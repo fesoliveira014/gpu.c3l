@@ -10,7 +10,7 @@ import std::core::mem::allocators;
 
 // Headless (lavapipe): the tiered threading model. Storm tests maximize
 // detection surface (handle uniqueness, allocation release, cache convergence);
-// parallel recording runs one context per thread into disjoint targets.
+// parallel recording runs one allocator per thread into disjoint targets.
 
 const char[*] THR_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 
@@ -18,9 +18,11 @@ const uint THR_THREADS = 4;
 const uint THR_ITERS = 32;
 const uint THR_ELEMENTS = 64;
 const usz THR_TRANSFER_BYTES = 256;
+const uint ALLOCATOR_WORKER_CHURN_COUNT = vk::MAX_COMMAND_ALLOCATORS + 1;
 
 struct TransferRecordArgs {
     gpu::Device*                device;
+    gpu::CommandAllocator*      allocator;
     uint                        worker_index;
     OwnedSpan                   upload;
     OwnedSpan                   intermediate;
@@ -29,15 +31,38 @@ struct TransferRecordArgs {
 }
 
 struct ReuseWorkerArgs {
-    gpu::Device*                  device;
+    gpu::CommandAllocator*        allocator;
     gpu::ExecutableCommandList[2] executables;
 }
 
+struct AllocatorBeginArgs {
+    gpu::CommandAllocator* allocator;
+    Atomic{bool}           entered;
+    Atomic{bool}           completed;
+    fault                  result;
+}
+
+struct FreshAllocatorWorkerArgs {
+    gpu::Device*                device;
+    gpu::CommandAllocatorHandle observed_handle;
+    fault                       result;
+    bool                        succeeded;
+}
+
+struct ExecutableSubmitArgs {
+    gpu::Queue                  queue;
+    gpu::ExecutableCommandList  executable;
+    gpu::CompletionPoint        completion;
+    fault                       result;
+    bool                        succeeded;
+}
+
 struct ScratchWorkerArgs {
-    gpu::Device*        device;
-    gpu::PipelineHandle pipeline;
-    Atomic{bool}*       start;
-    bool                failed;
+    gpu::Device*           device;
+    gpu::CommandAllocator* allocator;
+    gpu::PipelineHandle    pipeline;
+    Atomic{bool}*          start;
+    bool                   failed;
 }
 
 fn gpu::Device make_thr_device() {
@@ -181,6 +206,7 @@ fn void texture_view_cache_uses_device_allocator_across_threads() @test {
 }
 
 struct RenderViewGateArgs {
+    gpu::CommandAllocator*     allocator;
     gpu::CommandList           commands;
     gpu::AttachmentViewHandle  view;
     gpu::ExecutableCommandList executable;
@@ -191,6 +217,7 @@ struct RenderViewGateArgs {
 fn int render_view_gate_worker(void* raw_args) {
     RenderViewGateArgs* args = (RenderViewGateArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        args.commands = gpu::begin_commands(args.allocator)!!;
         gpu::ColorTargetDesc[1] colors = { {
             .view     = args.view,
             .load_op  = gpu::LoadOp.DONT_CARE,
@@ -230,11 +257,12 @@ fn void render_view_recording_avoids_texture_view_cache_lock() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &view)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
     RenderViewGateArgs args = {
-        .commands = gpu::begin_commands(
-            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-        )!!,
-        .view = view,
+        .allocator = &allocator,
+        .view      = view,
     };
     state.texture_view_cache_mutex.lock()!!;
     Thread worker;
@@ -359,10 +387,6 @@ fn int generated_scratch_worker(void* raw_args) {
     ScratchWorkerArgs* args = (ScratchWorkerArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
         while (!args.start.load(AtomicOrdering.ACQUIRE)) thread::yield();
-        gpu::Queue queue = gpu::get_queue(
-            args.device,
-            gpu::QueueKind.COMPUTE,
-        )!!;
         gpu::GeneratedScratchDesc reservation = {
             .pipeline                = args.pipeline,
             .kind                    = gpu::GeneratedWorkKind.DISPATCH,
@@ -370,22 +394,23 @@ fn int generated_scratch_worker(void* raw_args) {
             .preprocess_buffer_count = 1,
         };
         if (catch reserve_fault = gpu::reserve_generated_scratch(
-            queue,
+            args.allocator,
             &reservation,
         )) {
             (void)reserve_fault;
             args.failed = true;
             return 1;
         }
-        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        gpu::CommandList commands = gpu::begin_commands(args.allocator)!!;
         vk::VkDeviceState* state =
             (vk::VkDeviceState*)gpu::device_backend_state(*args.device);
         vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-        vk::RecordingContextState* context = state.recording_contexts.get(
-            record.context,
+        vk::CommandAllocatorSlot* allocator_slot =
+            state.command_allocators.get(
+            record.allocator,
         )!!;
         vk::GeneratedPreprocessBuffer* reserved =
-            &context.reserved_preprocess[0];
+            &allocator_slot.reservations[0];
         vk::MemoryRequirements requirements = {
             .size             = reserved.size,
             .alignment        = 1,
@@ -404,7 +429,7 @@ fn int generated_scratch_worker(void* raw_args) {
         }
         gpu::discard_commands(&commands)!!;
         gpu::release_generated_scratch(
-            queue,
+            args.allocator,
             args.pipeline,
             gpu::GeneratedWorkKind.DISPATCH,
         )!!;
@@ -415,38 +440,340 @@ fn int generated_scratch_worker(void* raw_args) {
 fn int reuse_recording_pool_worker(void* raw_args) {
     ReuseWorkerArgs* args = (ReuseWorkerArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-        gpu::Queue queue = gpu::get_queue(
-            args.device,
-            gpu::QueueKind.GRAPHICS,
-        )!!;
         for (uint i = 0; i < 2; i++) {
-            gpu::CommandList commands = gpu::begin_commands(queue)!!;
+            gpu::CommandList commands = gpu::begin_commands(args.allocator)!!;
             args.executables[i] = gpu::end_commands(&commands)!!;
         }
     };
     return 0;
 }
 
-fn void worker_thread_reuses_private_recording_pool() @test {
+fn int allocator_begin_worker(void* raw_args) {
+    AllocatorBeginArgs* args = (AllocatorBeginArgs*)raw_args;
+    args.entered.store(true, AtomicOrdering.RELEASE);
+    gpu::CommandList? commands_result = gpu::begin_commands(args.allocator);
+    if (catch begin_fault = commands_result) {
+        args.result = begin_fault;
+        args.completed.store(true, AtomicOrdering.RELEASE);
+        return 1;
+    }
+    gpu::CommandList commands = commands_result;
+    gpu::discard_commands(&commands)!!;
+    args.completed.store(true, AtomicOrdering.RELEASE);
+    return 0;
+}
+
+fn void? record_worker_barrier(gpu::CommandList* commands) {
+    gpu::Barrier barrier = {
+        .before = { .host = true },
+        .after  = { .transfer = true },
+    };
+    gpu::cmd_barrier(commands, &barrier)!;
+}
+
+fn void? run_fresh_allocator_worker(FreshAllocatorWorkerArgs* args) {
+    gpu::Queue queue = gpu::get_queue(
+        args.device,
+        gpu::QueueKind.GRAPHICS,
+    )!;
+    gpu::CommandAllocatorDesc desc = {
+        .command_buffer_capacity = 1,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        args.device,
+        queue,
+        &desc,
+    )!;
+    defer catch (void)gpu::destroy_command_allocator(&allocator);
+    args.observed_handle = allocator.handle;
+
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!;
+    defer catch (void)gpu::discard_commands(&commands);
+    record_worker_barrier(&commands)!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
+    defer catch (void)discard_test_executable(&executable);
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
+    executable = {};
+    gpu::wait_completion(completion)!;
+    gpu::destroy_command_allocator(&allocator)!;
+}
+
+fn int fresh_allocator_worker(void* raw_args) {
+    FreshAllocatorWorkerArgs* args = (FreshAllocatorWorkerArgs*)raw_args;
+    if (catch worker_fault = run_fresh_allocator_worker(args)) {
+        args.result = worker_fault;
+        return 1;
+    }
+    args.succeeded = true;
+    return 0;
+}
+
+fn int executable_submit_worker(void* raw_args) {
+    ExecutableSubmitArgs* args = (ExecutableSubmitArgs*)raw_args;
+    gpu::SubmitDesc submit = {
+        .command_lists = (&args.executable)[:1],
+    };
+    gpu::CompletionPoint? completion_result = gpu::submit(
+        args.queue,
+        &submit,
+    );
+    if (catch submit_fault = completion_result) {
+        args.result = submit_fault;
+        return 1;
+    }
+    args.completion = completion_result;
+    if (catch wait_fault = gpu::wait_completion(args.completion)) {
+        args.result = wait_fault;
+        return 1;
+    }
+    args.succeeded = true;
+    return 0;
+}
+
+fn void worker_thread_reuses_explicit_allocator_buffers() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
 
-    ReuseWorkerArgs args = { .device = &device };
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    ReuseWorkerArgs args = { .allocator = &allocator };
     Thread worker;
     worker.create(&reuse_recording_pool_worker, &args)!!;
     assert(worker.join()!! == 0, "worker records both lists");
 
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(state.recording_contexts.next_new == 1,
-        "the worker reuses one recording pool");
+    vk::CommandAllocatorSlot* allocator_slot =
+        state.command_allocators.get(allocator.handle)!!;
+    assert(state.command_allocators.next_new == 1
+        && allocator_slot.available_count
+            == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY - 2,
+        "the worker leases two buffers from one explicit allocator");
 
     gpu::ExecutableCommandList[2] lists = args.executables;
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+    assert(allocator_slot.available_count
+            == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY,
+        "completion returns both buffers to the exact allocator");
+    gpu::destroy_command_allocator(&allocator)!!;
 }
 
-fn void generated_scratch_reservations_are_thread_context_local() @test {
+fn void contended_allocator_does_not_hold_the_device_resource_lock() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator blocked = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&blocked)!!;
+    gpu::CommandAllocator independent = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&independent)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandAllocatorSlot* blocked_slot = state.command_allocators.get(
+        blocked.handle,
+    )!!;
+
+    blocked_slot.mutex.lock()!!;
+    AllocatorBeginArgs blocked_args = { .allocator = &blocked };
+    Thread blocked_worker;
+    blocked_worker.create(&allocator_begin_worker, &blocked_args)!!;
+    while (blocked_slot.resolution_pins.load(AtomicOrdering.ACQUIRE) == 0) {
+        thread::yield();
+    }
+
+    AllocatorBeginArgs independent_args = { .allocator = &independent };
+    Thread independent_worker;
+    independent_worker.create(
+        &allocator_begin_worker,
+        &independent_args,
+    )!!;
+    while (!independent_args.entered.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    thread::sleep_ms(25)!!;
+    bool independent_completed = independent_args.completed.load(
+        AtomicOrdering.ACQUIRE,
+    );
+
+    blocked_slot.mutex.unlock();
+    assert(independent_worker.join()!! == 0
+        && blocked_worker.join()!! == 0,
+        "both allocator workers complete after contention is released");
+    assert(independent_completed,
+        "an allocator waiter does not retain the device resource lock");
+}
+
+fn void full_validation_rejects_cross_thread_shared_allocator() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::RecordingWorkCounters before =
+        vk::command_recording_work_counters(state);
+
+    AllocatorBeginArgs args = { .allocator = &allocator };
+    Thread worker;
+    worker.create(&allocator_begin_worker, &args)!!;
+    int result = worker.join()!!;
+    gpu::RecordingWorkCounters after =
+        vk::command_recording_work_counters(state);
+
+    assert(result == 1 && args.result == gpu::RESOURCE_IN_USE,
+        "FULL validation rejects a second recording thread on one allocator");
+    assert(after.command_buffer_resets == before.command_buffer_resets,
+        "cross-thread rejection does not reset or begin a native buffer");
+}
+
+fn void allocator_migrates_after_last_end_and_discard() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc desc = {
+        .command_buffer_capacity = 2,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+
+    gpu::CommandList ended_commands = gpu::begin_commands(&allocator)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(
+        &ended_commands,
+    )!!;
+    defer discard_test_executable(&executable)!!;
+    AllocatorBeginArgs after_end = { .allocator = &allocator };
+    Thread end_worker;
+    end_worker.create(&allocator_begin_worker, &after_end)!!;
+    assert(end_worker.join()!! == 0,
+        "the allocator migrates after its last recording ends");
+    discard_test_executable(&executable)!!;
+
+    gpu::CommandList discarded_commands = gpu::begin_commands(&allocator)!!;
+    gpu::discard_commands(&discarded_commands)!!;
+    AllocatorBeginArgs after_discard = { .allocator = &allocator };
+    Thread discard_worker;
+    discard_worker.create(&allocator_begin_worker, &after_discard)!!;
+    assert(discard_worker.join()!! == 0,
+        "the allocator migrates after its last recording is discarded");
+
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandAllocatorSlot* slot = state.command_allocators.get(
+        allocator.handle,
+    )!!;
+    assert(slot.live_recordings == 0 && !slot.recording_thread_set,
+        "quiescence clears the allocator's recording-thread owner");
+}
+
+fn void executable_handoff_to_submit_thread_retires_to_allocator() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc desc = {
+        .command_buffer_capacity = 1,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    record_worker_barrier(&commands)!!;
+    ExecutableSubmitArgs args = {
+        .queue      = queue,
+        .executable = gpu::end_commands(&commands)!!,
+    };
+    defer discard_test_executable(&args.executable)!!;
+
+    Thread worker;
+    worker.create(&executable_submit_worker, &args)!!;
+    assert(worker.join()!! == 0 && args.succeeded,
+        "a synchronized submit thread consumes and waits for the executable");
+    assert(!args.executable.handle.is_valid() && args.completion.is_valid(),
+        "successful handoff consumes the executable and publishes completion");
+
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandAllocatorSlot* slot = state.command_allocators.get(
+        allocator.handle,
+    )!!;
+    assert(slot.available_count == 1 && slot.in_flight_buffers == 0,
+        "submit-thread retirement returns the buffer to its originating allocator");
+}
+
+fn void fresh_worker_runs_core_commands_without_pool_initialization() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    FreshAllocatorWorkerArgs args = { .device = &device };
+    Thread worker;
+    worker.create(&fresh_allocator_worker, &args)!!;
+    assert(worker.join()!! == 0 && args.succeeded,
+        "a fresh worker completes allocator create, record, submit, wait, and destroy");
+    assert(args.observed_handle.is_valid(),
+        "the fresh worker published one explicit allocator identity");
+
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(state.command_allocators.next_new == 1
+            && !state.command_allocators
+                .slots[args.observed_handle.index].used,
+        "the no-pool worker leaves no live allocator table cell");
+}
+
+fn void sequential_worker_churn_reuses_allocator_table_capacity() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    uint reused_index;
+    uint previous_generation;
+
+    for (uint i = 0; i < ALLOCATOR_WORKER_CHURN_COUNT; i++) {
+        FreshAllocatorWorkerArgs args = { .device = &device };
+        Thread worker;
+        worker.create(&fresh_allocator_worker, &args)!!;
+        assert(worker.join()!! == 0 && args.succeeded,
+            "every sequential fresh worker completes its command lifecycle");
+        if (i == 0) {
+            reused_index = args.observed_handle.index;
+        } else {
+            assert(args.observed_handle.index == reused_index
+                    && args.observed_handle.generation != previous_generation,
+                "worker churn reuses one slot with a fresh generation");
+        }
+        previous_generation = args.observed_handle.generation;
+    }
+
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(state.command_allocators.next_new == 1
+            && !state.command_allocators.slots[reused_index].used,
+        "historical workers consume no permanent allocator-table capacity");
+}
+
+fn void generated_scratch_reservations_are_allocator_local() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
     if (!gpu::get_device_caps(&device)!!.generated_work) return;
@@ -464,15 +791,40 @@ fn void generated_scratch_reservations_are_thread_context_local() @test {
         &pipeline_desc,
     )!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::GeneratedScratchDesc reservation = {
+        .pipeline                = pipeline,
+        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
+        .max_commands_per_list   = 1,
+        .preprocess_buffer_count = 1,
+    };
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::MemoryRequirements requirements =
+        vk::generated_scratch_requirements(state, &reservation)!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = 1,
+        .max_generated_preprocess_buffers_per_list = 1,
+        .generated_preprocess_bytes = (usz)requirements.size,
+    };
+    gpu::CommandAllocator[2] allocators;
+    for (uint i = 0; i < allocators.len; i++) {
+        allocators[i] = gpu::create_command_allocator(
+            &device,
+            queue,
+            &allocator_desc,
+        )!!;
+    }
 
     Atomic{bool} start;
     ScratchWorkerArgs[2] args;
     Thread[2] workers;
     for (uint i = 0; i < 2; i++) {
         args[i] = {
-            .device   = &device,
-            .pipeline = pipeline,
-            .start    = &start,
+            .device    = &device,
+            .allocator = &allocators[i],
+            .pipeline  = pipeline,
+            .start     = &start,
         };
         workers[i].create(&generated_scratch_worker, &args[i])!!;
     }
@@ -482,10 +834,12 @@ fn void generated_scratch_reservations_are_thread_context_local() @test {
             "each worker reserves and consumes its own generated scratch");
     }
 
-    vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(state.recording_contexts.next_new == 2,
-        "two worker threads own two independent recording contexts");
+    assert(state.command_allocators.next_new == 2
+        && allocators[0].handle != allocators[1].handle,
+        "two worker threads own two independent explicit allocators");
+    foreach (&allocator : allocators) {
+        gpu::destroy_command_allocator(allocator)!!;
+    }
 }
 
 fn char transfer_pattern(uint worker_index, usz byte_index) {
@@ -504,11 +858,7 @@ fn int explicit_transfer_worker(void* raw_args) {
         }
         gpu::flush_mapped_span(args.device, args.upload.span)!!;
 
-        gpu::Queue queue = gpu::get_queue(
-            args.device,
-            gpu::QueueKind.TRANSFER,
-        )!!;
-        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        gpu::CommandList commands = gpu::begin_commands(args.allocator)!!;
         defer (void)discard_test_commands(&commands);
         gpu::BufferCopyDesc upload_copy = {
             .src = args.upload.span,
@@ -540,6 +890,11 @@ fn void concurrent_caller_owned_explicit_transfers_preserve_bytes() @test {
     defer destroy_test_device(&device)!!;
 
     TransferRecordArgs[THR_THREADS] args = {};
+    gpu::CommandAllocator[THR_THREADS] allocators;
+    gpu::Queue transfer_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.TRANSFER,
+    )!!;
     defer {
         foreach (&worker_args : args) {
             (void)free_owned_span(&device, &worker_args.readback);
@@ -548,7 +903,12 @@ fn void concurrent_caller_owned_explicit_transfers_preserve_bytes() @test {
         }
     }
     for (uint i = 0; i < THR_THREADS; i++) {
+        allocators[i] = gpu::create_command_allocator(
+            &device,
+            transfer_queue,
+        )!!;
         args[i].device = &device;
+        args[i].allocator = &allocators[i];
         args[i].worker_index = i;
         args[i].upload = allocate_owned_span(
             device:       &device,
@@ -603,6 +963,10 @@ fn void concurrent_caller_owned_explicit_transfers_preserve_bytes() @test {
         }
     }
 
+    foreach (&allocator : allocators) {
+        gpu::destroy_command_allocator(allocator)!!;
+    }
+
     foreach (&worker_args : args) {
         free_owned_span(&device, &worker_args.readback)!!;
         free_owned_span(&device, &worker_args.intermediate)!!;
@@ -612,6 +976,7 @@ fn void concurrent_caller_owned_explicit_transfers_preserve_bytes() @test {
 
 struct RecordArgs {
     gpu::Device*                device;
+    gpu::CommandAllocator*      allocator;
     gpu::PipelineHandle         pipeline;
     gpu::GpuSpan                io_span;
     gpu::GpuSpan                root_span;
@@ -630,9 +995,7 @@ fn int record_worker(void* arg) {
         root.count = THR_ELEMENTS;
         gpu::flush_mapped_span(args.device, args.root_span)!!;
 
-        gpu::CommandList commands = gpu::begin_commands(
-            gpu::get_queue(args.device, gpu::QueueKind.GRAPHICS)!!,
-        )!!;
+        gpu::CommandList commands = gpu::begin_commands(args.allocator)!!;
         bind_test_compute_pipeline(&commands, args.pipeline);
         gpu::cmd_dispatch(
             commands: &commands,
@@ -664,6 +1027,11 @@ fn void parallel_recording_across_workers() @test {
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     RecordArgs[THR_THREADS] args;
+    gpu::CommandAllocator[THR_THREADS] allocators;
+    gpu::Queue graphics_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
     OwnedSpan[THR_THREADS] io_owned;
     OwnedSpan[THR_THREADS] root_owned;
     defer for (uint i = 0; i < THR_THREADS; i++) {
@@ -671,7 +1039,12 @@ fn void parallel_recording_across_workers() @test {
         free_owned_span(&device, &io_owned[i])!!;
     }
     for (uint i = 0; i < THR_THREADS; i++) {
+        allocators[i] = gpu::create_command_allocator(
+            &device,
+            graphics_queue,
+        )!!;
         args[i].device = &device;
+        args[i].allocator = &allocators[i];
         args[i].pipeline = pipeline;
         io_owned[i] = allocate_owned_span(
             device:       &device,
@@ -709,6 +1082,9 @@ fn void parallel_recording_across_workers() @test {
         &submit,
     )!!;
     gpu::wait_completion(completion)!!;
+    foreach (&allocator : allocators) {
+        gpu::destroy_command_allocator(allocator)!!;
+    }
 
     for (uint i = 0; i < THR_THREADS; i++) {
         gpu::invalidate_mapped_span(&device, args[i].io_span)!!;
@@ -723,6 +1099,7 @@ fn void parallel_recording_across_workers() @test {
 
 struct TransitionRecordArgs {
     gpu::Device*               device;
+    gpu::CommandAllocator*     allocator;
     gpu::TextureHandle         texture;
     gpu::ExecutableCommandList list;
 }
@@ -730,9 +1107,7 @@ struct TransitionRecordArgs {
 fn int transition_record_worker(void* arg) {
     TransitionRecordArgs* args = (TransitionRecordArgs*)arg;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-        gpu::CommandList commands = gpu::begin_commands(
-            gpu::get_queue(args.device, gpu::QueueKind.GRAPHICS)!!,
-        )!!;
+        gpu::CommandList commands = gpu::begin_commands(args.allocator)!!;
         gpu::TextureBarrier to_dst = {
             .texture = args.texture,
             .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -759,7 +1134,7 @@ fn void parallel_recording_disjoint_texture_transitions() @test {
             .width     = 4,
             .height    = 4,
             .format    = gpu::Format.RGBA8_UNORM,
-            .usage     = { .transfer_src, .transfer_dst },
+            .usage     = { .sampled, .transfer_src, .transfer_dst },
         };
         textures[i] = gpu::create_texture(&device, &tex_desc)!!;
     }
@@ -768,8 +1143,21 @@ fn void parallel_recording_disjoint_texture_transitions() @test {
     }
 
     TransitionRecordArgs[THR_THREADS] args;
+    gpu::CommandAllocator[THR_THREADS] allocators;
+    gpu::Queue graphics_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
     for (uint i = 0; i < THR_THREADS; i++) {
-        args[i] = { .device = &device, .texture = textures[i] };
+        allocators[i] = gpu::create_command_allocator(
+            &device,
+            graphics_queue,
+        )!!;
+        args[i] = {
+            .device    = &device,
+            .allocator = &allocators[i],
+            .texture   = textures[i],
+        };
     }
 
     Thread[THR_THREADS] threads;
@@ -785,6 +1173,9 @@ fn void parallel_recording_disjoint_texture_transitions() @test {
         &submit,
     )!!;
     gpu::wait_completion(completion)!!;
+    foreach (&allocator : allocators) {
+        gpu::destroy_command_allocator(allocator)!!;
+    }
 }
 
 const uint RELEASE_THREADS = 4;

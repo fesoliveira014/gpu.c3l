@@ -285,7 +285,10 @@ fn void? run_compute(
     gpu::flush_mapped_span(device, root_span)!;
 
     gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
-    gpu::CommandList cmd = gpu::begin_commands(queue)!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(device, queue)!;
+    defer (void)gpu::destroy_command_allocator(&allocator);
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!;
     defer (void)gpu::discard_commands(&cmd);
     gpu::cmd_bind_pipeline(&cmd, pipeline)!;
     gpu::cmd_dispatch(
@@ -307,6 +310,13 @@ fn void? run_compute(
     gpu::wait_completion(completion)!;
 }
 ```
+
+The allocator owns one exact compute-queue command pool and a fixed set of
+preallocated command buffers. Its zero descriptor uses the documented defaults.
+The completion wait retires this command buffer back to the allocator before
+the deferred allocator destruction runs. Allocator destruction never waits on
+the GPU; without that wait (or a successful poll), it would return
+`RESOURCE_IN_USE` and leave the allocator retryable.
 
 ## 5. Build and run
 

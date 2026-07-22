@@ -84,14 +84,23 @@ struct CommandListHandle {
 }
 $assert CommandListHandle::size <= ulong::size * 2;
 
-const Device               DEVICE_INVALID                 = {};
-const GpuAllocation        GPU_ALLOCATION_INVALID         = {};
-const TextureHandle        TEXTURE_HANDLE_INVALID         = {};
-const AttachmentViewHandle ATTACHMENT_VIEW_HANDLE_INVALID = {};
-const TextureView          TEXTURE_VIEW_INVALID           = {};
-const PipelineHandle       PIPELINE_HANDLE_INVALID        = {};
-const SwapchainHandle      SWAPCHAIN_HANDLE_INVALID       = {};
-const CommandListHandle    COMMAND_LIST_HANDLE_INVALID    = {};
+<* Generation-checked identity for a command allocator owned by one device. *>
+struct CommandAllocatorHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
+}
+$assert CommandAllocatorHandle::size <= ulong::size * 2;
+
+const Device                 DEVICE_INVALID                   = {};
+const GpuAllocation          GPU_ALLOCATION_INVALID           = {};
+const TextureHandle          TEXTURE_HANDLE_INVALID           = {};
+const AttachmentViewHandle   ATTACHMENT_VIEW_HANDLE_INVALID   = {};
+const TextureView            TEXTURE_VIEW_INVALID             = {};
+const PipelineHandle         PIPELINE_HANDLE_INVALID          = {};
+const SwapchainHandle        SWAPCHAIN_HANDLE_INVALID         = {};
+const CommandListHandle      COMMAND_LIST_HANDLE_INVALID      = {};
+const CommandAllocatorHandle COMMAND_ALLOCATOR_HANDLE_INVALID = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
@@ -139,6 +148,16 @@ fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
 }
 fn bool CommandListHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 fn bool CommandListHandle.equals(self, CommandListHandle other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+fn bool CommandAllocatorHandle.is_valid(self) =>
+    self.owner != 0 && self.generation != 0;
+fn bool CommandAllocatorHandle.equals(
+    self,
+    CommandAllocatorHandle other,
+) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;

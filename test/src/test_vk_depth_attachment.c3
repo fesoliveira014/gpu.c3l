@@ -229,6 +229,9 @@ fn void depth_test_occludes_both_orders() @test {
     gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
     gpu::PipelineHandle pipeline = make_depth_pipeline(&device, &ctx);
     defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
 
     bool[2] near_first_options = { true, false };
     foreach (near_first : near_first_options) {
@@ -265,7 +268,7 @@ fn void depth_test_occludes_both_orders() @test {
         defer free_owned_span(&device, &green_owned)!!;
         gpu::GpuSpan green = green_owned.span;
 
-        gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+        gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
         defer discard_test_commands(&cmd)!!;
         record_color_to_attach(&cmd, target);
         record_depth_to_attach(&cmd, depth);
@@ -364,7 +367,10 @@ fn void depth_write_toggle_honored() @test {
     defer free_owned_span(&device, &green_owned)!!;
     gpu::GpuSpan green = green_owned.span;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_color_to_attach(&cmd, target);
     record_depth_to_attach(&cmd, depth);
@@ -449,7 +455,10 @@ fn void depth_state_variants_share_entry() @test {
     defer free_owned_span(&device, &green_owned)!!;
     gpu::GpuSpan green = green_owned.span;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_color_to_attach(&cmd, target);
     record_depth_to_attach(&cmd, depth);
@@ -516,7 +525,10 @@ fn void depth_only_pass_renders_footprint() @test {
     defer free_owned_span(&device, &color_owned)!!;
     gpu::GpuSpan color = color_owned.span;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, depth);
     gpu::DepthTargetDesc depth_target = {
@@ -611,7 +623,10 @@ fn void sampled_depth_matches_readback() @test {
     root.v = 0.5f;
     gpu::flush_mapped_span(&device, root_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, depth);
     gpu::DepthTargetDesc depth_target = {
@@ -746,9 +761,16 @@ fn void depth_nonzero_mip_layer_isolated() @test {
         .base_layer  = 1,
         .layer_count = 1,
     };
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue command_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::TextureBarrier target_to_depth = gpu::texture_view_transition(
         texture: depth,
@@ -905,7 +927,10 @@ fn void depth_pass_validation_faults() @test {
     gpu::TextureHandle sampled_only = gpu::create_texture(&device, &sampled_only_desc)!!;
     defer gpu::destroy_texture(&device, sampled_only)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::AttachmentViewDesc no_usage = { .texture = sampled_only };
@@ -996,7 +1021,10 @@ fn void compare_sampler_exact_results() @test {
     root.ref_hi = NEAR_Z + 0.1f;
     gpu::flush_mapped_span(&device, root_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, depth);
     gpu::DepthTargetDesc depth_target = {
@@ -1083,7 +1111,10 @@ fn void depth_bias_shifts_stored_depth() @test {
     defer free_owned_span(&device, &color_owned)!!;
     gpu::GpuSpan color = color_owned.span;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
     gpu::TextureHandle[2] targets = { plain_depth, biased_depth };

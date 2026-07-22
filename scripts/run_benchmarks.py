@@ -114,15 +114,16 @@ COMMAND_RECORD_RESOLUTION = re.compile(
     re.MULTILINE,
 )
 COMMAND_RECORD_COLD_WORK = re.compile(
-    r"^cold work: host_allocations=[0-9]+ "
-    r"command_buffer_allocations=[0-9]+ command_buffer_frees=[0-9]+ "
+    r"^cold work: host_allocations=[1-9][0-9]* "
+    r"command_pool_creations=1 command_buffer_allocations=1 "
+    r"command_buffer_frees=[0-9]+ "
     r"command_buffer_resets=[0-9]+ image_view_creations=[0-9]+ "
     r"vma_allocations=[0-9]+ generated_scratch_misses=[0-9]+$",
     re.MULTILINE,
 )
 COMMAND_RECORD_WARM_WORK = re.compile(
     r"^warm work: host_allocations=(?P<host_allocations>[0-9]+) "
-    r"command_buffer_allocations=0 "
+    r"command_pool_creations=0 command_buffer_allocations=0 "
     r"command_buffer_frees=0 command_buffer_resets=[1-9][0-9]* "
     r"image_view_creations=0 vma_allocations=0 "
     r"generated_scratch_misses=0$",

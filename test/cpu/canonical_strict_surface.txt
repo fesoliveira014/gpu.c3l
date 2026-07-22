@@ -21,16 +21,23 @@ bitstruct gpu::TextureSampleCountSupport
 bitstruct gpu::TextureUsage
 constant gpu::ADAPTER_INVALID
 constant gpu::ATTACHMENT_VIEW_HANDLE_INVALID
-constant gpu::COMMAND_LIST_HANDLE_INVALID
 constant gpu::COLOR_WRITE_ALL
+constant gpu::COMMAND_ALLOCATOR_HANDLE_INVALID
+constant gpu::COMMAND_LIST_HANDLE_INVALID
 constant gpu::COMPLETION_POINT_INVALID
 constant gpu::DEFAULT_ATTACHMENT_VIEW_CAPACITY
+constant gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
+constant gpu::DEFAULT_COMMAND_PREPROCESS_PER_LIST
+constant gpu::DEFAULT_COMMAND_REFERENCES_PER_LIST
 constant gpu::DEFAULT_SAMPLER_HEAP_CAPACITY
 constant gpu::DEFAULT_TEXTURE_CAPACITY
 constant gpu::DEFAULT_TEXTURE_HEAP_CAPACITY
 constant gpu::DEVICE_INVALID
 constant gpu::GPU_ALLOCATION_INVALID
 constant gpu::MAX_COLOR_ATTACHMENTS
+constant gpu::MAX_COMMAND_ALLOCATOR_CAPACITY
+constant gpu::MAX_COMMAND_PREPROCESS_PER_LIST
+constant gpu::MAX_COMMAND_REFERENCES_PER_LIST
 constant gpu::MAX_DEVICE_RESOURCE_OWNER
 constant gpu::MAX_MEMORY_HEAPS
 constant gpu::MAX_PIPELINES
@@ -76,6 +83,7 @@ enum gpu::ShaderStage
 enum gpu::StoreOp
 enum gpu::TextureLayout
 fault gpu::BACKEND_ERROR
+fault gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED
 fault gpu::COMMAND_RECORDING_ERROR
 fault gpu::DESCRIPTOR_HEAP_FULL
 fault gpu::DEVICE_BUSY
@@ -125,6 +133,7 @@ function gpu::cmd_set_scissor
 function gpu::cmd_set_viewport
 function gpu::cmd_texture_barrier
 function gpu::create_attachment_view
+function gpu::create_command_allocator
 function gpu::create_compute_pipeline
 function gpu::create_compute_pipelines
 function gpu::create_dedicated_texture
@@ -138,6 +147,7 @@ function gpu::create_texture
 function gpu::create_texture_view
 function gpu::create_texture_views
 function gpu::destroy_attachment_view
+function gpu::destroy_command_allocator
 function gpu::destroy_device
 function gpu::destroy_pipeline
 function gpu::destroy_runtime
@@ -194,6 +204,8 @@ method gpu::Adapter.is_valid
 method gpu::AdapterList.get
 method gpu::AttachmentViewHandle.equals
 method gpu::AttachmentViewHandle.is_valid
+method gpu::CommandAllocatorHandle.equals
+method gpu::CommandAllocatorHandle.is_valid
 method gpu::CommandListHandle.equals
 method gpu::CommandListHandle.is_valid
 method gpu::CompletionPoint.equals
@@ -241,6 +253,9 @@ struct gpu::BufferTextureCopyDesc
 struct gpu::ClearDepth
 struct gpu::ColorTargetState
 struct gpu::ColorTargetDesc
+struct gpu::CommandAllocator
+struct gpu::CommandAllocatorDesc
+struct gpu::CommandAllocatorHandle
 struct gpu::CommandList
 struct gpu::CommandListHandle
 struct gpu::CompletionPoint

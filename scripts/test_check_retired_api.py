@@ -12,6 +12,74 @@ from scripts import check_retired_api
 
 
 class RetiredApiCheckTests(unittest.TestCase):
+    def test_live_scan_rejects_retired_readme_threading_claim(self) -> None:
+        source = (
+            "- Tiered threading: automatic per-worker command pools, "
+            "thread-safe allocation.\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            path = root / "README.md"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                failures = check_retired_api.find_live_retired_usages((path,))
+        self.assertEqual(
+            failures,
+            ["README.md:1: automatic per-worker command pools"],
+        )
+
+    def test_live_scan_rejects_retired_allocator_calls_in_c3_code(self) -> None:
+        source = (
+            "fn void first(gpu::Queue graphics) { gpu::begin_commands(graphics)!; }\n"
+            "fn void first(gpu::CommandAllocator* allocator) {}\n"
+            "fn void second(gpu::Queue transfer) {\n"
+            "    gpu::reserve_generated_scratch(transfer, &desc)!;\n"
+            "    gpu::release_generated_scratch(transfer, pipeline, kind)!;\n"
+            "}\n"
+            "// gpu::begin_commands(graphics)!;\n"
+            "ZString ignored = \"gpu::begin_commands(graphics)!;\";\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            path = root / "test" / "src" / "consumer.c3"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                failures = check_retired_api.find_live_retired_usages((path,))
+        self.assertEqual(len(failures), 3)
+        self.assertTrue(any("begin_commands(Queue)" in item for item in failures))
+        self.assertTrue(any(
+            "reserve_generated_scratch(Queue, ...)" in item
+            for item in failures
+        ))
+        self.assertTrue(any(
+            "release_generated_scratch(Queue, ...)" in item
+            for item in failures
+        ))
+
+    def test_live_scan_checks_c3_fences_without_flagging_migration_prose(self) -> None:
+        source = (
+            "The retired `begin_commands(queue)` spelling is discussed here.\n\n"
+            "```c3\n"
+            "gpu::Queue worker = gpu::get_queue(&device, kind)!;\n"
+            "gpu::begin_commands(worker)!;\n"
+            "```\n\n"
+            "```text\n"
+            "gpu::begin_commands(worker)!;\n"
+            "```\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            path = root / "docs" / "migration.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                failures = check_retired_api.find_live_retired_usages((path,))
+        self.assertEqual(
+            failures,
+            ["docs/migration.md:5: begin_commands(Queue)"],
+        )
+
     def test_live_scan_includes_indexed_planning_docs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_directory:
             root = Path(temp_directory)
@@ -85,6 +153,30 @@ class RetiredApiCheckTests(unittest.TestCase):
                 self.assertTrue(check_retired_api.has_expected_diagnostic(
                     "retired_cmd_dispatch_pipeline",
                     "pipeline",
+                    output,
+                ))
+
+    def test_accepts_exact_retired_allocator_signature_diagnostic(self) -> None:
+        source = "gpu::begin_commands(queue)!;\n"
+        queue_column = source.index("queue") + 1
+        output = (
+            f"(retired_begin_commands_queue.c3:1:{queue_column}) Error: "
+            "It is not possible to cast 'Queue' to 'CommandAllocator*'.\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            project = Path(temp_directory)
+            (project / "retired_begin_commands_queue.c3").write_text(
+                source,
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                check_retired_api,
+                "PROJECT",
+                project,
+            ):
+                self.assertTrue(check_retired_api.has_expected_diagnostic(
+                    "retired_begin_commands_queue",
+                    "queue",
                     output,
                 ))
 

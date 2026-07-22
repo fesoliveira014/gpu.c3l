@@ -348,13 +348,14 @@ Test names describe behavior, not roadmap or ticket labels.
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
-| Commands | begin/end/submit, exact linear duplicate visits and epoch rollover, timeline signal/wait, invalid state, transactional context-pool rollback, completion-safe context-local command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/raster/depth state, retired execution signatures, and zero execution-time pipeline creation. |
+| Command allocators | exact device/queue binding; default, ceiling, and overflow validation; transactional pool/buffer/host rollback; recyclable generations; begin/reference/generated capacity faults; non-waiting destroy in recording/executable/in-flight states; device-child accounting; exact-family pools; and tracking-off zero reference storage. |
+| Commands | allocator-owned begin/end/submit, exact linear duplicate visits and epoch rollover, mixed-allocator same-queue retirement, timeline signal/wait, invalid state, completion-safe exact-allocator command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/raster/depth state, retired queue-based signatures, and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline, raster, and depth state; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster/viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, per-target immutable identity, and singleton compute/generated-dispatch layouts. |
-| Threading | automatic per-worker recording contexts, private command-buffer and generated-scratch reuse, parallel record, identical submit. |
+| Threading | one explicit allocator per concurrent worker, same-allocator full-validation rejection, synchronized allocator migration and executable handoff, no device-wide recording lock, no temp-pool setup, historical worker churn, private command-buffer/generated-scratch reuse, parallel record, and identical submit. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
 | Depth | depth attachment creation, depth-tested draw, exact nonzero mip/layer selection, neighboring-subresource isolation, and readback. |
@@ -457,8 +458,9 @@ from its cached native snapshot before discard releases ownership.
 `vk_performance` runs complete warm
 begin/bind/dispatch/end and render-pass operations against existing pipelines,
 shaders, descriptor state, texture views, and allocations. Command-buffer reset
-is allowed; host/VMA allocation, command-buffer allocation/free, image-view
-creation, and pipeline/shader creation are required to remain zero. Resolution
+is allowed; allocator creation occurs before the measured interval, and
+host/VMA allocation, command-buffer allocation/free, command-pool creation,
+image-view creation, and pipeline/shader creation are required to remain zero. Resolution
 snapshots begin before pipeline binding: binding the opaque pipeline handle
 performs exactly one pipeline-table and one pipeline-cache lookup, while
 registry, retained-pin, lifecycle-vtable, command-table, and policy work remain
@@ -486,9 +488,9 @@ after interning, mirroring the blocking `vk_pipeline_cache` scale test; elapsed
 boundary time remains advisory. Command recording covers
 ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
 generated dispatch. It measures five 64-record lists after an untimed 64-record
-warmup. Before warmup, the calling worker reserves 64 preprocess buffers sized
-for the declared generated workload and exact public pipeline handle. Alias
-handles for one native pipeline require independent reservations. Each execute
+warmup. Before warmup, the caller reserves 64 preprocess buffers on the measured
+explicit allocator for the declared generated workload and exact public pipeline
+handle. Alias handles for one native pipeline require independent reservations. Each execute
 receives a distinct reserved address, and reuse occurs only after a list is
 discarded.
 The command target enables test-only resolution counters, resets them after
@@ -502,6 +504,10 @@ The same target reports cold and warm recording-work snapshots. Warm host
 allocations, command-buffer allocations/frees, image-view creations, VMA
 allocations, and generated-scratch misses must all be zero; command-buffer
 resets demonstrate reuse.
+Cold allocator counters separately prove one exact-family pool create, one
+complete native command-buffer allocation call, fixed host-scratch allocation,
+and the configured buffer count. The four command-policy modes reuse that
+allocator outside their measured intervals and require the same warm zeros.
 Lifecycle measurements cover submission, cached completed-point polling, and
 immediate texture destruction. Required immediate-destruction tests use exact
 injected native-destroy counts and immediate handle invalidation to prove the
@@ -612,9 +618,10 @@ CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
 
 ```text
 linux (blocking): documentation/source-list, API/retired-API/backend-boundary,
-    generator and ABI drift gates; benchmark executable builds and schema tests
-    (no benchmark execution); deterministic behavioral performance targets;
-    shader build; full lavapipe sweep; and a c3c docgen API reference artifact
+    command-path no-ambient-state/no-temp reachability, generator and ABI drift
+    gates; benchmark executable builds and schema tests (no benchmark
+    execution); deterministic behavioral performance targets; shader build;
+    full lavapipe sweep; and a c3c docgen API reference artifact
 windows (blocking): documentation/source-list, backend-boundary, generator and
     ABI drift gates; benchmark executable builds and schema tests (no benchmark
     execution); deterministic behavioral targets; and the full suite via
@@ -754,6 +761,8 @@ GPU-driven indirect draw sample works
 memory stats report plausible budgets
 leak reports are clean after all samples
 public API docs match signatures
+explicit command allocators are balanced and retired queue-based begin/reservation signatures are absent
+warm command recording/submission paths allocate no host/native/VMA/temp-pool storage
 no public API signature exposes vk::, vma::, or sdl:: types
 public sources declare only gpu and the three platform surface modules
 documentation links resolve

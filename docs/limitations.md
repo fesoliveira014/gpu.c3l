@@ -63,6 +63,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
   one backend facility that supports the draw, indexed-draw, and dispatch
   record layouts together. Unsupported devices retain the shared-root indirect
   path and report a zero `max_generated_work_count`.
+- **Command recording has no implicit allocator.** Every command list begins
+  from a caller-owned `CommandAllocator` bound to one exact selected queue.
+  There is no default, frame-owned, or ambient per-thread recording owner. Create
+  one allocator per concurrently recording worker, size it explicitly, and
+  destroy it after all of its command units retire.
 - **Vendored distribution.** There is no package registry; consumers vendor
   the repo (with its binding submodules) under `lib/`. See
   `docs/getting_started.md`.
@@ -98,7 +103,11 @@ exists (else the limit is compile-time).
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
 | Generated work items | Selected-device semantic limit reported by `DeviceCaps.max_generated_work_count`; zero when unsupported | — | — |
 | Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/device.c3`) | — | `SLOT_TABLE_FULL` |
-| Worker recording-pool caches per device | 256 (`MAX_RECORDING_CONTEXTS` in `gpu/vk/command.c3`) | reuse a bounded worker pool | `SLOT_TABLE_FULL` |
+| Live command allocators per device | 256 (`MAX_COMMAND_ALLOCATORS` in `gpu/vk/command.c3`) | destroy quiescent allocators to recycle generational slots | `SLOT_TABLE_FULL` |
+| Command buffers per allocator | 8 default, 4096 max (`DEFAULT_COMMAND_ALLOCATOR_CAPACITY`, `MAX_COMMAND_ALLOCATOR_CAPACITY` in `gpu/command.c3`) | `CommandAllocatorDesc.command_buffer_capacity` | `INVALID_ARGUMENT` above the maximum; `DEVICE_BUSY` while all configured units are live |
+| Tracked resource references per command list | 64 default, 4096 max (`DEFAULT_COMMAND_REFERENCES_PER_LIST`, `MAX_COMMAND_REFERENCES_PER_LIST` in `gpu/command.c3`) | `CommandAllocatorDesc.max_resource_references_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
+| Generated preprocess reservations retained by one list | 4 default, 64 max (`DEFAULT_COMMAND_PREPROCESS_PER_LIST`, `MAX_COMMAND_PREPROCESS_PER_LIST` in `gpu/command.c3`) | `CommandAllocatorDesc.max_generated_preprocess_buffers_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
+| Generated preprocess reservation bytes per allocator | zero by default (disabled) | `CommandAllocatorDesc.generated_preprocess_bytes` | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` during reservation |
 | Swapchains | 8 (`MAX_SWAPCHAINS` in `gpu/swapchain.c3`) | — | `SLOT_TABLE_FULL` |
 | Color attachments per pass | Lesser of 8 (`MAX_COLOR_ATTACHMENTS` in `gpu/pipeline.c3`) and `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
 
@@ -124,11 +133,17 @@ Two sizing rules that bite:
 - **Transient data is caller-owned.** Applications choose allocation reuse and
   concurrency policy. Flush CPU writes before submission, retain the covering
   completion point, and wait or poll before rewriting or freeing storage.
-- **Tracked references grow with the command record.** When lifetime tracking
-  is enabled there is no 16-resource recording cap; the backend starts at 16
-  entries and doubles the host allocation as distinct resources are retained.
-  Call `submit` or discard the token to release those references. Tracking-off
-  records keep this storage empty.
+- **Tracked references are fixed at allocator creation.** When lifetime
+  tracking is enabled, every command buffer receives exactly
+  `max_resource_references_per_list` stable entries. Exceeding the unique-
+  resource ceiling returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` without a
+  partial retain or native command. Tracking-off allocators ignore that storage
+  setting and keep every reference slice empty.
+- **Generated reservation capacity has two bounds.** The reservation table has
+  `command_buffer_capacity * max_generated_preprocess_buffers_per_list` entries,
+  and `generated_preprocess_bytes` limits their total exact driver-reported
+  bytes. Reservation occurs only while the allocator is quiescent. Recreate a
+  quiescent allocator with larger values after a capacity fault.
 
 ## 3. Driver and environment quirks
 

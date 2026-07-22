@@ -28,18 +28,19 @@ fn double lifecycle_median(double[LIFECYCLE_REPETITIONS] values) {
     return sorted[LIFECYCLE_REPETITIONS / 2];
 }
 
-fn gpu::ExecutableCommandList record_empty(gpu::Queue queue) {
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+fn gpu::ExecutableCommandList record_empty(gpu::CommandAllocator* allocator) {
+    gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     return gpu::end_commands(&commands)!!;
 }
 
 fn double measure_submissions(
+    gpu::CommandAllocator* allocator,
     gpu::Queue queue,
     gpu::CompletionPoint* last,
 ) {
     SubmissionFixture[SUBMISSION_ITERATIONS] fixtures;
     for (uint i = 0; i < SUBMISSION_ITERATIONS; i++) {
-        fixtures[i].commands[0] = record_empty(queue);
+        fixtures[i].commands[0] = record_empty(allocator);
     }
 
     std::time::Clock start = std::time::clock::now();
@@ -118,11 +119,20 @@ fn int main() {
     gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = SUBMISSION_ITERATIONS,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        device: &device,
+        queue:  queue,
+        desc:   &allocator_desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::CompletionPoint warm_completion;
-    (void)measure_submissions(queue, &warm_completion);
+    (void)measure_submissions(&allocator, queue, &warm_completion);
     ulong warm_native_queries;
     ulong warm_retirement_locks;
     (void)measure_completed_polls(
@@ -150,7 +160,11 @@ fn int main() {
     ulong cached_poll_native_queries;
     ulong cached_poll_retirement_locks;
     for (uint i = 0; i < LIFECYCLE_REPETITIONS; i++) {
-        submission_results[i] = measure_submissions(queue, &completion);
+        submission_results[i] = measure_submissions(
+            &allocator,
+            queue,
+            &completion,
+        );
         poll_results[i] = measure_completed_polls(
             point:            completion,
             state:            state,

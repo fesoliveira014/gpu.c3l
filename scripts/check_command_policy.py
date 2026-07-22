@@ -36,6 +36,62 @@ TRACKING_FUNCTIONS = frozenset((
     "note_command_reference_allocation",
 ))
 TRACKING_CALLS = tuple(f"{name}(" for name in TRACKING_FUNCTIONS)
+CORE_COMMAND_ROOTS = frozenset((
+    "vk_create_command_allocator",
+    "vk_destroy_command_allocator",
+    "vk_reserve_generated_scratch",
+    "vk_release_generated_scratch",
+    "vk_begin_commands",
+    "vk_end_commands",
+    "vk_discard_commands",
+    "vk_submit",
+    "retire_observed_completion_and_drain_with_query",
+    "drain_completed_submitted_commands",
+))
+ALLOCATION_FREE_ROOTS = frozenset((
+    "vk_begin_commands",
+    "vk_end_commands",
+    "vk_discard_commands",
+    "vk_submit",
+    "retire_observed_completion_and_drain_with_query",
+    "drain_completed_submitted_commands",
+))
+AMBIENT_COMMAND_PATTERNS = {
+    "temporary pool": re.compile(r"@pool\s*\(|\bmem::talloc[A-Za-z0-9_]*\s*\("),
+    "thread-local state": re.compile(r"\btlocal\b"),
+    "recording context": re.compile(
+        r"\b(?:ThreadRecordingContext|thread_recording_contexts|"
+        r"RecordingContextTable|RecordingContextState|"
+        r"RecordingContextHandle|MAX_RECORDING_CONTEXTS|"
+        r"MAX_THREAD_DEVICE_CONTEXTS)\b"
+    ),
+}
+WARM_ALLOCATION_PATTERNS = {
+    "host allocation": re.compile(
+        r"\b(?:mem|alloc)::(?:new[A-Za-z0-9_]*|realloc|"
+        r"resize[A-Za-z0-9_]*|alloc)\s*\("
+    ),
+    "native command allocation": re.compile(
+        r"\bvk::(?:allocate_command_buffers|create_command_pool)\s*\("
+    ),
+    "VMA allocation": re.compile(
+        r"(?:\bvma::|\ballocator\.)"
+        r"(?:allocate_memory|create_buffer(?:_with_alignment)?|create_image)\s*\("
+    ),
+}
+WARM_STACK_PATTERNS = {
+    "capacity-sized stack storage": re.compile(
+        r"\[[^\]\r\n]*(?:MAX_SUBMIT_COMMAND_LISTS|"
+        r"MAX_SUBMIT_COMPLETION_WAITS)[^\]\r\n]*\]"
+    ),
+}
+COLD_ALLOCATION_FUNCTIONS = frozenset((
+    "allocate_command_buffers_real",
+    "allocate_generated_preprocess_buffer",
+    "create_command_pool_real",
+    "initialize_command_allocator_slot",
+    "initialize_command_allocator_slot_with_ops",
+))
 SUPERSEDED_COMMAND_FUNCTIONS = frozenset((
     "bind_pipeline_state",
     "resolve_generated_work_records",
@@ -307,6 +363,52 @@ def check(root: Path = ROOT) -> list[str]:
             ):
                 errors.append(
                     f"{table_name} reaches tracking work at "
+                    f"{function.relative}:{function.line}:{function.name}"
+                )
+
+    missing_roots = sorted(CORE_COMMAND_ROOTS - set(functions))
+    if missing_roots:
+        errors.append(
+            "missing command-path roots: " + ", ".join(missing_roots)
+        )
+        return errors
+
+    command_roots = set(CORE_COMMAND_ROOTS)
+    for entries in tables.values():
+        command_roots.update(entries.values())
+    for function in sorted(
+        reachable_functions(functions, command_roots),
+        key=lambda item: (item.relative, item.line, item.name),
+    ):
+        for label, pattern in AMBIENT_COMMAND_PATTERNS.items():
+            if pattern.search(function.body):
+                errors.append(
+                    "command path reaches " + label + " at "
+                    f"{function.relative}:{function.line}:{function.name}"
+                )
+
+    allocation_free_roots = set(ALLOCATION_FREE_ROOTS)
+    for entries in tables.values():
+        allocation_free_roots.update(entries.values())
+    for function in sorted(
+        reachable_functions(functions, allocation_free_roots),
+        key=lambda item: (item.relative, item.line, item.name),
+    ):
+        if function.name in COLD_ALLOCATION_FUNCTIONS:
+            errors.append(
+                "warm command path reaches cold allocation helper at "
+                f"{function.relative}:{function.line}:{function.name}"
+            )
+        for label, pattern in WARM_ALLOCATION_PATTERNS.items():
+            if pattern.search(function.body):
+                errors.append(
+                    "warm command path reaches " + label + " at "
+                    f"{function.relative}:{function.line}:{function.name}"
+                )
+        for label, pattern in WARM_STACK_PATTERNS.items():
+            if pattern.search(function.body):
+                errors.append(
+                    "warm command path reaches " + label + " at "
                     f"{function.relative}:{function.line}:{function.name}"
                 )
 

@@ -9,6 +9,8 @@ const ulong MAX_COMPLETION_SEQUENCE @private =
     ulong::max >> COMPLETION_QUEUE_BITS;
 const uint MAX_SELECTED_QUEUE_IDENTITIES @private =
     MAX_REQUESTED_QUEUES_PER_ROLE * QUEUE_ROLE_COUNT;
+const uint MAX_SUBMIT_COMPLETION_WAITS @private = 1024;
+const uint MAX_SUBMIT_COMMAND_LISTS @private = 1024;
 const Queue QUEUE_INVALID = {};
 $assert(MAX_SELECTED_QUEUE_IDENTITIES - 1 <= ushort::max);
 $assert(MAX_SELECTED_QUEUE_IDENTITIES <= 1 << COMPLETION_QUEUE_BITS);
@@ -544,7 +546,10 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     defer end_device_operation(&operation);
     validate_queue(&operation, &device, queue)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    if (desc.command_lists.len > MAX_DEVICE_COMMANDS) {
+    if (desc.command_lists.len > MAX_SUBMIT_COMMAND_LISTS) {
+        return INVALID_ARGUMENT~;
+    }
+    if (desc.completion_waits.len > MAX_SUBMIT_COMPLETION_WAITS) {
         return INVALID_ARGUMENT~;
     }
     foreach (&commands : desc.command_lists) {

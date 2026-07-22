@@ -154,23 +154,104 @@ queue); resources used by both queues declare `{ .graphics, .compute }` access.
 Single-queue devices run the same code serialized.
 Running example: `particle_sim`.
 
-## 8. Record command lists from many threads
+## 8. Own command recording explicitly
 
-Goal: scale CPU-side recording.
+Goal: make command-pool ownership, concurrency, and reuse explicit.
+
+### One queue and one worker
 
 ```c3
-// Each worker records against the selected queue.
-gpu::CommandList list = gpu::begin_commands(queue)!;
-...
+gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!;
+gpu::CommandAllocator allocator =
+    gpu::create_command_allocator(&device, queue)!;
+gpu::CommandList list = gpu::begin_commands(&allocator)!;
+record_compute(&list)!;
 gpu::ExecutableCommandList executable = gpu::end_commands(&list)!;
-
-// The main thread submits the executable tokens in the chosen order.
+gpu::ExecutableCommandList[1] lists = { executable };
+gpu::CompletionPoint done = gpu::submit(
+    queue,
+    &{ .command_lists = lists[..] },
+)!;
+gpu::wait_completion(done)!;
+gpu::destroy_command_allocator(&allocator)!;
 ```
 
-Recording storage is cached automatically per worker. Benchmark with validation
-off because validation layers may serialize recording. Quiesce every worker
-before assembling and submitting the executable list.
-Running example: `multithreaded_recording`.
+The allocator is bound to the exact queue and owns fixed recording capacity.
+Running example: `root_pointer_compute`.
+
+### Separate graphics and compute allocators
+
+```c3
+gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
+gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!;
+gpu::CommandAllocator graphics_allocator =
+    gpu::create_command_allocator(&device, graphics)!;
+gpu::CommandAllocator compute_allocator =
+    gpu::create_command_allocator(&device, compute)!;
+```
+
+Use the compute allocator only for `compute` and the graphics allocator only
+for `graphics`. Even when both roles alias one native queue, the two allocator
+identities keep their pools, capacity, and recording ownership independent.
+Destroy each after its last completion. Running example: `particle_sim`.
+
+### Hand executable tokens to a submit thread
+
+Create one allocator per concurrently recording worker. A worker calls
+`begin_commands(&worker_allocator)`, records, and calls `end_commands`; it then
+publishes the resulting `ExecutableCommandList` through an application-
+synchronized queue. The submit thread may combine tokens from different
+allocators in one `SubmitDesc` when every allocator is bound to the exact submit
+queue. Do not touch the token or its aliases on the worker after publication.
+
+An allocator may move to another recording worker only after its last recording
+has ended or been discarded and the application establishes a happens-before
+edge. Core command work on a fresh C3 worker needs no implicit temporary-
+allocator initialization.
+Benchmark with Vulkan validation off because the layer may serialize native
+recording; run correctness gates with it on. Running example:
+`multithreaded_recording`.
+
+### Gate reuse and destruction on completion
+
+`command_buffer_capacity` is the maximum number of recording, executable, and
+in-flight units owned by one allocator. When all are live, `begin_commands`
+returns `DEVICE_BUSY`; wait or poll the covering completion, or discard an
+unsubmitted token, before retrying. Completion retirement returns each exact
+unit to its allocator. `destroy_command_allocator` follows the same rule but
+never waits: it returns `RESOURCE_IN_USE` and preserves the allocator until all
+units are back. Running example: `offscreen_triangle`.
+
+### Reserve generated scratch on the allocator
+
+```c3
+gpu::CommandAllocatorDesc allocator_desc = {
+    .command_buffer_capacity = 2,
+    .max_generated_preprocess_buffers_per_list = 4,
+    .generated_preprocess_bytes = 8 * 1024 * 1024,
+    .debug_name = "generated_graphics",
+};
+gpu::CommandAllocator allocator = gpu::create_command_allocator(
+    &device,
+    graphics,
+    &allocator_desc,
+)!;
+gpu::GeneratedScratchDesc scratch_desc = {
+    .pipeline = pipeline,
+    .kind = gpu::GeneratedWorkKind.DRAW,
+    .max_commands_per_list = max_draws,
+    .preprocess_buffer_count = 4,
+};
+gpu::reserve_generated_scratch(&allocator, &scratch_desc)!;
+```
+
+Reserve and release only while the allocator is quiescent. The backend queries
+the exact pipeline/layout/count requirements; the descriptor's byte value is a
+hard budget, not a substitute for compatibility. Reservation-table or byte-
+budget exhaustion returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`; no compatible
+free reservation during recording returns `GENERATED_SCRATCH_EXHAUSTED`.
+Release the pipeline/kind reservation, then destroy the allocator after its last
+completion. Running example: `gpu_driven_draw_sdl`.
 
 ## 9. Shadow mapping with compare samplers
 

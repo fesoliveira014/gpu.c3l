@@ -60,8 +60,9 @@ then free or reuse it.
   test gate across the whole suite
 - GPU-driven path: portable shared-root multi-draw indirect (+ count), plus
   capability-gated generated root records for per-work-item roots and arguments
-- Tiered threading: automatic per-worker command pools, thread-safe allocation,
-  completion-driven command-buffer reclamation
+- Tiered threading: explicit caller-owned command allocators, thread-confined
+  recording, thread-safe submission, and completion-driven command-buffer
+  reclamation
 - Pipeline dedup cache + driver-cache save/load; swapchain with present-mode
   query; compare samplers, depth bias, MRT
 - Runs entirely on lavapipe (CPU Vulkan) — CI needs no GPU, and neither does

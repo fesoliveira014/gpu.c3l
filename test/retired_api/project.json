@@ -560,6 +560,24 @@
         "retired_raster_state.c3"
       ]
     },
+    "retired_begin_commands_queue": {
+      "type": "object-files",
+      "sources": [
+        "retired_begin_commands_queue.c3"
+      ]
+    },
+    "retired_reserve_generated_scratch_queue": {
+      "type": "object-files",
+      "sources": [
+        "retired_reserve_generated_scratch_queue.c3"
+      ]
+    },
+    "retired_release_generated_scratch_queue": {
+      "type": "object-files",
+      "sources": [
+        "retired_release_generated_scratch_queue.c3"
+      ]
+    },
     "runtime_enable_validation": {
       "type": "object-files",
       "sources": [

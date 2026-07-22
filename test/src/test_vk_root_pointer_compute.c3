@@ -65,7 +65,12 @@ fn void root_pointer_compute_readback() @test {
     gpu::flush_mapped_span(&device, root_span)!!;
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, pipeline);
     gpu::cmd_dispatch(

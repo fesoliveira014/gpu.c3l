@@ -75,6 +75,7 @@ struct LeakCapture {
     uint textures;
     uint pipelines;
     uint shaders;
+    uint command_allocators;
 
     uint texture_descriptors;
     uint samplers;
@@ -135,6 +136,11 @@ fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
             capture.pipeline_identity_valid = message.resource.has_public_identity
                 && (first || second);
         case gpu::DebugResourceKind.SHADER:             capture.shaders++;
+        case gpu::DebugResourceKind.COMMAND_ALLOCATOR:
+            capture.command_allocators++;
+            capture.named_resources_valid = capture.named_resources_valid
+                && message.resource.debug_name != null
+                && message.resource.debug_name.str_view() == "leaky_command_allocator";
 
         case gpu::DebugResourceKind.TEXTURE_DESCRIPTOR: capture.texture_descriptors++;
         case gpu::DebugResourceKind.SAMPLER:            capture.samplers++;
@@ -374,9 +380,16 @@ fn void barrier_mask_diagnostic_preserves_fault() @test {
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
         .before = {
@@ -554,6 +567,16 @@ fn void leak_reporters_count_leaks() @test {
     gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
 
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .debug_name = "leaky_command_allocator",
+    };
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        device: &device,
+        queue:  queue,
+        desc:   &allocator_desc,
+    )!!;
+
     gpu::TextureView texture_index_view = gpu::create_texture_view(&device, texture, null)!!;
     gpu::TextureIndex texture_index = texture_index_view.index;
     gpu::SamplerDesc sampler_desc = {
@@ -581,20 +604,23 @@ fn void leak_reporters_count_leaks() @test {
         "one leaked allocation counted");
     assert(vk::report_texture_leaks(state) == 1, "one leaked texture counted");
     assert(vk::report_pipeline_leaks(state) == 1, "one leaked cache entry counted");
+    assert(vk::report_command_allocator_leaks(state) == 1,
+        "one leaked command allocator counted");
 
     vk::report_descriptor_leaks(state);
 
-    assert(capture.total == 5, "each leaked resource or owned descriptor emits one warning");
+    assert(capture.total == 6, "each leaked resource or owned descriptor emits one warning");
     assert(capture.allocations == 1 && capture.gpu_spans == 1
-        && capture.textures == 1 && capture.pipelines == 1,
-        "allocation, GPU span, texture, and pipeline leak kinds are exact");
+        && capture.textures == 1 && capture.pipelines == 1
+        && capture.command_allocators == 1,
+        "allocation, GPU span, texture, pipeline, and command allocator leak kinds are exact");
     assert(capture.shaders == 0,
         "borrowed shader code is not a live resource");
     assert(capture.texture_descriptors == 1 && capture.samplers == 0,
         "device-owned samplers are not descriptor leaks");
     assert(state.textures.get(texture)!!.live_descriptor_views == 1,
         "leak reporting does not decrement owner counts during table sweeps");
-    assert(capture.public_identities == 4,
+    assert(capture.public_identities == 5,
         "only strict public resources carry slot identities");
     assert(capture.private_span_identity_hidden,
         "private backing storage exposes no private handle identity");
@@ -609,6 +635,7 @@ fn void leak_reporters_count_leaks() @test {
     assert(tex_slot.allocation_size > 0, "texture leak line carries the allocation size");
 
     gpu::destroy_texture_view(&device, texture_index_view)!!;
+    gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::destroy_pipeline(&device, first_alias)!!;
     gpu::destroy_pipeline(&device, second_alias)!!;
     gpu::destroy_texture(&device, texture)!!;
@@ -616,7 +643,7 @@ fn void leak_reporters_count_leaks() @test {
     gpu::free_allocation(&device, &allocation)!!;
 
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
-    assert(capture.total == 5, "clean leak report emits nothing");
+    assert(capture.total == 6, "clean leak report emits nothing");
     destroy_test_device(&device)!!;
 }
 
@@ -712,7 +739,16 @@ fn void labels_record_validation_clean() @test {
         target,
     )!!;
     defer destroy_test_attachment_view(&device, &target_view)!!;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::cmd_begin_label(&cmd, "resource_setup")!!;
@@ -789,6 +825,10 @@ fn void callback_reports_leaks_without_validation() @test {
     };
     vk::BufferHandle buffer = vk::vk_create_buffer(&device, &buffer_desc)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    capture = {
+        .metadata_valid        = true,
+        .named_resources_valid = true,
+    };
     assert(vk::report_resource_leaks(state) == 1, "the live private backing is reported");
 
     assert(capture.total == 1 && capture.gpu_spans == 1,

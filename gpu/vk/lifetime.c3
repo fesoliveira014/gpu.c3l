@@ -7,8 +7,6 @@ import std::atomic::types;
 
 alias CompletionRetirementLockHook @if(env::TESTING) = fn void (void*);
 
-const usz COMMAND_REFERENCE_INITIAL_CAPACITY = 16;
-const usz SUBMITTED_COMMAND_INITIAL_CAPACITY = 16;
 const uint SUBMITTED_COMMAND_DRAIN_THRESHOLD = 64;
 
 struct CommandResourceReference {
@@ -19,14 +17,9 @@ struct CommandResourceReference {
 }
 
 struct SubmittedCommandBatch {
-    gpu::CompletionPoint       completion;
-    RecordingContextHandle     context;
-    vk::CommandPool            command_pool;
-    vk::CommandBuffer          command_buffer;
-    CommandResourceReference[] references;
-    uint                       reference_count;
-    GeneratedPreprocessBuffer[] generated_preprocess;
-    uint                        generated_preprocess_count;
+    gpu::CompletionPoint        completion;
+    gpu::CommandAllocatorHandle allocator;
+    uint                        allocator_buffer;
 }
 
 struct CommandBufferStats {
@@ -178,7 +171,7 @@ fn void release_tracked_command_references(
     }
 }
 
-fn void ensure_submitted_command_capacity(
+fn void? ensure_submitted_command_capacity(
     VkDeviceState* state,
     uint additional,
 ) {
@@ -186,35 +179,17 @@ fn void ensure_submitted_command_capacity(
         + (usz)state.submitted_command_reserved
         + (usz)additional;
     if (required <= state.submitted_commands.len) return;
-    usz capacity = state.submitted_commands.len == 0
-        ? SUBMITTED_COMMAND_INITIAL_CAPACITY
-        : state.submitted_commands.len * 2;
-    while (capacity < required) {
-        capacity *= 2;
-    }
-    SubmittedCommandBatch[] grown = alloc::new_array(
-        state.host_allocator,
-        SubmittedCommandBatch,
-        (sz)capacity,
-    );
-    note_recording_host_allocation(state);
-    for (uint i = 0; i < state.submitted_command_count; i++) {
-        grown[i] = state.submitted_commands[i];
-    }
-    if (state.submitted_commands.ptr != null) {
-        alloc::free(state.host_allocator, state.submitted_commands.ptr);
-    }
-    state.submitted_commands = grown;
+    return gpu::DEVICE_BUSY~;
 }
 
-fn uint prepare_submitted_commands(
+fn uint? prepare_submitted_commands(
     VkDeviceState* state,
     CommandRecord*[] records,
 ) {
     uint additional = (uint)records.len;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    ensure_submitted_command_capacity(state, additional);
+    ensure_submitted_command_capacity(state, additional)!;
     state.submitted_command_reserved += additional;
     return additional;
 }
@@ -240,19 +215,17 @@ fn void publish_submitted_commands(
     state.submitted_command_reserved -= reservation;
     foreach (record : records) {
         state.submitted_commands[state.submitted_command_count++] = {
-            .context         = record.context,
-            .command_pool    = record.command_pool,
-            .command_buffer  = record.command_buffer,
-            .completion      = completion,
-            .references           = record.references,
-            .reference_count      = record.reference_count,
-            .generated_preprocess = record.generated_preprocess,
-            .generated_preprocess_count = record.generated_preprocess_count,
+            .allocator        = record.allocator,
+            .allocator_buffer = record.allocator_buffer,
+            .completion       = completion,
         };
-        record.references = {};
-        record.reference_count = 0;
-        record.generated_preprocess = {};
-        record.generated_preprocess_count = 0;
+        CommandAllocatorSlot* slot = state.command_allocators.get(
+            record.allocator,
+        )!!;
+        slot.mutex.lock()!!;
+        slot.live_executables--;
+        slot.in_flight_buffers++;
+        slot.mutex.unlock();
     }
 }
 
@@ -261,24 +234,25 @@ fn void release_submitted_command_batch(
     uint index,
 ) {
     SubmittedCommandBatch* batch = &state.submitted_commands[index];
+    CommandAllocatorSlot* slot = state.command_allocators.get(
+        batch.allocator,
+    )!!;
+    slot.mutex.lock()!!;
+    defer slot.mutex.unlock();
+    CommandScratch* scratch = &slot.scratch[batch.allocator_buffer];
     release_tracked_command_references(
         state,
-        batch.references,
-        batch.reference_count,
+        scratch.references,
+        scratch.reference_count,
     );
-    recycle_generated_preprocess_buffers_locked(
+    recycle_generated_preprocess_indices_locked(
         state,
-        batch.generated_preprocess,
-        batch.generated_preprocess_count,
+        slot,
+        scratch.generated_preprocess_indices,
+        scratch.generated_preprocess_count,
     );
-    enqueue_retired_command_buffer_locked(
-        state:                state,
-        context_handle:       batch.context,
-        pool:                 batch.command_pool,
-        buffer:               batch.command_buffer,
-        references:           batch.references,
-        generated_preprocess: batch.generated_preprocess,
-    );
+    return_allocator_buffer_locked(slot, batch.allocator_buffer);
+    slot.in_flight_buffers--;
     state.submitted_command_count--;
     *batch = state.submitted_commands[state.submitted_command_count];
     state.submitted_commands[state.submitted_command_count] = {};
@@ -378,16 +352,18 @@ fn void retire_queue_through_locked(
     completion.retired_sequence.store(target, AtomicOrdering.RELEASE);
 }
 
-<* Lock-free pre-check, then locked retirement with a double-check; losers of
-   the lock race still observe the winner's release-published prefix. *>
-fn void retire_queue_through(
+<* Every first successful completion observation drains all pending queue
+   identities before publishing retired prefixes; cached hits rely on this. *>
+fn void? retire_observed_completion_and_drain_with_query(
     VkDeviceState* state,
-    QueueCompletionState* completion,
-    uint queue_id,
-    ulong native_completed,
+    uint observed_queue_id,
+    ulong observed_completed,
+    SemaphoreCounterQueryFn query_fn,
 ) {
-    ulong retired = completion.retired_sequence.load(AtomicOrdering.ACQUIRE);
-    if (native_completed <= retired) return;
+    bool[gpu::MAX_SELECTED_QUEUE_IDENTITIES] queried = {};
+    ulong[gpu::MAX_SELECTED_QUEUE_IDENTITIES] completed = {};
+    queried[observed_queue_id] = true;
+    completed[observed_queue_id] = observed_completed;
 
     $if env::TESTING:
         if (state.completion_retirement_lock_hook != null) {
@@ -400,14 +376,40 @@ fn void retire_queue_through(
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     note_completion_retirement_lock_acquisition(state);
-    retired = completion.retired_sequence.load(AtomicOrdering.RELAXED);
-    if (native_completed <= retired) return;
-    retire_queue_through_locked(
-        state:            state,
-        completion:       completion,
-        queue_id:         queue_id,
-        native_completed: native_completed,
-    );
+    for (uint i = 0; i < state.submitted_command_count; i++) {
+        SubmittedCommandBatch* batch = &state.submitted_commands[i];
+        uint queue_id = gpu::completion_point_queue_id(batch.completion);
+        if (queried[queue_id]) continue;
+        QueueCompletionState* completion = queue_completion_state(
+            state,
+            queue_id,
+        )!;
+        note_completion_counter_query(state);
+        check_device_result(
+            state,
+            query_fn(
+                state.device,
+                completion.timeline,
+                &completed[queue_id],
+            ),
+        )!;
+        queried[queue_id] = true;
+    }
+    for (uint queue_id = 0;
+        queue_id < gpu::MAX_SELECTED_QUEUE_IDENTITIES;
+        queue_id++) {
+        if (!queried[queue_id]) continue;
+        QueueCompletionState* completion = queue_completion_state(
+            state,
+            queue_id,
+        )!;
+        retire_queue_through_locked(
+            state:            state,
+            completion:       completion,
+            queue_id:         queue_id,
+            native_completed: completed[queue_id],
+        );
+    }
 }
 
 fn void set_completion_retirement_lock_hook(
@@ -423,8 +425,8 @@ fn void? drain_completed_submitted_commands_with_query(
     VkDeviceState* state,
     SemaphoreCounterQueryFn query_fn,
 ) {
-    bool[gpu::MAX_SELECTED_QUEUE_IDENTITIES] queried;
-    ulong[gpu::MAX_SELECTED_QUEUE_IDENTITIES] completed;
+    bool[gpu::MAX_SELECTED_QUEUE_IDENTITIES] queried = {};
+    ulong[gpu::MAX_SELECTED_QUEUE_IDENTITIES] completed = {};
     for (uint i = 0; i < state.submitted_command_count; i++) {
         SubmittedCommandBatch* batch = &state.submitted_commands[i];
         uint queue_id = gpu::completion_point_queue_id(batch.completion);
@@ -525,18 +527,11 @@ fn void reset_completion_work_counters(
 }
 
 fn void destroy_submitted_commands(VkDeviceState* state) {
-    for (uint i = 0; i < state.submitted_command_count; i++) {
-        SubmittedCommandBatch* batch = &state.submitted_commands[i];
-        release_tracked_command_references(
-            state,
-            batch.references,
-            batch.reference_count,
-        );
-        alloc::free(state.host_allocator, batch.references.ptr);
-        free_generated_preprocess_buffers(state, batch.generated_preprocess);
+    while (state.submitted_command_count > 0) {
+        release_submitted_command_batch(state, 0);
     }
     if (state.submitted_commands.ptr != null) {
-        alloc::free(state.host_allocator, state.submitted_commands.ptr);
+        mem::free(state.submitted_commands.ptr);
     }
     state.submitted_commands = {};
     state.submitted_command_count = 0;

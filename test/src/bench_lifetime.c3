@@ -57,7 +57,12 @@ fn gpu::CompletionPoint? submit_bench_queue(
 
 fn void? wait_bench_queue(gpu::Device* device, gpu::QueueKind queue) {
     gpu::Queue target = gpu::get_queue(device, queue)!;
-    gpu::CommandList commands = gpu::begin_commands(target)!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        device,
+        target,
+    )!;
+    defer (void)gpu::destroy_command_allocator(&allocator);
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!;
     defer (void)gpu::discard_commands(&commands);
     gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)! };
     defer (void)gpu::discard_executable_commands(&lists[0]);

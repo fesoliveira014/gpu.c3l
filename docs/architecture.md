@@ -192,6 +192,7 @@ Responsibilities:
 backend lifetime
 queue ownership
 resource slot tables, including independent allocations
+caller-owned command allocators and fixed recording storage
 VMA allocator through backend state
 descriptor heaps
 caller-owned allocation and completion lifetimes
@@ -268,13 +269,23 @@ caller precondition because nested pointers are opaque.
 The backend deduplicates only admitted roles' native families: one family stays
 exclusive; multiple families use private concurrent sharing.
 
-### Command lists
+### Command allocators and lists
+
+A `CommandAllocator` is a caller-owned, generation-checked device child bound
+to one exact selected `Queue`. Its backend slot owns one native command pool for
+that queue family, a fixed set of native command buffers, stable per-buffer
+reference and generated-reservation-index slices, a recycling stack, and a
+fixed generated-reservation table. Creation performs every host allocation,
+pool creation, and command-buffer allocation before publication. Destroying a
+live allocator never waits and returns `RESOURCE_IN_USE` until all its command
+units are discarded or completion-retired.
 
 A command list is a transient, owner-bearing token for a device-owned command
-record. The public token contains a `Device` value, generation-checked handle,
-and one opaque encoder pointer; the Vulkan command buffer, pool, bind cache,
-context, queue, and lifecycle state remain backend-owned. The encoder pointer is
-part of the command-token ABI. Copies alias one encoder phase and record.
+record and one allocator buffer/scratch index. The public token contains a
+`Device` value, generation-checked handle, and one opaque encoder pointer; the
+Vulkan command buffer, pool, bind cache, allocator identity, queue, and lifecycle
+state remain backend-owned. The encoder pointer is part of the command-token
+ABI. Copies alias one encoder phase and record.
 Each device slot owns a fixed `MAX_DEVICE_COMMANDS` encoder array. Across all
 device slots this zero-initialized storage is capped at 16 MiB; operating-system
 pages commit as encoder cells are touched.
@@ -285,7 +296,9 @@ State transitions:
 RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> consumed
 ```
 
-`begin_commands` creates a record in `RECORDING`. Render passes nest into
+`begin_commands(allocator)` pops one preallocated index and creates a record in
+`RECORDING`. If all configured indices are live it returns `DEVICE_BUSY`
+without allocation or state change. Render passes nest into
 `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes
 the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
 batch as `SUBMITTING`. Duplicate detection visits the submitted records once,
@@ -293,14 +306,15 @@ using a device-local epoch stored on each record; ordinary work is proportional
 to the command-list count rather than the square of it. Epoch rollover scans the
 allocated command table once before reusing epoch one. Validation or native
 failure restores it without publishing queue progress. Success publishes one
-`CompletionPoint` and
-invalidates every submitted token and alias. Completion observation and discard
-retire native buffers to their recording context. The context owner resets
-compatible buffers before its next begin and reuses their host-side reference
-and generated-scratch arrays. Native command-buffer and host allocation are
-cold fallbacks only when the context has no reusable unit. A retained reference
-array may also grow on the cold path when a command list establishes a new
-high-water mark. Device teardown relies on command-pool destruction. Invalid
+`CompletionPoint` and invalidates every submitted token and alias. A submission
+may mix allocators only when every token targets the exact submit queue.
+Completion observation and discard return each native buffer and scratch index
+to its originating allocator. The next begin resets and reuses that unit. Warm
+begin, recording, end, submit, discard, retirement, and reuse never allocate
+host storage, native command buffers, pools, VMA storage, or C3 temporary-pool
+memory. Per-list reference or generated-index exhaustion returns
+`COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` transactionally. Device teardown rejects
+even a quiescent live public allocator. Invalid
 transitions return faults, and render-pass command constraints remain enforced.
 A render pass records its attachment formats and sample count; a graphics
 pipeline must match them before begin or bind mutates native command state.
@@ -314,13 +328,14 @@ resolves the fixed view table into fixed-size local arrays. It does not create
 image views, grow a cache, or allocate host storage.
 
 Generated commands consume preprocess buffers from explicit reservations on
-the calling thread's device recording context. Each reservation is keyed by
+their originating command allocator. Each reservation is keyed by
 pipeline and generated-work kind; its count bound is translated into exact
-driver-reported size, alignment, and memory-type requirements. The queue passed
-to reservation selects and validates the device rather than creating a
-queue-scoped pool. Warm recording returns `GENERATED_SCRATCH_EXHAUSTED` instead
+driver-reported size, alignment, and memory-type requirements. The allocator
+fixes the exact queue, reservation-table capacity, total native byte budget,
+and per-list retained-index ceiling. Warm recording returns
+`GENERATED_SCRATCH_EXHAUSTED` instead
 of allocating when the count or compatible-buffer supply is exhausted. Discard
-and completion return reserved buffers to the same context; a different worker
+and completion return reserved buffers to the same allocator; another allocator
 never acquires them implicitly.
 
 Pipeline bind generation-checks the public handle, resolves the cache entry,
@@ -539,10 +554,11 @@ configuration. Headless and windowed programs use the same ownership model.
 
 ## 8. Command model
 
-`begin_commands(queue)` returns a thread-confined recording token. Successful
+`begin_commands(allocator)` returns a thread-confined recording token from an
+explicit exact-queue allocator. Successful
 `end_commands` consumes it and returns a one-shot executable token. Submission
 or explicit discard consumes the executable token. Native recording pools are
-private and cached per worker; see `docs/threading.md`.
+owned by allocators, not workers or frame boundaries; see `docs/threading.md`.
 
 Vulkan device creation selects one immutable command table from contract depth
 and tracking: trusted/no-tracking, trusted/tracking, checked/no-tracking, or

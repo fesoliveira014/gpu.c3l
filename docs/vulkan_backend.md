@@ -43,8 +43,9 @@ gpu/vk/shader.c3               temporary SPIR-V modules and reflection validatio
 gpu/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
 gpu/vk/pipeline_compute.c3     compute pipeline creation
 gpu/vk/pipeline_graphics.c3    graphics pipeline creation
-gpu/vk/command.c3              private recording pools and command encoding
+gpu/vk/command.c3              caller-owned allocator pools and command encoding
 gpu/vk/command_state.c3        command-list state and handle tracking
+gpu/vk/recording_thread_*.c3   portable and Win32 recording-owner identity
 gpu/vk/sync.c3                 barriers, timeline semaphores
 gpu/vk/render_pass.c3          dynamic rendering
 gpu/vk/swapchain.c3            swapchain lifecycle and presentation
@@ -255,17 +256,19 @@ layout. Each compute cache entry and live pipeline slot borrows that stable
 pair. Recording reads the slot value directly, and the device destroys both
 owned singleton handles at teardown. Generated recording uses implicit
 preprocessing with buffers reserved explicitly by `reserve_generated_scratch`
-on the calling thread's device recording context. The queue argument selects
-and validates the device. Reservations are keyed by public pipeline handle and
-generated-work kind, not by native pipeline identity, so alias handles require
-separate reservations. For each key, reservation queries
+on the originating command allocator. The allocator fixes the exact queue,
+pool, reservation table, and byte budget. Reservations are keyed by public
+pipeline handle and generated-work kind, not by native pipeline identity, so
+alias handles require separate reservations. For each key, reservation queries
 `vkGetGeneratedCommandsMemoryRequirementsEXT` with the exact layout and maximum
 sequence count, then allocates the requested number of addressable VMA buffers
 using the returned size, alignment, and memory-type mask. Warm generated calls
 borrow a matching buffer, retain it through command completion, and return
 `GENERATED_SCRATCH_EXHAUSTED` without allocating when the count or available
-compatible-buffer bound is exhausted. Discard and completion return each
-buffer to its owning context. `release_generated_scratch` removes one quiescent
+compatible-buffer bound is exhausted. Fixed reservation-table, byte-budget, or
+per-list index exhaustion returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` before
+native mutation. Discard and completion return each buffer to its owning
+allocator. `release_generated_scratch` removes one quiescent allocator's
 pipeline/kind reservation.
 A barrier with
 `hazards.draw_arguments` includes both indirect-command and generated
@@ -631,11 +634,14 @@ device allocation failure and explicit device loss propagate without retry.
 
 ## 12. Command buffers
 
-`begin_commands(queue)` lazily creates a private recording-pool set for the
-calling thread and device. Each set contains one pool per selected queue family.
-Compute aliases graphics when both use one family. A selected transfer role has
-a separate pool even when its family is shared. Pool construction is
-transactional and uses the device host allocator.
+`create_command_allocator(device, queue, desc)` transactionally creates one
+private pool for the exact selected queue family, allocates the complete fixed
+native command-buffer set in one call, and wires stable per-buffer reference and
+generated-index slices plus a recycling stack. The backend publishes the
+generational allocator slot only after every host/native allocation succeeds.
+Tracking-off devices allocate no reference slab. The table has 256 recyclable
+slots; destroyed slots advance generation and re-enter its free list rather than
+accumulating historical worker state.
 
 Public command values have two states:
 
@@ -648,8 +654,9 @@ Both carry a device token, `CommandListHandle`, and opaque encoder pointer.
 Begin resolves the handle once and publishes a stable root encoder containing
 the selected command-operation table, `VkDeviceState*`, and fixed
 `CommandRecord*`. Warm recording uses those cached pointers; only lifecycle
-operations continue through the device vtable. The record owns the native
-command buffer and pool, exact public queue, lifecycle state, bound-pipeline
+operations continue through the device vtable. The record identifies the
+originating allocator and fixed buffer/scratch index, and owns the exact public
+queue, lifecycle state, bound-pipeline
 snapshot, and pending texture transitions.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
@@ -690,13 +697,26 @@ device-owned table into fixed-size local arrays. Attachment creation owns any
 non-default native `VkImageView`; render-pass begin performs no image-view
 creation, texture-view-cache lookup, or host allocation.
 
-Discard retires the native buffer to its recording context. `submit` transfers
-it to a completion-tracked batch; completion observation retires the buffer to
-the same context. Before its next begin, only the context owner resets a
-compatible retired buffer and reuses its reference and generated-scratch arrays.
-Allocation of a native command buffer or growth of those arrays occurs only on
-the cold path when no reusable capacity exists. Device teardown relies on
-command-pool destruction.
+Discard returns the native buffer and scratch index to its allocator. `submit`
+stores an allocator handle/index for every command unit in the completion-
+tracked batch, so one same-queue batch may mix allocators. Completion observation
+returns each unit to the exact allocator exactly once. The next begin resets the
+preallocated buffer and clears its fixed scratch counts. If no index is
+available, begin returns `DEVICE_BUSY`; native/host growth is never a fallback.
+
+Allocator recording uses its own mutex, and `FULL` rejects a second recording
+thread while another recording remains live. Different allocators do not share
+a recording lock. The owner clears after the last recording ends or is
+discarded, and executable tokens may cross to a synchronized submit thread.
+Destroy checks allocator counters and available indices, returns
+`RESOURCE_IN_USE` without any queue wait, device wait, completion query, or
+poll, and frees the pool, buffers, reservations, slabs, mutex, and table cell
+only after quiescence.
+
+Core create/begin/record/end/discard/submit/retire and generated-reservation
+paths use explicit allocator-owned or bounded stack storage. They do not access
+an ambient per-thread recording cache or require a C3 temporary pool. Creation
+and generated reservation remain the intentional cold allocation points.
 
 ## 13. Synchronization
 

@@ -3,7 +3,7 @@ module gpu_test;
 import gpu @public;
 import gpu::vk @public;
 import vk;
-import std::core::mem::alloc;
+import std::core::mem;
 import std::core::mem::allocators;
 import std::atomic::types;
 import std::thread;
@@ -13,6 +13,9 @@ const char[*] LIFETIME_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 const long QUIESCENT_RELEASE_DEADLINE_NS = 5_000_000_000;
 ulong lifetime_counter_value;
 uint lifetime_counter_query_calls;
+ulong distinct_upstream_counter_value;
+uint distinct_upstream_query_calls;
+vk::Semaphore distinct_upstream_queried_semaphore;
 
 struct QuiescentReleaseWorkerArgs {
     gpu::Device*       device;
@@ -50,6 +53,18 @@ fn vk::Result lifetime_counter_query(
     return vk::Result.SUCCESS;
 }
 
+fn vk::Result distinct_upstream_counter_query(
+    vk::Device device,
+    vk::Semaphore semaphore,
+    ulong* value,
+) {
+    (void)device;
+    distinct_upstream_query_calls++;
+    distinct_upstream_queried_semaphore = semaphore;
+    *value = distinct_upstream_counter_value;
+    return vk::Result.SUCCESS;
+}
+
 fn gpu::Device make_lifetime_test_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -75,13 +90,11 @@ fn OwnedSpan make_lifetime_span(
 }
 
 fn gpu::CommandList record_lifetime_copy(
-    gpu::Device* device,
+    gpu::CommandAllocator* allocator,
     OwnedSpan* src,
     OwnedSpan* dst,
 ) {
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::BufferCopyDesc copy = {
         .src = src.span,
         .dst = dst.span,
@@ -277,7 +290,10 @@ fn void recording_references_reject_allocation_release() @test {
     OwnedSpan dst = make_lifetime_span(&device, "recording_dst");
     defer free_owned_span(&device, &dst)!!;
 
-    gpu::CommandList commands = record_lifetime_copy(&device, &src, &dst);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = record_lifetime_copy(&allocator, &src, &dst);
     fault src_fault = @catch(gpu::free_allocation(&device, &src.allocation));
     fault dst_fault = @catch(gpu::free_allocation(&device, &dst.allocation));
     assert(src_fault == gpu::RESOURCE_IN_USE && dst_fault == gpu::RESOURCE_IN_USE,
@@ -303,7 +319,10 @@ fn void executable_references_reject_allocation_release() @test {
     gpu::PipelineHandle pipeline = make_lifetime_compute_pipeline(&device);
     defer (void)gpu::destroy_pipeline(&device, pipeline);
 
-    gpu::CommandList commands = record_lifetime_copy(&device, &src, &dst);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = record_lifetime_copy(&allocator, &src, &dst);
     bind_test_compute_pipeline(&commands, pipeline);
     gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 0, 0, 0 })!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
@@ -334,7 +353,10 @@ fn void incomplete_submitted_commands_retain_references() @test {
     gpu::PipelineHandle pipeline = make_lifetime_compute_pipeline(&device);
     defer (void)gpu::destroy_pipeline(&device, pipeline);
 
-    gpu::CommandList commands = record_lifetime_copy(&device, &src, &dst);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = record_lifetime_copy(&allocator, &src, &dst);
     bind_test_compute_pipeline(&commands, pipeline);
     gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 0, 0, 0 })!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
@@ -385,7 +407,9 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::track_command_reference(
         state:      state,
@@ -464,9 +488,10 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
     gpu::PipelineHandle pipeline = make_lifetime_compute_pipeline(&device);
     defer (void)gpu::destroy_pipeline(&device, pipeline);
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::TextureBarrier barrier = {
         .texture = texture,
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -508,9 +533,10 @@ fn void failed_command_validation_retains_no_resource_reference() @test {
         .usage     = { .transfer_dst },
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-    )!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::TextureBarrier barrier = {
         .texture = texture,
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -531,32 +557,30 @@ fn void submitted_command_reservations_prevent_capacity_overcommit() @test {
         },
         .host_allocator = &allocators::LIBC_ALLOCATOR,
     };
-    vk::ensure_submitted_command_capacity(&state, 15);
+    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 16);
     state.submitted_command_count = 15;
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
 
-    vk::CommandRecord first_record = { .reference_count = 1 };
-    vk::CommandRecord second_record = { .reference_count = 1 };
+    vk::CommandRecord first_record;
+    vk::CommandRecord second_record;
     vk::CommandRecord*[1] first_records = { &first_record };
     vk::CommandRecord*[1] second_records = { &second_record };
 
     uint first = vk::prepare_submitted_commands(
         &state,
         first_records[..],
-    );
-    uint second = vk::prepare_submitted_commands(
+    )!!;
+    assert(@catch(vk::prepare_submitted_commands(
         &state,
         second_records[..],
-    );
-    assert(first == 1 && second == 1,
-        "each concurrent submit reserves its reference batch");
-    assert(state.submitted_command_reserved == 2,
-        "both reservations remain visible until publish or cancellation");
-    assert(state.submitted_commands.len >= 17,
-        "the second reservation grows capacity past the first reservation");
+    )) == gpu::DEVICE_BUSY,
+        "a second reservation cannot exceed fixed submitted-command storage");
+    assert(first == 1 && state.submitted_command_reserved == 1,
+        "the successful reservation remains visible until cancellation");
+    assert(state.submitted_commands.len == 16,
+        "reservation failure preserves fixed submitted-command capacity");
 
-    vk::cancel_submitted_command_reservation(&state, second);
     vk::cancel_submitted_command_reservation(&state, first);
     assert(state.submitted_command_reserved == 0,
         "cancellation releases every reserved batch");
@@ -578,14 +602,33 @@ fn void incomplete_reference_drain_is_deterministic() @test {
     }};
     completions[0].published_sequence.store(7, AtomicOrdering.RELEASE);
     state.queue_completions = completions[..];
-    vk::ensure_submitted_command_capacity(&state, 1);
+    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 1);
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,
         .roles  = { .graphics },
     };
+    vk::CommandScratch[1] scratch = {{ .in_use = true }};
+    uint[1] available;
+    vk::CommandAllocatorCell[1] allocator_cells;
+    state.command_allocators = {
+        .slots = allocator_cells[..],
+        .owner = 1,
+    };
+    gpu::CommandAllocatorHandle allocator = state.command_allocators.alloc({
+        .queue             = queue,
+        .scratch           = scratch[..],
+        .available         = available[..],
+        .in_flight_buffers = 1,
+    })!!;
+    vk::CommandAllocatorSlot* allocator_slot =
+        state.command_allocators.get(allocator)!!;
+    allocator_slot.mutex.init()!!;
+    defer (void)allocator_slot.mutex.destroy();
     state.submitted_commands[0] = {
-        .completion = gpu::make_completion_point(queue, 7)!!,
+        .completion       = gpu::make_completion_point(queue, 7)!!,
+        .allocator        = allocator,
+        .allocator_buffer = 0,
     };
     state.submitted_command_count = 1;
 
@@ -607,6 +650,83 @@ fn void incomplete_reference_drain_is_deterministic() @test {
     vk::destroy_submitted_commands(&state);
 }
 
+fn void successful_observation_drains_distinct_upstream_identity() @test {
+    vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
+    };
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
+    vk::QueueCompletionState[2] completions = {
+        {
+            .timeline = (vk::Semaphore)(uptr)11,
+            .bound    = true,
+        },
+        {
+            .timeline = (vk::Semaphore)(uptr)22,
+            .bound    = true,
+        },
+    };
+    completions[0].published_sequence.store(3, AtomicOrdering.RELEASE);
+    completions[1].published_sequence.store(3, AtomicOrdering.RELEASE);
+    state.queue_completions = completions[..];
+    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 1);
+    gpu::Queue upstream_queue = {
+        .device = { .generation = 1 },
+        .id     = 0,
+        .roles  = { .compute },
+    };
+    vk::CommandScratch[1] scratch = {{ .in_use = true }};
+    uint[1] available;
+    vk::CommandAllocatorCell[1] allocator_cells;
+    state.command_allocators = {
+        .slots = allocator_cells[..],
+        .owner = 1,
+    };
+    gpu::CommandAllocatorHandle allocator = state.command_allocators.alloc({
+        .queue             = upstream_queue,
+        .scratch           = scratch[..],
+        .available         = available[..],
+        .in_flight_buffers = 1,
+    })!!;
+    vk::CommandAllocatorSlot* slot = state.command_allocators.get(
+        allocator,
+    )!!;
+    slot.mutex.init()!!;
+    defer (void)slot.mutex.destroy();
+    state.submitted_commands[0] = {
+        .completion = gpu::make_completion_point(upstream_queue, 3)!!,
+        .allocator = allocator,
+        .allocator_buffer = 0,
+    };
+    state.submitted_command_count = 1;
+    distinct_upstream_counter_value = 3;
+    distinct_upstream_query_calls = 0;
+    distinct_upstream_queried_semaphore = (vk::Semaphore)null;
+
+    assert(vk::poll_queue_completion_with_query(
+        state:      &state,
+        completion: &completions[1],
+        queue_id:   1,
+        sequence:   3,
+        query_fn:   &distinct_upstream_counter_query,
+    )!!, "the injected downstream poll observes its exact sequence");
+
+    assert(distinct_upstream_query_calls == 2
+            && distinct_upstream_queried_semaphore == completions[0].timeline,
+        "poll queries the downstream and exact pending upstream identities");
+    assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 3
+            && completions[1].retired_sequence.load(AtomicOrdering.ACQUIRE)
+                == 3,
+        "distinct upstream and downstream retired prefixes remain independent");
+    assert(state.submitted_command_count == 0
+            && slot.in_flight_buffers == 0
+            && slot.available_count == 1
+            && slot.available[0] == 0
+            && !scratch[0].in_use,
+        "downstream completion returns the exact upstream allocator unit");
+    vk::destroy_submitted_commands(&state);
+}
+
 fn void completed_submission_release_boundary_is_exact() @test {
     vk::VkDeviceState state = {
         .host_allocator = &allocators::LIBC_ALLOCATOR,
@@ -615,31 +735,10 @@ fn void completed_submission_release_boundary_is_exact() @test {
     defer (void)state.resource_mutex.destroy();
     state.command_mutex.init()!!;
     defer (void)state.command_mutex.destroy();
-    vk::RecordingContextCell[1] context_cells;
-    state.recording_contexts.slots = context_cells[..];
-    vk::RecordingContextHandle context = state.recording_contexts.alloc({})!!;
-    vk::RecordingContextState* context_state =
-        state.recording_contexts.get(context)!!;
-    vk::GeneratedPreprocessBuffer[3] reserved_preprocess = {{
-        .reservation_in_use = true,
-    }, {
-        .reservation_in_use = true,
-    }, {
-        .reservation_in_use = true,
-    }};
-    context_state.reserved_preprocess = reserved_preprocess[..];
-    defer {
-        if (context_state.retired_commands.ptr != null) {
-            alloc::free(
-                state.host_allocator,
-                context_state.retired_commands.ptr,
-            );
-        }
-    }
     vk::QueueCompletionState[1] completions = {{ .bound = true }};
     state.queue_completions = completions[..];
     completions[0].published_sequence.store(9, AtomicOrdering.RELEASE);
-    vk::ensure_submitted_command_capacity(&state, 3);
+    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 3);
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,
@@ -660,47 +759,81 @@ fn void completed_submission_release_boundary_is_exact() @test {
     vk::CommandResourceReference[1] third_references = {{
         .tracked_command_references = &third_tracked_command_reference,
     }};
-    vk::GeneratedPreprocessBuffer[1] first_preprocess = {{
-        .reservation_context = context,
-        .reservation_index   = 0,
-        .reservation_owned   = true,
+    uint[1] first_preprocess = { 0 };
+    uint[1] second_preprocess = { 0 };
+    uint[1] third_preprocess = { 1 };
+    vk::CommandScratch[1] first_scratch = {{
+        .references                   = first_references[..],
+        .reference_count              = 1,
+        .generated_preprocess_indices = first_preprocess[..],
+        .generated_preprocess_count   = 1,
+        .in_use                      = true,
     }};
-    vk::GeneratedPreprocessBuffer[1] second_preprocess = {{
-        .reservation_context = context,
-        .reservation_index   = 1,
-        .reservation_owned   = true,
+    vk::CommandScratch[2] second_scratch = {{
+        .references                   = second_references[..],
+        .reference_count              = 1,
+        .generated_preprocess_indices = second_preprocess[..],
+        .generated_preprocess_count   = 1,
+        .in_use                      = true,
+    }, {
+        .references                   = third_references[..],
+        .reference_count              = 1,
+        .generated_preprocess_indices = third_preprocess[..],
+        .generated_preprocess_count   = 1,
+        .in_use                      = true,
     }};
-    vk::GeneratedPreprocessBuffer[1] third_preprocess = {{
-        .reservation_context = context,
-        .reservation_index   = 2,
-        .reservation_owned   = true,
+    vk::GeneratedPreprocessBuffer[3] reserved_preprocess = {{
+        .reservation_in_use = true,
+    }, {
+        .reservation_in_use = true,
+    }, {
+        .reservation_in_use = true,
     }};
+    uint[1] first_available;
+    uint[2] second_available;
+    vk::CommandAllocatorCell[2] allocator_cells;
+    state.command_allocators = {
+        .slots = allocator_cells[..],
+        .owner = 1,
+    };
+    gpu::CommandAllocatorHandle first_allocator = state.command_allocators.alloc({
+        .queue                         = queue,
+        .scratch                       = first_scratch[..],
+        .available                     = first_available[..],
+        .reservations                  = reserved_preprocess[:1],
+        .generated_reservations_in_use = 1,
+        .in_flight_buffers             = 1,
+    })!!;
+    gpu::CommandAllocatorHandle second_allocator = state.command_allocators.alloc({
+        .queue                         = queue,
+        .scratch                       = second_scratch[..],
+        .available                     = second_available[..],
+        .reservations                  = reserved_preprocess[1..],
+        .generated_reservations_in_use = 2,
+        .in_flight_buffers             = 2,
+    })!!;
+    vk::CommandAllocatorSlot* first_allocator_slot =
+        state.command_allocators.get(first_allocator)!!;
+    vk::CommandAllocatorSlot* second_allocator_slot =
+        state.command_allocators.get(second_allocator)!!;
+    first_allocator_slot.mutex.init()!!;
+    defer (void)first_allocator_slot.mutex.destroy();
+    second_allocator_slot.mutex.init()!!;
+    defer (void)second_allocator_slot.mutex.destroy();
     state.submitted_commands[0] = {
-        .completion                 = gpu::make_completion_point(queue, 7)!!,
-        .context                    = context,
-        .command_buffer             = (vk::CommandBuffer)(uptr)1,
-        .references                 = first_references[..],
-        .reference_count            = 1,
-        .generated_preprocess       = first_preprocess[..],
-        .generated_preprocess_count = 1,
+        .completion       = gpu::make_completion_point(queue, 7)!!,
+        .allocator        = first_allocator,
+        .allocator_buffer = 0,
     };
     state.submitted_commands[1] = {
-        .completion                 = gpu::make_completion_point(queue, 8)!!,
-        .context                    = context,
-        .command_buffer             = (vk::CommandBuffer)(uptr)2,
-        .references                 = second_references[..],
-        .reference_count            = 1,
-        .generated_preprocess       = second_preprocess[..],
-        .generated_preprocess_count = 1,
+        .completion       = gpu::make_completion_point(queue, 8)!!,
+        .allocator        = second_allocator,
+        .allocator_buffer = 0,
     };
     state.submitted_commands[2] = {
-        .completion                 = gpu::make_completion_point(queue, 8)!!,
-        .context                    = context,
-        .command_buffer             = (vk::CommandBuffer)(uptr)3,
-        .references                 = third_references[..],
-        .reference_count            = 1,
-        .generated_preprocess       = third_preprocess[..],
-        .generated_preprocess_count = 1,
+        .completion       = gpu::make_completion_point(queue, 8)!!,
+        .allocator        = second_allocator,
+        .allocator_buffer = 1,
     };
     state.submitted_command_count = 3;
 
@@ -726,10 +859,16 @@ fn void completed_submission_release_boundary_is_exact() @test {
         && reserved_preprocess[1].reservation_in_use
         && reserved_preprocess[2].reservation_in_use,
         "sequence N - 1 recycles only its covered preprocess reservation");
-    assert(context_state.retired_command_count == 1
-        && context_state.retired_commands[0].buffer
-            == (vk::CommandBuffer)(uptr)1,
-        "sequence N - 1 retires only its covered command buffer");
+    assert(first_allocator_slot.available_count == 1
+            && first_allocator_slot.available[0] == 0
+            && !first_scratch[0].in_use
+            && first_allocator_slot.in_flight_buffers == 0,
+        "sequence N - 1 returns its unit to the first allocator");
+    assert(second_allocator_slot.available_count == 0
+            && second_allocator_slot.in_flight_buffers == 2
+            && second_scratch[0].in_use
+            && second_scratch[1].in_use,
+        "sequence N - 1 leaves the later allocator entirely unchanged");
     assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 7,
         "sequence N - 1 publishes only the exact retired prefix");
 
@@ -752,10 +891,28 @@ fn void completed_submission_release_boundary_is_exact() @test {
     assert(!reserved_preprocess[1].reservation_in_use
         && !reserved_preprocess[2].reservation_in_use,
         "sequence N recycles every covered preprocess reservation");
-    assert(context_state.retired_command_count == 3,
-        "sequence N retires every covered command buffer");
+    assert(first_allocator_slot.available_count == 1
+            && first_allocator_slot.in_flight_buffers == 0
+            && second_allocator_slot.available_count == 2
+            && second_allocator_slot.in_flight_buffers == 0
+            && !second_scratch[0].in_use
+            && !second_scratch[1].in_use,
+        "sequence N routes every later unit to the second allocator");
     assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 8,
         "sequence N publishes only after all covered batches retire");
+    state.resource_mutex.lock()!!;
+    vk::retire_queue_through_locked(
+        state:            &state,
+        completion:       &completions[0],
+        queue_id:         0,
+        native_completed: 8,
+    );
+    state.resource_mutex.unlock();
+    assert(state.submitted_command_count == 0
+            && first_allocator_slot.available_count == 1
+            && second_allocator_slot.available_count == 2
+            && second_allocator_slot.in_flight_buffers == 0,
+        "repeating the same retirement is idempotent across allocators");
     state.resource_mutex.lock()!!;
     vk::retire_queue_through_locked(
         state:            &state,
@@ -767,6 +924,118 @@ fn void completed_submission_release_boundary_is_exact() @test {
     assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 9,
         "an empty submission advances the retired prefix without a synthetic batch");
     vk::destroy_submitted_commands(&state);
+}
+
+fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
+    vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
+    };
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
+    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 2);
+    gpu::Queue queue = {
+        .device = { .generation = 1 },
+        .id     = 0,
+        .roles  = { .graphics },
+    };
+    Atomic{uint} first_reference;
+    Atomic{uint} second_reference;
+    first_reference.store(1, AtomicOrdering.RELAXED);
+    second_reference.store(1, AtomicOrdering.RELAXED);
+    vk::CommandResourceReference[1] first_references = {{
+        .tracked_command_references = &first_reference,
+    }};
+    vk::CommandResourceReference[1] second_references = {{
+        .tracked_command_references = &second_reference,
+    }};
+    uint[1] first_preprocess = { 0 };
+    uint[1] second_preprocess = { 0 };
+    vk::CommandScratch[1] first_scratch = {{
+        .references                   = first_references[..],
+        .reference_count              = 1,
+        .generated_preprocess_indices = first_preprocess[..],
+        .generated_preprocess_count   = 1,
+        .in_use                       = true,
+    }};
+    vk::CommandScratch[1] second_scratch = {{
+        .references                   = second_references[..],
+        .reference_count              = 1,
+        .generated_preprocess_indices = second_preprocess[..],
+        .generated_preprocess_count   = 1,
+        .in_use                       = true,
+    }};
+    vk::GeneratedPreprocessBuffer[1] first_reservations = {{
+        .reservation_in_use = true,
+    }};
+    vk::GeneratedPreprocessBuffer[1] second_reservations = {{
+        .reservation_in_use = true,
+    }};
+    uint[1] first_available;
+    uint[1] second_available;
+    vk::CommandAllocatorCell[2] allocator_cells;
+    state.command_allocators = {
+        .slots = allocator_cells[..],
+        .owner = 1,
+    };
+    gpu::CommandAllocatorHandle first_allocator = state.command_allocators.alloc({
+        .queue                         = queue,
+        .scratch                       = first_scratch[..],
+        .available                     = first_available[..],
+        .reservations                  = first_reservations[..],
+        .generated_reservations_in_use = 1,
+        .in_flight_buffers             = 1,
+    })!!;
+    gpu::CommandAllocatorHandle second_allocator = state.command_allocators.alloc({
+        .queue                         = queue,
+        .scratch                       = second_scratch[..],
+        .available                     = second_available[..],
+        .reservations                  = second_reservations[..],
+        .generated_reservations_in_use = 1,
+        .in_flight_buffers             = 1,
+    })!!;
+    vk::CommandAllocatorSlot* first_slot =
+        state.command_allocators.get(first_allocator)!!;
+    vk::CommandAllocatorSlot* second_slot =
+        state.command_allocators.get(second_allocator)!!;
+    first_slot.mutex.init()!!;
+    defer (void)first_slot.mutex.destroy();
+    second_slot.mutex.init()!!;
+    defer (void)second_slot.mutex.destroy();
+    state.submitted_commands[0] = {
+        .allocator        = first_allocator,
+        .allocator_buffer = 0,
+    };
+    state.submitted_commands[1] = {
+        .allocator        = second_allocator,
+        .allocator_buffer = 0,
+    };
+    state.submitted_command_count = 2;
+
+    vk::destroy_submitted_commands(&state);
+
+    assert(state.submitted_command_count == 0
+            && state.submitted_commands.ptr == null,
+        "device-loss teardown consumes every submitted batch");
+    assert(first_reference.load(AtomicOrdering.RELAXED) == 0
+            && second_reference.load(AtomicOrdering.RELAXED) == 0,
+        "device-loss teardown releases references from every allocator");
+    assert(!first_reservations[0].reservation_in_use
+            && !second_reservations[0].reservation_in_use
+            && first_slot.generated_reservations_in_use == 0
+            && second_slot.generated_reservations_in_use == 0,
+        "device-loss teardown returns generated reservations to each allocator");
+    assert(first_slot.available_count == 1
+            && second_slot.available_count == 1
+            && first_slot.in_flight_buffers == 0
+            && second_slot.in_flight_buffers == 0
+            && !first_scratch[0].in_use
+            && !second_scratch[0].in_use,
+        "device-loss teardown returns each exact buffer and scratch block");
+
+    vk::destroy_submitted_commands(&state);
+    assert(first_slot.available_count == 1
+            && second_slot.available_count == 1,
+        "repeated defensive teardown is idempotent");
 }
 
 fn void threshold_drain_queries_once_and_publishes_retirement() @test {
@@ -784,8 +1053,8 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
         vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
         AtomicOrdering.RELEASE,
     );
-    vk::ensure_submitted_command_capacity(
-        &state,
+    state.submitted_commands = mem::new_array(
+        vk::SubmittedCommandBatch,
         vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
     );
     gpu::Queue queue = {
@@ -793,9 +1062,29 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
         .id     = 0,
         .roles  = { .graphics },
     };
+    vk::CommandScratch[vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD] scratch;
+    uint[vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD] available;
+    vk::CommandAllocatorCell[1] allocator_cells;
+    state.command_allocators = {
+        .slots = allocator_cells[..],
+        .owner = 1,
+    };
+    gpu::CommandAllocatorHandle allocator = state.command_allocators.alloc({
+        .queue             = queue,
+        .scratch           = scratch[..],
+        .available         = available[..],
+        .in_flight_buffers = vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
+    })!!;
+    vk::CommandAllocatorSlot* allocator_slot =
+        state.command_allocators.get(allocator)!!;
+    allocator_slot.mutex.init()!!;
+    defer (void)allocator_slot.mutex.destroy();
     for (uint i = 0; i < vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD; i++) {
+        scratch[i].in_use = true;
         state.submitted_commands[i] = {
-            .completion = gpu::make_completion_point(queue, (ulong)i + 1)!!,
+            .completion       = gpu::make_completion_point(queue, (ulong)i + 1)!!,
+            .allocator        = allocator,
+            .allocator_buffer = i,
         };
     }
     state.submitted_command_count = vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD;

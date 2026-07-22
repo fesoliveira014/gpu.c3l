@@ -384,6 +384,34 @@ fn void? track_render_pass(
 ) {
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
+    CommandResourceReference[
+        gpu::MAX_COLOR_ATTACHMENTS * 2 + 1
+    ] references;
+    uint reference_count;
+    for (uint i = 0; i < pass.color_count; i++) {
+        gpu::AttachmentViewHandle color = pass.color_handles[i];
+        references[reference_count++] = {
+            .owner      = color.owner,
+            .index      = color.index,
+            .generation = color.generation,
+        };
+        gpu::AttachmentViewHandle resolve = pass.resolve_handles[i];
+        if (resolve.is_valid()) {
+            references[reference_count++] = {
+                .owner      = resolve.owner,
+                .index      = resolve.index,
+                .generation = resolve.generation,
+            };
+        }
+    }
+    if (pass.has_depth) {
+        references[reference_count++] = {
+            .owner      = pass.depth_handle.owner,
+            .index      = pass.depth_handle.index,
+            .generation = pass.depth_handle.generation,
+        };
+    }
+    preflight_command_references(record, references[:reference_count])!;
     for (uint i = 0; i < pass.color_count; i++) {
         gpu::AttachmentViewHandle color = pass.color_handles[i];
         track_command_reference(
@@ -477,7 +505,7 @@ fn void? trusted_tracking_begin_render_pass(
 ) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -507,7 +535,7 @@ fn void? checked_tracking_begin_render_pass(
         desc,
     )!;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -1370,6 +1398,19 @@ fn void? track_indexed_indirect_draw(
 ) {
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
+    CommandResourceReference[2] references = {
+        {
+            .owner      = draw.args_span.owner,
+            .index      = draw.args_span.index,
+            .generation = draw.args_span.generation,
+        },
+        {
+            .owner      = draw.index_span.owner,
+            .index      = draw.index_span.index,
+            .generation = draw.index_span.generation,
+        },
+    };
+    preflight_command_references(record, references[..])!;
     track_span_command_reference(state, record, &draw.args_span)!;
     track_span_command_reference(state, record, &draw.index_span)!;
 }
@@ -1440,7 +1481,7 @@ fn void? trusted_tracking_draw_indexed_indirect(
         index_type:     index_type,
     )!;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -1492,7 +1533,7 @@ fn void? checked_tracking_draw_indexed_indirect(
             index_type:     index_type,
         )!;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -1619,6 +1660,24 @@ fn void? track_indexed_indirect_count_draw(
 ) {
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
+    CommandResourceReference[3] references = {
+        {
+            .owner      = draw.args_span.owner,
+            .index      = draw.args_span.index,
+            .generation = draw.args_span.generation,
+        },
+        {
+            .owner      = draw.count_span.owner,
+            .index      = draw.count_span.index,
+            .generation = draw.count_span.generation,
+        },
+        {
+            .owner      = draw.index_span.owner,
+            .index      = draw.index_span.index,
+            .generation = draw.index_span.generation,
+        },
+    };
+    preflight_command_references(record, references[..])!;
     track_span_command_reference(state, record, &draw.args_span)!;
     track_span_command_reference(state, record, &draw.count_span)!;
     track_span_command_reference(state, record, &draw.index_span)!;
@@ -1698,7 +1757,7 @@ fn void? trusted_tracking_draw_indexed_indirect_count(
             index_type:     index_type,
         )!;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -1754,7 +1813,7 @@ fn void? checked_tracking_draw_indexed_indirect_count(
             index_type:     index_type,
         )!;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -1873,6 +1932,19 @@ fn void? track_generated_draw(
 ) {
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
+    CommandResourceReference[2] references = {
+        {
+            .owner      = draw.records_span.owner,
+            .index      = draw.records_span.index,
+            .generation = draw.records_span.generation,
+        },
+        {
+            .owner      = draw.count_span.owner,
+            .index      = draw.count_span.index,
+            .generation = draw.count_span.generation,
+        },
+    };
+    preflight_command_references(record, references[..])!;
     track_span_command_reference(state, record, &draw.records_span)!;
     track_span_command_reference(state, record, &draw.count_span)!;
 }
@@ -1924,7 +1996,7 @@ fn void? trusted_tracking_draw_generated(
     )!;
     if (draw.max_count == 0) return;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -1963,7 +2035,7 @@ fn void? checked_tracking_draw_generated(
     )!;
     if (draw.max_count == 0) return;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -2086,6 +2158,24 @@ fn void? track_generated_indexed_draw(
 ) {
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
+    CommandResourceReference[3] references = {
+        {
+            .owner      = draw.records_span.owner,
+            .index      = draw.records_span.index,
+            .generation = draw.records_span.generation,
+        },
+        {
+            .owner      = draw.count_span.owner,
+            .index      = draw.count_span.index,
+            .generation = draw.count_span.generation,
+        },
+        {
+            .owner      = draw.index_span.owner,
+            .index      = draw.index_span.index,
+            .generation = draw.index_span.generation,
+        },
+    };
+    preflight_command_references(record, references[..])!;
     track_span_command_reference(state, record, &draw.records_span)!;
     track_span_command_reference(state, record, &draw.count_span)!;
     track_span_command_reference(state, record, &draw.index_span)!;
@@ -2149,7 +2239,7 @@ fn void? trusted_tracking_draw_indexed_generated(
     )!;
     if (draw.max_count == 0) return;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,
@@ -2198,7 +2288,7 @@ fn void? checked_tracking_draw_indexed_generated(
         )!;
     if (draw.max_count == 0) return;
     CommandRecord* record = encoder_command(commands);
-    uint checkpoint = record.reference_count;
+    uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
         encoder_device_state(commands),
         record,

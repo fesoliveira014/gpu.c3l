@@ -29,17 +29,26 @@ alias GetSpanAddressFn @private      = fn GpuAddress? (Device*, GpuSpan);
 alias FlushSpanFn @private           = fn void? (Device*, GpuSpan);
 alias InvalidateSpanFn @private      = fn void? (Device*, GpuSpan);
 // Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
+alias CreateCommandAllocatorFn @private = fn CommandAllocatorHandle? (
+    Device*,
+    Queue,
+    CommandAllocatorDesc*,
+);
+alias DestroyCommandAllocatorFn @private = fn void? (
+    Device*,
+    CommandAllocatorHandle,
+);
 alias BeginCommandsFn @private = fn void? (
-    Queue queue,
+    CommandAllocator* allocator,
     CommandList* out_commands,
     CommandBackendContext* out_backend,
 );
 alias ReserveGeneratedScratchFn @private = fn void? (
-    Queue,
+    CommandAllocator*,
     GeneratedScratchDesc*,
 );
 alias ReleaseGeneratedScratchFn @private = fn void? (
-    Queue,
+    CommandAllocator*,
     PipelineHandle,
     GeneratedWorkKind,
 );
@@ -201,6 +210,7 @@ enum ResourceOwnerKind @private {
     TEXTURE_VIEW,
     PIPELINE,
     SWAPCHAIN,
+    COMMAND_ALLOCATOR,
     COMMAND,
     COMPLETION_POINT,
 }
@@ -278,6 +288,8 @@ struct BackendVTable @private {
     GetSpanAddressFn          get_span_address;
     FlushSpanFn               flush_mapped_span;
     InvalidateSpanFn          invalidate_mapped_span;
+    CreateCommandAllocatorFn  create_command_allocator;
+    DestroyCommandAllocatorFn destroy_command_allocator;
     ReserveGeneratedScratchFn reserve_generated_scratch;
     ReleaseGeneratedScratchFn release_generated_scratch;
     BeginCommandsFn           begin_commands;
@@ -367,6 +379,7 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
    relaxed snapshots only around externally synchronized cold or warm work. *>
 struct RecordingWorkCounters @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
     ulong host_allocations;
+    ulong command_pool_creations;
     ulong command_buffer_allocations;
     ulong command_buffer_frees;
     ulong command_buffer_resets;

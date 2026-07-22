@@ -52,13 +52,15 @@ COMMAND_OUTPUT = "\n".join(
             "reference_increments=0 reference_releases=0"
         ),
         (
-            "cold work: host_allocations=5 command_buffer_allocations=1 "
+            "cold work: host_allocations=5 command_pool_creations=1 "
+            "command_buffer_allocations=1 "
             "command_buffer_frees=0 command_buffer_resets=3 "
             "image_view_creations=0 vma_allocations=64 "
             "generated_scratch_misses=0"
         ),
         (
-            "warm work: host_allocations=0 command_buffer_allocations=0 "
+            "warm work: host_allocations=0 command_pool_creations=0 "
+            "command_buffer_allocations=0 "
             "command_buffer_frees=0 command_buffer_resets=20 "
             "image_view_creations=0 vma_allocations=0 "
             "generated_scratch_misses=0"

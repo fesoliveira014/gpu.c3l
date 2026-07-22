@@ -23,6 +23,7 @@ struct UploadStorage {
 
 struct UploadWorkerArgs {
     gpu::Device*               device;
+    gpu::CommandAllocator*     allocator;
     UploadStorage*             upload;
     UploadStorage*             destination;
     Atomic{uint}*              requested_generation;
@@ -79,8 +80,7 @@ fn void record_upload_generation(UploadWorkerArgs* args, uint generation) {
     }
     gpu::flush_mapped_span(args.device, args.upload.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(args.device, gpu::QueueKind.TRANSFER)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandList commands = gpu::begin_commands(args.allocator)!!;
     defer (void)gpu::discard_commands(&commands);
     gpu::BufferCopyDesc copy = {
         .src = args.upload.span,
@@ -178,10 +178,27 @@ fn double run_upload_combo(
     stop.store(false, AtomicOrdering.RELAXED);
 
     UploadWorkerArgs[UPLOAD_BENCH_MAX_WORKERS] args;
+    gpu::CommandAllocator[UPLOAD_BENCH_MAX_WORKERS] command_allocators;
+    gpu::Queue transfer_queue = gpu::get_queue(
+        device,
+        gpu::QueueKind.TRANSFER,
+    )!!;
+    for (uint worker = 0; worker < workers; worker++) {
+        command_allocators[worker] = gpu::create_command_allocator(
+            device,
+            transfer_queue,
+        )!!;
+    }
+    defer {
+        for (uint worker = 0; worker < workers; worker++) {
+            (void)gpu::destroy_command_allocator(&command_allocators[worker]);
+        }
+    }
     Thread[UPLOAD_BENCH_MAX_WORKERS] threads;
     for (uint worker = 0; worker < workers; worker++) {
         args[worker] = {
             .device               = device,
+            .allocator            = &command_allocators[worker],
             .upload               = &uploads[worker],
             .destination          = &destinations[worker],
             .requested_generation = &requested_generation,

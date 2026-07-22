@@ -431,13 +431,14 @@ fn void debug_resource_kind_ordinals_match_exact_schema() @test {
     assert((int)gpu::DebugResourceKind.PIPELINE == 4);
     assert((int)gpu::DebugResourceKind.SWAPCHAIN == 5);
     assert((int)gpu::DebugResourceKind.SHADER == 6);
-    assert((int)gpu::DebugResourceKind.COMMAND_LIST == 7);
-    assert((int)gpu::DebugResourceKind.TEXTURE_DESCRIPTOR == 8);
-    assert((int)gpu::DebugResourceKind.SAMPLER == 9);
-    assert((int)gpu::DebugResourceKind.ALLOCATION == 10,
-        "allocation keeps the exact ordinal 10");
-    assert((int)gpu::DebugResourceKind.ATTACHMENT_VIEW == 11,
-        "attachment views append without changing existing ordinals");
+    assert((int)gpu::DebugResourceKind.COMMAND_ALLOCATOR == 7);
+    assert((int)gpu::DebugResourceKind.COMMAND_LIST == 8);
+    assert((int)gpu::DebugResourceKind.TEXTURE_DESCRIPTOR == 9);
+    assert((int)gpu::DebugResourceKind.SAMPLER == 10);
+    assert((int)gpu::DebugResourceKind.ALLOCATION == 11,
+        "allocation keeps the exact ordinal 11");
+    assert((int)gpu::DebugResourceKind.ATTACHMENT_VIEW == 12,
+        "attachment views append after the command allocator kind");
 }
 
 fn vk::Result allocation_probe_create_buffer(
@@ -701,10 +702,30 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         .id     = 0,
     };
     gpu::CompletionPoint completion = gpu::make_completion_point(queue, 1)!!;
-    vk::SubmittedCommandBatch[1] batches = {{
-        .completion      = completion,
+    vk::CommandScratch[1] scratch = {{
         .references      = references[..],
         .reference_count = 1,
+        .in_use          = true,
+    }};
+    uint[1] available;
+    vk::CommandAllocatorCell[1] allocator_cells;
+    fixture.state.command_allocators = {
+        .slots = allocator_cells[..],
+        .owner = 1,
+    };
+    gpu::CommandAllocatorHandle allocator = fixture.state.command_allocators.alloc({
+        .scratch           = scratch[..],
+        .available         = available[..],
+        .in_flight_buffers = 1,
+    })!!;
+    vk::CommandAllocatorSlot* allocator_slot =
+        fixture.state.command_allocators.get(allocator)!!;
+    allocator_slot.mutex.init()!!;
+    defer (void)allocator_slot.mutex.destroy();
+    vk::SubmittedCommandBatch[1] batches = {{
+        .completion       = completion,
+        .allocator        = allocator,
+        .allocator_buffer = 0,
     }};
     fixture.state.submitted_commands = batches[..];
     fixture.state.submitted_command_count = 1;
@@ -1225,7 +1246,12 @@ fn void native_mapped_visibility_round_trip() @test {
     gpu::flush_mapped_span(&device, written)!!;
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer (void)discard_test_commands(&commands);
     gpu::BufferCopyDesc copy = {
         .src = written,
@@ -1311,7 +1337,12 @@ fn void native_allocation_spans_support_fill_upload_and_readback() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer (void)discard_test_commands(&commands);
     gpu::BufferCopyDesc upload_copy = {
         .src = upload_span,
@@ -1385,9 +1416,16 @@ fn void allocation_span_commands_reject_stale_and_foreign_owners_before_mutation
         &foreign_device,
         foreign,
     )!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer (void)discard_test_commands(&commands);
     assert(@catch(gpu::cmd_fill_buffer(&commands, stale, 0))
         == gpu::INVALID_HANDLE,
@@ -1405,10 +1443,7 @@ fn void allocation_span_commands_reject_stale_and_foreign_owners_before_mutation
     defer (void)discard_test_executable(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = gpu::submit(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-        &submit,
-    )!!;
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
     gpu::wait_completion(completion)!!;
 }
 

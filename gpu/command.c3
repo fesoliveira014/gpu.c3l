@@ -1,5 +1,12 @@
 module gpu;
 
+const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
+const uint DEFAULT_COMMAND_REFERENCES_PER_LIST = 64;
+const uint DEFAULT_COMMAND_PREPROCESS_PER_LIST = 4;
+const uint MAX_COMMAND_ALLOCATOR_CAPACITY = 4096;
+const uint MAX_COMMAND_REFERENCES_PER_LIST = 4096;
+const uint MAX_COMMAND_PREPROCESS_PER_LIST = 64;
+
 <* Generated-work record kind a scratch reservation serves. *>
 enum GeneratedWorkKind : int {
     DRAW,
@@ -62,6 +69,24 @@ struct DispatchIndirectCommand {
 }
 $assert DispatchIndirectCommand::size == 12;
 
+<* A fixed-capacity command recording owner bound to one exact queue. One
+   allocator is confined to one recording thread while recordings are live. *>
+struct CommandAllocator {
+    Device                 device;
+    Queue                  queue;
+    CommandAllocatorHandle handle;
+}
+
+<* Zero capacities select the documented defaults. Generated preprocess bytes
+   bound exact descriptor-driven reservations; zero disables reservations. *>
+struct CommandAllocatorDesc {
+    uint    command_buffer_capacity;
+    uint    max_resource_references_per_list;
+    uint    max_generated_preprocess_buffers_per_list;
+    usz     generated_preprocess_bytes;
+    ZString debug_name;
+}
+
 <* A recording command token. Successful end consumes it. *>
 struct CommandList {
     Device            device;
@@ -78,9 +103,8 @@ struct ExecutableCommandList {
 }
 $assert ExecutableCommandList::size <= ulong::size * 4;
 
-<* Cold reservation for one generated-work pipeline and command kind on the
-   calling thread's device context. Count bounds each generated call; buffer
-   count bounds simultaneously retained calls. *>
+<* Cold reservation for one generated-work pipeline and command kind on one
+   allocator. Count bounds each call; buffer count bounds concurrent use. *>
 struct GeneratedScratchDesc {
     PipelineHandle    pipeline;
     GeneratedWorkKind kind;
@@ -197,11 +221,11 @@ fn CommandEncoderState*? recording_encoder(
 ) @private {
     if (commands == null) return INVALID_HANDLE~;
     CommandEncoderState* encoder = command_encoder(
-        commands.device,
-        commands.handle,
-        commands.encoder,
-        CommandEncoderPhase.RECORDING,
-        allow_lost,
+        device:     commands.device,
+        handle:     commands.handle,
+        opaque:     commands.encoder,
+        phase:      CommandEncoderPhase.RECORDING,
+        allow_lost: allow_lost,
     )!;
     if (!allow_lost) note_command_recording_call();
     return encoder;
@@ -213,11 +237,11 @@ fn CommandEncoderState*? executable_encoder(
 ) @private {
     if (commands == null) return INVALID_HANDLE~;
     return command_encoder(
-        commands.device,
-        commands.handle,
-        commands.encoder,
-        CommandEncoderPhase.EXECUTABLE,
-        allow_lost,
+        device:     commands.device,
+        handle:     commands.handle,
+        opaque:     commands.encoder,
+        phase:      CommandEncoderPhase.EXECUTABLE,
+        allow_lost: allow_lost,
     );
 }
 
@@ -310,17 +334,120 @@ fn bool generated_work_kind_valid(GeneratedWorkKind kind) @private {
     }
 }
 
-<* Reserve driver-compatible generated-command preprocess storage outside
-   command recording. Replacement requires a quiescent calling-thread device
-   context; insufficient warm capacity faults GENERATED_SCRATCH_EXHAUSTED. *>
-fn void? reserve_generated_scratch(
+fn void? validate_command_allocator(
+    DeviceOperation* operation,
+    CommandAllocator* allocator,
+) @private {
+    if (allocator == null || !allocator.handle.is_valid()) {
+        return INVALID_HANDLE~;
+    }
+    validate_queue(operation, &allocator.device, allocator.queue)!;
+    validate_resource_owner(
+        operation,
+        allocator.handle.owner,
+        ResourceOwnerKind.COMMAND_ALLOCATOR,
+    )!;
+}
+
+<* Create one fixed-capacity command allocator for an exact selected queue.
+   Zero capacities default to 8 command buffers, 64 tracked references per list,
+   and 4 generated-preprocess buffers per list; storage scales with their products.
+   Creation may fault for invalid limits, host/device allocation failure, a full
+   allocator table, device loss, or a busy/closing device. *>
+fn CommandAllocator? create_command_allocator(
+    Device* device,
     Queue queue,
+    CommandAllocatorDesc* desc = null,
+) {
+    DeviceOperation operation = begin_device_operation(device)!;
+    defer end_device_operation(&operation);
+    validate_queue(&operation, device, queue)!;
+
+    CommandAllocatorDesc normalized = desc == null ? {} : *desc;
+    if (normalized.command_buffer_capacity == 0) {
+        normalized.command_buffer_capacity = DEFAULT_COMMAND_ALLOCATOR_CAPACITY;
+    }
+    if (normalized.max_resource_references_per_list == 0) {
+        normalized.max_resource_references_per_list =
+            DEFAULT_COMMAND_REFERENCES_PER_LIST;
+    }
+    if (normalized.max_generated_preprocess_buffers_per_list == 0) {
+        normalized.max_generated_preprocess_buffers_per_list =
+            DEFAULT_COMMAND_PREPROCESS_PER_LIST;
+    }
+    if (normalized.command_buffer_capacity > MAX_COMMAND_ALLOCATOR_CAPACITY
+        || normalized.max_resource_references_per_list
+            > MAX_COMMAND_REFERENCES_PER_LIST
+        || normalized.max_generated_preprocess_buffers_per_list
+            > MAX_COMMAND_PREPROCESS_PER_LIST) {
+        return INVALID_ARGUMENT~;
+    }
+    if (normalized.command_buffer_capacity
+        > uint::max
+            / normalized.max_generated_preprocess_buffers_per_list) {
+        return INVALID_ARGUMENT~;
+    }
+
+    CommandAllocator allocator = {
+        .device = *device,
+        .queue  = queue,
+    };
+    if (operation.vtable.create_command_allocator == null) {
+        return BACKEND_ERROR~;
+    }
+    allocator.handle = operation.vtable.create_command_allocator(
+        device,
+        queue,
+        &normalized,
+    )!;
+    ulong expected_owner = resource_owner_tag(
+        operation.data.resource_owner,
+        ResourceOwnerKind.COMMAND_ALLOCATOR,
+    );
+    if (!allocator.handle.is_valid()
+        || allocator.handle.owner != expected_owner) {
+        if (operation.vtable.destroy_command_allocator != null) {
+            (void)operation.vtable.destroy_command_allocator(
+                device,
+                allocator.handle,
+            );
+        }
+        return BACKEND_ERROR~;
+    }
+    retain_device_children(&operation);
+    return allocator;
+}
+
+<* Destroy a quiescent allocator. RESOURCE_IN_USE or DEVICE_BUSY leaves the
+   allocator token unchanged and retryable. *>
+fn void? destroy_command_allocator(CommandAllocator* allocator) {
+    if (allocator == null || !allocator.handle.is_valid()) {
+        return INVALID_HANDLE~;
+    }
+    DeviceOperation operation = begin_device_operation(&allocator.device, true)!;
+    defer end_device_operation(&operation);
+    validate_command_allocator(&operation, allocator)!;
+    if (operation.vtable.destroy_command_allocator == null) {
+        return BACKEND_ERROR~;
+    }
+    operation.vtable.destroy_command_allocator(
+        &allocator.device,
+        allocator.handle,
+    )!;
+    *allocator = {};
+    release_device_children(&operation);
+}
+
+<* Reserve compatible generated-command preprocess storage on a quiescent
+   allocator. The allocator's fixed slot and byte ceilings bound replacement. *>
+fn void? reserve_generated_scratch(
+    CommandAllocator* allocator,
     GeneratedScratchDesc* desc,
 ) {
-    Device device = queue.device;
-    DeviceOperation operation = begin_device_operation(&device)!;
+    if (allocator == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(&allocator.device)!;
     defer end_device_operation(&operation);
-    validate_queue(&operation, &device, queue)!;
+    validate_command_allocator(&operation, allocator)!;
     if (desc == null) return INVALID_ARGUMENT~;
     validate_resource_owner(
         &operation,
@@ -334,37 +461,48 @@ fn void? reserve_generated_scratch(
             > operation.data.caps.max_generated_work_count) {
         return INVALID_ARGUMENT~;
     }
-    return operation.vtable.reserve_generated_scratch(queue, desc);
+    if (operation.vtable.reserve_generated_scratch == null) {
+        return BACKEND_ERROR~;
+    }
+    return operation.vtable.reserve_generated_scratch(allocator, desc);
 }
 
-<* Release one quiescent generated-work reservation from the calling thread's
-   device context. *>
+<* Release one generated-work reservation from a quiescent allocator. *>
 fn void? release_generated_scratch(
-    Queue queue,
+    CommandAllocator* allocator,
     PipelineHandle pipeline,
     GeneratedWorkKind kind,
 ) {
-    Device device = queue.device;
-    DeviceOperation operation = begin_device_operation(&device)!;
+    if (allocator == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(&allocator.device)!;
     defer end_device_operation(&operation);
-    validate_queue(&operation, &device, queue)!;
+    validate_command_allocator(&operation, allocator)!;
     validate_resource_owner(
         &operation,
         pipeline.owner,
         ResourceOwnerKind.PIPELINE,
     )!;
     if (!generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
-    return operation.vtable.release_generated_scratch(queue, pipeline, kind);
+    if (operation.vtable.release_generated_scratch == null) {
+        return BACKEND_ERROR~;
+    }
+    return operation.vtable.release_generated_scratch(
+        allocator,
+        pipeline,
+        kind,
+    );
 }
 
-<* Begin recording on a selected queue. The token retains its device until
-   successful end followed by submit, or until discard. *>
-fn CommandList? begin_commands(Queue queue) {
-    Device device = queue.device;
-    DeviceOperation operation = begin_device_operation(&device)!;
+<* Begin recording through an explicit allocator. The token retains its device until
+   successful end followed by submit, or until discard. DEVICE_BUSY leaves the
+   allocator unchanged when every preallocated command buffer is unavailable. *>
+fn CommandList? begin_commands(CommandAllocator* allocator) {
+    if (allocator == null) return INVALID_HANDLE~;
+    DeviceOperation operation = begin_device_operation(&allocator.device)!;
     defer end_device_operation(&operation);
-    validate_queue(&operation, &device, queue)!;
+    validate_command_allocator(&operation, allocator)!;
     BackendVTable* vtable = operation.vtable;
+    if (vtable.begin_commands == null) return BACKEND_ERROR~;
     CommandList commands;
     CommandBackendContext backend;
     bool backend_created = false;
@@ -384,7 +522,7 @@ fn CommandList? begin_commands(Queue queue) {
         }
     }
     note_command_lifecycle_vtable_dispatch();
-    vtable.begin_commands(queue, &commands, &backend)!;
+    vtable.begin_commands(allocator, &commands, &backend)!;
     backend_created = true;
     if (!retain_command_pin_lease(&operation, &commands)) {
         return INVALID_HANDLE~;
@@ -417,8 +555,14 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
 
 <* Consume an unfinished recording, including after device loss. *>
 fn void? discard_commands(CommandList* commands) {
-    CommandEncoderState* encoder = recording_encoder(commands, true)!;
-    DeviceOperation operation = command_operation(commands, true)!;
+    CommandEncoderState* encoder = recording_encoder(
+        commands,
+        allow_lost: true,
+    )!;
+    DeviceOperation operation = command_operation(
+        commands,
+        allow_lost: true,
+    )!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     CommandList consumed = *commands;
@@ -439,8 +583,14 @@ fn void? discard_commands(CommandList* commands) {
 
 <* Consume an executable token without submitting it. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
-    CommandEncoderState* encoder = executable_encoder(commands, true)!;
-    DeviceOperation operation = executable_command_operation(commands, true)!;
+    CommandEncoderState* encoder = executable_encoder(
+        commands,
+        allow_lost: true,
+    )!;
+    DeviceOperation operation = executable_command_operation(
+        commands,
+        allow_lost: true,
+    )!;
     defer end_device_operation(&operation);
     BackendVTable* vtable = operation.vtable;
     ExecutableCommandList consumed = *commands;

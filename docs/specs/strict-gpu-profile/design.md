@@ -345,13 +345,13 @@ Public recording uses two states:
 1. a recording `CommandList`;
 2. a one-shot executable command token returned by successful end.
 
-`begin_commands(queue)` acquires backend recording storage and transfers its device-operation pin to the returned token. Native pools are device-managed and may be cached per worker or sharded internally. They are not public resources.
+`create_command_allocator(device, queue, desc)` allocates one exact-queue native pool, a fixed command-buffer set, and stable per-list scratch before publication. `begin_commands(allocator)` draws one unit from that explicit owner and transfers its device-operation pin to the returned token. Native pool and scratch representations remain backend-private.
 
 Recording calls borrow the token's exact retained pin without changing the registry pin count. A nonmatching stale or forged token cannot borrow another command's pin and takes a short validation pin before backend access.
 
 `discard_commands` consumes an unfinished recording, including after device loss, and releases its pin. Successful submission consumes executable tokens, releases their pins, and returns a completion point. A recording or submission failure preserves each token and pin for retry or discard.
 
-Concurrent workers may record for the same device. Synchronization may occur during begin, end, and submit. Individual command calls do not take a process-global lock or allocate a public recording context.
+Concurrent workers may record for the same device through distinct allocators. One allocator is confined to one recording thread while any recording remains live; executable tokens may cross to a synchronized submit thread. Individual command calls do not take a process-global lock or allocate host/native/VMA/temporary-pool storage.
 
 Strict and compatibility commands share the same command list. Binding a pipeline records the active binding model. Strict draw and dispatch require a strict pipeline; compatibility draw and dispatch require a compatibility pipeline and the required descriptor sets.
 

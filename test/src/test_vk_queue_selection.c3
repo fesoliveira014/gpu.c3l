@@ -294,7 +294,13 @@ fn void queue_alias_matches_async_compute_cap() @test {
 fn void cross_queue_timeline_chain_validates() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
-    gpu::CommandList compute_cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
+    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute_queue)!!;
+    defer gpu::destroy_command_allocator(&compute_allocator)!!;
+    gpu::Queue graphics_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics_queue)!!;
+    defer gpu::destroy_command_allocator(&graphics_allocator)!!;
+    gpu::CommandList compute_cmd = gpu::begin_commands(&compute_allocator)!!;
     defer discard_test_commands(&compute_cmd)!!;
     gpu::ExecutableCommandList compute_cmd_executable = gpu::end_commands(&compute_cmd)!!;
     defer discard_test_executable(&compute_cmd_executable)!!;
@@ -306,7 +312,7 @@ fn void cross_queue_timeline_chain_validates() @test {
         &compute_submit,
     )!!;
 
-    gpu::CommandList gfx_cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList gfx_cmd = gpu::begin_commands(&graphics_allocator)!!;
     defer discard_test_commands(&gfx_cmd)!!;
     gpu::ExecutableCommandList gfx_cmd_executable = gpu::end_commands(&gfx_cmd)!!;
     defer discard_test_executable(&gfx_cmd_executable)!!;
@@ -374,8 +380,14 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
             && graphics.id != transfer.id
             && compute.id != transfer.id,
             "the integration request owns three distinct queues");
+        gpu::CommandAllocator transfer_allocator = gpu::create_command_allocator(&device, transfer)!!;
+        defer gpu::destroy_command_allocator(&transfer_allocator)!!;
+        gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute)!!;
+        defer gpu::destroy_command_allocator(&compute_allocator)!!;
+        gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics)!!;
+        defer gpu::destroy_command_allocator(&graphics_allocator)!!;
 
-        gpu::CommandList transfer_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!)!!;
+        gpu::CommandList transfer_commands = gpu::begin_commands(&transfer_allocator)!!;
         defer discard_test_commands(&transfer_commands)!!;
         gpu::ExecutableCommandList transfer_commands_executable = gpu::end_commands(&transfer_commands)!!;
         defer discard_test_executable(&transfer_commands_executable)!!;
@@ -387,7 +399,7 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
             &transfer_submit,
         )!!;
 
-        gpu::CommandList compute_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
+        gpu::CommandList compute_commands = gpu::begin_commands(&compute_allocator)!!;
         defer discard_test_commands(&compute_commands)!!;
         gpu::ExecutableCommandList compute_commands_executable = gpu::end_commands(&compute_commands)!!;
         defer discard_test_executable(&compute_commands_executable)!!;
@@ -404,7 +416,7 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
             &compute_submit,
         )!!;
 
-        gpu::CommandList graphics_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+        gpu::CommandList graphics_commands = gpu::begin_commands(&graphics_allocator)!!;
         defer discard_test_commands(&graphics_commands)!!;
         gpu::ExecutableCommandList graphics_commands_executable = gpu::end_commands(&graphics_commands)!!;
         defer discard_test_executable(&graphics_commands_executable)!!;
@@ -625,46 +637,62 @@ fn void resource_texture_create_info_uses_exact_access_families() @test {
     assert(concurrent.p_queue_family_indices[1] == 5);
 }
 
-fn void pool_selection_follows_queue_family() @test {
-    vk::CommandPool[1] gfx  = { (vk::CommandPool)(uptr)0x10 };
-    vk::CommandPool[1] comp = { (vk::CommandPool)(uptr)0x30 };
-    vk::CommandPool[1] xfer = { (vk::CommandPool)(uptr)0x20 };
+fn void allocator_pool_ownership_is_exact() @test {
+    gpu::Device device = make_queue_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics)!!;
+    defer gpu::destroy_command_allocator(&graphics_allocator)!!;
+    gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute)!!;
+    defer gpu::destroy_command_allocator(&compute_allocator)!!;
+    gpu::CommandAllocator transfer_allocator = gpu::create_command_allocator(&device, transfer)!!;
+    defer gpu::destroy_command_allocator(&transfer_allocator)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandAllocatorSlot* graphics_slot = state.command_allocators.get(
+        graphics_allocator.handle,
+    )!!;
+    vk::CommandAllocatorSlot* compute_slot = state.command_allocators.get(
+        compute_allocator.handle,
+    )!!;
+    vk::CommandAllocatorSlot* transfer_slot = state.command_allocators.get(
+        transfer_allocator.handle,
+    )!!;
 
-    vk::RecordingContextState aliased = {
-        .graphics_pools = gfx[..],
-        .transfer_pools = xfer[..],
-    };
-    aliased.compute_pools = aliased.graphics_pools;
-    assert(vk::pool_for(&aliased, { .roles = { .compute } })
-        == gfx[0], "aliased compute uses graphics pool");
-    assert(vk::pool_for(&aliased, { .roles = { .transfer } })
-        == xfer[0], "transfer uses transfer pool");
-
-    vk::RecordingContextState distinct = {
-        .graphics_pools = gfx[..],
-        .compute_pools  = comp[..],
-        .transfer_pools = xfer[..],
-        .compute_pools_distinct = true,
-    };
-    assert(vk::pool_for(&distinct, { .roles = { .compute } })
-        == comp[0], "distinct compute uses compute pool");
-    assert(vk::pool_for(&distinct, { .roles = { .graphics } })
-        == gfx[0], "graphics remains independent");
+    assert(graphics_slot.queue == graphics
+        && compute_slot.queue == compute
+        && transfer_slot.queue == transfer,
+        "allocator slots preserve their exact selected queues");
+    assert(graphics_slot.pool != compute_slot.pool
+        && graphics_slot.pool != transfer_slot.pool
+        && compute_slot.pool != transfer_slot.pool,
+        "each allocator owns an independent native command pool");
 }
 
 fn void tri_queue_completions_wait_cleanly() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
+    gpu::QueueKind[3] kinds = {
+        gpu::QueueKind.GRAPHICS,
+        gpu::QueueKind.COMPUTE,
+        gpu::QueueKind.TRANSFER,
+    };
+    gpu::CommandAllocator[3] allocators;
+    for (uint i = 0; i < kinds.len; i++) {
+        gpu::Queue queue = gpu::get_queue(&device, kinds[i])!!;
+        allocators[i] = gpu::create_command_allocator(&device, queue)!!;
+    }
+    defer {
+        for (uint i = 0; i < allocators.len; i++) {
+            (void)gpu::destroy_command_allocator(&allocators[i]);
+        }
+    }
 
     for (uint round = 0; round < 4; round++) {
-        gpu::QueueKind[3] kinds = {
-            gpu::QueueKind.GRAPHICS,
-            gpu::QueueKind.COMPUTE,
-            gpu::QueueKind.TRANSFER,
-        };
         gpu::CompletionPoint[3] completions;
         for (uint i = 0; i < kinds.len; i++) {
-            gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, kinds[i])!!)!!;
+            gpu::CommandList cmd = gpu::begin_commands(&allocators[i])!!;
             defer discard_test_commands(&cmd)!!;
             gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
             defer discard_test_executable(&cmd_executable)!!;

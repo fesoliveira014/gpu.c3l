@@ -348,7 +348,18 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     };
     gpu::PipelineHandle graphics_pipeline = gpu::create_graphics_pipeline(&device, &graphics_pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, graphics_pipeline)!!;
-    gpu::CommandList compute_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
+    gpu::Queue compute_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(
+        &device,
+        compute_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&compute_allocator)!!;
+    gpu::CommandList compute_commands = gpu::begin_commands(
+        &compute_allocator,
+    )!!;
     defer discard_test_commands(&compute_commands)!!;
     gpu::TextureBarrier to_general = {
         .texture = shared_texture,
@@ -386,7 +397,18 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
     gpu::CompletionPoint compute_completion = submit_test_queue(&device, gpu::QueueKind.COMPUTE, &compute_submit)!!;
 
-    gpu::CommandList graphics_commands = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::Queue graphics_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(
+        &device,
+        graphics_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&graphics_allocator)!!;
+    gpu::CommandList graphics_commands = gpu::begin_commands(
+        &graphics_allocator,
+    )!!;
     defer discard_test_commands(&graphics_commands)!!;
     gpu::TextureBarrier target_to_attachment = {
         .texture = target,
@@ -589,7 +611,16 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::flush_mapped_span(&device, write_root_span)!!;
     gpu::flush_mapped_span(&device, sample_root_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture = texture,

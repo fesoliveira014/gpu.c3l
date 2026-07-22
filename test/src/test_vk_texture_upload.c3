@@ -115,7 +115,16 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     sample_root.height        = UP_SIZE;
     gpu::flush_mapped_span(&device, sample_root_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_dst = gpu::texture_transition(
@@ -276,7 +285,16 @@ fn void storage_write_direct_readback() @test {
     root.height        = UP_SIZE;
     gpu::flush_mapped_span(&device, root_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_general = {
         .texture = texture,
@@ -361,7 +379,16 @@ fn void copy_validation_faults() @test {
     )!!;
     defer free_owned_span(&device, &staging)!!;
     gpu::GpuSpan span = staging.span;
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_dst = {
@@ -485,7 +512,16 @@ fn void mip_subset_view_sampled() @test {
     root.height        = UP_SIZE / 2;
     gpu::flush_mapped_span(&device, root_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     gpu::TextureBarrier to_dst = {
         .texture = texture,

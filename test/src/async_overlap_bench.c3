@@ -62,8 +62,8 @@ fn void read_pool(vk::VkDeviceState* state, vk::QueryPool pool, uint valid_bits,
 }
 
 <* Record the compute workload and optional timestamps. *>
-fn gpu::ExecutableCommandList record_compute(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::GpuAddress root_gpu, vk::QueryPool pool, bool timestamps_ok) {
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.COMPUTE)!!)!!;
+fn gpu::ExecutableCommandList record_compute(gpu::CommandAllocator* allocator, gpu::PipelineHandle pipeline, gpu::GpuAddress root_gpu, vk::QueryPool pool, bool timestamps_ok) {
+    gpu::CommandList cmd = gpu::begin_commands(allocator)!!;
     vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
@@ -82,8 +82,8 @@ fn gpu::ExecutableCommandList record_compute(gpu::Device* device, gpu::PipelineH
 }
 
 <* Record the graphics workload and optional timestamps. *>
-fn gpu::ExecutableCommandList record_graphics(gpu::Device* device, gpu::PipelineHandle pipeline, gpu::AttachmentViewHandle view, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!)!!;
+fn gpu::ExecutableCommandList record_graphics(gpu::CommandAllocator* allocator, gpu::PipelineHandle pipeline, gpu::AttachmentViewHandle view, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
+    gpu::CommandList cmd = gpu::begin_commands(allocator)!!;
     vk::CommandBuffer raw_cmd = gpu::vk::resolve_command(&cmd)!!.command_buffer;
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
@@ -150,6 +150,24 @@ fn int main() {
     };
     gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
+    gpu::Queue compute_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(
+        &device,
+        compute_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&compute_allocator)!!;
+    gpu::Queue graphics_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(
+        &device,
+        graphics_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&graphics_allocator)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     bool families_distinct = state.graphics_family != state.compute_family;
@@ -292,7 +310,9 @@ fn int main() {
 
     // One startup transition establishes attachment use; repeated passes keep
     // the texture in the same semantic use.
-    gpu::CommandList transition_cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
+    gpu::CommandList transition_cmd = gpu::begin_commands(
+        &graphics_allocator,
+    )!!;
     gpu::TextureBarrier to_attach = {
         .texture = rt,
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -323,7 +343,7 @@ fn int main() {
         comp_root.iters = comp_iters;
         gpu::flush_mapped_span(&device, comp_root_span)!!;
         gpu::ExecutableCommandList comp_cmd = record_compute(
-            device:        &device,
+            allocator:     &compute_allocator,
             pipeline:      comp_pipeline,
             root_gpu:      gpu::get_span_address(&device, comp_root_span)!!,
             pool:          comp_pool,
@@ -381,7 +401,7 @@ fn int main() {
         gpu::flush_mapped_span(&device, frag_span)!!;
         gpu::flush_mapped_span(&device, vertex_span)!!;
         gpu::ExecutableCommandList frag_cmd = record_graphics(
-            device:        &device,
+            allocator:     &graphics_allocator,
             pipeline:      gfx_pipeline,
             view:          rt_view,
             vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
@@ -459,7 +479,7 @@ fn int main() {
         // Phase A chains graphics after compute.
         std::time::Clock a_start = std::time::clock::now();
         gpu::ExecutableCommandList a_compute = record_compute(
-            device:        &device,
+            allocator:     &compute_allocator,
             pipeline:      comp_pipeline,
             root_gpu:      gpu::get_span_address(&device, comp_root_span)!!,
             pool:          comp_pool,
@@ -476,7 +496,7 @@ fn int main() {
         )!!;
 
         gpu::ExecutableCommandList a_graphics = record_graphics(
-            device:        &device,
+            allocator:     &graphics_allocator,
             pipeline:      gfx_pipeline,
             view:          rt_view,
             vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
@@ -509,7 +529,7 @@ fn int main() {
         // Phase B submits the workloads independently.
         std::time::Clock b_start = std::time::clock::now();
         gpu::ExecutableCommandList b_compute = record_compute(
-            device:        &device,
+            allocator:     &compute_allocator,
             pipeline:      comp_pipeline,
             root_gpu:      gpu::get_span_address(&device, comp_root_span)!!,
             pool:          comp_pool,
@@ -526,7 +546,7 @@ fn int main() {
         )!!;
 
         gpu::ExecutableCommandList b_graphics = record_graphics(
-            device:        &device,
+            allocator:     &graphics_allocator,
             pipeline:      gfx_pipeline,
             view:          rt_view,
             vertex_root:   gpu::get_span_address(&device, vertex_span)!!,

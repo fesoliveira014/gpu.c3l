@@ -935,9 +935,16 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         == gpu::INVALID_RESOURCE_STATE,
         "the acquired borrowed view rejects caller destruction");
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::TextureBarrier to_color = {
         .texture = old_texture,
         .before  = acquired.prior_state,

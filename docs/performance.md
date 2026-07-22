@@ -63,6 +63,11 @@ and object-boundary modes require every policy-work counter to be zero. Both
 full modes require semantic and tracking work, releases must equal increments,
 and allocations cannot exceed increments. Every warm interval must report zero
 device registry, command-table, pipeline-table/cache, and policy reselection.
+The target creates its explicit queue-bound allocator before warmup and outside
+every measured interval. Its cold counters report allocator host allocation,
+one pool creation, and one complete native command-buffer allocation separately
+from warm recording. All four policy modes require zero warm host/native/VMA
+allocation; tracking modes use the reference slab allocated at allocator create.
 
 ## Evidence and regression gates
 
@@ -81,17 +86,17 @@ The suite covers:
 | `async_overlap_bench` | Serialized and independent graphics/compute submissions |
 
 Each timing target performs its own warmup and fixed repetitions. Generated
-dispatch first reserves 64 context-local preprocess buffers, prewarms one
+dispatch first reserves 64 allocator-local preprocess buffers, prewarms one
 untimed 64-record command list, then measures five 64-record lists. Every
 execute call in a live list receives a distinct reserved preprocess address.
-Completed or discarded lists return compatible buffers to the same recording
-context.
+Completed or discarded lists return compatible buffers to the same allocator.
 
 Required performance evidence executes complete operations and compares narrow
 subsystem snapshots:
 
 | Invariant | Required observation |
 |---|---|
+| Cold allocator creation | Host allocations, exactly one exact-family command-pool create, one complete native command-buffer allocation call, and configured buffer count |
 | Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and pre-bind `CommandResolutionStats` |
 | Warm render pass | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, and native command emission |
 | Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
@@ -102,9 +107,9 @@ subsystem snapshots:
 | Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and zero post-intern shader work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Exact collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
-Warm command-buffer reset is expected reuse evidence. In tracking modes, any
-warm host allocation must equal the reported command-reference allocation
-count; every other host allocation remains prohibited. VMA allocation,
+Warm command-buffer reset is expected reuse evidence. Warm host allocation is
+prohibited in every policy mode; tracking modes retain into fixed reference
+storage allocated with the command allocator. VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
 and registry, retained-pin, lifecycle-vtable, command-table, and policy work
 remain prohibited. Binding an opaque pipeline handle performs exactly one
@@ -241,7 +246,7 @@ invariants: point_allocations=0 destruction_queries=0 destruction_completion_wai
 ```
 
 Generated-dispatch timing is reported only for runs using an explicit
-64-buffer reservation. A release run is accepted only when it also reports zero
+64-buffer reservation on the measured command allocator. A release run is accepted only when it also reports zero
 warm host allocations, command-buffer allocations/frees, image-view creations,
 VMA allocations, and generated-scratch misses. Command-buffer resets are
 expected reuse evidence. The runner publishes cold and warm work-counter lines
@@ -260,10 +265,14 @@ for collecting debug cost with a matching layer.
 - Cache pipelines; command-time topology, cull, front-face, and depth-bias
   permutations should reuse one immutable pipeline and change state with
   `cmd_set_raster_state`.
-- Reserve generated scratch per worker and public pipeline handle before
+- Create one allocator per concurrently recording worker and exact queue before
+  timing. Allocator creation is cold setup; `DEVICE_BUSY` means its fixed command
+  buffer count is already live, while `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`
+  means a fixed scratch or reservation ceiling must be enlarged.
+- Reserve generated scratch per allocator and public pipeline handle before
   timing. Aliases of one native pipeline have distinct reservation keys.
   Generated command recording assigns a unique reserved preprocess address to
-  every execute call and returns it to the same context only after the owning
+  every execute call and returns it to the same allocator only after the owning
   command list is discarded or completed.
 - Queue overlap depends on topology, driver scheduling, and workload balance;
   treat it as an observation, not a guarantee. For cross-queue dependencies,

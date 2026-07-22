@@ -52,7 +52,12 @@ fn void mismatched_previous_use_remains_explicit_at_recording() @test {
     defer gpu::destroy_texture(&device, texture)!!;
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_transition(
         commands: &commands,
@@ -87,7 +92,12 @@ fn void explicit_transition_copy_and_sample_submit() @test {
     gpu::flush_mapped_span(&device, upload.span)!!;
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_transition(
         commands: &commands,
@@ -147,7 +157,12 @@ fn void partial_mip_transition_copy_submits() @test {
         .mip_count = 1,
     };
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_transition(
         commands: &commands,
@@ -204,7 +219,12 @@ fn void many_explicit_texture_transitions_submit() @test {
     }
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     foreach (texture : textures) {
         record_transition(

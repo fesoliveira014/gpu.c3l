@@ -37,6 +37,8 @@ faultdef
     SLOT_TABLE_FULL,
     // Explicitly reserved recording storage cannot satisfy the requested work.
     GENERATED_SCRATCH_EXHAUSTED,
+    // Fixed command allocator bookkeeping cannot represent requested work.
+    COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
     // No free descriptor slot: capacity is too small for live descriptors.
     DESCRIPTOR_HEAP_FULL,
     // The driver rejected pipeline creation (invalid state combination or

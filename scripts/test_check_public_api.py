@@ -51,9 +51,24 @@ def valid_document() -> dict:
                         "name": "begin_commands",
                         "return_type": {"name": "CommandList?"},
                         "members": [
-                            {"name": "queue", "type": {"name": "Queue"}},
+                            {
+                                "name": "allocator",
+                                "type": {"name": "CommandAllocator*"},
+                            },
                         ],
                     },
+                    api_function(
+                        "create_command_allocator",
+                        "CommandAllocator?",
+                        ("device", "Device*"),
+                        ("queue", "Queue"),
+                        ("desc", "CommandAllocatorDesc*"),
+                    ),
+                    api_function(
+                        "destroy_command_allocator",
+                        "void?",
+                        ("allocator", "CommandAllocator*"),
+                    ),
                     {
                         "name": "end_commands",
                         "return_type": {
@@ -142,13 +157,13 @@ def valid_document() -> dict:
                     api_function(
                         "reserve_generated_scratch",
                         "void?",
-                        ("queue", "Queue"),
+                        ("allocator", "CommandAllocator*"),
                         ("desc", "GeneratedScratchDesc*"),
                     ),
                     api_function(
                         "release_generated_scratch",
                         "void?",
-                        ("queue", "Queue"),
+                        ("allocator", "CommandAllocator*"),
                         ("pipeline", "PipelineHandle"),
                         ("kind", "GeneratedWorkKind"),
                     ),
@@ -713,6 +728,50 @@ def valid_document() -> dict:
                             {"name": "owner", "type": {"name": "ulong"}},
                             {"name": "index", "type": {"name": "uint"}},
                             {"name": "generation", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "CommandAllocatorHandle",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "owner", "type": {"name": "ulong"}},
+                            {"name": "index", "type": {"name": "uint"}},
+                            {"name": "generation", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "CommandAllocator",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "device", "type": {"name": "Device"}},
+                            {"name": "queue", "type": {"name": "Queue"}},
+                            {
+                                "name": "handle",
+                                "type": {"name": "CommandAllocatorHandle"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "CommandAllocatorDesc",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "command_buffer_capacity",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "max_resource_references_per_list",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "max_generated_preprocess_buffers_per_list",
+                                "type": {"name": "uint"},
+                            },
+                            {
+                                "name": "generated_preprocess_bytes",
+                                "type": {"name": "usz"},
+                            },
+                            {"name": "debug_name", "type": {"name": "ZString"}},
                         ],
                     },
                     {
@@ -1585,6 +1644,7 @@ method gpu::Runtime.is_valid
                 "PIPELINE",
                 "SWAPCHAIN",
                 "SHADER",
+                "COMMAND_ALLOCATOR",
                 "COMMAND_LIST",
                 "TEXTURE_DESCRIPTOR",
                 "SAMPLER",
@@ -1609,6 +1669,16 @@ method gpu::Runtime.is_valid
         })
         failures = check_public_api.validate_document(document)
         self.assertIn("retired recording context", failures)
+
+    def test_rejects_retired_recording_context_checkpoint(self) -> None:
+        failures = check_public_api.validate_private_backend_source(
+            Path("gpu/vk/device.c3"),
+            "module gpu::vk @private;\nenum Checkpoint { RECORDING_CONTEXTS }\n",
+        )
+        self.assertIn(
+            "retired backend RECORDING_CONTEXTS in gpu/vk/device.c3",
+            failures,
+        )
 
     def test_rejects_swapchain_handle_coupling(self) -> None:
         document = valid_document()
@@ -2701,7 +2771,7 @@ method gpu::Runtime.is_valid
         )
         end_commands["return_type"] = {"name": "void?"}
         failures = check_public_api.validate_document(document)
-        self.assertIn("begin_commands must take one Queue token", failures)
+        self.assertIn("begin_commands must take one CommandAllocator*", failures)
         self.assertIn(
             "end_commands must return ExecutableCommandList?",
             failures,

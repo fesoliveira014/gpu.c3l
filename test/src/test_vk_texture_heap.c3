@@ -108,7 +108,16 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::flush_mapped_span(&device, write_root_span)!!;
     gpu::flush_mapped_span(&device, sample_root_span)!!;
 
-    gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!)!!;
+    gpu::Queue command_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
     gpu::TextureBarrier to_general = gpu::texture_transition(
@@ -184,7 +193,7 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::flush_mapped_span(&device, sample_root_span)!!;
 
     gpu::CommandList reused_cmd = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!,
+        &command_allocator,
     )!!;
     defer discard_test_commands(&reused_cmd)!!;
     gpu::TextureBarrier reused_to_general = gpu::texture_transition(
@@ -370,9 +379,16 @@ fn void storage_write_then_fragment_sample() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
 
-    gpu::CommandList commands = gpu::begin_commands(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    gpu::Queue command_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::TextureBarrier to_storage = gpu::texture_transition(
         texture: sampled_texture,
