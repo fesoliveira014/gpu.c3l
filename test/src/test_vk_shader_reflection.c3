@@ -105,8 +105,7 @@ fn gpu::PipelineHandle? create_reflection_compute_pipeline(
 ) {
     gpu::ShaderCode shader = gpu::prepare_shader_code(shader_desc)!;
     gpu::ComputePipelineDesc pipeline_desc = {
-        .shader             = shader,
-        .push_constant_size = gpu::RootPush::size,
+        .shader = shader,
     };
     return gpu::create_compute_pipeline(device, &pipeline_desc);
 }
@@ -269,7 +268,7 @@ fn void wrong_pipeline_shader_context_reports_borrowed_code_once() @test {
         .entry_point = "main", .debug_name = "vertex_in_compute",
     };
     gpu::ShaderCode vertex = gpu::prepare_shader_code(&vertex_desc)!!;
-    gpu::ComputePipelineDesc pipeline_desc = { .shader = vertex, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc pipeline_desc = { .shader = vertex };
     uint before = capture.calls;
     fault pipeline_fault = @catch(gpu::create_compute_pipeline(&device, &pipeline_desc));
     assert(pipeline_fault == gpu::INVALID_ARGUMENT, "wrong compute shader context keeps INVALID_ARGUMENT");

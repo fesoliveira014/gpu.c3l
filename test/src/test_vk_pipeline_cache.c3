@@ -9,10 +9,13 @@ import std::atomic;
 import std::thread;
 
 // Headless (lavapipe): deterministic pipeline identity, transactional batches,
-// refcounted cache entries, shared layouts, and dynamic viewport/scissor state.
+// refcounted cache entries, per-target color state, shared layouts, and dynamic
+// raster state.
 
 const char[*] CACHE_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
 const char[*] CACHE_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
+const char[*] CACHE_TARGETS_FRAG_SPIRV =
+    $embed("shaders/pipeline_targets.frag.spv");
 const char[*] CACHE_COMP_SPIRV     = $embed("shaders/root_pointer.comp.spv");
 const char[*] CACHE_ALT_COMP_SPIRV = $embed("shaders/heap_write.comp.spv");
 
@@ -96,20 +99,30 @@ fn int record_generated_dispatch(void* raw_args) {
 }
 
 fn CacheShaders make_cache_shaders() {
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = CACHE_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = CACHE_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert_sd = {
+        .stage       = gpu::ShaderStage.VERTEX,
+        .spirv       = CACHE_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderDesc frag_sd = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = CACHE_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
     return {
         .vert = gpu::prepare_shader_code(&vert_sd)!!,
         .frag = gpu::prepare_shader_code(&frag_sd)!!,
     };
 }
 
-fn gpu::GraphicsPipelineDesc base_graphics_desc(CacheShaders* shaders, gpu::Format[] color_formats) {
+fn gpu::GraphicsPipelineDesc base_graphics_desc(
+    CacheShaders* shaders,
+    gpu::ColorTargetState[] colors,
+) {
     return {
         .vertex_shader   = shaders.vert,
         .fragment_shader = shaders.frag,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-        .color_formats   = color_formats,
+        .colors          = colors,
     };
 }
 
@@ -118,8 +131,11 @@ fn void identical_descs_alias_one_entry() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
-    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, formats[..]);
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, pipeline_colors[..]);
 
     gpu::PipelineHandle first = gpu::create_graphics_pipeline(&device, &desc)!!;
     gpu::PipelineHandle second = gpu::create_graphics_pipeline(&device, &desc)!!;
@@ -137,27 +153,23 @@ fn void identical_descs_alias_one_entry() @test {
     assert(cache_entry_count(&device) == 0, "last alias releases the entry");
 }
 
-fn void immutable_state_and_blend_normalization_split_entries() @test {
+fn void per_target_state_and_blend_normalization_split_entries() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
-    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, formats[..]);
+    gpu::ColorTargetState[1] base_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, base_colors[..]);
     gpu::PipelineHandle base = gpu::create_graphics_pipeline(&device, &desc)!!;
     defer gpu::destroy_pipeline(&device, base)!!;
 
-
-    gpu::GraphicsPipelineDesc culled = desc;
-    culled.raster.cull_mode = gpu::CullMode.BACK;
-    gpu::PipelineHandle cull_variant =
-        gpu::create_graphics_pipeline(&device, &culled)!!;
-    defer gpu::destroy_pipeline(&device, cull_variant)!!;
-    assert(cache_entry_count(&device) == 2,
-        "culling is immutable graphics pipeline identity");
-
+    gpu::ColorTargetState[1] garbage_colors = base_colors;
     gpu::GraphicsPipelineDesc garbage_blend = desc;
-    garbage_blend.blend = {
+    garbage_blend.colors = garbage_colors[..];
+    garbage_colors[0].blend = {
         .enable    = false,
         .src_color = gpu::BlendFactor.DST_ALPHA,
         .dst_color = gpu::BlendFactor.SRC_ALPHA,
@@ -165,10 +177,13 @@ fn void immutable_state_and_blend_normalization_split_entries() @test {
     };
     gpu::PipelineHandle normalized = gpu::create_graphics_pipeline(&device, &garbage_blend)!!;
     defer gpu::destroy_pipeline(&device, normalized)!!;
-    assert(cache_entry_count(&device) == 2, "disabled blend ignores factor fields in the key");
+    assert(cache_entry_count(&device) == 1,
+        "disabled per-target blend ignores factor fields in the key");
 
+    gpu::ColorTargetState[1] blended_colors = base_colors;
     gpu::GraphicsPipelineDesc blended = desc;
-    blended.blend = {
+    blended.colors = blended_colors[..];
+    blended_colors[0].blend = {
         .enable    = true,
         .src_color = gpu::BlendFactor.SRC_ALPHA,
         .dst_color = gpu::BlendFactor.ONE_MINUS_SRC_ALPHA,
@@ -179,7 +194,247 @@ fn void immutable_state_and_blend_normalization_split_entries() @test {
     };
     gpu::PipelineHandle distinct = gpu::create_graphics_pipeline(&device, &blended)!!;
     defer gpu::destroy_pipeline(&device, distinct)!!;
-    assert(cache_entry_count(&device) == 3, "enabled blend is immutable state and splits the key");
+    assert(cache_entry_count(&device) == 2,
+        "observable per-target blend state splits the key");
+
+    gpu::ColorTargetState[1] masked_colors = blended_colors;
+    gpu::GraphicsPipelineDesc masked = blended;
+    masked.colors = masked_colors[..];
+    masked_colors[0].write_mask = {};
+    gpu::PipelineHandle masked_first =
+        gpu::create_graphics_pipeline(&device, &masked)!!;
+    defer gpu::destroy_pipeline(&device, masked_first)!!;
+    masked_colors[0].blend = {};
+    gpu::PipelineHandle masked_second =
+        gpu::create_graphics_pipeline(&device, &masked)!!;
+    defer gpu::destroy_pipeline(&device, masked_second)!!;
+    assert(cache_entry_count(&device) == 3,
+        "zero write mask erases semantically unobservable blend identity");
+}
+
+fn void integer_color_targets_reject_blending_before_native_creation() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::ColorTargetState[1] colors = {{
+        .format = gpu::Format.R8_UINT,
+        .blend = {
+            .enable = true,
+        },
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc desc = base_graphics_desc(
+        &shaders,
+        colors[..],
+    );
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    ulong native_before = vk::pipeline_native_create_count(state);
+
+    assert(@catch(gpu::create_graphics_pipeline(&device, &desc))
+        == gpu::INVALID_ARGUMENT,
+        "integer color targets reject enabled blending");
+    assert(vk::pipeline_native_create_count(state) == native_before,
+        "integer blend validation precedes native pipeline creation");
+}
+
+fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::ShaderDesc target_frag_desc = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = CACHE_TARGETS_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    shaders.frag = gpu::prepare_shader_code(&target_frag_desc)!!;
+
+    gpu::ColorTargetState[2] pipeline_colors = {
+        {
+            .format     = gpu::Format.RGBA8_UNORM,
+            .write_mask = { .red = true },
+        },
+        {
+            .format = gpu::Format.RGBA8_UNORM,
+            .blend  = {
+                .enable    = true,
+                .src_color = gpu::BlendFactor.SRC_ALPHA,
+                .dst_color = gpu::BlendFactor.ONE_MINUS_SRC_ALPHA,
+                .color_op  = gpu::BlendOp.ADD,
+                .src_alpha = gpu::BlendFactor.ONE,
+                .dst_alpha = gpu::BlendFactor.ZERO,
+                .alpha_op  = gpu::BlendOp.ADD,
+            },
+            .write_mask = gpu::COLOR_WRITE_ALL,
+        },
+    };
+    gpu::GraphicsPipelineDesc pipeline_desc =
+        base_graphics_desc(&shaders, pipeline_colors[..]);
+    gpu::PipelineHandle pipeline =
+        gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+
+    gpu::TextureDesc texture_desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute, .transfer },
+        .width     = CACHE_RT_SIZE,
+        .height    = CACHE_RT_SIZE,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .color_attach, .transfer_src },
+    };
+    gpu::TextureHandle[2] targets = {
+        gpu::create_texture(&device, &texture_desc)!!,
+        gpu::create_texture(&device, &texture_desc)!!,
+    };
+    defer {
+        foreach (target : targets) {
+            (void)gpu::destroy_texture(&device, target);
+        }
+    }
+    gpu::AttachmentViewHandle[2] target_views = {
+        create_test_attachment_view(&device, targets[0])!!,
+        create_test_attachment_view(&device, targets[1])!!,
+    };
+    defer {
+        foreach (&view : target_views) {
+            (void)destroy_test_attachment_view(&device, view);
+        }
+    }
+    OwnedSpan[2] readbacks = {
+        allocate_owned_span(
+            device:       &device,
+            size:         CACHE_RT_BYTES,
+            memory_class: gpu::MemoryClass.CPU_READ,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "cache_first_target_readback",
+        )!!,
+        allocate_owned_span(
+            device:       &device,
+            size:         CACHE_RT_BYTES,
+            memory_class: gpu::MemoryClass.CPU_READ,
+            access:       { .graphics, .compute, .transfer },
+            debug_name:   "cache_second_target_readback",
+        )!!,
+    };
+    defer {
+        foreach (&readback : readbacks) {
+            (void)free_owned_span(&device, readback);
+        }
+    }
+    OwnedSpan vertices = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "cache_target_vertices",
+    )!!;
+    defer free_owned_span(&device, &vertices)!!;
+    float* mapped_vertices =
+        (float*)test_span_mapping(&device, vertices.span).ptr;
+    float[12] vertex_data = {
+        -0.8f, -0.8f, 0.0f, 0.0f,
+         0.8f, -0.8f, 0.0f, 0.0f,
+         0.0f,  0.8f, 0.0f, 0.0f,
+    };
+    for (uint i = 0; i < vertex_data.len; i++) {
+        mapped_vertices[i] = vertex_data[i];
+    }
+    gpu::flush_mapped_span(&device, vertices.span)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    foreach (target : targets) {
+        gpu::TextureBarrier to_attach = {
+            .texture = target,
+            .before  = gpu::TextureUse.UNDEFINED,
+            .after   = gpu::TextureUse.COLOR_ATTACHMENT,
+        };
+        gpu::cmd_texture_barrier(&commands, &to_attach)!!;
+    }
+    gpu::ColorTargetDesc[2] colors = {
+        {
+            .view     = target_views[0],
+            .load_op  = gpu::LoadOp.CLEAR,
+            .store_op = gpu::StoreOp.STORE,
+            .clear    = { .rgba = { 0.0f, 0.0f, 1.0f, 1.0f } },
+        },
+        {
+            .view     = target_views[1],
+            .load_op  = gpu::LoadOp.CLEAR,
+            .store_op = gpu::StoreOp.STORE,
+            .clear    = { .rgba = { 0.0f, 0.0f, 1.0f, 1.0f } },
+        },
+    };
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = CACHE_RT_SIZE,
+        .height = CACHE_RT_SIZE,
+    };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    bind_test_graphics_pipeline(&commands, pipeline);
+    gpu::GpuAddress root = test_span_address(&device, vertices.span);
+    gpu::cmd_draw(
+        commands:       &commands,
+        vertex_root:    root,
+        fragment_root:  root,
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    for (uint i = 0; i < targets.len; i++) {
+        gpu::TextureBarrier to_source = {
+            .texture = targets[i],
+            .before  = gpu::TextureUse.COLOR_ATTACHMENT,
+            .after   = gpu::TextureUse.TRANSFER_SOURCE,
+        };
+        gpu::cmd_texture_barrier(&commands, &to_source)!!;
+        gpu::TextureBufferCopyDesc copy = {
+            .texture = targets[i],
+            .dst     = readbacks[i].span,
+        };
+        gpu::cmd_copy_texture_to_buffer(&commands, &copy)!!;
+    }
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after  = { .host = true },
+    };
+    gpu::cmd_barrier(&commands, &host_read)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+
+    foreach (&readback : readbacks) {
+        gpu::invalidate_mapped_span(&device, readback.span)!!;
+    }
+    uint center_offset =
+        (CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4;
+    char* first_pixels =
+        (char*)test_span_mapping(&device, readbacks[0].span).ptr;
+    char* first_center = &first_pixels[center_offset];
+    assert(first_center[0] == (char)255
+            && first_center[1] == (char)0
+            && first_center[2] == (char)255
+            && first_center[3] == (char)255,
+        "first target writes only red and preserves cleared blue and alpha");
+    char* second_pixels =
+        (char*)test_span_mapping(&device, readbacks[1].span).ptr;
+    char* second_center = &second_pixels[center_offset];
+    assert(second_center[0] == (char)0
+            && (second_center[1] == (char)127
+                || second_center[1] == (char)128)
+            && (second_center[2] == (char)127
+                || second_center[2] == (char)128),
+        "second target applies its own alpha blend equation");
 }
 
 fn void formats_split_entries_and_limits_enforced() @test {
@@ -187,13 +442,19 @@ fn void formats_split_entries_and_limits_enforced() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::Format[1] rgba = { gpu::Format.RGBA8_UNORM };
-    gpu::GraphicsPipelineDesc desc_rgba = base_graphics_desc(&shaders, rgba[..]);
+    gpu::ColorTargetState[1] rgba_targets = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc desc_rgba = base_graphics_desc(&shaders, rgba_targets[..]);
     gpu::PipelineHandle first = gpu::create_graphics_pipeline(&device, &desc_rgba)!!;
     defer gpu::destroy_pipeline(&device, first)!!;
 
-    gpu::Format[1] bgra = { gpu::Format.BGRA8_UNORM };
-    gpu::GraphicsPipelineDesc desc_bgra = base_graphics_desc(&shaders, bgra[..]);
+    gpu::ColorTargetState[1] bgra_targets = {{
+        .format     = gpu::Format.BGRA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc desc_bgra = base_graphics_desc(&shaders, bgra_targets[..]);
     gpu::PipelineHandle second = gpu::create_graphics_pipeline(&device, &desc_bgra)!!;
     defer gpu::destroy_pipeline(&device, second)!!;
     assert(cache_entry_count(&device) == 2, "different formats produce distinct pipelines");
@@ -204,21 +465,45 @@ fn void formats_split_entries_and_limits_enforced() @test {
     assert(first_layout == second_layout, "graphics pipelines share one layout");
     assert(first_layout == state.graphics_layout, "the shared layout is the device graphics layout");
 
-    gpu::Format[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
-    foreach (&format : too_many) *format = gpu::Format.RGBA8_UNORM;
+    gpu::ColorTargetState[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
+    foreach (&target : too_many) {
+        *target = {
+            .format     = gpu::Format.RGBA8_UNORM,
+            .write_mask = gpu::COLOR_WRITE_ALL,
+        };
+    }
     gpu::GraphicsPipelineDesc over_limit = base_graphics_desc(&shaders, too_many[..]);
     assert(@catch(gpu::create_graphics_pipeline(&device, &over_limit)) == gpu::INVALID_ARGUMENT,
-        "more than MAX_COLOR_ATTACHMENTS color formats faults INVALID_ARGUMENT");
+        "more than MAX_COLOR_ATTACHMENTS color targets faults INVALID_ARGUMENT");
+
+    uint unknown_bits = 1u << 8;
+    mem::copy(
+        &rgba_targets[0].write_mask,
+        &unknown_bits,
+        uint::size,
+    );
+    ulong native_before = vk::pipeline_native_create_count(state);
+    gpu::GraphicsPipelineDesc unknown_mask =
+        base_graphics_desc(&shaders, rgba_targets[..]);
+    assert(@catch(gpu::create_graphics_pipeline(&device, &unknown_mask))
+            == gpu::INVALID_ARGUMENT,
+        "unknown color-write bits fault INVALID_ARGUMENT");
+    assert(vk::pipeline_native_create_count(state) == native_before,
+        "unknown color-write bits fault before native creation");
 }
 
 fn void compute_pipelines_dedup_and_share_layouts() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc comp_sd = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
     gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
 
-    gpu::ComputePipelineDesc desc = { .shader = comp, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc desc = { .shader = comp };
     gpu::PipelineHandle first = gpu::create_compute_pipeline(&device, &desc)!!;
     defer gpu::destroy_pipeline(&device, first)!!;
     gpu::PipelineHandle second = gpu::create_compute_pipeline(&device, &desc)!!;
@@ -226,18 +511,29 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
     assert(first != second, "compute aliases are distinct handles");
     assert(cache_entry_count(&device) == 1, "identical compute descriptors share one entry");
 
-    gpu::ComputePipelineDesc wider = { .shader = comp, .push_constant_size = 16 };
-    gpu::PipelineHandle third = gpu::create_compute_pipeline(&device, &wider)!!;
+    gpu::ShaderDesc alt_sd = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_ALT_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode alt = gpu::prepare_shader_code(&alt_sd)!!;
+    gpu::ComputePipelineDesc distinct_desc = { .shader = alt };
+    gpu::PipelineHandle third = gpu::create_compute_pipeline(
+        &device,
+        &distinct_desc,
+    )!!;
     defer gpu::destroy_pipeline(&device, third)!!;
-    assert(cache_entry_count(&device) == 2, "push size is part of the compute key");
+    assert(cache_entry_count(&device) == 2,
+        "distinct compute shaders create distinct pipeline entries");
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(state.compute_layout_cache.count == 2, "duplicate push sizes reuse one layout entry");
     vk::PipelineLayout first_layout = state.pipelines.slots[first.index].value.layout;
     vk::PipelineLayout second_layout = state.pipelines.slots[second.index].value.layout;
     vk::PipelineLayout third_layout = state.pipelines.slots[third.index].value.layout;
-    assert(first_layout == second_layout, "equal push sizes share a compute layout");
-    assert(first_layout != third_layout, "different push sizes use different layouts");
+    assert(first_layout == second_layout && first_layout == third_layout,
+        "all compute pipelines share one layout");
+    assert(first_layout == state.compute_layout,
+        "compute pipelines use the device singleton layout");
 }
 
 fn void identical_shader_bytes_from_distinct_storage_deduplicate() @test {
@@ -266,11 +562,9 @@ fn void identical_shader_bytes_from_distinct_storage_deduplicate() @test {
     gpu::ShaderCode second_code = gpu::prepare_shader_code(&second_desc)!!;
     gpu::ComputePipelineDesc first_pipeline_desc = {
         .shader             = first_code,
-        .push_constant_size = gpu::RootPush::size,
     };
     gpu::ComputePipelineDesc second_pipeline_desc = {
         .shader             = second_code,
-        .push_constant_size = gpu::RootPush::size,
     };
 
     gpu::PipelineHandle first =
@@ -306,11 +600,9 @@ fn void shader_digest_collisions_compare_ir_bytes() @test {
 
     gpu::ComputePipelineDesc first_pipeline_desc = {
         .shader             = first_code,
-        .push_constant_size = gpu::RootPush::size,
     };
     gpu::ComputePipelineDesc distinct_pipeline_desc = {
         .shader             = distinct_code,
-        .push_constant_size = gpu::RootPush::size,
     };
     gpu::PipelineHandle first =
         gpu::create_compute_pipeline(&device, &first_pipeline_desc)!!;
@@ -337,7 +629,6 @@ fn void prepared_shader_code_is_reusable_across_devices() @test {
     defer destroy_test_device(&second_device)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader             = shader,
-        .push_constant_size = gpu::RootPush::size,
     };
 
     gpu::PipelineHandle first =
@@ -353,7 +644,7 @@ fn void prepared_shader_code_is_reusable_across_devices() @test {
         "the second device owns an independent entry for shared shader code");
 }
 
-fn void immutable_cull_state_renders_per_pipeline() @test {
+fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
@@ -420,17 +711,25 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
         target_reset,
     )!!;
     defer destroy_test_attachment_view(&device, &reset_view)!!;
+    gpu::TextureHandle target_lines = gpu::create_texture(&device, &rt_desc)!!;
+    defer gpu::destroy_texture(&device, target_lines)!!;
+    gpu::AttachmentViewHandle lines_view = create_test_attachment_view(
+        &device,
+        target_lines,
+    )!!;
+    defer destroy_test_attachment_view(&device, &lines_view)!!;
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
-    gpu::GraphicsPipelineDesc no_cull_desc = base_graphics_desc(&shaders, formats[..]);
-    gpu::PipelineHandle no_cull = gpu::create_graphics_pipeline(&device, &no_cull_desc)!!;
-    defer gpu::destroy_pipeline(&device, no_cull)!!;
-
-    gpu::GraphicsPipelineDesc cull_desc = no_cull_desc;
-    cull_desc.raster.cull_mode = gpu::CullMode.BACK;
-    gpu::PipelineHandle culled = gpu::create_graphics_pipeline(&device, &cull_desc)!!;
-    defer gpu::destroy_pipeline(&device, culled)!!;
-    assert(cache_entry_count(&device) == 2, "distinct cull state has distinct graphics identity");
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc pipeline_desc = base_graphics_desc(&shaders, pipeline_colors[..]);
+    gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    assert(cache_entry_count(&device) == 1, "dynamic cull state shares one graphics identity");
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong native_pipelines = vk::pipeline_native_create_count(state);
 
     OwnedSpan rb_culled = allocate_owned_span(
         device:       &device,
@@ -456,6 +755,14 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
         debug_name:   "cache_reset_readback",
     )!!;
     defer free_owned_span(&device, &rb_reset)!!;
+    OwnedSpan rb_lines = allocate_owned_span(
+        device:       &device,
+        size:         CACHE_RT_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "cache_lines_readback",
+    )!!;
+    defer free_owned_span(&device, &rb_lines)!!;
     OwnedSpan verts_owned = allocate_owned_span(
         device:       &device,
         size:         3 * 16,
@@ -491,14 +798,24 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
     defer discard_test_commands(&cmd)!!;
 
-    gpu::TextureHandle[3] targets = { target_culled, target_drawn, target_reset };
-    gpu::AttachmentViewHandle[3] target_views = {
+    gpu::TextureHandle[4] targets = {
+        target_culled,
+        target_drawn,
+        target_reset,
+        target_lines,
+    };
+    gpu::AttachmentViewHandle[4] target_views = {
         culled_view,
         drawn_view,
         reset_view,
+        lines_view,
     };
-    gpu::PipelineHandle[3] pipelines = { culled, no_cull, no_cull };
-    gpu::GpuSpan[3] readbacks = { rb_culled.span, rb_drawn.span, rb_reset.span };
+    gpu::GpuSpan[4] readbacks = {
+        rb_culled.span,
+        rb_drawn.span,
+        rb_reset.span,
+        rb_lines.span,
+    };
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
             .texture = targets[i],
@@ -515,7 +832,16 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
         gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        if (i == 0) {
+            gpu::DynamicRasterState raster = { .cull_mode = gpu::CullMode.BACK };
+            gpu::cmd_set_raster_state(&cmd, &raster)!!;
+        }
         if (i == 1) {
+            gpu::DynamicRasterState raster = {
+                .cull_mode  = gpu::CullMode.BACK,
+                .front_face = gpu::FrontFace.CLOCKWISE,
+            };
+            gpu::cmd_set_raster_state(&cmd, &raster)!!;
             gpu::Viewport viewport = {
                 .width = (float)CACHE_RT_SIZE / 2.0f, .height = (float)CACHE_RT_SIZE, .max_depth = 1.0f,
             };
@@ -525,7 +851,13 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
             gpu::cmd_set_viewport(&cmd, &viewport)!!;
             gpu::cmd_set_scissor(&cmd, &scissor)!!;
         }
-        bind_test_graphics_pipeline(&cmd, pipelines[i]);
+        if (i == 3) {
+            gpu::DynamicRasterState raster = {
+                .topology = gpu::PrimitiveTopology.LINES,
+            };
+            gpu::cmd_set_raster_state(&cmd, &raster)!!;
+        }
+        bind_test_graphics_pipeline(&cmd, pipeline);
         gpu::cmd_draw(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, verts_span),
@@ -577,16 +909,25 @@ fn void immutable_cull_state_renders_per_pipeline() @test {
     char* drawn_left = &drawn_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 4) * 4];
     char* drawn_right = &drawn_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE * 3 / 4) * 4];
     assert(drawn_left[0] == (char)255 && drawn_left[1] == (char)255 && drawn_left[2] == (char)255,
-        "pipeline alias switch preserves the explicit viewport and scissor on the left");
+        "clockwise front-face state prevents back culling on the left");
     assert(drawn_right[0] == (char)8 && drawn_right[1] == (char)16 && drawn_right[2] == (char)32,
-        "pipeline alias switch preserves clipping on the right");
+        "dynamic raster changes preserve clipping on the right");
 
     gpu::invalidate_mapped_span(&device, rb_reset.span)!!;
     gpu::GpuSpan reset_span = rb_reset.span;
     char* reset_pixels = (char*)test_span_mapping(&device, reset_span).ptr;
     char* reset_center = &reset_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
     assert(reset_center[0] == (char)255 && reset_center[1] == (char)255 && reset_center[2] == (char)255,
-        "the next pass restores full viewport and scissor defaults");
+        "the next pass restores raster, viewport, and scissor defaults");
+
+    gpu::invalidate_mapped_span(&device, rb_lines.span)!!;
+    gpu::GpuSpan lines_span = rb_lines.span;
+    char* lines_pixels = (char*)test_span_mapping(&device, lines_span).ptr;
+    char* lines_center = &lines_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
+    assert(lines_center[0] == (char)8 && lines_center[1] == (char)16 && lines_center[2] == (char)32,
+        "line topology changes triangle interior coverage without creating a pipeline");
+    assert(vk::pipeline_native_create_count(state) == native_pipelines,
+        "command-time raster permutations create no additional native pipeline");
 }
 
 fn void alias_survives_peer_destroy() @test {
@@ -594,8 +935,11 @@ fn void alias_survives_peer_destroy() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
-    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, formats[..]);
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, pipeline_colors[..]);
     gpu::PipelineHandle doomed = gpu::create_graphics_pipeline(&device, &desc)!!;
     gpu::PipelineHandle survivor = gpu::create_graphics_pipeline(&device, &desc)!!;
     gpu::destroy_pipeline(&device, doomed)!!;
@@ -681,24 +1025,33 @@ fn void index_survives_create_alias_destroy_churn() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     uint[CHURN_CAPACITY] teardown_order = { 3, 0, 7, 1, 6, 2, 5, 4 };
 
     for (uint round = 0; round < CHURN_ROUNDS; round++) {
         gpu::PipelineHandle[CHURN_CAPACITY] handles;
         for (uint i = 0; i < CHURN_CAPACITY; i++) {
-            gpu::GraphicsPipelineDesc variant = base_graphics_desc(&shaders, formats[..]);
-            variant.raster.depth_bias_constant = (float)(round * CHURN_CAPACITY + i + 1);
+            pipeline_colors[0].write_mask = {
+                .red   = (i & 1) != 0,
+                .green = (i & 2) != 0,
+                .blue  = (i & 4) != 0,
+                .alpha = (i & 8) != 0,
+            };
+            gpu::GraphicsPipelineDesc variant = base_graphics_desc(&shaders, pipeline_colors[..]);
             handles[i] = gpu::create_graphics_pipeline(&device, &variant)!!;
         }
         assert(cache_index_consistent(&device), "index consistent once all distinct entries are inserted");
-        assert(cache_entry_count(&device) == CHURN_CAPACITY, "each round inserts exactly CHURN_CAPACITY distinct entries");
+        assert(cache_entry_count(&device) == CHURN_CAPACITY,
+            "each round inserts exactly CHURN_CAPACITY distinct entries");
 
         // Alias two live entries; the refcount>0 path must not touch the index.
-        gpu::GraphicsPipelineDesc alias_desc = base_graphics_desc(&shaders, formats[..]);
-        alias_desc.raster.depth_bias_constant = (float)(round * CHURN_CAPACITY + 0 + 1);
+        gpu::GraphicsPipelineDesc alias_desc = base_graphics_desc(&shaders, pipeline_colors[..]);
+        pipeline_colors[0].write_mask = {};
         gpu::PipelineHandle alias_a = gpu::create_graphics_pipeline(&device, &alias_desc)!!;
-        alias_desc.raster.depth_bias_constant = (float)(round * CHURN_CAPACITY + 3 + 1);
+        pipeline_colors[0].write_mask = { .red = true, .green = true };
         gpu::PipelineHandle alias_b = gpu::create_graphics_pipeline(&device, &alias_desc)!!;
         assert(cache_index_consistent(&device), "index consistent after aliasing existing entries");
         assert(cache_entry_count(&device) == CHURN_CAPACITY, "aliasing does not grow the entry count");
@@ -724,18 +1077,24 @@ fn void small_pipeline_capacity_faults_at_limit() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::PipelineHandle[CAPACITY] handles;
     for (uint i = 0; i < CAPACITY; i++) {
-        gpu::GraphicsPipelineDesc variant = base_graphics_desc(&shaders, formats[..]);
-        variant.raster.depth_bias_constant = (float)(i + 1);
+        pipeline_colors[0].write_mask = {
+            .red   = (i & 1) != 0,
+            .green = (i & 2) != 0,
+        };
+        gpu::GraphicsPipelineDesc variant = base_graphics_desc(&shaders, pipeline_colors[..]);
         handles[i] = gpu::create_graphics_pipeline(&device, &variant)!!;
     }
     assert(cache_entry_count(&device) == CAPACITY, "the small capacity fills exactly");
     assert(cache_index_consistent(&device), "index consistent at capacity");
 
-    gpu::GraphicsPipelineDesc over_capacity = base_graphics_desc(&shaders, formats[..]);
-    over_capacity.raster.depth_bias_constant = (float)(CAPACITY + 1);
+    pipeline_colors[0].write_mask = { .blue = true };
+    gpu::GraphicsPipelineDesc over_capacity = base_graphics_desc(&shaders, pipeline_colors[..]);
     assert(@catch(gpu::create_graphics_pipeline(&device, &over_capacity)) == gpu::SLOT_TABLE_FULL,
         "the distinct pipeline past the configured capacity faults SLOT_TABLE_FULL");
 
@@ -746,14 +1105,17 @@ fn void line_polygon_mode_respects_optional_feature() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     bool supported = state.caps.line_polygon_mode;
 
     state.caps.line_polygon_mode = false;
     gpu::GraphicsPipelineDesc unavailable = {
-        .raster        = { .polygon_mode = gpu::PolygonMode.LINE },
-        .color_formats = formats[..],
+        .colors       = pipeline_colors[..],
+        .polygon_mode = gpu::PolygonMode.LINE,
     };
     uint entries_before = cache_entry_count(&device);
     assert(@catch(gpu::create_graphics_pipeline(&device, &unavailable)) == gpu::UNSUPPORTED_FEATURE,
@@ -761,62 +1123,49 @@ fn void line_polygon_mode_respects_optional_feature() @test {
     assert(cache_entry_count(&device) == entries_before, "unsupported LINE publishes no cache entry");
     state.caps.line_polygon_mode = supported;
 
-    gpu::GraphicsPipelineDesc line_topology = base_graphics_desc(&shaders, formats[..]);
-    line_topology.topology = gpu::PrimitiveTopology.LINES;
-    gpu::PipelineHandle topology_pipeline = gpu::create_graphics_pipeline(&device, &line_topology)!!;
-    gpu::destroy_pipeline(&device, topology_pipeline)!!;
-
     if (!supported) return;
-    gpu::GraphicsPipelineDesc line_polygon = base_graphics_desc(&shaders, formats[..]);
-    line_polygon.raster.polygon_mode = gpu::PolygonMode.LINE;
+    gpu::GraphicsPipelineDesc line_polygon = base_graphics_desc(&shaders, pipeline_colors[..]);
+    line_polygon.polygon_mode = gpu::PolygonMode.LINE;
     gpu::PipelineHandle line_pipeline = gpu::create_graphics_pipeline(&device, &line_polygon)!!;
     gpu::destroy_pipeline(&device, line_pipeline)!!;
 }
 
-fn void compute_push_constant_sizes_validate_before_vulkan() @test {
+fn void compute_layout_exists_before_pipeline_creation() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(state.compute_layout != null,
+        "strict device creation publishes the singleton compute layout");
+    assert(state.generated_work.enabled
+            ? state.generated_dispatch_layout != null
+            : state.generated_dispatch_layout == null,
+        "generated dispatch singleton follows device capability");
+    vk::PipelineLayout compute_layout = state.compute_layout;
+    vk::IndirectCommandsLayoutEXT generated_layout =
+        state.generated_dispatch_layout;
+
+    gpu::ShaderDesc comp_sd = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
     gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
-
-    gpu::ComputePipelineDesc below_minimum = { .push_constant_size = 4 };
-    assert(@catch(gpu::create_compute_pipeline(&device, &below_minimum)) == gpu::INVALID_ARGUMENT,
-        "below-minimum size faults before invalid shader-code validation");
-
-    gpu::ComputePipelineDesc unaligned = { .shader = comp, .push_constant_size = gpu::RootPush::size + 1 };
-    assert(@catch(gpu::create_compute_pipeline(&device, &unaligned)) == gpu::INVALID_ARGUMENT,
-        "unaligned push-constant size faults INVALID_ARGUMENT");
-
-    uint limit = gpu::get_device_caps(&device)!!.max_push_constant_size;
-    uint aligned_limit = limit - limit % 4;
-    gpu::ComputePipelineDesc over_maximum = { .shader = comp, .push_constant_size = aligned_limit + 4 };
-    assert(@catch(gpu::create_compute_pipeline(&device, &over_maximum)) == gpu::INVALID_ARGUMENT,
-        "size above the selected-device maximum faults INVALID_ARGUMENT");
-
-    gpu::ComputePipelineDesc maximum = { .shader = comp, .push_constant_size = aligned_limit };
-    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &maximum)!!;
+    gpu::ComputePipelineDesc desc = { .shader = comp };
+    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &desc)!!;
+    assert(state.pipelines.slots[pipeline.index].value.layout
+        == state.compute_layout,
+        "compute creation copies the singleton layout into the pipeline slot");
+    assert(state.pipelines.slots[pipeline.index]
+            .value.generated_dispatch_layout == generated_layout,
+        "compute creation copies the generated singleton into the pipeline slot");
     gpu::destroy_pipeline(&device, pipeline)!!;
+    assert(state.compute_layout == compute_layout
+            && state.generated_dispatch_layout == generated_layout,
+        "pipeline destruction leaves device-owned singleton layouts live");
 }
 
-fn void compute_layout_cache_grows_beyond_pipeline_capacity_hint() @test {
-    gpu::Device device = make_cache_test_device_with_capacity(1);
-    defer destroy_test_device(&device)!!;
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
-
-    uint[3] sizes = { 8, 12, 16 };
-    foreach (size : sizes) {
-        gpu::ComputePipelineDesc desc = { .shader = comp, .push_constant_size = size };
-        gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &desc)!!;
-        gpu::destroy_pipeline(&device, pipeline)!!;
-    }
-
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(state.compute_layout_cache.count == sizes.len, "each distinct size has one cached layout");
-    assert(state.compute_layout_cache.entries.len >= sizes.len, "layout cache grows beyond the one-pipeline hint");
-}
-
-fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
+fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test {
     gpu::Device device = make_generated_work_cache_test_device();
     defer destroy_test_device(&device)!!;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
@@ -830,7 +1179,6 @@ fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader             = shader,
-        .push_constant_size = gpu::RootPush::size,
     };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(
         &device,
@@ -889,34 +1237,31 @@ fn void generated_dispatch_layout_survives_compute_cache_relocation() @test {
     worker.create(&record_generated_dispatch, &args)!!;
     while (!gate.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
 
-    bool initial_capacity_is_two = state.compute_layout_cache.entries.len == 2;
-    vk::ComputeLayoutEntry* before_growth =
-        state.compute_layout_cache.entries.ptr;
-    uint[2] push_sizes = { 12, 16 };
-    foreach (push_size : push_sizes) {
-        gpu::ComputePipelineDesc variant = {
-            .shader             = shader,
-            .push_constant_size = push_size,
-        };
-        gpu::PipelineHandle handle = gpu::create_compute_pipeline(
-            &device,
-            &variant,
-        )!!;
-        gpu::destroy_pipeline(&device, handle)!!;
-    }
-    bool cache_relocated =
-        state.compute_layout_cache.entries.ptr != before_growth;
+    gpu::ShaderDesc alternate_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_ALT_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode alternate_shader =
+        gpu::prepare_shader_code(&alternate_desc)!!;
+    gpu::ComputePipelineDesc alternate_pipeline_desc = {
+        .shader = alternate_shader,
+    };
+    gpu::PipelineHandle alternate_pipeline = gpu::create_compute_pipeline(
+        &device,
+        &alternate_pipeline_desc,
+    )!!;
+    defer gpu::destroy_pipeline(&device, alternate_pipeline)!!;
+    assert(state.pipelines.slots[alternate_pipeline.index]
+        .value.generated_dispatch_layout == expected_layout,
+        "concurrent compute creation copies the same generated layout");
     gate.release.store(true, AtomicOrdering.RELEASE);
     int worker_result = worker.join()!!;
 
     assert(expected_layout != null,
         "generated-work compute pipelines publish a generated layout");
-    assert(initial_capacity_is_two,
-        "the fixture begins at the capacity required to force growth");
-    assert(cache_relocated,
-        "distinct compute layouts relocate the cache while recording pauses");
     assert(worker_result == 0,
-        "generated dispatch recording resumes after cache relocation: %s",
+        "generated dispatch recording resumes after concurrent creation: %s",
         args.failure);
     assert(state.generated_dispatch_layout_read_observed == expected_layout,
         "recording reads the original pipeline slot's generated layout");
@@ -947,10 +1292,17 @@ fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test 
     gpu::ShaderDesc equivalent_desc = shader_desc;
     equivalent_desc.spirv = equivalent_storage;
     gpu::ShaderCode equivalent_shader = gpu::prepare_shader_code(&equivalent_desc)!!;
+    gpu::ShaderDesc distinct_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_ALT_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode distinct_shader =
+        gpu::prepare_shader_code(&distinct_desc)!!;
     gpu::ComputePipelineDesc[3] descs = {
-        { .shader = shader, .push_constant_size = gpu::RootPush::size },
-        { .shader = equivalent_shader, .push_constant_size = gpu::RootPush::size },
-        { .shader = equivalent_shader, .push_constant_size = 16 },
+        { .shader = shader },
+        { .shader = equivalent_shader },
+        { .shader = distinct_shader },
     };
     gpu::PipelineHandle[3] pipelines;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -963,8 +1315,8 @@ fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test 
         "a successful batch publishes every pipeline handle");
     assert(pipelines[0] != pipelines[1], "duplicate descriptions publish distinct owning handles");
     assert(cache_entry_count(&device) == 2, "duplicate descriptions share deterministic pipeline identity");
-    assert(vk::pipeline_shader_module_create_count(state) - shader_modules_before == 1,
-        "shared shader IR creates one temporary native module per batch");
+    assert(vk::pipeline_shader_module_create_count(state) - shader_modules_before == 2,
+        "each distinct shader IR creates one temporary native module per batch");
     assert(vk::pipeline_native_create_count(state) - native_pipelines_before == 2,
         "only distinct compute pipeline identities reach native creation");
 
@@ -975,11 +1327,16 @@ fn void graphics_pipeline_batch_reuses_shared_shader_modules() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] first_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::ColorTargetState[1] second_colors = first_colors;
     gpu::GraphicsPipelineDesc[2] descs;
-    descs[0] = base_graphics_desc(&shaders, formats[..]);
+    descs[0] = base_graphics_desc(&shaders, first_colors[..]);
     descs[1] = descs[0];
-    descs[1].blend = {
+    descs[1].colors = second_colors[..];
+    second_colors[0].blend = {
         .enable    = true,
         .src_color = gpu::BlendFactor.SRC_ALPHA,
         .dst_color = gpu::BlendFactor.ONE_MINUS_SRC_ALPHA,
@@ -1008,9 +1365,12 @@ fn void graphics_pipeline_batch_revalidates_shared_shader_roles() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc[1] descs;
-    descs[0] = base_graphics_desc(&shaders, formats[..]);
+    descs[0] = base_graphics_desc(&shaders, pipeline_colors[..]);
     descs[0].fragment_shader = descs[0].vertex_shader;
     gpu::PipelineHandle[1] outputs = {
         { .owner = 1, .index = 2, .generation = 3 },
@@ -1044,7 +1404,7 @@ fn void pipeline_batch_shape_failure_preserves_outputs() @test {
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc[2] descs;
     foreach (&desc : descs) {
-        *desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
+        *desc = { .shader = shader };
     }
     gpu::PipelineHandle sentinel = gpu::create_compute_pipeline(&device, &descs[0])!!;
     defer gpu::destroy_pipeline(&device, sentinel)!!;
@@ -1068,8 +1428,8 @@ fn void pipeline_batch_capacity_failure_is_transactional() @test {
     };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc[2] descs = {
-        { .shader = shader, .push_constant_size = gpu::RootPush::size },
-        { .shader = shader, .push_constant_size = 16 },
+        { .shader = shader },
+        { .shader = shader },
     };
     gpu::PipelineHandle[2] outputs = {
         { .owner = 7, .index = 8, .generation = 9 },
@@ -1096,12 +1456,19 @@ fn void pipeline_batch_invalid_state_prevalidates_transactionally() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc[2] descs;
-    descs[0] = base_graphics_desc(&shaders, formats[..]);
+    descs[0] = base_graphics_desc(&shaders, pipeline_colors[..]);
     descs[1] = descs[0];
-    int invalid_topology = 99;
-    mem::copy(&descs[1].topology, &invalid_topology, int::size);
+    int invalid_polygon_mode = 99;
+    mem::copy(
+        &descs[1].polygon_mode,
+        &invalid_polygon_mode,
+        int::size,
+    );
     gpu::PipelineHandle[2] outputs = {
         { .owner = 1, .index = 2, .generation = 3 },
         { .owner = 4, .index = 5, .generation = 6 },
@@ -1136,9 +1503,16 @@ fn void pipeline_batch_partial_failure_rolls_back_publication() @test {
         .entry_point = "main",
     };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc alternate_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = CACHE_ALT_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode alternate_shader =
+        gpu::prepare_shader_code(&alternate_desc)!!;
     gpu::ComputePipelineDesc[2] descs = {
-        { .shader = shader, .push_constant_size = gpu::RootPush::size },
-        { .shader = shader, .push_constant_size = 16 },
+        { .shader = shader },
+        { .shader = alternate_shader },
     };
     gpu::PipelineHandle[2] outputs = {
         { .owner = 13, .index = 14, .generation = 15 },

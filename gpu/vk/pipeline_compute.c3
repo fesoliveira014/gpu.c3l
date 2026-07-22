@@ -99,17 +99,6 @@ fn bool pipeline_handle_capacity_available(VkDeviceState* state, usz required) {
     return (usz)state.pipelines.available_count() >= required;
 }
 
-fn void? validate_compute_pipeline_desc(
-    VkDeviceState* state,
-    gpu::ComputePipelineDesc* desc,
-) {
-    if (desc.push_constant_size < gpu::RootPush::size
-        || desc.push_constant_size % 4 != 0
-        || desc.push_constant_size > state.caps.max_push_constant_size) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-}
-
 fn bool compute_pipeline_is_cached(
     VkDeviceState* state,
     gpu::ComputePipelineDesc* desc,
@@ -127,16 +116,15 @@ fn bool compute_pipeline_is_cached(
     ) != PIPELINE_ENTRY_NONE;
 }
 
-<* Dedup through the descriptor cache keyed on shader + push size. A batch may
-   provide one temporary shader module shared by all descriptions using the
-   same exact ShaderCode value. *>
+<* Dedup through the descriptor cache keyed on shader identity. A batch may
+   provide one temporary shader module shared by all descriptions using the same
+   exact ShaderCode value. *>
 fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     gpu::Device* device,
     gpu::ComputePipelineDesc* desc,
     PipelineShaderModule* batch_shader,
 ) {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    validate_compute_pipeline_desc(state, desc)!;
     PipelineKey key = build_compute_key(desc);
     ulong hash = hash_key(&key);
     {
@@ -165,10 +153,6 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         }
     }
 
-    ComputeLayoutRef compute_layout = get_compute_layout(
-        state,
-        desc.push_constant_size,
-    )!;
     PipelineShaderModule owned_shader;
     defer destroy_pipeline_shader_module(state, &owned_shader);
     PipelineShaderModule* shader = batch_shader;
@@ -188,7 +172,7 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         .set_stage(vk::ShaderStageFlagBits.COMPUTE_BIT)
         .set_mod(shader.shader_module)
         .set_name(&shader.entry_point[0]);
-    pipe_info.layout = compute_layout.layout;
+    pipe_info.layout = state.compute_layout;
     if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
         pipe_info.flags = vk::PipelineCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT;
     }
@@ -233,8 +217,8 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
             .hash                      = hash,
             .key                       = key,
             .pipeline                  = pipeline,
-            .layout                    = compute_layout.layout,
-            .generated_dispatch_layout = compute_layout.generated_dispatch_layout,
+            .layout                    = state.compute_layout,
+            .generated_dispatch_layout = state.generated_dispatch_layout,
         },
         first_shader:  &desc.shader,
         second_shader: null,
@@ -279,7 +263,6 @@ fn void? vk_create_compute_pipelines(
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
 
-    foreach (&desc : descs) validate_compute_pipeline_desc(state, desc)!;
     if (!pipeline_handle_capacity_available(state, descs.len)) {
         return gpu::SLOT_TABLE_FULL~;
     }

@@ -77,15 +77,24 @@ fn void device_create_destroy() @test {
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::PhysicalDeviceFeatures features;
     vk::get_physical_device_features(state.physical_device, &features);
+    assert(features.independent_blend != 0,
+        "selected device supports independent blend");
+    assert(features.depth_bias_clamp != 0,
+        "selected device supports depth-bias clamp");
     assert(gpu::get_device_caps(&device)!!.line_polygon_mode == (features.fill_mode_non_solid != 0),
         "line polygon cap matches the selected physical device");
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(state.physical_device, &props);
     vk::PhysicalDeviceTimelineSemaphoreProperties timeline_props =
         vk::physical_device_timeline_semaphore_properties();
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        vk::physical_device_extended_dynamic_state3properties_ext();
+    timeline_props = timeline_props.set_next(&dynamic_properties);
     vk::PhysicalDeviceProperties2 props2 =
         vk::physical_device_properties2().set_next(&timeline_props);
     vk::get_physical_device_properties2(state.physical_device, &props2);
+    assert(dynamic_properties.dynamic_primitive_topology_unrestricted != 0,
+        "selected device supports unrestricted dynamic topology");
     ulong timeline_difference = state.max_timeline_semaphore_value_difference;
     assert(
         timeline_difference == timeline_props.max_timeline_semaphore_value_difference,

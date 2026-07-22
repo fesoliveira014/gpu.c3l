@@ -96,12 +96,14 @@ fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc pipe_desc = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-        .color_formats   = formats[..],
+        .colors          = pipeline_colors[..],
     };
     ctx.graphics = gpu::create_graphics_pipeline(device, &pipe_desc)!!;
 
@@ -210,7 +212,7 @@ fn ValComputeCtx make_val_compute_ctx(gpu::Device* device) {
     ValComputeCtx ctx;
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = VAL_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
-    gpu::ComputePipelineDesc comp_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc comp_desc = { .shader = shader };
     ctx.pipeline = gpu::create_compute_pipeline(device, &comp_desc)!!;
     return ctx;
 }
@@ -772,7 +774,7 @@ fn void draw_with_compute_pipeline_faults() @test {
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = VAL_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode comp_shader = gpu::prepare_shader_code(&comp_sd)!!;
-    gpu::ComputePipelineDesc comp_desc = { .shader = comp_shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc comp_desc = { .shader = comp_shader };
     gpu::PipelineHandle compute = gpu::create_compute_pipeline(&device, &comp_desc)!!;
     defer gpu::destroy_pipeline(&device, compute)!!;
     gpu::CommandList cmd = gpu::begin_commands(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!)!!;
@@ -955,6 +957,119 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         "pipeline bind and execution perform no native compilation");
 }
 
+fn void dynamic_raster_state_validation_is_atomic_and_pass_scoped() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle target = make_val_target(&device);
+    defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
+        &device,
+        target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
+
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::DynamicRasterState raster = {};
+
+    gpu::reset_command_resolution_stats();
+    assert(@catch(gpu::cmd_set_raster_state(&commands, &raster))
+            == gpu::COMMAND_RECORDING_ERROR,
+        "raster state requires an active render pass");
+    assert(gpu::command_resolution_stats().native_commands == 0,
+        "out-of-pass raster validation emits no native command");
+
+    record_val_target_to_attach(&commands, target);
+    gpu::ColorTargetDesc[1] colors = {{
+        .view     = target_view,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+
+    gpu::PrimitiveTopology[3] topologies = {
+        gpu::PrimitiveTopology.TRIANGLES,
+        gpu::PrimitiveTopology.LINES,
+        gpu::PrimitiveTopology.POINTS,
+    };
+    foreach (topology : topologies) {
+        raster = { .topology = topology };
+        gpu::cmd_set_raster_state(&commands, &raster)!!;
+    }
+    gpu::CullMode[3] cull_modes = {
+        gpu::CullMode.NONE,
+        gpu::CullMode.FRONT,
+        gpu::CullMode.BACK,
+    };
+    foreach (cull_mode : cull_modes) {
+        raster = { .cull_mode = cull_mode };
+        gpu::cmd_set_raster_state(&commands, &raster)!!;
+    }
+    gpu::FrontFace[2] front_faces = {
+        gpu::FrontFace.COUNTER_CLOCKWISE,
+        gpu::FrontFace.CLOCKWISE,
+    };
+    foreach (front_face : front_faces) {
+        raster = { .front_face = front_face };
+        gpu::cmd_set_raster_state(&commands, &raster)!!;
+    }
+
+    gpu::reset_command_resolution_stats();
+    assert(@catch(gpu::cmd_set_raster_state(&commands, null))
+            == gpu::INVALID_ARGUMENT,
+        "null raster state faults INVALID_ARGUMENT");
+    assert(gpu::command_resolution_stats().native_commands == 0,
+        "null raster state emits no native command");
+
+    raster = {
+        .topology            = gpu::PrimitiveTopology.LINES,
+        .cull_mode           = gpu::CullMode.BACK,
+        .front_face          = gpu::FrontFace.CLOCKWISE,
+        .depth_bias_enable   = true,
+        .depth_bias_constant = 1.0f,
+        .depth_bias_slope    = 2.0f,
+        .depth_bias_clamp    = 3.0f,
+    };
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_set_raster_state(&commands, &raster)!!;
+    assert(gpu::command_resolution_stats().native_commands == 5,
+        "enabled depth bias emits the four raster commands and bias factors");
+
+    gpu::DynamicRasterState invalid = raster;
+    int invalid_topology = 99;
+    mem::copy(&invalid.topology, &invalid_topology, int::size);
+    gpu::reset_command_resolution_stats();
+    assert(@catch(gpu::cmd_set_raster_state(&commands, &invalid))
+            == gpu::INVALID_ARGUMENT,
+        "invalid topology faults before replacing valid raster state");
+    assert(gpu::command_resolution_stats().native_commands == 0,
+        "invalid raster state emits no partial native update");
+
+    invalid = raster;
+    invalid.depth_bias_slope = float::nan;
+    gpu::reset_command_resolution_stats();
+    assert(@catch(gpu::cmd_set_raster_state(&commands, &invalid))
+            == gpu::INVALID_ARGUMENT,
+        "enabled non-finite depth bias faults INVALID_ARGUMENT");
+    assert(gpu::command_resolution_stats().native_commands == 0,
+        "invalid depth bias emits no partial native update");
+
+    invalid.depth_bias_enable = false;
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_set_raster_state(&commands, &invalid)!!;
+    assert(gpu::command_resolution_stats().native_commands == 5,
+        "disabled depth bias emits zero bias factors with the four raster commands");
+
+    gpu::cmd_end_render_pass(&commands)!!;
+}
+
 fn void bound_pipeline_checked_dispatch_rejects_destroyed_and_reused_slots() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -997,7 +1112,7 @@ fn void compute_pipeline_from_vertex_shader_faults() @test {
     gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode vert_shader = gpu::prepare_shader_code(&vert_sd)!!;
 
-    gpu::ComputePipelineDesc desc = { .shader = vert_shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc desc = { .shader = vert_shader };
     fault wrong_stage = @catch(gpu::create_compute_pipeline(&device, &desc));
     assert(wrong_stage == gpu::INVALID_ARGUMENT, "compute pipeline from a vertex-stage shader faults INVALID_ARGUMENT");
 }
@@ -1011,12 +1126,14 @@ fn void graphics_pipeline_from_swapped_shader_stages_faults() @test {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag_shader = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc swapped = {
         .vertex_shader   = frag_shader,
         .fragment_shader = vert_shader,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-        .color_formats   = formats[..],
+        .colors          = pipeline_colors[..],
     };
     fault wrong_stage = @catch(gpu::create_graphics_pipeline(&device, &swapped));
     assert(wrong_stage == gpu::INVALID_ARGUMENT, "graphics pipeline with swapped vertex/fragment shaders faults INVALID_ARGUMENT");

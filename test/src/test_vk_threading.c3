@@ -324,7 +324,7 @@ struct PipelineRaceArgs {
 fn int pipeline_race_worker(void* arg) {
     PipelineRaceArgs* args = (PipelineRaceArgs*)arg;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-        gpu::ComputePipelineDesc desc = { .shader = args.shader, .push_constant_size = gpu::RootPush::size };
+        gpu::ComputePipelineDesc desc = { .shader = args.shader };
         args.handle = gpu::create_compute_pipeline(args.device, &desc)!!;
     };
     return 0;
@@ -456,8 +456,7 @@ fn void generated_scratch_reservations_are_thread_context_local() @test {
     };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
-        .shader             = shader,
-        .push_constant_size = gpu::RootPush::size,
+        .shader = shader,
     };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(
         &device,
@@ -659,7 +658,7 @@ fn void parallel_recording_across_workers() @test {
 
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc pipe_desc = { .shader = shader };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 

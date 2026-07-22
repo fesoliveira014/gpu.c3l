@@ -481,6 +481,42 @@
       "sources": [
         "retired_graphics_pipeline_depth.c3"
       ]
+    },
+    "retired_pipeline_topology": {
+      "type": "object-files",
+      "sources": [
+        "retired_pipeline_topology.c3"
+      ]
+    },
+    "retired_pipeline_raster": {
+      "type": "object-files",
+      "sources": [
+        "retired_pipeline_raster.c3"
+      ]
+    },
+    "retired_graphics_pipeline_blend": {
+      "type": "object-files",
+      "sources": [
+        "retired_graphics_pipeline_blend.c3"
+      ]
+    },
+    "retired_pipeline_color_formats": {
+      "type": "object-files",
+      "sources": [
+        "retired_pipeline_color_formats.c3"
+      ]
+    },
+    "retired_compute_push_constant": {
+      "type": "object-files",
+      "sources": [
+        "retired_compute_push_constant.c3"
+      ]
+    },
+    "retired_raster_state": {
+      "type": "object-files",
+      "sources": [
+        "retired_raster_state.c3"
+      ]
     }
   }
 }

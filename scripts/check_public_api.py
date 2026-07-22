@@ -376,6 +376,10 @@ def validate_document(document: dict) -> list[str]:
         entry.get("name"): entry
         for entry in public_surface.get("types", [])
     }
+    variables = {
+        entry.get("name"): entry
+        for entry in public_surface.get("variables", [])
+    }
 
     sample_count = types.get("SampleCount")
     expected_sample_counts = (
@@ -397,19 +401,105 @@ def validate_document(document: dict) -> list[str]:
     ):
         failures.append("SampleCount must define the strict sample counts")
 
-    graphics_pipeline_desc = types.get("GraphicsPipelineDesc")
-    if graphics_pipeline_desc is None:
-        failures.append("missing GraphicsPipelineDesc")
-    else:
-        graphics_pipeline_fields = dict(member_schema(graphics_pipeline_desc))
-        if "depth" in graphics_pipeline_fields:
-            failures.append(
-                "GraphicsPipelineDesc must not contain dynamic depth state"
+    pipeline_schemas = (
+        (
+            "BlendState",
+            "struct",
+            (
+                ("enable", "bool"),
+                ("src_color", "BlendFactor"),
+                ("dst_color", "BlendFactor"),
+                ("color_op", "BlendOp"),
+                ("src_alpha", "BlendFactor"),
+                ("dst_alpha", "BlendFactor"),
+                ("alpha_op", "BlendOp"),
+            ),
+        ),
+        (
+            "ColorTargetState",
+            "struct",
+            (
+                ("format", "Format"),
+                ("blend", "BlendState"),
+                ("write_mask", "ColorWriteMask"),
+            ),
+        ),
+        (
+            "DynamicRasterState",
+            "struct",
+            (
+                ("topology", "PrimitiveTopology"),
+                ("cull_mode", "CullMode"),
+                ("front_face", "FrontFace"),
+                ("depth_bias_enable", "bool"),
+                ("depth_bias_constant", "float"),
+                ("depth_bias_slope", "float"),
+                ("depth_bias_clamp", "float"),
+            ),
+        ),
+        (
+            "ComputePipelineDesc",
+            "struct",
+            (
+                ("shader", "ShaderCode"),
+                ("debug_name", "ZString"),
+            ),
+        ),
+        (
+            "GraphicsPipelineDesc",
+            "struct",
+            (
+                ("vertex_shader", "ShaderCode"),
+                ("fragment_shader", "ShaderCode"),
+                ("colors", "ColorTargetState[]"),
+                ("depth_format", "Format"),
+                ("sample_count", "SampleCount"),
+                ("polygon_mode", "PolygonMode"),
+                ("debug_name", "ZString"),
+            ),
+        ),
+    )
+    for type_name, expected_kind, expected_members in pipeline_schemas:
+        definition = types.get(type_name)
+        if (
+            definition is None
+            or definition.get("kind") != expected_kind
+            or member_schema(definition) != expected_members
+        ):
+            failures.append(f"{type_name} must match the strict schema")
+
+    color_write_mask = types.get("ColorWriteMask", {})
+    color_write_members = color_write_mask.get("members", [])
+    color_write_mask_matches = (
+        color_write_mask.get("kind") == "bitstruct"
+        and color_write_mask.get("base_type", {}).get("name") == "uint"
+        and tuple(
+            (
+                member.get("name"),
+                member.get("type", {}).get("name"),
+                member.get("bit_range"),
             )
-        if graphics_pipeline_fields.get("sample_count") != "SampleCount":
-            failures.append(
-                "GraphicsPipelineDesc.sample_count must be SampleCount"
-            )
+            for member in color_write_members
+        ) == (
+            ("red", "bool", [0, 0]),
+            ("green", "bool", [1, 1]),
+            ("blue", "bool", [2, 2]),
+            ("alpha", "bool", [3, 3]),
+        )
+    )
+    if not color_write_mask_matches:
+        failures.append("ColorWriteMask must match the strict channel bits")
+
+    color_write_all = variables.get("COLOR_WRITE_ALL", {})
+    if (
+        color_write_all.get("kind") != "constant"
+        or color_write_all.get("type", {}).get("name") != "ColorWriteMask"
+        or color_write_all.get("value") != (
+            "{ .red = true, .green = true, .blue = true, "
+            ".alpha = true, }"
+        )
+    ):
+        failures.append("COLOR_WRITE_ALL must enable every color channel")
 
     texture_desc_fields = dict(member_schema(types.get("TextureDesc")))
     if texture_desc_fields.get("sample_count") != "SampleCount":
@@ -701,6 +791,10 @@ def validate_document(document: dict) -> list[str]:
             ("CommandList*", "DepthState*"),
             "void?",
         ),
+        "cmd_set_raster_state": (
+            ("CommandList*", "DynamicRasterState*"),
+            "void?",
+        ),
         "cmd_dispatch": (
             ("CommandList*", "GpuAddress", "Vec3u"),
             "void?",
@@ -821,6 +915,7 @@ def validate_document(document: dict) -> list[str]:
         ),
         "cmd_bind_pipeline": ("commands", "pipeline"),
         "cmd_set_depth_state": ("commands", "depth"),
+        "cmd_set_raster_state": ("commands", "raster"),
         "cmd_dispatch": ("commands", "root", "groups"),
         "cmd_draw": (
             "commands",

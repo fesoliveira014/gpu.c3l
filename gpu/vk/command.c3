@@ -1406,13 +1406,13 @@ fn RenderCompatibility pipeline_render_compatibility(
     PipelineKey* key,
 ) @private {
     RenderCompatibility compatibility = {
-        .color_count  = key.color_format_count,
+        .color_count  = key.color_target_count,
         .depth_format = (gpu::Format)key.depth_format,
         .sample_count = (gpu::SampleCount)key.sample_count,
     };
-    for (uint i = 0; i < key.color_format_count; i++) {
+    for (uint i = 0; i < key.color_target_count; i++) {
         compatibility.color_formats[i] =
-            (gpu::Format)key.color_formats[i];
+            (gpu::Format)key.color_targets[i].format;
     }
     return compatibility;
 }

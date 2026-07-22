@@ -399,9 +399,11 @@ create_compute_pipelines(device, descriptions, outputs)  -> void?
 create_graphics_pipelines(device, descriptions, outputs) -> void?
 ```
 
-Graphics pipeline identity includes shaders, attachment compatibility, topology,
-cull/front-face, sample state, depth bias, polygon mode, and baseline blend.
-Depth state is separate; viewport and scissor are dynamic. Batch creation
+Graphics pipeline identity includes shaders, per-target format/blend/write-mask
+state, depth format, sample count, and polygon mode. Topology, cull mode,
+front face, depth bias, depth state, viewport, and scissor are command-time
+state. Compute pipelines share one device-owned `RootPush` layout and, when
+generated work is available, one generated-dispatch layout. Batch creation
 deduplicates exact shader code and pipeline identity, then publishes every
 handle transactionally. The pipeline cache fronts a serializable driver cache:
 `get_pipeline_cache_size` /
@@ -531,6 +533,7 @@ native pipeline creation.
 ```text
 cmd_begin_render_pass(command_list, render_pass_desc)
 cmd_bind_pipeline(command_list, pipeline)
+cmd_set_raster_state(command_list, raster_state)
 cmd_set_depth_state(command_list, depth_state)
 cmd_set_viewport(command_list, viewport)
 cmd_set_scissor(command_list, scissor)
@@ -539,12 +542,14 @@ cmd_draw_indexed(command_list, vertex_root, fragment_root, index_span, index_cou
 cmd_end_render_pass(command_list)
 ```
 
-Pass begin records full-pass viewport/scissor defaults and requires a fresh
-depth-state command before drawing. Viewport and scissor persist across pipeline
-binds until another setter or the next pass begin. They remain outside pipeline
-keys, so handle aliasing cannot overwrite caller-selected rectangles. Draws
-require an active graphics pipeline and nonzero roots and perform no native
-pipeline creation.
+Pass begin records full-pass viewport/scissor defaults and the zero raster
+default: triangles, no culling, counter-clockwise front faces, and disabled
+depth bias. It requires a fresh depth-state command before drawing. Raster,
+viewport, and scissor state persist across pipeline binds until another setter
+or the next pass begin. Their setters, including `cmd_set_raster_state`, require
+an active render pass. They remain outside pipeline keys, so handle aliasing
+cannot overwrite caller-selected command state. Draws require an active
+graphics pipeline and nonzero roots and perform no native pipeline creation.
 
 Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex input is allowed for simple paths, but it is not the preferred data model.
 

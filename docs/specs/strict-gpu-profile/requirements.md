@@ -110,8 +110,10 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - Pipeline binding is separate from draw and dispatch.
 - Draw and dispatch carry root addresses and execution arguments, not pipeline handles.
 - Depth/stencil state is separate from graphics pipeline identity.
-- Viewport and scissor are dynamic.
-- Baseline blend state remains part of graphics pipeline creation.
+- Topology, culling, front face, depth bias, viewport, and scissor are dynamic.
+- Per-target format, blend, and write mask remain part of graphics pipeline creation.
+- Polygon mode remains immutable graphics pipeline state.
+- Compute pipelines use one fixed `RootPush` device layout.
 - Native pipeline compilation never occurs during draw or dispatch.
 - Optional GPU-generated work and root records are exposed as an explicit semantic capability and are never emulated through a CPU loop.
 

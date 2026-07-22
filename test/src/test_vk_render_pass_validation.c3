@@ -113,10 +113,13 @@ fn void graphics_pipeline_rejects_unsupported_sample_count() @test {
     }
     if (unsupported == gpu::SampleCount.ONE) return;
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc desc = {
-        .color_formats = formats[..],
-        .sample_count  = unsupported,
+        .colors       = pipeline_colors[..],
+        .sample_count = unsupported,
     };
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
@@ -126,11 +129,14 @@ fn void graphics_pipeline_rejects_unsupported_sample_count() @test {
 }
 
 fn void graphics_pipeline_key_distinguishes_sample_count() @test {
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc one = {
         .vertex_shader   = { .digest = 1 },
         .fragment_shader = { .digest = 2 },
-        .color_formats   = formats[..],
+        .colors          = pipeline_colors[..],
     };
     gpu::GraphicsPipelineDesc four = one;
     four.sample_count = gpu::SampleCount.FOUR;
@@ -143,6 +149,51 @@ fn void graphics_pipeline_key_distinguishes_sample_count() @test {
         "pipeline keys retain the requested sample count");
     assert(!vk::key_equals(&one_key, &four_key),
         "pipeline cache identity includes sample count");
+}
+
+fn void graphics_pipeline_key_zeroes_unobservable_and_unused_target_state() @test {
+    gpu::ColorTargetState[1] first_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .blend      = {
+            .src_color = gpu::BlendFactor.DST_ALPHA,
+            .dst_color = gpu::BlendFactor.SRC_ALPHA,
+            .color_op  = gpu::BlendOp.MAX,
+        },
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc first = {
+        .vertex_shader   = { .digest = 1 },
+        .fragment_shader = { .digest = 2 },
+        .colors          = first_colors[..],
+    };
+    gpu::ColorTargetState[1] second_colors = first_colors;
+    second_colors[0].blend = {};
+    gpu::GraphicsPipelineDesc second = first;
+    second.colors = second_colors[..];
+
+    vk::PipelineKey first_key = vk::build_graphics_key(&first);
+    vk::PipelineKey second_key = vk::build_graphics_key(&second);
+    assert(vk::key_equals(&first_key, &second_key),
+        "disabled blend bytes are absent from canonical identity");
+    assert(vk::hash_key(&first_key) == vk::hash_key(&second_key),
+        "canonical aliases have equal key hashes");
+    assert(first_key.reserved == 0 && second_key.reserved == 0,
+        "explicit key tail padding stays zero");
+
+    for (uint i = 1; i < gpu::MAX_COLOR_ATTACHMENTS; i++) {
+        vk::ColorTargetKey* unused = &first_key.color_targets[i];
+        assert(unused.format == 0
+                && unused.blend_enable == 0
+                && (uint)unused.write_mask == 0,
+            "unused target key fields are zero");
+        assert(unused.blend.src_color == 0
+                && unused.blend.dst_color == 0
+                && unused.blend.color_op == 0
+                && unused.blend.src_alpha == 0
+                && unused.blend.dst_alpha == 0
+                && unused.blend.alpha_op == 0,
+            "unused target blend fields are zero");
+    }
 }
 
 fn void render_pass_rejects_mixed_samples_before_mutation() @test {

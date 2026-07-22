@@ -43,13 +43,16 @@ fn DepthCtx make_depth_ctx() {
 }
 
 fn gpu::PipelineHandle make_depth_pipeline(gpu::Device* device, DepthCtx* ctx, bool with_color = true) {
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc desc = {
         .vertex_shader   = ctx.vert,
         .fragment_shader = ctx.frag,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-
-        .color_formats   = with_color ? formats[..] : (gpu::Format[]){},
+        .colors          = with_color
+            ? pipeline_colors[..]
+            : (gpu::ColorTargetState[]){},
         .depth_format    = gpu::Format.D32_FLOAT,
     };
     return gpu::create_graphics_pipeline(device, &desc)!!;
@@ -542,7 +545,7 @@ fn void sampled_depth_matches_readback() @test {
     gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DEPTH_SAMPLE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
-    gpu::ComputePipelineDesc comp_desc = { .shader = comp, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc comp_desc = { .shader = comp };
     gpu::PipelineHandle sample_pipeline = gpu::create_compute_pipeline(&device, &comp_desc)!!;
     defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
 
@@ -690,7 +693,7 @@ fn void compare_sampler_exact_results() @test {
     gpu::SamplerIndex shadow_smp = gpu::publish_sampler(&device, shadow_sampler)!!;
     gpu::ShaderDesc probe_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = SHADOW_PROBE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode probe = gpu::prepare_shader_code(&probe_sd)!!;
-    gpu::ComputePipelineDesc probe_desc = { .shader = probe, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc probe_desc = { .shader = probe };
     gpu::PipelineHandle probe_pipeline = gpu::create_compute_pipeline(&device, &probe_desc)!!;
     defer gpu::destroy_pipeline(&device, probe_pipeline)!!;
 
@@ -779,18 +782,6 @@ fn void compare_sampler_exact_results() @test {
     assert(results[1] == 0.0f, "reference above stored depth fails LESS compare, got %f", results[1]);
 }
 
-fn gpu::PipelineHandle make_biased_pipeline(gpu::Device* device, DepthCtx* ctx, float bias_constant) {
-    gpu::GraphicsPipelineDesc desc = {
-        .vertex_shader   = ctx.vert,
-        .fragment_shader = ctx.frag,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-
-        .raster          = { .depth_bias_constant = bias_constant },
-        .depth_format    = gpu::Format.D32_FLOAT,
-    };
-    return gpu::create_graphics_pipeline(device, &desc)!!;
-}
-
 fn void depth_bias_shifts_stored_depth() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
@@ -811,10 +802,12 @@ fn void depth_bias_shifts_stored_depth() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &biased_view)!!;
 
-    gpu::PipelineHandle plain = make_biased_pipeline(&device, &ctx, 0.0f);
-    defer gpu::destroy_pipeline(&device, plain)!!;
-    gpu::PipelineHandle biased = make_biased_pipeline(&device, &ctx, 4096.0f);
-    defer gpu::destroy_pipeline(&device, biased)!!;
+    gpu::PipelineHandle pipeline = make_depth_pipeline(
+        device:     &device,
+        ctx:        &ctx,
+        with_color: false,
+    );
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     OwnedSpan readback = make_readback(&device, DP_DEPTH_BYTES * 2);
     defer free_owned_span(&device, &readback)!!;
@@ -836,7 +829,6 @@ fn void depth_bias_shifts_stored_depth() @test {
         plain_view,
         biased_view,
     };
-    gpu::PipelineHandle[2] pipelines = { plain, biased };
     gpu::GpuSpan*[2] readbacks = { &rb_plain, &rb_biased };
     for (uint i = 0; i < 2; i++) {
         record_depth_to_attach(&cmd, targets[i]);
@@ -846,7 +838,14 @@ fn void depth_bias_shifts_stored_depth() @test {
         };
         gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
         gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-        bind_test_graphics_pipeline(&cmd, pipelines[i], tested);
+        if (i == 1) {
+            gpu::DynamicRasterState raster = {
+                .depth_bias_enable   = true,
+                .depth_bias_constant = 4096.0f,
+            };
+            gpu::cmd_set_raster_state(&cmd, &raster)!!;
+        }
+        bind_test_graphics_pipeline(&cmd, pipeline, tested);
         gpu::cmd_draw(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, verts),

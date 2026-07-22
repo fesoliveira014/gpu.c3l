@@ -23,8 +23,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
-        .shader             = shader,
-        .push_constant_size = gpu::RootPush::size,
+        .shader = shader,
     };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(
         &device,

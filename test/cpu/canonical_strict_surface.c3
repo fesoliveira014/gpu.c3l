@@ -120,13 +120,26 @@ fn void pin_shaders_and_pipelines() {
         .spirv = spirv[..],
     };
     gpu::ShaderCode shader = {};
+    gpu::ColorWriteMask write_mask = gpu::COLOR_WRITE_ALL;
+    gpu::BlendState blend = {};
+    gpu::ColorTargetState[1] colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .blend      = blend,
+        .write_mask = write_mask,
+    }};
     gpu::ComputePipelineDesc compute_desc = {
-        .shader = shader,
+        .shader     = shader,
+        .debug_name = "compute",
     };
     gpu::ComputePipelineDesc[1] compute_descs = { compute_desc };
     gpu::GraphicsPipelineDesc graphics_desc = {
         .vertex_shader   = shader,
         .fragment_shader = shader,
+        .colors          = colors[..],
+        .depth_format    = gpu::Format.D32_FLOAT,
+        .sample_count    = gpu::SampleCount.ONE,
+        .polygon_mode    = gpu::PolygonMode.FILL,
+        .debug_name      = "graphics",
     };
     gpu::GraphicsPipelineDesc[1] graphics_descs = { graphics_desc };
     gpu::PipelineHandle pipeline = {};
@@ -178,6 +191,7 @@ fn void pin_commands_and_completion() {
     gpu::PipelineHandle pipeline = {};
     gpu::AttachmentViewHandle attachment_view = {};
     gpu::DepthState depth = {};
+    gpu::DynamicRasterState raster = {};
     gpu::Viewport viewport = {};
     gpu::ScissorRect scissor = {};
     gpu::ColorTargetDesc[1] colors = {
@@ -236,6 +250,7 @@ fn void pin_commands_and_completion() {
     );
     (void)gpu::cmd_begin_render_pass(&commands, &render_pass);
     (void)gpu::cmd_set_depth_state(&commands, &depth);
+    (void)gpu::cmd_set_raster_state(&commands, &raster);
     (void)gpu::cmd_set_viewport(&commands, &viewport);
     (void)gpu::cmd_set_scissor(&commands, &scissor);
     (void)gpu::cmd_draw(

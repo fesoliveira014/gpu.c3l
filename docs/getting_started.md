@@ -7,7 +7,9 @@ compiles and runs the embedded project on lavapipe.
 
 You need three things: the **C3 compiler** (0.8.0 — the version this library
 is pinned to), a **Vulkan 1.3 loader + driver**, and **glslang** to compile
-shaders.
+shaders. The driver must also expose `VK_EXT_extended_dynamic_state3` and report
+`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`; this is an intentional
+minimum device requirement.
 
 ### Linux
 
@@ -237,7 +239,7 @@ fn void? run() {
     };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!;
 
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc pipe_desc = { .shader = shader };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!;
     defer (void)gpu::destroy_pipeline(&device, pipeline);
 

@@ -56,6 +56,19 @@ COMMAND_OUTPUT = "\n".join(
         "generated preprocess: reuse_events=320",
     )
 )
+PIPELINE_OUTPUT = "\n".join(
+    (
+        "iterations=raster=200;duplicate=200000;batch=64x2000 "
+        "units=ns/create,ns/state",
+        (
+            "phase 1 (raster matrix, requested=200 native=1 "
+            "cache_entries=1 aliases=200): 42621.0 ns/create"
+        ),
+        "raster recording (requested=200 native=1): 99.0 ns/state",
+        "phase 2 (duplicate, 200000 at full alias set): 1388.1 ns/create",
+        "phase 3 (cached batch, 64x2000): 2454.9 ns/create",
+    )
+)
 
 
 
@@ -108,7 +121,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         self.assertEqual(
             runner.BENCHMARK_METHODS["pipeline_cache_bench"],
-            ("cold=200; duplicate=200000; batch=64x2000", "ns/create"),
+            (
+                "raster=200; duplicate=200000; batch=64x2000",
+                "ns/create, ns/state",
+            ),
         )
         self.assertEqual(
             runner.BENCHMARK_METHODS["descriptor_churn_bench"],
@@ -313,27 +329,35 @@ class BenchmarkRunnerTests(unittest.TestCase):
 
     def test_regression_thresholds_reject_order_of_magnitude_slowdowns(self):
         runner = load_runner()
-        pipeline_output = "\n".join(
-            (
-                "iterations=cold=200;duplicate=200000;batch=64x2000 units=ns/create",
-                "phase 1 (cold, 200 distinct): 42621.0 ns/create",
-                "phase 2 (duplicate, 200000 at full table): 1388.1 ns/create",
-                "phase 3 (cached batch, 64x2000): 2454.9 ns/create",
-            )
-        )
         cases = (
             ("allocation_bench", ALLOCATION_OUTPUT.replace("23.75", "5001.0")),
             ("command_record_bench", COMMAND_OUTPUT.replace("130.0", "2001.0")),
             ("lifecycle_bench", LIFECYCLE_OUTPUT.replace("8400.0", "100001.0")),
             (
                 "pipeline_cache_bench",
-                pipeline_output.replace("42621.0", "500001.0"),
+                PIPELINE_OUTPUT.replace("42621.0", "500001.0"),
             ),
         )
         for target, output in cases:
             with self.subTest(target=target):
                 with self.assertRaisesRegex(ValueError, "regression threshold"):
                     runner.require_measurement(output, target)
+
+    def test_pipeline_cache_requires_one_native_raster_pipeline(self):
+        runner = load_runner()
+        with self.assertRaisesRegex(ValueError, "one native pipeline"):
+            runner.require_measurement(
+                PIPELINE_OUTPUT.replace("native=1", "native=2"),
+                "pipeline_cache_bench",
+            )
+
+    def test_pipeline_cache_requires_raster_recording_evidence(self):
+        runner = load_runner()
+        with self.assertRaisesRegex(ValueError, "recording evidence"):
+            runner.require_measurement(
+                PIPELINE_OUTPUT.replace("99.0 ns/state", "missing"),
+                "pipeline_cache_bench",
+            )
 
     def test_upload_target_rejects_generic_measurement(self):
         runner = load_runner()

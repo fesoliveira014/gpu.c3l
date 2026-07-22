@@ -240,7 +240,12 @@ get_device_caps(Device*)         -> DeviceCaps?
 ```
 
 `strict_enabled` reports whether strict semantics were requested and enabled.
-Query request support before creation. `generated_work` is true only when the
+The minimum supported device profile is intentionally Vulkan 1.3 plus
+`VK_EXT_extended_dynamic_state3` and
+`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. The strict profile also
+requires independent per-target blending and depth-bias clamp. Query request
+support before creation; creation returns `UNSUPPORTED_FEATURE` when an adapter
+cannot provide every requirement. `generated_work` is true only when the
 created strict device enables GPU-written root and work records for graphics
 and compute. A supported device reports a nonzero `max_generated_work_count`;
 an unsupported device reports false and zero. Heap and generated-work
@@ -370,7 +375,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime` | the selected backend is unavailable |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, a borrowed swapchain attachment view was passed for destruction, or the requested generated-scratch key is not reserved |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
@@ -770,7 +775,6 @@ pipelines and devices. There is no public shader-module handle.
 ```text
 ComputePipelineDesc
     ShaderCode shader
-    uint push_constant_size
     ZString debug_name
 
 create_compute_pipeline(Device* device, ComputePipelineDesc* desc) -> PipelineHandle?
@@ -781,10 +785,8 @@ create_compute_pipelines(
 ) -> void?
 ```
 
-The first ABI requires at least the 8-byte `RootPush` size. The requested size
-must be a multiple of four and no greater than
-`DeviceCaps.max_push_constant_size`, which reports the selected device's
-Vulkan `maxPushConstantsSize` limit.
+Every compute pipeline uses the device's singleton layout with the fixed 8-byte
+`RootPush` range. Compute layout size is not pipeline identity or caller policy.
 
 ### Graphics pipelines
 
@@ -799,14 +801,6 @@ DepthState
     bool write_enable
     CompareOp compare
 
-RasterState
-    CullMode cull_mode
-    FrontFace front_face
-    PolygonMode polygon_mode
-    float depth_bias_constant   (any nonzero bias field enables depth bias)
-    float depth_bias_slope
-    float depth_bias_clamp
-
 BlendState
     bool enable
     BlendFactor src_color
@@ -816,16 +810,33 @@ BlendState
     BlendFactor dst_alpha
     BlendOp alpha_op
 
+ColorWriteMask
+    bool red
+    bool green
+    bool blue
+    bool alpha
+
+ColorTargetState
+    Format format
+    BlendState blend
+    ColorWriteMask write_mask
+
+DynamicRasterState
+    PrimitiveTopology topology
+    CullMode cull_mode
+    FrontFace front_face
+    bool depth_bias_enable
+    float depth_bias_constant
+    float depth_bias_slope
+    float depth_bias_clamp
+
 GraphicsPipelineDesc
     ShaderCode vertex_shader
     ShaderCode fragment_shader
-    PrimitiveTopology topology
-
-    RasterState raster
-    BlendState blend
-    Format[] color_formats
+    ColorTargetState[] colors
     Format depth_format
     SampleCount sample_count
+    PolygonMode polygon_mode
     ZString debug_name
 
 create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) -> PipelineHandle?
@@ -838,20 +849,27 @@ destroy_pipeline(Device* device, PipelineHandle pipeline) -> void?
 ```
 `PolygonMode.LINE` is optional. Query `DeviceCaps.line_polygon_mode` before
 using it; unsupported LINE creation returns `UNSUPPORTED_FEATURE`.
-`PrimitiveTopology.LINES` remains available independently with FILL mode.
+`PrimitiveTopology.LINES` remains available independently with FILL mode and is
+selected with `cmd_set_raster_state`.
 
-`color_formats` carries at most `MAX_COLOR_ATTACHMENTS` (8) entries.
+`colors` carries at most `MAX_COLOR_ATTACHMENTS` (8) entries. Format, blend,
+and write mask are specified independently for every target. The zero write
+mask disables all writes; use `COLOR_WRITE_ALL` for the conventional RGBA
+mask. In particular, a zero-initialized `ColorTargetState` that sets only
+`.format` creates a valid target that renders no color. Enabled blending is
+invalid for integer color formats. A disabled blend equation, or any blend
+equation paired with a zero write mask, is normalized out of pipeline identity.
 
 ### Pipeline deduplication
 
 Pipeline creation deduplicates through a descriptor-keyed cache. Every create
 returns a fresh handle, but descriptors identical in immutable state (exact
-shader code identity, topology, polygon mode, blend, attachment formats and
-sample count, and — for compute — push size) alias one backend pipeline
-underneath. Digest collisions are
-resolved by stage, entry point, length, and exact SPIR-V bytes. Raster
-cull/front-face state is immutable graphics identity. Depth test/write/compare,
-viewport, and scissor are separate dynamic command state.
+shader code identity, polygon mode, per-target format/blend/write masks, depth
+format, and sample count) alias one backend pipeline underneath. Compute
+identity is shader identity because its `RootPush` layout is fixed. Digest collisions are
+resolved by stage, entry point, length, and exact SPIR-V bytes. Topology,
+cull/front-face, depth bias, depth test/write/compare, viewport, and scissor are
+separate dynamic command state.
 
 Batch output length must equal descriptor count; an empty batch succeeds.
 Shared shader code creates one temporary native module per exact stage, entry
@@ -1010,6 +1028,7 @@ Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
 
 ```text
 cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) -> void?
+cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
 cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
 cmd_dispatch(
     CommandList* commands,
@@ -1028,9 +1047,13 @@ they do not resolve pipeline-table or cache state again. Dispatch requires an
 active compute pipeline and a nonzero root
 address. Graphics draws require an active graphics pipeline, nonzero vertex and
 fragment roots, and explicit depth state for the current render pass.
-`cmd_set_depth_state` is valid only inside a render pass; pass begin resets
-that requirement, while viewport and scissor still receive their full-pass
-defaults. Execution with no required state returns
+`cmd_set_raster_state` and `cmd_set_depth_state` require an active render pass;
+outside one they fault `COMMAND_RECORDING_ERROR`. Raster validation is atomic:
+invalid enum values or non-finite enabled depth-bias factors return
+`INVALID_ARGUMENT` without emitting any native state.
+Pass begin emits a zero `DynamicRasterState` and resets the explicit depth-state
+requirement, while viewport and scissor receive their full-pass defaults.
+Execution with no required state returns
 `COMMAND_RECORDING_ERROR`; a wrong active pipeline kind or zero root returns
 `INVALID_ARGUMENT`.
 
@@ -1110,7 +1133,9 @@ command list holds an explicit reference. Zero, stale, foreign-device, and
 mismatched view handles fault before native recording.
 
 Render-pass begin initializes one viewport and one scissor to the full pass
-extent. Callers may override either state for subsequent draws:
+extent and initializes raster state to triangles, no culling,
+counter-clockwise front faces, and disabled depth bias. Callers may override
+these states for subsequent draws:
 
 ```text
 Viewport
@@ -1129,6 +1154,7 @@ ScissorRect
 
 cmd_set_viewport(CommandList* commands, Viewport* viewport) -> void?
 cmd_set_scissor(CommandList* commands, ScissorRect* scissor) -> void?
+cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
 ```
 
 A conventional full-depth viewport must set `max_depth` explicitly because
@@ -1146,16 +1172,17 @@ gpu::Viewport viewport = {
 gpu::cmd_set_viewport(&commands, &viewport)!!;
 ```
 
-Both commands are valid only inside a render pass. Viewports require finite,
-nonnegative origins, positive extents, pass-local endpoints, and depth
+All three setters are valid only inside a render pass. Viewports require
+finite, nonnegative origins, positive extents, pass-local endpoints, and depth
 endpoints in `[0, 1]`; reversed depth ranges are valid. Scissors use signed
 inputs so negative origins/extents fault, while zero extent is a valid empty
 clip. Scissor endpoints must not overflow and both rectangles stay within the
 active pass. Invalid values return `INVALID_ARGUMENT` before changing dynamic
 state; calls outside a pass return `COMMAND_RECORDING_ERROR`.
 
-Explicit viewport/scissor state survives graphics pipeline and cache-alias
-handle switches. The next render-pass begin restores the full-pass defaults.
+Explicit viewport/scissor/raster state survives graphics pipeline and
+cache-alias handle switches. The next render-pass begin restores the full-pass
+and zero-raster defaults.
 The current API intentionally exposes one rectangle only and does not support
 negative-height viewport flips or off-pass overscan.
 
@@ -1266,7 +1293,9 @@ execution path and the library never emulates generated work with a CPU loop.
 Generated commands require an explicit cold reservation on the calling
 thread's device recording context. The queue selects and validates the device;
 the reservation can be consumed by compatible selected queues on that device.
-Each reservation is keyed by its exact pipeline and `GeneratedWorkKind`.
+Each reservation is keyed by the exact public `PipelineHandle` and
+`GeneratedWorkKind`, not by the shared native pipeline. Two alias handles for
+one native pipeline therefore require separate reservations.
 `max_commands_per_list` bounds the maximum generated count accepted by one
 call, and `preprocess_buffer_count` bounds simultaneously retained calls for
 that key across incomplete command lists. The backend asks the driver for the

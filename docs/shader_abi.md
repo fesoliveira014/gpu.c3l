@@ -302,7 +302,10 @@ debug_mode
 reserved
 ```
 
-Changing push constant layout requires updating:
+Compute pipelines use one device-owned layout with exactly the `RootPush`
+range; graphics pipelines use one layout with `GraphicsRootPush`. Neither
+layout size is a pipeline descriptor dimension. Changing either ABI requires
+updating:
 
 ```text
 docs/shader_abi.md

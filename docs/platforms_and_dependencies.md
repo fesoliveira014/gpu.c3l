@@ -148,8 +148,10 @@ Linux:   libvulkan.so.1
 Windows: vulkan-1.dll / vulkan-1 import library
 ```
 
-`vk.c3l` handles link declarations according to its manifest. Headless use needs
-only the Vulkan 1.3 strict-core requirements. Presentation additionally requires
+`vk.c3l` handles link declarations according to its manifest. Headless use
+requires Vulkan 1.3, `VK_EXT_extended_dynamic_state3`, and
+`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. Presentation additionally
+requires
 `VK_KHR_get_surface_capabilities2` and `VK_EXT_surface_maintenance1` on the
 instance plus `VK_KHR_swapchain` and
 `VK_EXT_swapchain_maintenance1` on the device; support queries reject adapters

@@ -29,6 +29,7 @@ alias GeneratedDispatchLayoutReadHook @private @if(env::TESTING) = fn void (void
 
 const ZString SWAPCHAIN_EXTENSION             = "VK_KHR_swapchain";
 const ZString SWAPCHAIN_MAINTENANCE_EXTENSION = "VK_EXT_swapchain_maintenance1";
+const ZString DYNAMIC_STATE_3_EXTENSION       = "VK_EXT_extended_dynamic_state3";
 const ZString GENERATED_WORK_EXTENSION        = "VK_EXT_device_generated_commands";
 const ZString GENERATED_WORK_USAGE_EXTENSION = "VK_KHR_maintenance5";
 const uint GENERATED_WORK_TOKEN_COUNT  = 2;
@@ -136,9 +137,10 @@ struct VkDeviceState {
     PipelineTable              pipelines;
     PipelineCacheTable         pipeline_cache;
     vk::PipelineLayout         graphics_layout;
+    vk::PipelineLayout         compute_layout;
     vk::IndirectCommandsLayoutEXT generated_draw_layout;
     vk::IndirectCommandsLayoutEXT generated_indexed_draw_layout;
-    ComputeLayoutCache         compute_layout_cache;
+    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
     vk::PipelineCache          driver_cache;
     TextureTable               textures;
     AttachmentViewTable        attachment_views;
@@ -291,6 +293,7 @@ const gpu::CommandOps VK_COMMAND_OPS @private = {
     .texture_barrier             = &vk_cmd_texture_barrier,
     .bind_pipeline               = &vk_cmd_bind_pipeline,
     .set_depth_state             = &vk_cmd_set_depth_state,
+    .set_raster_state            = &vk_cmd_set_raster_state,
     .dispatch                    = &vk_cmd_dispatch,
     .begin_render_pass           = &vk_cmd_begin_render_pass,
     .set_viewport                = &vk_cmd_set_viewport,
@@ -527,11 +530,18 @@ fn gpu::Device? create_vk_device_from_runtime(
     vk::PhysicalDeviceFeatures2 features2 =
         vk::physical_device_features2().set_next(&features11);
     vk::get_physical_device_features2(state.physical_device, &features2);
+    check_required_dynamic_state3_extension(
+        state.physical_device,
+        state,
+    )!;
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        query_dynamic_raster_properties(state.physical_device);
     check_required_features(
-        base: &features2.features,
-        v11:  &features11,
-        v12:  &features12,
-        v13:  &features13,
+        base:               &features2.features,
+        v11:                &features11,
+        v12:                &features12,
+        v13:                &features13,
+        dynamic_properties: &dynamic_properties,
     )!;
     if (state.presentation.enabled
         && !presentation_maintenance_supported(
@@ -907,19 +917,37 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
     mem::free(state);
 }
 
-<* Gate on the required base/1.1/1.2/1.3 features. Pure, so it is unit-testable
-   without a device. shaderInt64 backs the root-pointer shader ABI's 64-bit
-   address scalars (SPIR-V Int64 capability); multiDrawIndirect and
-   shaderDrawParameters back multi-draw indirect execution and the gl_DrawID
-   per-draw indexing convention. *>
-fn void? check_required_features(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan11Features* v11, vk::PhysicalDeviceVulkan12Features* v12, vk::PhysicalDeviceVulkan13Features* v13) {
-    if (base.shader_int64 == 0)         return gpu::UNSUPPORTED_FEATURE~;
-    if (base.multi_draw_indirect == 0)  return gpu::UNSUPPORTED_FEATURE~;
+<* Gate required base/core features and unrestricted dynamic topology.
+   Pure, so it is unit-testable without a device. *>
+fn void? check_required_features(
+    vk::PhysicalDeviceFeatures* base,
+    vk::PhysicalDeviceVulkan11Features* v11,
+    vk::PhysicalDeviceVulkan12Features* v12,
+    vk::PhysicalDeviceVulkan13Features* v13,
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT* dynamic_properties,
+) {
+    if (base.shader_int64 == 0)          return gpu::UNSUPPORTED_FEATURE~;
+    if (base.multi_draw_indirect == 0)   return gpu::UNSUPPORTED_FEATURE~;
+    if (base.independent_blend == 0)     return gpu::UNSUPPORTED_FEATURE~;
+    if (base.depth_bias_clamp == 0)      return gpu::UNSUPPORTED_FEATURE~;
     if (v11.shader_draw_parameters == 0) return gpu::UNSUPPORTED_FEATURE~;
-    if (v12.buffer_device_address == 0) return gpu::UNSUPPORTED_FEATURE~;
-    if (v12.timeline_semaphore == 0)    return gpu::UNSUPPORTED_FEATURE~;
-    if (v13.synchronization2 == 0)      return gpu::UNSUPPORTED_FEATURE~;
-    if (v13.dynamic_rendering == 0)     return gpu::UNSUPPORTED_FEATURE~;
+    if (v12.buffer_device_address == 0)  return gpu::UNSUPPORTED_FEATURE~;
+    if (v12.timeline_semaphore == 0)     return gpu::UNSUPPORTED_FEATURE~;
+    if (v13.synchronization2 == 0)       return gpu::UNSUPPORTED_FEATURE~;
+    if (v13.dynamic_rendering == 0)      return gpu::UNSUPPORTED_FEATURE~;
+    if (dynamic_properties.dynamic_primitive_topology_unrestricted == 0) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+}
+
+fn vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT
+query_dynamic_raster_properties(vk::PhysicalDevice physical_device) {
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        vk::physical_device_extended_dynamic_state3properties_ext();
+    vk::PhysicalDeviceProperties2 properties2 =
+        vk::physical_device_properties2().set_next(&dynamic_properties);
+    vk::get_physical_device_properties2(physical_device, &properties2);
+    return dynamic_properties;
 }
 
 <* Optional non-solid polygon rasterization support. Pure. *>
@@ -1038,6 +1066,30 @@ fn bool? query_device_extension_support_mapped(
     return supported;
 }
 
+fn void? check_required_dynamic_state3_extension_with_query(
+    vk::PhysicalDevice physical_device,
+    DeviceExtensionQueryFn extension_query,
+    VkDeviceState* state = null,
+) {
+    if (!query_device_extension_support_mapped(
+        state:           state,
+        physical_device: physical_device,
+        extension:       DYNAMIC_STATE_3_EXTENSION,
+        extension_query: extension_query,
+    )!) return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? check_required_dynamic_state3_extension(
+    vk::PhysicalDevice physical_device,
+    VkDeviceState* state = null,
+) @private {
+    return check_required_dynamic_state3_extension_with_query(
+        physical_device,
+        &query_device_extension_support,
+        state,
+    );
+}
+
 <* The feature struct is only chained once the extension is confirmed. *>
 fn bool? query_descriptor_buffer_support_with_query(
     vk::PhysicalDevice physical_device,
@@ -1148,17 +1200,21 @@ fn bool candidate_satisfies(
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(candidate, &props);
     if (props.api_version < API_VERSION_1_3) return false;
+    if (catch check_required_dynamic_state3_extension(candidate)) return false;
 
     vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
     vk::PhysicalDeviceVulkan11Features features11 = vk::physical_device_vulkan11features().set_next(&features12);
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
     vk::get_physical_device_features2(candidate, &features2);
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
+        query_dynamic_raster_properties(candidate);
     if (catch check_required_features(
-        base: &features2.features,
-        v11:  &features11,
-        v12:  &features12,
-        v13:  &features13,
+        base:               &features2.features,
+        v11:                &features11,
+        v12:                &features12,
+        v13:                &features13,
+        dynamic_properties: &dynamic_properties,
     )) return false;
 
     uint? resolved_tex = resolve_descriptor_capacity(
@@ -1323,6 +1379,8 @@ fn void? create_logical_device_with_queue_infos(
         .set_next(&features12);
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
     features2.features.shader_int64 = vk::TRUE;
+    features2.features.independent_blend = vk::TRUE;
+    features2.features.depth_bias_clamp = vk::TRUE;
     if (line_polygon_mode) features2.features.fill_mode_non_solid = vk::TRUE;
     if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;
@@ -1332,8 +1390,9 @@ fn void? create_logical_device_with_queue_infos(
     }
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[6] extensions;
+    ZString[7] extensions;
     uint extension_count = 0;
+    extensions[extension_count++] = DYNAMIC_STATE_3_EXTENSION;
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
     if (state.generated_work.enabled) {
         extensions[extension_count++] = GENERATED_WORK_EXTENSION;

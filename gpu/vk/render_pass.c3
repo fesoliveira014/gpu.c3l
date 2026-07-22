@@ -48,6 +48,47 @@ fn vk::ClearColorValue clear_color_to_vk(
     return value;
 }
 
+fn void emit_raster_state(
+    CommandRecord* record,
+    gpu::DynamicRasterState* raster,
+) @private {
+    vk::cmd_set_primitive_topology(
+        record.command_buffer,
+        topology_to_vk(raster.topology),
+    );
+    gpu::note_command_native_call();
+    vk::cmd_set_cull_mode(
+        record.command_buffer,
+        (vk::CullModeFlags)cull_mode_to_vk(raster.cull_mode),
+    );
+    gpu::note_command_native_call();
+    vk::cmd_set_front_face(
+        record.command_buffer,
+        front_face_to_vk(raster.front_face),
+    );
+    gpu::note_command_native_call();
+    vk::cmd_set_depth_bias_enable(
+        record.command_buffer,
+        raster.depth_bias_enable ? vk::TRUE : vk::FALSE,
+    );
+    gpu::note_command_native_call();
+    float depth_bias_constant = 0.0f;
+    float depth_bias_clamp = 0.0f;
+    float depth_bias_slope = 0.0f;
+    if (raster.depth_bias_enable) {
+        depth_bias_constant = raster.depth_bias_constant;
+        depth_bias_clamp = raster.depth_bias_clamp;
+        depth_bias_slope = raster.depth_bias_slope;
+    }
+    vk::cmd_set_depth_bias(
+        command_buffer:             record.command_buffer,
+        depth_bias_constant_factor: depth_bias_constant,
+        depth_bias_clamp:           depth_bias_clamp,
+        depth_bias_slope_factor:    depth_bias_slope,
+    );
+    gpu::note_command_native_call();
+}
+
 <* Begin dynamic rendering with precreated attachment views. Attachments must
    sit in their attachment layouts, have matching usage, and cover the pass
    dimensions. *>
@@ -287,6 +328,9 @@ fn void? vk_cmd_begin_render_pass(
     vk::cmd_set_scissor(cb, 0, 1, &scissor);
     gpu::note_command_native_call();
 
+    gpu::DynamicRasterState raster = {};
+    emit_raster_state(record, &raster);
+
     record.active_render_width = desc.width;
     record.active_render_height = desc.height;
     record.depth_state_set = false;
@@ -401,6 +445,29 @@ fn void? vk_cmd_set_depth_state(
     );
     gpu::note_command_native_call();
     record.depth_state_set = true;
+}
+
+fn void? vk_cmd_set_raster_state(
+    gpu::CommandEncoderState* commands,
+    gpu::DynamicRasterState* raster,
+) @private {
+    CommandRecord* record = encoder_command(commands);
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    if (raster == null
+        || !primitive_topology_valid(raster.topology)
+        || !cull_mode_valid(raster.cull_mode)
+        || !front_face_valid(raster.front_face)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (raster.depth_bias_enable
+        && (!math::is_finite(raster.depth_bias_constant)
+            || !math::is_finite(raster.depth_bias_slope)
+            || !math::is_finite(raster.depth_bias_clamp))) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    emit_raster_state(record, raster);
 }
 
 fn BoundPipeline*? validate_graphics_execution_state(

@@ -529,6 +529,15 @@ fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
     return encoder.ops.set_depth_state(encoder, depth);
 }
 
+<* Set pass-bounded topology, culling, front face, and depth bias for
+   subsequent draws. Requires an active render pass. A failed update leaves
+   the previous state unchanged. *>
+fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
+    CommandEncoderState* encoder = recording_encoder(commands)!;
+    if (raster == null) return INVALID_ARGUMENT~;
+    return encoder.ops.set_raster_state(encoder, raster);
+}
+
 <* Set one pass-bounded dynamic viewport for subsequent draws. Requires an
    active render pass; malformed values fault INVALID_ARGUMENT. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {

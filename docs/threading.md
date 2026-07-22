@@ -63,7 +63,9 @@ distinct recording thread receives
 Completed or discarded native command buffers return to the same context and
 are reset and reused only by its owner. A worker must reserve its own generated
 scratch before recording generated commands; reservations are not shared or
-stolen across worker contexts. Release every reservation before a worker
+stolen across worker contexts. Each reservation is also specific to the public
+pipeline handle, so aliases of one native pipeline do not share it. Release
+every reservation before a worker
 exits: an exited worker's reservations stay held by its context, and the
 reserved pipelines remain retained until the device is destroyed.
 

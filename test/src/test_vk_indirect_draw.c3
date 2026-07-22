@@ -51,12 +51,14 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = IND_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    gpu::ColorTargetState[1] pipeline_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
     gpu::GraphicsPipelineDesc pipe_desc = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .topology        = gpu::PrimitiveTopology.TRIANGLES,
-        .color_formats   = formats[..],
+        .colors          = pipeline_colors[..],
     };
     ctx.pipeline = gpu::create_graphics_pipeline(device, &pipe_desc)!!;
 
@@ -169,8 +171,7 @@ fn gpu::PipelineHandle make_cross_family_compute_pipeline(gpu::Device* device) {
     };
     gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
     gpu::ComputePipelineDesc pipeline_desc = {
-        .shader             = shader,
-        .push_constant_size = gpu::RootPush::size,
+        .shader = shader,
     };
     return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
 }
@@ -349,7 +350,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
 
     gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_sd)!!;
-    gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc build_desc = { .shader = build_shader };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!!;
     defer gpu::destroy_pipeline(&device, build_pipeline)!!;
 
@@ -563,8 +564,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     };
     gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_shader_desc)!!;
     gpu::ComputePipelineDesc build_pipeline_desc = {
-        .shader             = build_shader,
-        .push_constant_size = gpu::RootPush::size,
+        .shader = build_shader,
     };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(
         &device,
@@ -970,13 +970,13 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
 
     gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_sd)!!;
-    gpu::ComputePipelineDesc build_desc = { .shader = build_shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc build_desc = { .shader = build_shader };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!!;
     defer gpu::destroy_pipeline(&device, build_pipeline)!!;
 
     gpu::ShaderDesc double_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_DOUBLE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode double_shader = gpu::prepare_shader_code(&double_sd)!!;
-    gpu::ComputePipelineDesc double_desc = { .shader = double_shader, .push_constant_size = gpu::RootPush::size };
+    gpu::ComputePipelineDesc double_desc = { .shader = double_shader };
     gpu::PipelineHandle double_pipeline = gpu::create_compute_pipeline(&device, &double_desc)!!;
     defer gpu::destroy_pipeline(&device, double_pipeline)!!;
 
