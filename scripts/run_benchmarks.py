@@ -25,7 +25,10 @@ BENCHMARK_TARGETS = (
 BENCHMARK_METHODS = {
     "allocation_bench": ("4000/phase", "ns/allocation, ns/free"),
     "resource_create_bench": ("300/worker; workers=1,2,4", "ns/op"),
-    "descriptor_churn_bench": ("320/worker; workers=1,2,4", "ns/descriptor, ns/op"),
+    "descriptor_churn_bench": (
+        "320/worker; workers=1,2,4; ownership highwater=16,4096,65536",
+        "ns/descriptor, ns/op, ns/destroy, ns/check; exact work units",
+    ),
     "upload_throughput_bench": (
         "warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4",
         "uploads/s",

@@ -475,8 +475,12 @@ CPU cells retain generation and texture ownership. The public `TextureView`
 token also carries the device-owner identity and current generation, while its
 `TextureIndex` field is only the shader value: zero is invalid and a live value
 encodes the zero-based physical slot plus one. Destruction validates owner and
-generation before recycling the slot. Device teardown reports leaked texture
-views. Sampler indices are device-owned and are not individually releasable.
+generation with one cell lookup before recycling the slot. Each texture slot
+tracks its exact number of live shader-visible views under the resource mutex,
+so texture destruction decides ownership in O(1) without scanning descriptor
+cells. Cached native views and command validation references retain independent
+lifetime accounting. Device teardown reports leaked texture views. Sampler
+indices are device-owned and are not individually releasable.
 
 Batch creation uses a prepare/commit transaction under the resource lock.
 Preparation validates every item and resolves its native view without consuming
@@ -485,7 +489,9 @@ misses created by the transaction. If a later item faults, those Vulkan image
 views are destroyed exactly once and their full prior cache cells are restored;
 default, pre-existing, and duplicate views are untouched. After complete
 preparation, commit allocates every slot, publishes owner-bearing views, and
-performs the selected heap writes.
+increments the matching texture counts before performing the selected heap
+writes. Full validation rejects count overflow or underflow before mutating a
+descriptor cell, owner count, generation, free list, or output token.
 
 ## 11. Shader and pipeline implementation
 
@@ -861,6 +867,9 @@ a pending acquisition and `RESOURCE_IN_USE` for unfinished presentation or live
 command/view references. They never call `vkQueueWaitIdle`, wait a fence, submit
 cleanup work, or defer release. Once the guards pass, wrapped texture slots,
 views, semaphores, fences, and the native swapchain are released immediately.
+Shader-view ownership is checked directly on each wrapped texture, so the guard
+is O(image count) and independent of global descriptor-heap high-water state;
+texture and attachment command-reference checks remain unchanged.
 
 ## 17. Debug implementation
 

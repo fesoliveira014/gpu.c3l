@@ -253,6 +253,12 @@ cache-create seam whose retryable first attempt and successful empty second
 attempt emit no terminal diagnostic. Pure range and lookup helpers remain
 fault-only; operation-aware result helpers own specialized backend mapping and
 emit exactly once with stable operation context.
+Texture-view accounting coverage also asserts one generation-checked lookup per
+successful destruction, exact single and repeated-owner batch counts,
+transactional overflow/underflow diagnostics, and one ownership work unit for
+texture destruction at descriptor high-water marks 16, 4,096, and 65,536.
+Swapchain tests charge one work unit per wrapped image examined while retaining
+texture and attachment validation-reference guards.
 Queue tests cover compact completion packing, monotonicity, exhaustion, stale
 and foreign ownership, unpublished values, native poll/wait, timeout retry,
 and no public child allocation. Deterministic seams pause after native
@@ -433,6 +439,12 @@ resets demonstrate reuse. The source contract follows every reachable Vulkan
 recording helper and rejects those operations except at explicit cold seams.
 Lifecycle measurements cover submission, cached completed-point polling, and
 immediate texture destruction.
+
+`descriptor_churn_bench` additionally reports texture-destruction and wrapped-
+image ownership work at descriptor high-water marks 16, 4,096, and 65,536. Its
+feature-gated counters are the blocking complexity evidence: destruction must
+charge one ownership decision per texture, and swapchain checks one per image
+examined. The accompanying elapsed times are advisory.
 
 The lifecycle output requires `cached_poll_queries=0` and
 `retirement_locks=0` across each 100,000-poll measured interval. Run

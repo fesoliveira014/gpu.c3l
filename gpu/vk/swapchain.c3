@@ -700,17 +700,18 @@ fn void? build_swapchain(
             )!;
 
             TextureSlot texture = {
-                .image           = images[i],
-                .default_view    = view,
-                .format          = format,
-                .usage           = swapchain_image_usage(usage),
-                .access          = { .graphics },
-                .sample_count    = gpu::SampleCount.ONE,
-                .width           = extent.width,
-                .height          = extent.height,
-                .mip_levels      = 1,
-                .array_layers    = 1,
-                .swapchain_owned = true,
+                .image                 = images[i],
+                .default_view          = view,
+                .format                = format,
+                .usage                 = swapchain_image_usage(usage),
+                .access                = { .graphics },
+                .sample_count          = gpu::SampleCount.ONE,
+                .width                 = extent.width,
+                .height                = extent.height,
+                .mip_levels            = 1,
+                .array_layers          = 1,
+                .live_descriptor_views = 0,
+                .swapchain_owned       = true,
             };
             copy_debug_name(&texture.debug_name[0], slot.requested.debug_name);
             set_object_name(
@@ -841,10 +842,10 @@ fn bool? swapchain_images_referenced_locked(
     VkDeviceState* state,
     SwapchainSlot* slot,
 ) @private {
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     for (uint i = 0; i < slot.image_count; i++) {
         gpu::TextureHandle handle = slot.textures[i];
         TextureSlot* texture = state.textures.get(handle)!;
+        if (texture_has_live_descriptor_views(state, texture)) return true;
         if (texture.validation_references.load(AtomicOrdering.RELAXED) > 0) {
             return true;
         }
@@ -858,9 +859,6 @@ fn bool? swapchain_images_referenced_locked(
             ) > 0) {
                 return true;
             }
-        }
-        foreach (&cell : heap.texture_cells[:heap.texture_next_new]) {
-            if (cell.used && cell.owner == handle) return true;
         }
     }
     return false;
