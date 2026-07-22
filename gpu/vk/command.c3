@@ -1520,10 +1520,7 @@ fn void push_compute_root(
     gpu::RootPush push = { .root_gpu = root };
     $if env::TESTING:
         last_compute_root.store((ulong)push.root_gpu, AtomicOrdering.RELAXED);
-        last_compute_layout.store(
-            (ulong)pipeline.layout,
-            AtomicOrdering.RELAXED,
-        );
+        last_compute_layout.store((ulong)pipeline.layout, AtomicOrdering.RELAXED);
     $endif
     vk::cmd_push_constants(
         command_buffer: record.command_buffer,
