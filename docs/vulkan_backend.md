@@ -721,10 +721,11 @@ Presentation transitions use these exact synchronization2 scopes:
 The public `PRESENT` state has empty stages and access because the presentation
 engine is external to the Vulkan pipeline. Native lowering retains the fixed
 color-attachment-output/no-access WSI scope in both directions. The texture
-transitions keep their narrow caller-declared scopes. Independently, the private
-acquire semaphore uses the exact `SubmitDesc.readiness_before` destination mask
-for the first actual consumer of the acquired image; that wait scope is not
-derived from the fixed `PRESENT` barrier source. The private present signal
+transitions keep their narrow caller-declared scopes. The private acquire
+semaphore uses the exact `SubmitDesc.readiness_before` destination mask for the
+first actual consumer of the acquired image; because that wait scope is not
+derived from the fixed `PRESENT` barrier source, a transition leaving `PRESENT`
+is ordered after acquisition only when the mask includes color output. The private present signal
 keeps the backend's full-submission scope.
 
 ## 14. Timeline semaphores
