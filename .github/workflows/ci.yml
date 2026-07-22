@@ -101,8 +101,10 @@ jobs:
 
       - name: Build benchmark targets
         run: |
-          for target in $(python3 -c 'import scripts.run_benchmarks as b; print("benchmark_info", *b.BENCHMARK_TARGETS)'); do
-            c3c build "$target" --path test -O1
+          for spec in $(python3 -c 'import scripts.run_benchmarks as b; print(*[f"{target}:{project}" for target, project in b.benchmark_build_targets()])'); do
+            target="${spec%%:*}"
+            project="${spec#*:}"
+            c3c build "$target" --path "$project" -O1
           done
 
       - name: Link proof (smoke)
@@ -316,8 +318,10 @@ jobs:
 
       - name: Build benchmark targets
         run: |
-          for target in $(python -c 'import scripts.run_benchmarks as b; print("benchmark_info", *b.BENCHMARK_TARGETS)'); do
-            c3c build "$target" --path test -O1
+          for spec in $(python -c 'import scripts.run_benchmarks as b; print(*[f"{target}:{project}" for target, project in b.benchmark_build_targets()])'); do
+            target="${spec%%:*}"
+            project="${spec#*:}"
+            c3c build "$target" --path "$project" -O1
           done
 
       - name: Link proof (smoke)

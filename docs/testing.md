@@ -397,6 +397,7 @@ c3c build import_surface_x11 --path test/cpu
 c3c build span_data_operations --path test/cpu
 c3c build sampler_operations --path test/cpu
 c3c build texture_view_operations --path test/cpu
+c3c build command_wrapper_bench --path test/cpu -O1
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
 python -m unittest scripts.test_check_docs scripts.test_check_public_api scripts.test_check_backend_dispatch scripts.test_check_swapchain_acquire_policy
@@ -475,10 +476,35 @@ binding and requires the recorded layout snapshot to remain unchanged. A
 compile-time exact member-shape guard rejects adding or substituting a hidden
 slot pointer or index/generation back-reference without an explicit gate update.
 
-The benchmark runner builds nine executable targets with `-O1`:
+The benchmark runner builds eleven executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
-`upload_throughput_bench`, `command_record_bench`, `lifecycle_bench`,
+`upload_throughput_bench`, `command_wrapper_bench`,
+`command_path_baseline_bench`, `command_record_bench`, `lifecycle_bench`,
 `submit_batch_bench`, `pipeline_cache_bench`, and `async_overlap_bench`.
+`command_wrapper_bench` routes through `test/cpu/project.json`; it links only
+the CPU project and libc, so it can run without a Vulkan loader, ICD, VMA, or
+native Vulkan library. `command_path_baseline_bench` routes through
+`test/project.json` and requires the normal headless Vulkan 1.3 environment.
+Run them directly with:
+
+```sh
+c3c build command_wrapper_bench --path test/cpu -O1
+./test/cpu/build/command_wrapper_bench
+python3 scripts/build_shaders.py
+c3c build command_path_baseline_bench --path test -O1
+VK_DRIVER_FILES=/path/to/icd.json ./test/build/command_path_baseline_bench
+```
+
+The CPU target reports five alternating direct/public wrapper pairs with exact
+per-repetition observation. The Vulkan target reports five equivalent native
+operation pairs, zero forbidden structural-work deltas for warmed recording,
+non-zero dispatch and buffer-copy readback equivalence, and full
+begin-bind-record-end-submit-wait lifecycle cases for 0, 1, 16, and 256
+commands. Lifecycle timing ends only after successful completion wait; its
+structural gate permits only the exact command-list allocation/reset work and
+rejects unrelated allocation, creation, and registry-lock work. All elapsed
+times and ratios are advisory, while schema, work, and equivalence failures are
+blocking.
 The submit-batch target submits real batches of 1, 8, 32, 128, and 1,024
 executable lists and requires exactly one duplicate-detection record visit per
 list with no rollover work. Its elapsed times are advisory. The pipeline-cache

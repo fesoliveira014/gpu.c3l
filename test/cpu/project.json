@@ -114,6 +114,12 @@
       "sources": [
         "../src/test_shader_abi_layout.c3"
       ]
+    },
+    "command_wrapper_bench": {
+      "type": "executable",
+      "sources": [
+        "command_wrapper_bench.c3"
+      ]
     }
   }
 }

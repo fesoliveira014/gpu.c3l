@@ -849,6 +849,83 @@ fn void warm_command_begin_reuses_allocator_owned_storage() @test {
         "warm begin/discard retains reusable host bookkeeping");
 }
 
+fn void recording_work_reset_snapshot_and_delta_are_exact() @test {
+    gpu::RuntimeDesc desc = {
+        .backend          = gpu::BackendKind.VULKAN,
+        .application_name = "recording_work_stats_test",
+    };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state_ptr(
+        &device,
+    );
+
+    gpu::CommandList warm = gpu::begin_commands(&allocator)!!;
+    gpu::ExecutableCommandList warm_executable = gpu::end_commands(&warm)!!;
+    gpu::discard_executable_commands(&warm_executable)!!;
+    vk::reset_command_recording_work_counters(state);
+    gpu::RecordingWorkCounters zero = vk::command_recording_work_counters(state);
+    assert(zero.host_allocations == 0
+            && zero.command_pool_creations == 0
+            && zero.command_buffer_allocations == 0
+            && zero.command_buffer_frees == 0
+            && zero.command_buffer_resets == 0
+            && zero.image_view_creations == 0
+            && zero.vma_allocations == 0
+            && zero.registry_lock_acquisitions == 0
+            && zero.generated_scratch_misses == 0
+            && zero.generated_dispatch_emissions == 0
+            && zero.generated_draw_emissions == 0
+            && zero.generated_indexed_draw_emissions == 0,
+        "reset clears every structural recording-work counter");
+
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    gpu::discard_executable_commands(&executable)!!;
+    gpu::RecordingWorkCounters after = vk::command_recording_work_counters(state);
+    gpu::RecordingWorkCounters work = vk::command_recording_work_delta(after, zero);
+    assert(work.command_buffer_resets == 1,
+        "one warmed command-list lifecycle records one reset");
+    assert(work.host_allocations == 0
+            && work.command_pool_creations == 0
+            && work.command_buffer_allocations == 0
+            && work.command_buffer_frees == 0
+            && work.image_view_creations == 0
+            && work.vma_allocations == 0
+            && work.registry_lock_acquisitions == 0
+            && work.generated_scratch_misses == 0
+            && work.generated_dispatch_emissions == 0
+            && work.generated_draw_emissions == 0
+            && work.generated_indexed_draw_emissions == 0,
+        "the warmed lifecycle delta contains no unrelated structural work");
+
+    assert(gpu::device_slot_available(),
+        "the registry probe finds an available device slot");
+    gpu::RecordingWorkCounters registry_after =
+        vk::command_recording_work_counters(state);
+    gpu::RecordingWorkCounters registry_work =
+        vk::command_recording_work_delta(registry_after, after);
+    assert(registry_work.registry_lock_acquisitions == 1,
+        "the structural delta includes one exact registry-lock acquisition");
+    assert(registry_work.host_allocations == 0
+            && registry_work.command_pool_creations == 0
+            && registry_work.command_buffer_allocations == 0
+            && registry_work.command_buffer_frees == 0
+            && registry_work.command_buffer_resets == 0
+            && registry_work.image_view_creations == 0
+            && registry_work.vma_allocations == 0,
+        "the registry probe changes no other structural work counter");
+}
+
 fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = create_test_device(&desc)!!;
