@@ -1034,14 +1034,16 @@ cmd_dispatch(
 
 Pipeline binding selects the active compute or graphics pipeline without
 compiling or synthesizing a variant. A failed bind preserves the previous active
-pipeline. A successful bind caches the pipeline's stable validation cell,
-expected generation, native pipeline/layout, kind, render compatibility,
-cache-entry identity, and generated-work layout. Later draws and dispatches use
-that snapshot and reject a destroyed or reused slot before native handle use;
-they do not resolve pipeline-table or cache state again. Dispatch requires an
-active compute pipeline. Graphics draws require an active graphics pipeline
-and explicit depth state for the current render pass. Root addresses, including
-zero, are pushed unchanged.
+pipeline. A successful bind generation-checks the public handle, retains the
+pipeline when runtime validation is enabled, and caches its native
+pipeline/layout, kind, render compatibility, cache-entry identity,
+generated-work layout, and public diagnostic identity. Later draws and
+dispatches use that snapshot without reading a pipeline cell, table, or cache.
+Validation ownership prevents destruction until discard or command completion;
+without validation, the caller must keep the pipeline live through completion.
+Dispatch requires an active compute pipeline. Graphics draws require an active
+graphics pipeline and explicit depth state for the current render pass. Root
+addresses, including zero, are pushed unchanged.
 `cmd_set_raster_state` and `cmd_set_depth_state` require an active render pass;
 outside one they fault `COMMAND_RECORDING_ERROR`. Raster validation is atomic:
 invalid enum values or non-finite enabled depth-bias factors return

@@ -219,6 +219,147 @@ class PerformanceContractTests(unittest.TestCase):
                 any("post-bind pipeline resolution" in error for error in errors)
             )
 
+    def test_bound_pipeline_validation_cell_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command_state.c3",
+                "    gpu::PipelineHandle               handle;",
+                (
+                    "    gpu::PipelineHandle               handle;\n"
+                    "    PipelineCell*                     validation_cell;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "forbidden bound-pipeline revalidation token "
+                    "validation_cell" in error
+                    for error in errors
+                )
+            )
+
+    def test_bound_pipeline_expected_generation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command_state.c3",
+                "    uint                              cache_entry;",
+                (
+                    "    uint                              expected_generation;\n"
+                    "    uint                              cache_entry;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "forbidden bound-pipeline revalidation token "
+                    "expected_generation" in error
+                    for error in errors
+                )
+            )
+
+    def test_bound_pipeline_identity_validator_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "fn BoundPipeline*? active_bound_pipeline(",
+                (
+                    "fn void validate_bound_pipeline_identity() {}\n\n"
+                    "fn BoundPipeline*? active_bound_pipeline("
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "forbidden bound-pipeline revalidation token "
+                    "validate_bound_pipeline_identity" in error
+                    for error in errors
+                )
+            )
+
+    def test_renamed_bound_pipeline_cell_revalidation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command_state.c3",
+                "    gpu::PipelineHandle               handle;",
+                (
+                    "    gpu::PipelineHandle               handle;\n"
+                    "    PipelineCell*                     bound_cell;\n"
+                    "    uint                              generation_snapshot;"
+                ),
+            )
+            self.mutate(
+                root,
+                "gpu/vk/command.c3",
+                "fn BoundPipeline*? active_bound_pipeline(",
+                (
+                    "fn void? ensure_bound_pipeline_live(\n"
+                    "    BoundPipeline* bound,\n"
+                    ") {\n"
+                    "    if (!bound.bound_cell.used\n"
+                    "        || bound.bound_cell.generation\n"
+                    "            != bound.generation_snapshot) {\n"
+                    "        return gpu::INVALID_HANDLE~;\n"
+                    "    }\n"
+                    "}\n\n"
+                    "fn BoundPipeline*? active_bound_pipeline("
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(
+                any(
+                    "BoundPipeline must contain only the reviewed native "
+                    "snapshot fields" in error
+                    for error in errors
+                )
+            )
+
+    def test_pipeline_cell_moved_to_command_record_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command_state.c3",
+                "    CommandState                state;",
+                (
+                    "    CommandState                state;\n"
+                    "    PipelineCell*               retained_pipeline_slot;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "CommandRecord must not retain a PipelineCell pointer" in error
+                for error in errors
+            ))
+
+    def test_missing_bound_pipeline_reports_contract_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/command_state.c3",
+                "struct BoundPipeline {",
+                "struct RemovedBoundPipeline {",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "missing struct BoundPipeline" in error
+                for error in errors
+            ))
+
     def test_retired_compute_layout_cache_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

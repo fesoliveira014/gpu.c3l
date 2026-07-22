@@ -61,6 +61,17 @@ fn gpu::CommandList record_lifetime_copy(
     return commands;
 }
 
+fn gpu::PipelineHandle make_lifetime_compute_pipeline(gpu::Device* device) {
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = LIFETIME_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
+    return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
+}
+
 fn void unreferenced_destroy_is_immediate() @test {
     gpu::Device device = make_lifetime_test_device();
     defer destroy_test_device(&device)!!;
@@ -107,18 +118,27 @@ fn void executable_references_reject_allocation_release() @test {
     defer free_owned_span(&device, &src)!!;
     OwnedSpan dst = make_lifetime_span(&device, "executable_dst");
     defer free_owned_span(&device, &dst)!!;
+    gpu::PipelineHandle pipeline = make_lifetime_compute_pipeline(&device);
+    defer (void)gpu::destroy_pipeline(&device, pipeline);
 
     gpu::CommandList commands = record_lifetime_copy(&device, &src, &dst);
+    bind_test_compute_pipeline(&commands, pipeline);
+    gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 0, 0, 0 })!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     assert(@catch(gpu::free_allocation(&device, &dst.allocation))
         == gpu::RESOURCE_IN_USE, "executable references reject release");
     assert(dst.allocation.is_valid(), "rejected executable release preserves ownership");
+    assert(@catch(gpu::destroy_pipeline(&device, pipeline))
+        == gpu::RESOURCE_IN_USE,
+        "executable command retains its bound pipeline");
 
     gpu::discard_executable_commands(&executable)!!;
     gpu::free_allocation(&device, &src.allocation)!!;
     src.span = {};
     gpu::free_allocation(&device, &dst.allocation)!!;
     dst.span = {};
+    gpu::destroy_pipeline(&device, pipeline)!!;
+    pipeline = {};
 }
 
 fn void incomplete_submitted_commands_retain_references() @test {
@@ -129,8 +149,12 @@ fn void incomplete_submitted_commands_retain_references() @test {
     defer free_owned_span(&device, &src)!!;
     OwnedSpan dst = make_lifetime_span(&device, "submitted_dst");
     defer free_owned_span(&device, &dst)!!;
+    gpu::PipelineHandle pipeline = make_lifetime_compute_pipeline(&device);
+    defer (void)gpu::destroy_pipeline(&device, pipeline);
 
     gpu::CommandList commands = record_lifetime_copy(&device, &src, &dst);
+    bind_test_compute_pipeline(&commands, pipeline);
+    gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 0, 0, 0 })!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -146,6 +170,9 @@ fn void incomplete_submitted_commands_retain_references() @test {
             "incomplete submitted work rejects release");
         assert(dst.allocation.is_valid(),
             "rejected submitted release preserves ownership");
+        assert(@catch(gpu::destroy_pipeline(&device, pipeline))
+            == gpu::RESOURCE_IN_USE,
+            "incomplete submitted command retains its bound pipeline");
     }
     gpu::wait_completion(completion)!!;
     vk::VkDeviceState* state =
@@ -156,6 +183,8 @@ fn void incomplete_submitted_commands_retain_references() @test {
     src.span = {};
     gpu::free_allocation(&device, &dst.allocation)!!;
     dst.span = {};
+    gpu::destroy_pipeline(&device, pipeline)!!;
+    pipeline = {};
 }
 
 fn void borrowed_attachment_view_reference_releases_after_completion_drain() @test {
@@ -250,17 +279,7 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
     defer (void)gpu::destroy_texture(&device, texture);
 
-    gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
-        .spirv       = LIFETIME_COMP_SPIRV[..],
-        .entry_point = "main",
-    };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
-    gpu::ComputePipelineDesc pipeline_desc = {
-        .shader = shader,
-    };
-    gpu::PipelineHandle pipeline =
-        gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
+    gpu::PipelineHandle pipeline = make_lifetime_compute_pipeline(&device);
     defer (void)gpu::destroy_pipeline(&device, pipeline);
 
     gpu::CommandList commands = gpu::begin_commands(
@@ -277,12 +296,15 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
     };
     gpu::cmd_texture_barrier(&commands, &barrier)!!;
     bind_test_compute_pipeline(&commands, pipeline);
-    gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 1, 1, 1 })!!;
 
     assert(@catch(gpu::destroy_texture(&device, texture))
         == gpu::RESOURCE_IN_USE, "recorded texture references reject destroy");
     assert(@catch(gpu::destroy_pipeline(&device, pipeline))
         == gpu::RESOURCE_IN_USE, "recorded pipeline references reject destroy");
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 1, 1, 1 })!!;
+    assert_warm_command_resolution(gpu::command_resolution_stats(), 1);
 
     gpu::discard_commands(&commands)!!;
     gpu::destroy_texture(&device, texture)!!;

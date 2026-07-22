@@ -59,6 +59,20 @@ RECORDING_PIPELINE_RESOLUTION_ALLOWLIST = frozenset((
     "retain_validation_reference",
     "release_validation_reference",
 ))
+BOUND_PIPELINE_REVALIDATION_FORBIDDEN = (
+    "validation_cell",
+    "expected_generation",
+    "validate_bound_pipeline_identity",
+)
+BOUND_PIPELINE_SNAPSHOT_FIELDS = (
+    "handle",
+    "pipeline",
+    "layout",
+    "generated_dispatch_layout",
+    "cache_entry",
+    "kind",
+    "render",
+)
 RECORDING_COLD_GROWTH_ALLOWLIST = frozenset((
     "ensure_command_reference_capacity",
 ))
@@ -222,6 +236,33 @@ def function_names(source: str) -> tuple[str, ...]:
             mask_c3_comments(source),
         )
     )
+
+
+def struct_body(source: str, name: str) -> str:
+    masked_source = mask_c3_comments(source)
+    declaration = re.search(
+        rf"(?m)^struct\s+{re.escape(name)}\s*\{{",
+        masked_source,
+    )
+    if declaration is None:
+        raise ValueError(f"missing struct {name}")
+    start = masked_source.find("{", declaration.start())
+    depth = 0
+    for index in range(start, len(masked_source)):
+        if masked_source[index] == "{":
+            depth += 1
+        elif masked_source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return masked_source[start + 1:index]
+    raise ValueError(f"unterminated struct {name}")
+
+
+def struct_field_names(source: str, name: str) -> tuple[str, ...]:
+    return tuple(re.findall(
+        r"(?m)^\s*[^\n;{}]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*;",
+        struct_body(source, name),
+    ))
 
 
 def read(root: Path, relative: str) -> str:
@@ -499,6 +540,43 @@ def check(root: Path = ROOT) -> list[str]:
                     f"{relative}:{name} performs forbidden post-bind "
                     "pipeline resolution on a recording path"
                 )
+
+    bound_pipeline_source = mask_c3_comments(
+        backend_source + "\n" + command_state_source + "\n" + render_source
+    )
+    for token in BOUND_PIPELINE_REVALIDATION_FORBIDDEN:
+        if token in bound_pipeline_source:
+            errors.append(
+                "Vulkan command recording retains forbidden bound-pipeline "
+                f"revalidation token {token}"
+            )
+    try:
+        bound_pipeline_fields = struct_field_names(
+            command_state_source,
+            "BoundPipeline",
+        )
+    except ValueError as error:
+        errors.append(f"gpu/vk/command_state.c3:{error}")
+    else:
+        if bound_pipeline_fields != BOUND_PIPELINE_SNAPSHOT_FIELDS:
+            errors.append(
+                "gpu/vk/command_state.c3:BoundPipeline must contain only the "
+                "reviewed native snapshot fields"
+            )
+
+    try:
+        command_record_body = struct_body(command_state_source, "CommandRecord")
+    except ValueError as error:
+        errors.append(f"gpu/vk/command_state.c3:{error}")
+    else:
+        if re.search(
+            r"(?m)^\s*PipelineCell\s*\*\s*[A-Za-z_][A-Za-z0-9_]*\s*;",
+            command_record_body,
+        ):
+            errors.append(
+                "gpu/vk/command_state.c3:CommandRecord must not retain a "
+                "PipelineCell pointer"
+            )
 
     backend_root = root / "gpu/vk"
     retired_layout_cache_references = 0

@@ -1336,15 +1336,6 @@ fn ResolvedSpan? resolve_indirect_span(
     return resolved;
 }
 
-fn void? validate_bound_pipeline_identity(BoundPipeline* pipeline) @private {
-    if (pipeline.validation_cell == null
-        || !pipeline.validation_cell.used
-        || pipeline.validation_cell.generation
-            != pipeline.expected_generation) {
-        return gpu::INVALID_HANDLE~;
-    }
-}
-
 fn BoundPipeline*? active_bound_pipeline(
     VkDeviceState* state,
     CommandRecord* record,
@@ -1353,7 +1344,6 @@ fn BoundPipeline*? active_bound_pipeline(
 ) @private {
     BoundPipeline* pipeline = &record.bound_pipeline;
     if (!pipeline.handle.is_valid()) return gpu::COMMAND_RECORDING_ERROR~;
-    validate_bound_pipeline_identity(pipeline)!;
     if (pipeline.kind != expected_kind) {
         ZString invariant = expected_kind == PipelineKind.COMPUTE
             ? "pipeline kind must match the COMPUTE bind point"
@@ -1400,7 +1390,6 @@ fn void? validate_active_pipeline_render_compatibility(
 ) @private {
     BoundPipeline* pipeline = &record.bound_pipeline;
     if (!pipeline.handle.is_valid()) return;
-    validate_bound_pipeline_identity(pipeline)!;
     return validate_pipeline_render_compatibility(pipeline, render);
 }
 
@@ -1425,8 +1414,7 @@ fn void? bind_pipeline_state(
     gpu::PipelineHandle pipeline,
 ) @private {
     validate_descriptor_heap_binding(state)!;
-    PipelineCell* cell = state.pipelines.get_cell(pipeline)!;
-    PipelineSlot* slot = &cell.value;
+    PipelineSlot* slot = state.pipelines.get(pipeline)!;
     gpu::note_command_pipeline_cache_lookup();
     if (slot.entry >= state.pipeline_cache.entries.len
         || !state.pipeline_cache.entries[slot.entry].used) {
@@ -1435,11 +1423,9 @@ fn void? bind_pipeline_state(
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
     BoundPipeline bound = {
         .handle                    = pipeline,
-        .validation_cell           = cell,
         .pipeline                  = slot.pipeline,
         .layout                    = slot.layout,
         .generated_dispatch_layout = slot.generated_dispatch_layout,
-        .expected_generation       = cell.generation,
         .cache_entry               = slot.entry,
         .kind                      = (PipelineKind)entry.key.kind,
         .render                    = pipeline_render_compatibility(&entry.key),

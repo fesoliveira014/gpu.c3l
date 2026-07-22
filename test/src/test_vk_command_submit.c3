@@ -57,31 +57,6 @@ fn void command_tokens_are_small_owner_values() @test {
         "executable token stays within four machine words");
 }
 
-fn void bound_pipeline_validation_rejects_destroyed_and_reused_slots() @test {
-    vk::PipelineCell cell = {
-        .generation = 7,
-        .used       = true,
-    };
-    vk::BoundPipeline pipeline = {
-        .validation_cell     = &cell,
-        .expected_generation = 7,
-    };
-
-    vk::validate_bound_pipeline_identity(&pipeline)!!;
-    cell.used = false;
-    fault destroyed_fault =
-        @catch(vk::validate_bound_pipeline_identity(&pipeline));
-    cell.used = true;
-    cell.generation = 8;
-    fault reused_fault =
-        @catch(vk::validate_bound_pipeline_identity(&pipeline));
-
-    assert(destroyed_fault == gpu::INVALID_HANDLE,
-        "a destroyed bound pipeline is rejected before native handle use");
-    assert(reused_fault == gpu::INVALID_HANDLE,
-        "a reused pipeline cell cannot satisfy the cached generation");
-}
-
 fn void discard_consumes_recording_and_executable_lists() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = create_test_device(&desc)!!;
