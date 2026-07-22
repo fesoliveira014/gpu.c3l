@@ -79,6 +79,41 @@ struct GeneratedDispatchRecordArgs {
     fault            failure;
 }
 
+struct PipelineShaderDiagnosticCapture {
+    uint    calls;
+    ZString expected_operation;
+    ZString expected_debug_name;
+    ZString expected_field;
+    bool    matched;
+}
+
+fn void capture_pipeline_shader_diagnostic(
+    gpu::DebugMessage* message,
+    void* user_data,
+) {
+    PipelineShaderDiagnosticCapture* capture =
+        (PipelineShaderDiagnosticCapture*)user_data;
+    capture.calls++;
+    capture.matched = capture.matched
+        && message.severity == gpu::DebugMessageSeverity.ERROR
+        && message.category.public_contract
+        && message.has_fault
+        && message.public_fault == gpu::INVALID_ARGUMENT
+        && message.operation != null
+        && message.operation.str_view()
+            == capture.expected_operation.str_view()
+        && message.resource.kind == gpu::DebugResourceKind.SHADER
+        && !message.resource.has_public_identity
+        && message.resource.debug_name != null
+        && message.resource.debug_name.str_view()
+            == capture.expected_debug_name.str_view()
+        && message.rejected_field != null
+        && message.rejected_field.str_view() == capture.expected_field.str_view()
+        && message.invariant != null
+        && message.invariant.str_view()
+            == "shader code must come from prepare_shader_code";
+}
+
 fn void block_generated_layout_read(void* raw_gate) {
     GeneratedLayoutGate* gate = (GeneratedLayoutGate*)raw_gate;
     gate.entered.store(true, AtomicOrdering.RELEASE);
@@ -626,9 +661,6 @@ fn void shader_store_cache_hit_reference_is_stable() @test {
         "a cache hit does not clone an existing shader identity");
     assert(hit_stats.pipeline_key_probes == 1,
         "a cached lookup probes one compact pipeline key");
-    assert(hit_stats.pipeline_lookup_bytes_compared == 0
-            && hit_stats.pipeline_lookup_bytes_cloned == 0,
-        "pipeline-key lookup performs no shader byte work");
 
     gpu::destroy_pipeline(&device, first)!!;
     assert(vk::shader_store_live_count(state) == 1,
@@ -1752,7 +1784,36 @@ fn void pipeline_batch_capacity_failure_is_transactional() @test {
         "batch handle preflight faults before shader interning");
 }
 
-fn void compute_pipeline_batch_shader_validation_releases_prepared_identities() @test {
+fn void compute_pipeline_shader_validation_reports_contract_failure() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderCode invalid = { .debug_name = "invalid_compute_shader" };
+    gpu::ComputePipelineDesc desc = { .shader = invalid };
+    vk::VkDeviceState* state = cache_test_state(&device);
+    PipelineShaderDiagnosticCapture capture = {
+        .expected_operation  = "create_compute_pipeline",
+        .expected_debug_name = "invalid_compute_shader",
+        .expected_field      = "ComputePipelineDesc.shader",
+        .matched             = true,
+    };
+    state.debug_callback = &capture_pipeline_shader_diagnostic;
+    state.debug_user_data = &capture;
+
+    fault shader_fault = @catch(gpu::create_compute_pipeline(&device, &desc));
+
+    state.debug_callback = null;
+    state.debug_user_data = null;
+    assert(shader_fault == gpu::INVALID_ARGUMENT,
+        "invalid compute shader preserves its validation fault");
+    assert(capture.calls == 1 && capture.matched,
+        "invalid compute shader emits one exact contract diagnostic");
+    assert(cache_entry_count(&device) == 0,
+        "compute shader validation publishes no cache entry");
+    assert(vk::shader_store_live_count(state) == 0,
+        "compute shader validation performs no interning");
+}
+
+fn void compute_pipeline_batch_shader_validation_ignores_unprepared_suffix() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
@@ -1765,16 +1826,31 @@ fn void compute_pipeline_batch_shader_validation_releases_prepared_identities() 
         { .shader = shader },
         { .shader = shader },
     };
-    gpu::PipelineHandle[2] priming_outputs;
-    gpu::create_compute_pipelines(&device, descs[..], priming_outputs[..])!!;
-    foreach (pipeline : priming_outputs) gpu::destroy_pipeline(&device, pipeline)!!;
-    descs[1] = {};
+    gpu::PipelineHandle sentinel_pipeline =
+        gpu::create_compute_pipeline(&device, &descs[0])!!;
+    descs[1] = {
+        .shader = { .debug_name = "invalid_compute_batch_shader" },
+    };
     gpu::PipelineHandle[2] outputs = {
         { .owner = 1, .index = 2, .generation = 3 },
         { .owner = 4, .index = 5, .generation = 6 },
     };
     gpu::PipelineHandle[2] before = outputs;
     vk::VkDeviceState* state = cache_test_state(&device);
+    uint sentinel_entry_index =
+        state.pipelines.slots[sentinel_pipeline.index].value.entry;
+    vk::ShaderId sentinel_shader_id =
+        state.pipeline_cache.entries[sentinel_entry_index].key.vertex_shader;
+    vk::set_pipeline_prepare_poison(state, sentinel_shader_id);
+    defer vk::clear_pipeline_prepare_poison(state);
+    PipelineShaderDiagnosticCapture capture = {
+        .expected_operation  = "create_compute_pipelines",
+        .expected_debug_name = "invalid_compute_batch_shader",
+        .expected_field      = "ComputePipelineDesc.shader",
+        .matched             = true,
+    };
+    state.debug_callback = &capture_pipeline_shader_diagnostic;
+    state.debug_user_data = &capture;
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
     vk::reset_pipeline_identity_stats(state);
@@ -1785,27 +1861,37 @@ fn void compute_pipeline_batch_shader_validation_releases_prepared_identities() 
         outputs[..],
     ));
 
+    state.debug_callback = null;
+    state.debug_user_data = null;
+
     assert(shader_fault == gpu::INVALID_ARGUMENT,
         "a later invalid compute shader preserves its validation fault");
+    assert(capture.calls == 1 && capture.matched,
+        "later invalid compute shader emits one exact contract diagnostic");
     assert(outputs[0] == before[0] && outputs[1] == before[1],
         "compute shader validation leaves caller outputs unchanged");
-    assert(cache_entry_count(&device) == 0,
-        "compute shader validation publishes no cache entry");
+    assert(cache_entry_count(&device) == 1,
+        "compute shader validation preserves the sentinel cache entry");
     assert(vk::pipeline_shader_module_create_count(state) == shader_modules_before,
         "compute shader validation creates no temporary shader module");
     assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
         "compute shader validation performs no native pipeline creation");
     vk::PipelineIdentityStats stats = vk::pipeline_identity_stats(state);
-    assert(vk::shader_store_live_count(state) == 0,
-        "compute shader validation releases the prepared identity prefix");
+    assert(vk::shader_store_live_count(state) == 1,
+        "compute shader validation preserves the sentinel identity");
+    assert(state.shader_store.entries[(uint)sentinel_shader_id].refcount == 1,
+        "compute cleanup ignores the poisoned unprepared suffix");
     assert(vk::shader_store_index_consistent(state),
         "compute shader validation preserves the shader index and free list");
-    assert(stats.shader_owned_bytes_cloned == shader.spirv.len
-            && stats.shader_owned_bytes_freed == shader.spirv.len,
-        "compute shader validation frees the prepared clone exactly once");
+    assert(stats.shader_owned_bytes_cloned == 0
+            && stats.shader_owned_bytes_freed == 0,
+        "compute shader validation balances the prepared sentinel retain");
+    gpu::destroy_pipeline(&device, sentinel_pipeline)!!;
+    assert(vk::shader_store_live_count(state) == 0,
+        "destroying the sentinel releases its cache-owned identity");
 }
 
-fn void graphics_pipeline_batch_shader_validation_releases_prepared_identities() @test {
+fn void graphics_pipeline_batch_shader_validation_ignores_unprepared_suffix() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
@@ -1816,16 +1902,33 @@ fn void graphics_pipeline_batch_shader_validation_releases_prepared_identities()
     gpu::GraphicsPipelineDesc[2] descs;
     descs[0] = base_graphics_desc(&shaders, pipeline_colors[..]);
     descs[1] = descs[0];
-    gpu::PipelineHandle[2] priming_outputs;
-    gpu::create_graphics_pipelines(&device, descs[..], priming_outputs[..])!!;
-    foreach (pipeline : priming_outputs) gpu::destroy_pipeline(&device, pipeline)!!;
-    descs[1].fragment_shader = {};
+    gpu::PipelineHandle sentinel_pipeline =
+        gpu::create_graphics_pipeline(&device, &descs[0])!!;
+    descs[1].fragment_shader = {
+        .debug_name = "invalid_graphics_batch_fragment",
+    };
     gpu::PipelineHandle[2] outputs = {
         { .owner = 7, .index = 8, .generation = 9 },
         { .owner = 10, .index = 11, .generation = 12 },
     };
     gpu::PipelineHandle[2] before = outputs;
     vk::VkDeviceState* state = cache_test_state(&device);
+    uint sentinel_entry_index =
+        state.pipelines.slots[sentinel_pipeline.index].value.entry;
+    vk::ShaderId sentinel_vertex_id =
+        state.pipeline_cache.entries[sentinel_entry_index].key.vertex_shader;
+    vk::ShaderId sentinel_fragment_id =
+        state.pipeline_cache.entries[sentinel_entry_index].key.fragment_shader;
+    vk::set_pipeline_prepare_poison(state, sentinel_vertex_id);
+    defer vk::clear_pipeline_prepare_poison(state);
+    PipelineShaderDiagnosticCapture capture = {
+        .expected_operation  = "create_graphics_pipelines",
+        .expected_debug_name = "invalid_graphics_batch_fragment",
+        .expected_field      = "GraphicsPipelineDesc.fragment_shader",
+        .matched             = true,
+    };
+    state.debug_callback = &capture_pipeline_shader_diagnostic;
+    state.debug_user_data = &capture;
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
     vk::reset_pipeline_identity_stats(state);
@@ -1836,29 +1939,38 @@ fn void graphics_pipeline_batch_shader_validation_releases_prepared_identities()
         outputs[..],
     ));
 
+    state.debug_callback = null;
+    state.debug_user_data = null;
+
     assert(shader_fault == gpu::INVALID_ARGUMENT,
         "a later invalid fragment shader preserves its validation fault");
+    assert(capture.calls == 1 && capture.matched,
+        "later invalid fragment emits one exact contract diagnostic");
     assert(outputs[0] == before[0] && outputs[1] == before[1],
         "graphics shader validation leaves caller outputs unchanged");
-    assert(cache_entry_count(&device) == 0,
-        "graphics shader validation publishes no cache entry");
+    assert(cache_entry_count(&device) == 1,
+        "graphics shader validation preserves the sentinel cache entry");
     assert(vk::pipeline_shader_module_create_count(state) == shader_modules_before,
         "graphics shader validation creates no temporary shader module");
     assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
         "graphics shader validation performs no native pipeline creation");
     vk::PipelineIdentityStats stats = vk::pipeline_identity_stats(state);
-    ulong expected_owned_bytes = (ulong)shaders.vert.spirv.len
-        + (ulong)shaders.frag.spirv.len;
-    assert(vk::shader_store_live_count(state) == 0,
-        "graphics shader validation releases each prepared identity prefix");
+    assert(vk::shader_store_live_count(state) == 2,
+        "graphics shader validation preserves both sentinel identities");
+    assert(state.shader_store.entries[(uint)sentinel_vertex_id].refcount == 1
+            && state.shader_store.entries[(uint)sentinel_fragment_id].refcount == 1,
+        "graphics cleanup ignores the poisoned unprepared fragment suffix");
     assert(vk::shader_store_index_consistent(state),
         "graphics shader validation preserves the shader index and free list");
-    assert(stats.shader_owned_bytes_cloned == expected_owned_bytes
-            && stats.shader_owned_bytes_freed == expected_owned_bytes,
-        "graphics shader validation frees every prepared clone exactly once");
+    assert(stats.shader_owned_bytes_cloned == 0
+            && stats.shader_owned_bytes_freed == 0,
+        "graphics shader validation balances every prepared sentinel retain");
+    gpu::destroy_pipeline(&device, sentinel_pipeline)!!;
+    assert(vk::shader_store_live_count(state) == 0,
+        "destroying the sentinel releases both cache-owned identities");
 }
 
-fn void graphics_pipeline_shader_validation_releases_vertex_identity() @test {
+fn void graphics_pipeline_shader_validation_reports_contract_failure() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
@@ -1868,16 +1980,31 @@ fn void graphics_pipeline_shader_validation_releases_vertex_identity() @test {
     }};
     gpu::GraphicsPipelineDesc desc =
         base_graphics_desc(&shaders, pipeline_colors[..]);
-    desc.fragment_shader = {};
+    desc.fragment_shader = {
+        .debug_name = "invalid_graphics_fragment",
+    };
     vk::VkDeviceState* state = cache_test_state(&device);
+    PipelineShaderDiagnosticCapture capture = {
+        .expected_operation  = "create_graphics_pipeline",
+        .expected_debug_name = "invalid_graphics_fragment",
+        .expected_field      = "GraphicsPipelineDesc.fragment_shader",
+        .matched             = true,
+    };
+    state.debug_callback = &capture_pipeline_shader_diagnostic;
+    state.debug_user_data = &capture;
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
     vk::reset_pipeline_identity_stats(state);
 
     fault shader_fault = @catch(gpu::create_graphics_pipeline(&device, &desc));
 
+    state.debug_callback = null;
+    state.debug_user_data = null;
+
     assert(shader_fault == gpu::INVALID_ARGUMENT,
         "an invalid fragment shader preserves its validation fault");
+    assert(capture.calls == 1 && capture.matched,
+        "invalid fragment emits one exact contract diagnostic");
     assert(cache_entry_count(&device) == 0,
         "single graphics shader validation publishes no cache entry");
     assert(vk::pipeline_shader_module_create_count(state) == shader_modules_before,
@@ -1889,9 +2016,9 @@ fn void graphics_pipeline_shader_validation_releases_vertex_identity() @test {
         "single graphics shader validation releases the vertex identity");
     assert(vk::shader_store_index_consistent(state),
         "single graphics shader validation preserves shader-store structure");
-    assert(stats.shader_owned_bytes_cloned == shaders.vert.spirv.len
-            && stats.shader_owned_bytes_freed == shaders.vert.spirv.len,
-        "single graphics shader validation frees the vertex clone exactly once");
+    assert(stats.shader_owned_bytes_cloned == 0
+            && stats.shader_owned_bytes_freed == 0,
+        "single graphics shader validation faults before interning");
 }
 
 fn void pipeline_batch_invalid_state_prevalidates_transactionally() @test {

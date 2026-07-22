@@ -79,10 +79,10 @@ work counts are blocking; `ns/submit` remains advisory.
 
 The pipeline-cache benchmark separately interns synthetic 1 KiB, 64 KiB, and
 1 MiB identities. For every size, its blocking counters require one complete
-owned clone and free, one compact-key probe, and zero SPIR-V bytes cloned or
-compared by post-intern pipeline lookup. Interning probes and collision bytes
-are reported separately. Boundary elapsed time is advisory; the exact work
-counters are the regression gate.
+owned clone and free and one compact-key probe. The source-contract gate proves
+that post-intern pipeline lookup has no SPIR-V byte path; interning probes and
+collision bytes are reported separately. Boundary elapsed time is advisory;
+the exact work counters and structural gate are the regression evidence.
 
 Release runs use deliberately broad order-of-magnitude thresholds:
 

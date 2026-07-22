@@ -232,7 +232,6 @@ def require_measurement(output, target, enforce_thresholds=True):
                 rf"^identity size_bytes={byte_count} intern_probes=[0-9]+ "
                 rf"intern_bytes_compared=[0-9]+ "
                 rf"owned_bytes_cloned={byte_count} pipeline_key_probes=1 "
-                rf"pipeline_bytes_compared=0 pipeline_bytes_cloned=0 "
                 rf"owned_bytes_freed={byte_count} elapsed_ns=[0-9]+$",
                 re.MULTILINE,
             )

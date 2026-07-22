@@ -303,16 +303,16 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
                 release_prepared_shader_locked(
                     state,
                     prepared_vertex_shader,
-                )!;
+                )!!;
                 release_prepared_shader_locked(
                     state,
                     prepared_fragment_shader,
-                )!;
+                )!!;
                 return handle;
             }
             entry.refcount--;
-            release_prepared_shader_locked(state, prepared_vertex_shader)!;
-            release_prepared_shader_locked(state, prepared_fragment_shader)!;
+            release_prepared_shader_locked(state, prepared_vertex_shader)!!;
+            release_prepared_shader_locked(state, prepared_fragment_shader)!!;
             return gpu::SLOT_TABLE_FULL~;
         }
     }
@@ -497,11 +497,11 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
             release_prepared_shader_locked(
                 state,
                 prepared_vertex_shader,
-            )!;
+            )!!;
             release_prepared_shader_locked(
                 state,
                 prepared_fragment_shader,
-            )!;
+            )!!;
             entry_index = raced;
             pipeline = state.pipeline_cache.entries[raced].pipeline;
         } else if (try idx = insert_entry(
@@ -541,6 +541,18 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
     validate_graphics_pipeline_desc(state, desc)!;
+    validate_pipeline_shader_code(
+        state:          state,
+        code:           &desc.vertex_shader,
+        operation:      "create_graphics_pipeline",
+        rejected_field: "GraphicsPipelineDesc.vertex_shader",
+    )!;
+    validate_pipeline_shader_code(
+        state:          state,
+        code:           &desc.fragment_shader,
+        operation:      "create_graphics_pipeline",
+        rejected_field: "GraphicsPipelineDesc.fragment_shader",
+    )!;
     if (!pipeline_handle_capacity_available(state, 1)) {
         return gpu::SLOT_TABLE_FULL~;
     }
@@ -582,7 +594,9 @@ fn void? vk_create_graphics_pipelines(
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
 
-    foreach (&desc : descs) validate_graphics_pipeline_desc(state, desc)!;
+    foreach (&desc : descs) {
+        validate_graphics_pipeline_desc(state, desc)!;
+    }
     if (!pipeline_handle_capacity_available(state, descs.len)) {
         return gpu::SLOT_TABLE_FULL~;
     }
@@ -592,6 +606,10 @@ fn void? vk_create_graphics_pipelines(
             mem::talloc_array(PreparedShaderIdentity, descs.len);
         PreparedShaderIdentity[] prepared_fragment =
             mem::talloc_array(PreparedShaderIdentity, descs.len);
+        $if env::TESTING:
+            poison_unprepared_shader_identities(state, prepared_vertex);
+            poison_unprepared_shader_identities(state, prepared_fragment);
+        $endif
         usz prepared_vertex_count = 0;
         usz prepared_fragment_count = 0;
         defer release_prepared_shaders(
@@ -602,21 +620,37 @@ fn void? vk_create_graphics_pipelines(
             state,
             prepared_vertex[:prepared_vertex_count],
         );
-        {
-            state.resource_mutex.lock()!!;
-            defer state.resource_mutex.unlock();
-            foreach (i, &desc : descs) {
+        foreach (i, &desc : descs) {
+            validate_pipeline_shader_code(
+                state:          state,
+                code:           &desc.vertex_shader,
+                operation:      "create_graphics_pipelines",
+                rejected_field: "GraphicsPipelineDesc.vertex_shader",
+            )!;
+            {
+                state.resource_mutex.lock()!!;
+                defer state.resource_mutex.unlock();
                 prepared_vertex[i] = prepare_shader_identity_locked(
                     state,
                     &desc.vertex_shader,
                 )!;
-                prepared_vertex_count++;
+            }
+            prepared_vertex_count++;
+            validate_pipeline_shader_code(
+                state:          state,
+                code:           &desc.fragment_shader,
+                operation:      "create_graphics_pipelines",
+                rejected_field: "GraphicsPipelineDesc.fragment_shader",
+            )!;
+            {
+                state.resource_mutex.lock()!!;
+                defer state.resource_mutex.unlock();
                 prepared_fragment[i] = prepare_shader_identity_locked(
                     state,
                     &desc.fragment_shader,
                 )!;
-                prepared_fragment_count++;
             }
+            prepared_fragment_count++;
         }
 
         PipelineBatchShader[] shaders =

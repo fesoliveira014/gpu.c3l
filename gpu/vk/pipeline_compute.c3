@@ -155,11 +155,11 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
                 .generated_dispatch_layout = entry.generated_dispatch_layout,
                 .entry                     = hit,
             })) {
-                release_prepared_shader_locked(state, prepared_shader)!;
+                release_prepared_shader_locked(state, prepared_shader)!!;
                 return handle;
             }
             entry.refcount--;
-            release_prepared_shader_locked(state, prepared_shader)!;
+            release_prepared_shader_locked(state, prepared_shader)!!;
             return gpu::SLOT_TABLE_FULL~;
         }
     }
@@ -213,7 +213,7 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     if (raced != PIPELINE_ENTRY_NONE) {
         vk::destroy_pipeline(state.device, pipeline, null);
         state.pipeline_cache.entries[raced].refcount++;
-        release_prepared_shader_locked(state, prepared_shader)!;
+        release_prepared_shader_locked(state, prepared_shader)!!;
         entry_index = raced;
     } else if (try idx = insert_entry(
         state: state,
@@ -252,6 +252,12 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
+    validate_pipeline_shader_code(
+        state:          state,
+        code:           &desc.shader,
+        operation:      "create_compute_pipeline",
+        rejected_field: "ComputePipelineDesc.shader",
+    )!;
     if (!pipeline_handle_capacity_available(state, 1)) {
         return gpu::SLOT_TABLE_FULL~;
     }
@@ -288,18 +294,25 @@ fn void? vk_create_compute_pipelines(
     @pool() {
         PreparedShaderIdentity[] prepared =
             mem::talloc_array(PreparedShaderIdentity, descs.len);
+        $if env::TESTING:
+            poison_unprepared_shader_identities(state, prepared);
+        $endif
         usz prepared_count = 0;
         defer release_prepared_shaders(state, prepared[:prepared_count]);
-        {
+        foreach (i, &desc : descs) {
+            validate_pipeline_shader_code(
+                state:          state,
+                code:           &desc.shader,
+                operation:      "create_compute_pipelines",
+                rejected_field: "ComputePipelineDesc.shader",
+            )!;
             state.resource_mutex.lock()!!;
             defer state.resource_mutex.unlock();
-            foreach (i, &desc : descs) {
-                prepared[i] = prepare_shader_identity_locked(
-                    state,
-                    &desc.shader,
-                )!;
-                prepared_count++;
-            }
+            prepared[i] = prepare_shader_identity_locked(
+                state,
+                &desc.shader,
+            )!;
+            prepared_count++;
         }
 
         PipelineBatchShader[] shaders = mem::talloc_array(PipelineBatchShader, descs.len);

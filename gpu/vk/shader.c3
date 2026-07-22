@@ -42,13 +42,21 @@ struct PipelineIdentityStats @if(env::TESTING || $feature(PIPELINE_CACHE_STATS))
     ulong shader_owned_bytes_cloned;
     ulong shader_owned_bytes_freed;
     ulong pipeline_key_probes;
-    ulong pipeline_lookup_bytes_compared;
-    ulong pipeline_lookup_bytes_cloned;
 }
 
 struct PipelineIdentityProbeResult @if(env::TESTING || $feature(PIPELINE_CACHE_STATS)) {
     PipelineIdentityStats interning;
     PipelineIdentityStats lookup;
+}
+
+struct PipelineShaderModule {
+    vk::ShaderModule shader_module;
+    char[gpu::SHADER_ENTRY_POINT_CAP] entry_point;
+}
+
+struct PipelineBatchShader {
+    ShaderId             id;
+    PipelineShaderModule native;
 }
 
 fn void note_shader_intern_probe(VkDeviceState* state) {
@@ -98,8 +106,6 @@ fn void reset_pipeline_identity_stats(
     state.shader_owned_bytes_cloned = 0;
     state.shader_owned_bytes_freed = 0;
     state.pipeline_key_probes = 0;
-    state.pipeline_lookup_bytes_compared = 0;
-    state.pipeline_lookup_bytes_cloned = 0;
 }
 
 fn PipelineIdentityStats pipeline_identity_stats(
@@ -111,8 +117,6 @@ fn PipelineIdentityStats pipeline_identity_stats(
         .shader_owned_bytes_cloned     = state.shader_owned_bytes_cloned,
         .shader_owned_bytes_freed      = state.shader_owned_bytes_freed,
         .pipeline_key_probes           = state.pipeline_key_probes,
-        .pipeline_lookup_bytes_compared = state.pipeline_lookup_bytes_compared,
-        .pipeline_lookup_bytes_cloned   = state.pipeline_lookup_bytes_cloned,
     };
 }
 
@@ -268,6 +272,34 @@ fn void release_prepared_shaders(
     }
 }
 
+fn void poison_unprepared_shader_identities(
+    VkDeviceState* state,
+    PreparedShaderIdentity[] prepared,
+) @if(env::TESTING) {
+    if (!state.pipeline_prepare_poison_enabled) return;
+    foreach (&identity : prepared) {
+        *identity = {
+            .id       = state.pipeline_prepare_poison_id,
+            .retained = true,
+        };
+    }
+}
+
+fn void set_pipeline_prepare_poison(
+    VkDeviceState* state,
+    ShaderId id,
+) @if(env::TESTING) {
+    state.pipeline_prepare_poison_id = id;
+    state.pipeline_prepare_poison_enabled = true;
+}
+
+fn void clear_pipeline_prepare_poison(
+    VkDeviceState* state,
+) @if(env::TESTING) {
+    state.pipeline_prepare_poison_enabled = false;
+    state.pipeline_prepare_poison_id = SHADER_ID_INVALID;
+}
+
 fn gpu::ShaderCode shader_store_code(
     ShaderStoreEntry* entry,
     ZString debug_name,
@@ -347,16 +379,6 @@ fn void destroy_shader_store(VkDeviceState* state) {
     }
     state.shader_store.free_head = 0;
     state.shader_store.next_new = 0;
-}
-
-struct PipelineShaderModule {
-    vk::ShaderModule shader_module;
-    char[gpu::SHADER_ENTRY_POINT_CAP] entry_point;
-}
-
-struct PipelineBatchShader {
-    ShaderId             id;
-    PipelineShaderModule native;
 }
 
 <* Fault SHADER_INVALID on any set other than 0 or a set-0 binding that breaks
@@ -491,6 +513,23 @@ fn fault report_shader_contract_failure(
     );
 }
 
+fn void? validate_pipeline_shader_code(
+    VkDeviceState* state,
+    gpu::ShaderCode* code,
+    ZString operation,
+    ZString rejected_field,
+) {
+    if (code != null && code.is_valid()) return;
+    return report_shader_contract_failure(
+        state:          state,
+        operation:      operation,
+        public_fault:   gpu::INVALID_ARGUMENT,
+        debug_name:     code == null ? null : code.debug_name,
+        rejected_field: rejected_field,
+        invariant:      "shader code must come from prepare_shader_code",
+    )~;
+}
+
 <* Validate one prepared shader and create the temporary native module used by
    a single pipeline build. *>
 fn PipelineShaderModule? create_pipeline_shader_module(
@@ -500,16 +539,12 @@ fn PipelineShaderModule? create_pipeline_shader_module(
     ZString operation,
     ZString rejected_field,
 ) {
-    if (code == null || !code.is_valid()) {
-        return report_shader_contract_failure(
-            state:          state,
-            operation:      operation,
-            public_fault:   gpu::INVALID_ARGUMENT,
-            debug_name:     code == null ? null : code.debug_name,
-            rejected_field: rejected_field,
-            invariant:      "shader code must come from prepare_shader_code",
-        )~;
-    }
+    validate_pipeline_shader_code(
+        state:          state,
+        code:           code,
+        operation:      operation,
+        rejected_field: rejected_field,
+    )!;
     if (code.stage != expected_stage) {
         return report_shader_contract_failure(
             state:          state,

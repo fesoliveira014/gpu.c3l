@@ -70,20 +70,17 @@ PIPELINE_OUTPUT = "\n".join(
         (
             "identity size_bytes=1024 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=1024 "
-            "pipeline_key_probes=1 pipeline_bytes_compared=0 "
-            "pipeline_bytes_cloned=0 owned_bytes_freed=1024 elapsed_ns=1200"
+            "pipeline_key_probes=1 owned_bytes_freed=1024 elapsed_ns=1200"
         ),
         (
             "identity size_bytes=65536 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=65536 "
-            "pipeline_key_probes=1 pipeline_bytes_compared=0 "
-            "pipeline_bytes_cloned=0 owned_bytes_freed=65536 elapsed_ns=8400"
+            "pipeline_key_probes=1 owned_bytes_freed=65536 elapsed_ns=8400"
         ),
         (
             "identity size_bytes=1048576 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=1048576 "
-            "pipeline_key_probes=1 pipeline_bytes_compared=0 "
-            "pipeline_bytes_cloned=0 owned_bytes_freed=1048576 elapsed_ns=94000"
+            "pipeline_key_probes=1 owned_bytes_freed=1048576 elapsed_ns=94000"
         ),
     )
 )
@@ -442,14 +439,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 PIPELINE_OUTPUT.replace(missing, ""),
                 "pipeline_cache_bench",
             )
-
-    def test_pipeline_cache_rejects_post_intern_byte_work(self):
-        runner = load_runner()
-        for field in ("pipeline_bytes_compared", "pipeline_bytes_cloned"):
-            with self.subTest(field=field):
-                output = PIPELINE_OUTPUT.replace(f"{field}=0", f"{field}=1", 1)
-                with self.assertRaisesRegex(ValueError, "nonzero after interning"):
-                    runner.require_measurement(output, "pipeline_cache_bench")
 
     def test_pipeline_cache_rejects_malformed_identity_evidence(self):
         runner = load_runner()
