@@ -1,9 +1,7 @@
 module gpu::surface::wayland;
 
 import gpu @public;
-
-typedef DisplayHandle = void*;
-typedef SurfaceHandle = void*;
+import gpu::internal @public;
 
 <* Create a runtime-owned Wayland surface from native handles. *>
 fn gpu::Surface? create_surface(
@@ -17,7 +15,7 @@ fn gpu::Surface? create_surface(
         return gpu::INVALID_ARGUMENT~;
     }
 
-    gpu::RuntimeData* runtime_data = gpu::resolve_runtime(runtime);
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(runtime);
     if (runtime_data == null) return gpu::INVALID_HANDLE~;
     if (runtime_data.vtable.create_wayland_surface == null
         || runtime_data.vtable.destroy_surface == null) {
@@ -33,5 +31,5 @@ fn gpu::Surface? create_surface(
         runtime_data.backend_state,
         backend_surface,
     );
-    return gpu::register_surface(runtime, backend_surface);
+    return gpu::internal::register_surface(runtime, backend_surface);
 }
