@@ -173,6 +173,12 @@ LIVE_RETIRED_PATTERNS = {
     "publish_sampler": re.compile(r"\bpublish_sampler\b"),
 }
 RETIRED_DESC_FIELDS = {
+    "RuntimeDesc.enable_validation": re.compile(
+        r"(?:\bRuntimeDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
+        r"|\bfn\s+(?:gpu::)?RuntimeDesc\b[^\r\n=]*=>\s*)\{"
+        r"(?:(?!\};).)*?\.enable_validation\s*=",
+        re.DOTALL,
+    ),
     "TextureDesc.dimension/depth": re.compile(
         r"\bTextureDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*\{"
         r"(?:(?!\};).)*?\.(?:dimension|depth)\s*=",

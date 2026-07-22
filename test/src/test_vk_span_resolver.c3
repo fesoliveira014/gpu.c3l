@@ -298,7 +298,6 @@ fn void independent_span_diagnostic_uses_allocation_identity() @test {
     SpanDiagnosticCapture capture;
     fixture.state.debug_callback = &capture_span_diagnostic;
     fixture.state.debug_user_data = &capture;
-    vk::bind_command_diagnostic_sink(&fixture.state);
     gpu::GpuSpan escaping = fixture_allocation_span(&fixture, 56, 16);
 
     fault span_fault = @catch(vk::resolve_span_slot(

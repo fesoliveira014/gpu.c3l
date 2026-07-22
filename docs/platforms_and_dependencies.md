@@ -293,7 +293,8 @@ These belong in testing documentation, not in core code.
 linux (ubuntu-24.04, blocking):
     pinned c3c release, glslc, mesa-vulkan-drivers (lavapipe)
     generator unit tests, gen_abi.py --check, build_shaders.py
-    benchmark-schema tests and deterministic behavioral performance targets
+    benchmark executable builds and schema tests (no benchmark execution)
+    deterministic behavioral performance targets
     full test-target sweep under VK_DRIVER_FILES (any failure fails the job)
     c3c docgen API reference, uploaded as the api-reference artifact
 
@@ -305,8 +306,8 @@ windows (windows-2022, blocking):
     pinned c3c release, Vulkan SDK, MSVC env
     VMA static lib built in-job (build-vma-windows.sh)
     generator unit tests, gen_abi.py --check, build_shaders.py
-    link proof (smoke), pure-CPU targets, benchmark-schema tests, and
-    deterministic behavioral performance targets
+    link proof (smoke), pure-CPU targets, benchmark executable builds and
+    schema tests (no benchmark execution), and deterministic behavioral targets
     lavapipe (mesa-dist-win) registered under the HKLM Vulkan driver key,
     then the full Vulkan sweep — any non-capability-gated failure fails the job
 ```

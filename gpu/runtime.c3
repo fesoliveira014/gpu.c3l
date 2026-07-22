@@ -36,20 +36,20 @@ const Runtime RUNTIME_INVALID = {};
 
 <* Runtime discovery configuration; zero-initialized fields select defaults. *>
 struct RuntimeDesc {
-    BackendKind          backend;
-    ContractValidation  contract_validation;
-    bool                track_resource_lifetimes;
-    bool                enable_vulkan_validation;
-    bool                enable_debug_names;
-    uint                texture_heap_capacity;
-    uint                sampler_heap_capacity;
-    uint                texture_capacity;
-    uint                pipeline_capacity;
+    BackendKind           backend;
+    ContractValidation   contract_validation;
+    bool                 track_resource_lifetimes;
+    bool                 enable_vulkan_validation;
+    bool                 enable_debug_names;
+    uint                 texture_heap_capacity;
+    uint                 sampler_heap_capacity;
+    uint                 texture_capacity;
+    uint                 pipeline_capacity;
     // Borrowed input copied by create_runtime for later device creation.
-    char[]               pipeline_cache_data;
-    ZString              application_name;
-    DebugMessageCallback debug_callback;
-    void*                debug_user_data;
+    char[]                pipeline_cache_data;
+    ZString               application_name;
+    DebugMessageCallback  debug_callback;
+    void*                 debug_user_data;
 }
 
 struct RuntimeBackendVTable @private {
@@ -88,7 +88,7 @@ fn RuntimeDesc full_validation_runtime_desc() => {
     .enable_vulkan_validation = true,
 };
 
-fn bool contract_validation_is_known(ContractValidation policy) {
+fn bool contract_validation_is_known(ContractValidation policy) @private {
     switch (policy) {
         case ContractValidation.TRUSTED:
         case ContractValidation.OBJECT_BOUNDARIES:

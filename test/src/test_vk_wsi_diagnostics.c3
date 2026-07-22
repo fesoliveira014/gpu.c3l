@@ -53,7 +53,6 @@ fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::bind_command_diagnostic_sink(&state);
     gpu::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = "acquire_next_image",
@@ -179,7 +178,6 @@ fn void expect_wsi_result(
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::bind_command_diagnostic_sink(&state);
     gpu::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = operation,
@@ -215,7 +213,6 @@ fn void expect_silent_wsi_result(vk::Result result) {
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::bind_command_diagnostic_sink(&state);
     gpu::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = "acquire_next_image",
@@ -301,7 +298,6 @@ fn void wrapped_image_failure_is_backend_with_swapchain_identity() @test {
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::bind_command_diagnostic_sink(&state);
     gpu::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = "present",
@@ -332,7 +328,6 @@ fn void wsi_lifecycle_diagnostics_are_contract_failures() @test {
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::bind_command_diagnostic_sink(&state);
     gpu::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = "acquire_next_image",
@@ -381,7 +376,6 @@ fn void capability_failures_are_backend_only_and_success_is_silent() @test {
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::bind_command_diagnostic_sink(&state);
     gpu::vk::WsiDiagnosticContext context = {
         .state      = &state,
         .operation  = "create_swapchain",

@@ -137,13 +137,7 @@ fn fault report_contract_failure(
         .invariant      = invariant,
         .backend_text   = backend_text,
     };
-    gpu::DebugMessageCallback callback = state.command_diagnostics.callback == null
-        ? null
-        : *state.command_diagnostics.callback;
-    void* user_data = state.command_diagnostics.user_data == null
-        ? null
-        : *state.command_diagnostics.user_data;
-    gpu::dispatch_debug_message(callback, user_data, &message);
+    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     return public_fault;
 }
 

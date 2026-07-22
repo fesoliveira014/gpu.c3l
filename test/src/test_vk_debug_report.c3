@@ -417,7 +417,6 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
         .debug_callback  = &capture_debug_message,
         .debug_user_data = &capture,
     };
-    vk::bind_command_diagnostic_sink(&state);
 
     fault returned = vk::report_contract_failure(
         state:               &state,
@@ -450,7 +449,6 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
 fn void debug_names_do_not_require_validation() @test {
     gpu::RuntimeDesc desc = {
         .backend            = gpu::BackendKind.VULKAN,
-
         .enable_debug_names = true,
         .application_name   = "gpu_debug_names_test",
     };

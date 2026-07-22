@@ -173,30 +173,6 @@ fn void emit_raster_state(
     gpu::note_command_native_call();
 }
 
-<* Begin dynamic rendering with precreated attachment views. Attachments must
-   sit in their attachment layouts, have matching usage, and cover the pass
-   dimensions. *>
-fn bool render_load_op_valid(gpu::LoadOp op) {
-    switch (op) {
-        case gpu::LoadOp.LOAD:
-        case gpu::LoadOp.CLEAR:
-        case gpu::LoadOp.DONT_CARE:
-            return true;
-        default:
-            return false;
-    }
-}
-
-fn bool render_store_op_valid(gpu::StoreOp op) {
-    switch (op) {
-        case gpu::StoreOp.STORE:
-        case gpu::StoreOp.DONT_CARE:
-            return true;
-        default:
-            return false;
-    }
-}
-
 fn PreparedRenderPass? lower_render_pass(
     gpu::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
@@ -283,31 +259,8 @@ fn void? validate_render_pass_desc_fields(
     VkDeviceState* state,
     gpu::RenderPassDesc* desc,
 ) {
-    if (desc.width == 0 || desc.height == 0
-        || (desc.colors.len == 0 && desc.depth == null)
+    if (!gpu::render_pass_desc_valid(desc)
         || desc.colors.len > state.caps.max_color_attachments) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    foreach (&target : desc.colors) {
-        if (!target.view.is_valid()
-            || !render_load_op_valid(target.load_op)
-            || !render_store_op_valid(target.store_op)
-            || (target.resolve_view.is_valid()
-                && target.resolve_view == target.view)) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-    }
-    if (desc.depth != null
-        && (!desc.depth.view.is_valid()
-            || !render_load_op_valid(desc.depth.load_op)
-            || !render_store_op_valid(desc.depth.store_op))) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (desc.depth != null
-        && desc.depth.load_op == gpu::LoadOp.CLEAR
-        && (!math::is_finite(desc.depth.clear.depth)
-            || desc.depth.clear.depth < 0.0f
-            || desc.depth.clear.depth > 1.0f)) {
         return gpu::INVALID_ARGUMENT~;
     }
 }
@@ -871,11 +824,11 @@ fn void record_draw(
     CommandRecord* record = encoder_command(commands);
     push_graphics_roots(record, pipeline, vertex_root, fragment_root);
     vk::cmd_draw(
-        record.command_buffer,
-        vertex_count,
-        instance_count,
-        0,
-        0,
+        command_buffer: record.command_buffer,
+        vertex_count:   vertex_count,
+        instance_count: instance_count,
+        first_vertex:   0,
+        first_instance: 0,
     );
     gpu::note_command_native_call();
 }
@@ -1041,12 +994,12 @@ fn void record_indexed_draw(
         index_type: draw.index_type,
     );
     vk::cmd_draw_indexed(
-        record.command_buffer,
-        draw.index_count,
-        draw.instance_count,
-        0,
-        0,
-        0,
+        command_buffer: record.command_buffer,
+        index_count:    draw.index_count,
+        instance_count: draw.instance_count,
+        first_index:    0,
+        vertex_offset:  0,
+        first_instance: 0,
     );
     gpu::note_command_native_call();
 }
@@ -1688,13 +1641,13 @@ fn void record_indexed_indirect_count_draw(
         index_type: draw.index_type,
     );
     vk::cmd_draw_indexed_indirect_count(
-        record.command_buffer,
-        draw.args.slot.buffer,
-        (vk::DeviceSize)draw.args.offset,
-        draw.count.slot.buffer,
-        (vk::DeviceSize)draw.count.offset,
-        draw.max_draw_count,
-        gpu::DrawIndexedIndirectCommand::size,
+        command_buffer:      record.command_buffer,
+        buffer:              draw.args.slot.buffer,
+        offset:              (vk::DeviceSize)draw.args.offset,
+        count_buffer:        draw.count.slot.buffer,
+        count_buffer_offset: (vk::DeviceSize)draw.count.offset,
+        max_draw_count:      draw.max_draw_count,
+        stride:              gpu::DrawIndexedIndirectCommand::size,
     );
     gpu::note_command_native_call();
 }

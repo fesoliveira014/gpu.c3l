@@ -124,7 +124,6 @@ function gpu::cmd_set_raster_state
 function gpu::cmd_set_scissor
 function gpu::cmd_set_viewport
 function gpu::cmd_texture_barrier
-function gpu::contract_validation_is_known
 function gpu::create_attachment_view
 function gpu::create_compute_pipeline
 function gpu::create_compute_pipelines

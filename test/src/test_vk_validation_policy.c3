@@ -515,7 +515,6 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
         .debug_callback  = &capture_policy_diagnostic,
         .debug_user_data = &capture,
     };
-    vk::bind_command_diagnostic_sink(&state);
 
     state.validation_policy.contract = gpu::ContractValidation.TRUSTED;
     fault returned = vk::vk_report_root_contract_failure(

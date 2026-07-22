@@ -52,11 +52,6 @@ struct DeviceValidationPolicy {
     bool                    vulkan_layers;
 }
 
-struct CommandDiagnosticSink {
-    gpu::DebugMessageCallback* callback;
-    void**                     user_data;
-}
-
 struct CommandPolicyCounters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
     ulong semantic_checks;
     ulong tracking_calls;
@@ -149,7 +144,6 @@ struct VkDeviceState {
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;
-    CommandDiagnosticSink      command_diagnostics;
     bool                       memory_budget_enabled;
     bool                       draw_indirect_count;
     GeneratedWorkSupport       generated_work;
@@ -356,7 +350,7 @@ fn void? reach_device_creation_checkpoint(
     if (probe.fail_at == checkpoint) return gpu::BACKEND_ERROR~;
 }
 
-gpu::CommandOps trusted_command_ops @private = {
+const gpu::CommandOps TRUSTED_COMMAND_OPS @private = {
     .copy_buffer                 = &trusted_copy_buffer,
     .fill_buffer                 = &trusted_fill_buffer,
     .copy_buffer_to_texture      = &trusted_copy_buffer_to_texture,
@@ -384,7 +378,7 @@ gpu::CommandOps trusted_command_ops @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-gpu::CommandOps trusted_tracking_command_ops @private = {
+const gpu::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .copy_buffer                 = &trusted_tracking_copy_buffer,
     .fill_buffer                 = &trusted_tracking_fill_buffer,
     .copy_buffer_to_texture      = &trusted_tracking_copy_buffer_to_texture,
@@ -412,7 +406,7 @@ gpu::CommandOps trusted_tracking_command_ops @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-gpu::CommandOps checked_command_ops @private = {
+const gpu::CommandOps CHECKED_COMMAND_OPS @private = {
     .copy_buffer                 = &checked_copy_buffer,
     .fill_buffer                 = &checked_fill_buffer,
     .copy_buffer_to_texture      = &checked_copy_buffer_to_texture,
@@ -440,7 +434,7 @@ gpu::CommandOps checked_command_ops @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-gpu::CommandOps checked_tracking_command_ops @private = {
+const gpu::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .copy_buffer                 = &checked_tracking_copy_buffer,
     .fill_buffer                 = &checked_tracking_fill_buffer,
     .copy_buffer_to_texture      = &checked_tracking_copy_buffer_to_texture,
@@ -473,14 +467,16 @@ fn gpu::CommandOps* select_command_ops(DeviceValidationPolicy policy) {
         case gpu::ContractValidation.TRUSTED:
         case gpu::ContractValidation.OBJECT_BOUNDARIES:
             return policy.track_lifetimes
-                ? &trusted_tracking_command_ops
-                : &trusted_command_ops;
+                ? &TRUSTED_TRACKING_COMMAND_OPS
+                : &TRUSTED_COMMAND_OPS;
         case gpu::ContractValidation.FULL:
             return policy.track_lifetimes
-                ? &checked_tracking_command_ops
-                : &checked_command_ops;
+                ? &CHECKED_TRACKING_COMMAND_OPS
+                : &CHECKED_COMMAND_OPS;
         default:
-            unreachable();
+            return policy.track_lifetimes
+                ? &CHECKED_TRACKING_COMMAND_OPS
+                : &CHECKED_COMMAND_OPS;
     }
 }
 
@@ -520,13 +516,6 @@ fn void note_command_semantic_check(VkDeviceState* state) @private {
             AtomicOrdering.RELAXED,
         );
     $endif
-}
-
-fn void bind_command_diagnostic_sink(VkDeviceState* state) {
-    state.command_diagnostics = {
-        .callback  = &state.debug_callback,
-        .user_data = &state.debug_user_data,
-    };
 }
 
 fn void note_command_tracking_call(VkDeviceState* state) @private {
@@ -620,7 +609,7 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .submit                      = &vk_submit,
     .poll_completion             = &vk_poll_completion,
     .wait_completion             = &vk_wait_completion,
-    .command_ops                 = &checked_tracking_command_ops,
+    .command_ops                 = &CHECKED_TRACKING_COMMAND_OPS,
     .get_texture_format_support  = &vk_get_texture_format_support,
     .supports_texture_desc       = &vk_supports_texture_desc,
     .get_texture_requirements    = &vk_get_texture_requirements,
@@ -740,7 +729,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
-    bind_command_diagnostic_sink(state);
     state.debug_names = desc.enable_debug_names;
     state.validation_policy = desc.validation_policy;
     state.command_ops = select_command_ops(state.validation_policy);

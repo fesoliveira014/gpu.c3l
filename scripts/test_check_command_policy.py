@@ -10,19 +10,19 @@ from scripts import check_command_policy
 TABLE_SOURCE = """
 module gpu::vk;
 
-gpu::CommandOps trusted_command_ops @private = {
+const gpu::CommandOps TRUSTED_COMMAND_OPS @private = {
     .copy = &trusted_copy,
 };
 
-gpu::CommandOps trusted_tracking_command_ops @private = {
+const gpu::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .copy = &trusted_tracking_copy,
 };
 
-gpu::CommandOps checked_command_ops @private = {
+const gpu::CommandOps CHECKED_COMMAND_OPS @private = {
     .copy = &checked_copy,
 };
 
-gpu::CommandOps checked_tracking_command_ops @private = {
+const gpu::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .copy = &checked_tracking_copy,
 };
 
@@ -118,7 +118,7 @@ class CommandPolicyCheckTests(unittest.TestCase):
             self.write_source(root, "gpu/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
-                "trusted_command_ops reaches tracking work" in error
+                "TRUSTED_COMMAND_OPS reaches tracking work" in error
                 for error in errors
             ))
 
@@ -167,6 +167,20 @@ fn void overloaded_helper(uint value) {
                 in error
                 for error in errors
             ))
+
+    def test_rejects_uninventoried_command_table(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE + """
+const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
+    .copy = &trusted_copy,
+};
+"""
+            self.write_source(root, "gpu/vk/device.c3", source)
+            self.assertEqual(
+                check_command_policy.check(root),
+                ["unexpected command policy table: EXPERIMENTAL_COMMAND_OPS"],
+            )
 
 
 if __name__ == "__main__":

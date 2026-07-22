@@ -140,7 +140,7 @@ Validation controls are independent:
 
 | Control | Zero/default | Effect |
 |---|---|---|
-| `contract_validation` | `TRUSTED` | Selects library contract diagnostics. Every level rejects stale/foreign identities as mandatory safety. `OBJECT_BOUNDARIES` adds structured stale/foreign diagnostics at covered public create, query, destroy, command-lifecycle, and submit boundaries. `FULL` also enables detailed command argument, usage, layout, queue, pipeline-kind, render-compatibility, and state diagnostics. |
+| `contract_validation` | `TRUSTED` | Selects library contract diagnostics. Every level rejects stale/foreign identities at public resolve/destroy boundaries as mandatory safety. `OBJECT_BOUNDARIES` adds structured stale/foreign diagnostics at covered public create, query, destroy, command-lifecycle, and submit boundaries. `FULL` also enables detailed command argument, usage, layout, queue, pipeline-kind, render-compatibility, and state diagnostics. |
 | `track_resource_lifetimes` | `false` | When true, command records retain explicitly named resources and early destruction returns `RESOURCE_IN_USE`. When false, recording allocates and updates no reference storage; the caller proves completion before destruction. |
 | `enable_vulkan_validation` | `false` | Requests `VK_LAYER_KHRONOS_validation`. It does not select library checks or lifetime tracking. |
 | `enable_debug_names` | `false` | Requests best-effort native object naming through debug utils. It enables no checks, tracking, or layers. |

@@ -26,9 +26,12 @@ this required order:
 | 4 | `FULL` | on | on |
 
 Only mode 1 participates in release timing thresholds. All four elapsed times
-remain advisory; their exact work counters are blocking. To collect the
-former all-enabled debug configuration for the other benchmark devices in a
-separate report, run:
+remain advisory. Whenever the runner is executed locally or on a self-hosted
+machine, exact work-counter violations hard-fail the run. Hosted CI builds the
+benchmark targets and unit-tests their schemas but does not execute this
+four-mode runner; its blocking live equivalent is the `vk_validation_policy`
+behavioral target. To collect the former all-enabled debug configuration for
+the other benchmark devices in a separate report, run:
 
 ```sh
 python -B scripts/run_benchmarks.py --validation \

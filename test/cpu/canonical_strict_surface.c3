@@ -19,7 +19,6 @@ fn void pin_runtime_adapter_device() {
     };
     gpu::Device device = {};
 
-    (void)gpu::contract_validation_is_known(runtime_desc.contract_validation);
     (void)gpu::full_validation_runtime_desc();
     (void)gpu::create_runtime(&runtime_desc);
     (void)gpu::enumerate_adapters(&runtime);

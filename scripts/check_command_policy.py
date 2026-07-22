@@ -9,11 +9,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TABLES = {
-    "trusted_command_ops": False,
-    "trusted_tracking_command_ops": True,
-    "checked_command_ops": False,
-    "checked_tracking_command_ops": True,
+    "TRUSTED_COMMAND_OPS": False,
+    "TRUSTED_TRACKING_COMMAND_OPS": True,
+    "CHECKED_COMMAND_OPS": False,
+    "CHECKED_TRACKING_COMMAND_OPS": True,
 }
+# TABLES enumerates every command-policy table; POLICY_FIELDS covers backend
+# policy reads; SUPERSEDED_COMMAND_FUNCTIONS records removed dispatch roots.
+# Update the matching inventory whenever any of those sets changes.
 POLICY_FIELDS = (
     "validation_policy",
     "track_lifetimes",
@@ -21,6 +24,10 @@ POLICY_FIELDS = (
     "debug_callback",
     "debug_names",
 )
+# Delivery reads are not policy selection; keep each exception narrow and named.
+POLICY_FIELD_ALLOWED_READS = frozenset((
+    ("report_contract_failure", "debug_callback"),
+))
 TRACKING_FUNCTIONS = frozenset((
     "track_command_reference",
     "resolve_tracked_texture_command_reference",
@@ -55,7 +62,7 @@ FUNCTION_DECLARATION = re.compile(
     r"(?m)^fn\s+[^\r\n(]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*\(",
 )
 TABLE_DECLARATION = re.compile(
-    r"(?m)^gpu::CommandOps\s+([A-Za-z_][A-Za-z0-9_]*)\b[^=]*=\s*\{",
+    r"(?m)^const\s+gpu::CommandOps\s+([A-Za-z_][A-Za-z0-9_]*)\b[^=]*=\s*\{",
 )
 TABLE_ENTRY = re.compile(
     r"\.([A-Za-z_][A-Za-z0-9_]*)\s*=\s*&([A-Za-z_][A-Za-z0-9_]*)\s*,",
@@ -215,7 +222,7 @@ def command_tables(root: Path) -> dict[str, dict[str, str]]:
     for declaration in TABLE_DECLARATION.finditer(masked):
         name = declaration.group(1)
         if name not in TABLES:
-            continue
+            raise ValueError(f"unexpected command policy table: {name}")
         start = masked.find("{", declaration.start())
         end = matching_delimiter(masked, start, "{", "}")
         tables[name] = dict(TABLE_ENTRY.findall(masked[start:end + 1]))
@@ -263,15 +270,15 @@ def check(root: Path = ROOT) -> list[str]:
             + ", ".join(superseded)
         )
 
-    expected_fields = set(tables["trusted_command_ops"])
+    expected_fields = set(tables["TRUSTED_COMMAND_OPS"])
     if not expected_fields:
-        errors.append("trusted_command_ops has no command entries")
+        errors.append("TRUSTED_COMMAND_OPS has no command entries")
         return errors
     for table_name, entries in sorted(tables.items()):
         fields = set(entries)
         if fields != expected_fields:
             errors.append(
-                f"{table_name} command fields differ from trusted_command_ops"
+                f"{table_name} command fields differ from TRUSTED_COMMAND_OPS"
             )
         for field, entry in sorted(entries.items()):
             if entry not in functions:
@@ -286,6 +293,8 @@ def check(root: Path = ROOT) -> list[str]:
             key=lambda item: (item.relative, item.line, item.name),
         ):
             for field in POLICY_FIELDS:
+                if (function.name, field) in POLICY_FIELD_ALLOWED_READS:
+                    continue
                 if re.search(rf"\b{re.escape(field)}\b", function.body):
                     errors.append(
                         f"{table_name} reaches {function.relative}:{function.line}:"

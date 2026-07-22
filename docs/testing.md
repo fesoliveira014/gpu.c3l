@@ -537,8 +537,11 @@ reselection. Only trusted/no-tracking/no-layer command timings participate in
 release threshold evaluation. `--validation` still supplies the separate
 all-enabled debug run for the other benchmark devices; those timings are not
 release comparisons and pinned comparison flags are rejected. Exact schemas
-and work invariants are blocking; timings are advisory unless runner, driver,
-and profile are explicitly pinned. See [Performance](performance.md).
+and work invariants hard-fail whenever the runner is executed locally or on a
+self-hosted machine; timings are advisory unless runner, driver, and profile
+are explicitly pinned. Hosted CI only builds benchmark executables and tests
+their schemas. Its blocking live policy coverage comes from
+`vk_validation_policy`. See [Performance](performance.md).
 
 Run the behavioral performance targets directly with:
 
@@ -609,13 +612,13 @@ CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
 
 ```text
 linux (blocking): documentation/source-list, API/retired-API/backend-boundary,
-    generator and ABI drift gates; benchmark-schema tests; deterministic
-    behavioral performance targets; shader build; full lavapipe sweep; and a
-    c3c docgen API reference artifact
+    generator and ABI drift gates; benchmark executable builds and schema tests
+    (no benchmark execution); deterministic behavioral performance targets;
+    shader build; full lavapipe sweep; and a c3c docgen API reference artifact
 windows (blocking): documentation/source-list, backend-boundary, generator and
-    ABI drift gates; benchmark-schema tests; deterministic behavioral targets;
-    and the full suite via mesa-dist-win lavapipe registered in the HKLM Vulkan
-    driver registry
+    ABI drift gates; benchmark executable builds and schema tests (no benchmark
+    execution); deterministic behavioral targets; and the full suite via
+    mesa-dist-win lavapipe registered in the HKLM Vulkan driver registry
 docs-walkthrough (blocking): executes docs/getting_started.md verbatim on a
     bare runner
 ```

@@ -145,9 +145,10 @@ full_validation_runtime_desc()     -> RuntimeDesc
 
 Runtime policy has independent axes. `ContractValidation.TRUSTED` is the zero
 value and uses the direct command path. Every level rejects stale/foreign
-identities as mandatory safety; `OBJECT_BOUNDARIES` adds structured diagnostics
-for those failures at covered public resource and command-lifecycle boundaries
-while sharing that direct path. `FULL` selects detailed command semantic checks.
+identities at public resolve/destroy boundaries as mandatory safety;
+`OBJECT_BOUNDARIES` adds structured diagnostics for those failures at covered
+public resource and command-lifecycle boundaries while sharing that direct
+path. `FULL` selects detailed command semantic checks.
 `track_resource_lifetimes` independently selects command reference retention,
 and `enable_vulkan_validation` independently requests the Khronos layer.
 Debug names request best-effort native naming, while a callback only selects

@@ -667,7 +667,7 @@ fn void command_policy_selection_covers_every_contract_and_tracking_mode() @test
     uptr trusted_address = (uptr)gpu::vk::select_command_ops(policy);
     assert(
         gpu::vk::select_command_ops(policy)
-            == &gpu::vk::trusted_command_ops,
+            == &gpu::vk::TRUSTED_COMMAND_OPS,
         "trusted without tracking selects the trusted table"
     );
 
@@ -676,7 +676,7 @@ fn void command_policy_selection_covers_every_contract_and_tracking_mode() @test
         (uptr)gpu::vk::select_command_ops(policy);
     assert(
         gpu::vk::select_command_ops(policy)
-            == &gpu::vk::trusted_tracking_command_ops,
+            == &gpu::vk::TRUSTED_TRACKING_COMMAND_OPS,
         "trusted with tracking selects the trusted tracking table"
     );
 
@@ -684,14 +684,14 @@ fn void command_policy_selection_covers_every_contract_and_tracking_mode() @test
     policy.track_lifetimes = false;
     assert(
         gpu::vk::select_command_ops(policy)
-            == &gpu::vk::trusted_command_ops,
+            == &gpu::vk::TRUSTED_COMMAND_OPS,
         "object boundaries without tracking shares the trusted table"
     );
 
     policy.track_lifetimes = true;
     assert(
         gpu::vk::select_command_ops(policy)
-            == &gpu::vk::trusted_tracking_command_ops,
+            == &gpu::vk::TRUSTED_TRACKING_COMMAND_OPS,
         "object boundaries with tracking shares the trusted tracking table"
     );
 
@@ -700,7 +700,7 @@ fn void command_policy_selection_covers_every_contract_and_tracking_mode() @test
     uptr checked_address = (uptr)gpu::vk::select_command_ops(policy);
     assert(
         gpu::vk::select_command_ops(policy)
-            == &gpu::vk::checked_command_ops,
+            == &gpu::vk::CHECKED_COMMAND_OPS,
         "full validation without tracking selects the checked table"
     );
 
@@ -709,33 +709,45 @@ fn void command_policy_selection_covers_every_contract_and_tracking_mode() @test
         (uptr)gpu::vk::select_command_ops(policy);
     assert(
         gpu::vk::select_command_ops(policy)
-            == &gpu::vk::checked_tracking_command_ops,
+            == &gpu::vk::CHECKED_TRACKING_COMMAND_OPS,
         "full validation with tracking selects the checked tracking table"
     );
 
-    assert(gpu::vk::command_ops_are_complete(&gpu::vk::trusted_command_ops));
-    assert(gpu::vk::command_ops_are_complete(&gpu::vk::trusted_tracking_command_ops));
-    assert(gpu::vk::command_ops_are_complete(&gpu::vk::checked_command_ops));
-    assert(gpu::vk::command_ops_are_complete(&gpu::vk::checked_tracking_command_ops));
+    assert(gpu::vk::command_ops_are_complete(&gpu::vk::TRUSTED_COMMAND_OPS));
+    assert(gpu::vk::command_ops_are_complete(&gpu::vk::TRUSTED_TRACKING_COMMAND_OPS));
+    assert(gpu::vk::command_ops_are_complete(&gpu::vk::CHECKED_COMMAND_OPS));
+    assert(gpu::vk::command_ops_are_complete(&gpu::vk::CHECKED_TRACKING_COMMAND_OPS));
     assert(trusted_address != trusted_tracking_address);
     assert(trusted_address != checked_address);
     assert(checked_address != checked_tracking_address);
+    policy.contract = bitcast(99, gpu::ContractValidation);
+    policy.track_lifetimes = false;
     assert(
-        gpu::vk::trusted_command_ops.begin_label
-            == gpu::vk::trusted_tracking_command_ops.begin_label
-            && gpu::vk::trusted_command_ops.begin_label
-                == gpu::vk::checked_command_ops.begin_label
-            && gpu::vk::trusted_command_ops.begin_label
-                == gpu::vk::checked_tracking_command_ops.begin_label,
+        gpu::vk::select_command_ops(policy) == &gpu::vk::CHECKED_COMMAND_OPS,
+        "an unknown policy falls back to checked command recording"
+    );
+    policy.track_lifetimes = true;
+    assert(
+        gpu::vk::select_command_ops(policy)
+            == &gpu::vk::CHECKED_TRACKING_COMMAND_OPS,
+        "an unknown policy preserves requested lifetime tracking"
+    );
+    assert(
+        gpu::vk::TRUSTED_COMMAND_OPS.begin_label
+            == gpu::vk::TRUSTED_TRACKING_COMMAND_OPS.begin_label
+            && gpu::vk::TRUSTED_COMMAND_OPS.begin_label
+                == gpu::vk::CHECKED_COMMAND_OPS.begin_label
+            && gpu::vk::TRUSTED_COMMAND_OPS.begin_label
+                == gpu::vk::CHECKED_TRACKING_COMMAND_OPS.begin_label,
         "every command policy shares the label-begin entry"
     );
     assert(
-        gpu::vk::trusted_command_ops.end_label
-            == gpu::vk::trusted_tracking_command_ops.end_label
-            && gpu::vk::trusted_command_ops.end_label
-                == gpu::vk::checked_command_ops.end_label
-            && gpu::vk::trusted_command_ops.end_label
-                == gpu::vk::checked_tracking_command_ops.end_label,
+        gpu::vk::TRUSTED_COMMAND_OPS.end_label
+            == gpu::vk::TRUSTED_TRACKING_COMMAND_OPS.end_label
+            && gpu::vk::TRUSTED_COMMAND_OPS.end_label
+                == gpu::vk::CHECKED_COMMAND_OPS.end_label
+            && gpu::vk::TRUSTED_COMMAND_OPS.end_label
+                == gpu::vk::CHECKED_TRACKING_COMMAND_OPS.end_label,
         "every command policy shares the label-end entry"
     );
 }
