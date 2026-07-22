@@ -2,6 +2,8 @@
 
 import importlib.util
 import pathlib
+import subprocess
+import sys
 import unittest
 
 
@@ -20,7 +22,8 @@ LIFECYCLE_OUTPUT = "\n".join(
         "completion poll: iterations=100000 repetitions=5 median=125.0 ns/poll",
         "texture destroy: iterations=300 repetitions=5 median=410.0 ns/destroy",
         (
-            "invariants: point_allocations=0 destruction_waits=0 "
+            "invariants: point_allocations=0 destruction_queries=0 "
+            "destruction_completion_waits=0 destruction_device_waits=0 "
             "deferred_releases=0 cached_poll_queries=0 retirement_locks=0"
         ),
     )
@@ -340,7 +343,9 @@ class BenchmarkRunnerTests(unittest.TestCase):
         runner = load_runner()
         for field in (
             "point_allocations",
-            "destruction_waits",
+            "destruction_queries",
+            "destruction_completion_waits",
+            "destruction_device_waits",
             "deferred_releases",
             "cached_poll_queries",
             "retirement_locks",
@@ -461,7 +466,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     runner.require_measurement(output, "allocation_bench")
 
-    def test_regression_thresholds_reject_order_of_magnitude_slowdowns(self):
+    def test_unpinned_regression_thresholds_are_advisory(self):
         runner = load_runner()
         cases = (
             ("allocation_bench", ALLOCATION_OUTPUT.replace("23.75", "5001.0")),
@@ -474,8 +479,52 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         for target, output in cases:
             with self.subTest(target=target):
-                with self.assertRaisesRegex(ValueError, "regression threshold"):
-                    runner.require_measurement(output, target)
+                advisories = runner.require_measurement(output, target)
+                self.assertEqual(len(advisories), 1)
+                self.assertIn("regression threshold", advisories[0])
+
+    def test_pinned_regression_thresholds_are_required(self):
+        runner = load_runner()
+        output = ALLOCATION_OUTPUT.replace("23.75", "5001.0")
+        with self.assertRaisesRegex(ValueError, "regression threshold"):
+            runner.require_measurement(
+                output,
+                "allocation_bench",
+                enforce_thresholds=True,
+            )
+
+    def test_validation_rejects_pinned_comparison(self):
+        result = subprocess.run(
+            (
+                sys.executable,
+                str(SCRIPT),
+                "--validation",
+                "--pinned-runner",
+                "runner",
+                "--pinned-driver",
+                "driver",
+                "--comparison-profile",
+                "profile",
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "--validation cannot be combined with pinned comparison fields",
+            result.stderr,
+        )
+
+    def test_validation_skips_release_threshold_evaluation(self):
+        runner = load_runner()
+        output = ALLOCATION_OUTPUT.replace("23.75", "5001.0")
+        advisories = runner.require_measurement(
+            output,
+            "allocation_bench",
+            evaluate_thresholds=False,
+        )
+        self.assertEqual(advisories, [])
 
     def test_pipeline_cache_requires_one_native_raster_pipeline(self):
         runner = load_runner()
@@ -544,14 +593,12 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_main_validates_raw_output_before_annotation(self):
         source = SCRIPT.read_text(encoding="utf-8")
         main = source[source.index("def main()"):]
-        validation_call = (
-            "require_measurement(output, target, "
-            "enforce_thresholds=not args.validation)"
-        )
-        self.assertIn(validation_call, main)
+        self.assertIn("timing_advisories.extend(require_measurement(", main)
+        self.assertIn("enforce_thresholds=pinned", main)
+        self.assertIn("evaluate_thresholds=not args.validation", main)
         self.assertIn('"--validation"', main)
         self.assertIn('"1" if args.validation else "0"', main)
-        validation = main.index(validation_call)
+        validation = main.index("timing_advisories.extend(require_measurement(")
         annotation = main.index('annotated = f"iterations={iterations}')
         self.assertLess(validation, annotation)
 

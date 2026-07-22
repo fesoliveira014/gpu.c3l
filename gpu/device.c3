@@ -373,6 +373,9 @@ struct RecordingWorkCounters @if(env::TESTING || $feature(COMMAND_RESOLUTION_STA
     ulong image_view_creations;
     ulong vma_allocations;
     ulong generated_scratch_misses;
+    ulong generated_dispatch_emissions;
+    ulong generated_draw_emissions;
+    ulong generated_indexed_draw_emissions;
 }
 
 Atomic{ulong} command_device_registry_resolutions @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));

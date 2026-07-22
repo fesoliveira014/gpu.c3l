@@ -77,13 +77,28 @@ fn void unreferenced_destroy_is_immediate() @test {
     defer destroy_test_device(&device)!!;
     OwnedSpan owned = make_lifetime_span(&device, "immediate_unreferenced");
     gpu::GpuAllocation stale = owned.allocation;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::device_backend_state(device);
+    vk::reset_completion_work_counters(state);
+    vk::reset_destruction_work_counters(state);
 
     gpu::free_allocation(&device, &owned.allocation)!!;
     owned.span = {};
 
+    vk::CompletionWorkCounters completion =
+        vk::completion_work_counters(state);
+    vk::DestructionWorkCounters destruction =
+        vk::destruction_work_counters(state);
+
     assert(!owned.allocation.is_valid(), "successful release consumes the allocation token");
     assert(@catch(gpu::get_allocation_info(&device, stale)) == gpu::INVALID_HANDLE,
         "immediate release invalidates copied tokens without a lifecycle boundary");
+    assert(completion.native_counter_queries == 0
+        && completion.native_wait_calls == 0,
+        "quiescent release performs no native completion query or wait");
+    assert(destruction.device_waits == 0
+        && destruction.deferred_release_enqueues == 0,
+        "quiescent release performs no device wait or deferred enqueue");
 }
 
 fn void recording_references_reject_allocation_release() @test {

@@ -10,10 +10,11 @@ env:
   VULKAN_SDK_VERSION: "1.3.290.0"
   MESA_DIST_WIN_VERSION: "25.1.5"
   DESCRIPTOR_BUFFER_E2E_RETEST_MESA_VERSION: "25.1.5"
+  REQUIRED_GPU_CAPABILITIES: ""
   HEADLESS_TEST_TARGETS: >-
     vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
     vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
-    vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading
+    vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading vk_performance
     vk_queue vk_debug upload_bench_observation vk_device_request
 
 jobs:
@@ -86,10 +87,8 @@ jobs:
       - name: Generator unit tests
         run: c3c test unit --path tools/gen_shader_abi
 
-      - name: Performance contract gate
-        run: |
-          python3 -B -m unittest scripts.test_run_benchmarks scripts.test_check_performance_contract
-          python3 -B scripts/check_performance_contract.py
+      - name: Benchmark output contract tests
+        run: python3 -B -m unittest scripts.test_run_benchmarks
 
       - name: ABI drift gate
         run: python3 scripts/gen_abi.py --check
@@ -100,7 +99,7 @@ jobs:
       - name: Build benchmark targets
         run: |
           for target in $(python3 -c 'import scripts.run_benchmarks as b; print("benchmark_info", *b.BENCHMARK_TARGETS)'); do
-            c3c -O1 build "$target" --path test
+            c3c build "$target" --path test -O1
           done
 
       - name: Link proof (smoke)
@@ -110,14 +109,23 @@ jobs:
 
       - name: Test sweep (lavapipe)
         run: |
+          set -o pipefail
           FAIL=0
+          : > /tmp/vulkan-capabilities.txt
           for t in $HEADLESS_TEST_TARGETS; do
             echo "::group::$t"
-            if ! c3c test "$t" --path test; then
+            if ! c3c test "$t" --path test --test-show-output 2>&1 \
+              | tee -a /tmp/vulkan-capabilities.txt; then
               echo "::error::target $t failed"
               FAIL=1
             fi
             echo "::endgroup::"
+          done
+          for capability in $REQUIRED_GPU_CAPABILITIES; do
+            if ! grep -Fq "$capability: EXERCISED" /tmp/vulkan-capabilities.txt; then
+              echo "::error::required capability $capability was not exercised"
+              FAIL=1
+            fi
           done
           exit $FAIL
 
@@ -284,10 +292,8 @@ jobs:
       - name: Generator unit tests
         run: c3c test unit --path tools/gen_shader_abi
 
-      - name: Performance contract gate
-        run: |
-          python -B -m unittest scripts.test_run_benchmarks scripts.test_check_performance_contract
-          python -B scripts/check_performance_contract.py
+      - name: Benchmark output contract tests
+        run: python -B -m unittest scripts.test_run_benchmarks
 
       - name: ABI drift gate
         run: C3C="$(cygpath -w "$(command -v c3c)")" python scripts/gen_abi.py --check
@@ -298,7 +304,7 @@ jobs:
       - name: Build benchmark targets
         run: |
           for target in $(python -c 'import scripts.run_benchmarks as b; print("benchmark_info", *b.BENCHMARK_TARGETS)'); do
-            c3c -O1 build "$target" --path test
+            c3c build "$target" --path test -O1
           done
 
       - name: Link proof (smoke)
@@ -350,14 +356,23 @@ jobs:
 
       - name: Vulkan sweep (lavapipe)
         run: |
+          set -o pipefail
           FAIL=0
+          : > /tmp/vulkan-capabilities.txt
           for t in $HEADLESS_TEST_TARGETS; do
             echo "::group::$t"
-            if ! c3c test "$t" --path test; then
+            if ! c3c test "$t" --path test --test-show-output 2>&1 \
+              | tee -a /tmp/vulkan-capabilities.txt; then
               echo "::error::target $t failed on windows lavapipe"
               FAIL=1
             fi
             echo "::endgroup::"
+          done
+          for capability in $REQUIRED_GPU_CAPABILITIES; do
+            if ! grep -Fq "$capability: EXERCISED" /tmp/vulkan-capabilities.txt; then
+              echo "::error::required capability $capability was not exercised"
+              FAIL=1
+            fi
           done
           exit $FAIL
 

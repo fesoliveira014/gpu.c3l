@@ -192,6 +192,31 @@ fn void note_generated_scratch_miss(VkDeviceState* state) {
     $endif
 }
 
+fn void note_generated_native_emission(
+    VkDeviceState* state,
+    gpu::GeneratedWorkKind kind,
+) {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        switch (kind) {
+            case gpu::GeneratedWorkKind.DISPATCH:
+                (void)state.generated_dispatch_emissions.add(
+                    1,
+                    AtomicOrdering.RELAXED,
+                );
+            case gpu::GeneratedWorkKind.DRAW:
+                (void)state.generated_draw_emissions.add(
+                    1,
+                    AtomicOrdering.RELAXED,
+                );
+            case gpu::GeneratedWorkKind.DRAW_INDEXED:
+                (void)state.generated_indexed_draw_emissions.add(
+                    1,
+                    AtomicOrdering.RELAXED,
+                );
+        }
+    $endif
+}
+
 fn vk::CommandPoolCreateFlags context_pool_create_flags() {
     return (vk::CommandPoolCreateFlags)(
         (uint)vk::CommandPoolCreateFlagBits.TRANSIENT_BIT
@@ -663,6 +688,12 @@ fn void enqueue_retired_command_buffer_locked(
     GeneratedPreprocessBuffer[] generated_preprocess = {},
 ) {
     if (buffer == null) return;
+    $if env::TESTING || $feature(DESTRUCTION_WORK_STATS):
+        (void)state.destruction_deferred_release_enqueues.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
     RecordingContextState* context = state.recording_contexts.get(
         context_handle,
     )!!;
@@ -1648,6 +1679,8 @@ fn void? execute_generated_work(
     ResolvedSpan* records,
     ResolvedSpan* count,
     uint max_count,
+    ResolvedSpan* index_span = null,
+    gpu::IndexType index_type = gpu::IndexType.U32,
 ) {
     vk::GeneratedCommandsPipelineInfoEXT pipeline_info =
         vk::generated_commands_pipeline_info_ext()
@@ -1688,11 +1721,19 @@ fn void? execute_generated_work(
             .set_preprocess_address(preprocess.address)
             .set_preprocess_size(preprocess.size);
     }
+    if (index_span != null) {
+        bind_index_buffer(
+            cb:         record.command_buffer,
+            index_span: index_span,
+            index_type: index_type,
+        );
+    }
     state.device_dispatch.generated_work.cmd_execute_generated_commands(
         record.command_buffer,
         vk::FALSE,
         &info,
     );
+    note_generated_native_emission(state, kind);
     gpu::note_command_native_call();
 }
 
@@ -1951,6 +1992,15 @@ fn gpu::RecordingWorkCounters command_recording_work_counters(
         .generated_scratch_misses = state.generated_scratch_misses.load(
             AtomicOrdering.RELAXED,
         ),
+        .generated_dispatch_emissions =
+            state.generated_dispatch_emissions.load(AtomicOrdering.RELAXED),
+        .generated_draw_emissions = state.generated_draw_emissions.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .generated_indexed_draw_emissions =
+            state.generated_indexed_draw_emissions.load(
+                AtomicOrdering.RELAXED,
+            ),
     };
 }
 
@@ -1968,6 +2018,12 @@ fn void reset_command_recording_work_counters(
     state.recording_image_view_creations.store(0, AtomicOrdering.RELAXED);
     state.recording_vma_allocations.store(0, AtomicOrdering.RELAXED);
     state.generated_scratch_misses.store(0, AtomicOrdering.RELAXED);
+    state.generated_dispatch_emissions.store(0, AtomicOrdering.RELAXED);
+    state.generated_draw_emissions.store(0, AtomicOrdering.RELAXED);
+    state.generated_indexed_draw_emissions.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
 }
 
 fn vk::IndirectCommandsLayoutEXT? create_generated_work_layout(

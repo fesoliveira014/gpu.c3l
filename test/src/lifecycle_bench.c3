@@ -87,7 +87,9 @@ fn gpu::TextureHandle create_bench_texture(gpu::Device* device) {
 
 fn double measure_texture_destruction(
     gpu::Device* device,
-    ulong* wait_calls,
+    ulong* completion_queries,
+    ulong* completion_waits,
+    ulong* device_waits,
     ulong* deferred_releases,
 ) {
     gpu::TextureHandle[DESTRUCTION_ITERATIONS] textures;
@@ -97,21 +99,21 @@ fn double measure_texture_destruction(
 
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(*device);
-    vk::SubmitStats submit_before = vk::submit_stats(state);
-    vk::CommandBufferStats commands_before = vk::command_buffer_stats(state);
+    vk::reset_completion_work_counters(state);
+    vk::reset_destruction_work_counters(state);
     std::time::Clock start = std::time::clock::now();
     foreach (texture : textures) {
         gpu::destroy_texture(device, texture)!!;
     }
     long elapsed_ns = (long)start.to_now();
-    vk::SubmitStats submit_after = vk::submit_stats(state);
-    vk::CommandBufferStats commands_after = vk::command_buffer_stats(state);
-    *wait_calls += submit_after.completion_wait_calls
-        - submit_before.completion_wait_calls;
-    if (commands_after.pending > commands_before.pending) {
-        *deferred_releases +=
-            (ulong)(commands_after.pending - commands_before.pending);
-    }
+    vk::CompletionWorkCounters completion =
+        vk::completion_work_counters(state);
+    vk::DestructionWorkCounters destruction =
+        vk::destruction_work_counters(state);
+    *completion_queries += completion.native_counter_queries;
+    *completion_waits += completion.native_wait_calls;
+    *device_waits += destruction.device_waits;
+    *deferred_releases += destruction.deferred_release_enqueues;
     return (double)elapsed_ns / (double)DESTRUCTION_ITERATIONS;
 }
 
@@ -136,12 +138,16 @@ fn int main() {
         native_queries:   &warm_native_queries,
         retirement_locks: &warm_retirement_locks,
     );
-    ulong warm_destruction_waits;
+    ulong warm_destruction_queries;
+    ulong warm_completion_waits;
+    ulong warm_device_waits;
     ulong warm_deferred_releases;
     (void)measure_texture_destruction(
-        &device,
-        &warm_destruction_waits,
-        &warm_deferred_releases,
+        device:            &device,
+        completion_queries: &warm_destruction_queries,
+        completion_waits:   &warm_completion_waits,
+        device_waits:       &warm_device_waits,
+        deferred_releases:  &warm_deferred_releases,
     );
 
     vk::SubmitStats submit_before = vk::submit_stats(state);
@@ -150,7 +156,9 @@ fn int main() {
     double[LIFECYCLE_REPETITIONS] poll_results;
     double[LIFECYCLE_REPETITIONS] destruction_results;
     gpu::CompletionPoint completion;
-    ulong destruction_waits;
+    ulong destruction_queries;
+    ulong destruction_completion_waits;
+    ulong destruction_device_waits;
     ulong deferred_releases;
     ulong cached_poll_native_queries;
     ulong cached_poll_retirement_locks;
@@ -163,9 +171,11 @@ fn int main() {
             retirement_locks: &cached_poll_retirement_locks,
         );
         destruction_results[i] = measure_texture_destruction(
-            &device,
-            &destruction_waits,
-            &deferred_releases,
+            device:             &device,
+            completion_queries: &destruction_queries,
+            completion_waits:   &destruction_completion_waits,
+            device_waits:       &destruction_device_waits,
+            deferred_releases:  &deferred_releases,
         );
     }
     vk::SubmitStats submit_after = vk::submit_stats(state);
@@ -178,7 +188,10 @@ fn int main() {
         "every measured submit publishes one completion point");
     assert(point_allocations == 0,
         "scalar completion publication performs no table allocation");
-    assert(destruction_waits == 0,
+    assert(destruction_queries == 0
+        && destruction_completion_waits == 0,
+        "immediate destruction performs no completion query or wait");
+    assert(destruction_device_waits == 0,
         "immediate destruction performs no device wait");
     assert(deferred_releases == 0,
         "immediate destruction enqueues no deferred release");
@@ -206,9 +219,11 @@ fn int main() {
         lifecycle_median(destruction_results),
     );
     io::printfn(
-        "invariants: point_allocations=%d destruction_waits=%d deferred_releases=%d cached_poll_queries=%d retirement_locks=%d",
+        "invariants: point_allocations=%d destruction_queries=%d destruction_completion_waits=%d destruction_device_waits=%d deferred_releases=%d cached_poll_queries=%d retirement_locks=%d",
         point_allocations,
-        destruction_waits,
+        destruction_queries,
+        destruction_completion_waits,
+        destruction_device_waits,
         deferred_releases,
         cached_poll_native_queries,
         cached_poll_retirement_locks,

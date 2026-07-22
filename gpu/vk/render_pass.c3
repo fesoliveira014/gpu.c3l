@@ -851,11 +851,6 @@ fn void? vk_cmd_draw_indexed_generated(
         required:   0,
         operation:  "cmd_draw_indexed_generated",
     )!;
-    bind_index_buffer(
-        cb:         record.command_buffer,
-        index_span: &resolved_index,
-        index_type: index_type,
-    );
     uint stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT
         | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     execute_generated_work(
@@ -868,5 +863,7 @@ fn void? vk_cmd_draw_indexed_generated(
         records:       &resolved_records,
         count:         &resolved_count,
         max_count:     max_draw_count,
+        index_span:    &resolved_index,
+        index_type:    index_type,
     )!;
 }

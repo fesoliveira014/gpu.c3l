@@ -3,6 +3,7 @@ module gpu_test;
 import gpu @public;
 import gpu::vk @public;
 import vk;
+import std::io;
 
 const char[*] GENERATED_SCRATCH_SPIRV =
     $embed("shaders/root_pointer.comp.spv");
@@ -14,7 +15,12 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.generated_work) return;
+    if (!gpu::get_device_caps(&device)!!.generated_work) {
+        io::printfn(
+            "generated-scratch-reservation: NOT EXERCISED (generated work unavailable)",
+        );
+        return;
+    }
 
     gpu::ShaderDesc shader_desc = {
         .stage       = gpu::ShaderStage.COMPUTE,
@@ -133,4 +139,5 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
     )!!;
+    io::printfn("generated-scratch-reservation: EXERCISED");
 }

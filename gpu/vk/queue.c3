@@ -24,6 +24,7 @@ const uint MAX_SELECTED_QUEUE_INDICES = 3;
 enum SubmissionCheckpoint : uint {
     NATIVE_ACCEPTED,
     BATCHES_PUBLISHED,
+    TOKEN_PUBLISHED,
 }
 
 struct QueueFamilies {
@@ -2316,6 +2317,13 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 record.state = CommandState.SUBMITTED;
             }
             publish_queue_completion_locked(state, point)!!;
+            $if env::TESTING:
+                reach_submission_checkpoint(
+                    state,
+                    SubmissionCheckpoint.TOKEN_PUBLISHED,
+                    point,
+                );
+            $endif
             submitted = point;
         }
 

@@ -359,8 +359,7 @@ python scripts/check_docs.py
 python scripts/check_public_api.py
 python scripts/check_backend_dispatch.py
 python scripts/check_retired_api.py
-python -B -m unittest scripts.test_run_benchmarks scripts.test_check_performance_contract
-python -B scripts/check_performance_contract.py
+python -B -m unittest scripts.test_run_benchmarks
 ```
 
 Smoke target, as CI runs it:
@@ -384,7 +383,7 @@ The blocking headless matrix is shared by Linux and Windows:
 ```text
 vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
 vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
-vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading
+vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading vk_performance
 vk_queue vk_debug upload_bench_observation vk_device_request
 ```
 
@@ -403,25 +402,21 @@ short spans, zero work, index formats, and generated-preprocess barrier masks.
 cache-hit reference stability, last-alias release, unique free-list churn,
 full-capacity preflight, and exact cleanup after partial shader preparation,
 reflection, native shader, native pipeline, cache insertion, and mid-batch
-faults. It also uses a test-only
-synchronization hook immediately before a generated-dispatch layout read,
-creates another compute pipeline on a second thread, and verifies that recording
-observes the device's unchanged singleton layout through the bound pipeline
-slot. The platform-independent source contract rejects retired
-compute-layout-cache storage, per-pipeline compute layout creation, dynamic
-raster fields in `PipelineKey`, loss of per-target immutable key state, shader
-payloads in cache entries, and byte work or renamed comparison helpers in
-`find_entry`. It also
-walks every Vulkan recording root and reachable helper across backend files,
-rejecting device/backend re-resolution, command-table lookup, lifecycle-vtable
-dispatch, post-bind pipeline resolution, and bound-cell generation validation.
-Mutation tests restore each retired `BoundPipeline` cell pointer, expected
-generation, and identity-validator seam; move a renamed `PipelineCell*` onto
-`CommandRecord`; and prove through helper relocation that moving forbidden work
-to another source file does not evade the gate. Validation-mode
-lifetime coverage also proves a recording command blocks public pipeline
-destruction, then continues execution from its cached native snapshot before
-discard releases ownership.
+faults. It uses exact interning and byte-comparison counters for collision and
+distinct-storage cases, while cache hits require compact-key probes without
+shader-byte comparison. A test-only synchronization hook immediately before a
+generated-dispatch layout read, creates another compute pipeline on a second
+thread, and verifies that recording observes the device's unchanged singleton
+layout through the bound pipeline slot. Validation-mode lifetime coverage also
+proves a recording command blocks public pipeline destruction, then continues
+from its cached native snapshot before discard releases ownership.
+
+`vk_performance` runs complete warm
+begin/bind/dispatch/end and render-pass operations against existing pipelines,
+shaders, descriptor state, texture views, and allocations. Command-buffer reset
+is allowed; host/VMA allocation, command-buffer allocation/free, image-view
+creation, pipeline/shader creation, and post-bind registry/vtable/table/policy
+resolution are required to remain zero.
 
 The benchmark runner builds nine executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
@@ -455,8 +450,7 @@ Vulkan command emitted by recording paths.
 The same target reports cold and warm recording-work snapshots. Warm host
 allocations, command-buffer allocations/frees, image-view creations, VMA
 allocations, and generated-scratch misses must all be zero; command-buffer
-resets demonstrate reuse. The source contract follows every reachable Vulkan
-recording helper and rejects those operations except at explicit cold seams.
+resets demonstrate reuse.
 Lifecycle measurements cover submission, cached completed-point polling, and
 immediate texture destruction.
 
@@ -470,17 +464,36 @@ The same benchmark reports sampler lookup occupancy 8, 64, 1,024, and 65,536
 through production hash/bucket/link/equality helpers. The runner requires a
 power-of-two bucket count at least twice occupancy and one through eight probes
 at every tier. Collision, rollback, bucket consistency, concurrent publication,
-and teardown are covered by Vulkan and CPU tests. The source contract rejects
-direct and helper-hidden whole-table scans reachable from `vk_intern_sampler`.
+and teardown are covered by Vulkan and CPU tests. Collision-chain scenarios
+require exact candidate-probe counts for head, middle, tail, and miss lookups.
 
 The lifecycle output requires `cached_poll_queries=0` and
-`retirement_locks=0` across each 100,000-poll measured interval. Run
+`retirement_locks=0` across each 100,000-poll measured interval and zero native
+completion queries/waits, device waits, and deferred-release enqueues in their
+respective intervals. Run
 `python -B scripts/run_benchmarks.py` for validation-disabled release
 evidence. Run `python -B scripts/run_benchmarks.py --validation --output
 test/build/benchmark-report-validation.md` separately for debug-layer cost.
-Timing values remain advisory; exact schemas, zero hot-path invariants, broad
-regression thresholds, and `scripts/check_performance_contract.py` are
-blocking CI gates. See [Performance](performance.md) for methods and baselines.
+Exact schemas and zero-work invariants are blocking; timings are advisory unless
+the runner, driver, and comparison profile are all explicitly pinned.
+Validation runs skip release timing comparisons and reject pinned comparison
+flags. See
+[Performance](performance.md) for methods and baselines.
+
+Run the behavioral performance targets directly with:
+
+```sh
+c3c test vk_performance --path test --test-show-output
+c3c test vk_indirect --path test --test-show-output
+c3c test vk_pipeline_cache --path test --test-show-output
+c3c test vk_queue --path test --test-show-output
+```
+
+Capability-gated tests print one terminal `EXERCISED` or `NOT EXERCISED
+(<reason>)` line. Portable lanes accept declared unavailability while
+preserving every other blocking assertion. A pinned lane sets
+`REQUIRED_GPU_CAPABILITIES` and fails unless each named capability reports
+`EXERCISED`.
 
 Distinct-adapter ownership is gated deterministically by the CPU stub suite.
 `vk_device_request` also uses two physical adapters when both support the strict
@@ -533,12 +546,14 @@ C3 0.8.0 constraints:
 CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
 
 ```text
-linux (blocking): documentation/source-list gate, generator tests, ABI drift
-    gate, shader build, full lavapipe test sweep, then a c3c docgen API
-    reference uploaded as the api-reference artifact
-windows (blocking): documentation/source-list gate and the same suite via
-    mesa-dist-win lavapipe, registered in the HKLM Vulkan driver registry;
-    private heap selection is covered by the shared mocked and native targets
+linux (blocking): documentation/source-list, API/retired-API/backend-boundary,
+    generator and ABI drift gates; benchmark-schema tests; deterministic
+    behavioral performance targets; shader build; full lavapipe sweep; and a
+    c3c docgen API reference artifact
+windows (blocking): documentation/source-list, backend-boundary, generator and
+    ABI drift gates; benchmark-schema tests; deterministic behavioral targets;
+    and the full suite via mesa-dist-win lavapipe registered in the HKLM Vulkan
+    driver registry
 docs-walkthrough (blocking): executes docs/getting_started.md verbatim on a
     bare runner
 ```
@@ -573,6 +588,8 @@ CI tiers (`.github/workflows/ci.yml`):
 | Getting-started walkthrough (docs-walkthrough job, `scripts/run_doc.py`) | linux | yes |
 | Link proof (smoke) + pure-CPU targets | windows | yes |
 | lavapipe (mesa-dist-win) Vulkan sweep | windows | yes |
+| Deterministic behavioral performance invariants | linux + windows | yes |
+| Benchmark nanosecond comparisons | portable runners | no, unless runner, driver, and profile are pinned |
 | Descriptor-buffer device/heap | windows | yes when exposed; otherwise reported not exercised |
 | Descriptor-buffer shader E2E | real hardware | pending; software ICD is reported not exercised |
 

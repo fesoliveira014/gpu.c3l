@@ -13,7 +13,7 @@ python -B scripts/run_benchmarks.py
 ```
 
 The runner builds every target with C3 `-O1`, disables validation and implicit
-layers, validates the output schemas and release thresholds, and writes
+layers, validates output schemas and zero-work fields, and writes
 `test/build/benchmark-report.md`. Use a separate report for validation cost:
 
 ```sh
@@ -22,9 +22,10 @@ python -B scripts/run_benchmarks.py --validation \
 ```
 
 Validation mode enables `RuntimeDesc.enable_validation` for every benchmark
-device and skips release-performance thresholds. Do not compare its timings
-with the release baseline. The validation layer must recognize every enabled
-Vulkan extension; otherwise its diagnostics invalidate the timing run.
+device. It does not evaluate or report release timing thresholds, and pinned
+comparison flags are rejected in this mode. Do not compare its timings with the
+release baseline. The validation layer must recognize every enabled Vulkan
+extension; otherwise its diagnostics invalidate the timing run.
 
 ## Evidence and regression gates
 
@@ -49,17 +50,24 @@ execute call in a live list receives a distinct reserved preprocess address.
 Completed or discarded lists return compatible buffers to the same recording
 context.
 
-The runner rejects nonzero hot-path invariants. The CPU-only
-`scripts/check_performance_contract.py` gate also rejects registry locking or
-pipeline construction in recording entry points, per-point allocation,
-destruction waits or deferred releases, allocation-before-reuse in the
-generated preprocess path, retired compute-layout caches, and dynamic raster
-fields in immutable pipeline keys. It walks the reachable Vulkan recording
-graph and rejects host allocation, native command-buffer allocation/free,
-image-view creation, and VMA allocation outside named cold seams. Its mutation
-tests run without a Vulkan ICD. The same gate requires hashed sampler
-bucket/link storage and rejects a whole-table scan in `vk_intern_sampler` or any
-renamed helper reachable from it.
+Required performance evidence executes complete operations and compares narrow
+subsystem snapshots:
+
+| Invariant | Required observation |
+|---|---|
+| Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and post-bind `CommandResolutionStats` |
+| Warm render pass | `RecordingWorkCounters`, pipeline/shader creation counts, and native command emission |
+| Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
+| Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
+| Immediate destruction | `CompletionWorkCounters` plus `DestructionWorkCounters` |
+| Submission ownership | Submitted-batch references, caller tokens, retained-reference counts, and ordered retirement state |
+| Bound pipeline snapshot | Exact bind-time table/cache lookups followed by zero post-bind resolution under cache churn |
+| Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and compact-key pipeline probes |
+| Sampler buckets | Exact candidate probes through collision chains at fixed occupancy tiers |
+
+Warm command-buffer reset is expected reuse evidence. Host/VMA allocation,
+command-buffer allocation/free, image-view creation, pipeline/shader creation,
+and post-bind registry/vtable/table/policy work remain prohibited.
 
 The lifecycle benchmark first establishes full retirement for each measured
 point, then resets completion-work counters before 100,000 repeated polls. The
@@ -88,12 +96,13 @@ work counts are blocking; `ns/submit` remains advisory.
 
 The pipeline-cache benchmark separately interns synthetic 1 KiB, 64 KiB, and
 1 MiB identities. For every size, its blocking counters require one complete
-owned clone and free and one compact-key probe. The source-contract gate proves
-that post-intern pipeline lookup has no SPIR-V byte path; interning probes and
-collision bytes are reported separately. Boundary elapsed time is advisory;
-the exact work counters and structural gate are the regression evidence.
+owned clone and free and one compact-key probe. Collision and distinct-storage
+tests require exact intern probes and compared bytes while cache lookup requires
+only the compact key. Boundary elapsed time is advisory; the exact work counters
+are the regression evidence.
 
-Release runs use deliberately broad order-of-magnitude thresholds:
+Unpinned runs report crossings of these broad order-of-magnitude thresholds as
+advisories:
 
 | Measurement | Maximum |
 |---|---:|
@@ -107,8 +116,20 @@ Release runs use deliberately broad order-of-magnitude thresholds:
 | Raster-matrix pipeline alias creation | 500,000 ns/create |
 | Cached duplicate / batch | 20,000 ns/create |
 
-These thresholds catch accidental algorithmic or lifecycle regressions. They
-are not cross-machine performance rankings.
+These thresholds flag observations for investigation; they are not
+cross-machine acceptance criteria. To make them blocking, identify all three
+comparison inputs explicitly:
+
+```sh
+python -B scripts/run_benchmarks.py \
+  --pinned-runner windows-2022-rtx4090 \
+  --pinned-driver nvidia-2417000448 \
+  --comparison-profile release-o1-2026-07
+```
+
+The report records the runner, driver, profile, and whether timing is advisory
+or blocking. Supplying only part of the pinned identity, or combining a pinned
+identity with `--validation`, is rejected.
 
 ### Pipeline identity snapshot
 
@@ -168,7 +189,7 @@ The table reports the median of the three target medians and their full range.
 Every run reported:
 
 ```text
-invariants: point_allocations=0 destruction_waits=0 deferred_releases=0 cached_poll_queries=0 retirement_locks=0
+invariants: point_allocations=0 destruction_queries=0 destruction_completion_waits=0 destruction_device_waits=0 deferred_releases=0 cached_poll_queries=0 retirement_locks=0
 ```
 
 Generated-dispatch timing is reported only for runs using an explicit

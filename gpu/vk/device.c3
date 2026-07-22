@@ -168,6 +168,9 @@ struct VkDeviceState {
     Atomic{ulong}              recording_image_view_creations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              recording_vma_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_scratch_misses @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              generated_dispatch_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              generated_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              generated_indexed_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
     Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);
@@ -187,6 +190,8 @@ struct VkDeviceState {
     ulong                      submit_epoch_reset_cells @if(env::TESTING || $feature(SUBMIT_DUPLICATE_STATS));
     CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
     void*                      completion_retirement_lock_user_data @if(env::TESTING);
+    Atomic{ulong}              destruction_device_waits @if(env::TESTING || $feature(DESTRUCTION_WORK_STATS));
+    Atomic{ulong}              destruction_deferred_release_enqueues @if(env::TESTING || $feature(DESTRUCTION_WORK_STATS));
     ulong                      pipeline_shader_modules_created;
     ulong                      pipelines_created;
     ulong                      shader_intern_probes @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));

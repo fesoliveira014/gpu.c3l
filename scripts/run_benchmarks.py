@@ -96,7 +96,8 @@ LIFECYCLE_SCHEMA = re.compile(
     rf"\Asubmission: iterations=256 repetitions=5 median={ALLOCATION_NUMBER} ns/submit\r?\n"
     rf"completion poll: iterations=100000 repetitions=5 median={ALLOCATION_NUMBER} ns/poll\r?\n"
     rf"texture destroy: iterations=300 repetitions=5 median={ALLOCATION_NUMBER} ns/destroy\r?\n"
-    r"invariants: point_allocations=0 destruction_waits=0 "
+    r"invariants: point_allocations=0 destruction_queries=0 "
+    r"destruction_completion_waits=0 destruction_device_waits=0 "
     r"deferred_releases=0 cached_poll_queries=0 retirement_locks=0\Z"
 )
 SUBMIT_BATCH_SIZES = (1, 8, 32, 128, 1024)
@@ -173,7 +174,8 @@ def require_context_fields(output):
             raise ValueError(f"benchmark context is missing {field[:-1]}")
 
 
-def require_regression_thresholds(output, target):
+def evaluate_regression_thresholds(output, target, enforce=False):
+    advisories = []
     for label, pattern, maximum, required in REGRESSION_THRESHOLDS.get(target, ()):
         match = None
         for line in output.splitlines():
@@ -186,11 +188,14 @@ def require_regression_thresholds(output, target):
             continue
         value = float(match.group("value"))
         if value > maximum:
-            raise ValueError(
+            message = (
                 f"{target} {label} exceeded regression threshold: "
                 f"{value:g} > {maximum:g}"
             )
-
+            if enforce:
+                raise ValueError(message)
+            advisories.append(message)
+    return advisories
 
 def require_sampler_lookup_evidence(output):
     lines = [
@@ -229,7 +234,13 @@ def require_sampler_lookup_evidence(output):
                 "descriptor_churn_bench sampler lookup probes must be in [1, 8]"
             )
 
-def require_measurement(output, target, enforce_thresholds=True):
+
+def require_measurement(
+    output,
+    target,
+    enforce_thresholds=False,
+    evaluate_thresholds=True,
+):
     if target == "allocation_bench":
         for phase, pattern in ALLOCATION_PHASES:
             if not pattern.search(output):
@@ -286,8 +297,13 @@ def require_measurement(output, target, enforce_thresholds=True):
                     f"{target} identity evidence for {byte_count} bytes is "
                     "missing, malformed, or nonzero after interning"
                 )
-    if enforce_thresholds:
-        require_regression_thresholds(output, target)
+    advisories = []
+    if evaluate_thresholds:
+        advisories = evaluate_regression_thresholds(
+            output,
+            target,
+            enforce=enforce_thresholds,
+        )
 
     if not re.search(r"\biterations?=\S+", output):
         raise ValueError(f"{target} is missing an iteration count")
@@ -299,6 +315,7 @@ def require_measurement(output, target, enforce_thresholds=True):
             raise ValueError(f"{target} is missing upload measurement fields")
     if not MEASURED_VALUE.search(output):
         raise ValueError(f"{target} is missing a measured value")
+    return advisories
 
 
 def run(command, cwd, env=None):
@@ -336,7 +353,25 @@ def main():
         action="store_true",
         help="enable debug validation and skip release-performance thresholds",
     )
+    parser.add_argument("--pinned-runner")
+    parser.add_argument("--pinned-driver")
+    parser.add_argument("--comparison-profile")
     args = parser.parse_args()
+    pinned_fields = (
+        args.pinned_runner,
+        args.pinned_driver,
+        args.comparison_profile,
+    )
+    if any(pinned_fields) and not all(pinned_fields):
+        parser.error(
+            "--pinned-runner, --pinned-driver, and --comparison-profile "
+            "must be supplied together"
+        )
+    pinned = all(pinned_fields)
+    if args.validation and pinned:
+        parser.error(
+            "--validation cannot be combined with pinned comparison fields"
+        )
 
     root = pathlib.Path(__file__).resolve().parents[1]
     env = os.environ.copy()
@@ -360,17 +395,32 @@ def main():
         f"- compiler={compiler}",
         f"- optimization={' '.join(C3_BUILD_FLAGS)}",
         f"- validation={'enabled' if args.validation else 'disabled'}",
+        f"- timing_mode={'blocking' if pinned else 'advisory'}",
+        f"- pinned_runner={args.pinned_runner or 'none'}",
+        f"- pinned_driver={args.pinned_driver or 'none'}",
+        f"- comparison_profile={args.comparison_profile or 'none'}",
         "- repetitions=one fixed suite invocation; target-internal repetitions are listed below",
         "",
         report_section("Context", context),
     ]
 
+    timing_advisories = []
     for target in BENCHMARK_TARGETS:
         iterations, units = BENCHMARK_METHODS[target]
         output = run((str(executable(root, target)),), root, env)
-        require_measurement(output, target, enforce_thresholds=not args.validation)
+        timing_advisories.extend(require_measurement(
+            output,
+            target,
+            enforce_thresholds=pinned,
+            evaluate_thresholds=not args.validation,
+        ))
         annotated = f"iterations={iterations}\nunits={units}\n{output}"
         lines.append(report_section(target, annotated))
+
+    advisory_output = "none" if not timing_advisories else "\n".join(
+        f"ADVISORY: {message}" for message in timing_advisories
+    )
+    lines.append(report_section("Timing advisories", advisory_output))
 
     output_path = args.output if args.output.is_absolute() else root / args.output
     output_path.parent.mkdir(parents=True, exist_ok=True)
