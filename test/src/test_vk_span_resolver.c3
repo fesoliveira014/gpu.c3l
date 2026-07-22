@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 
 const ulong SPAN_RESOLVER_DEVICE_OWNER = 71;
@@ -23,9 +24,9 @@ struct SpanResolverFixture {
 
 fn void init_span_resolver_fixture(SpanResolverFixture* fixture) {
     fixture.state.resource_owner = SPAN_RESOLVER_DEVICE_OWNER;
-    fixture.state.buffers.owner = gpu::resource_owner_tag(
+    fixture.state.buffers.owner = gpu::internal::resource_owner_tag(
         SPAN_RESOLVER_DEVICE_OWNER,
-        gpu::ResourceOwnerKind.BUFFER,
+        gpu::internal::ResourceOwnerKind.BUFFER,
     );
     fixture.state.buffers.slots = fixture.buffer_cells[..];
     fixture.state.buffers.next_new = 1;
@@ -42,9 +43,9 @@ fn void init_span_resolver_fixture(SpanResolverFixture* fixture) {
         .generation = 5,
         .used       = true,
     };
-    fixture.state.allocations.owner = gpu::resource_owner_tag(
+    fixture.state.allocations.owner = gpu::internal::resource_owner_tag(
         SPAN_RESOLVER_DEVICE_OWNER,
-        gpu::ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
     fixture.state.allocations.slots = fixture.allocation_cells[..];
     fixture.state.allocations.next_new = 1;
@@ -137,9 +138,9 @@ fn void span_resolver_rejects_wrong_owner_and_stale_generation() @test {
     init_span_resolver_fixture(&fixture);
 
     gpu::GpuSpan wrong_owner = fixture_buffer_span(&fixture, 0, 16);
-    wrong_owner.owner = gpu::resource_owner_tag(
+    wrong_owner.owner = gpu::internal::resource_owner_tag(
         SPAN_RESOLVER_DEVICE_OWNER + 1,
-        gpu::ResourceOwnerKind.BUFFER,
+        gpu::internal::ResourceOwnerKind.BUFFER,
     );
     fault wrong_owner_fault = @catch(vk::resolve_span(&fixture.state, &wrong_owner));
     assert(wrong_owner_fault == gpu::INVALID_HANDLE,

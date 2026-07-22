@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 
 struct DispatchLookupCounts {
@@ -35,13 +35,13 @@ fn bool supports_no_instance_extensions(ZString name) => false;
 fn bool supports_all_instance_extensions(ZString name) => true;
 
 fn bool supports_win32_instance_extensions(ZString name) {
-    return name.str_view() == gpu::vk::SURFACE_EXTENSION.str_view()
-        || name.str_view() == gpu::vk::WIN32_SURFACE_EXTENSION.str_view();
+    return name.str_view() == gpu::internal::vk::SURFACE_EXTENSION.str_view()
+        || name.str_view() == gpu::internal::vk::WIN32_SURFACE_EXTENSION.str_view();
 }
 
 fn bool supports_surface_maintenance_without_capabilities2(ZString name) {
-    return name.str_view() == gpu::vk::SURFACE_EXTENSION.str_view()
-        || name.str_view() == gpu::vk::SURFACE_MAINTENANCE_EXTENSION.str_view();
+    return name.str_view() == gpu::internal::vk::SURFACE_EXTENSION.str_view()
+        || name.str_view() == gpu::internal::vk::SURFACE_MAINTENANCE_EXTENSION.str_view();
 }
 
 fn void capture_instance_message(
@@ -52,7 +52,7 @@ fn void capture_instance_message(
 fn void runtime_policies_plan_layers_and_debug_utils_independently() @test {
     vk::DebugUtilsMessengerCreateInfoEXT messenger_info;
     gpu::RuntimeDesc desc;
-    gpu::vk::VkInstanceDesc plan = gpu::vk::runtime_instance_desc(
+    gpu::internal::vk::VkInstanceDesc plan = gpu::internal::vk::runtime_instance_desc(
         &desc,
         &messenger_info,
     );
@@ -62,37 +62,37 @@ fn void runtime_policies_plan_layers_and_debug_utils_independently() @test {
 
     desc.contract_validation = gpu::ContractValidation.FULL;
     desc.track_resource_lifetimes = true;
-    plan = gpu::vk::runtime_instance_desc(&desc, &messenger_info);
+    plan = gpu::internal::vk::runtime_instance_desc(&desc, &messenger_info);
     assert(!plan.enable_validation, "contract and lifetime policies do not request layers");
     assert(!plan.enable_debug_utils, "contract and lifetime policies do not request debug utils");
 
     desc.debug_callback = &capture_instance_message;
-    plan = gpu::vk::runtime_instance_desc(&desc, &messenger_info);
+    plan = gpu::internal::vk::runtime_instance_desc(&desc, &messenger_info);
     assert(!plan.enable_validation, "callback-only configuration does not request layers");
     assert(plan.enable_debug_utils, "callback-only configuration requests debug utils");
     assert(plan.debug_messenger_info == null, "callback-only configuration does not chain a layer messenger");
 
     desc.debug_callback = null;
     desc.enable_debug_names = true;
-    plan = gpu::vk::runtime_instance_desc(&desc, &messenger_info);
+    plan = gpu::internal::vk::runtime_instance_desc(&desc, &messenger_info);
     assert(!plan.enable_validation, "names-only configuration does not request layers");
     assert(plan.enable_debug_utils, "names-only configuration requests debug utils");
 
     desc.enable_debug_names = false;
     desc.enable_vulkan_validation = true;
-    plan = gpu::vk::runtime_instance_desc(&desc, &messenger_info);
+    plan = gpu::internal::vk::runtime_instance_desc(&desc, &messenger_info);
     assert(plan.enable_validation, "the Vulkan validation field alone requests layers");
     assert(plan.enable_debug_utils, "Vulkan validation requests debug utils");
     assert(plan.debug_messenger_info == &messenger_info, "Vulkan validation chains the messenger");
 }
 
 fn void instance_capabilities_require_request_and_support() @test {
-    gpu::vk::VkInstanceDesc desc = {
+    gpu::internal::vk::VkInstanceDesc desc = {
         .enable_debug_utils        = true,
         .enable_available_surfaces = true,
     };
-    gpu::vk::VkInstanceCapabilities capabilities =
-        gpu::vk::resolve_instance_capabilities(
+    gpu::internal::vk::VkInstanceCapabilities capabilities =
+        gpu::internal::vk::resolve_instance_capabilities(
             &desc,
             &supports_no_instance_extensions,
         );
@@ -104,7 +104,7 @@ fn void instance_capabilities_require_request_and_support() @test {
     assert(!capabilities.wayland_surface, "platform surfaces require the base surface extension");
     assert(!capabilities.xlib_surface, "platform surfaces require the base surface extension");
 
-    capabilities = gpu::vk::resolve_instance_capabilities(
+    capabilities = gpu::internal::vk::resolve_instance_capabilities(
         &desc,
         &supports_all_instance_extensions,
     );
@@ -116,7 +116,7 @@ fn void instance_capabilities_require_request_and_support() @test {
     assert(capabilities.wayland_surface, "available Wayland surface support is enabled");
     assert(capabilities.xlib_surface, "available Xlib surface support is enabled");
 
-    capabilities = gpu::vk::resolve_instance_capabilities(
+    capabilities = gpu::internal::vk::resolve_instance_capabilities(
         &desc,
         &supports_win32_instance_extensions,
     );
@@ -127,7 +127,7 @@ fn void instance_capabilities_require_request_and_support() @test {
     assert(!capabilities.wayland_surface, "unsupported Wayland surface support remains disabled");
     assert(!capabilities.xlib_surface, "unsupported Xlib surface support remains disabled");
 
-    capabilities = gpu::vk::resolve_instance_capabilities(
+    capabilities = gpu::internal::vk::resolve_instance_capabilities(
         &desc,
         &supports_surface_maintenance_without_capabilities2,
     );
@@ -135,7 +135,7 @@ fn void instance_capabilities_require_request_and_support() @test {
         "surface maintenance requires get-surface-capabilities2");
 
     desc.enable_available_surfaces = false;
-    capabilities = gpu::vk::resolve_instance_capabilities(
+    capabilities = gpu::internal::vk::resolve_instance_capabilities(
         &desc,
         &supports_all_instance_extensions,
     );
@@ -148,32 +148,32 @@ fn void instance_capabilities_require_request_and_support() @test {
 }
 
 fn void debug_messenger_requires_resolved_capability() @test {
-    gpu::vk::VkInstanceCapabilities capabilities;
+    gpu::internal::vk::VkInstanceCapabilities capabilities;
 
     assert(
-        !gpu::vk::should_create_debug_messenger(capabilities, true),
+        !gpu::internal::vk::should_create_debug_messenger(capabilities, true),
         "unsupported debug utils skip messenger creation"
     );
     assert(
-        gpu::vk::should_report_debug_messenger_unavailable(capabilities, true),
+        gpu::internal::vk::should_report_debug_messenger_unavailable(capabilities, true),
         "requested unavailable debug utils require a diagnostic"
     );
     assert(
-        !gpu::vk::should_report_debug_messenger_unavailable(capabilities, false),
+        !gpu::internal::vk::should_report_debug_messenger_unavailable(capabilities, false),
         "unrequested debug utils remain silent"
     );
 
     capabilities.debug_utils = true;
     assert(
-        gpu::vk::should_create_debug_messenger(capabilities, true),
+        gpu::internal::vk::should_create_debug_messenger(capabilities, true),
         "enabled debug utils permit requested messenger creation"
     );
     assert(
-        !gpu::vk::should_create_debug_messenger(capabilities, false),
+        !gpu::internal::vk::should_create_debug_messenger(capabilities, false),
         "unrequested messenger creation remains disabled"
     );
     assert(
-        !gpu::vk::should_report_debug_messenger_unavailable(capabilities, true),
+        !gpu::internal::vk::should_report_debug_messenger_unavailable(capabilities, true),
         "available debug utils do not report unavailability"
     );
 }
@@ -234,11 +234,11 @@ fn vk::PFN_vkVoidFunction recording_device_proc_loader(
 }
 
 fn void instance_dispatch_loads_only_selected_groups() @test {
-    gpu::vk::VkInstanceDispatchPlan plan;
+    gpu::internal::vk::VkInstanceDispatchPlan plan;
     DispatchLookupCounts counts;
 
     counts = {};
-    (void)gpu::vk::load_vk_instance_dispatch(
+    (void)gpu::internal::vk::load_vk_instance_dispatch(
         (vk::Instance)&counts,
         &recording_instance_proc_loader,
         plan,
@@ -247,7 +247,7 @@ fn void instance_dispatch_loads_only_selected_groups() @test {
 
     counts = {};
     plan.debug = true;
-    (void)gpu::vk::load_vk_instance_dispatch(
+    (void)gpu::internal::vk::load_vk_instance_dispatch(
         (vk::Instance)&counts,
         &recording_instance_proc_loader,
         plan,
@@ -258,7 +258,7 @@ fn void instance_dispatch_loads_only_selected_groups() @test {
 
     counts = {};
     plan = { .surface = true };
-    (void)gpu::vk::load_vk_instance_dispatch(
+    (void)gpu::internal::vk::load_vk_instance_dispatch(
         (vk::Instance)&counts,
         &recording_instance_proc_loader,
         plan,
@@ -277,7 +277,7 @@ fn void instance_dispatch_loads_only_selected_groups() @test {
         .wayland_surface = true,
         .xlib_surface    = true,
     };
-    (void)gpu::vk::load_vk_instance_dispatch(
+    (void)gpu::internal::vk::load_vk_instance_dispatch(
         (vk::Instance)&counts,
         &recording_instance_proc_loader,
         plan,
@@ -290,11 +290,11 @@ fn void instance_dispatch_loads_only_selected_groups() @test {
 }
 
 fn void device_dispatch_loads_only_selected_groups() @test {
-    gpu::vk::VkDeviceDispatchPlan plan;
+    gpu::internal::vk::VkDeviceDispatchPlan plan;
     DispatchLookupCounts counts;
 
     counts = {};
-    (void)gpu::vk::load_vk_device_dispatch(
+    (void)gpu::internal::vk::load_vk_device_dispatch(
         (vk::Device)&counts,
         &recording_device_proc_loader,
         plan,
@@ -303,7 +303,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
 
     counts = {};
     plan.debug = true;
-    (void)gpu::vk::load_vk_device_dispatch(
+    (void)gpu::internal::vk::load_vk_device_dispatch(
         (vk::Device)&counts,
         &recording_device_proc_loader,
         plan,
@@ -315,7 +315,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
 
     counts = {};
     plan = { .presentation = true };
-    (void)gpu::vk::load_vk_device_dispatch(
+    (void)gpu::internal::vk::load_vk_device_dispatch(
         (vk::Device)&counts,
         &recording_device_proc_loader,
         plan,
@@ -327,7 +327,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
 
     counts = {};
     plan = { .descriptor_buffer = true };
-    (void)gpu::vk::load_vk_device_dispatch(
+    (void)gpu::internal::vk::load_vk_device_dispatch(
         (vk::Device)&counts,
         &recording_device_proc_loader,
         plan,
@@ -363,13 +363,13 @@ fn vk::PFN_vkVoidFunction fake_device_proc_loader(
 }
 
 fn void device_dispatch_loads_per_device() @test {
-    gpu::vk::VkDeviceDispatchPlan plan = { .descriptor_buffer = true };
-    gpu::vk::VkDeviceDispatch first = gpu::vk::load_vk_device_dispatch(
+    gpu::internal::vk::VkDeviceDispatchPlan plan = { .descriptor_buffer = true };
+    gpu::internal::vk::VkDeviceDispatch first = gpu::internal::vk::load_vk_device_dispatch(
         (vk::Device)(uptr)1,
         &fake_device_proc_loader,
         plan,
     );
-    gpu::vk::VkDeviceDispatch second = gpu::vk::load_vk_device_dispatch(
+    gpu::internal::vk::VkDeviceDispatch second = gpu::internal::vk::load_vk_device_dispatch(
         (vk::Device)(uptr)2,
         &fake_device_proc_loader,
         plan,
@@ -403,47 +403,47 @@ fn void fake_begin_label(
 fn void fake_end_label(vk::CommandBuffer command_buffer) {}
 
 fn void instance_debug_messenger_dispatch_requires_complete_pair() @test {
-    gpu::vk::VkInstanceDispatch empty;
-    assert(!gpu::vk::instance_dispatch_supports_debug_messenger(&empty), "empty pair is unavailable");
+    gpu::internal::vk::VkInstanceDispatch empty;
+    assert(!gpu::internal::vk::instance_dispatch_supports_debug_messenger(&empty), "empty pair is unavailable");
 
-    gpu::vk::VkInstanceDispatch create_only = {
+    gpu::internal::vk::VkInstanceDispatch create_only = {
         .debug.create_debug_messenger = &fake_create_debug_messenger,
     };
-    assert(!gpu::vk::instance_dispatch_supports_debug_messenger(&create_only), "create-only pair is unavailable");
+    assert(!gpu::internal::vk::instance_dispatch_supports_debug_messenger(&create_only), "create-only pair is unavailable");
 
-    gpu::vk::VkInstanceDispatch destroy_only = {
+    gpu::internal::vk::VkInstanceDispatch destroy_only = {
         .debug.destroy_debug_messenger = &fake_destroy_debug_messenger,
     };
-    assert(!gpu::vk::instance_dispatch_supports_debug_messenger(&destroy_only), "destroy-only pair is unavailable");
+    assert(!gpu::internal::vk::instance_dispatch_supports_debug_messenger(&destroy_only), "destroy-only pair is unavailable");
 
-    gpu::vk::VkInstanceDispatch complete = {
+    gpu::internal::vk::VkInstanceDispatch complete = {
         .debug = {
             .create_debug_messenger  = &fake_create_debug_messenger,
             .destroy_debug_messenger = &fake_destroy_debug_messenger,
         },
     };
-    assert(gpu::vk::instance_dispatch_supports_debug_messenger(&complete), "complete pair is available");
+    assert(gpu::internal::vk::instance_dispatch_supports_debug_messenger(&complete), "complete pair is available");
 }
 
 fn void device_label_dispatch_requires_complete_pair() @test {
-    gpu::vk::VkDeviceDispatch empty;
-    assert(!gpu::vk::device_dispatch_supports_labels(&empty), "empty pair is unavailable");
+    gpu::internal::vk::VkDeviceDispatch empty;
+    assert(!gpu::internal::vk::device_dispatch_supports_labels(&empty), "empty pair is unavailable");
 
-    gpu::vk::VkDeviceDispatch begin_only = {
+    gpu::internal::vk::VkDeviceDispatch begin_only = {
         .debug.cmd_begin_label = &fake_begin_label,
     };
-    assert(!gpu::vk::device_dispatch_supports_labels(&begin_only), "begin-only pair is unavailable");
+    assert(!gpu::internal::vk::device_dispatch_supports_labels(&begin_only), "begin-only pair is unavailable");
 
-    gpu::vk::VkDeviceDispatch end_only = {
+    gpu::internal::vk::VkDeviceDispatch end_only = {
         .debug.cmd_end_label = &fake_end_label,
     };
-    assert(!gpu::vk::device_dispatch_supports_labels(&end_only), "end-only pair is unavailable");
+    assert(!gpu::internal::vk::device_dispatch_supports_labels(&end_only), "end-only pair is unavailable");
 
-    gpu::vk::VkDeviceDispatch complete = {
+    gpu::internal::vk::VkDeviceDispatch complete = {
         .debug = {
             .cmd_begin_label = &fake_begin_label,
             .cmd_end_label   = &fake_end_label,
         },
     };
-    assert(gpu::vk::device_dispatch_supports_labels(&complete), "complete pair is available");
+    assert(gpu::internal::vk::device_dispatch_supports_labels(&complete), "complete pair is available");
 }

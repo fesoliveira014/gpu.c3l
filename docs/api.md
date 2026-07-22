@@ -12,6 +12,12 @@ All public API lives in:
 module gpu;
 ```
 
+The source-of-truth split is strict: `gpu/gpu.c3i` contains all public
+non-callable declarations, while `gpu/gpu.c3` contains all public callable
+implementations with their doc contracts, attributes, and default arguments.
+Backend-independent implementation details live in private `gpu::internal`;
+Vulkan implementation details live in private `gpu::internal::vk`.
+
 Backend and dependency modules are not re-exported as public handle types.
 
 Application code should import:
@@ -27,6 +33,10 @@ import gpu::surface::win32;
 // or gpu::surface::wayland
 // or gpu::surface::x11
 ```
+
+Each surface module keeps its native handle typedefs in its local `surface.c3i`
+and `create_surface` in the adjacent `surface.c3`. These platform modules are
+the only public API outside the root `gpu` source pair.
 
 SDL3 may supply the native handles in a consumer, but core declarations do not
 mention `sdl::Window`, `vk::Device`, or `vma::Allocation`.
@@ -406,7 +416,7 @@ only after proving the range.
 
 ## 4. Faults
 
-Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix. `gpu/faults.c3` documents each fault at its definition; the table below maps them to the operations that raise them.
+Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix. `gpu/gpu.c3i` documents each fault at its definition; the table below maps them to the operations that raise them.
 
 Descriptor, configuration, barrier, viewport, scissor, and label pointers must
 be non-null unless the API explicitly documents null as a value (such as

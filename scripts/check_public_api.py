@@ -16,6 +16,24 @@ MODULE_DECLARATION = re.compile(
     r"(?m)^\s*module\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*"
     r"(?:::[A-Za-z_][A-Za-z0-9_]*)*)\s*(?P<attributes>[^;]*);"
 )
+CALLABLE_DECLARATION = re.compile(
+    r"(?m)^\s*(?:fn\s+[^\r\n(]*?\b|macro\s+)"
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
+NON_CALLABLE_DECLARATION = re.compile(
+    r"(?m)^\s*(?P<kind>alias|bitstruct|const|constdef|def|distinct|enum|"
+    r"fault|faultdef|interface|struct|typedef|union)\b"
+)
+IMPORT_DECLARATION = re.compile(r"(?m)^\s*import\s+(?P<target>[^;]+);")
+TYPEDEF_DECLARATION = re.compile(
+    r"(?m)^\s*typedef\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+    r"(?P<target>[^;]+);"
+)
+SURFACE_TYPES = {
+    "wayland": (("DisplayHandle", "void*"), ("SurfaceHandle", "void*")),
+    "win32": (("InstanceHandle", "void*"), ("WindowHandle", "void*")),
+    "x11": (("DisplayHandle", "void*"), ("WindowHandle", "ulong")),
+}
 
 FORBIDDEN_TEXT = {
     "devicedesc": "retired transitional DeviceDesc",
@@ -137,6 +155,16 @@ PLATFORM_HANDLE_TYPES = {
     "gpu::surface::win32": ("InstanceHandle", "WindowHandle"),
     "gpu::surface::wayland": ("DisplayHandle", "SurfaceHandle"),
     "gpu::surface::x11": ("DisplayHandle", "WindowHandle"),
+}
+PLATFORM_HANDLE_BASE_TYPES = {
+    "gpu::surface::win32": ("void*", "void*"),
+    "gpu::surface::wayland": ("void*", "void*"),
+    "gpu::surface::x11": ("void*", "ulong"),
+}
+PLATFORM_PARAMETER_NAMES = {
+    "gpu::surface::win32": ("runtime", "instance", "window"),
+    "gpu::surface::wayland": ("runtime", "display", "surface"),
+    "gpu::surface::x11": ("runtime", "display", "window"),
 }
 
 DEBUG_RESOURCE_KINDS = (
@@ -350,8 +378,8 @@ def validate_generated_backend_privacy(document: dict) -> list[str]:
     failures = []
     for module_name, module in document.get("modules", {}).items():
         if not (
-            module_name == "gpu::vk"
-            or module_name.startswith("gpu::vk::")
+            module_name == "gpu::internal"
+            or module_name.startswith("gpu::internal::")
         ):
             continue
         for contents in module.values():
@@ -379,6 +407,7 @@ def validate_document(document: dict) -> list[str]:
     encoded = json.dumps(public_surface, separators=(",", ":"))
     lowered = encoded.lower()
     failures = validate_generated_backend_privacy(document)
+    failures.extend(validate_public_metadata_boundaries(document))
     failures.extend([
         label
         for token, label in FORBIDDEN_TEXT.items()
@@ -1585,13 +1614,32 @@ def validate_document(document: dict) -> list[str]:
             entry.get("name"): entry
             for entry in surface.get("types", [])
         }
-        for handle_name in handle_names:
+        if set(definitions) != set(handle_names):
+            failures.append(
+                f"{module_name} must expose exactly its two native handle types"
+            )
+        for handle_name, base_type in zip(
+            handle_names,
+            PLATFORM_HANDLE_BASE_TYPES[module_name],
+        ):
             definition = definitions.get(handle_name)
-            if definition is None or definition.get("kind") != "distinct type":
+            if (
+                definition is None
+                or definition.get("kind") != "distinct type"
+                or definition.get("base_type", {}).get("name") != base_type
+            ):
                 failures.append(
-                    f"{module_name}::{handle_name} must be a distinct type"
+                    f"{module_name}::{handle_name} must be a distinct "
+                    f"{base_type} type"
                 )
 
+        functions = surface.get("functions", [])
+        if tuple(
+            entry.get("name") for entry in functions
+        ) != ("create_surface",):
+            failures.append(
+                f"{module_name} must expose exactly create_surface"
+            )
         create_surface = next(
             (
                 entry
@@ -1604,15 +1652,31 @@ def validate_document(document: dict) -> list[str]:
             failures.append(f"missing {module_name}::create_surface")
             continue
 
+        if create_surface.get("return_type", {}).get("name") != "Surface?":
+            failures.append(
+                f"{module_name}::create_surface must return Surface?"
+            )
+        parameter_names = tuple(
+            member.get("name")
+            for member in create_surface.get("members", [])
+        )
         parameter_types = tuple(
             member.get("type", {}).get("name")
             for member in create_surface.get("members", [])
         )
         expected_types = ("Runtime*", *handle_names)
-        if parameter_types != expected_types:
+        if (
+            parameter_names != PLATFORM_PARAMETER_NAMES[module_name]
+            or parameter_types != expected_types
+        ):
             failures.append(
-                f"{module_name}::create_surface must use typed platform handles"
+                f"{module_name}::create_surface must use the exact native signature"
             )
+        for section in ("methods", "variables"):
+            if surface.get(section):
+                failures.append(
+                    f"{module_name} may not expose public {section}"
+                )
 
     return failures
 
@@ -1633,13 +1697,205 @@ def scan_retired_source_symbols() -> list[str]:
     return failures
 
 
+def mask_non_code(source: str) -> str:
+    masked = list(source)
+    index = 0
+    quote = None
+    block_end = None
+    block_depth = 0
+    while index < len(source):
+        if quote is not None:
+            if source[index] == "\\":
+                masked[index] = " "
+                if index + 1 < len(source):
+                    masked[index + 1] = " "
+                index += 2
+            else:
+                if source[index] == quote:
+                    quote = None
+                if source[index] != "\n":
+                    masked[index] = " "
+                index += 1
+            continue
+        if block_end is not None:
+            if source.startswith(block_end, index):
+                for offset in range(len(block_end)):
+                    masked[index + offset] = " "
+                index += len(block_end)
+                block_depth -= 1
+                if block_depth == 0:
+                    block_end = None
+                continue
+            nested_start = "<*" if block_end == "*>" else "/*"
+            if source.startswith(nested_start, index):
+                masked[index] = masked[index + 1] = " "
+                index += 2
+                block_depth += 1
+                continue
+            if source[index] != "\n":
+                masked[index] = " "
+            index += 1
+            continue
+        if source.startswith("//", index):
+            end = source.find("\n", index)
+            if end < 0:
+                end = len(source)
+            for offset in range(index, end):
+                masked[offset] = " "
+            index = end
+            continue
+        if source.startswith("<*", index) or source.startswith("/*", index):
+            block_end = "*>" if source.startswith("<*", index) else "*/"
+            masked[index] = masked[index + 1] = " "
+            index += 2
+            block_depth = 1
+            continue
+        if source[index] in {'"', "'", "`"}:
+            quote = source[index]
+            masked[index] = " "
+            index += 1
+            continue
+        index += 1
+    return "".join(masked)
+
+
+def source_line(source: str, offset: int) -> int:
+    return source.count("\n", 0, offset) + 1
+
+
+def validate_root_facade_source(relative: Path, source: str) -> list[str]:
+    failures = validate_public_module_source(relative, source)
+    masked = mask_non_code(source)
+    if relative.suffix == ".c3i":
+        for declaration in CALLABLE_DECLARATION.finditer(masked):
+            failures.append(
+                f"{relative.as_posix()}:{source_line(masked, declaration.start())} "
+                "public interface may not contain callable declarations"
+            )
+        for line_number, line in enumerate(masked.splitlines(), start=1):
+            if "@private" in line:
+                failures.append(
+                    f"{relative.as_posix()}:{line_number} "
+                    "public interface may not contain private declarations"
+                )
+        if re.search(
+            r"(?m)^\s*import\s+(?:gpu::internal(?:::[A-Za-z0-9_]+)*|vk|vma)\b",
+            masked,
+        ):
+            failures.append(
+                f"{relative.as_posix()} may not import private implementation modules"
+            )
+        return failures
+
+    for declaration in NON_CALLABLE_DECLARATION.finditer(masked):
+        failures.append(
+            f"{relative.as_posix()}:{source_line(masked, declaration.start())} "
+            "public implementation may not contain non-callable declarations"
+        )
+    for declaration in re.finditer(r"(?m)^\s*\$assert\b", masked):
+        failures.append(
+            f"{relative.as_posix()}:{source_line(masked, declaration.start())} "
+            "public implementation may not contain layout assertions"
+        )
+    for line_number, line in enumerate(masked.splitlines(), start=1):
+        if "@private" in line:
+            failures.append(
+                f"{relative.as_posix()}:{line_number} "
+                "public implementation may not contain private declarations"
+            )
+    return failures
+
+
+def validate_surface_source(relative: Path, source: str) -> list[str]:
+    failures = validate_public_module_source(relative, source)
+    platform = relative.parts[2]
+    masked = mask_non_code(source)
+    imports = tuple(
+        declaration.group("target").strip()
+        for declaration in IMPORT_DECLARATION.finditer(masked)
+    )
+    if relative.suffix == ".c3i":
+        actual_types = tuple(
+            (match.group("name"), match.group("target").strip())
+            for match in TYPEDEF_DECLARATION.finditer(masked)
+        )
+        if actual_types != SURFACE_TYPES[platform]:
+            failures.append(
+                f"{relative.as_posix()} must contain exactly the public "
+                f"{platform} surface handle typedefs"
+            )
+        if CALLABLE_DECLARATION.search(masked):
+            failures.append(
+                f"{relative.as_posix()} may not contain callable declarations"
+            )
+        if len(tuple(NON_CALLABLE_DECLARATION.finditer(masked))) != len(actual_types):
+            failures.append(
+                f"{relative.as_posix()} may only contain surface handle typedefs"
+            )
+        if re.search(r"(?m)^\s*\$assert\b", masked):
+            failures.append(
+                f"{relative.as_posix()} may only contain surface handle typedefs"
+            )
+        if imports != ("gpu @public",):
+            failures.append(
+                f"{relative.as_posix()} must import exactly gpu @public"
+            )
+        return failures
+
+    callables = tuple(
+        declaration.group("name")
+        for declaration in CALLABLE_DECLARATION.finditer(masked)
+    )
+    if callables != ("create_surface",):
+        failures.append(
+            f"{relative.as_posix()} must contain exactly create_surface"
+        )
+    if NON_CALLABLE_DECLARATION.search(masked):
+        failures.append(
+            f"{relative.as_posix()} may not contain non-callable declarations"
+        )
+    if sorted(imports) != ["gpu @public", "gpu::internal @public"]:
+        failures.append(
+            f"{relative.as_posix()} must import exactly gpu @public and "
+            "gpu::internal @public"
+        )
+    if "@private" in masked:
+        failures.append(
+            f"{relative.as_posix()} may not contain private declarations"
+        )
+    return failures
+
+
+def validate_public_metadata_boundaries(document: dict) -> list[str]:
+    failures = []
+    for module_name, module in document.get("modules", {}).items():
+        if not (
+            module_name == "gpu"
+            or module_name.startswith("gpu::surface::")
+        ):
+            continue
+        encoded = json.dumps(public_entries(module), separators=(",", ":"))
+        lowered = encoded.lower()
+        for token, label in (
+            ("gpu::internal", "internal gpu type"),
+            ("vk::", "Vulkan binding type"),
+            ("vma::", "VMA binding type"),
+            ("spvreflect::", "SPIR-V reflection binding type"),
+        ):
+            if token in lowered:
+                failures.append(
+                    f"{module_name} public metadata contains {label}"
+                )
+    return failures
+
+
 def validate_private_backend_source(relative: Path, source: str) -> list[str]:
     failures = []
     normalized = source.lstrip("﻿")
     module_declarations = list(MODULE_DECLARATION.finditer(normalized))
     if not module_declarations:
         failures.append(
-            f"{relative.as_posix()} must declare the private gpu::vk backend module"
+            f"{relative.as_posix()} must declare the private gpu::internal::vk backend module"
         )
     for declaration in module_declarations:
         name = declaration.group("name")
@@ -1648,16 +1904,16 @@ def validate_private_backend_source(relative: Path, source: str) -> list[str]:
             0,
             declaration.start(),
         ) + 1
-        if name != "gpu::vk" and not name.startswith("gpu::vk::"):
+        if name != "gpu::internal::vk":
             failures.append(
                 f"{relative.as_posix()}:{line_number} "
-                "backend file may only declare gpu::vk modules, "
+                "backend file may only declare gpu::internal::vk modules, "
                 f"found {name}"
             )
             continue
         if "@private" not in declaration.group("attributes").split():
             failures.append(
-                f"{relative.as_posix()} must declare the private gpu::vk backend module"
+                f"{relative.as_posix()} must declare the private gpu::internal::vk backend module"
             )
 
     for line_number, line in enumerate(normalized.splitlines(), start=1):
@@ -1677,6 +1933,42 @@ def validate_private_backend_source(relative: Path, source: str) -> list[str]:
         for symbol in RETIRED_BACKEND_SOURCE_SYMBOLS
         if symbol in source
     )
+    return failures
+
+
+def validate_private_internal_source(relative: Path, source: str) -> list[str]:
+    failures = []
+    normalized = source.lstrip("﻿")
+    module_declarations = list(MODULE_DECLARATION.finditer(normalized))
+    if not module_declarations:
+        failures.append(
+            f"{relative.as_posix()} must declare private module gpu::internal"
+        )
+    for declaration in module_declarations:
+        name = declaration.group("name")
+        line_number = normalized.count("\n", 0, declaration.start()) + 1
+        if name != "gpu::internal":
+            failures.append(
+                f"{relative.as_posix()}:{line_number} internal file may only "
+                f"declare gpu::internal, found {name}"
+            )
+            continue
+        if "@private" not in declaration.group("attributes").split():
+            failures.append(
+                f"{relative.as_posix()} must declare private module gpu::internal"
+            )
+
+    for line_number, line in enumerate(normalized.splitlines(), start=1):
+        stripped = line.strip()
+        if (
+            "@public" in stripped
+            and not stripped.startswith("import ")
+            and not stripped.startswith("module ")
+        ):
+            failures.append(
+                f"{relative.as_posix()}:{line_number} "
+                "internal declaration may not use @public"
+            )
     return failures
 
 
@@ -1720,38 +2012,119 @@ def validate_public_module_source(
 
 
 def is_private_backend_source(relative: Path) -> bool:
-    return relative.parts[:2] == ("gpu", "vk")
+    return relative.parts[:3] == ("gpu", "internal", "vk")
+
+
+def is_private_internal_source(relative: Path) -> bool:
+    return relative.parts[:2] == ("gpu", "internal")
 
 
 def scan_public_module_sources() -> list[str]:
     failures = []
-    for path in sorted((ROOT / "gpu").rglob("*")):
-        relative = path.relative_to(ROOT)
-        if (
-            path.is_file()
-            and path.suffix in {".c3", ".c3i"}
-            and not is_private_backend_source(relative)
-        ):
-            failures.extend(
-                validate_public_module_source(
-                    relative,
-                    path.read_text(encoding="utf-8"),
-                )
-            )
+    expected = {
+        Path("gpu/gpu.c3"),
+        Path("gpu/gpu.c3i"),
+        *(
+            Path("gpu") / "surface" / platform / f"surface{suffix}"
+            for platform in SURFACE_TYPES
+            for suffix in (".c3", ".c3i")
+        ),
+    }
+    actual = {
+        path.relative_to(ROOT)
+        for path in (ROOT / "gpu").rglob("*")
+        if path.is_file()
+        and path.suffix in {".c3", ".c3i"}
+        and not is_private_backend_source(path.relative_to(ROOT))
+        and not is_private_internal_source(path.relative_to(ROOT))
+    }
+    failures.extend(
+        f"unexpected public source {relative.as_posix()}"
+        for relative in sorted(actual - expected)
+    )
+    failures.extend(
+        f"missing public source {relative.as_posix()}"
+        for relative in sorted(expected - actual)
+    )
+    for relative in sorted(actual & expected):
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        validator = (
+            validate_surface_source
+            if relative.parts[:2] == ("gpu", "surface")
+            else validate_root_facade_source
+        )
+        failures.extend(validator(relative, source))
     return failures
 
 
 def scan_private_backend_modules() -> list[str]:
     failures = []
-    for path in sorted((ROOT / "gpu" / "vk").rglob("*")):
+    backend_root = ROOT / "gpu" / "internal" / "vk"
+    for path in sorted(backend_root.rglob("*")):
         if not path.is_file() or path.suffix not in {".c3", ".c3i"}:
+            continue
+        relative = path.relative_to(ROOT)
+        if path.parent != backend_root or path.suffix != ".c3":
+            failures.append(
+                f"unexpected Vulkan backend source {relative.as_posix()}"
+            )
             continue
         failures.extend(
             validate_private_backend_source(
-                path.relative_to(ROOT),
+                relative,
                 path.read_text(encoding="utf-8"),
             )
         )
+    return failures
+
+
+def scan_private_internal_modules() -> list[str]:
+    failures = []
+    internal_root = ROOT / "gpu" / "internal"
+    for path in sorted(internal_root.rglob("*")):
+        if not path.is_file() or path.suffix not in {".c3", ".c3i"}:
+            continue
+        relative = path.relative_to(ROOT)
+        if path.is_relative_to(internal_root / "vk"):
+            continue
+        if path.parent != internal_root or path.suffix != ".c3":
+            failures.append(
+                f"unexpected backend-independent internal source "
+                f"{relative.as_posix()}"
+            )
+            continue
+        failures.extend(
+            validate_private_internal_source(
+                relative,
+                path.read_text(encoding="utf-8"),
+            )
+        )
+    return failures
+
+
+def scan_retired_vulkan_namespace() -> list[str]:
+    failures = []
+    namespace = "gpu::" + "vk"
+    path_fragment = "gpu/" + "vk"
+    roots = (ROOT / "gpu", ROOT / "test", ROOT / "scripts")
+    paths = [ROOT / "manifest.json"]
+    for directory in roots:
+        paths.extend(
+            path
+            for path in directory.rglob("*")
+            if path.is_file()
+            and "build" not in path.relative_to(directory).parts
+            and "__pycache__" not in path.relative_to(directory).parts
+        )
+    for path in sorted(paths):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if namespace in source or path_fragment in source:
+            failures.append(
+                f"retired Vulkan namespace in {path.relative_to(ROOT).as_posix()}"
+            )
     return failures
 
 
@@ -1783,7 +2156,9 @@ def main() -> int:
     )
     failures.extend(scan_retired_source_symbols())
     failures.extend(scan_public_module_sources())
+    failures.extend(scan_private_internal_modules())
     failures.extend(scan_private_backend_modules())
+    failures.extend(scan_retired_vulkan_namespace())
     if failures:
         print("public GPU API contract violations:", file=sys.stderr)
         for failure in failures:

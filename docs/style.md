@@ -12,11 +12,23 @@ Public module:
 module gpu;
 ```
 
+Backend-independent implementation module:
+
+```c3
+module gpu::internal @private;
+```
+
 Vulkan backend module:
 
 ```c3
-module gpu::vk @private;
+module gpu::internal::vk @private;
 ```
+
+Public non-callables belong in `gpu/gpu.c3i`. Public callables, including their
+contracts, attributes, defaults, and bodies, belong in `gpu/gpu.c3`. A platform
+surface keeps only its public native typedefs in `surface.c3i` and its public
+callable in the adjacent `surface.c3`. Private implementation declarations go
+in `gpu/internal/*.c3`; Vulkan declarations go in `gpu/internal/vk/*.c3`.
 
 Sample modules may use sample-specific namespaces. Do not put samples in `module gpu;` unless they are shipped helpers.
 
@@ -28,7 +40,7 @@ Sample modules may use sample-specific namespaces. Do not put samples in `module
 | Functions | `snake_case` | `allocate_memory`, `cmd_dispatch`, `wait_completion` |
 | Structs, enums, typedefs, aliases | `PascalCase` | `RuntimeDesc`, `GpuSpan`, `TextureUsage` |
 | Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_SHADER_HEAP_CAPACITY`, `TRANSFER_DST`, `DEVICE_LOST` |
-| Modules | lowercase, dotted | `gpu`, `gpu::vk` |
+| Modules | lowercase, dotted | `gpu`, `gpu::internal`, `gpu::internal::vk` |
 | Files | `snake_case.c3` | `descriptor_heap.c3`, `pipeline_graphics.c3` |
 
 ## 4. Definition order
@@ -193,32 +205,29 @@ Backend files may import `vk` and `vma`. Samples may import `sdl`.
 
 ## 13. File organization
 
-Public files should be grouped by API area:
+The root public facade has one authoritative pair:
 
 ```text
-gpu/device.c3
-gpu/memory.c3
-gpu/texture.c3
-gpu/pipeline.c3
-gpu/command.c3
-gpu/render_pass.c3
-gpu/sync.c3
-gpu/swapchain.c3
+gpu/gpu.c3i
+gpu/gpu.c3
+gpu/surface/<platform>/surface.c3i
+gpu/surface/<platform>/surface.c3
 ```
 
-Backend implementation should mirror public areas:
+Backend-independent implementation is grouped by area in `gpu/internal/*.c3`.
+The Vulkan implementation mirrors those areas below it:
 
 ```text
-gpu/vk/device.c3
-gpu/vk/buffer.c3
-gpu/vk/texture.c3
-gpu/vk/pipeline_compute.c3
-gpu/vk/pipeline_graphics.c3
-gpu/vk/command.c3
-gpu/vk/sync.c3
+gpu/internal/vk/device.c3
+gpu/internal/vk/buffer.c3
+gpu/internal/vk/texture.c3
+gpu/internal/vk/pipeline_compute.c3
+gpu/internal/vk/pipeline_graphics.c3
+gpu/internal/vk/command.c3
+gpu/internal/vk/sync.c3
 ```
 
-Translation helpers belong in `gpu/vk/helpers.c3` and should not be duplicated.
+Translation helpers belong in `gpu/internal/vk/helpers.c3` and should not be duplicated.
 
 ## 14. Shader style
 

@@ -68,7 +68,7 @@ gpu/
 
 The final file split may change as code is migrated. Module ownership may not.
 
-`gpu::vk` and `gpu::vk::compat` are private. There is no public `gpu::compat::vk` backend.
+`gpu::internal::vk` is private. Compatibility Vulkan code remains in that module; there is no public `gpu::compat::vk` backend.
 
 ## Runtime and discovery
 
@@ -412,7 +412,7 @@ Compatibility shaders are authored for explicit descriptor layouts. The library 
 
 The compatibility per-draw data contract requires a separate design review before compatibility pipeline and command tasks are generated. This architecture exposes no placeholder binding API.
 
-A Vulkan 1.2 backend enables the core features and extensions needed for the requested public semantics. If a 1.2 implementation can preserve a root operation exactly, the fallback remains in `gpu::vk`. Only descriptor-set authoring and other unavoidable semantic differences belong in `gpu::compat`.
+A Vulkan 1.2 backend enables the core features and extensions needed for the requested public semantics. If a 1.2 implementation can preserve a root operation exactly, the fallback remains in `gpu::internal::vk`. Only descriptor-set authoring and other unavoidable semantic differences belong in `gpu::compat`.
 
 ## Backend implementation
 

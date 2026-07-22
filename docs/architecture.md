@@ -34,7 +34,7 @@ gpu public API, module gpu
 backend dispatch layer
         |
         v
-gpu::vk Vulkan backend
+gpu::internal::vk Vulkan backend
         |
         +--> vk.c3l         -> Vulkan API calls
         +--> vma.c3l        -> Vulkan memory allocation
@@ -52,31 +52,22 @@ gpu.c3l/
 ├── abi/                     shader ABI schemas
 ├── manifest.json
 ├── gpu/
-│   ├── gpu.c3i
-│   ├── gpu.c3
-│   ├── types.c3
-│   ├── faults.c3
-│   ├── runtime.c3
-│   ├── adapter.c3
-│   ├── caps.c3
-│   ├── device.c3
-│   ├── queue.c3
-│   ├── memory.c3
-│   ├── texture.c3
-│   ├── descriptor_heap.c3
-│   ├── shader_abi.c3
-│   ├── pipeline.c3
-│   ├── command.c3
-│   ├── sync.c3
-│   ├── surface.c3
+│   ├── gpu.c3i              public non-callable declarations
+│   ├── gpu.c3               public callable implementations and contracts
 │   ├── surface/
-│   │   ├── win32/surface.c3
-│   │   ├── wayland/surface.c3
-│   │   └── x11/surface.c3
-│   ├── swapchain.c3
-│   ├── debug.c3
-│   └── vk/
-│       └── *.c3
+│   │   ├── win32/
+│   │   │   ├── surface.c3i  public native handle types
+│   │   │   └── surface.c3   public surface callable
+│   │   ├── wayland/
+│   │   │   ├── surface.c3i
+│   │   │   └── surface.c3
+│   │   └── x11/
+│   │       ├── surface.c3i
+│   │       └── surface.c3
+│   └── internal/
+│       ├── *.c3              backend-independent private implementation
+│       └── vk/
+│           └── *.c3          private Vulkan backend
 ├── include/
 │   └── shaders/        published shader-side ABI includes only (no application shaders)
 ├── lib/                     vendored C3 bindings
@@ -88,21 +79,34 @@ gpu.c3l/
 
 ### Library files
 
-Files under `gpu/` declare:
+`gpu/gpu.c3i` is the only source of public non-callable declarations in the
+root module. `gpu/gpu.c3` contains every public method, operator, macro, and
+free-function implementation together with its contract and default arguments.
+Both declare:
 
 ```c3
 module gpu;
 ```
 
-Backend files under `gpu/vk/` declare:
+Each platform surface keeps its public native typedefs in `surface.c3i` and its
+single `create_surface` callable in the adjacent `surface.c3` under
+`gpu::surface::{win32,wayland,x11}`.
+
+Backend-independent implementation files under `gpu/internal/` declare:
 
 ```c3
-module gpu::vk @private;
+module gpu::internal @private;
 ```
 
-The public `gpu` module explicitly imports this implementation module with a
-visibility override. White-box tests do the same; consumers should not depend on
-backend declarations.
+Vulkan files under `gpu/internal/vk/` declare:
+
+```c3
+module gpu::internal::vk @private;
+```
+
+Public callable implementations and platform surface implementations import
+private implementation modules with a scoped visibility override. White-box
+tests do the same; consumers should not depend on either internal module.
 
 Samples are standalone consumers and may declare their own sample modules.
 
@@ -384,7 +388,7 @@ private native buffers.
 
 The Vulkan backend may use private `BufferHandle`, `BufferDesc`, and
 `BufferUsage` declarations for generic allocation backing. They remain in
-`gpu::vk` and never cross backend dispatch.
+`gpu::internal::vk` and never cross backend dispatch.
 
 ### Textures
 

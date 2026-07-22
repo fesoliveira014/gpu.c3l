@@ -17,7 +17,7 @@ verification commands.
 - `gpu` owns the canonical runtime, adapter, device, queue, memory, texture, command, synchronization, rendering, presentation, and strict pipeline APIs.
 - `gpu::compat` adds explicit descriptor-set capabilities and compatibility pipelines. It does not preserve or wrap the current API.
 - `gpu::surface::<platform>` creates platform surfaces and returns the shared `gpu::Surface` type.
-- `gpu::vk` is a private shared backend. Compatibility implementation code may live under a private `gpu::vk::compat` submodule.
+- `gpu::internal::vk` is the single private Vulkan backend module. Compatibility implementation code, if added, remains private within that module.
 - Importing any module performs no runtime initialization.
 
 Vulkan types, feature names, queue families, layouts, descriptor mechanisms, and result codes do not appear in the GPU-shaped API.

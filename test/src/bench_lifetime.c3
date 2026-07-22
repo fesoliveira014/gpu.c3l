@@ -1,5 +1,6 @@
 module gpu_bench;
 
+import gpu::internal @public;
 import gpu @public;
 import std::os::env;
 
@@ -74,9 +75,9 @@ fn void? wait_bench_queue(gpu::Device* device, gpu::QueueKind queue) {
 fn void? destroy_bench_device(gpu::Device* device) {
     if (device == null || !device.is_valid()) return;
     gpu::Runtime runtime;
-    gpu::DeviceOperation operation = gpu::begin_device_operation(device, true)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device, true)!;
     if (operation.data.runtime_retained) runtime = operation.data.runtime;
-    gpu::end_device_operation(&operation);
+    gpu::internal::end_device_operation(&operation);
     gpu::QueueCounts? counts_result = gpu::get_queue_counts(device);
     if (catch err = counts_result) {
         if (err == gpu::DEVICE_LOST) {

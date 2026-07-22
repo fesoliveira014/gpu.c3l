@@ -1,7 +1,8 @@
 module gpu_bench;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import std::io;
 import std::time;
 
@@ -45,7 +46,7 @@ $assert $reflect(ComputeRoot._pad1).offset == 24;
 $assert $reflect(ComputeRoot._pad2).offset == 28;
 
 struct CommandPathWork {
-    gpu::RecordingWorkCounters recording;
+    gpu::internal::RecordingWorkCounters recording;
     ulong                      shader_module_creations;
     ulong                      pipeline_creations;
 }
@@ -1187,7 +1188,7 @@ fn int main() {
         create_bench_device(&runtime_desc, explicit_policy: true)!!;
     defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(state.validation_policy.contract
         == gpu::ContractValidation.TRUSTED);
     assert(!state.validation_policy.track_lifetimes);

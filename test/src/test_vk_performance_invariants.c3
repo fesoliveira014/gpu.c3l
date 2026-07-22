@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 
 const char[*] PERFORMANCE_COMP_SPIRV =
@@ -42,8 +43,8 @@ fn gpu::Device make_performance_invariant_device() {
 }
 
 fn void assert_zero_warm_creation_work(
-    gpu::RecordingWorkCounters before,
-    gpu::RecordingWorkCounters after,
+    gpu::internal::RecordingWorkCounters before,
+    gpu::internal::RecordingWorkCounters after,
     ulong shader_modules_before,
     ulong shader_modules_after,
     ulong pipelines_before,
@@ -154,8 +155,8 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     gpu::discard_executable_commands(&warmup_executable)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state(device);
-    gpu::RecordingWorkCounters before =
+        gpu::internal::device_backend_state(device);
+    gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(
         state,
@@ -234,7 +235,7 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    gpu::RecordingWorkCounters after =
+    gpu::internal::RecordingWorkCounters after =
         vk::command_recording_work_counters(state);
     ulong shader_modules_after = vk::pipeline_shader_module_create_count(
         state,
@@ -345,8 +346,8 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     gpu::discard_executable_commands(&warmup_executable)!!;
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state(device);
-    gpu::RecordingWorkCounters before =
+        gpu::internal::device_backend_state(device);
+    gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(
         state,
@@ -378,7 +379,7 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         "draw emits one root push and one native draw");
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    gpu::RecordingWorkCounters after =
+    gpu::internal::RecordingWorkCounters after =
         vk::command_recording_work_counters(state);
     ulong shader_modules_after = vk::pipeline_shader_module_create_count(
         state,

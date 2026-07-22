@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 
 fn gpu::Device make_transition_device() {
     gpu::RuntimeDesc desc = {

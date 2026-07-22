@@ -92,24 +92,24 @@ exists (else the limit is compile-time).
 
 | Limit | Value | Knob | Fault when exceeded |
 |---|---|---|---|
-| Texture views in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_HEAP_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `texture_heap_capacity` | `DESCRIPTOR_HEAP_FULL` |
-| Sampler descriptors | 256 default, 65 536 max (`DEFAULT_SAMPLER_HEAP_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `sampler_heap_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Texture views in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_HEAP_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/gpu.c3i`) | `texture_heap_capacity` | `DESCRIPTOR_HEAP_FULL` |
+| Sampler descriptors | 256 default, 65 536 max (`DEFAULT_SAMPLER_HEAP_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/gpu.c3i`) | `sampler_heap_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Interned samplers | selected-device `maxSamplerAllocationCount`, capped at 65 536 | — | `SLOT_TABLE_FULL` |
 | Sampler mip LOD bias | Absolute value up to selected-device `maxSamplerLodBias`, reported by `DeviceCaps.max_sampler_lod_bias` | — | `INVALID_ARGUMENT` |
-| Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY` in `gpu/texture.c3`; `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
-| Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
-| Live pipelines | 256 by default (`MAX_PIPELINES` in `gpu/pipeline.c3`) | `pipeline_capacity` | `SLOT_TABLE_FULL` |
+| Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/gpu.c3i`) | `texture_capacity` | `SLOT_TABLE_FULL` |
+| Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/internal/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
+| Live pipelines | 256 by default (`MAX_PIPELINES` in `gpu/gpu.c3i`) | `pipeline_capacity` | `SLOT_TABLE_FULL` |
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
 | Generated work items | Selected-device semantic limit reported by `DeviceCaps.max_generated_work_count`; zero when unsupported | — | — |
-| Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/device.c3`) | — | `SLOT_TABLE_FULL` |
-| Live command allocators per device | 256 (`MAX_COMMAND_ALLOCATORS` in `gpu/vk/command.c3`) | destroy quiescent allocators to recycle generational slots | `SLOT_TABLE_FULL` |
-| Command buffers per allocator | 8 default, 4096 max (`DEFAULT_COMMAND_ALLOCATOR_CAPACITY`, `MAX_COMMAND_ALLOCATOR_CAPACITY` in `gpu/command.c3`) | `CommandAllocatorDesc.command_buffer_capacity` | `INVALID_ARGUMENT` above the maximum; `DEVICE_BUSY` while all configured units are live |
-| Tracked resource references per command list | 64 default, 4096 max (`DEFAULT_COMMAND_REFERENCES_PER_LIST`, `MAX_COMMAND_REFERENCES_PER_LIST` in `gpu/command.c3`) | `CommandAllocatorDesc.max_resource_references_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
-| Generated preprocess reservations retained by one list | 4 default, 64 max (`DEFAULT_COMMAND_PREPROCESS_PER_LIST`, `MAX_COMMAND_PREPROCESS_PER_LIST` in `gpu/command.c3`) | `CommandAllocatorDesc.max_generated_preprocess_buffers_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
+| Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/internal/device.c3`) | — | `SLOT_TABLE_FULL` |
+| Live command allocators per device | 256 (`MAX_COMMAND_ALLOCATORS` in `gpu/internal/vk/command.c3`) | destroy quiescent allocators to recycle generational slots | `SLOT_TABLE_FULL` |
+| Command buffers per allocator | 8 default, 4096 max (`DEFAULT_COMMAND_ALLOCATOR_CAPACITY`, `MAX_COMMAND_ALLOCATOR_CAPACITY` in `gpu/gpu.c3i`) | `CommandAllocatorDesc.command_buffer_capacity` | `INVALID_ARGUMENT` above the maximum; `DEVICE_BUSY` while all configured units are live |
+| Tracked resource references per command list | 64 default, 4096 max (`DEFAULT_COMMAND_REFERENCES_PER_LIST`, `MAX_COMMAND_REFERENCES_PER_LIST` in `gpu/gpu.c3i`) | `CommandAllocatorDesc.max_resource_references_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
+| Generated preprocess reservations retained by one list | 4 default, 64 max (`DEFAULT_COMMAND_PREPROCESS_PER_LIST`, `MAX_COMMAND_PREPROCESS_PER_LIST` in `gpu/gpu.c3i`) | `CommandAllocatorDesc.max_generated_preprocess_buffers_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
 | Generated preprocess reservation bytes per allocator | zero by default (disabled) | `CommandAllocatorDesc.generated_preprocess_bytes` | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` during reservation |
-| Swapchains | 8 (`MAX_SWAPCHAINS` in `gpu/swapchain.c3`) | — | `SLOT_TABLE_FULL` |
-| Color attachments per pass | Lesser of 8 (`MAX_COLOR_ATTACHMENTS` in `gpu/pipeline.c3`) and `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
+| Swapchains | 8 (`MAX_SWAPCHAINS` in `gpu/gpu.c3i`) | — | `SLOT_TABLE_FULL` |
+| Color attachments per pass | Lesser of 8 (`MAX_COLOR_ATTACHMENTS` in `gpu/gpu.c3i`) and `DeviceCaps.max_color_attachments` | — | `INVALID_ARGUMENT` |
 
 Two sizing rules that bite:
 - **Heap capacities are exact device defaults.** `create_device` checks the

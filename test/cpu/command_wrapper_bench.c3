@@ -1,5 +1,6 @@
 module gpu;
 
+import gpu::internal @public;
 import std::io;
 import std::time;
 
@@ -49,13 +50,13 @@ fn CommandAllocatorHandle? create_wrapper_bench_allocator(
 ) {
     (void)queue;
     (void)desc;
-    WrapperBenchState* state = (WrapperBenchState*)device_backend_state_ptr(
+    WrapperBenchState* state = (WrapperBenchState*)gpu::internal::device_backend_state_ptr(
         device,
     );
     return {
-        .owner      = resource_owner_tag(
+        .owner      = gpu::internal::resource_owner_tag(
             state.resource_owner,
-            ResourceOwnerKind.COMMAND_ALLOCATOR,
+            gpu::internal::ResourceOwnerKind.COMMAND_ALLOCATOR,
         ),
         .index      = 0,
         .generation = 1,
@@ -73,17 +74,17 @@ fn void? destroy_wrapper_bench_allocator(
 fn void? begin_wrapper_bench_commands(
     CommandAllocator* allocator,
     CommandList* out_commands,
-    CommandBackendContext* out_backend,
+    gpu::internal::CommandBackendContext* out_backend,
 ) {
-    WrapperBenchState* state = (WrapperBenchState*)device_backend_state_ptr(
+    WrapperBenchState* state = (WrapperBenchState*)gpu::internal::device_backend_state_ptr(
         &allocator.device,
     );
     *out_commands = {
         .device = allocator.device,
         .handle = {
-            .owner      = resource_owner_tag(
+            .owner      = gpu::internal::resource_owner_tag(
                 state.resource_owner,
-                ResourceOwnerKind.COMMAND,
+                gpu::internal::ResourceOwnerKind.COMMAND,
             ),
             .index      = 0,
             .generation = 1,
@@ -95,7 +96,7 @@ fn void? begin_wrapper_bench_commands(
     };
 }
 
-fn void? end_wrapper_bench_commands(CommandEncoderState* encoder) {
+fn void? end_wrapper_bench_commands(gpu::internal::CommandEncoderState* encoder) {
     (void)encoder;
 }
 
@@ -103,7 +104,7 @@ fn void? discard_wrapper_bench_commands(
     Device* device,
     CommandListHandle handle,
     bool executable,
-    CommandEncoderState* encoder,
+    gpu::internal::CommandEncoderState* encoder,
 ) {
     (void)device;
     (void)handle;
@@ -112,7 +113,7 @@ fn void? discard_wrapper_bench_commands(
 }
 
 fn void? wrapper_bench_copy_buffer(
-    CommandEncoderState* encoder,
+    gpu::internal::CommandEncoderState* encoder,
     BufferCopyDesc* desc,
 ) {
     (void)encoder;
@@ -121,7 +122,7 @@ fn void? wrapper_bench_copy_buffer(
 }
 
 fn void? wrapper_bench_barrier(
-    CommandEncoderState* encoder,
+    gpu::internal::CommandEncoderState* encoder,
     Barrier* barrier,
 ) {
     (void)encoder;
@@ -130,7 +131,7 @@ fn void? wrapper_bench_barrier(
 }
 
 fn void? wrapper_bench_dispatch(
-    CommandEncoderState* encoder,
+    gpu::internal::CommandEncoderState* encoder,
     GpuAddress root,
     Vec3u groups,
 ) {
@@ -141,7 +142,7 @@ fn void? wrapper_bench_dispatch(
 }
 
 fn void? wrapper_bench_viewport(
-    CommandEncoderState* encoder,
+    gpu::internal::CommandEncoderState* encoder,
     Viewport* viewport,
 ) {
     (void)encoder;
@@ -150,7 +151,7 @@ fn void? wrapper_bench_viewport(
 }
 
 fn void? wrapper_bench_draw(
-    CommandEncoderState* encoder,
+    gpu::internal::CommandEncoderState* encoder,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     uint vertex_count,
@@ -164,7 +165,7 @@ fn void? wrapper_bench_draw(
     observe_draw();
 }
 
-CommandOps wrapper_bench_command_ops @private = {
+gpu::internal::CommandOps wrapper_bench_command_ops @private = {
     .copy_buffer  = &wrapper_bench_copy_buffer,
     .barrier      = &wrapper_bench_barrier,
     .dispatch     = &wrapper_bench_dispatch,
@@ -172,7 +173,7 @@ CommandOps wrapper_bench_command_ops @private = {
     .draw         = &wrapper_bench_draw,
 };
 
-BackendVTable wrapper_bench_vtable @private = {
+gpu::internal::BackendVTable wrapper_bench_vtable @private = {
     .destroy_device            = &destroy_wrapper_bench_device,
     .create_command_allocator  = &create_wrapper_bench_allocator,
     .destroy_command_allocator = &destroy_wrapper_bench_allocator,
@@ -443,8 +444,8 @@ fn void print_samples(
 
 fn int main() {
     WrapperBenchState state;
-    state.resource_owner = allocate_device_resource_owner()!!;
-    Device device = register_device(
+    state.resource_owner = gpu::internal::allocate_device_resource_owner()!!;
+    Device device = gpu::internal::register_device(
         backend:        BackendKind.VULKAN,
         caps:           {},
         vtable:         &wrapper_bench_vtable,

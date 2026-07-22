@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 
 fn gpu::TextureHandle make_render_validation_target(
@@ -23,7 +24,7 @@ fn vk::TextureSlot* render_validation_slot(
     gpu::TextureHandle texture,
 ) {
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(*device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
     return state.textures.get(texture)!!;
 }
 
@@ -32,7 +33,7 @@ fn vk::AttachmentViewSlot* render_validation_view_slot(
     gpu::AttachmentViewHandle view,
 ) {
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(*device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
     return state.attachment_views.get(view)!!;
 }
 
@@ -120,7 +121,7 @@ fn void graphics_pipeline_rejects_unsupported_sample_count() @test {
         .sample_count = unsupported,
     };
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(@catch(vk::validate_graphics_pipeline_desc(state, &desc))
         == gpu::UNSUPPORTED_FEATURE,
         "pipeline creation preflights attachment sample support");

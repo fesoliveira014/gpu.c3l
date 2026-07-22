@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 
 fn RuntimeDesc queue_runtime_desc() {
     return {
@@ -20,7 +21,7 @@ fn void queue_test_destroy(void* backend_state) {
     (void)backend_state;
 }
 
-gpu::BackendVTable queue_test_vtable = {
+gpu::internal::BackendVTable queue_test_vtable = {
     .destroy_device = &queue_test_destroy,
 };
 
@@ -84,13 +85,13 @@ fn void queue_queries_return_device_owned_identities() @test {
 
 fn void queue_queries_preserve_distinct_compute_identity() @test {
     int backend_state;
-    gpu::QueueSelection selection = gpu::queue_selection_for_aliases(
+    gpu::internal::QueueSelection selection = gpu::internal::queue_selection_for_aliases(
         compute_aliases_graphics:  false,
         transfer_aliases_graphics: true,
         transfer_aliases_compute:  false,
     );
 
-    gpu::Device device = gpu::register_device(
+    gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          { .async_compute = true },
         vtable:        &queue_test_vtable,
@@ -153,13 +154,13 @@ fn void selected_queue_counts_round_trip_stored_identities() @test {
     ulong[2] graphics = { 10, 20 };
     ulong[1] compute = { 20 };
     ulong[1] transfer = { 10 };
-    gpu::QueueSelection selection = gpu::queue_selection_from_native_ids(
+    gpu::internal::QueueSelection selection = gpu::internal::queue_selection_from_native_ids(
         requirements: requirements,
         graphics:     graphics[..],
         compute:      compute[..],
         transfer:     transfer[..],
     )!!;
-    gpu::Device device = gpu::register_device(
+    gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          {},
         vtable:        &queue_test_vtable,
@@ -192,26 +193,26 @@ fn void selected_queue_counts_reach_encoded_capacity() @test {
     int backend_state;
     gpu::QueueRequirements requirements = {
         .counts = {
-            .graphics = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .compute  = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .transfer = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .graphics = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .compute  = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .transfer = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
         },
     };
-    ulong[gpu::MAX_REQUESTED_QUEUES_PER_ROLE] graphics;
-    ulong[gpu::MAX_REQUESTED_QUEUES_PER_ROLE] compute;
-    ulong[gpu::MAX_REQUESTED_QUEUES_PER_ROLE] transfer;
-    for (uint index = 0; index < gpu::MAX_REQUESTED_QUEUES_PER_ROLE; index++) {
+    ulong[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] graphics;
+    ulong[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] compute;
+    ulong[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] transfer;
+    for (uint index = 0; index < gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE; index++) {
         graphics[index] = (ulong)index;
-        compute[index] = (ulong)(gpu::MAX_REQUESTED_QUEUES_PER_ROLE + index);
-        transfer[index] = (ulong)(2 * gpu::MAX_REQUESTED_QUEUES_PER_ROLE + index);
+        compute[index] = (ulong)(gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE + index);
+        transfer[index] = (ulong)(2 * gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE + index);
     }
-    gpu::QueueSelection selection = gpu::queue_selection_from_native_ids(
+    gpu::internal::QueueSelection selection = gpu::internal::queue_selection_from_native_ids(
         requirements: requirements,
         graphics:     graphics[..],
         compute:      compute[..],
         transfer:     transfer[..],
     )!!;
-    gpu::Device device = gpu::register_device(
+    gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
         caps:          {},
         vtable:        &queue_test_vtable,
@@ -224,13 +225,13 @@ fn void selected_queue_counts_reach_encoded_capacity() @test {
     gpu::Queue last = gpu::get_queue(
         &device,
         gpu::QueueKind.TRANSFER,
-        gpu::MAX_REQUESTED_QUEUES_PER_ROLE - 1,
+        gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE - 1,
     )!!;
     gpu::QueueInfo info = gpu::get_queue_info(&device, last)!!;
-    assert(counts.graphics == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(counts.compute == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(counts.transfer == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(last.id == gpu::MAX_SELECTED_QUEUE_IDENTITIES - 1);
+    assert(counts.graphics == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(counts.compute == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(counts.transfer == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(last.id == gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES - 1);
     assert(info.id == last.id);
     assert(
         !info.roles.graphics && !info.roles.compute && info.roles.transfer,
@@ -242,7 +243,7 @@ fn void queue_registration_rejects_duplicate_role_identity() @test {
     int backend_state;
     gpu::QueueRequirements requirements = { .counts = { .graphics = 2 } };
     ulong[2] graphics = { 10, 20 };
-    gpu::QueueSelection selection = gpu::queue_selection_from_native_ids(
+    gpu::internal::QueueSelection selection = gpu::internal::queue_selection_from_native_ids(
         requirements: requirements,
         graphics:     graphics[..],
         compute:      {},
@@ -251,7 +252,7 @@ fn void queue_registration_rejects_duplicate_role_identity() @test {
     selection.graphics_ids[1] = selection.graphics_ids[0];
 
     assert(
-        @catch(gpu::register_device(
+        @catch(gpu::internal::register_device(
             backend:       gpu::BackendKind.VULKAN,
             caps:          {},
             vtable:        &queue_test_vtable,

@@ -24,20 +24,40 @@ def api_function(
 
 
 def surface_module(*handles: str) -> dict:
+    specs = {
+        ("InstanceHandle", "WindowHandle"): (
+            ("instance", "window"),
+            ("void*", "void*"),
+        ),
+        ("DisplayHandle", "SurfaceHandle"): (
+            ("display", "surface"),
+            ("void*", "void*"),
+        ),
+        ("DisplayHandle", "WindowHandle"): (
+            ("display", "window"),
+            ("void*", "ulong"),
+        ),
+    }
+    parameter_names, base_types = specs[handles]
     return {
         "functions": [{
             "name": "create_surface",
+            "return_type": {"name": "Surface?"},
             "members": [
                 {"name": "runtime", "type": {"name": "Runtime*"}},
                 *[
-                    {"name": name.lower(), "type": {"name": name}}
-                    for name in handles
+                    {"name": parameter, "type": {"name": handle}}
+                    for parameter, handle in zip(parameter_names, handles)
                 ],
             ],
         }],
         "types": [
-            {"name": name, "kind": "distinct type"}
-            for name in handles
+            {
+                "name": name,
+                "kind": "distinct type",
+                "base_type": {"name": base_type},
+            }
+            for name, base_type in zip(handles, base_types)
         ],
     }
 
@@ -1485,35 +1505,35 @@ method gpu::Runtime.is_valid
 
     def test_rejects_generated_public_backend_declaration(self) -> None:
         document = valid_document()
-        document["modules"]["gpu::vk"] = {
+        document["modules"]["gpu::internal::vk"] = {
             "functions": [{
                 "name": "create_native_device",
-                "uid": "gpu::vk::create_native_device",
+                "uid": "gpu::internal::vk::create_native_device",
                 "visibility": "public",
             }],
             "types": [{
                 "name": "PrivateState",
-                "uid": "gpu::vk::PrivateState",
+                "uid": "gpu::internal::vk::PrivateState",
                 "visibility": "private",
             }],
         }
         self.assertIn(
-            "generated gpu::vk::create_native_device must remain private",
+            "generated gpu::internal::vk::create_native_device must remain private",
             check_public_api.validate_document(document),
         )
 
     def test_rejects_generated_public_nested_backend_declaration(self) -> None:
         document = valid_document()
-        document["modules"]["gpu::vk::testing"] = {
+        document["modules"]["gpu::internal::vk::testing"] = {
             "functions": [{
                 "name": "open_backend_escape",
-                "uid": "gpu::vk::testing::open_backend_escape",
+                "uid": "gpu::internal::vk::testing::open_backend_escape",
                 "visibility": "public",
             }],
         }
         self.assertIn(
             (
-                "generated gpu::vk::testing::open_backend_escape "
+                "generated gpu::internal::vk::testing::open_backend_escape "
                 "must remain private"
             ),
             check_public_api.validate_document(document),
@@ -1552,7 +1572,7 @@ method gpu::Runtime.is_valid
         win32_types = document["modules"]["gpu::surface::win32"]["types"]
         win32_types[0]["kind"] = "inline type"
         self.assertIn(
-            "gpu::surface::win32::InstanceHandle must be a distinct type",
+            "gpu::surface::win32::InstanceHandle must be a distinct void* type",
             check_public_api.validate_document(document),
         )
 
@@ -1696,11 +1716,11 @@ method gpu::Runtime.is_valid
 
     def test_rejects_retired_recording_context_checkpoint(self) -> None:
         failures = check_public_api.validate_private_backend_source(
-            Path("gpu/vk/device.c3"),
-            "module gpu::vk @private;\nenum Checkpoint { RECORDING_CONTEXTS }\n",
+            Path("gpu/internal/vk/device.c3"),
+            "module gpu::internal::vk @private;\nenum Checkpoint { RECORDING_CONTEXTS }\n",
         )
         self.assertIn(
-            "retired backend RECORDING_CONTEXTS in gpu/vk/device.c3",
+            "retired backend RECORDING_CONTEXTS in gpu/internal/vk/device.c3",
             failures,
         )
 
@@ -2006,11 +2026,11 @@ method gpu::Runtime.is_valid
 
     def test_rejects_retired_backend_acquisition_timeout_policy(self) -> None:
         failures = check_public_api.validate_private_backend_source(
-            Path("gpu/vk/swapchain.c3"),
+            Path("gpu/internal/vk/swapchain.c3"),
             "const ulong ACQUIRE_TIMEOUT_NS = 1_000_000_000;\n",
         )
         self.assertIn(
-            "retired backend ACQUIRE_TIMEOUT_NS in gpu/vk/swapchain.c3",
+            "retired backend ACQUIRE_TIMEOUT_NS in gpu/internal/vk/swapchain.c3",
             failures,
         )
 
@@ -2441,18 +2461,196 @@ method gpu::Runtime.is_valid
                     check_public_api.validate_document(document),
                 )
 
+    def test_enforces_root_interface_and_implementation_roles(self) -> None:
+        interface_failures = check_public_api.validate_root_facade_source(
+            Path("gpu/gpu.c3i"),
+            "module gpu;\nfn void misplaced() {}\n",
+        )
+        self.assertIn(
+            "gpu/gpu.c3i:2 public interface may not contain callable declarations",
+            interface_failures,
+        )
+
+        implementation_failures = check_public_api.validate_root_facade_source(
+            Path("gpu/gpu.c3"),
+            "module gpu;\nstruct Misplaced {}\n"
+            "$assert Misplaced::size == 0;\n"
+            "fn void hidden() @private {}\n",
+        )
+        self.assertIn(
+            "gpu/gpu.c3:2 public implementation may not contain non-callable declarations",
+            implementation_failures,
+        )
+        self.assertIn(
+            "gpu/gpu.c3:3 public implementation may not contain layout assertions",
+            implementation_failures,
+        )
+        self.assertIn(
+            "gpu/gpu.c3:4 public implementation may not contain private declarations",
+            implementation_failures,
+        )
+
+    def test_classifies_macro_and_definition_declarations(self) -> None:
+        interface_failures = check_public_api.validate_root_facade_source(
+            Path("gpu/gpu.c3i"),
+            "module gpu;\nmacro misplaced() {}\n",
+        )
+        self.assertIn(
+            "gpu/gpu.c3i:2 public interface may not contain callable declarations",
+            interface_failures,
+        )
+        implementation_failures = check_public_api.validate_root_facade_source(
+            Path("gpu/gpu.c3"),
+            "module gpu;\nfaultdef BAD;\nconstdef LIMIT = 1;\n",
+        )
+        self.assertEqual(
+            sum(
+                "non-callable declarations" in failure
+                for failure in implementation_failures
+            ),
+            2,
+        )
+
+    def test_enforces_exact_surface_source_roles(self) -> None:
+        interface = (
+            "module gpu::surface::win32;\n"
+            "import gpu @public;\n"
+            "typedef InstanceHandle = void*;\n"
+            "typedef WindowHandle = void*;\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_surface_source(
+                Path("gpu/surface/win32/surface.c3i"),
+                interface,
+            ),
+            [],
+        )
+        failures = check_public_api.validate_surface_source(
+            Path("gpu/surface/win32/surface.c3i"),
+            interface + "struct Escape {}\nfn void misplaced() {}\n",
+        )
+        self.assertIn(
+            "gpu/surface/win32/surface.c3i may not contain callable declarations",
+            failures,
+        )
+        self.assertIn(
+            "gpu/surface/win32/surface.c3i may only contain surface handle typedefs",
+            failures,
+        )
+
+        implementation_failures = check_public_api.validate_surface_source(
+            Path("gpu/surface/win32/surface.c3"),
+            "module gpu::surface::win32;\n"
+            "import gpu @public;\n"
+            "import gpu::internal @public;\n"
+            "fn void create_surface() {}\n"
+            "fn void extra() {}\n",
+        )
+        self.assertIn(
+            "gpu/surface/win32/surface.c3 must contain exactly create_surface",
+            implementation_failures,
+        )
+        reordered_implementation = (
+            "module gpu::surface::win32;\n"
+            "import gpu::internal @public;\n"
+            "import gpu @public;\n"
+            "fn void create_surface() {}\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_surface_source(
+                Path("gpu/surface/win32/surface.c3"),
+                reordered_implementation,
+            ),
+            [],
+        )
+
+    def test_rejects_internal_and_binding_types_in_all_public_metadata(self) -> None:
+        document = valid_document()
+        document["modules"]["gpu"]["functions"][0]["return_type"] = {
+            "name": "gpu::internal::RuntimeData*",
+        }
+        document["modules"]["gpu::surface::win32"]["functions"][0][
+            "return_type"
+        ] = {"name": "vk::Device"}
+        failures = check_public_api.validate_public_metadata_boundaries(document)
+        self.assertIn(
+            "gpu public metadata contains internal gpu type",
+            failures,
+        )
+        self.assertIn(
+            "gpu::surface::win32 public metadata contains Vulkan binding type",
+            failures,
+        )
+
+    def test_rejects_nested_internal_and_backend_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested_internal = root / "gpu" / "internal" / "probe" / "escape.c3"
+            nested_internal.parent.mkdir(parents=True)
+            nested_internal.write_text(
+                "module gpu::internal @private;\n",
+                encoding="utf-8",
+            )
+            nested_backend = root / "gpu" / "internal" / "vk" / "probe" / "escape.c3"
+            nested_backend.parent.mkdir(parents=True)
+            nested_backend.write_text(
+                "module gpu::internal::vk @private;\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(check_public_api, "ROOT", root):
+                self.assertEqual(
+                    check_public_api.scan_private_internal_modules(),
+                    [
+                        "unexpected backend-independent internal source "
+                        "gpu/internal/probe/escape.c3"
+                    ],
+                )
+                self.assertEqual(
+                    check_public_api.scan_private_backend_modules(),
+                    [
+                        "unexpected Vulkan backend source "
+                        "gpu/internal/vk/probe/escape.c3"
+                    ],
+                )
+
+    def test_rejects_retired_vulkan_namespace_in_live_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in (
+                Path("gpu/probe.c3"),
+                Path("test/probe.c3"),
+                Path("scripts/probe.py"),
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("gpu::" + "vk", encoding="utf-8")
+            (root / "manifest.json").write_text(
+                "gpu/" + "vk",
+                encoding="utf-8",
+            )
+            with mock.patch.object(check_public_api, "ROOT", root):
+                self.assertEqual(
+                    check_public_api.scan_retired_vulkan_namespace(),
+                    [
+                        "retired Vulkan namespace in gpu/probe.c3",
+                        "retired Vulkan namespace in manifest.json",
+                        "retired Vulkan namespace in scripts/probe.py",
+                        "retired Vulkan namespace in test/probe.c3",
+                    ],
+                )
+
     def test_requires_private_vulkan_backend_modules(self) -> None:
-        relative = Path("gpu/vk/buffer.c3")
+        relative = Path("gpu/internal/vk/buffer.c3")
         self.assertEqual(
             check_public_api.validate_private_backend_source(
                 relative,
-                "module gpu::vk @private;",
+                "module gpu::internal::vk @private;",
             ),
             [],
         )
         for declaration in (
-            "module gpu::vk;",
-            "module gpu::vk @public;",
+            "module gpu::internal::vk;",
+            "module gpu::internal::vk @public;",
         ):
             with self.subTest(declaration=declaration):
                 self.assertEqual(
@@ -2461,8 +2659,8 @@ method gpu::Runtime.is_valid
                         declaration,
                     ),
                     [
-                        "gpu/vk/buffer.c3 must declare the private "
-                        "gpu::vk backend module"
+                        "gpu/internal/vk/buffer.c3 must declare the private "
+                        "gpu::internal::vk backend module"
                     ],
                 )
 
@@ -2473,18 +2671,73 @@ method gpu::Runtime.is_valid
             ),
             [
                 (
-                    "gpu/vk/buffer.c3:1 backend file may only declare "
-                    "gpu::vk modules, found gpu"
+                    "gpu/internal/vk/buffer.c3:1 backend file may only declare "
+                    "gpu::internal::vk modules, found gpu"
                 ),
+            ],
+        )
+        self.assertEqual(
+            check_public_api.validate_private_backend_source(
+                relative,
+                "module gpu::internal::vk::probe @private;",
+            ),
+            [
+                "gpu/internal/vk/buffer.c3:1 backend file may only declare "
+                "gpu::internal::vk modules, found gpu::internal::vk::probe"
+            ],
+        )
+
+    def test_requires_private_internal_module(self) -> None:
+        relative = Path("gpu/internal/device.c3")
+        self.assertEqual(
+            check_public_api.validate_private_internal_source(
+                relative,
+                "module gpu::internal @private;\nimport gpu @public;\n",
+            ),
+            [],
+        )
+        self.assertEqual(
+            check_public_api.validate_private_internal_source(
+                relative,
+                "module gpu::internal;\n",
+            ),
+            [
+                "gpu/internal/device.c3 must declare private module "
+                "gpu::internal"
+            ],
+        )
+        self.assertEqual(
+            check_public_api.validate_private_internal_source(
+                relative,
+                "module gpu::probe @private;\n",
+            ),
+            [
+                "gpu/internal/device.c3:1 internal file may only declare "
+                "gpu::internal, found gpu::probe"
+            ],
+        )
+
+    def test_rejects_internal_source_visibility_escape(self) -> None:
+        relative = Path("gpu/internal/helpers.c3")
+        source = (
+            "module gpu::internal @private;\n"
+            "import gpu @public;\n"
+            "fn void leaked_helper() @public {}\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_private_internal_source(relative, source),
+            [
+                "gpu/internal/helpers.c3:3 internal declaration may not use "
+                "@public"
             ],
         )
 
     def test_rejects_backend_source_visibility_escapes(self) -> None:
-        relative = Path("gpu/vk/helpers.c3")
+        relative = Path("gpu/internal/vk/helpers.c3")
         nested_source = (
-            "module gpu::vk @private;\n"
+            "module gpu::internal::vk @private;\n"
             "import gpu @public;\n"
-            "module gpu::vk::probe;\n"
+            "module gpu::internal::vk::probe;\n"
             "fn void open_backend_escape() {}\n"
         )
         self.assertEqual(
@@ -2493,13 +2746,13 @@ method gpu::Runtime.is_valid
                 nested_source,
             ),
             [
-                "gpu/vk/helpers.c3 must declare the private "
-                "gpu::vk backend module"
+                "gpu/internal/vk/helpers.c3:3 backend file may only declare "
+                "gpu::internal::vk modules, found gpu::internal::vk::probe"
             ],
         )
 
         public_declaration_source = (
-            "module gpu::vk @private;\n"
+            "module gpu::internal::vk @private;\n"
             "import gpu @public;\n"
             "fn void open_backend_escape() @public {}\n"
         )
@@ -2509,13 +2762,13 @@ method gpu::Runtime.is_valid
                 public_declaration_source,
             ),
             [
-                "gpu/vk/helpers.c3:3 "
+                "gpu/internal/vk/helpers.c3:3 "
                 "backend declaration may not use @public"
             ],
         )
 
         wrong_module_source = (
-            "module gpu::vk @private;\n"
+            "module gpu::internal::vk @private;\n"
             "import gpu @public;\n"
             "module gpu::probe;\n"
             "fn int probe_leak() { return 7; }\n"
@@ -2527,16 +2780,16 @@ method gpu::Runtime.is_valid
             ),
             [
                 (
-                    "gpu/vk/helpers.c3:3 backend file may only declare "
-                    "gpu::vk modules, found gpu::probe"
+                    "gpu/internal/vk/helpers.c3:3 backend file may only declare "
+                    "gpu::internal::vk modules, found gpu::probe"
                 ),
             ],
         )
 
     def test_rejects_retired_standalone_backend_lifecycle(self) -> None:
-        relative = Path("gpu/vk/device.c3")
+        relative = Path("gpu/internal/vk/device.c3")
         source = (
-            "module gpu::vk @private;\n"
+            "module gpu::internal::vk @private;\n"
             "struct StandaloneDeviceConfig {}\n"
             "fn void create_standalone_device_with_probe() {}\n"
         )
@@ -2546,19 +2799,19 @@ method gpu::Runtime.is_valid
             [
                 (
                     "retired backend StandaloneDeviceConfig "
-                    "in gpu/vk/device.c3"
+                    "in gpu/internal/vk/device.c3"
                 ),
                 (
                     "retired backend create_standalone_device_with_probe "
-                    "in gpu/vk/device.c3"
+                    "in gpu/internal/vk/device.c3"
                 ),
             ],
         )
 
     def test_rejects_retired_texture_lowering_paths(self) -> None:
-        relative = Path("gpu/vk/sync.c3")
+        relative = Path("gpu/internal/vk/sync.c3")
         source = (
-            "module gpu::vk @private;\n"
+            "module gpu::internal::vk @private;\n"
             "struct TextureUseScope {}\n"
             "fn void texture_use_to_vk() {}\n"
             "fn TextureBarrierRejection texture_barrier_rejection() {}\n"
@@ -2572,41 +2825,41 @@ method gpu::Runtime.is_valid
             source,
         )
         self.assertIn(
-            "retired backend TextureUseScope in gpu/vk/sync.c3",
+            "retired backend TextureUseScope in gpu/internal/vk/sync.c3",
             failures,
         )
         self.assertIn(
-            "retired backend texture_use_ in gpu/vk/sync.c3",
-            failures,
-        )
-        self.assertIn(
-            "retired backend fn TextureBarrierRejection "
-            "texture_barrier_rejection( in gpu/vk/sync.c3",
+            "retired backend texture_use_ in gpu/internal/vk/sync.c3",
             failures,
         )
         self.assertIn(
             "retired backend fn TextureBarrierRejection "
-            "texture_barrier_queue_rejection( in gpu/vk/sync.c3",
+            "texture_barrier_rejection( in gpu/internal/vk/sync.c3",
             failures,
         )
         self.assertIn(
-            "retired backend texture_transition_range( in gpu/vk/sync.c3",
+            "retired backend fn TextureBarrierRejection "
+            "texture_barrier_queue_rejection( in gpu/internal/vk/sync.c3",
             failures,
         )
         self.assertIn(
-            "retired backend texture_barrier_to_vk( in gpu/vk/sync.c3",
+            "retired backend texture_transition_range( in gpu/internal/vk/sync.c3",
+            failures,
+        )
+        self.assertIn(
+            "retired backend texture_barrier_to_vk( in gpu/internal/vk/sync.c3",
             failures,
         )
 
     def test_rejects_sibling_modules_in_public_sources(self) -> None:
-        relative = Path("gpu/memory.c3")
+        relative = Path("gpu/gpu.c3")
         self.assertEqual(
             check_public_api.validate_public_module_source(
                 relative,
                 "struct AllocationInfo {}\n",
             ),
             [
-                "gpu/memory.c3 must declare public module gpu",
+                "gpu/gpu.c3 must declare public module gpu",
             ],
         )
 
@@ -2623,7 +2876,7 @@ method gpu::Runtime.is_valid
             ),
             [
                 (
-                    "gpu/memory.c3:3 public source may only declare "
+                    "gpu/gpu.c3:3 public source may only declare "
                     "gpu, found gpu::util"
                 ),
             ],
@@ -2652,13 +2905,42 @@ method gpu::Runtime.is_valid
     def test_scans_only_the_canonical_backend_tree(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            gpu_root = root / "gpu"
+            gpu_root.mkdir(parents=True)
+            (gpu_root / "gpu.c3").write_text(
+                "module gpu;\nfn void probe() {}\n",
+                encoding="utf-8",
+            )
+            (gpu_root / "gpu.c3i").write_text(
+                "module gpu;\nstruct Probe {}\n",
+                encoding="utf-8",
+            )
+            for platform, types in check_public_api.SURFACE_TYPES.items():
+                surface_root = gpu_root / "surface" / platform
+                surface_root.mkdir(parents=True)
+                module = f"gpu::surface::{platform}"
+                typedefs = "".join(
+                    f"typedef {name} = {target};\n"
+                    for name, target in types
+                )
+                (surface_root / "surface.c3i").write_text(
+                    f"module {module};\nimport gpu @public;\n{typedefs}",
+                    encoding="utf-8",
+                )
+                (surface_root / "surface.c3").write_text(
+                    f"module {module};\n"
+                    "import gpu @public;\n"
+                    "import gpu::internal @public;\n"
+                    "fn void create_surface() {}\n",
+                    encoding="utf-8",
+                )
             sibling = root / "gpu" / "surface" / "vk" / "escape.c3"
             sibling.parent.mkdir(parents=True)
             sibling.write_text(
                 "module gpu::escape;\n",
                 encoding="utf-8",
             )
-            backend = root / "gpu" / "vk" / "escape.c3i"
+            backend = root / "gpu" / "internal" / "vk" / "escape.c3i"
             backend.parent.mkdir(parents=True)
             backend.write_text(
                 "module gpu::escape;\n",
@@ -2669,19 +2951,14 @@ method gpu::Runtime.is_valid
                 self.assertEqual(
                     check_public_api.scan_public_module_sources(),
                     [
-                        (
-                            "gpu/surface/vk/escape.c3:1 public source may "
-                            "only declare gpu, found gpu::escape"
-                        ),
+                        "unexpected public source gpu/surface/vk/escape.c3",
                     ],
                 )
                 self.assertEqual(
                     check_public_api.scan_private_backend_modules(),
                     [
-                        (
-                            "gpu/vk/escape.c3i:1 backend file may only "
-                            "declare gpu::vk modules, found gpu::escape"
-                        ),
+                        "unexpected Vulkan backend source "
+                        "gpu/internal/vk/escape.c3i",
                     ],
                 )
 

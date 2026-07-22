@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import std::io;
 
@@ -81,7 +82,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         .preprocess_buffer_count = 1,
     };
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
         state,
         &reservation,
@@ -134,7 +135,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         max_count:    9,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "work above the reserved command count faults deterministically");
-    gpu::RecordingWorkCounters before = vk::command_recording_work_counters(
+    gpu::internal::RecordingWorkCounters before = vk::command_recording_work_counters(
         state,
     );
     vk::GeneratedPreprocessBuffer* acquired =
@@ -145,7 +146,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
             kind:         gpu::GeneratedWorkKind.DISPATCH,
             max_count:    8,
         )!!;
-    gpu::RecordingWorkCounters after = vk::command_recording_work_counters(
+    gpu::internal::RecordingWorkCounters after = vk::command_recording_work_counters(
         state,
     );
     assert(acquired.address == reserved.address,
@@ -231,7 +232,7 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     gpu::GeneratedScratchDesc alias_reservation = reservation;
     alias_reservation.pipeline = alias_pipeline;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
         state,
         &reservation,
@@ -440,7 +441,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         .preprocess_buffer_count = 1,
     };
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state_ptr(&device);
+        gpu::internal::device_backend_state_ptr(&device);
     vk::PFN_vkGetGeneratedCommandsMemoryRequirementsEXT original =
         state.device_dispatch.generated_work.get_memory_requirements;
     zero_generated_requirement_calls = 0;

@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import std::thread;
 import std::atomic;
@@ -143,7 +144,7 @@ fn void concurrent_creation_storm() @test {
     foreach (&t : threads) t.join()!!;
     foreach (&a : args) assert(!a.failed, "every storm create yielded a valid handle");
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(state.strict_heap.descriptors.texture_free_count
         == state.strict_heap.descriptors.texture_next_new,
         "concurrent texture-view publication and release returns every slot");
@@ -256,7 +257,7 @@ fn void render_view_recording_avoids_texture_view_cache_lock() @test {
         1,
     )!!;
     defer destroy_test_attachment_view(&device, &view)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -330,7 +331,7 @@ fn void concurrent_sampler_interning_converges() @test {
             "concurrent interning returns one stable index");
     }
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(state.samplers.count == 1,
         "concurrent interning creates one native sampler cell");
     assert(state.strict_heap.descriptors.sampler_next_new == 1,
@@ -374,7 +375,7 @@ fn void same_descriptor_pipeline_race() @test {
     }
     foreach (&t : threads) t.join()!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(vk::pipeline_cache_entry_count(state) == 1, "same-key race converges to one entry");
     uint entry = state.pipelines.slots[args[0].handle.index].value.entry;
     assert(state.pipeline_cache.entries[entry].refcount == THR_THREADS,
@@ -403,7 +404,7 @@ fn int generated_scratch_worker(void* raw_args) {
         }
         gpu::CommandList commands = gpu::begin_commands(args.allocator)!!;
         vk::VkDeviceState* state =
-            (vk::VkDeviceState*)gpu::device_backend_state(*args.device);
+            (vk::VkDeviceState*)gpu::internal::device_backend_state(*args.device);
         vk::CommandRecord* record = vk::resolve_command(&commands)!!;
         if (catch acquire_fault = vk::acquire_generated_preprocess_buffer(
             state:        state,
@@ -532,7 +533,7 @@ fn void worker_thread_reuses_explicit_allocator_buffers() @test {
     assert(worker.join()!! == 0, "worker records both lists");
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandAllocatorSlot* allocator_slot =
         state.command_allocators.get(allocator.handle)!!;
     assert(state.command_allocators.next_new == 1
@@ -569,7 +570,7 @@ fn void contended_allocator_does_not_hold_the_device_resource_lock() @test {
     )!!;
     defer gpu::destroy_command_allocator(&independent)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandAllocatorSlot* blocked_slot = state.command_allocators.get(
         blocked.handle,
     )!!;
@@ -616,15 +617,15 @@ fn void full_validation_rejects_cross_thread_shared_allocator() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
-    gpu::RecordingWorkCounters before =
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
 
     AllocatorBeginArgs args = { .allocator = &allocator };
     Thread worker;
     worker.create(&allocator_begin_worker, &args)!!;
     int result = worker.join()!!;
-    gpu::RecordingWorkCounters after =
+    gpu::internal::RecordingWorkCounters after =
         vk::command_recording_work_counters(state);
 
     assert(result == 1 && args.result == gpu::RESOURCE_IN_USE,
@@ -668,7 +669,7 @@ fn void allocator_migrates_after_last_end_and_discard() @test {
         "the allocator migrates after its last recording is discarded");
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -705,7 +706,7 @@ fn void executable_handoff_to_submit_thread_retires_to_allocator() @test {
         "successful handoff consumes the executable and publishes completion");
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -725,7 +726,7 @@ fn void fresh_worker_runs_core_commands_without_pool_initialization() @test {
         "the fresh worker published one explicit allocator identity");
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(state.command_allocators.next_new == 1
             && !state.command_allocators
                 .slots[args.observed_handle.index].used,
@@ -755,7 +756,7 @@ fn void sequential_worker_churn_reuses_allocator_table_capacity() @test {
     }
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(state.command_allocators.next_new == 1
             && !state.command_allocators.slots[reused_index].used,
         "historical workers consume no permanent allocator-table capacity");
@@ -787,7 +788,7 @@ fn void generated_scratch_reservations_are_allocator_local() @test {
         .preprocess_buffer_count = 1,
     };
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::MemoryRequirements requirements =
         vk::generated_scratch_requirements(state, &reservation)!!;
     gpu::CommandAllocatorDesc allocator_desc = {
@@ -1215,7 +1216,7 @@ fn void concurrent_allocation_release_from_worker_threads() @test {
                 "worker release clears every owned allocation and span");
         }
     }
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 0,
         "concurrent allocation release leaves no live resource slots");
 }

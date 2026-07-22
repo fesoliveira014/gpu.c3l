@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 
 struct WsiDiagnosticCapture {
@@ -32,7 +32,7 @@ fn void wsi_presentation_gate_diagnostic() @test {
 
     gpu::Surface surface;
     gpu::SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
-    fault gate_fault = @catch(gpu::vk::vk_create_swapchain(&device, &surface, &swapchain_desc));
+    fault gate_fault = @catch(gpu::internal::vk::vk_create_swapchain(&device, &surface, &swapchain_desc));
 
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "presentation gate fault is unchanged");
     assert(capture.calls == 1, "presentation gate emits exactly once");
@@ -48,12 +48,12 @@ fn void wsi_presentation_gate_diagnostic() @test {
 
 fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
     WsiDiagnosticCapture capture;
-    gpu::vk::VkDeviceState state = {
+    gpu::internal::vk::VkDeviceState state = {
         .validation_policy = { .contract = gpu::ContractValidation.FULL },
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::WsiDiagnosticContext context = {
+    gpu::internal::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = "acquire_next_image",
         .has_public_identity = true,
@@ -62,9 +62,9 @@ fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
         .debug_name          = "main_swapchain",
     };
 
-    fault result_fault = @catch(gpu::vk::check_wsi_backend_result(
+    fault result_fault = @catch(gpu::internal::vk::check_wsi_backend_result(
         context: &context,
-        kind:    gpu::vk::WsiResultKind.ACQUIRE,
+        kind:    gpu::internal::vk::WsiResultKind.ACQUIRE,
         result:  vk::Result.ERROR_OUT_OF_DATE_KHR,
     ));
 
@@ -142,7 +142,7 @@ fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
     gpu::CompletionPoint completion = gpu::submit(queue, &submit_desc)!!;
     gpu::wait_completion(completion, 1_000_000_000)!!;
     gpu::AcquiredImage acquired = {
-        .readiness = gpu::vk::make_swapchain_readiness(
+        .readiness = gpu::internal::vk::make_swapchain_readiness(
             device,
             bogus,
             1,
@@ -167,18 +167,18 @@ fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
 }
 
 fn void expect_wsi_result(
-    gpu::vk::WsiResultKind kind,
+    gpu::internal::vk::WsiResultKind kind,
     vk::Result result,
     fault expected,
     ZString operation,
 ) {
     WsiDiagnosticCapture capture;
-    gpu::vk::VkDeviceState state = {
+    gpu::internal::vk::VkDeviceState state = {
         .validation_policy = { .contract = gpu::ContractValidation.FULL },
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::WsiDiagnosticContext context = {
+    gpu::internal::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = operation,
         .has_public_identity = true,
@@ -187,7 +187,7 @@ fn void expect_wsi_result(
         .debug_name          = "resolved_swapchain",
     };
 
-    fault actual = @catch(gpu::vk::check_wsi_backend_result(
+    fault actual = @catch(gpu::internal::vk::check_wsi_backend_result(
         context: &context,
         kind:    kind,
         result:  result,
@@ -208,12 +208,12 @@ fn void expect_wsi_result(
 
 fn void expect_silent_wsi_result(vk::Result result) {
     WsiDiagnosticCapture capture;
-    gpu::vk::VkDeviceState state = {
+    gpu::internal::vk::VkDeviceState state = {
         .validation_policy = { .contract = gpu::ContractValidation.FULL },
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::WsiDiagnosticContext context = {
+    gpu::internal::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = "acquire_next_image",
         .has_public_identity = true,
@@ -222,9 +222,9 @@ fn void expect_silent_wsi_result(vk::Result result) {
         .debug_name          = "resolved_swapchain",
     };
 
-    fault actual = @catch(gpu::vk::check_wsi_backend_result(
+    fault actual = @catch(gpu::internal::vk::check_wsi_backend_result(
         context: &context,
-        kind:    gpu::vk::WsiResultKind.ACQUIRE,
+        kind:    gpu::internal::vk::WsiResultKind.ACQUIRE,
         result:  result,
     ));
 
@@ -234,37 +234,37 @@ fn void expect_silent_wsi_result(vk::Result result) {
 
 fn void all_specialized_wsi_results_use_one_mapping_seam() @test {
     expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.SURFACE,
+        kind:      gpu::internal::vk::WsiResultKind.SURFACE,
         result:    vk::Result.ERROR_SURFACE_LOST_KHR,
         expected:  gpu::SURFACE_LOST,
         operation: "create_swapchain",
     );
     expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.SURFACE,
+        kind:      gpu::internal::vk::WsiResultKind.SURFACE,
         result:    vk::Result.ERROR_NATIVE_WINDOW_IN_USE_KHR,
         expected:  gpu::INVALID_RESOURCE_STATE,
         operation: "create_swapchain",
     );
     expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.SURFACE_ENUMERATION,
+        kind:      gpu::internal::vk::WsiResultKind.SURFACE_ENUMERATION,
         result:    vk::Result.INCOMPLETE,
         expected:  gpu::BACKEND_ERROR,
         operation: "get_present_mode_support",
     );
     expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.SWAPCHAIN_CREATE,
+        kind:      gpu::internal::vk::WsiResultKind.SWAPCHAIN_CREATE,
         result:    vk::Result.ERROR_OUT_OF_DATE_KHR,
         expected:  gpu::SWAPCHAIN_OUT_OF_DATE,
         operation: "resize_swapchain",
     );
     expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.SWAPCHAIN_CREATE,
+        kind:      gpu::internal::vk::WsiResultKind.SWAPCHAIN_CREATE,
         result:    vk::Result.ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR,
         expected:  gpu::UNSUPPORTED_FEATURE,
         operation: "create_swapchain",
     );
     expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.ENUMERATION,
+        kind:      gpu::internal::vk::WsiResultKind.ENUMERATION,
         result:    vk::Result.INCOMPLETE,
         expected:  gpu::BACKEND_ERROR,
         operation: "create_swapchain",
@@ -272,19 +272,19 @@ fn void all_specialized_wsi_results_use_one_mapping_seam() @test {
     expect_silent_wsi_result(vk::Result.TIMEOUT);
     expect_silent_wsi_result(vk::Result.NOT_READY);
     expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.ACQUIRE,
+        kind:      gpu::internal::vk::WsiResultKind.ACQUIRE,
         result:    vk::Result.ERROR_OUT_OF_DATE_KHR,
         expected:  gpu::SWAPCHAIN_OUT_OF_DATE,
         operation: "acquire_next_image",
     );
     expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.PRESENT,
+        kind:      gpu::internal::vk::WsiResultKind.PRESENT,
         result:    vk::Result.ERROR_SURFACE_LOST_KHR,
         expected:  gpu::SURFACE_LOST,
         operation: "present",
     );
     expect_wsi_result(
-        kind:      gpu::vk::WsiResultKind.PRESENT,
+        kind:      gpu::internal::vk::WsiResultKind.PRESENT,
         result:    vk::Result.ERROR_OUT_OF_DATE_KHR,
         expected:  gpu::SWAPCHAIN_OUT_OF_DATE,
         operation: "present",
@@ -293,12 +293,12 @@ fn void all_specialized_wsi_results_use_one_mapping_seam() @test {
 
 fn void wrapped_image_failure_is_backend_with_swapchain_identity() @test {
     WsiDiagnosticCapture capture;
-    gpu::vk::VkDeviceState state = {
+    gpu::internal::vk::VkDeviceState state = {
         .validation_policy = { .contract = gpu::ContractValidation.FULL },
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::WsiDiagnosticContext context = {
+    gpu::internal::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = "present",
         .has_public_identity = true,
@@ -308,7 +308,7 @@ fn void wrapped_image_failure_is_backend_with_swapchain_identity() @test {
     };
     gpu::TextureHandle missing = { .index = 7, .generation = 3 };
 
-    fault missing_fault = @catch(gpu::vk::resolve_swapchain_texture_for_operation(&context, missing));
+    fault missing_fault = @catch(gpu::internal::vk::resolve_swapchain_texture_for_operation(&context, missing));
 
     assert(missing_fault == gpu::INVALID_HANDLE, "wrapped-image invariant preserves internal lookup fault");
     assert(capture.calls == 1, "wrapped-image invariant emits exactly once");
@@ -323,21 +323,21 @@ fn void wrapped_image_failure_is_backend_with_swapchain_identity() @test {
 
 fn void wsi_lifecycle_diagnostics_are_contract_failures() @test {
     WsiDiagnosticCapture capture;
-    gpu::vk::VkDeviceState state = {
+    gpu::internal::vk::VkDeviceState state = {
         .validation_policy = { .contract = gpu::ContractValidation.FULL },
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::WsiDiagnosticContext context = {
+    gpu::internal::vk::WsiDiagnosticContext context = {
         .state               = &state,
         .operation           = "acquire_next_image",
         .has_public_identity = true,
         .index               = 1,
         .generation          = 5,
     };
-    gpu::vk::SwapchainSlot slot = { .info = { .dormant = true } };
+    gpu::internal::vk::SwapchainSlot slot = { .info = { .dormant = true } };
 
-    assert(@catch(gpu::vk::check_swapchain_acquire_lifecycle(&context, &slot)) == gpu::SWAPCHAIN_OUT_OF_DATE,
+    assert(@catch(gpu::internal::vk::check_swapchain_acquire_lifecycle(&context, &slot)) == gpu::SWAPCHAIN_OUT_OF_DATE,
         "dormant acquire preserves OUT_OF_DATE");
     assert(capture.calls == 0, "dormant acquire emits no diagnostic");
 
@@ -345,7 +345,7 @@ fn void wsi_lifecycle_diagnostics_are_contract_failures() @test {
     slot.info.dormant = false;
     slot.swapchain = (vk::SwapchainKHR)1;
     slot.acquire_pending = true;
-    assert(@catch(gpu::vk::check_swapchain_acquire_lifecycle(&context, &slot)) == gpu::INVALID_RESOURCE_STATE,
+    assert(@catch(gpu::internal::vk::check_swapchain_acquire_lifecycle(&context, &slot)) == gpu::INVALID_RESOURCE_STATE,
         "double acquire preserves INVALID_RESOURCE_STATE");
     assert(capture.calls == 1 && capture.last.rejected_field.str_view() == "swapchain acquire lifecycle",
         "double acquire reports its lifecycle field");
@@ -357,7 +357,7 @@ fn void wsi_lifecycle_diagnostics_are_contract_failures() @test {
     gpu::AcquiredImage acquired = {
         .readiness = { .payload = 7ull << 32 },
     };
-    assert(@catch(gpu::vk::check_swapchain_present_contract(
+    assert(@catch(gpu::internal::vk::check_swapchain_present_contract(
         context:           &context,
         slot:              &slot,
         image:             &acquired,
@@ -371,18 +371,18 @@ fn void wsi_lifecycle_diagnostics_are_contract_failures() @test {
 
 fn void capability_failures_are_backend_only_and_success_is_silent() @test {
     WsiDiagnosticCapture capture;
-    gpu::vk::VkDeviceState state = {
+    gpu::internal::vk::VkDeviceState state = {
         .validation_policy = { .contract = gpu::ContractValidation.FULL },
         .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::vk::WsiDiagnosticContext context = {
+    gpu::internal::vk::WsiDiagnosticContext context = {
         .state      = &state,
         .operation  = "create_swapchain",
         .debug_name = "pending_swapchain",
     };
 
-    fault capability_fault = gpu::vk::report_wsi_backend_failure(
+    fault capability_fault = gpu::internal::vk::report_wsi_backend_failure(
         context:      &context,
         public_fault: gpu::UNSUPPORTED_FEATURE,
         backend_text: "selected presentation queue family cannot present to the surface",
@@ -396,14 +396,14 @@ fn void capability_failures_are_backend_only_and_success_is_silent() @test {
     assert(!capture.last.resource.has_public_identity, "unpublished capability failure has no identity");
 
     capture = {};
-    gpu::vk::check_wsi_backend_result(
+    gpu::internal::vk::check_wsi_backend_result(
         context: &context,
-        kind:    gpu::vk::WsiResultKind.ACQUIRE,
+        kind:    gpu::internal::vk::WsiResultKind.ACQUIRE,
         result:  vk::Result.SUCCESS,
     )!!;
-    gpu::vk::check_wsi_backend_result(
+    gpu::internal::vk::check_wsi_backend_result(
         context: &context,
-        kind:    gpu::vk::WsiResultKind.PRESENT,
+        kind:    gpu::internal::vk::WsiResultKind.PRESENT,
         result:  vk::Result.SUBOPTIMAL_KHR,
     )!!;
     assert(capture.calls == 0, "successful and suboptimal WSI results emit nothing");

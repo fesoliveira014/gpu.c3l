@@ -8,21 +8,21 @@ from scripts import check_command_policy
 
 
 TABLE_SOURCE = """
-module gpu::vk;
+module gpu::internal::vk;
 
-const gpu::CommandOps TRUSTED_COMMAND_OPS @private = {
+const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
     .copy = &trusted_copy,
 };
 
-const gpu::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
+const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .copy = &trusted_tracking_copy,
 };
 
-const gpu::CommandOps CHECKED_COMMAND_OPS @private = {
+const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
     .copy = &checked_copy,
 };
 
-const gpu::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
+const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .copy = &checked_tracking_copy,
 };
 
@@ -93,7 +93,7 @@ class CommandPolicyCheckTests(unittest.TestCase):
     def test_accepts_policy_free_tables_with_tracking_isolated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self.write_source(root, "gpu/vk/device.c3", TABLE_SOURCE)
+            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
             self.assertEqual(check_command_policy.check(root), [])
 
     def test_rejects_direct_policy_read(self) -> None:
@@ -107,7 +107,7 @@ class CommandPolicyCheckTests(unittest.TestCase):
                     "}"
                 ),
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any("reads validation_policy" in error for error in errors))
 
@@ -126,7 +126,7 @@ class CommandPolicyCheckTests(unittest.TestCase):
                     "fn void trusted_tracking_copy"
                 ),
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "TRUSTED_COMMAND_OPS reaches tracking work" in error
@@ -140,10 +140,10 @@ class CommandPolicyCheckTests(unittest.TestCase):
                 "    lower_copy();\n}\n\nfn void trusted_tracking_copy",
                 "    cross_file_helper();\n}\n\nfn void trusted_tracking_copy",
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             self.write_source(
                 root,
-                "gpu/vk/nested/helper.c3",
+                "gpu/internal/vk/nested/helper.c3",
                 "fn void cross_file_helper() { (void)state.vulkan_layers; }\n",
             )
             errors = check_command_policy.check(root)
@@ -163,7 +163,7 @@ fn void overloaded_helper(uint value) {
     (void)state.debug_names;
 }
 """
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any("reads debug_names" in error for error in errors))
 
@@ -171,7 +171,7 @@ fn void overloaded_helper(uint value) {
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = TABLE_SOURCE + "\nfn void vk_cmd_copy_buffer() {}\n"
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "superseded command functions remain declared: vk_cmd_copy_buffer"
@@ -183,11 +183,11 @@ fn void overloaded_helper(uint value) {
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = TABLE_SOURCE + """
-const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
+const gpu::internal::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
     .copy = &trusted_copy,
 };
 """
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             self.assertEqual(
                 check_command_policy.check(root),
                 ["unexpected command policy table: EXPERIMENTAL_COMMAND_OPS"],
@@ -200,7 +200,7 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                 "fn void vk_begin_commands() {}",
                 "fn void vk_begin_commands() { @pool() {} }",
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "command path reaches temporary pool" in error
@@ -219,7 +219,7 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                     "}"
                 ),
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             self.assertEqual(check_command_policy.check(root), [])
 
     def test_rejects_reachable_thread_local_state(self) -> None:
@@ -232,7 +232,7 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                     "fn void hidden_tls() { tlocal int command_cache; }"
                 ),
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "command path reaches thread-local state" in error
@@ -249,7 +249,7 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                     "fn void hidden_growth() { mem::new_array(uint, 1); }"
                 ),
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "warm command path reaches host allocation" in error
@@ -268,7 +268,7 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                     "}"
                 ),
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "warm command path reaches capacity-sized stack storage" in error
@@ -282,10 +282,10 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                 "fn void vk_begin_commands() {}",
                 "fn void vk_begin_commands() { cross_file_growth(); }",
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             self.write_source(
                 root,
-                "gpu/vk/nested/helper.c3",
+                "gpu/internal/vk/nested/helper.c3",
                 "fn void cross_file_growth() { alloc::new_array_try(a, uint, 1); }\n",
             )
             errors = check_command_policy.check(root)
@@ -306,7 +306,7 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                     "}"
                 ),
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "warm command path reaches VMA allocation" in error
@@ -321,7 +321,7 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                 "fn void vk_begin_commands() { allocate_command_buffers_real(); }",
             )
             source += "\nfn void allocate_command_buffers_real() { ops.allocate(); }\n"
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "warm command path reaches cold allocation helper" in error
@@ -335,10 +335,10 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                 "fn void vk_submit() {}",
                 "fn void vk_submit() { cross_file_context(); }",
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             self.write_source(
                 root,
-                "gpu/vk/nested/helper.c3",
+                "gpu/internal/vk/nested/helper.c3",
                 (
                     "fn void cross_file_context() {\n"
                     "    RecordingContextTable contexts;\n"
@@ -364,7 +364,7 @@ const gpu::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
                     "}"
                 ),
             )
-            self.write_source(root, "gpu/vk/device.c3", source)
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "warm command path reaches native command allocation" in error

@@ -1,7 +1,8 @@
 module gpu_bench;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import std::io;
 import std::time;
 
@@ -97,7 +98,7 @@ fn double measure_texture_destruction(
     }
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(*device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
     vk::reset_completion_work_counters(state);
     std::time::Clock start = std::time::clock::now();
     foreach (texture : textures) {
@@ -129,7 +130,7 @@ fn int main() {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     gpu::CompletionPoint warm_completion;
     (void)measure_submissions(&allocator, queue, &warm_completion);

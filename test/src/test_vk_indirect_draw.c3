@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import std::io;
 
@@ -189,7 +190,7 @@ fn char* center_pixel(gpu::Device* device, gpu::GpuSpan* rb_span) {
 }
 
 fn bool distinct_graphics_compute_families(gpu::Device* device, ZString test_name) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(*device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
     if (state.graphics_family != state.compute_family) return true;
     io::eprintfn("%s not applicable: graphics and compute share family %d", test_name, state.graphics_family);
     return false;
@@ -868,7 +869,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .preprocess_buffer_count = 2,
     };
     vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::device_backend_state(device);
+        gpu::internal::device_backend_state(device);
     vk::MemoryRequirements dispatch_requirements =
         vk::generated_scratch_requirements(state, &dispatch_scratch)!!;
     vk::MemoryRequirements draw_requirements =
@@ -963,7 +964,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
 
     bind_test_compute_pipeline(&commands, dispatch_pipeline);
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    gpu::RecordingWorkCounters dispatch_work_before =
+    gpu::internal::RecordingWorkCounters dispatch_work_before =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats dispatch_recording_before =
         vk::command_recording_stats(state);
@@ -977,7 +978,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_dispatch_count: 1,
     )!!;
     assert_warm_command_resolution(gpu::command_resolution_stats(), 1);
-    gpu::RecordingWorkCounters dispatch_work_after =
+    gpu::internal::RecordingWorkCounters dispatch_work_after =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats dispatch_recording_after =
         vk::command_recording_stats(state);
@@ -1001,7 +1002,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             == dispatch_preprocess_count + 1,
         "generated dispatch stays within its reserved preprocess capacity");
 
-    gpu::RecordingWorkCounters dispatch_exhausted_before =
+    gpu::internal::RecordingWorkCounters dispatch_exhausted_before =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats dispatch_exhausted_recording_before =
         vk::command_recording_stats(state);
@@ -1016,7 +1017,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_dispatch_count: 1,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "generated dispatch exhaustion preserves the exact public fault");
-    gpu::RecordingWorkCounters dispatch_exhausted_after =
+    gpu::internal::RecordingWorkCounters dispatch_exhausted_after =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats dispatch_exhausted_recording_after =
         vk::command_recording_stats(state);
@@ -1057,7 +1058,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     };
     gpu::cmd_begin_render_pass(&commands, &plain_pass)!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
-    gpu::RecordingWorkCounters draw_work_before =
+    gpu::internal::RecordingWorkCounters draw_work_before =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats draw_recording_before =
         vk::command_recording_stats(state);
@@ -1070,7 +1071,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_draw_count: 1,
     )!!;
     assert_warm_command_resolution(gpu::command_resolution_stats(), 1);
-    gpu::RecordingWorkCounters draw_work_after =
+    gpu::internal::RecordingWorkCounters draw_work_after =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats draw_recording_after =
         vk::command_recording_stats(state);
@@ -1091,7 +1092,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             == draw_preprocess_count + 1,
         "generated draw emits once within reserved preprocess capacity");
 
-    gpu::RecordingWorkCounters draw_exhausted_before =
+    gpu::internal::RecordingWorkCounters draw_exhausted_before =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats draw_exhausted_recording_before =
         vk::command_recording_stats(state);
@@ -1106,7 +1107,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_draw_count: 1,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "generated draw exhaustion preserves the exact public fault");
-    gpu::RecordingWorkCounters draw_exhausted_after =
+    gpu::internal::RecordingWorkCounters draw_exhausted_after =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats draw_exhausted_recording_after =
         vk::command_recording_stats(state);
@@ -1147,7 +1148,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     };
     gpu::cmd_begin_render_pass(&commands, &indexed_pass)!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
-    gpu::RecordingWorkCounters indexed_work_before =
+    gpu::internal::RecordingWorkCounters indexed_work_before =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats indexed_recording_before =
         vk::command_recording_stats(state);
@@ -1162,7 +1163,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         index_span:    indices.span,
     )!!;
     assert_warm_command_resolution(gpu::command_resolution_stats(), 1);
-    gpu::RecordingWorkCounters indexed_work_after =
+    gpu::internal::RecordingWorkCounters indexed_work_after =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats indexed_recording_after =
         vk::command_recording_stats(state);
@@ -1185,7 +1186,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             == indexed_preprocess_count + 1,
         "generated indexed draw emits once within reserved preprocess capacity");
 
-    gpu::RecordingWorkCounters indexed_exhausted_before =
+    gpu::internal::RecordingWorkCounters indexed_exhausted_before =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats indexed_exhausted_recording_before =
         vk::command_recording_stats(state);
@@ -1201,7 +1202,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         index_span:    indices.span,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "generated indexed-draw exhaustion preserves the exact public fault");
-    gpu::RecordingWorkCounters indexed_exhausted_after =
+    gpu::internal::RecordingWorkCounters indexed_exhausted_after =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats indexed_exhausted_recording_after =
         vk::command_recording_stats(state);

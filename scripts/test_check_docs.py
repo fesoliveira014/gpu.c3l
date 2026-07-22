@@ -42,7 +42,7 @@ class DocumentationCheckTests(unittest.TestCase):
     def test_manifest_sources_cover_every_gpu_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            backend = root / "gpu" / "vk"
+            backend = root / "gpu" / "internal" / "vk"
             backend.mkdir(parents=True)
             (root / "gpu" / "gpu.c3").write_text("", encoding="utf-8")
             (root / "gpu" / "gpu.c3i").write_text("", encoding="utf-8")
@@ -52,7 +52,7 @@ class DocumentationCheckTests(unittest.TestCase):
             self.assertEqual(
                 check_docs.validate_manifest_sources(
                     root,
-                    ["gpu/gpu.c3", "gpu/gpu.c3i", "gpu/vk/**"],
+                    ["gpu/gpu.c3", "gpu/gpu.c3i", "gpu/internal/vk/**"],
                 ),
                 ["manifest sources omit gpu/missing.c3"],
             )
@@ -66,11 +66,11 @@ class DocumentationCheckTests(unittest.TestCase):
             self.assertEqual(
                 check_docs.validate_manifest_sources(
                     root,
-                    ["gpu/gpu.c3", "gpu/removed.c3", "gpu/vk/**"],
+                    ["gpu/gpu.c3", "gpu/removed.c3", "gpu/internal/vk/**"],
                 ),
                 [
                     "manifest source does not exist: gpu/removed.c3",
-                    "manifest source pattern matches nothing: gpu/vk/**",
+                    "manifest source pattern matches nothing: gpu/internal/vk/**",
                 ],
             )
 

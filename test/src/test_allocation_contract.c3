@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 
 struct AllocationStubState {
@@ -30,12 +31,12 @@ fn void destroy_allocation_stub(void* backend_state) {
 }
 
 fn GpuAllocation? allocate_stub_memory(Device* device, AllocationDesc* desc) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.allocate_calls++;
     if (state.live) return gpu::INVALID_RESOURCE_STATE~;
     state.seen_desc = *desc;
     state.allocation = {
-        .owner      = gpu::resource_owner_tag(state.owner, ResourceOwnerKind.ALLOCATION),
+        .owner      = gpu::internal::resource_owner_tag(state.owner, gpu::internal::ResourceOwnerKind.ALLOCATION),
         .index      = 0,
         .generation = 1,
     };
@@ -44,7 +45,7 @@ fn GpuAllocation? allocate_stub_memory(Device* device, AllocationDesc* desc) {
 }
 
 fn void? free_stub_allocation(Device* device, GpuAllocation allocation) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.free_calls++;
     if (!state.live || allocation != state.allocation) return gpu::INVALID_HANDLE~;
     if (state.block_free || state.texture_live) return gpu::RESOURCE_IN_USE~;
@@ -52,7 +53,7 @@ fn void? free_stub_allocation(Device* device, GpuAllocation allocation) {
 }
 
 fn AllocationInfo? get_stub_allocation_info(Device* device, GpuAllocation allocation) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     if (!state.live || allocation != state.allocation) return gpu::INVALID_HANDLE~;
     return {
         .size         = state.seen_desc.size,
@@ -66,7 +67,7 @@ fn AllocationInfo? get_stub_allocation_info(Device* device, GpuAllocation alloca
 }
 
 fn GpuSpan? get_stub_allocation_span(Device* device, GpuAllocation allocation) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     if (!state.live || allocation != state.allocation) return gpu::INVALID_HANDLE~;
     return {
         .owner      = allocation.owner,
@@ -77,7 +78,7 @@ fn GpuSpan? get_stub_allocation_span(Device* device, GpuAllocation allocation) {
 }
 
 fn char[]? get_stub_span_mapping(Device* device, GpuSpan span) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     if (!state.live || span.owner != state.allocation.owner
         || span.index != state.allocation.index
         || span.generation != state.allocation.generation) {
@@ -87,35 +88,35 @@ fn char[]? get_stub_span_mapping(Device* device, GpuSpan span) {
     if (state.seen_desc.memory_class == MemoryClass.GPU_PRIVATE) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (!gpu::range_fits(state.seen_desc.size, span.offset, span.size)) {
+    if (!gpu::internal::range_fits(state.seen_desc.size, span.offset, span.size)) {
         return gpu::INVALID_ARGUMENT~;
     }
     return state.mapping[span.offset:span.size];
 }
 
 fn GpuAddress? get_stub_span_address(Device* device, GpuSpan span) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     if (!state.live || span.owner != state.allocation.owner
         || span.index != state.allocation.index
         || span.generation != state.allocation.generation) {
         return gpu::INVALID_HANDLE~;
     }
     if (span.size == 0) return gpu::INVALID_ARGUMENT~;
-    if (!gpu::range_fits(state.seen_desc.size, span.offset, span.size)) {
+    if (!gpu::internal::range_fits(state.seen_desc.size, span.offset, span.size)) {
         return gpu::INVALID_ARGUMENT~;
     }
     return (GpuAddress)(0x1000 + span.offset);
 }
 
 fn void? flush_stub_mapped_span(Device* device, GpuSpan span) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.visibility_entries++;
     (void)get_stub_span_mapping(device, span)!;
     state.flush_calls++;
 }
 
 fn void? invalidate_stub_mapped_span(Device* device, GpuSpan span) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.visibility_entries++;
     (void)get_stub_span_mapping(device, span)!;
     state.invalidate_calls++;
@@ -125,16 +126,16 @@ fn TextureRequirements? get_stub_texture_requirements(
     Device* device,
     TextureDesc* desc,
 ) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.requirements_calls++;
-    if (!gpu::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::internal::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
     return {
         .size          = 64,
         .alignment     = 64,
         .compatibility = test_texture_compatibility(
-            gpu::resource_owner_tag(
+            gpu::internal::resource_owner_tag(
                 state.owner,
-                ResourceOwnerKind.ALLOCATION,
+                gpu::internal::ResourceOwnerKind.ALLOCATION,
             ),
             3,
         ),
@@ -147,17 +148,17 @@ fn TextureHandle? create_stub_placed_texture(
     GpuAllocation allocation,
     usz offset,
 ) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.placed_texture_calls++;
-    if (!gpu::texture_desc_valid(desc) || !state.live
+    if (!gpu::internal::texture_desc_valid(desc) || !state.live
         || allocation != state.allocation || offset > state.seen_desc.size - 64) {
         return gpu::INVALID_ARGUMENT~;
     }
     state.texture_live = true;
     return {
-        .owner      = gpu::resource_owner_tag(
+        .owner      = gpu::internal::resource_owner_tag(
             state.owner,
-            ResourceOwnerKind.TEXTURE,
+            gpu::internal::ResourceOwnerKind.TEXTURE,
         ),
         .index      = 0,
         .generation = 1,
@@ -170,7 +171,7 @@ fn DedicatedTexture? create_stub_dedicated_texture(
     AllocationDesc* allocation_desc,
 ) {
     AllocationStubState* state =
-        (AllocationStubState*)gpu::device_backend_state_ptr(device);
+        (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.dedicated_texture_calls++;
     GpuAllocation allocation = allocate_stub_memory(
         device,
@@ -192,13 +193,13 @@ fn DedicatedTexture? create_stub_dedicated_texture(
 }
 
 fn void? destroy_stub_texture(Device* device, TextureHandle texture) {
-    AllocationStubState* state = (AllocationStubState*)gpu::device_backend_state_ptr(device);
+    AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.texture_destroy_calls++;
     if (!state.texture_live || !texture.is_valid()) return gpu::INVALID_HANDLE~;
     state.texture_live = false;
 }
 
-BackendVTable allocation_stub_vtable = {
+gpu::internal::BackendVTable allocation_stub_vtable = {
     .destroy_device      = &destroy_allocation_stub,
     .allocate_memory     = &allocate_stub_memory,
     .free_allocation     = &free_stub_allocation,
@@ -215,8 +216,8 @@ BackendVTable allocation_stub_vtable = {
 };
 
 fn Device create_allocation_stub_device(AllocationStubState* state) {
-    state.owner = gpu::allocate_device_resource_owner()!!;
-    QueueSelection queues = gpu::queue_selection_for_requirements(
+    state.owner = gpu::internal::allocate_device_resource_owner()!!;
+    QueueSelection queues = gpu::internal::queue_selection_for_requirements(
         requirements: {
             .counts = { .compute = 1 },
         },
@@ -224,7 +225,7 @@ fn Device create_allocation_stub_device(AllocationStubState* state) {
         transfer_aliases_graphics: false,
         transfer_aliases_compute:  false,
     )!!;
-    return gpu::register_device(
+    return gpu::internal::register_device(
         backend:        BackendKind.VULKAN,
         caps:           {},
         vtable:         &allocation_stub_vtable,
@@ -347,9 +348,9 @@ fn void mapped_span_visibility_validates_ownership_and_ranges() @test {
     assert(@catch(gpu::flush_mapped_span(&second, range))
         == gpu::INVALID_HANDLE);
     GpuSpan buffer_owned = range;
-    buffer_owned.owner = gpu::resource_owner_tag(
+    buffer_owned.owner = gpu::internal::resource_owner_tag(
         first_state.owner,
-        ResourceOwnerKind.BUFFER,
+        gpu::internal::ResourceOwnerKind.BUFFER,
     );
     assert(@catch(gpu::flush_mapped_span(&first, buffer_owned))
         == gpu::INVALID_HANDLE);
@@ -520,9 +521,9 @@ fn void texture_memory_rejects_foreign_and_dedicated_requirements() @test {
         == gpu::INVALID_HANDLE);
     TextureRequirements incompatible_first = requirements;
     TextureRequirements incompatible_second = requirements;
-    ulong owner = gpu::resource_owner_tag(
+    ulong owner = gpu::internal::resource_owner_tag(
         first_state.owner,
-        ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
     incompatible_first.compatibility = test_texture_compatibility(owner, 1);
     incompatible_second.compatibility = test_texture_compatibility(

@@ -5,11 +5,14 @@
 The Vulkan backend implements the `gpu` public API on Vulkan 1.3. It lives under:
 
 ```c3
-module gpu::vk @private;
+module gpu::internal::vk @private;
 ```
 
-Backend declarations are private by default. Only the public dispatch layer and
-white-box tests import them with a visibility override.
+Backend declarations are private by default and are nested under the
+backend-independent private `gpu::internal` module. Public non-callables remain
+in `gpu/gpu.c3i`; `gpu/gpu.c3` owns public dispatch callables. Only those
+implementations and white-box tests import backend declarations with a scoped
+visibility override.
 
 It imports:
 
@@ -20,39 +23,39 @@ import vma;
 import spvreflect;
 ```
 
-`spvreflect` is used by `gpu/vk/shader.c3` for SPIR-V reflection.
+`spvreflect` is used by `gpu/internal/vk/shader.c3` for SPIR-V reflection.
 
 No `vk::` or `vma::` type should appear in public `gpu` API signatures.
 
 ## 2. Backend files
 
 ```text
-gpu/vk/backend.c3              instance/device dispatch loading, loader/VMA link probes
-gpu/vk/runtime.c3              per-runtime instance, diagnostics, adapter ownership
-gpu/vk/surface.c3              per-runtime WSI dispatch and VkSurfaceKHR operations
-gpu/vk/adapter.c3              semantic adapter metadata and diagnostic snapshots
-gpu/vk/instance.c3             shared instance construction
-gpu/vk/device.c3               physical device selection, logical device, feature chain
-gpu/vk/queue.c3                queue family selection, queue handles, submit
-gpu/vk/allocator.c3            vma::Allocator creation/destruction, stats
-gpu/vk/allocation.c3           generic-buffer and raw texture-memory allocations
-gpu/vk/buffer.c3               VkBuffer + VMA allocation path
-gpu/vk/texture.c3              owned/placed images, views, presentation-use state
-gpu/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
-gpu/vk/shader.c3               temporary SPIR-V modules and reflection validation
-gpu/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
-gpu/vk/pipeline_compute.c3     compute pipeline creation
-gpu/vk/pipeline_graphics.c3    graphics pipeline creation
-gpu/vk/command.c3              caller-owned allocator pools and command encoding
-gpu/vk/command_state.c3        command-list state and handle tracking
-gpu/vk/recording_thread_*.c3   portable and Win32 recording-owner identity
-gpu/vk/sync.c3                 barriers, timeline semaphores
-gpu/vk/render_pass.c3          dynamic rendering
-gpu/vk/swapchain.c3            swapchain lifecycle and presentation
-gpu/vk/lifetime.c3             optional command resource lifetime tracking
-gpu/vk/debug.c3                debug names, leak reports
-gpu/vk/helpers.c3              enum and flag translation helpers
-gpu/vk/validate.c3             descriptor and command validation helpers
+gpu/internal/vk/backend.c3              instance/device dispatch loading, loader/VMA link probes
+gpu/internal/vk/runtime.c3              per-runtime instance, diagnostics, adapter ownership
+gpu/internal/vk/surface.c3              per-runtime WSI dispatch and VkSurfaceKHR operations
+gpu/internal/vk/adapter.c3              semantic adapter metadata and diagnostic snapshots
+gpu/internal/vk/instance.c3             shared instance construction
+gpu/internal/vk/device.c3               physical device selection, logical device, feature chain
+gpu/internal/vk/queue.c3                queue family selection, queue handles, submit
+gpu/internal/vk/allocator.c3            vma::Allocator creation/destruction, stats
+gpu/internal/vk/allocation.c3           generic-buffer and raw texture-memory allocations
+gpu/internal/vk/buffer.c3               VkBuffer + VMA allocation path
+gpu/internal/vk/texture.c3              owned/placed images, views, presentation-use state
+gpu/internal/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
+gpu/internal/vk/shader.c3               temporary SPIR-V modules and reflection validation
+gpu/internal/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
+gpu/internal/vk/pipeline_compute.c3     compute pipeline creation
+gpu/internal/vk/pipeline_graphics.c3    graphics pipeline creation
+gpu/internal/vk/command.c3              caller-owned allocator pools and command encoding
+gpu/internal/vk/command_state.c3        command-list state and handle tracking
+gpu/internal/vk/recording_thread_*.c3   portable and Win32 recording-owner identity
+gpu/internal/vk/sync.c3                 barriers, timeline semaphores
+gpu/internal/vk/render_pass.c3          dynamic rendering
+gpu/internal/vk/swapchain.c3            swapchain lifecycle and presentation
+gpu/internal/vk/lifetime.c3             optional command resource lifetime tracking
+gpu/internal/vk/debug.c3                debug names, leak reports
+gpu/internal/vk/helpers.c3              enum and flag translation helpers
+gpu/internal/vk/validate.c3             descriptor and command validation helpers
 ```
 
 ## 3. Required Vulkan features
@@ -346,7 +349,7 @@ publish the AllocationTable slot last
 
 `CPU_WRITE` uses mapped sequential host access, `GPU_PRIVATE` prefers device
 memory without a public mapping, and `CPU_READ` uses mapped random host access.
-These choices stay in `gpu::vk`; public code sees only `MemoryClass` and
+These choices stay in `gpu::internal::vk`; public code sees only `MemoryClass` and
 `AllocationInfo`.
 
 Each slot stores immutable size, class, access, alignment, capabilities, native
@@ -361,7 +364,7 @@ table entries before destroying the allocator.
 
 ## 8. Private buffer implementation
 
-`gpu::vk::BufferHandle`, `BufferDesc`, and `BufferUsage` implement
+`gpu::internal::vk::BufferHandle`, `BufferDesc`, and `BufferUsage` implement
 generic allocation backing. They never cross backend dispatch.
 
 Creation validates size and semantic access, derives the exact native queue
@@ -986,14 +989,14 @@ Releasing an allocation with a live placement returns `RESOURCE_IN_USE`.
 
 ## 19. Translation helpers
 
-Centralize enum and flag conversion in `gpu/vk/helpers.c3` or the backend file
+Centralize enum and flag conversion in `gpu/internal/vk/helpers.c3` or the backend file
 that owns the complete semantic operation. Texture-state validation and
-lowering stay in one path in `gpu/vk/sync.c3` beside barrier construction
+lowering stay in one path in `gpu/internal/vk/sync.c3` beside barrier construction
 because the layout-specific access mapping belongs to that operation.
 
 Shared helpers include format, usage, sampler, blend, topology, and global
 barrier conversion. Texture-state validation, lowering, native barrier
-assembly, and emission form one path owned by `gpu/vk/sync.c3`; command and
+assembly, and emission form one path owned by `gpu/internal/vk/sync.c3`; command and
 resource files do not duplicate that translation.
 
 ## 20. Backend acceptance criteria

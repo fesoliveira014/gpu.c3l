@@ -1,5 +1,6 @@
-module gpu::vk @private;
+module gpu::internal::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import std::atomic;
 import std::core::mem;
@@ -70,7 +71,7 @@ fn gpu::SamplerIndex? intern_stub_sampler(
     gpu::Device* device,
     gpu::SamplerDesc* desc,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
     if (sampler_desc_invalid_enum_field(desc) != null) return gpu::INVALID_ARGUMENT~;
     if (desc.mip_lod_bias < -STUB_SAMPLER_LOD_BIAS_LIMIT
@@ -98,14 +99,14 @@ fn gpu::SamplerIndex? intern_stub_sampler(
 }
 
 fn uint stub_sampler_intern_attempt_count(gpu::Device* device) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     return state.sampler_intern_attempts;
 }
 
 fn uint stub_sampler_native_create_count(gpu::Device* device) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     return state.sampler_native_creates;
@@ -217,7 +218,7 @@ fn bool? supports_stub_queue_requirements(
     if (state == null || requirements == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
-    gpu::QueueSelection? selection = gpu::queue_selection_for_requirements(
+    gpu::internal::QueueSelection? selection = gpu::internal::queue_selection_for_requirements(
         requirements:               *requirements,
         compute_aliases_graphics:    true,
         transfer_aliases_graphics:   true,
@@ -230,7 +231,7 @@ fn bool? supports_stub_queue_requirements(
     return true;
 }
 
-const gpu::RuntimeBackendVTable STUB_RUNTIME_VTABLE @private = {
+const gpu::internal::RuntimeBackendVTable STUB_RUNTIME_VTABLE @private = {
     .destroy_runtime         = &destroy_stub_runtime,
     .get_adapter_info        = &get_stub_adapter_info,
     .get_adapter_diagnostics = &get_stub_adapter_diagnostics,
@@ -242,7 +243,7 @@ const gpu::RuntimeBackendVTable STUB_RUNTIME_VTABLE @private = {
     .supports_queue_requirements = &supports_stub_queue_requirements,
 };
 
-const gpu::RuntimeBackendVTable STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY @private = {
+const gpu::internal::RuntimeBackendVTable STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY @private = {
     .destroy_runtime         = &destroy_stub_runtime,
     .get_adapter_info        = &get_stub_adapter_info,
     .get_adapter_diagnostics = &get_stub_adapter_diagnostics,
@@ -258,7 +259,7 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     state.adapter_count = configured_adapter_count;
     runtime_creates++;
     defer catch destroy_stub_runtime(state);
-    gpu::Runtime runtime = gpu::register_runtime(
+    gpu::Runtime runtime = gpu::internal::register_runtime(
         backend:       gpu::BackendKind.VULKAN,
         vtable:        surface_destroy_available
             ? &STUB_RUNTIME_VTABLE
@@ -302,9 +303,9 @@ fn void stub_set_surface_destroy_available(bool available) {
 fn gpu::Adapter stub_last_device_adapter() => last_device_adapter;
 
 fn gpu::Adapter? stub_device_adapter(gpu::Device* device) {
-    gpu::DeviceOperation operation = gpu::begin_device_operation(device)!;
-    defer gpu::end_device_operation(&operation);
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (state == null) return gpu::INVALID_HANDLE~;
     return state.adapter;
 }
@@ -357,7 +358,7 @@ fn void stub_set_presentation_support(bool supported) {
 fn void destroy_stub_device(void* backend_state) {
     StubDeviceState* state = (StubDeviceState*)backend_state;
     if (state.swapchain_live) {
-        gpu::surface_release_swapchain(&state.surface)!!;
+        gpu::internal::surface_release_swapchain(&state.surface)!!;
     }
     sampler_native_destroys += state.sampler_count;
     device_temporary_destroys++;
@@ -368,14 +369,14 @@ fn gpu::GpuAllocation? allocate_stub_memory(
     gpu::Device* device,
     gpu::AllocationDesc* desc,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     allocation_create_attempts++;
     if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
     if (state.allocation_live) return gpu::INVALID_RESOURCE_STATE~;
     state.allocation = {
-        .owner      = gpu::resource_owner_tag(
+        .owner      = gpu::internal::resource_owner_tag(
             state.resource_owner,
-            gpu::ResourceOwnerKind.ALLOCATION,
+            gpu::internal::ResourceOwnerKind.ALLOCATION,
         ),
         .index      = 0,
         .generation = 1,
@@ -388,7 +389,7 @@ fn void? free_stub_allocation(
     gpu::Device* device,
     gpu::GpuAllocation allocation,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     allocation_free_attempts++;
     if (state == null || !state.allocation_live) return gpu::INVALID_HANDLE~;
     if (state.allocation != allocation) return gpu::INVALID_HANDLE~;
@@ -405,17 +406,17 @@ fn gpu::TextureRequirements? get_stub_texture_requirements(
     gpu::TextureDesc* desc,
 ) {
     StubDeviceState* state =
-        (StubDeviceState*)gpu::device_backend_state_ptr(device);
-    if (state == null || !gpu::texture_desc_valid(desc)) {
+        (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
+    if (state == null || !gpu::internal::texture_desc_valid(desc)) {
         return gpu::INVALID_ARGUMENT~;
     }
     return {
         .size      = 64,
         .alignment = 64,
         .compatibility = stub_texture_compatibility(
-            gpu::resource_owner_tag(
+            gpu::internal::resource_owner_tag(
                 state.resource_owner,
-                gpu::ResourceOwnerKind.ALLOCATION,
+                gpu::internal::ResourceOwnerKind.ALLOCATION,
             ),
             1,
         ),
@@ -426,11 +427,11 @@ fn gpu::TextureHandle? create_stub_texture(
     gpu::Device* device,
     gpu::TextureDesc* desc,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
     if (state.texture_live) return gpu::INVALID_RESOURCE_STATE~;
     state.texture = {
-        .owner      = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.TEXTURE),
+        .owner      = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.TEXTURE),
         .index      = 0,
         .generation = 1,
     };
@@ -445,7 +446,7 @@ fn gpu::TextureHandle? create_stub_placed_texture(
     usz offset,
 ) {
     StubDeviceState* state =
-        (StubDeviceState*)gpu::device_backend_state_ptr(device);
+        (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (state == null || !state.allocation_live
         || state.allocation != allocation || offset != 0) {
         return gpu::INVALID_ARGUMENT~;
@@ -457,7 +458,7 @@ fn void? destroy_stub_texture(
     gpu::Device* device,
     gpu::TextureHandle texture,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     texture_destroy_attempts++;
     if (state == null || !state.texture_live) return gpu::INVALID_HANDLE~;
     if (state.texture != texture) return gpu::INVALID_HANDLE~;
@@ -470,15 +471,15 @@ fn gpu::SwapchainHandle? create_stub_swapchain(
     gpu::Surface* surface,
     gpu::SwapchainDesc* desc,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     swapchain_create_attempts++;
     if (state == null || surface == null || desc == null) return gpu::INVALID_ARGUMENT~;
     if (state.swapchain_live) return gpu::INVALID_RESOURCE_STATE~;
 
-    gpu::surface_retain_swapchain(surface)!;
+    gpu::internal::surface_retain_swapchain(surface)!;
     state.surface = *surface;
     state.swapchain = {
-        .owner      = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN),
+        .owner      = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.SWAPCHAIN),
         .index      = 0,
         .generation = 1,
     };
@@ -490,17 +491,17 @@ fn void? destroy_stub_swapchain(
     gpu::Device* device,
     gpu::SwapchainHandle swapchain,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
+    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (state == null || !state.swapchain_live) return gpu::INVALID_HANDLE~;
     if (state.swapchain != swapchain) return gpu::INVALID_HANDLE~;
 
-    gpu::surface_release_swapchain(&state.surface)!;
+    gpu::internal::surface_release_swapchain(&state.surface)!;
     state.surface = {};
     state.swapchain = {};
     state.swapchain_live = false;
 }
 
-const gpu::BackendVTable STUB_DEVICE_VTABLE @private = {
+const gpu::internal::BackendVTable STUB_DEVICE_VTABLE @private = {
     .destroy_device           = &destroy_stub_device,
     .allocate_memory          = &allocate_stub_memory,
     .free_allocation          = &free_stub_allocation,
@@ -516,8 +517,8 @@ const gpu::BackendVTable STUB_DEVICE_VTABLE @private = {
 fn gpu::Device? stub_create_strict_disabled_device() {
     StubDeviceState* state = mem::new(StubDeviceState);
     defer catch mem::free(state);
-    state.resource_owner = gpu::allocate_device_resource_owner()!;
-    return gpu::register_device(
+    state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
+    return gpu::internal::register_device(
         backend:        gpu::BackendKind.VULKAN,
         caps:           { .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT },
         vtable:         &STUB_DEVICE_VTABLE,
@@ -531,9 +532,9 @@ fn gpu::Device? create_vk_device(
     gpu::DeviceRequest* request,
     gpu::Runtime* retained_runtime,
 ) {
-    gpu::validate_device_request(request)!;
+    gpu::internal::validate_device_request(request)!;
     StubDeviceState* state = mem::new(StubDeviceState);
-    state.resource_owner = gpu::allocate_device_resource_owner()!;
+    state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     device_temporary_creates++;
     defer catch {
         device_temporary_destroys++;
@@ -543,9 +544,9 @@ fn gpu::Device? create_vk_device(
 
     state.adapter = *adapter;
     last_device_adapter = *adapter;
-    gpu::Surface presentation_surface = gpu::requested_surface(*request);
-    gpu::QueueRequirements requirements = gpu::requested_queue_requirements(*request);
-    gpu::QueueSelection queues = gpu::queue_selection_for_requirements(
+    gpu::Surface presentation_surface = gpu::internal::requested_surface(*request);
+    gpu::QueueRequirements requirements = gpu::internal::requested_queue_requirements(*request);
+    gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_requirements(
         requirements:               requirements,
         compute_aliases_graphics:    true,
         transfer_aliases_graphics:   true,
@@ -556,7 +557,7 @@ fn gpu::Device? create_vk_device(
         .presentation_enabled = presentation_surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
     };
-    return gpu::register_device(
+    return gpu::internal::register_device(
         backend:              gpu::BackendKind.VULKAN,
         caps:                 caps,
         vtable:               &STUB_DEVICE_VTABLE,

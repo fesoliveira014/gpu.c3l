@@ -6,7 +6,7 @@ from pathlib import Path
 from scripts import check_swapchain_acquire_policy
 
 
-SOURCE = Path("gpu/vk/swapchain.c3").read_text(encoding="utf-8")
+SOURCE = Path("gpu/internal/vk/swapchain.c3").read_text(encoding="utf-8")
 
 
 class SwapchainAcquirePolicyTests(unittest.TestCase):

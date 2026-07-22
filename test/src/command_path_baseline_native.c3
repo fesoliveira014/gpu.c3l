@@ -1,5 +1,6 @@
-module gpu::vk @private;
+module gpu::internal::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 
@@ -22,7 +23,7 @@ fn CommandPathNativeContext? command_path_native_context(
     gpu::CommandList* commands,
 ) {
     CommandRecord* record = resolve_command(commands)!;
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(
         &commands.device,
     );
     return {
@@ -39,7 +40,7 @@ fn CommandPathNativeCopy? command_path_native_copy(
     gpu::GpuSpan src,
     gpu::GpuSpan dst,
 ) {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(
         device,
     );
     if (state == null) return gpu::INVALID_HANDLE~;

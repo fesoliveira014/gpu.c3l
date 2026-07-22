@@ -1,4 +1,4 @@
-module gpu::vk;
+module gpu::internal::vk;
 
 import gpu @public;
 
@@ -26,7 +26,7 @@ fn void descriptor_capacity_resolution() @test {
 }
 
 fn void strict_indexing_heap_capacity_support_matches_creation_limits() @test {
-    gpu::vk::IndexingHeapLimits limits = {
+    gpu::internal::vk::IndexingHeapLimits limits = {
         .max_sampled_images           = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
         .max_storage_images           = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
         .max_samplers                 = gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
@@ -37,14 +37,14 @@ fn void strict_indexing_heap_capacity_support_matches_creation_limits() @test {
         .max_all_pools_descriptors    = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY * 2
             + gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     };
-    assert(gpu::vk::indexing_heap_fits_limits(
+    assert(gpu::internal::vk::indexing_heap_fits_limits(
         tex_capacity: gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
         smp_capacity: gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
         limits:       limits,
     ));
 
     limits.max_sampled_images--;
-    assert(!gpu::vk::indexing_heap_fits_limits(
+    assert(!gpu::internal::vk::indexing_heap_fits_limits(
         tex_capacity: gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
         smp_capacity: gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
         limits:       limits,

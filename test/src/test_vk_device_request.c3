@@ -1,32 +1,33 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import std::atomic;
 import std::io;
 
-const gpu::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
+const gpu::internal::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
     .destroy_device = &destroy_registry_blocker,
 };
-const gpu::RuntimeBackendVTable PRESENTATION_INSTANCE_GATE_VTABLE @private = {
+const gpu::internal::RuntimeBackendVTable PRESENTATION_INSTANCE_GATE_VTABLE @private = {
     .destroy_runtime = &destroy_presentation_instance_gate_runtime,
     .destroy_surface = &destroy_presentation_instance_gate_surface,
 };
 fn uint live_device_slot_count() @private {
     uint live_count;
-    for (uint i = 0; i < gpu::MAX_DEVICES; i++) {
-        gpu::DeviceSlot* slot = &gpu::device_slots[i];
-        gpu::DeviceSlotControl control =
-            (gpu::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
-        if (control.state == gpu::DEVICE_SLOT_LIVE) live_count++;
+    for (uint i = 0; i < gpu::internal::MAX_DEVICES; i++) {
+        gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[i];
+        gpu::internal::DeviceSlotControl control =
+            (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.RELAXED);
+        if (control.state == gpu::internal::DEVICE_SLOT_LIVE) live_count++;
     }
     return live_count;
 }
 
 fn void strict_disabled_state_owns_no_sampler_table() @test {
-    gpu::vk::VkDeviceState state;
-    gpu::vk::create_sampler_table(&state)!!;
+    gpu::internal::vk::VkDeviceState state;
+    gpu::internal::vk::create_sampler_table(&state)!!;
 
     assert(state.samplers.slots.ptr == null,
         "a strict-disabled state allocates no sampler table");
@@ -57,14 +58,14 @@ fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
 }
 
 fn uptr device_physical_adapter(gpu::Device* device) @private {
-    gpu::DeviceOperation operation = gpu::begin_device_operation(device)!!;
-    defer gpu::end_device_operation(&operation);
-    gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state_ptr(device);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::vk::VkDeviceState* state =
+        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     return (uptr)state.physical_device;
 }
 
-fn gpu::vk::IndexingHeapLimits permissive_indexing_heap_limits() @private {
+fn gpu::internal::vk::IndexingHeapLimits permissive_indexing_heap_limits() @private {
     return {
         .max_sampled_images           = uint::max,
         .max_storage_images           = uint::max,
@@ -78,15 +79,15 @@ fn gpu::vk::IndexingHeapLimits permissive_indexing_heap_limits() @private {
 }
 
 fn void strict_heap_state_selects_private_implementation() @test {
-    gpu::vk::VkDeviceConfig desc = {
+    gpu::internal::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
-    gpu::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
+    gpu::internal::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
 
-    gpu::vk::VkStrictHeapState disabled =
-        gpu::vk::resolve_strict_heap_state(false, &desc)!!;
-    gpu::vk::select_strict_heap_implementation(
+    gpu::internal::vk::VkStrictHeapState disabled =
+        gpu::internal::vk::resolve_strict_heap_state(false, &desc)!!;
+    gpu::internal::vk::select_strict_heap_implementation(
         state:              &disabled,
         indexing_supported: false,
         buffer_supported:   false,
@@ -94,16 +95,16 @@ fn void strict_heap_state_selects_private_implementation() @test {
     )!!;
     assert(!disabled.enabled, "an unrequested strict heap remains disabled");
     assert(
-        disabled.implementation == gpu::vk::VkHeapImplementation.NONE,
+        disabled.implementation == gpu::internal::vk::VkHeapImplementation.NONE,
         "a disabled strict heap selects no private implementation"
     );
     assert(disabled.texture_capacity == 0, "a disabled strict heap reserves no texture capacity");
     assert(disabled.sampler_capacity == 0, "a disabled strict heap reserves no sampler capacity");
     assert(disabled.descriptors.texture_cells.ptr == null, "a disabled strict heap owns no descriptor cells");
 
-    gpu::vk::VkStrictHeapState indexing =
-        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::vk::select_strict_heap_implementation(
+    gpu::internal::vk::VkStrictHeapState indexing =
+        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::internal::vk::select_strict_heap_implementation(
         state:              &indexing,
         indexing_supported: true,
         buffer_supported:   true,
@@ -111,48 +112,48 @@ fn void strict_heap_state_selects_private_implementation() @test {
     )!!;
     assert(indexing.enabled, "a requested strict heap is enabled");
     assert(
-        indexing.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+        indexing.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         "indexing is preferred when it satisfies the semantic capacities"
     );
     assert(indexing.texture_capacity == 7, "the requested texture capacity is preserved");
     assert(indexing.sampler_capacity == 9, "the requested sampler capacity is preserved");
-    assert(gpu::vk::strict_heap_uses_descriptor_indexing(&indexing), "the indexing path requests indexing features");
+    assert(gpu::internal::vk::strict_heap_uses_descriptor_indexing(&indexing), "the indexing path requests indexing features");
     assert(
-        !gpu::vk::strict_heap_uses_descriptor_buffer(&indexing),
+        !gpu::internal::vk::strict_heap_uses_descriptor_buffer(&indexing),
         "the indexing path requests no descriptor-buffer dispatch"
     );
 
-    gpu::vk::IndexingHeapLimits constrained = limits;
+    gpu::internal::vk::IndexingHeapLimits constrained = limits;
     constrained.max_sampled_images = 6;
-    gpu::vk::VkStrictHeapState fallback =
-        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::vk::select_strict_heap_implementation(
+    gpu::internal::vk::VkStrictHeapState fallback =
+        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::internal::vk::select_strict_heap_implementation(
         state:              &fallback,
         indexing_supported: true,
         buffer_supported:   true,
         indexing_limits:    constrained,
     )!!;
     assert(
-        fallback.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+        fallback.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
         "descriptor buffers are selected when indexing cannot provide the requested capacity"
     );
 
-    gpu::vk::VkStrictHeapState buffer_only =
-        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::vk::select_strict_heap_implementation(
+    gpu::internal::vk::VkStrictHeapState buffer_only =
+        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::internal::vk::select_strict_heap_implementation(
         state:              &buffer_only,
         indexing_supported: false,
         buffer_supported:   true,
         indexing_limits:    limits,
     )!!;
     assert(
-        buffer_only.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+        buffer_only.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
         "descriptor buffers satisfy strict heaps when indexing is unavailable"
     );
 
-    gpu::vk::VkStrictHeapState unavailable =
-        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
-    fault selection_fault = @catch(gpu::vk::select_strict_heap_implementation(
+    gpu::internal::vk::VkStrictHeapState unavailable =
+        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
+    fault selection_fault = @catch(gpu::internal::vk::select_strict_heap_implementation(
         state:              &unavailable,
         indexing_supported: false,
         buffer_supported:   false,
@@ -163,21 +164,21 @@ fn void strict_heap_state_selects_private_implementation() @test {
         "strict heap selection faults when no private implementation is available"
     );
     assert(
-        unavailable.implementation == gpu::vk::VkHeapImplementation.NONE,
+        unavailable.implementation == gpu::internal::vk::VkHeapImplementation.NONE,
         "failed selection leaves the private implementation unpublished"
     );
 }
 
 fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
-    gpu::vk::VkDeviceConfig desc = {
+    gpu::internal::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
-    gpu::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
+    gpu::internal::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
 
-    gpu::vk::VkStrictHeapState automatic =
-        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::vk::select_strict_heap_implementation_for_creation(
+    gpu::internal::vk::VkStrictHeapState automatic =
+        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::internal::vk::select_strict_heap_implementation_for_creation(
         state:              &automatic,
         indexing_supported: true,
         buffer_supported:   true,
@@ -185,16 +186,16 @@ fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
         probe:              null,
     )!!;
     assert(
-        automatic.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
+        automatic.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
         "ordinary creation keeps automatic indexing preference"
     );
 
-    gpu::vk::DeviceCreationProbe probe = {
+    gpu::internal::vk::DeviceCreationProbe probe = {
         .descriptor_buffer_override = true,
     };
-    gpu::vk::VkStrictHeapState overridden =
-        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::vk::select_strict_heap_implementation_for_creation(
+    gpu::internal::vk::VkStrictHeapState overridden =
+        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::internal::vk::select_strict_heap_implementation_for_creation(
         state:              &overridden,
         indexing_supported: true,
         buffer_supported:   true,
@@ -202,7 +203,7 @@ fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
         probe:              &probe,
     )!!;
     assert(
-        overridden.implementation == gpu::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
+        overridden.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
         "the private creation probe can exercise descriptor-buffer runtime paths"
     );
     assert(
@@ -212,10 +213,10 @@ fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
         "the probe records advertised capability and completed selection"
     );
 
-    gpu::vk::VkStrictHeapState unsupported =
-        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::internal::vk::VkStrictHeapState unsupported =
+        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
     assert(
-        @catch(gpu::vk::select_strict_heap_implementation_for_creation(
+        @catch(gpu::internal::vk::select_strict_heap_implementation_for_creation(
             state:              &unsupported,
             indexing_supported: true,
             buffer_supported:   false,
@@ -233,15 +234,15 @@ fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
 }
 
 fn void descriptor_buffer_query_is_needed_only_for_fallback_or_override() @test {
-    gpu::vk::VkDeviceConfig desc = {
+    gpu::internal::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
-    gpu::vk::VkStrictHeapState state =
-        gpu::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
+    gpu::internal::vk::VkStrictHeapState state =
+        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
+    gpu::internal::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
     assert(
-        !gpu::vk::strict_heap_needs_descriptor_buffer_query(
+        !gpu::internal::vk::strict_heap_needs_descriptor_buffer_query(
             state:              &state,
             indexing_supported: true,
             indexing_limits:    limits,
@@ -250,10 +251,10 @@ fn void descriptor_buffer_query_is_needed_only_for_fallback_or_override() @test 
         "a usable indexing heap does not require a descriptor-buffer query"
     );
 
-    gpu::vk::IndexingHeapLimits constrained = limits;
+    gpu::internal::vk::IndexingHeapLimits constrained = limits;
     constrained.max_sampled_images = 6;
     assert(
-        gpu::vk::strict_heap_needs_descriptor_buffer_query(
+        gpu::internal::vk::strict_heap_needs_descriptor_buffer_query(
             state:              &state,
             indexing_supported: true,
             indexing_limits:    constrained,
@@ -262,7 +263,7 @@ fn void descriptor_buffer_query_is_needed_only_for_fallback_or_override() @test 
         "an indexing-capacity shortfall requires descriptor-buffer fallback evidence"
     );
     assert(
-        gpu::vk::strict_heap_needs_descriptor_buffer_query(
+        gpu::internal::vk::strict_heap_needs_descriptor_buffer_query(
             state:              &state,
             indexing_supported: false,
             indexing_limits:    limits,
@@ -271,11 +272,11 @@ fn void descriptor_buffer_query_is_needed_only_for_fallback_or_override() @test 
         "missing indexing features require descriptor-buffer fallback evidence"
     );
 
-    gpu::vk::DeviceCreationProbe probe = {
+    gpu::internal::vk::DeviceCreationProbe probe = {
         .descriptor_buffer_override = true,
     };
     assert(
-        gpu::vk::strict_heap_needs_descriptor_buffer_query(
+        gpu::internal::vk::strict_heap_needs_descriptor_buffer_query(
             state:              &state,
             indexing_supported: true,
             indexing_limits:    limits,
@@ -315,28 +316,28 @@ fn bool? descriptor_buffer_extension_query_layer_missing(
 fn void descriptor_buffer_capability_query_distinguishes_absence_and_failure() @test {
     vk::PhysicalDevice physical_device = (vk::PhysicalDevice)(uptr)0xA0;
     assert(
-        !gpu::vk::query_descriptor_buffer_support_with_query(
+        !gpu::internal::vk::query_descriptor_buffer_support_with_query(
             physical_device,
             &descriptor_buffer_extension_absent,
         )!!,
         "confirmed extension absence is unsupported capability"
     );
     assert(
-        @catch(gpu::vk::query_descriptor_buffer_support_with_query(
+        @catch(gpu::internal::vk::query_descriptor_buffer_support_with_query(
             physical_device,
             &descriptor_buffer_extension_query_host_oom,
         )) == gpu::OUT_OF_HOST_MEMORY,
         "extension-query host OOM maps into the public fault taxonomy"
     );
     assert(
-        @catch(gpu::vk::query_descriptor_buffer_support_with_query(
+        @catch(gpu::internal::vk::query_descriptor_buffer_support_with_query(
             physical_device,
             &descriptor_buffer_extension_query_device_oom,
         )) == gpu::OUT_OF_DEVICE_MEMORY,
         "extension-query device OOM maps into the public fault taxonomy"
     );
     assert(
-        @catch(gpu::vk::query_descriptor_buffer_support_with_query(
+        @catch(gpu::internal::vk::query_descriptor_buffer_support_with_query(
             physical_device,
             &descriptor_buffer_extension_query_layer_missing,
         )) == gpu::UNSUPPORTED_FEATURE,
@@ -357,8 +358,8 @@ fn void runtime_copies_device_creation_defaults() @test {
         .application_name      = "gpu_vk_runtime_defaults_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
-    gpu::vk::VkRuntimeState* state =
-        (gpu::vk::VkRuntimeState*)gpu::runtime_backend_state(&runtime);
+    gpu::internal::vk::VkRuntimeState* state =
+        (gpu::internal::vk::VkRuntimeState*)gpu::internal::runtime_backend_state(&runtime);
 
     assert(state != null, "the runtime publishes its Vulkan state");
     assert(state.debug_names, "the runtime retains the debug-name default");
@@ -409,28 +410,28 @@ fn void adapter_support_inherits_runtime_device_config() @test {
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     assert(adapters.count > 0, "the controlled target exposes an adapter");
     gpu::DeviceRequest request = gpu::strict_device_request();
-    gpu::RuntimeData* runtime_data = gpu::resolve_runtime(&runtime);
-    gpu::vk::VkRuntimeState* runtime_state =
-        (gpu::vk::VkRuntimeState*)runtime_data.backend_state;
-    gpu::vk::VkDeviceConfig config = gpu::vk::runtime_device_config(runtime_state);
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(&runtime);
+    gpu::internal::vk::VkRuntimeState* runtime_state =
+        (gpu::internal::vk::VkRuntimeState*)runtime_data.backend_state;
+    gpu::internal::vk::VkDeviceConfig config = gpu::internal::vk::runtime_device_config(runtime_state);
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         gpu::AdapterInfo info = gpu::get_adapter_info(&adapter)!!;
         gpu::DeviceRequestSupport support =
             gpu::supports_device_request(&adapter, &request)!!;
-        gpu::vk::VkAdapterState* adapter_state = &runtime_state.adapters[i];
-        bool expected = gpu::vk::strict_adapter_supported(
+        gpu::internal::vk::VkAdapterState* adapter_state = &runtime_state.adapters[i];
+        bool expected = gpu::internal::vk::strict_adapter_supported(
             adapter_state.physical_device,
             &config,
         );
         assert(info.strict_supported == expected, "adapter info uses the runtime configuration");
         assert(support.supported == expected, "support and adapter info agree");
 
-        gpu::vk::VkDeviceConfig invalid_config = config;
+        gpu::internal::vk::VkDeviceConfig invalid_config = config;
         invalid_config.texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1;
-        gpu::vk::VkAdapterState invalid_adapter;
-        gpu::vk::initialize_adapter(
+        gpu::internal::vk::VkAdapterState invalid_adapter;
+        gpu::internal::vk::initialize_adapter(
             &invalid_adapter,
             adapter_state.physical_device,
             &invalid_config,
@@ -480,12 +481,12 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             gpu::supports_device_request(&adapter, &request)!!;
         if (!support.supported) continue;
 
-        gpu::RuntimeData* runtime_data = gpu::resolve_adapter(&adapter);
-        gpu::vk::VkRuntimeState* runtime_state =
-            (gpu::vk::VkRuntimeState*)runtime_data.backend_state;
+        gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
+        gpu::internal::vk::VkRuntimeState* runtime_state =
+            (gpu::internal::vk::VkRuntimeState*)runtime_data.backend_state;
         gpu::Device device = gpu::create_device(&adapter, &request)!!;
-        gpu::vk::VkDeviceState* device_state =
-            (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+        gpu::internal::vk::VkDeviceState* device_state =
+            (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
         assert(device_state.instance == runtime_state.instance, "the device reuses the runtime instance");
         assert(
@@ -533,9 +534,9 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             caps.sampler_heap_capacity == device_state.strict_heap.sampler_capacity,
             "published sampler capacity matches strict state"
         );
-        if (gpu::vk::strict_heap_uses_descriptor_buffer(&device_state.strict_heap)) {
+        if (gpu::internal::vk::strict_heap_uses_descriptor_buffer(&device_state.strict_heap)) {
             assert(
-                gpu::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
+                gpu::internal::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
                 "the selected descriptor-buffer path loads its dispatch"
             );
             assert(
@@ -544,7 +545,7 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             );
         } else {
             assert(
-                !gpu::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
+                !gpu::internal::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
                 "the indexing path loads no descriptor-buffer dispatch"
             );
             assert(
@@ -557,11 +558,11 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
         assert(!device_state.presentation.queue_mutex.is_initialized(), "headless requests initialize no presentation mutex");
         assert(device_state.presentation.swapchains.slots.ptr == null, "headless requests allocate no swapchain table");
         assert(
-            !gpu::vk::instance_dispatch_supports_presentation(&device_state.instance_dispatch),
+            !gpu::internal::vk::instance_dispatch_supports_presentation(&device_state.instance_dispatch),
             "headless requests retain no surface procedures"
         );
         assert(
-            !gpu::vk::device_dispatch_supports_presentation(&device_state.device_dispatch),
+            !gpu::internal::vk::device_dispatch_supports_presentation(&device_state.device_dispatch),
             "headless requests load no presentation procedures"
         );
         assert(
@@ -602,7 +603,7 @@ fn void malformed_native_request_preserves_runtime_state() @test {
     }
 
     gpu::Adapter adapter = adapters.get(0)!!;
-    gpu::DeviceRequest empty = gpu::empty_device_request();
+    gpu::DeviceRequest empty = gpu::internal::empty_device_request();
     assert(
         @catch(gpu::create_device(&adapter, &empty)) == gpu::INVALID_ARGUMENT,
         "an empty request is rejected before native creation"
@@ -615,18 +616,18 @@ fn void malformed_native_request_preserves_runtime_state() @test {
 }
 
 fn void presentation_device_creation_requires_instance_maintenance() @test {
-    gpu::vk::VkAdapterState[1] adapter_states;
-    gpu::vk::VkRuntimeState runtime_state = {
+    gpu::internal::vk::VkAdapterState[1] adapter_states;
+    gpu::internal::vk::VkRuntimeState runtime_state = {
         .adapters = adapter_states[..],
     };
-    gpu::Runtime runtime = gpu::register_runtime(
+    gpu::Runtime runtime = gpu::internal::register_runtime(
         backend:       gpu::BackendKind.VULKAN,
         vtable:        &PRESENTATION_INSTANCE_GATE_VTABLE,
         backend_state: &runtime_state,
         adapter_count: 1,
     )!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::Surface surface = gpu::register_surface(&runtime, (void*)1)!!;
+    gpu::Surface surface = gpu::internal::register_surface(&runtime, (void*)1)!!;
     defer gpu::destroy_surface(&surface)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::Adapter adapter = adapters.get(0)!!;
@@ -634,10 +635,10 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
         gpu::strict_device_request(),
         &surface,
     )!!;
-    gpu::vk::DeviceCreationProbe probe;
+    gpu::internal::vk::DeviceCreationProbe probe;
 
     assert(
-        @catch(gpu::vk::create_vk_device_with_probe(
+        @catch(gpu::internal::vk::create_vk_device_with_probe(
             adapter:          &adapter,
             request:          &request,
             retained_runtime: &runtime,
@@ -646,108 +647,108 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
         "presentation creation requires instance maintenance support"
     );
     assert(
-        probe.reached == gpu::vk::DeviceCreationCheckpoint.NONE
+        probe.reached == gpu::internal::vk::DeviceCreationCheckpoint.NONE
             && probe.rollback_count == 0,
         "the instance capability gate precedes backend device mutation"
     );
 }
 
 fn void device_creation_checkpoint_ordinals_match_exact_schema() @test {
-    assert(gpu::vk::DeviceCreationCheckpoint.NONE.ordinal == 0);
-    assert(gpu::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal == 1);
-    assert(gpu::vk::DeviceCreationCheckpoint.ALLOCATOR.ordinal == 2);
-    assert(gpu::vk::DeviceCreationCheckpoint.COMMAND_STORAGE.ordinal == 3);
-    assert(gpu::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP.ordinal == 4);
-    assert(gpu::vk::DeviceCreationCheckpoint.PIPELINE_SHARED.ordinal == 5);
-    assert(gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal == 6);
+    assert(gpu::internal::vk::DeviceCreationCheckpoint.NONE.ordinal == 0);
+    assert(gpu::internal::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal == 1);
+    assert(gpu::internal::vk::DeviceCreationCheckpoint.ALLOCATOR.ordinal == 2);
+    assert(gpu::internal::vk::DeviceCreationCheckpoint.COMMAND_STORAGE.ordinal == 3);
+    assert(gpu::internal::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP.ordinal == 4);
+    assert(gpu::internal::vk::DeviceCreationCheckpoint.PIPELINE_SHARED.ordinal == 5);
+    assert(gpu::internal::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal == 6);
 }
 
 fn void command_policy_selection_covers_every_contract_and_tracking_mode() @test {
-    gpu::vk::DeviceValidationPolicy policy;
-    uptr trusted_address = (uptr)gpu::vk::select_command_ops(policy);
+    gpu::internal::vk::DeviceValidationPolicy policy;
+    uptr trusted_address = (uptr)gpu::internal::vk::select_command_ops(policy);
     assert(
-        gpu::vk::select_command_ops(policy)
-            == &gpu::vk::TRUSTED_COMMAND_OPS,
+        gpu::internal::vk::select_command_ops(policy)
+            == &gpu::internal::vk::TRUSTED_COMMAND_OPS,
         "trusted without tracking selects the trusted table"
     );
 
     policy.track_lifetimes = true;
     uptr trusted_tracking_address =
-        (uptr)gpu::vk::select_command_ops(policy);
+        (uptr)gpu::internal::vk::select_command_ops(policy);
     assert(
-        gpu::vk::select_command_ops(policy)
-            == &gpu::vk::TRUSTED_TRACKING_COMMAND_OPS,
+        gpu::internal::vk::select_command_ops(policy)
+            == &gpu::internal::vk::TRUSTED_TRACKING_COMMAND_OPS,
         "trusted with tracking selects the trusted tracking table"
     );
 
     policy.contract = gpu::ContractValidation.OBJECT_BOUNDARIES;
     policy.track_lifetimes = false;
     assert(
-        gpu::vk::select_command_ops(policy)
-            == &gpu::vk::TRUSTED_COMMAND_OPS,
+        gpu::internal::vk::select_command_ops(policy)
+            == &gpu::internal::vk::TRUSTED_COMMAND_OPS,
         "object boundaries without tracking shares the trusted table"
     );
 
     policy.track_lifetimes = true;
     assert(
-        gpu::vk::select_command_ops(policy)
-            == &gpu::vk::TRUSTED_TRACKING_COMMAND_OPS,
+        gpu::internal::vk::select_command_ops(policy)
+            == &gpu::internal::vk::TRUSTED_TRACKING_COMMAND_OPS,
         "object boundaries with tracking shares the trusted tracking table"
     );
 
     policy.contract = gpu::ContractValidation.FULL;
     policy.track_lifetimes = false;
-    uptr checked_address = (uptr)gpu::vk::select_command_ops(policy);
+    uptr checked_address = (uptr)gpu::internal::vk::select_command_ops(policy);
     assert(
-        gpu::vk::select_command_ops(policy)
-            == &gpu::vk::CHECKED_COMMAND_OPS,
+        gpu::internal::vk::select_command_ops(policy)
+            == &gpu::internal::vk::CHECKED_COMMAND_OPS,
         "full validation without tracking selects the checked table"
     );
 
     policy.track_lifetimes = true;
     uptr checked_tracking_address =
-        (uptr)gpu::vk::select_command_ops(policy);
+        (uptr)gpu::internal::vk::select_command_ops(policy);
     assert(
-        gpu::vk::select_command_ops(policy)
-            == &gpu::vk::CHECKED_TRACKING_COMMAND_OPS,
+        gpu::internal::vk::select_command_ops(policy)
+            == &gpu::internal::vk::CHECKED_TRACKING_COMMAND_OPS,
         "full validation with tracking selects the checked tracking table"
     );
 
-    assert(gpu::vk::command_ops_are_complete(&gpu::vk::TRUSTED_COMMAND_OPS));
-    assert(gpu::vk::command_ops_are_complete(&gpu::vk::TRUSTED_TRACKING_COMMAND_OPS));
-    assert(gpu::vk::command_ops_are_complete(&gpu::vk::CHECKED_COMMAND_OPS));
-    assert(gpu::vk::command_ops_are_complete(&gpu::vk::CHECKED_TRACKING_COMMAND_OPS));
+    assert(gpu::internal::vk::command_ops_are_complete(&gpu::internal::vk::TRUSTED_COMMAND_OPS));
+    assert(gpu::internal::vk::command_ops_are_complete(&gpu::internal::vk::TRUSTED_TRACKING_COMMAND_OPS));
+    assert(gpu::internal::vk::command_ops_are_complete(&gpu::internal::vk::CHECKED_COMMAND_OPS));
+    assert(gpu::internal::vk::command_ops_are_complete(&gpu::internal::vk::CHECKED_TRACKING_COMMAND_OPS));
     assert(trusted_address != trusted_tracking_address);
     assert(trusted_address != checked_address);
     assert(checked_address != checked_tracking_address);
     policy.contract = bitcast(99, gpu::ContractValidation);
     policy.track_lifetimes = false;
     assert(
-        gpu::vk::select_command_ops(policy) == &gpu::vk::CHECKED_COMMAND_OPS,
+        gpu::internal::vk::select_command_ops(policy) == &gpu::internal::vk::CHECKED_COMMAND_OPS,
         "an unknown policy falls back to checked command recording"
     );
     policy.track_lifetimes = true;
     assert(
-        gpu::vk::select_command_ops(policy)
-            == &gpu::vk::CHECKED_TRACKING_COMMAND_OPS,
+        gpu::internal::vk::select_command_ops(policy)
+            == &gpu::internal::vk::CHECKED_TRACKING_COMMAND_OPS,
         "an unknown policy preserves requested lifetime tracking"
     );
     assert(
-        gpu::vk::TRUSTED_COMMAND_OPS.begin_label
-            == gpu::vk::TRUSTED_TRACKING_COMMAND_OPS.begin_label
-            && gpu::vk::TRUSTED_COMMAND_OPS.begin_label
-                == gpu::vk::CHECKED_COMMAND_OPS.begin_label
-            && gpu::vk::TRUSTED_COMMAND_OPS.begin_label
-                == gpu::vk::CHECKED_TRACKING_COMMAND_OPS.begin_label,
+        gpu::internal::vk::TRUSTED_COMMAND_OPS.begin_label
+            == gpu::internal::vk::TRUSTED_TRACKING_COMMAND_OPS.begin_label
+            && gpu::internal::vk::TRUSTED_COMMAND_OPS.begin_label
+                == gpu::internal::vk::CHECKED_COMMAND_OPS.begin_label
+            && gpu::internal::vk::TRUSTED_COMMAND_OPS.begin_label
+                == gpu::internal::vk::CHECKED_TRACKING_COMMAND_OPS.begin_label,
         "every command policy shares the label-begin entry"
     );
     assert(
-        gpu::vk::TRUSTED_COMMAND_OPS.end_label
-            == gpu::vk::TRUSTED_TRACKING_COMMAND_OPS.end_label
-            && gpu::vk::TRUSTED_COMMAND_OPS.end_label
-                == gpu::vk::CHECKED_COMMAND_OPS.end_label
-            && gpu::vk::TRUSTED_COMMAND_OPS.end_label
-                == gpu::vk::CHECKED_TRACKING_COMMAND_OPS.end_label,
+        gpu::internal::vk::TRUSTED_COMMAND_OPS.end_label
+            == gpu::internal::vk::TRUSTED_TRACKING_COMMAND_OPS.end_label
+            && gpu::internal::vk::TRUSTED_COMMAND_OPS.end_label
+                == gpu::internal::vk::CHECKED_COMMAND_OPS.end_label
+            && gpu::internal::vk::TRUSTED_COMMAND_OPS.end_label
+                == gpu::internal::vk::CHECKED_TRACKING_COMMAND_OPS.end_label,
         "every command policy shares the label-end entry"
     );
 }
@@ -769,19 +770,19 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
         if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
 
         for (
-            uint checkpoint_ordinal = gpu::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal;
-            checkpoint_ordinal <= gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal;
+            uint checkpoint_ordinal = gpu::internal::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal;
+            checkpoint_ordinal <= gpu::internal::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal;
             checkpoint_ordinal++
         ) {
-            gpu::vk::DeviceCreationCheckpoint checkpoint =
-                (gpu::vk::DeviceCreationCheckpoint)checkpoint_ordinal;
+            gpu::internal::vk::DeviceCreationCheckpoint checkpoint =
+                (gpu::internal::vk::DeviceCreationCheckpoint)checkpoint_ordinal;
             gpu::Runtime retained_runtime = runtime;
-            gpu::runtime_retain_device(&retained_runtime)!!;
-            gpu::vk::DeviceCreationProbe probe = { .fail_at = checkpoint };
+            gpu::internal::runtime_retain_device(&retained_runtime)!!;
+            gpu::internal::vk::DeviceCreationProbe probe = { .fail_at = checkpoint };
             uint live_slots_before = live_device_slot_count();
 
             assert(
-                @catch(gpu::vk::create_vk_device_with_probe(
+                @catch(gpu::internal::vk::create_vk_device_with_probe(
                     adapter:          &adapter,
                     request:          &request,
                     retained_runtime: &retained_runtime,
@@ -789,7 +790,7 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
                 )) == gpu::BACKEND_ERROR,
                 "a checkpoint failure returns the backend fault"
             );
-            gpu::runtime_release_device(&retained_runtime)!!;
+            gpu::internal::runtime_release_device(&retained_runtime)!!;
             assert(probe.reached == checkpoint, "creation reaches the requested checkpoint");
             assert(probe.rollback_count == 1, "creation rolls back exactly once");
             assert(
@@ -833,10 +834,10 @@ fn void publication_failure_rolls_back_native_state() @test {
         exercised = true;
 
         uint blocker_state;
-        gpu::Device[gpu::MAX_DEVICES] blockers;
+        gpu::Device[gpu::internal::MAX_DEVICES] blockers;
         defer destroy_registry_blockers(blockers[..]);
         foreach (&blocker : blockers) {
-            *blocker = gpu::register_device(
+            *blocker = gpu::internal::register_device(
                 backend:       gpu::BackendKind.VULKAN,
                 caps:          {},
                 vtable:        &REGISTRY_BLOCKER_VTABLE,
@@ -845,16 +846,16 @@ fn void publication_failure_rolls_back_native_state() @test {
         }
 
         gpu::Runtime retained_runtime = runtime;
-        gpu::runtime_retain_device(&retained_runtime)!!;
+        gpu::internal::runtime_retain_device(&retained_runtime)!!;
         bool retain_live = true;
         defer {
-            if (retain_live) (void)gpu::runtime_release_device(&retained_runtime);
+            if (retain_live) (void)gpu::internal::runtime_release_device(&retained_runtime);
         }
-        gpu::vk::DeviceCreationProbe probe;
+        gpu::internal::vk::DeviceCreationProbe probe;
         uint live_slots_before = live_device_slot_count();
 
         assert(
-            @catch(gpu::vk::create_vk_device_with_probe(
+            @catch(gpu::internal::vk::create_vk_device_with_probe(
                 adapter:          &adapter,
                 request:          &request,
                 retained_runtime: &retained_runtime,
@@ -862,10 +863,10 @@ fn void publication_failure_rolls_back_native_state() @test {
             )) == gpu::SLOT_TABLE_FULL,
             "registration reports a full device registry"
         );
-        gpu::runtime_release_device(&retained_runtime)!!;
+        gpu::internal::runtime_release_device(&retained_runtime)!!;
         retain_live = false;
         assert(
-            probe.reached == gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
+            probe.reached == gpu::internal::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
             "registry exhaustion occurs after native initialization"
         );
         assert(probe.rollback_count == 1, "registry exhaustion rolls back once");
@@ -923,9 +924,9 @@ fn void runtime_devices_destroy_independently() @test {
             io::eprintfn("runtime_devices: distinct-adapter=N/A (one strict-compatible adapter)");
         }
 
-        gpu::RuntimeData* runtime_data = gpu::resolve_adapter(&adapter);
-        gpu::vk::VkRuntimeState* runtime_state =
-            (gpu::vk::VkRuntimeState*)runtime_data.backend_state;
+        gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
+        gpu::internal::vk::VkRuntimeState* runtime_state =
+            (gpu::internal::vk::VkRuntimeState*)runtime_data.backend_state;
         gpu::Device first = gpu::create_device(&adapter, &request)!!;
         gpu::Device second = gpu::create_device(&second_adapter, &request)!!;
         uptr first_physical = device_physical_adapter(&first);

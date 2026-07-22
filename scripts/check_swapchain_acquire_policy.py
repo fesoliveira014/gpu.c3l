@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SWAPCHAIN_SOURCE = ROOT / "gpu" / "vk" / "swapchain.c3"
+SWAPCHAIN_SOURCE = ROOT / "gpu" / "internal" / "vk" / "swapchain.c3"
 FUNCTION_DECLARATION = re.compile(
     r"^fn\s+[^\r\n(]*?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
     re.MULTILINE,
@@ -99,8 +99,8 @@ def validate_acquire_policy(source: str) -> list[str]:
     poll = blocks.get("poll_swapchain_completion", "")
     poll_body = re.compile(
         r"return\s+vk_poll_completion\s*\(\s*device,\s*"
-        r"gpu::completion_point_queue_id\(point\),\s*"
-        r"gpu::completion_point_sequence\(point\),\s*\)\s*;",
+        r"gpu::internal::completion_point_queue_id\(point\),\s*"
+        r"gpu::internal::completion_point_sequence\(point\),\s*\)\s*;",
         re.DOTALL,
     )
     if not poll_body.search(poll):

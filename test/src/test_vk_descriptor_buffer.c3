@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import std::os::env;
 import std::io;
 
@@ -21,7 +22,7 @@ fn bool db_e2e_enabled() {
 }
 
 fn bool descriptor_buffer_creation_is_unavailable(
-    gpu::vk::DeviceCreationProbe* probe,
+    gpu::internal::vk::DeviceCreationProbe* probe,
     fault err,
 ) {
     return err == gpu::UNSUPPORTED_FEATURE
@@ -32,15 +33,15 @@ fn bool descriptor_buffer_creation_is_unavailable(
 }
 
 fn void descriptor_buffer_creation_skip_policy_is_exact() @test {
-    gpu::vk::DeviceCreationProbe unprobed = {};
-    gpu::vk::DeviceCreationProbe unavailable = {
+    gpu::internal::vk::DeviceCreationProbe unprobed = {};
+    gpu::internal::vk::DeviceCreationProbe unavailable = {
         .descriptor_buffer_capability_checked = true,
     };
-    gpu::vk::DeviceCreationProbe advertised = {
+    gpu::internal::vk::DeviceCreationProbe advertised = {
         .descriptor_buffer_capability_checked   = true,
         .descriptor_buffer_capability_available = true,
     };
-    gpu::vk::DeviceCreationProbe selected = {
+    gpu::internal::vk::DeviceCreationProbe selected = {
         .descriptor_buffer_capability_checked   = true,
         .descriptor_buffer_capability_available = true,
         .descriptor_buffer_selected             = true,
@@ -70,7 +71,7 @@ fn void descriptor_buffer_creation_skip_policy_is_exact() @test {
 
 fn gpu::Device? create_descriptor_buffer_test_device(
     gpu::RuntimeDesc* desc,
-    gpu::vk::DeviceCreationProbe* probe,
+    gpu::internal::vk::DeviceCreationProbe* probe,
 ) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
     gpu::Runtime runtime = gpu::create_runtime(desc)!;
@@ -82,15 +83,15 @@ fn gpu::Device? create_descriptor_buffer_test_device(
         if (!gpu::supports_device_request(&adapter, &request)!.supported) continue;
 
         gpu::Runtime retained_runtime = runtime;
-        gpu::runtime_retain_device(&retained_runtime)!;
-        gpu::Device? device = gpu::vk::create_vk_device_with_probe(
+        gpu::internal::runtime_retain_device(&retained_runtime)!;
+        gpu::Device? device = gpu::internal::vk::create_vk_device_with_probe(
             adapter:          &adapter,
             request:          &request,
             retained_runtime: &retained_runtime,
             probe:            probe,
         );
         if (catch err = device) {
-            gpu::runtime_release_device(&retained_runtime)!;
+            gpu::internal::runtime_release_device(&retained_runtime)!;
             if (err == gpu::UNSUPPORTED_FEATURE) continue;
             return err~;
         }
@@ -110,7 +111,7 @@ fn void descriptor_buffer_device_and_heap() @test {
         .application_name      = "gpu_descriptor_buffer_test",
     };
 
-    gpu::vk::DeviceCreationProbe probe = {
+    gpu::internal::vk::DeviceCreationProbe probe = {
         .descriptor_buffer_override = true,
     };
     gpu::Device? maybe_device = create_descriptor_buffer_test_device(&desc, &probe);
@@ -125,10 +126,10 @@ fn void descriptor_buffer_device_and_heap() @test {
     }
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
-    gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::internal::vk::VkDeviceState* state =
+        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(
-        gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
+        gpu::internal::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"
     );
 
@@ -175,7 +176,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .enable_vulkan_validation = true,
         .application_name  = "gpu_descriptor_buffer_compute_to_graphics",
     };
-    gpu::vk::DeviceCreationProbe probe = {
+    gpu::internal::vk::DeviceCreationProbe probe = {
         .descriptor_buffer_override = true,
     };
     gpu::Device? maybe_device = create_descriptor_buffer_test_device(&device_desc, &probe);
@@ -190,10 +191,10 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     }
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
-    gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::internal::vk::VkDeviceState* state =
+        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(
-        gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
+        gpu::internal::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"
     );
     io::eprintfn(
@@ -516,7 +517,7 @@ fn void descriptor_buffer_write_then_sample() @test {
         .enable_vulkan_validation = true,
         .application_name  = "gpu_descriptor_buffer_e2e",
     };
-    gpu::vk::DeviceCreationProbe probe = {
+    gpu::internal::vk::DeviceCreationProbe probe = {
         .descriptor_buffer_override = true,
     };
     gpu::Device? maybe_device = create_descriptor_buffer_test_device(&device_desc, &probe);
@@ -531,10 +532,10 @@ fn void descriptor_buffer_write_then_sample() @test {
     }
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
-    gpu::vk::VkDeviceState* state =
-        (gpu::vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::internal::vk::VkDeviceState* state =
+        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(
-        gpu::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
+        gpu::internal::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"
     );
 

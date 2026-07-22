@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import std::atomic;
 import std::thread;
 
@@ -17,8 +18,8 @@ struct SamplerInternWorkerArgs {
 }
 
 fn Runtime sampler_test_runtime() {
-    gpu::vk::stub_set_adapter_count(1);
-    gpu::vk::stub_set_strict_support(true);
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_strict_support(true);
     RuntimeDesc desc = {
         .backend          = BackendKind.VULKAN,
         .application_name = "sampler_identity_test",
@@ -64,12 +65,12 @@ fn int sampler_intern_worker(void* raw_args) {
 fn void sampler_interning_pins_public_contract() @test {
     Runtime runtime = sampler_test_runtime();
     Device device = sampler_test_device(&runtime);
-    uint destroys_before = gpu::vk::stub_sampler_native_destroy_count();
+    uint destroys_before = gpu::internal::vk::stub_sampler_native_destroy_count();
     ulong children_before =
-        gpu::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
+        gpu::internal::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
 
     assert(@catch(gpu::intern_sampler(&device, null)) == gpu::INVALID_ARGUMENT);
-    assert(gpu::vk::stub_sampler_intern_attempt_count(&device) == 0,
+    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device) == 0,
         "null descriptions stop before backend mutation");
 
     DeviceCaps caps = gpu::get_device_caps(&device)!!;
@@ -79,7 +80,7 @@ fn void sampler_interning_pins_public_contract() @test {
     invalid_bias.mip_lod_bias = caps.max_sampler_lod_bias + 1.0f;
     assert(@catch(gpu::intern_sampler(&device, &invalid_bias))
         == gpu::INVALID_ARGUMENT);
-    assert(gpu::vk::stub_sampler_intern_attempt_count(&device) == 0,
+    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device) == 0,
         "over-limit LOD bias stops before sampler table mutation");
 
     SamplerDesc first_desc = sampler_test_desc();
@@ -102,17 +103,17 @@ fn void sampler_interning_pins_public_contract() @test {
         "filter changes produce distinct sampler indices");
     assert(first != different_address,
         "address changes produce distinct sampler indices");
-    assert(gpu::vk::stub_sampler_native_create_count(&device) == 3,
+    assert(gpu::internal::vk::stub_sampler_native_create_count(&device) == 3,
         "only semantic descriptions create backend samplers");
 
     assert(first.is_valid(), "interning returns a live shader index");
     ulong children_after =
-        gpu::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
+        gpu::internal::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
     assert(children_after == children_before,
         "interning retains no device child");
 
     gpu::destroy_device(&device)!!;
-    assert(gpu::vk::stub_sampler_native_destroy_count() == destroys_before + 3,
+    assert(gpu::internal::vk::stub_sampler_native_destroy_count() == destroys_before + 3,
         "device teardown destroys each interned native sampler exactly once");
     gpu::destroy_runtime(&runtime)!!;
 }
@@ -151,10 +152,10 @@ fn void concurrent_identical_sampler_interning_is_deduplicated() @test {
 
     assert(all_joined, "every sampler interning worker succeeds");
     assert(all_equal, "concurrent identical descriptions return one identity");
-    assert(gpu::vk::stub_sampler_intern_attempt_count(&device)
+    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device)
         == SAMPLER_INTERN_WORKER_COUNT,
         "every worker reaches backend interning");
-    assert(gpu::vk::stub_sampler_native_create_count(&device) == 1,
+    assert(gpu::internal::vk::stub_sampler_native_create_count(&device) == 1,
         "concurrent identical descriptions create one backend sampler");
 
     gpu::destroy_device(&device)!!;
@@ -169,15 +170,15 @@ fn void sampler_keys_normalize_inactive_and_effective_fields() @test {
     inactive.max_anisotropy = 1.0f;
     inactive.compare = CompareOp.ALWAYS;
     inactive.mip_lod_bias = -0.0f;
-    gpu::vk::SamplerKey base_key = gpu::vk::canonical_sampler_key(&base, 8.0f);
-    gpu::vk::SamplerKey inactive_key = gpu::vk::canonical_sampler_key(
+    gpu::internal::vk::SamplerKey base_key = gpu::internal::vk::canonical_sampler_key(&base, 8.0f);
+    gpu::internal::vk::SamplerKey inactive_key = gpu::internal::vk::canonical_sampler_key(
         &inactive,
         8.0f,
     );
-    assert(gpu::vk::sampler_key_equal(&base_key, &inactive_key),
+    assert(gpu::internal::vk::sampler_key_equal(&base_key, &inactive_key),
         "disabled anisotropy, compare, and signed zero normalize");
-    assert(gpu::vk::hash_sampler_key(&base_key)
-            == gpu::vk::hash_sampler_key(&inactive_key),
+    assert(gpu::internal::vk::hash_sampler_key(&base_key)
+            == gpu::internal::vk::hash_sampler_key(&inactive_key),
         "canonical aliases have identical byte hashes");
     assert(base_key.anisotropy_enable == 0 && base_key.compare_enable == 0,
         "disabled sampler flags use canonical zero words");
@@ -187,18 +188,18 @@ fn void sampler_keys_normalize_inactive_and_effective_fields() @test {
     clamped_a.max_anisotropy = 16.0f;
     SamplerDesc clamped_b = clamped_a;
     clamped_b.max_anisotropy = 32.0f;
-    gpu::vk::SamplerKey clamped_a_key = gpu::vk::canonical_sampler_key(
+    gpu::internal::vk::SamplerKey clamped_a_key = gpu::internal::vk::canonical_sampler_key(
         &clamped_a,
         8.0f,
     );
-    gpu::vk::SamplerKey clamped_b_key = gpu::vk::canonical_sampler_key(
+    gpu::internal::vk::SamplerKey clamped_b_key = gpu::internal::vk::canonical_sampler_key(
         &clamped_b,
         8.0f,
     );
-    assert(gpu::vk::sampler_key_equal(&clamped_a_key, &clamped_b_key),
+    assert(gpu::internal::vk::sampler_key_equal(&clamped_a_key, &clamped_b_key),
         "requests with the same effective anisotropy share a key");
-    assert(gpu::vk::hash_sampler_key(&clamped_a_key)
-            == gpu::vk::hash_sampler_key(&clamped_b_key),
+    assert(gpu::internal::vk::hash_sampler_key(&clamped_a_key)
+            == gpu::internal::vk::hash_sampler_key(&clamped_b_key),
         "clamped anisotropy aliases have identical byte hashes");
     assert(clamped_a_key.anisotropy_enable == 1,
         "enabled sampler flags use canonical one words");
@@ -214,25 +215,25 @@ fn void sampler_identity_exhaustion_is_transactional() @test {
         SamplerIndex index = gpu::intern_sampler(&device, &desc)!!;
         if (i == 0) first = index;
     }
-    uint creates_before = gpu::vk::stub_sampler_native_create_count(&device);
+    uint creates_before = gpu::internal::vk::stub_sampler_native_create_count(&device);
     desc.mip_lod_bias = 16.0f;
     assert(@catch(gpu::intern_sampler(&device, &desc)) == gpu::SLOT_TABLE_FULL);
     desc.mip_lod_bias = 0.0f;
     assert(gpu::intern_sampler(&device, &desc)!! == first,
         "an existing identity survives table exhaustion");
-    assert(gpu::vk::stub_sampler_native_create_count(&device) == creates_before,
+    assert(gpu::internal::vk::stub_sampler_native_create_count(&device) == creates_before,
         "exhaustion creates no native sampler");
     gpu::destroy_device(&device)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
 
 fn void sampler_interning_requires_strict_capability() @test {
-    Device device = gpu::vk::stub_create_strict_disabled_device()!!;
+    Device device = gpu::internal::vk::stub_create_strict_disabled_device()!!;
     SamplerDesc desc = sampler_test_desc();
-    uint attempts_before = gpu::vk::stub_sampler_intern_attempt_count(&device);
+    uint attempts_before = gpu::internal::vk::stub_sampler_intern_attempt_count(&device);
     assert(@catch(gpu::intern_sampler(&device, &desc))
         == gpu::UNSUPPORTED_FEATURE);
-    assert(gpu::vk::stub_sampler_intern_attempt_count(&device)
+    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device)
         == attempts_before,
         "strict-disabled interning stops before backend mutation");
     gpu::destroy_device(&device)!!;

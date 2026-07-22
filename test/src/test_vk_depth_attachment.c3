@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 
 // Headless (lavapipe): D32_FLOAT depth attachments. Depth-tested overlap in
@@ -440,7 +441,7 @@ fn void depth_state_variants_share_entry() @test {
     gpu::PipelineHandle test_off = make_depth_pipeline(&device, &ctx);
     defer gpu::destroy_pipeline(&device, test_off)!!;
 
-    uint entries = vk::pipeline_cache_entry_count((vk::VkDeviceState*)gpu::device_backend_state(device));
+    uint entries = vk::pipeline_cache_entry_count((vk::VkDeviceState*)gpu::internal::device_backend_state(device));
     assert(entries == 1, "depth-state variants share one cache entry");
     OwnedSpan near_verts_owned = write_tri(&device, NEAR_Z);
     defer free_owned_span(&device, &near_verts_owned)!!;

@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import vma;
 
@@ -148,14 +149,14 @@ fn void init_dedicated_fixture(DedicatedTextureFixture* fixture) {
     const ulong OWNER = 131;
     fixture.state.resource_owner = OWNER;
     fixture.state.compute_family = 0;
-    fixture.state.allocations.owner = gpu::resource_owner_tag(
+    fixture.state.allocations.owner = gpu::internal::resource_owner_tag(
         OWNER,
-        gpu::ResourceOwnerKind.ALLOCATION,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
     fixture.state.allocations.slots = fixture.allocations[..];
-    fixture.state.textures.owner = gpu::resource_owner_tag(
+    fixture.state.textures.owner = gpu::internal::resource_owner_tag(
         OWNER,
-        gpu::ResourceOwnerKind.TEXTURE,
+        gpu::internal::ResourceOwnerKind.TEXTURE,
     );
     fixture.state.textures.slots = fixture.textures[..];
     fixture.state.resource_mutex.init()!!;
@@ -274,9 +275,9 @@ fn void dedicated_texture_validation_precedes_native_mutation() @test {
     allocation_desc.size = requirements.size;
     gpu::TextureRequirements foreign_requirements = requirements;
     foreign_requirements.compatibility = vk::texture_compatibility(
-        gpu::resource_owner_tag(
+        gpu::internal::resource_owner_tag(
             132,
-            gpu::ResourceOwnerKind.ALLOCATION,
+            gpu::internal::ResourceOwnerKind.ALLOCATION,
         ),
         0b0010,
     );

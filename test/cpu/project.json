@@ -1,36 +1,30 @@
 {
   "langrev": "1",
-  // Pure-CPU lane: the full public module plus a stub gpu::vk backend, zero
+  // Pure-CPU lane: the full public module plus a stub gpu::internal::vk backend, zero
   // native libraries — a clean checkout runs these with no Vulkan/VMA
   // installed. Shared sources at project scope; targets add only test files.
   "warnings": [
     "no-unused"
   ],
   "sources": [
-    "../../gpu/gpu.c3",
     "../../gpu/gpu.c3i",
-    "../../gpu/types.c3",
-    "../../gpu/faults.c3",
-    "../../gpu/runtime.c3",
-    "../../gpu/adapter.c3",
-    "../../gpu/device.c3",
-    "../../gpu/device_request.c3",
-    "../../gpu/device_support.c3",
-    "../../gpu/surface.c3",
+    "../../gpu/gpu.c3",
     "../../gpu/surface/**",
-    "../../gpu/caps.c3",
-    "../../gpu/memory.c3",
-    "../../gpu/texture.c3",
-    "../../gpu/descriptor_heap.c3",
-    "../../gpu/pipeline.c3",
-    "../../gpu/command.c3",
-    "../../gpu/render_pass.c3",
-    "../../gpu/sync.c3",
-    "../../gpu/queue.c3",
-    "../../gpu/swapchain.c3",
-    "../../gpu/debug.c3",
-    "../../gpu/shader_abi.c3",
-    "../../gpu/vk/internal.c3",
+    "../../gpu/internal/runtime.c3",
+    "../../gpu/internal/adapter.c3",
+    "../../gpu/internal/device.c3",
+    "../../gpu/internal/device_request.c3",
+    "../../gpu/internal/surface.c3",
+    "../../gpu/internal/debug.c3",
+    "../../gpu/internal/shader_abi.c3",
+    "../../gpu/internal/memory.c3",
+    "../../gpu/internal/texture.c3",
+    "../../gpu/internal/pipeline.c3",
+    "../../gpu/internal/command.c3",
+    "../../gpu/internal/render_pass.c3",
+    "../../gpu/internal/sync.c3",
+    "../../gpu/internal/queue.c3",
+    "../../gpu/internal/vk/internal.c3",
     "vk_stub.c3"
   ],
   "output": "build",

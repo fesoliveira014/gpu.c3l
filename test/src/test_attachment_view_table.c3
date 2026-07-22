@@ -1,7 +1,7 @@
 module gpu_test;
 
 import gpu @public;
-import gpu::vk;
+import gpu::internal::vk;
 import vk;
 
 fn void attachment_view_table_is_generation_checked() @test {

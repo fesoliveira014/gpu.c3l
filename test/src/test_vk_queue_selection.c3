@@ -1,7 +1,8 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import vk;
 import std::atomic;
 
@@ -284,7 +285,7 @@ fn gpu::Device make_queue_test_device() {
 fn void queue_alias_matches_async_compute_cap() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* s = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* s = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(s.compute_queue_distinct == gpu::get_device_caps(&device)!!.async_compute, "distinct flag mirrors the cap");
     assert((s.compute_queue == s.graphics_queue) == !gpu::get_device_caps(&device)!!.async_compute, "alias iff no async compute");
     uint expected_index = s.compute_queue_distinct && s.compute_family == s.graphics_family ? 1 : 0;
@@ -649,7 +650,7 @@ fn void allocator_pool_ownership_is_exact() @test {
     defer gpu::destroy_command_allocator(&compute_allocator)!!;
     gpu::CommandAllocator transfer_allocator = gpu::create_command_allocator(&device, transfer)!!;
     defer gpu::destroy_command_allocator(&transfer_allocator)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandAllocatorSlot* graphics_slot = state.command_allocators.get(
         graphics_allocator.handle,
     )!!;
@@ -1337,24 +1338,24 @@ fn void device_queue_families_include_multi_count_selections() @test {
 
 fn void maximum_queue_counts_share_full_native_range() @test {
     vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, gpu::MAX_REQUESTED_QUEUES_PER_ROLE),
+        family(QF_G | QF_C | QF_T, gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE),
     };
     gpu::QueueRequirements requirements = {
         .counts = {
-            .graphics = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .compute  = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .transfer = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .graphics = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .compute  = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .transfer = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
         },
     };
 
     vk::QueueFamilies picked =
         vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(picked.counts.graphics == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(picked.counts.compute == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(picked.counts.transfer == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.graphics == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.compute == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.transfer == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
     assert(
         vk::requested_queue_count(&picked, 0, false)
-            == gpu::MAX_REQUESTED_QUEUES_PER_ROLE
+            == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE
     );
     assert(
         vk::selected_native_queue(&picked, gpu::QueueKind.GRAPHICS, 254)
@@ -1368,13 +1369,13 @@ fn void maximum_queue_counts_share_full_native_range() @test {
 
 fn void maximum_distinct_queue_counts_use_disjoint_native_ranges() @test {
     vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, gpu::MAX_SELECTED_QUEUE_IDENTITIES),
+        family(QF_G | QF_C | QF_T, gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES),
     };
     gpu::QueueRequirements requirements = {
         .counts = {
-            .graphics = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .compute  = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .transfer = gpu::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .graphics = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .compute  = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
+            .transfer = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
         },
         .distinct = {
             .graphics,
@@ -1385,9 +1386,9 @@ fn void maximum_distinct_queue_counts_use_disjoint_native_ranges() @test {
 
     vk::QueueFamilies picked =
         vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(picked.counts.graphics == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(picked.counts.compute == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(picked.counts.transfer == gpu::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.graphics == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.compute == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
+    assert(picked.counts.transfer == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
     assert(vk::requested_queue_count(&picked, 0, false)
-        == gpu::MAX_SELECTED_QUEUE_IDENTITIES);
+        == gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES);
 }

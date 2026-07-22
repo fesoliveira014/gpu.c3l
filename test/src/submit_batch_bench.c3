@@ -1,7 +1,8 @@
 module gpu_bench;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import std::io;
 import std::time;
 
@@ -85,7 +86,7 @@ fn int main() {
     )!!;
     defer (void)gpu::destroy_command_allocator(&allocator);
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     io::printfn(
         "iterations=%d batch_sizes=1,8,32,128,1024 units=ns/submit",

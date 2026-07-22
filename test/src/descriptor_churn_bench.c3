@@ -1,7 +1,8 @@
 module gpu_bench;
 
+import gpu::internal @public;
 import gpu @public;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 import std::io;
 import std::thread;
 import std::time;
@@ -247,7 +248,7 @@ fn void run_sampler_lookup_probe(
 fn void run_bench_suite(gpu::RuntimeDesc* desc, ZString label) {
     gpu::Device device = create_bench_device(desc)!!;
     defer destroy_bench_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     gpu::TextureHandle[BENCH_MAX_WORKERS] textures = make_texture_pool(&device);
 

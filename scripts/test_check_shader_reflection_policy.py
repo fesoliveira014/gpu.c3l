@@ -37,7 +37,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_rejects_module_wide_descriptor_reflection(self) -> None:
         errors = self.mutate(
-            "gpu/vk/shader.c3",
+            "gpu/internal/vk/shader.c3",
             ".enumerate_entry_point_descriptor_bindings(",
             ".enumerate_descriptor_bindings(",
         )
@@ -45,7 +45,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_rejects_native_creation_before_exact_root_check(self) -> None:
         errors = self.mutate(
-            "gpu/vk/shader.c3",
+            "gpu/internal/vk/shader.c3",
             "if (catch push_fault = check_root_push_abi(",
             "create_pipeline_shader_module_native(state, null, null);\n"
             "    if (catch push_fault = check_root_push_abi(",
@@ -54,7 +54,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_requires_no_push_block_acceptance(self) -> None:
         errors = self.mutate(
-            "gpu/vk/shader.c3",
+            "gpu/internal/vk/shader.c3",
             "if (count == 0) return;\n"
             "    if (count != 1) return gpu::SHADER_INVALID~;",
             "if (count == 0) return gpu::SHADER_INVALID~;\n"
@@ -64,7 +64,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_requires_integer_numeric_kind(self) -> None:
         errors = self.mutate(
-            "gpu/vk/shader.c3",
+            "gpu/internal/vk/shader.c3",
             "integer == expected.integer",
             "integer == integer",
         )
@@ -72,7 +72,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_requires_float_numeric_kind(self) -> None:
         errors = self.mutate(
-            "gpu/vk/shader.c3",
+            "gpu/internal/vk/shader.c3",
             "float_scalar != expected.integer",
             "float_scalar == float_scalar",
         )
@@ -80,7 +80,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_requires_reflection_fault_mapping(self) -> None:
         errors = self.mutate(
-            "gpu/vk/shader.c3",
+            "gpu/internal/vk/shader.c3",
             "public_fault:   gpu::SHADER_INVALID",
             "public_fault:   gpu::INVALID_ARGUMENT",
         )
@@ -88,7 +88,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_rejects_public_generated_metadata(self) -> None:
         errors = self.mutate(
-            "gpu/shader_abi.c3",
+            "gpu/internal/shader_abi.c3",
             "const RootAbiSpec ROOT_PUSH_ABI @private",
             "const RootAbiSpec ROOT_PUSH_ABI",
         )
@@ -96,7 +96,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_generated_metadata_in_comment_does_not_satisfy_contract(self) -> None:
         errors = self.mutate(
-            "gpu/shader_abi.c3",
+            "gpu/internal/shader_abi.c3",
             "struct RootAbiMemberSpec @private",
             "struct RootAbiMemberSpec\n// struct RootAbiMemberSpec @private",
         )
@@ -104,7 +104,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_generated_metadata_in_string_does_not_satisfy_contract(self) -> None:
         errors = self.mutate(
-            "gpu/shader_abi.c3",
+            "gpu/internal/shader_abi.c3",
             "struct RootAbiSpec @private",
             'struct RootAbiSpec\nconst String ROOT_ABI_POLICY = "struct RootAbiSpec @private";',
         )
@@ -120,7 +120,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_shader_counter_in_comment_does_not_satisfy_contract(self) -> None:
         errors = self.mutate(
-            "gpu/vk/shader.c3",
+            "gpu/internal/vk/shader.c3",
             "state.shader_reflection_validations++;",
             "// state.shader_reflection_validations++;",
         )
@@ -128,7 +128,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_shader_counter_in_string_does_not_satisfy_contract(self) -> None:
         errors = self.mutate(
-            "gpu/vk/shader.c3",
+            "gpu/internal/vk/shader.c3",
             "state.pipeline_shader_create_attempts++;",
             'ZString policy_example = "state.pipeline_shader_create_attempts++;";',
         )
@@ -136,9 +136,9 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
 
     def test_rejects_backend_foreign_redeclaration(self) -> None:
         errors = self.mutate(
-            "gpu/vk/shader.c3",
-            "module gpu::vk @private;",
-            "module gpu::vk @private;\nextern fn void local_reflect() @cname(\"spvReflectLocal\");",
+            "gpu/internal/vk/shader.c3",
+            "module gpu::internal::vk @private;",
+            "module gpu::internal::vk @private;\nextern fn void local_reflect() @cname(\"spvReflectLocal\");",
         )
         self.assertTrue(any("redeclares a foreign" in error for error in errors))
 
@@ -154,7 +154,7 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.copy_policy_sources(root)
-            path = root / "gpu/vk/shader.c3"
+            path = root / "gpu/internal/vk/shader.c3"
             source = path.read_text(encoding="utf-8")
             source += (
                 '\n// extern fn void fake() @cname("spvReflectFake");\n'

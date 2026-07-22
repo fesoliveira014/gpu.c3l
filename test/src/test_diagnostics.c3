@@ -1,5 +1,6 @@
 module gpu;
 
+import gpu::internal @public;
 struct DiagnosticCapture {
     uint              calls;
     void*             user_data;
@@ -15,7 +16,7 @@ fn void capture_diagnostic(DebugMessage* message, void* user_data) {
 
 fn void diagnostic_dispatch_is_null_safe() @test {
     DebugMessage message = {};
-    dispatch_debug_message(null, null, &message);
+    gpu::internal::dispatch_debug_message(null, null, &message);
 }
 
 fn void null_command_owner_faults_as_invalid_handle() @test {
@@ -49,7 +50,7 @@ fn void diagnostic_dispatch_delivers_complete_message_once() @test {
         .validation_id_number = 42,
     };
 
-    dispatch_debug_message(&capture_diagnostic, &capture, &message);
+    gpu::internal::dispatch_debug_message(&capture_diagnostic, &capture, &message);
 
     assert(capture.calls == 1, "dispatch invokes the callback exactly once");
     assert(capture.user_data == &capture, "dispatch preserves callback userdata");
@@ -82,7 +83,7 @@ fn void diagnostic_dispatch_preserves_absent_fault() @test {
         .backend_text = "backend warning",
     };
 
-    dispatch_debug_message(&capture_diagnostic, &capture, &message);
+    gpu::internal::dispatch_debug_message(&capture_diagnostic, &capture, &message);
 
     assert(capture.calls == 1, "faultless diagnostics are delivered");
     assert(!capture.message.has_fault, "absent public fault remains absent");

@@ -1,10 +1,11 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 import gpu::surface::wayland;
 import gpu::surface::win32;
 import gpu::surface::x11;
-import gpu::vk @public;
+import gpu::internal::vk @public;
 
 fn Surface create_test_surface(Runtime* runtime) {
     return gpu::surface::win32::create_surface(
@@ -19,8 +20,8 @@ fn void assert_device_ownership(
     Adapter expected_adapter,
     Surface expected_surface,
 ) {
-    gpu::DeviceOperation operation = gpu::begin_device_operation(device)!!;
-    defer gpu::end_device_operation(&operation);
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!!;
+    defer gpu::internal::end_device_operation(&operation);
     assert(
         (ulong)operation.data.adapter == (ulong)expected_adapter,
         "the device retains its exact adapter"
@@ -45,7 +46,7 @@ fn void forged_surface_tokens_are_rejected() @test {
     Surface reserved = surface;
     reserved.reserved = 1;
     Surface out_of_range = surface;
-    out_of_range.index = gpu::MAX_SURFACES;
+    out_of_range.index = gpu::internal::MAX_SURFACES;
     Surface wrong_generation = surface;
     wrong_generation.generation--;
 
@@ -58,23 +59,23 @@ fn void forged_surface_tokens_are_rejected() @test {
 }
 
 fn void surfaces_retain_their_runtime_and_expire_on_destroy() @test {
-    gpu::vk::stub_reset_surface_counts();
+    gpu::internal::vk::stub_reset_surface_counts();
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
     Surface stale = surface;
 
     assert(@catch(gpu::destroy_runtime(&runtime)) == gpu::RESOURCE_IN_USE);
-    assert(gpu::vk::stub_surface_create_count() == 1);
+    assert(gpu::internal::vk::stub_surface_create_count() == 1);
     gpu::destroy_surface(&surface)!!;
     assert(!surface.is_valid());
     assert(@catch(gpu::destroy_surface(&stale)) == gpu::INVALID_HANDLE);
-    assert(gpu::vk::stub_surface_destroy_count() == 1);
+    assert(gpu::internal::vk::stub_surface_destroy_count() == 1);
     gpu::destroy_runtime(&runtime)!!;
 }
 
 fn void invalid_platform_handles_fault_before_backend_work() @test {
-    gpu::vk::stub_reset_surface_counts();
+    gpu::internal::vk::stub_reset_surface_counts();
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
@@ -100,13 +101,13 @@ fn void invalid_platform_handles_fault_before_backend_work() @test {
             (gpu::surface::x11::WindowHandle)0,
         )) == gpu::INVALID_ARGUMENT
     );
-    assert(gpu::vk::stub_surface_create_count() == 0);
+    assert(gpu::internal::vk::stub_surface_create_count() == 0);
 }
 
 fn void surface_creation_rejects_an_incomplete_backend_contract() @test {
-    gpu::vk::stub_reset_surface_counts();
-    gpu::vk::stub_set_surface_destroy_available(false);
-    defer gpu::vk::stub_set_surface_destroy_available(true);
+    gpu::internal::vk::stub_reset_surface_counts();
+    gpu::internal::vk::stub_set_surface_destroy_available(false);
+    defer gpu::internal::vk::stub_set_surface_destroy_available(true);
 
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
@@ -120,13 +121,13 @@ fn void surface_creation_rejects_an_incomplete_backend_contract() @test {
         )) == gpu::UNSUPPORTED_FEATURE
     );
     assert(
-        gpu::vk::stub_surface_create_count() == 0,
+        gpu::internal::vk::stub_surface_create_count() == 0,
         "an unusable surface must not reach the backend"
     );
 }
 
 fn void presentation_support_validates_runtime_ownership() @test {
-    gpu::vk::stub_set_presentation_support(true);
+    gpu::internal::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();
     Runtime first = gpu::create_runtime(&desc)!!;
     Runtime second = gpu::create_runtime(&desc)!!;
@@ -139,7 +140,7 @@ fn void presentation_support_validates_runtime_ownership() @test {
         @catch(gpu::supports_presentation(&second_adapter, &surface)) == gpu::INVALID_HANDLE
     );
 
-    gpu::vk::stub_set_presentation_support(false);
+    gpu::internal::vk::stub_set_presentation_support(false);
     assert(!gpu::supports_presentation(&first_adapter, &surface)!!);
 
     gpu::destroy_surface(&surface)!!;
@@ -148,7 +149,7 @@ fn void presentation_support_validates_runtime_ownership() @test {
 }
 
 fn void presentation_request_is_immutable_and_surface_bound() @test {
-    gpu::vk::stub_set_presentation_support(true);
+    gpu::internal::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
@@ -172,7 +173,7 @@ fn void presentation_request_is_immutable_and_surface_bound() @test {
     assert(graphics.roles.graphics, "the admitted graphics queue supports graphics");
     gpu::destroy_device(&device)!!;
 
-    gpu::vk::stub_set_presentation_support(false);
+    gpu::internal::vk::stub_set_presentation_support(false);
     DeviceRequestSupport unsupported = gpu::supports_device_request(&adapter, &presentation)!!;
     assert(!unsupported.supported);
     assert(unsupported.unmet_requirement == "presentation");
@@ -183,8 +184,8 @@ fn void presentation_request_is_immutable_and_surface_bound() @test {
 }
 
 fn void presentation_requests_require_graphics_in_every_composition_order() @test {
-    gpu::vk::stub_set_presentation_support(true);
-    gpu::vk::stub_reset_device_counts();
+    gpu::internal::vk::stub_set_presentation_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
@@ -217,11 +218,11 @@ fn void presentation_requests_require_graphics_in_every_composition_order() @tes
         "creation rejects forged presentation requests without graphics"
     );
     assert(
-        gpu::vk::stub_device_support_query_count() == 0,
+        gpu::internal::vk::stub_device_support_query_count() == 0,
         "invalid presentation requests bypass support queries"
     );
     assert(
-        gpu::vk::stub_device_temporary_create_count() == 0,
+        gpu::internal::vk::stub_device_temporary_create_count() == 0,
         "invalid presentation requests allocate no device state"
     );
 
@@ -234,16 +235,16 @@ fn void live_swapchains_block_surface_destruction() @test {
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
 
-    gpu::surface_retain_swapchain(&surface)!!;
+    gpu::internal::surface_retain_swapchain(&surface)!!;
     assert(@catch(gpu::destroy_surface(&surface)) == gpu::RESOURCE_IN_USE);
     assert(surface.is_valid());
-    gpu::surface_release_swapchain(&surface)!!;
+    gpu::internal::surface_release_swapchain(&surface)!!;
     gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
 
 fn void swapchains_borrow_runtime_owned_surfaces() @test {
-    gpu::vk::stub_set_presentation_support(true);
+    gpu::internal::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
@@ -271,7 +272,7 @@ fn void swapchains_borrow_runtime_owned_surfaces() @test {
 }
 
 fn void swapchain_creation_rejects_a_foreign_runtime_surface() @test {
-    gpu::vk::stub_set_presentation_support(true);
+    gpu::internal::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();
     Runtime first = gpu::create_runtime(&desc)!!;
     Runtime second = gpu::create_runtime(&desc)!!;
@@ -304,7 +305,7 @@ fn void swapchain_creation_rejects_a_foreign_runtime_surface() @test {
 }
 
 fn void strict_only_devices_reject_swapchains_before_backend_work() @test {
-    gpu::vk::stub_reset_surface_counts();
+    gpu::internal::vk::stub_reset_surface_counts();
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
@@ -325,7 +326,7 @@ fn void strict_only_devices_reject_swapchains_before_backend_work() @test {
         )) == gpu::UNSUPPORTED_FEATURE
     );
     assert(
-        gpu::vk::stub_swapchain_create_attempt_count() == 0,
+        gpu::internal::vk::stub_swapchain_create_attempt_count() == 0,
         "strict-only rejection precedes backend mutation"
     );
 
@@ -335,10 +336,10 @@ fn void strict_only_devices_reject_swapchains_before_backend_work() @test {
 }
 
 fn void presentation_devices_accept_only_the_requested_surface() @test {
-    gpu::vk::stub_set_adapter_count(2);
-    defer gpu::vk::stub_set_adapter_count(1);
-    gpu::vk::stub_reset_surface_counts();
-    gpu::vk::stub_set_presentation_support(true);
+    gpu::internal::vk::stub_set_adapter_count(2);
+    defer gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_reset_surface_counts();
+    gpu::internal::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface first_surface = create_test_surface(&runtime);
@@ -380,7 +381,7 @@ fn void presentation_devices_accept_only_the_requested_surface() @test {
         )) == gpu::INVALID_HANDLE
     );
     assert(
-        gpu::vk::stub_swapchain_create_attempt_count() == 0,
+        gpu::internal::vk::stub_swapchain_create_attempt_count() == 0,
         "both surface mismatches reject before backend mutation"
     );
 
@@ -394,7 +395,7 @@ fn void presentation_devices_accept_only_the_requested_surface() @test {
         &second_surface,
         &swapchain_desc,
     )!!;
-    assert(gpu::vk::stub_swapchain_create_attempt_count() == 2);
+    assert(gpu::internal::vk::stub_swapchain_create_attempt_count() == 2);
 
     gpu::destroy_swapchain(&first, first_swapchain)!!;
     gpu::destroy_device(&first)!!;

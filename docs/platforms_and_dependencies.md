@@ -37,13 +37,20 @@ Manifest shape (shipped):
 {
   "provides": "gpu",
   "linklib-dir": "linked-libs",
-  "sources": [ "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/types.c3", /* ...all public files... */ "gpu/vk/**" ],
+  "sources": [
+    "gpu/gpu.c3i", "gpu/gpu.c3", "gpu/surface/**", "gpu/internal/**"
+  ],
   "targets": {
     "linux-x64":   { "dependencies": [ "vk", "vma", "spvreflect" ] },
     "windows-x64": { "dependencies": [ "vk", "vma", "spvreflect" ] }
   }
 }
 ```
+
+`gpu/gpu.c3i` and `gpu/gpu.c3` are the authoritative root public interface and
+implementation. Public native surface API stays in each platform's adjacent
+`surface.c3i`/`surface.c3` pair. `gpu/internal/*.c3` declares private
+`gpu::internal`; its `vk/*.c3` subtree declares private `gpu::internal::vk`.
 
 `manifest.json` accepts no top-level `dependency-search-paths` (a
 `project.json` key): dependencies are declared per-target and resolved by the
