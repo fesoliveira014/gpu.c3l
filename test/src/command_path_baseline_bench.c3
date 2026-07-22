@@ -1183,7 +1183,8 @@ fn int main() {
         .enable_vulkan_validation = false,
         .application_name         = "gpu_command_path_baseline",
     };
-    gpu::Device device = create_bench_device(&runtime_desc, true)!!;
+    gpu::Device device =
+        create_bench_device(&runtime_desc, explicit_policy: true)!!;
     defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
