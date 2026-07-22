@@ -268,7 +268,9 @@ fn void extent_clamp_rules() @test {
 fn void swapchain_requires_a_presentation_request() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_swapchain_gate_test",
     };
     gpu::Device device = create_test_device(&desc)!!;
@@ -407,7 +409,9 @@ fn void present_path_guards_precede_native_mutation() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_present_guard_test",
         .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
@@ -683,7 +687,7 @@ fn void swapchain_release_detects_shared_resource_references() @test {
         &slot,
     )!!, "an unused wrapped texture is releasable");
 
-    state.textures.get(texture)!!.validation_references.add(
+    state.textures.get(texture)!!.tracked_command_references.add(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -696,12 +700,12 @@ fn void swapchain_release_detects_shared_resource_references() @test {
         gpu::vk::texture_view_accounting(&state);
     assert(texture_reference.ownership_work_units == 1,
         "texture validation references still charge one ownership decision");
-    state.textures.get(texture)!!.validation_references.sub(
+    state.textures.get(texture)!!.tracked_command_references.sub(
         1,
         AtomicOrdering.RELAXED,
     );
 
-    state.attachment_views.get(attachment_view)!!.validation_references.add(
+    state.attachment_views.get(attachment_view)!!.tracked_command_references.add(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -714,7 +718,7 @@ fn void swapchain_release_detects_shared_resource_references() @test {
         gpu::vk::texture_view_accounting(&state);
     assert(attachment_reference.ownership_work_units == 1,
         "attachment validation references still charge one ownership decision");
-    state.attachment_views.get(attachment_view)!!.validation_references.sub(
+    state.attachment_views.get(attachment_view)!!.tracked_command_references.sub(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -798,7 +802,9 @@ fn void swapchain_release_ownership_work_tracks_examined_images() @test {
 fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::RuntimeDesc runtime_desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "borrowed_swapchain_view_lifecycle_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -970,7 +976,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     assert(@catch(gpu::cmd_texture_barrier(&commands, &invalid_present))
         == gpu::INVALID_ARGUMENT,
         "public PRESENT state rejects nonempty access");
-    assert(view.validation_references.load(AtomicOrdering.RELAXED) == 1,
+    assert(view.tracked_command_references.load(AtomicOrdering.RELAXED) == 1,
         "recorded rendering retains the borrowed view");
     gpu::vk::commit_present_result(live_slot, &acquired, vk::Result.SUCCESS);
 
@@ -984,13 +990,13 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     assert(@catch(gpu::vk::vk_destroy_swapchain(&device, swapchain))
         == gpu::RESOURCE_IN_USE,
         "destruction rejects a recorded borrowed-view reference");
-    assert(view.validation_references.load(AtomicOrdering.RELAXED) == 1
+    assert(view.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
         && state.textures.get(old_texture)!! == texture
         && state.attachment_views.get(old_view)!! == view,
         "failed release attempts preserve the command and borrowed handles");
 
     gpu::discard_commands(&commands)!!;
-    assert(view.validation_references.load(AtomicOrdering.RELAXED) == 0,
+    assert(view.tracked_command_references.load(AtomicOrdering.RELAXED) == 0,
         "discard releases the recorded borrowed-view reference");
     gpu::vk::vk_resize_swapchain(
         device: &device,
@@ -1229,7 +1235,9 @@ fn void acquired_image_reports_prior_state() @test {
 fn void swapchain_info_query_rejects_invalid_handle() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_swapchain_info_invalid_handle_test",
     };
     gpu::Device device = create_test_device(&desc)!!;

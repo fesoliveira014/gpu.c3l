@@ -828,6 +828,7 @@ fn Device? register_device(
     DeviceCaps caps,
     BackendVTable* vtable,
     void* backend_state,
+    CommandOps* command_ops = null,
     ulong resource_owner = 0,
     Runtime* retained_runtime = null,
     Adapter* adapter = null,
@@ -836,6 +837,9 @@ fn Device? register_device(
     Device* owner = null,
 ) @private {
     if (vtable == null || backend_state == null || vtable.destroy_device == null) return INVALID_ARGUMENT~;
+    CommandOps* selected_ops = command_ops == null
+        ? vtable.command_ops
+        : command_ops;
     if (resource_owner == 0) resource_owner = allocate_device_resource_owner()!;
     bool has_runtime = retained_runtime != null;
     if (has_runtime != (adapter != null)) return INVALID_ARGUMENT~;
@@ -899,7 +903,7 @@ fn Device? register_device(
             .caps                 = caps,
             .queues               = queues,
             .vtable               = vtable,
-            .command_ops          = vtable.command_ops,
+            .command_ops          = selected_ops,
             .backend_state        = backend_state,
             .resource_owner       = resource_owner,
             .runtime              = runtime,

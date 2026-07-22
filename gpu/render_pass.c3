@@ -84,13 +84,17 @@ fn bool store_op_valid(StoreOp op) @private {
     }
 }
 
+fn bool render_pass_desc_host_safe(RenderPassDesc* desc) @private {
+    return desc != null
+        && desc.colors.len <= MAX_COLOR_ATTACHMENTS
+        && (desc.colors.len == 0 || desc.colors.ptr != null);
+}
+
 fn bool render_pass_desc_valid(RenderPassDesc* desc) @private {
-    if (desc == null
+    if (!render_pass_desc_host_safe(desc)
         || desc.width == 0
         || desc.height == 0
-        || desc.colors.len > MAX_COLOR_ATTACHMENTS
         || (desc.colors.len == 0 && desc.depth == null)) return false;
-    if (desc.colors.len > 0 && desc.colors.ptr == null) return false;
 
     foreach (&target : desc.colors) {
         if (!target.view.is_valid()
@@ -154,7 +158,7 @@ fn void? destroy_attachment_view(
    the full render area. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     CommandEncoderState* encoder = recording_encoder(commands)!;
-    if (!render_pass_desc_valid(desc)) return INVALID_ARGUMENT~;
+    if (!render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
     return encoder.ops.begin_render_pass(encoder, desc);
 }
 

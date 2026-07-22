@@ -61,7 +61,9 @@ fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
 fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_sync_diagnostic_test",
         .debug_callback    = &capture_sync_diagnostic,
         .debug_user_data   = capture,
@@ -72,7 +74,9 @@ fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
 fn gpu::Device make_val_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_command_validation_test",
     };
     return create_test_device(&desc)!!;

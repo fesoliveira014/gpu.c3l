@@ -88,7 +88,9 @@ fn void discard_consumes_recording_and_executable_lists() @test {
 fn void copy_upload_to_readback() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_command_test",
     };
     gpu::Device device = create_test_device(&desc)!!;

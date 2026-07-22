@@ -461,7 +461,9 @@ fn void adapter_support_inherits_runtime_device_config() @test {
 fn void adapter_request_creation_reuses_runtime_discovery() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_vk_device_request_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
@@ -491,7 +493,19 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
                 == runtime_state.adapters[adapter.adapter_index].physical_device,
             "the device uses the exact requested physical adapter"
         );
-        assert(device_state.validation, "the device inherits runtime validation state");
+        assert(
+            device_state.validation_policy.contract
+                == gpu::ContractValidation.FULL,
+            "the device inherits runtime contract validation"
+        );
+        assert(
+            device_state.validation_policy.track_lifetimes,
+            "the device inherits runtime lifetime tracking"
+        );
+        assert(
+            device_state.validation_policy.vulkan_layers,
+            "the device inherits runtime Vulkan validation layers"
+        );
         gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
         assert(device_state.strict_heap.enabled, "the strict request owns heap state");
         assert(caps.strict_enabled, "strict state is enabled");
@@ -648,11 +662,103 @@ fn void device_creation_checkpoint_ordinals_match_exact_schema() @test {
     assert(gpu::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal == 6);
 }
 
+fn void command_policy_selection_covers_every_contract_and_tracking_mode() @test {
+    gpu::vk::DeviceValidationPolicy policy;
+    uptr trusted_address = (uptr)gpu::vk::select_command_ops(policy);
+    assert(
+        gpu::vk::select_command_ops(policy)
+            == &gpu::vk::TRUSTED_COMMAND_OPS,
+        "trusted without tracking selects the trusted table"
+    );
+
+    policy.track_lifetimes = true;
+    uptr trusted_tracking_address =
+        (uptr)gpu::vk::select_command_ops(policy);
+    assert(
+        gpu::vk::select_command_ops(policy)
+            == &gpu::vk::TRUSTED_TRACKING_COMMAND_OPS,
+        "trusted with tracking selects the trusted tracking table"
+    );
+
+    policy.contract = gpu::ContractValidation.OBJECT_BOUNDARIES;
+    policy.track_lifetimes = false;
+    assert(
+        gpu::vk::select_command_ops(policy)
+            == &gpu::vk::TRUSTED_COMMAND_OPS,
+        "object boundaries without tracking shares the trusted table"
+    );
+
+    policy.track_lifetimes = true;
+    assert(
+        gpu::vk::select_command_ops(policy)
+            == &gpu::vk::TRUSTED_TRACKING_COMMAND_OPS,
+        "object boundaries with tracking shares the trusted tracking table"
+    );
+
+    policy.contract = gpu::ContractValidation.FULL;
+    policy.track_lifetimes = false;
+    uptr checked_address = (uptr)gpu::vk::select_command_ops(policy);
+    assert(
+        gpu::vk::select_command_ops(policy)
+            == &gpu::vk::CHECKED_COMMAND_OPS,
+        "full validation without tracking selects the checked table"
+    );
+
+    policy.track_lifetimes = true;
+    uptr checked_tracking_address =
+        (uptr)gpu::vk::select_command_ops(policy);
+    assert(
+        gpu::vk::select_command_ops(policy)
+            == &gpu::vk::CHECKED_TRACKING_COMMAND_OPS,
+        "full validation with tracking selects the checked tracking table"
+    );
+
+    assert(gpu::vk::command_ops_are_complete(&gpu::vk::TRUSTED_COMMAND_OPS));
+    assert(gpu::vk::command_ops_are_complete(&gpu::vk::TRUSTED_TRACKING_COMMAND_OPS));
+    assert(gpu::vk::command_ops_are_complete(&gpu::vk::CHECKED_COMMAND_OPS));
+    assert(gpu::vk::command_ops_are_complete(&gpu::vk::CHECKED_TRACKING_COMMAND_OPS));
+    assert(trusted_address != trusted_tracking_address);
+    assert(trusted_address != checked_address);
+    assert(checked_address != checked_tracking_address);
+    policy.contract = bitcast(99, gpu::ContractValidation);
+    policy.track_lifetimes = false;
+    assert(
+        gpu::vk::select_command_ops(policy) == &gpu::vk::CHECKED_COMMAND_OPS,
+        "an unknown policy falls back to checked command recording"
+    );
+    policy.track_lifetimes = true;
+    assert(
+        gpu::vk::select_command_ops(policy)
+            == &gpu::vk::CHECKED_TRACKING_COMMAND_OPS,
+        "an unknown policy preserves requested lifetime tracking"
+    );
+    assert(
+        gpu::vk::TRUSTED_COMMAND_OPS.begin_label
+            == gpu::vk::TRUSTED_TRACKING_COMMAND_OPS.begin_label
+            && gpu::vk::TRUSTED_COMMAND_OPS.begin_label
+                == gpu::vk::CHECKED_COMMAND_OPS.begin_label
+            && gpu::vk::TRUSTED_COMMAND_OPS.begin_label
+                == gpu::vk::CHECKED_TRACKING_COMMAND_OPS.begin_label,
+        "every command policy shares the label-begin entry"
+    );
+    assert(
+        gpu::vk::TRUSTED_COMMAND_OPS.end_label
+            == gpu::vk::TRUSTED_TRACKING_COMMAND_OPS.end_label
+            && gpu::vk::TRUSTED_COMMAND_OPS.end_label
+                == gpu::vk::CHECKED_COMMAND_OPS.end_label
+            && gpu::vk::TRUSTED_COMMAND_OPS.end_label
+                == gpu::vk::CHECKED_TRACKING_COMMAND_OPS.end_label,
+        "every command policy shares the label-end entry"
+    );
+}
+
 fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "gpu_vk_device_request_rollback_test",
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
@@ -709,7 +815,9 @@ fn void publication_failure_rolls_back_native_state() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "gpu_vk_publication_rollback_test",
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer {
@@ -787,7 +895,9 @@ fn void publication_failure_rolls_back_native_state() @test {
 fn void runtime_devices_destroy_independently() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_vk_multi_device_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;

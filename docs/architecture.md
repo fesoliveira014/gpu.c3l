@@ -121,7 +121,9 @@ Public shape:
 ```text
 RuntimeDesc
     BackendKind backend
-    bool enable_validation
+    ContractValidation contract_validation
+    bool track_resource_lifetimes
+    bool enable_vulkan_validation
     bool enable_debug_names
     uint texture_heap_capacity
     uint sampler_heap_capacity
@@ -138,7 +140,21 @@ AdapterList.get(uint)              -> Adapter?
 get_adapter_info(Adapter*)         -> AdapterInfo?
 get_adapter_diagnostics(Adapter*)  -> AdapterDiagnostics?
 destroy_runtime(Runtime*)          -> void?
+full_validation_runtime_desc()     -> RuntimeDesc
 ```
+
+Runtime policy has independent axes. `ContractValidation.TRUSTED` is the zero
+value and uses the direct command path. Every level rejects stale/foreign
+identities at public resolve/destroy boundaries as mandatory safety;
+`OBJECT_BOUNDARIES` adds structured diagnostics for those failures at covered
+public resource and command-lifecycle boundaries while sharing that direct
+path. `FULL` selects detailed command semantic checks.
+`track_resource_lifetimes` independently selects command reference retention,
+and `enable_vulkan_validation` independently requests the Khronos layer.
+Debug names request best-effort native naming, while a callback only selects
+delivery for diagnostics already produced. The all-zero descriptor is therefore
+trusted/no-tracking/no-layer. `full_validation_runtime_desc()` returns the
+former all-enabled development configuration.
 
 `AdapterList` is an allocation-free view. Its adapters and the read-only strings in adapter query results are borrowed until their runtime is destroyed. Destroying a runtime consumes its token, invalidates its adapter views and handles, and returns `RESOURCE_IN_USE` while a dependent surface or device is live.
 
@@ -308,7 +324,7 @@ and completion return reserved buffers to the same context; a different worker
 never acquires them implicitly.
 
 Pipeline bind generation-checks the public handle, resolves the cache entry,
-retains validation ownership, and publishes a complete bound snapshot: native
+optionally retains tracked ownership, and publishes a complete bound snapshot: native
 pipeline and layout, kind, render compatibility, cache identity, generated-work
 layout, and public diagnostic identity. Later draw, dispatch, render-pass,
 indirect, and generated commands use that snapshot without reading a pipeline
@@ -485,10 +501,15 @@ points finish, and private presentation resource retirement completes. A pending
 image returns `INVALID_RESOURCE_STATE`; detected command/view or presentation
 use returns `RESOURCE_IN_USE`; faults preserve the owning token for retry.
 
-With validation enabled, the backend rejects destruction when an explicitly
-named span, texture, or pipeline is referenced by a recording token, executable
-token, or incomplete submission. GPU addresses and shader indices are opaque to
-the command stream, so their lifetime remains a caller precondition.
+With `track_resource_lifetimes` enabled, the backend retains explicitly named
+spans, textures, attachment views, allocations, and pipelines across recording,
+executable, and incomplete-submission phases; destruction returns
+`RESOURCE_IN_USE` until discard or retirement releases the reference. With
+tracking disabled, records contain no reference storage and destruction adds no
+implicit wait or deferred release. The caller must observe completion before
+destroying every referenced owner. GPU addresses and shader indices are opaque
+to the command stream under either setting, so their lifetime always remains a
+caller precondition.
 
 ## 7. Work and storage lifetime model
 
@@ -522,6 +543,16 @@ configuration. Headless and windowed programs use the same ownership model.
 `end_commands` consumes it and returns a one-shot executable token. Submission
 or explicit discard consumes the executable token. Native recording pools are
 private and cached per worker; see `docs/threading.md`.
+
+Vulkan device creation selects one immutable command table from contract depth
+and tracking: trusted/no-tracking, trusted/tracking, checked/no-tracking, or
+checked/tracking. `OBJECT_BOUNDARIES` uses the trusted command entries because
+its additional work belongs at public boundaries. The encoder snapshots the
+chosen pointer once; repeated `cmd_*` calls do not inspect contract, tracking,
+layer, callback, or naming policy. All four tables retain mandatory host
+pointer/slice/range safety, overflow protection, internal state integrity,
+public ownership, Vulkan result handling, and rollback. Detailed command misuse
+outside that floor is a caller contract violation unless `FULL` is selected.
 
 ### Compute
 
@@ -678,8 +709,12 @@ leaked descriptors
 leaked backend objects
 ```
 
-`destroy_device` rejects live public resources. Validation diagnostics during
-accepted teardown cover internal, partial-initialization, and device-loss state.
+`destroy_device` rejects live public resources. Accepted teardown scans report
+internal, partial-initialization, and device-loss state under
+`OBJECT_BOUNDARIES`/`FULL`, or whenever a callback is present. A callback only
+selects structured delivery; it does not change contract checks, tracking,
+layers, or naming. Vulkan layer messages remain native routing and are
+independent of library contract diagnostics.
 
 ## 12. Supported baseline
 

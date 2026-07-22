@@ -54,7 +54,7 @@ struct BufferSlot {
     BufferUsage         usage;
     gpu::QueueRoles     access;
     gpu::MemoryClass    memory_class;
-    Atomic{uint}        validation_references;
+    Atomic{uint}        tracked_command_references;
     char[DEBUG_NAME_CAP] debug_name;
     bool                internal;
 }
@@ -222,9 +222,9 @@ fn void? vk_destroy_buffer(gpu::Device* device, BufferHandle handle) @private {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     BufferSlot* slot = state.buffers.get(handle)!;
-    if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+    if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
         drain_completed_submitted_commands(state)!;
-        if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+        if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
             return gpu::RESOURCE_IN_USE~;
         }
     }

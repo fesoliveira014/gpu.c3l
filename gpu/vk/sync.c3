@@ -543,45 +543,13 @@ fn fault report_texture_barrier_rejection(
     );
 }
 
-fn LoweredTextureBarrier? validate_and_lower_texture_barrier(
+fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
     VkDeviceState* state,
     CommandRecord* record,
     gpu::TextureBarrier* barrier,
+    TextureSlot* slot,
     ZString operation,
 ) {
-    note_texture_barrier_helper(state);
-    if (barrier == null) {
-        TextureBarrierRejection rejection = {
-            .field     = "TextureBarrier",
-            .invariant = "barrier must be non-null",
-        };
-        return report_texture_barrier_rejection(
-            state:     state,
-            barrier:   barrier,
-            slot:      null,
-            rejection: rejection,
-        )~;
-    }
-
-    TextureSlot*? slot_result = resolve_texture_command_reference(
-        state,
-        record,
-        barrier.texture,
-    );
-    if (catch handle_fault = slot_result) {
-        TextureBarrierRejection rejection = {
-            .field     = "TextureBarrier.texture",
-            .invariant = "must identify one live texture",
-        };
-        return report_texture_barrier_rejection(
-            state:        state,
-            barrier:      barrier,
-            slot:         null,
-            rejection:    rejection,
-            public_fault: handle_fault,
-        )~;
-    }
-    TextureSlot* slot = slot_result;
     note_texture_barrier_access_validation(state);
     validate_texture_queue_access(
         state:       state,
@@ -670,6 +638,96 @@ fn LoweredTextureBarrier? validate_and_lower_texture_barrier(
     return { .slot = slot, .native = native };
 }
 
+fn LoweredTextureBarrier? validate_and_lower_texture_barrier(
+    VkDeviceState* state,
+    CommandRecord* record,
+    gpu::TextureBarrier* barrier,
+    ZString operation,
+) {
+    note_texture_barrier_helper(state);
+    if (barrier == null) {
+        TextureBarrierRejection rejection = {
+            .field     = "TextureBarrier",
+            .invariant = "barrier must be non-null",
+        };
+        return report_texture_barrier_rejection(
+            state:     state,
+            barrier:   barrier,
+            slot:      null,
+            rejection: rejection,
+        )~;
+    }
+
+    TextureSlot*? slot_result = state.textures.get(barrier.texture);
+    if (catch handle_fault = slot_result) {
+        TextureBarrierRejection rejection = {
+            .field     = "TextureBarrier.texture",
+            .invariant = "must identify one live texture",
+        };
+        return report_texture_barrier_rejection(
+            state:        state,
+            barrier:      barrier,
+            slot:         null,
+            rejection:    rejection,
+            public_fault: handle_fault,
+        )~;
+    }
+    return validate_and_lower_resolved_texture_barrier(
+        state:     state,
+        record:    record,
+        barrier:   barrier,
+        slot:      slot_result,
+        operation: operation,
+    );
+}
+
+fn LoweredTextureBarrier? validate_track_and_lower_texture_barrier(
+    VkDeviceState* state,
+    CommandRecord* record,
+    gpu::TextureBarrier* barrier,
+    ZString operation,
+) {
+    note_texture_barrier_helper(state);
+    if (barrier == null) {
+        TextureBarrierRejection rejection = {
+            .field     = "TextureBarrier",
+            .invariant = "barrier must be non-null",
+        };
+        return report_texture_barrier_rejection(
+            state:     state,
+            barrier:   barrier,
+            slot:      null,
+            rejection: rejection,
+        )~;
+    }
+
+    TextureSlot*? slot_result = resolve_tracked_texture_command_reference(
+        state,
+        record,
+        barrier.texture,
+    );
+    if (catch handle_fault = slot_result) {
+        TextureBarrierRejection rejection = {
+            .field     = "TextureBarrier.texture",
+            .invariant = "must identify one live texture",
+        };
+        return report_texture_barrier_rejection(
+            state:        state,
+            barrier:      barrier,
+            slot:         null,
+            rejection:    rejection,
+            public_fault: handle_fault,
+        )~;
+    }
+    return validate_and_lower_resolved_texture_barrier(
+        state:     state,
+        record:    record,
+        barrier:   barrier,
+        slot:      slot_result,
+        operation: operation,
+    );
+}
+
 fn void? vk_cmd_barrier(
     gpu::CommandEncoderState* commands,
     gpu::Barrier* barrier,
@@ -733,27 +791,75 @@ fn void? vk_cmd_barrier(
     gpu::note_command_native_call();
 }
 
-fn void? vk_cmd_texture_barrier(
+fn void? trusted_barrier(
     gpu::CommandEncoderState* commands,
-    gpu::TextureBarrier* barrier,
-) @private {
+    gpu::Barrier* barrier,
+) {
+    if (commands == null || barrier == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) {
+    if (record == null || record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
-    uint reference_checkpoint = record.reference_count;
-    defer catch rollback_command_references(
-        state,
-        record,
-        reference_checkpoint,
+    bool descriptor_buffer = state.strict_heap.implementation
+        == VkHeapImplementation.DESCRIPTOR_BUFFER;
+    vk::MemoryBarrier2 native_barrier = barrier_to_vk(
+        barrier,
+        descriptor_buffer,
+        state.generated_work.enabled,
     );
-    LoweredTextureBarrier lowered = validate_and_lower_texture_barrier(
-        state:     state,
-        record:    record,
-        barrier:   barrier,
-        operation: "cmd_texture_barrier",
+    vk::DependencyInfo dependency =
+        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
+    vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
+    gpu::note_command_native_call();
+}
+
+fn void? checked_barrier(
+    gpu::CommandEncoderState* commands,
+    gpu::Barrier* barrier,
+) {
+    if (commands == null) return gpu::INVALID_ARGUMENT~;
+    note_command_semantic_check(encoder_device_state(commands));
+    return vk_cmd_barrier(commands, barrier);
+}
+
+fn LoweredTextureBarrier? lower_texture_barrier_trusted(
+    gpu::CommandEncoderState* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    if (commands == null || barrier == null) return gpu::INVALID_ARGUMENT~;
+    CommandRecord* record = encoder_command(commands);
+    if (record == null || record.state != CommandState.RECORDING) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = encoder_device_state(commands);
+    TextureSlot* slot = state.textures.get(barrier.texture)!;
+    vk::ImageSubresourceRange range = resolve_texture_barrier_range(
+        barrier.view,
+        slot,
     )!;
+    TextureStateScope before = texture_state_to_vk(barrier.before, slot.format);
+    TextureStateScope after = texture_state_to_vk(barrier.after, slot.format);
+    vk::ImageMemoryBarrier2 native = vk::image_memory_barrier2()
+        .set_src_stage_mask(before.stages)
+        .set_src_access_mask(before.access)
+        .set_dst_stage_mask(after.stages)
+        .set_dst_access_mask(after.access)
+        .set_old_layout(before.layout)
+        .set_new_layout(after.layout)
+        .set_src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .set_image(slot.image)
+        .set_subresource_range(range);
+    return { .slot = slot, .native = native };
+}
+
+fn void emit_texture_barrier(
+    gpu::CommandEncoderState* commands,
+    LoweredTextureBarrier* lowered,
+) {
+    VkDeviceState* state = encoder_device_state(commands);
+    CommandRecord* record = encoder_command(commands);
     vk::DependencyInfo dependency = vk::dependency_info()
         .set_image_memory_barriers((&lowered.native)[:1]);
     note_texture_barrier_native_emission(state);
@@ -770,6 +876,82 @@ fn void? vk_cmd_texture_barrier(
         vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
     $endif
     gpu::note_command_native_call();
+}
+
+fn void? trusted_texture_barrier(
+    gpu::CommandEncoderState* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    LoweredTextureBarrier lowered = lower_texture_barrier_trusted(
+        commands,
+        barrier,
+    )!;
+    emit_texture_barrier(commands, &lowered);
+}
+
+fn void? trusted_tracking_texture_barrier(
+    gpu::CommandEncoderState* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    LoweredTextureBarrier lowered = lower_texture_barrier_trusted(
+        commands,
+        barrier,
+    )!;
+    CommandRecord* record = encoder_command(commands);
+    uint checkpoint = record.reference_count;
+    defer catch rollback_command_references(
+        encoder_device_state(commands),
+        record,
+        checkpoint,
+    );
+    track_texture_command_reference(
+        encoder_device_state(commands),
+        record,
+        barrier.texture,
+    )!;
+    emit_texture_barrier(commands, &lowered);
+}
+
+fn void? checked_texture_barrier(
+    gpu::CommandEncoderState* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    if (commands == null) return gpu::INVALID_ARGUMENT~;
+    CommandRecord* record = encoder_command(commands);
+    if (record == null || record.state != CommandState.RECORDING) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = encoder_device_state(commands);
+    note_command_semantic_check(state);
+    LoweredTextureBarrier lowered = validate_and_lower_texture_barrier(
+        state:     state,
+        record:    record,
+        barrier:   barrier,
+        operation: "cmd_texture_barrier",
+    )!;
+    emit_texture_barrier(commands, &lowered);
+}
+
+fn void? checked_tracking_texture_barrier(
+    gpu::CommandEncoderState* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    if (commands == null) return gpu::INVALID_ARGUMENT~;
+    VkDeviceState* state = encoder_device_state(commands);
+    CommandRecord* record = encoder_command(commands);
+    if (record == null || record.state != CommandState.RECORDING) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    note_command_semantic_check(state);
+    uint checkpoint = record.reference_count;
+    defer catch rollback_command_references(state, record, checkpoint);
+    LoweredTextureBarrier lowered = validate_track_and_lower_texture_barrier(
+        state:     state,
+        record:    record,
+        barrier:   barrier,
+        operation: "cmd_texture_barrier",
+    )!;
+    emit_texture_barrier(commands, &lowered);
 }
 
 fn TextureBarrierWorkCounters texture_barrier_work_counters(

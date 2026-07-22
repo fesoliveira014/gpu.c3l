@@ -20,6 +20,7 @@ FIXTURES = {
     "texture_desc_depth": "depth",
     "texture_view_desc_format": "format",
     "device_desc": "DeviceDesc",
+    "runtime_enable_validation": "enable_validation",
     "create_device_from_desc": "create_device_from_desc",
     "create_sampler": "create_sampler",
     "destroy_sampler": "destroy_sampler",
@@ -109,6 +110,7 @@ ERROR_DIAGNOSTIC = re.compile(
 )
 
 INVALID_MEMBER_TYPES = {
+    "runtime_enable_validation": "RuntimeDesc",
     "texture_desc_dimension": "TextureDesc",
     "texture_desc_depth": "TextureDesc",
     "texture_view_desc_format": "TextureViewDesc",
@@ -171,6 +173,12 @@ LIVE_RETIRED_PATTERNS = {
     "publish_sampler": re.compile(r"\bpublish_sampler\b"),
 }
 RETIRED_DESC_FIELDS = {
+    "RuntimeDesc.enable_validation": re.compile(
+        r"(?:\bRuntimeDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
+        r"|\bfn\s+(?:gpu::)?RuntimeDesc\b[^\r\n=]*=>\s*)\{"
+        r"(?:(?!\};).)*?\.enable_validation\s*=",
+        re.DOTALL,
+    ),
     "TextureDesc.dimension/depth": re.compile(
         r"\bTextureDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*\{"
         r"(?:(?!\};).)*?\.(?:dimension|depth)\s*=",

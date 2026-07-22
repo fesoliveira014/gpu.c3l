@@ -8,7 +8,9 @@ import std::core::mem;
 fn void allocator_stats_and_report() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_vma_test",
     };
     gpu::Device device = create_test_device(&desc)!!;

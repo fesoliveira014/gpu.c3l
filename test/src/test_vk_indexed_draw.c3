@@ -17,7 +17,9 @@ const uint U16V_OFFSET_ELEMENTS = 6;
 fn gpu::Device u16v_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_u16_verify",
     };
     return create_test_device(&desc)!!;

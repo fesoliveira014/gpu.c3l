@@ -43,6 +43,25 @@ class RetiredApiCheckTests(unittest.TestCase):
             self.assertTrue(any("TextureDesc.dimension/depth" in item for item in failures))
             self.assertTrue(any("publish_sampler" in item for item in failures))
 
+    def test_live_scan_reports_retired_runtime_desc_initializers_only(self) -> None:
+        source = (
+            "gpu::RuntimeDesc desc = { .enable_validation = true };\n"
+            "fn gpu::RuntimeDesc legacy() => { .enable_validation = true };\n"
+            "vk::VkInstanceDesc backend = { .enable_validation = true };\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            path = root / "test" / "src" / "runtime_desc.c3"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                failures = check_retired_api.find_live_retired_usages((path,))
+            self.assertEqual(len(failures), 2)
+            self.assertTrue(all(
+                "RuntimeDesc.enable_validation" in item
+                for item in failures
+            ))
+
     def test_accepts_exact_retired_pipeline_signature_diagnostic(self) -> None:
         source = (
             "gpu::cmd_dispatch(commands, pipeline, root, {})!;\n"

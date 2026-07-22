@@ -822,6 +822,25 @@ fn void failed_encoder_publication_rolls_back_begin() @test {
     gpu::destroy_device(&device)!!;
 }
 
+fn void registration_accepts_per_device_command_operations() @test {
+    CommandPinFixture fixture;
+    gpu::BackendVTable missing_ops = command_pin_vtable;
+    missing_ops.command_ops = null;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &missing_ops,
+        backend_state: &fixture,
+        command_ops:    &command_pin_ops,
+    )!!;
+    gpu::DeviceSlot* slot = &gpu::device_slots[device.index];
+    assert(
+        slot.data.command_ops == &command_pin_ops,
+        "the per-device table overrides the backend default"
+    );
+    gpu::destroy_device(&device)!!;
+}
+
 fn void failed_submit_preserves_command_lifetime_pins() @test {
     CommandPinFixture fixture = { .submit_busy = true };
     gpu::Device device = gpu::register_device(

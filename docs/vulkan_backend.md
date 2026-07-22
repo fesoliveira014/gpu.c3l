@@ -48,7 +48,7 @@ gpu/vk/command_state.c3        command-list state and handle tracking
 gpu/vk/sync.c3                 barriers, timeline semaphores
 gpu/vk/render_pass.c3          dynamic rendering
 gpu/vk/swapchain.c3            swapchain lifecycle and presentation
-gpu/vk/lifetime.c3             validation-only command resource tracking
+gpu/vk/lifetime.c3             optional command resource lifetime tracking
 gpu/vk/debug.c3                debug names, leak reports
 gpu/vk/helpers.c3              enum and flag translation helpers
 gpu/vk/validate.c3             descriptor and command validation helpers
@@ -107,10 +107,10 @@ Instance creation responsibilities:
 ```text
 select Vulkan API version
 collect required instance extensions
-collect validation layer names when enabled
+collect validation layer names only for RuntimeDesc.enable_vulkan_validation
 create vk::Instance
 load extension entry points
-install a persistent debug-utils messenger for validation or callback routing
+install a persistent debug-utils messenger for layer, name, or callback routing
 ```
 
 Runtime creation enables available platform surface extensions and owns the
@@ -119,17 +119,21 @@ request and loads only the selected device dispatch groups after logical-device
 creation. Headless devices create no presentation state. Missing platform
 support faults when that platform constructor is called.
 
-`VK_EXT_debug_utils` is requested when validation, Vulkan debug names, or a
-structured callback needs it. `enable_debug_names` remains independent of
-`enable_validation`; missing debug-utils support makes native naming a
-best-effort no-op without discarding slot-owned public debug names.
+`VK_EXT_debug_utils` is requested when Vulkan validation, Vulkan debug names,
+or a structured callback needs it. `enable_debug_names` remains independent of
+`enable_vulkan_validation`; missing debug-utils support makes native naming a
+best-effort no-op without discarding slot-owned public debug names. Internally,
+`VkInstanceDesc.enable_validation` is the backend planning flag derived only
+from `RuntimeDesc.enable_vulkan_validation`; it is not a public combined policy.
 
-When validation or a structured callback requests Vulkan routing and the
-optional extension is available, the backend installs the persistent
-messenger. When validation is enabled, messenger create info is also chained
-through instance creation so bootstrap messages use the same route. The
-backend stores the callback and userdata before instance creation and
-retains them through messenger and instance destruction. Vulkan severity/type
+When layers, debug names, or a structured callback request Vulkan routing and
+the optional extension is available, the backend installs the persistent
+messenger. When Vulkan validation is enabled, messenger create info is also
+chained through instance creation so bootstrap messages use the same route.
+Missing Khronos layers can fault runtime creation only when
+`enable_vulkan_validation` is true; `ContractValidation.FULL` remains available
+without them. The backend stores the callback and userdata before instance
+creation and retains them through messenger and instance destruction. Vulkan severity/type
 flags, message text,
 validation ID name/number, and the first useful named object are translated
 into `DebugMessage`; the native callback always returns `VK_FALSE`.
@@ -138,13 +142,16 @@ Messages are forwarded synchronously from Vulkan and may be concurrent on
 arbitrary driver/application threads. Payloads are borrowed, no diagnostic
 allocation or queue is introduced, and callback reentry into gpu.c3l is
 prohibited. Native Vulkan object handles/types never cross the public boundary.
-When no callback is configured, validation output retains the stderr fallback.
-Accepted teardown scans backend state when validation or a structured callback
-is active. Normal live children are rejected by the public device registry;
-the scan covers internal, partial-initialization, and device-loss leftovers.
+When no callback is configured, Vulkan layer output retains the stderr fallback.
+Accepted teardown scans backend state for `OBJECT_BOUNDARIES`/`FULL` or when a
+structured callback is active. Normal live children are rejected by the public
+device registry; the scan covers internal, partial-initialization, and
+device-loss leftovers.
 Callback messages use `WARNING`/`resource_lifetime` with operation
-`destroy_device`; validation without a callback uses stderr. Runtime diagnostics
-use the same callback contract with independent instance and messenger lifetimes.
+`destroy_device`; enabled contract reporting without a callback uses stderr.
+Runtime diagnostics use the same callback contract with independent instance
+and messenger lifetimes. Callback presence changes delivery only; it does not
+enable library checks, lifetime tracking, Vulkan layers, or object naming.
 
 ## 5. Adapter enumeration and device selection
 
@@ -482,7 +489,7 @@ encodes the zero-based physical slot plus one. Destruction validates owner and
 generation with one cell lookup before recycling the slot. Each texture slot
 tracks its exact number of live shader-visible views under the resource mutex,
 so texture destruction decides ownership in O(1) without scanning descriptor
-cells. Cached native views and command validation references retain independent
+cells. Cached native views and tracked command references retain independent
 lifetime accounting. Device teardown reports leaked texture views. Sampler
 indices are device-owned and are not individually releasable.
 
@@ -553,12 +560,12 @@ vk::Pipeline
 
 Dynamic rendering begins with fixed-count `vkCmdSetViewport` and
 `vkCmdSetScissor` calls covering the full pass, followed by the zero raster
-default. Public overrides use those
-same Vulkan 1.3 core commands after library validation: finite viewport
-values, nonnegative/positive extents as appropriate, representable scissor
-endpoints, depth endpoints in `[0, 1]`, and rectangles bounded by the active
-pass. The command list carries the active pass extent only while
-`RECORDING_RENDER_PASS`.
+default. Under `FULL`, public overrides validate finite viewport values,
+nonnegative/positive extents as appropriate, representable scissor endpoints,
+depth endpoints in `[0, 1]`, and rectangles bounded by the active pass before
+using those same Vulkan 1.3 core commands. Trusted entries retain only the
+mandatory safe-lowering and state-machine floor. The command list carries the
+active pass extent only while `RECORDING_RENDER_PASS`.
 
 Topology, cull mode, front face, depth bias, viewport, scissor, and depth state
 are absent from `PipelineKey` and `PipelineSlot`. `PipelineKey` stores each
@@ -647,15 +654,25 @@ snapshot, and pending texture transitions.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
 
+`VkRuntimeState`, `VkDeviceConfig`, and `VkDeviceState` carry one named policy:
+contract depth, lifetime tracking, and Vulkan-layer selection. Device creation
+stores it before policy-dependent subsystems initialize and selects one of four
+immutable command tables: trusted/no-tracking, trusted/tracking,
+checked/no-tracking, or checked/tracking. `OBJECT_BOUNDARIES` shares trusted
+recording entries because its additional checks occur at public boundaries.
+The encoder snapshots the selected table during begin; warm recording performs
+no policy lookup or branch. Every table retains host pointer/slice/range safety,
+overflow protection, command-state and internal-table integrity, public device
+ownership, Vulkan result/device-loss handling, and transactional rollback.
+
 `cmd_bind_pipeline` generation-checks the pipeline slot, resolves its cache
-entry, retains validation ownership, and stores native pipeline/layout, kind,
+entry, optionally retains tracked ownership, and stores native pipeline/layout, kind,
 render compatibility, cache identity, generated-command layout, and public
 diagnostic identity. Execution helpers consume only that snapshot; they do not
 retain or reread a pipeline cell and never revisit pipeline table/cache storage.
-Without runtime validation, the caller-owned lifetime contract requires the
-pipeline to remain live through command completion.
-The checked command-operation table is immutable per device. Policy selection
-happens during device or encoder setup and remains outside warm recording.
+Without lifetime tracking, the caller-owned lifetime contract requires the
+pipeline to remain live through command completion. `FULL` controls detailed
+semantic preparation independently of that retention choice.
 
 Submission preflights the batch under the command-table mutex. It rejects stale,
 duplicate, non-executable, or wrong-queue tokens before claiming records. A
@@ -695,17 +712,19 @@ cmd_barrier -> vk::MemoryBarrier2
 cmd_texture_barrier -> vk::ImageMemoryBarrier2
 ```
 
-`cmd_barrier` emits one global memory barrier. Normal access scopes follow from
+`cmd_barrier` emits one global memory barrier. Under `FULL`, normal access scopes follow from
 its producer and consumer stages; draw-argument, descriptor-buffer, and
 depth/stencil cache paths are enabled only by their hazard flags. Invalid,
 contradictory, consumer-incompatible, or queue-unsupported scopes fault before
-recording. Cross-queue ordering remains a submission completion-wait concern.
+recording. Trusted entries retain safe lowering and command-state checks but
+treat detailed stage/hazard/queue misuse as a caller contract. Cross-queue
+ordering remains a submission completion-wait concern.
 
 The backend must not insert hidden barriers for user-visible resource
 transitions except for unavoidable swapchain acquire/present transitions
 inside WSI helpers.
 
-Texture-state validation uses one layout-specific matrix:
+Full texture-state validation uses one layout-specific matrix:
 
 | Layout | Accepted public stages | Accepted access | Native layout/access |
 |---|---|---|---|
@@ -724,12 +743,13 @@ inside `TextureState`; unknown layout, stage, or access bits fault before
 recording. View format must be undefined or exactly match the texture. Zero
 mip/layer counts mean the remaining range and are normalized once.
 
-`validate_and_lower_texture_barrier` is the only texture-barrier command path.
-It performs one handle resolution, one recording-access validation and retain,
-one range normalization, two state validations/lowerings, one native assembly,
-and one native emission. A later validation fault rolls references back to the
-pre-call checkpoint and emits nothing. No second semantic pass or shared
-layout-history update follows successful lowering.
+Checked texture barriers perform one handle resolution, one range
+normalization, two state validations/lowerings, one native assembly, and one
+native emission. Tracking variants retain the explicit texture/allocation once
+and roll newly retained references back if later checked preparation faults.
+Trusted variants share safe range/lowering and emission without the semantic
+matrix; non-tracking variants perform no reference work. No path adds a second
+semantic pass or shared layout-history update after successful lowering.
 
 Presentation transitions use these exact synchronization2 scopes:
 
@@ -787,8 +807,8 @@ CompletionWait
 ```
 
 Host poll and wait reject unpublished sequences. Each selected queue owns an
-atomic retired prefix whose release-store follows validation-reference
-release, generated-preprocess recycling, and command-buffer retirement for all
+atomic retired prefix whose release-store follows tracked-reference release
+when selected, generated-preprocess recycling, and command-buffer retirement for all
 published submissions through that sequence. An acquire load satisfying the
 requested point is the complete fast path: no Vulkan call, submission mutex, or
 resource mutex.
@@ -909,12 +929,16 @@ Core destruction releases native objects immediately. The backend performs no
 wait and owns no deferred-release queue. Swapchain destruction and resize use
 private presentation fences to prove WSI retirement without hidden waits.
 
-Validation-only command references cover explicitly named spans, textures, and
-pipelines across recording, executable, and incomplete submitted work.
-Destruction drains only already-completed reference records with non-blocking
-timeline queries; a remaining reference returns `RESOURCE_IN_USE`. GPU
-addresses and shader indices remain caller-managed because they cannot be
-enumerated from a command stream.
+When `track_resource_lifetimes` is true, command references cover explicitly
+named spans, textures, attachment views, allocations, and pipelines across
+recording, executable, and incomplete submitted work. Destruction drains only
+already-completed reference records with non-blocking timeline queries; a
+remaining reference returns `RESOURCE_IN_USE`. When false, recording allocates
+no reference storage and discard, retirement, device loss, and teardown perform
+no reference-release work. The backend adds no implicit wait: callers retain
+owners until the covering completion is observed. GPU addresses and shader
+indices remain caller-managed because they cannot be enumerated from a command
+stream.
 
 Placed and dedicated textures retain their allocation until texture destruction.
 Releasing an allocation with a live placement returns `RESOURCE_IN_USE`.

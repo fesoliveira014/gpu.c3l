@@ -50,7 +50,7 @@ struct AllocationSlot {
     usz                 alignment;
     gpu::MemoryClass    memory_class;
     bool                coherent;
-    Atomic{uint}       validation_references;
+    Atomic{uint}       tracked_command_references;
     uint                live_placements;
     char[DEBUG_NAME_CAP] debug_name;
 }
@@ -568,9 +568,9 @@ fn void? free_allocation_for_state_with_ops(
         defer state.resource_mutex.unlock();
         AllocationSlot* slot = state.allocations.get(allocation)!;
         if (slot.live_placements > 0) return gpu::RESOURCE_IN_USE~;
-        if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+        if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
             drain_completed_submitted_commands(state)!;
-            if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+            if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
                 return gpu::RESOURCE_IN_USE~;
             }
         }

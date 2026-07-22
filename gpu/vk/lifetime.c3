@@ -15,7 +15,7 @@ struct CommandResourceReference {
     ulong         owner;
     uint          index;
     uint          generation;
-    Atomic{uint}* validation_references;
+    Atomic{uint}* tracked_command_references;
 }
 
 struct SubmittedCommandBatch {
@@ -44,7 +44,7 @@ fn bool same_resource_reference(
         && left.generation == right.generation;
 }
 
-fn void? retain_validation_reference(
+fn void? retain_tracked_command_reference(
     VkDeviceState* state,
     CommandResourceReference reference,
 ) {
@@ -53,7 +53,7 @@ fn void? retain_validation_reference(
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.buffers.get(handle)!.validation_references.add(
+        state.buffers.get(handle)!.tracked_command_references.add(
             1,
             AtomicOrdering.RELAXED,
         );
@@ -64,7 +64,7 @@ fn void? retain_validation_reference(
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.allocations.get(allocation)!.validation_references.add(
+        state.allocations.get(allocation)!.tracked_command_references.add(
             1,
             AtomicOrdering.RELAXED,
         );
@@ -75,7 +75,7 @@ fn void? retain_validation_reference(
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.textures.get(texture)!.validation_references.add(
+        state.textures.get(texture)!.tracked_command_references.add(
             1,
             AtomicOrdering.RELAXED,
         );
@@ -86,7 +86,7 @@ fn void? retain_validation_reference(
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.attachment_views.get(view)!.validation_references.add(
+        state.attachment_views.get(view)!.tracked_command_references.add(
             1,
             AtomicOrdering.RELAXED,
         );
@@ -97,7 +97,7 @@ fn void? retain_validation_reference(
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.pipelines.get(pipeline)!.validation_references.add(
+        state.pipelines.get(pipeline)!.tracked_command_references.add(
             1,
             AtomicOrdering.RELAXED,
         );
@@ -106,12 +106,13 @@ fn void? retain_validation_reference(
     return gpu::INVALID_HANDLE~;
 }
 
-fn void release_validation_reference(
+fn void release_tracked_command_reference(
     VkDeviceState* state,
     CommandResourceReference reference,
 ) {
-    if (reference.validation_references != null) {
-        reference.validation_references.sub(1, AtomicOrdering.RELAXED);
+    if (reference.tracked_command_references != null) {
+        reference.tracked_command_references.sub(1, AtomicOrdering.RELAXED);
+        note_command_reference_release(state);
         return;
     }
     if (reference.owner == state.buffers.owner) {
@@ -119,56 +120,61 @@ fn void release_validation_reference(
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.buffers.get(handle)!!.validation_references.sub(
+        state.buffers.get(handle)!!.tracked_command_references.sub(
             1,
             AtomicOrdering.RELAXED,
         );
+        note_command_reference_release(state);
     } else if (reference.owner == state.allocations.owner) {
         gpu::GpuAllocation allocation = {
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.allocations.get(allocation)!!.validation_references.sub(
+        state.allocations.get(allocation)!!.tracked_command_references.sub(
             1,
             AtomicOrdering.RELAXED,
         );
+        note_command_reference_release(state);
     } else if (reference.owner == state.textures.owner) {
         gpu::TextureHandle texture = {
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.textures.get(texture)!!.validation_references.sub(
+        state.textures.get(texture)!!.tracked_command_references.sub(
             1,
             AtomicOrdering.RELAXED,
         );
+        note_command_reference_release(state);
     } else if (reference.owner == state.attachment_views.owner) {
         gpu::AttachmentViewHandle view = {
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.attachment_views.get(view)!!.validation_references.sub(
+        state.attachment_views.get(view)!!.tracked_command_references.sub(
             1,
             AtomicOrdering.RELAXED,
         );
+        note_command_reference_release(state);
     } else if (reference.owner == state.pipelines.owner) {
         gpu::PipelineHandle pipeline = {
             .owner = reference.owner, .index = reference.index,
             .generation = reference.generation,
         };
-        state.pipelines.get(pipeline)!!.validation_references.sub(
+        state.pipelines.get(pipeline)!!.tracked_command_references.sub(
             1,
             AtomicOrdering.RELAXED,
         );
+        note_command_reference_release(state);
     }
 }
 
-fn void release_validation_references(
+fn void release_tracked_command_references(
     VkDeviceState* state,
     CommandResourceReference[] references,
     uint count,
 ) {
     for (uint i = 0; i < count; i++) {
-        release_validation_reference(state, references[i]);
+        release_tracked_command_reference(state, references[i]);
     }
 }
 
@@ -255,7 +261,7 @@ fn void release_submitted_command_batch(
     uint index,
 ) {
     SubmittedCommandBatch* batch = &state.submitted_commands[index];
-    release_validation_references(
+    release_tracked_command_references(
         state,
         batch.references,
         batch.reference_count,
@@ -521,7 +527,7 @@ fn void reset_completion_work_counters(
 fn void destroy_submitted_commands(VkDeviceState* state) {
     for (uint i = 0; i < state.submitted_command_count; i++) {
         SubmittedCommandBatch* batch = &state.submitted_commands[i];
-        release_validation_references(
+        release_tracked_command_references(
             state,
             batch.references,
             batch.reference_count,

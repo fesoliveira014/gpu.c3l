@@ -18,7 +18,7 @@ fn ZString device_type_name(vk::PhysicalDeviceType device_type) {
 fn int main() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = false,
+
         .application_name  = "gpu_benchmark_info",
     };
     gpu::Device device = create_bench_device(&desc)!!;
@@ -43,7 +43,12 @@ fn int main() {
         (uint)driver.driver_id,
         properties.properties.driver_version,
     );
-    io::printfn("validation: enabled=%s", state.validation ? "true" : "false");
+    io::printfn(
+        "validation: contract=%s tracking=%s layers=%s",
+        state.validation_policy.contract,
+        state.validation_policy.track_lifetimes ? "true" : "false",
+        state.validation_policy.vulkan_layers ? "true" : "false",
+    );
     io::printfn(
         "queues: graphics=%d:0 compute=%d:%d compute_distinct=%s transfer=%d:0 transfer_distinct=%s",
         state.graphics_family,

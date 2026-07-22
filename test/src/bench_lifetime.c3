@@ -12,10 +12,15 @@ fn bool bench_validation_enabled() {
 
 fn gpu::Device? create_bench_device(
     gpu::RuntimeDesc* desc,
+    bool explicit_policy = false,
 ) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
     gpu::RuntimeDesc runtime_desc = *desc;
-    runtime_desc.enable_validation = bench_validation_enabled();
+    if (bench_validation_enabled() && !explicit_policy) {
+        runtime_desc.contract_validation = gpu::ContractValidation.FULL;
+        runtime_desc.track_resource_lifetimes = true;
+        runtime_desc.enable_vulkan_validation = true;
+    }
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;

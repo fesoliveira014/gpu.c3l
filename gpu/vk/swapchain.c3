@@ -846,7 +846,7 @@ fn bool? swapchain_images_referenced_locked(
         gpu::TextureHandle handle = slot.textures[i];
         TextureSlot* texture = state.textures.get(handle)!;
         if (texture_has_live_descriptor_views(state, texture)) return true;
-        if (texture.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+        if (texture.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
             return true;
         }
         // A missing borrowed slot carries no references; a missing texture
@@ -854,7 +854,7 @@ fn bool? swapchain_images_referenced_locked(
         if (try attachment_view = state.attachment_views.get(
             slot.attachment_views[i],
         )) {
-            if (attachment_view.validation_references.load(
+            if (attachment_view.tracked_command_references.load(
                 AtomicOrdering.RELAXED,
             ) > 0) {
                 return true;

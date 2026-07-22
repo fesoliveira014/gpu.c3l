@@ -8,7 +8,9 @@ fn void root_pointer_compute_readback() @test {
     const uint COUNT = 256;
     gpu::RuntimeDesc device_desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_root_pointer_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;

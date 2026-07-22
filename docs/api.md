@@ -62,9 +62,16 @@ Methods are acceptable only for operations that clearly operate on an existing `
 BackendKind
     VULKAN
 
+ContractValidation
+    TRUSTED
+    OBJECT_BOUNDARIES
+    FULL
+
 RuntimeDesc
     BackendKind backend
-    bool enable_validation
+    ContractValidation contract_validation
+    bool track_resource_lifetimes
+    bool enable_vulkan_validation
     bool enable_debug_names
     uint texture_heap_capacity      (0 = default; docs/limitations.md)
     uint sampler_heap_capacity
@@ -126,7 +133,40 @@ enumerate_adapters(Runtime*)      -> AdapterList?
 get_adapter_info(Adapter*)        -> AdapterInfo?
 get_adapter_diagnostics(Adapter*) -> AdapterDiagnostics?
 destroy_runtime(Runtime*)         -> void?
+full_validation_runtime_desc()    -> RuntimeDesc
 ```
+
+Validation controls are independent:
+
+| Control | Zero/default | Effect |
+|---|---|---|
+| `contract_validation` | `TRUSTED` | Selects library contract diagnostics. Every level rejects stale/foreign identities at public resolve/destroy boundaries as mandatory safety. `OBJECT_BOUNDARIES` adds structured stale/foreign diagnostics at covered public create, query, destroy, command-lifecycle, and submit boundaries. `FULL` also enables detailed command argument, usage, layout, queue, pipeline-kind, render-compatibility, and state diagnostics. |
+| `track_resource_lifetimes` | `false` | When true, command records retain explicitly named resources and early destruction returns `RESOURCE_IN_USE`. When false, recording allocates and updates no reference storage; the caller proves completion before destruction. |
+| `enable_vulkan_validation` | `false` | Requests `VK_LAYER_KHRONOS_validation`. It does not select library checks or lifetime tracking. |
+| `enable_debug_names` | `false` | Requests best-effort native object naming through debug utils. It enables no checks, tracking, or layers. |
+| `debug_callback` | null | Selects structured delivery for diagnostics already produced by the contract policy or Vulkan. It does not enable checks, tracking, layers, or names. |
+
+Every contract level retains the mandatory safety floor: host pointer and slice
+validity before reads, integer-overflow and backing-range protection required
+for safe lowering, command state transitions and internal table safety, public
+device ownership, Vulkan result/device-loss handling, and transactional
+creation rollback. Under `TRUSTED`, misuse outside that floor is a caller
+contract violation and detailed command diagnostics are not promised.
+
+Use the helper for the former all-enabled development configuration:
+
+```c3
+gpu::RuntimeDesc runtime_desc = gpu::full_validation_runtime_desc();
+runtime_desc.application_name = "my_app";
+```
+
+`FULL` does not require Vulkan SDK layers. Set `contract_validation = FULL` and
+leave `enable_vulkan_validation = false` when detailed library diagnostics are
+needed on a machine without the Khronos layer. For migration only, a former
+`enable_validation = true` initializer maps to `FULL`, lifetime tracking on,
+and Vulkan validation on (or the helper); `false` or omission maps to
+`TRUSTED`, tracking off, and Vulkan validation off. The retired field is not
+part of `RuntimeDesc` and intentionally fails to compile.
 
 Creating a runtime is the first operation that may initialize backend discovery. Enumeration returns an allocation-free view:
 
@@ -394,7 +434,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `WAIT_TIMEOUT` | `wait_completion`, `acquire_next_image`, `present` | bounded wait, transient image unavailability, or a private present fence not yet reusable; retry with the unchanged value |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
-Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and log backend details when validation/debug is enabled. `DEVICE_LOST` is reserved for an explicit native device-loss result; an unmapped native result becomes `BACKEND_ERROR`.
+Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and report backend details through the configured diagnostic path. `DEVICE_LOST` is reserved for an explicit native device-loss result; an unmapped native result becomes `BACKEND_ERROR`.
 
 ## 5. Memory API
 
@@ -1035,12 +1075,12 @@ cmd_dispatch(
 Pipeline binding selects the active compute or graphics pipeline without
 compiling or synthesizing a variant. A failed bind preserves the previous active
 pipeline. A successful bind generation-checks the public handle, retains the
-pipeline when runtime validation is enabled, and caches its native
+pipeline when `track_resource_lifetimes` is enabled, and caches its native
 pipeline/layout, kind, render compatibility, cache-entry identity,
 generated-work layout, and public diagnostic identity. Later draws and
 dispatches use that snapshot without reading a pipeline cell, table, or cache.
-Validation ownership prevents destruction until discard or command completion;
-without validation, the caller must keep the pipeline live through completion.
+Tracked ownership prevents destruction until discard or command completion;
+without tracking, the caller must keep the pipeline live through completion.
 Dispatch requires an active compute pipeline. Graphics draws require an active
 graphics pipeline and explicit depth state for the current render pass. Root
 addresses, including zero, are pushed unchanged.
@@ -1519,13 +1559,14 @@ No command helper should silently insert barriers for a later use.
 
 ### Structured debug messages, labels, and leak reporting
 
-`RuntimeDesc.debug_callback` optionally receives `DebugMessage` values for
-public-contract failures, backend failures, Vulkan validation/performance
-messages, and resource-lifetime warnings during device teardown. A null
-callback disables structured delivery and never changes the value, fault,
-rollback, or resource state of the originating operation. The flat public
-fault remains authoritative; `has_fault` says whether `public_fault`
-accompanies the message.
+`RuntimeDesc.debug_callback` optionally receives `DebugMessage` values produced
+by the selected contract policy, backend failures, native Vulkan
+validation/performance routing, and eligible resource-lifetime scans during
+device teardown. Callback presence is observational: it enables no library
+checks, tracking, layers, or debug names and never changes the value, fault,
+rollback, native emission, or resource state of the originating operation. The
+flat public fault remains authoritative; `has_fault` says whether
+`public_fault` accompanies the message.
 
 ```text
 DebugMessage
@@ -1560,13 +1601,16 @@ never exposed. For validation-category messages, `validation_id_number` is the
 numeric validation ID; for backend-result messages, it carries the raw signed
 native result code.
 
-Stored public debug names remain available when validation is disabled;
+Stored public debug names remain available in every policy;
 `enable_debug_names` controls best-effort Vulkan object naming independently.
 
-Contract diagnostics cover resource creation, recording, submission, memory,
-descriptors, pipelines, queue progress, and WSI failures. Backend failures
-preserve the public fault and report the public operation name, such as
-`submit` or `wait_completion`.
+`TRUSTED` still reports backend/device failures and callback-requested teardown
+leaks, but does not promise detailed misuse diagnostics. `OBJECT_BOUNDARIES`
+reports covered stale/foreign public identities. `FULL` reports detailed
+rejected fields and invariants for command misuse. These library diagnostics do
+not require Vulkan validation layers. Backend failures preserve the public
+fault and report the public operation name, such as `submit` or
+`wait_completion`.
 
 Allocation diagnostics cover invalid classes, sizes, alignments, mapping and
 address capability mismatches, visibility failures, stale spans, and detected
@@ -1582,12 +1626,14 @@ Labels group work for capture tools; they are valid while recording,
 including inside render passes, and silently succeed when debug-utils is
 absent. Balance is the caller's responsibility.
 
-Accepted destruction scans backend state when validation or a debug callback
-is enabled. Normal live children are rejected before this scan; diagnostics are
-a safety net for internal, partial-initialization, and device-loss leftovers.
+Accepted destruction scans backend state under `OBJECT_BOUNDARIES` or `FULL`,
+or whenever a callback is configured. `TRUSTED` without a callback may remain
+silent. Normal live children are rejected before this scan; diagnostics are a
+safety net for internal, partial-initialization, and device-loss leftovers.
 Callback messages use `WARNING`/`resource_lifetime` with operation
-`destroy_device`; validation without a callback uses stderr. Debug names are
-stored as truncating 63-byte copies.
+`destroy_device`; enabled contract reporting without a callback uses stderr.
+Layer and debug-name settings do not control the scan. Debug names are stored
+as truncating 63-byte copies.
 
 ## 10. Swapchain API
 

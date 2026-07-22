@@ -46,8 +46,30 @@ enum DeviceCreationCheckpoint : uint {
     BEFORE_PUBLICATION,
 }
 
+struct DeviceValidationPolicy {
+    gpu::ContractValidation contract;
+    bool                    track_lifetimes;
+    bool                    vulkan_layers;
+}
+
+struct CommandPolicyCounters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
+    ulong semantic_checks;
+    ulong tracking_calls;
+    ulong reference_allocations;
+    ulong reference_increments;
+    ulong reference_releases;
+}
+
+struct CommandPolicyAtomicCounters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
+    Atomic{ulong} semantic_checks;
+    Atomic{ulong} tracking_calls;
+    Atomic{ulong} reference_allocations;
+    Atomic{ulong} reference_increments;
+    Atomic{ulong} reference_releases;
+}
+
 struct VkDeviceConfig {
-    bool                      enable_validation;
+    DeviceValidationPolicy    validation_policy;
     bool                      enable_debug_names;
     uint                      texture_heap_capacity;
     uint                      sampler_heap_capacity;
@@ -117,7 +139,8 @@ struct VkDeviceState {
     gpu::DeviceCaps            caps;
     ulong                      max_timeline_semaphore_value_difference;
     usz                        non_coherent_atom_size;
-    bool                       validation;
+    DeviceValidationPolicy     validation_policy;
+    gpu::CommandOps*           command_ops;
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;
@@ -171,6 +194,7 @@ struct VkDeviceState {
     Atomic{ulong}              generated_dispatch_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_indexed_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    CommandPolicyAtomicCounters command_policy_counters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS));
     Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
     Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);
@@ -326,33 +350,241 @@ fn void? reach_device_creation_checkpoint(
     if (probe.fail_at == checkpoint) return gpu::BACKEND_ERROR~;
 }
 
-const gpu::CommandOps VK_COMMAND_OPS @private = {
-    .copy_buffer                 = &vk_cmd_copy_buffer,
-    .fill_buffer                 = &vk_cmd_fill_buffer,
-    .copy_buffer_to_texture      = &vk_cmd_copy_buffer_to_texture,
-    .copy_texture_to_buffer      = &vk_cmd_copy_texture_to_buffer,
-    .barrier                     = &vk_cmd_barrier,
-    .texture_barrier             = &vk_cmd_texture_barrier,
-    .bind_pipeline               = &vk_cmd_bind_pipeline,
-    .set_depth_state             = &vk_cmd_set_depth_state,
-    .set_raster_state            = &vk_cmd_set_raster_state,
-    .dispatch                    = &vk_cmd_dispatch,
-    .begin_render_pass           = &vk_cmd_begin_render_pass,
-    .set_viewport                = &vk_cmd_set_viewport,
-    .set_scissor                 = &vk_cmd_set_scissor,
+const gpu::CommandOps TRUSTED_COMMAND_OPS @private = {
+    .copy_buffer                 = &trusted_copy_buffer,
+    .fill_buffer                 = &trusted_fill_buffer,
+    .copy_buffer_to_texture      = &trusted_copy_buffer_to_texture,
+    .copy_texture_to_buffer      = &trusted_copy_texture_to_buffer,
+    .barrier                     = &trusted_barrier,
+    .texture_barrier             = &trusted_texture_barrier,
+    .bind_pipeline               = &trusted_bind_pipeline,
+    .set_depth_state             = &trusted_set_depth_state,
+    .set_raster_state            = &trusted_set_raster_state,
+    .dispatch                    = &trusted_dispatch,
+    .begin_render_pass           = &trusted_begin_render_pass,
+    .set_viewport                = &trusted_set_viewport,
+    .set_scissor                 = &trusted_set_scissor,
     .end_render_pass             = &vk_cmd_end_render_pass,
-    .draw                        = &vk_cmd_draw,
-    .draw_indexed                = &vk_cmd_draw_indexed,
-    .draw_indirect               = &vk_cmd_draw_indirect,
-    .draw_indexed_indirect       = &vk_cmd_draw_indexed_indirect,
-    .draw_indexed_indirect_count = &vk_cmd_draw_indexed_indirect_count,
-    .dispatch_indirect           = &vk_cmd_dispatch_indirect,
-    .draw_generated              = &vk_cmd_draw_generated,
-    .draw_indexed_generated      = &vk_cmd_draw_indexed_generated,
-    .dispatch_generated          = &vk_cmd_dispatch_generated,
+    .draw                        = &trusted_draw,
+    .draw_indexed                = &trusted_draw_indexed,
+    .draw_indirect               = &trusted_draw_indirect,
+    .draw_indexed_indirect       = &trusted_draw_indexed_indirect,
+    .draw_indexed_indirect_count = &trusted_draw_indexed_indirect_count,
+    .dispatch_indirect           = &trusted_dispatch_indirect,
+    .draw_generated              = &trusted_draw_generated,
+    .draw_indexed_generated      = &trusted_draw_indexed_generated,
+    .dispatch_generated          = &trusted_dispatch_generated,
     .begin_label                 = &vk_cmd_begin_label,
     .end_label                   = &vk_cmd_end_label,
 };
+
+const gpu::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
+    .copy_buffer                 = &trusted_tracking_copy_buffer,
+    .fill_buffer                 = &trusted_tracking_fill_buffer,
+    .copy_buffer_to_texture      = &trusted_tracking_copy_buffer_to_texture,
+    .copy_texture_to_buffer      = &trusted_tracking_copy_texture_to_buffer,
+    .barrier                     = &trusted_barrier,
+    .texture_barrier             = &trusted_tracking_texture_barrier,
+    .bind_pipeline               = &trusted_tracking_bind_pipeline,
+    .set_depth_state             = &trusted_set_depth_state,
+    .set_raster_state            = &trusted_set_raster_state,
+    .dispatch                    = &trusted_dispatch,
+    .begin_render_pass           = &trusted_tracking_begin_render_pass,
+    .set_viewport                = &trusted_set_viewport,
+    .set_scissor                 = &trusted_set_scissor,
+    .end_render_pass             = &vk_cmd_end_render_pass,
+    .draw                        = &trusted_draw,
+    .draw_indexed                = &trusted_tracking_draw_indexed,
+    .draw_indirect               = &trusted_tracking_draw_indirect,
+    .draw_indexed_indirect       = &trusted_tracking_draw_indexed_indirect,
+    .draw_indexed_indirect_count = &trusted_tracking_draw_indexed_indirect_count,
+    .dispatch_indirect           = &trusted_tracking_dispatch_indirect,
+    .draw_generated              = &trusted_tracking_draw_generated,
+    .draw_indexed_generated      = &trusted_tracking_draw_indexed_generated,
+    .dispatch_generated          = &trusted_tracking_dispatch_generated,
+    .begin_label                 = &vk_cmd_begin_label,
+    .end_label                   = &vk_cmd_end_label,
+};
+
+const gpu::CommandOps CHECKED_COMMAND_OPS @private = {
+    .copy_buffer                 = &checked_copy_buffer,
+    .fill_buffer                 = &checked_fill_buffer,
+    .copy_buffer_to_texture      = &checked_copy_buffer_to_texture,
+    .copy_texture_to_buffer      = &checked_copy_texture_to_buffer,
+    .barrier                     = &checked_barrier,
+    .texture_barrier             = &checked_texture_barrier,
+    .bind_pipeline               = &checked_bind_pipeline,
+    .set_depth_state             = &checked_set_depth_state,
+    .set_raster_state            = &checked_set_raster_state,
+    .dispatch                    = &checked_dispatch,
+    .begin_render_pass           = &checked_begin_render_pass,
+    .set_viewport                = &checked_set_viewport,
+    .set_scissor                 = &checked_set_scissor,
+    .end_render_pass             = &vk_cmd_end_render_pass,
+    .draw                        = &checked_draw,
+    .draw_indexed                = &checked_draw_indexed,
+    .draw_indirect               = &checked_draw_indirect,
+    .draw_indexed_indirect       = &checked_draw_indexed_indirect,
+    .draw_indexed_indirect_count = &checked_draw_indexed_indirect_count,
+    .dispatch_indirect           = &checked_dispatch_indirect,
+    .draw_generated              = &checked_draw_generated,
+    .draw_indexed_generated      = &checked_draw_indexed_generated,
+    .dispatch_generated          = &checked_dispatch_generated,
+    .begin_label                 = &vk_cmd_begin_label,
+    .end_label                   = &vk_cmd_end_label,
+};
+
+const gpu::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
+    .copy_buffer                 = &checked_tracking_copy_buffer,
+    .fill_buffer                 = &checked_tracking_fill_buffer,
+    .copy_buffer_to_texture      = &checked_tracking_copy_buffer_to_texture,
+    .copy_texture_to_buffer      = &checked_tracking_copy_texture_to_buffer,
+    .barrier                     = &checked_barrier,
+    .texture_barrier             = &checked_tracking_texture_barrier,
+    .bind_pipeline               = &checked_tracking_bind_pipeline,
+    .set_depth_state             = &checked_set_depth_state,
+    .set_raster_state            = &checked_set_raster_state,
+    .dispatch                    = &checked_dispatch,
+    .begin_render_pass           = &checked_tracking_begin_render_pass,
+    .set_viewport                = &checked_set_viewport,
+    .set_scissor                 = &checked_set_scissor,
+    .end_render_pass             = &vk_cmd_end_render_pass,
+    .draw                        = &checked_draw,
+    .draw_indexed                = &checked_tracking_draw_indexed,
+    .draw_indirect               = &checked_tracking_draw_indirect,
+    .draw_indexed_indirect       = &checked_tracking_draw_indexed_indirect,
+    .draw_indexed_indirect_count = &checked_tracking_draw_indexed_indirect_count,
+    .dispatch_indirect           = &checked_tracking_dispatch_indirect,
+    .draw_generated              = &checked_tracking_draw_generated,
+    .draw_indexed_generated      = &checked_tracking_draw_indexed_generated,
+    .dispatch_generated          = &checked_tracking_dispatch_generated,
+    .begin_label                 = &vk_cmd_begin_label,
+    .end_label                   = &vk_cmd_end_label,
+};
+
+fn gpu::CommandOps* select_command_ops(DeviceValidationPolicy policy) {
+    switch (policy.contract) {
+        case gpu::ContractValidation.TRUSTED:
+        case gpu::ContractValidation.OBJECT_BOUNDARIES:
+            return policy.track_lifetimes
+                ? &TRUSTED_TRACKING_COMMAND_OPS
+                : &TRUSTED_COMMAND_OPS;
+        case gpu::ContractValidation.FULL:
+            return policy.track_lifetimes
+                ? &CHECKED_TRACKING_COMMAND_OPS
+                : &CHECKED_COMMAND_OPS;
+        default:
+            return policy.track_lifetimes
+                ? &CHECKED_TRACKING_COMMAND_OPS
+                : &CHECKED_COMMAND_OPS;
+    }
+}
+
+fn bool command_ops_are_complete(gpu::CommandOps* ops) {
+    return ops != null
+        && ops.copy_buffer != null
+        && ops.fill_buffer != null
+        && ops.copy_buffer_to_texture != null
+        && ops.copy_texture_to_buffer != null
+        && ops.barrier != null
+        && ops.texture_barrier != null
+        && ops.bind_pipeline != null
+        && ops.set_depth_state != null
+        && ops.set_raster_state != null
+        && ops.dispatch != null
+        && ops.begin_render_pass != null
+        && ops.set_viewport != null
+        && ops.set_scissor != null
+        && ops.end_render_pass != null
+        && ops.draw != null
+        && ops.draw_indexed != null
+        && ops.draw_indirect != null
+        && ops.draw_indexed_indirect != null
+        && ops.draw_indexed_indirect_count != null
+        && ops.dispatch_indirect != null
+        && ops.draw_generated != null
+        && ops.draw_indexed_generated != null
+        && ops.dispatch_generated != null
+        && ops.begin_label != null
+        && ops.end_label != null;
+}
+
+fn void note_command_semantic_check(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        (void)state.command_policy_counters.semantic_checks.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_tracking_call(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        (void)state.command_policy_counters.tracking_calls.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_allocation(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        (void)state.command_policy_counters.reference_allocations.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_increment(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        (void)state.command_policy_counters.reference_increments.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_release(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        (void)state.command_policy_counters.reference_releases.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void reset_command_policy_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
+    state.command_policy_counters.semantic_checks.store(0, AtomicOrdering.RELAXED);
+    state.command_policy_counters.tracking_calls.store(0, AtomicOrdering.RELAXED);
+    state.command_policy_counters.reference_allocations.store(0, AtomicOrdering.RELAXED);
+    state.command_policy_counters.reference_increments.store(0, AtomicOrdering.RELAXED);
+    state.command_policy_counters.reference_releases.store(0, AtomicOrdering.RELAXED);
+}
+
+fn CommandPolicyCounters command_policy_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
+    return {
+        .semantic_checks = state.command_policy_counters.semantic_checks.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .tracking_calls = state.command_policy_counters.tracking_calls.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .reference_allocations = state.command_policy_counters.reference_allocations.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .reference_increments = state.command_policy_counters.reference_increments.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .reference_releases = state.command_policy_counters.reference_releases.load(
+            AtomicOrdering.RELAXED,
+        ),
+    };
+}
 
 // One static lifecycle table shared by every Vulkan device.
 const gpu::BackendVTable VK_VTABLE @private = {
@@ -377,7 +609,7 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .submit                      = &vk_submit,
     .poll_completion             = &vk_poll_completion,
     .wait_completion             = &vk_wait_completion,
-    .command_ops                 = &VK_COMMAND_OPS,
+    .command_ops                 = &CHECKED_TRACKING_COMMAND_OPS,
     .get_texture_format_support  = &vk_get_texture_format_support,
     .supports_texture_desc       = &vk_supports_texture_desc,
     .get_texture_requirements    = &vk_get_texture_requirements,
@@ -409,7 +641,7 @@ const gpu::BackendVTable VK_VTABLE @private = {
 
 fn VkDeviceConfig runtime_device_config(VkRuntimeState* state) {
     return {
-        .enable_validation     = state.validation,
+        .validation_policy     = state.validation_policy,
         .enable_debug_names    = state.debug_names,
         .texture_heap_capacity = state.texture_heap_capacity,
         .sampler_heap_capacity = state.sampler_heap_capacity,
@@ -498,6 +730,8 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
     state.debug_names = desc.enable_debug_names;
+    state.validation_policy = desc.validation_policy;
+    state.command_ops = select_command_ops(state.validation_policy);
     state.resource_mutex.init()!;
     state.pipeline_creation_mutex.init()!;
     state.texture_view_cache_mutex.init()!;
@@ -505,7 +739,6 @@ fn gpu::Device? create_vk_device_from_runtime(
 
     state.strict_heap = resolve_strict_heap_state(strict_requested, desc)!;
 
-    state.validation = desc.enable_validation;
     state.presentation.enabled = presentation_surface != null;
     if (state.presentation.enabled) state.presentation.queue_mutex.init()!;
     bool debug_utils_enabled;
@@ -804,6 +1037,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         caps:                 state.caps,
         vtable:               &VK_VTABLE,
         backend_state:        (void*)state,
+        command_ops:          state.command_ops,
         resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
         adapter:              adapter,
@@ -851,8 +1085,11 @@ fn fault vk_report_root_contract_failure(
     ZString rejected_field,
     ZString invariant,
 ) @private {
+    VkDeviceState* state = (VkDeviceState*)backend_state;
+    if (state.validation_policy.contract
+        == gpu::ContractValidation.TRUSTED) return public_fault;
     return report_contract_failure(
-        state:               (VkDeviceState*)backend_state,
+        state:               state,
         operation:           operation,
         public_fault:        public_fault,
         resource_kind:       resource_kind,
@@ -877,13 +1114,17 @@ fn void vk_destroy_device(void* backend_state) @private {
     destroy_state((VkDeviceState*)backend_state);
 }
 
+fn bool report_teardown_leaks(VkDeviceState* state) =>
+    state.validation_policy.contract != gpu::ContractValidation.TRUSTED
+        || state.debug_callback != null;
+
 <* Reverse-order cleanup after accepted destruction, device loss, or partial creation. *>
 fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @private {
     if (state == null) return;
     if (state.device != null) {
         destroy_submitted_commands(state);
         // Report before cleanup clears the diagnostic tables.
-        if (state.validation || state.debug_callback != null) (void)report_resource_leaks(state);
+        if (report_teardown_leaks(state)) (void)report_resource_leaks(state);
         // Internal buffers and device-loss leftovers remain backend-owned.
         if (state.allocator != null && state.buffers.slots.ptr != null) {
             foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {
@@ -902,7 +1143,7 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
             mem::free(state.presentation.swapchains.slots.ptr);
             state.presentation.swapchains.slots = {};
         }
-        if (state.validation || state.debug_callback != null) report_descriptor_leaks(state);
+        if (report_teardown_leaks(state)) report_descriptor_leaks(state);
         destroy_descriptor_heap(state);
         destroy_sampler_table(state);
         destroy_attachment_view_table(state);
