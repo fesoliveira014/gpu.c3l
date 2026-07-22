@@ -404,7 +404,9 @@ full-capacity preflight, and exact cleanup after partial shader preparation,
 reflection, native shader, native pipeline, cache insertion, and mid-batch
 faults. It uses exact interning and byte-comparison counters for collision and
 distinct-storage cases, while cache hits require compact-key probes without
-shader-byte comparison. A test-only synchronization hook immediately before a
+shader-byte comparison. Live tests exercise 1 KiB, 64 KiB, and 1 MiB synthetic
+identities and require zero shader probes, byte comparisons, and clones after
+interning at every size. A test-only synchronization hook immediately before a
 generated-dispatch layout read, creates another compute pipeline on a second
 thread, and verifies that recording observes the device's unchanged singleton
 layout through the bound pipeline slot. Validation-mode lifetime coverage also
@@ -420,7 +422,11 @@ snapshots begin before pipeline binding: binding the opaque pipeline handle
 performs exactly one pipeline-table and one pipeline-cache lookup, while
 registry, retained-pin, lifecycle-vtable, command-table, and policy work remain
 zero. Dispatch and draw add no further resolution and each emits exactly one
-root push plus its native execution command.
+root push plus its native execution command. The dispatch test also replaces
+the bound handle's backing slot with invalid, different pipeline state after
+binding and requires the recorded layout snapshot to remain unchanged. A
+compile-time exact member-shape guard rejects adding or substituting a hidden
+slot pointer or index/generation back-reference without an explicit gate update.
 
 The benchmark runner builds nine executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
@@ -435,7 +441,8 @@ cache entries/aliases, and recording/create timings; all permutations share
 one immutable pipeline. It additionally reports exact interning, clone/free,
 and compact-key probe counts for 1 KiB, 64 KiB, and 1 MiB identities. Separate
 lookup-side counters require zero shader probes, byte comparisons, and clones
-after interning; elapsed boundary time remains advisory. Command recording covers
+after interning, mirroring the blocking `vk_pipeline_cache` scale test; elapsed
+boundary time remains advisory. Command recording covers
 ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
 generated dispatch. It measures five 64-record lists after an untimed 64-record
 warmup. Before warmup, the calling worker reserves 64 preprocess buffers sized
@@ -472,9 +479,11 @@ The same benchmark reports sampler lookup occupancy 8, 64, 1,024, and 65,536
 through production hash/bucket/link/equality helpers. The runner requires a
 power-of-two bucket count at least twice occupancy, one through eight probes for
 the selected hit, and zero candidate probes for a guaranteed empty-bucket miss
-at every tier. Collision, rollback, bucket consistency, concurrent publication,
-and teardown are covered by Vulkan and CPU tests. Collision-chain scenarios
-require exact candidate-probe counts for head, middle, tail, and miss lookups.
+at every tier. The blocking `vk_descriptor_heap` target independently requires
+zero candidate probes for the 65,536-entry empty-bucket miss. Collision,
+rollback, bucket consistency, concurrent publication, and teardown are covered
+by Vulkan and CPU tests. Collision-chain scenarios require exact candidate-
+probe counts for head, middle, tail, and miss lookups.
 
 The lifecycle output requires `cached_poll_queries=0` and
 `retirement_locks=0` across each 100,000-poll measured interval and zero native

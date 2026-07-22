@@ -61,9 +61,9 @@ subsystem snapshots:
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
 | Submission ownership | Submitted-batch references, caller tokens, retained-reference counts, and ordered retirement state |
-| Bound pipeline snapshot | Exact bind-time table/cache lookups followed by zero post-bind resolution under cache churn |
-| Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and compact-key pipeline probes |
-| Sampler buckets | Exact candidate probes through collision chains at fixed occupancy tiers |
+| Bound pipeline snapshot | Exact bind-time table/cache lookups, zero post-bind resolution under cache churn, and unchanged layout use after backing-slot mutation |
+| Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and zero post-intern shader work at 1 KiB/64 KiB/1 MiB |
+| Sampler buckets | Exact collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
 Warm command-buffer reset is expected reuse evidence. Host/VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
@@ -71,7 +71,11 @@ and registry, retained-pin, lifecycle-vtable, command-table, and policy work
 remain prohibited. Binding an opaque pipeline handle performs exactly one
 pipeline-table and one pipeline-cache lookup; dispatch and draw perform no
 additional resolution and each emits exactly one root push plus its native
-execution command.
+execution command. The dispatch invariant mutates the bound handle's backing
+slot after binding and observes the pushed layout, proving command recording
+uses the bind-time value snapshot. A compile-time exact member-shape guard makes
+any hidden slot pointer or index/generation back-reference an explicit test
+change.
 
 The lifecycle benchmark first establishes full retirement for each measured
 point, then resets completion-work counters before 100,000 repeated polls. The
@@ -91,8 +95,8 @@ The same target builds synthetic sampler tables at occupancy 8, 64, 1,024, and
 helpers. Every tier requires a power-of-two bucket count at least twice the
 occupancy and between one and eight candidate probes for the selected hit.
 Every tier also requires zero candidate probes for a guaranteed empty-bucket
-miss. Elapsed lookup time is advisory; exact occupancy, shape, and probe work
-are the blocking evidence.
+miss. The 65,536-entry zero-probe observation is also enforced by the live
+`vk_descriptor_heap` test target. Elapsed lookup time is advisory.
 
 The submit-batch benchmark submits real executable command lists in batches of
 1, 8, 32, 128, and 1,024. Its feature-gated counters require exactly one token
@@ -100,11 +104,11 @@ visit per list and zero epoch-reset cells for each ordinary batch. These exact
 work counts are blocking; `ns/submit` remains advisory.
 
 The pipeline-cache benchmark separately interns synthetic 1 KiB, 64 KiB, and
-1 MiB identities. For every size, its blocking counters require one complete
-owned clone and free and one compact-key probe. Collision and distinct-storage
-tests require exact intern probes and compared bytes while cache lookup requires
-zero shader probes, byte comparisons, and clones after interning. Boundary
-elapsed time is advisory; the exact work counters are the regression evidence.
+1 MiB identities. For every size, the live `vk_pipeline_cache` test and the
+benchmark require one complete owned clone and free, one compact-key probe, and
+zero shader probes, byte comparisons, and clones after interning. Collision and
+distinct-storage tests require exact intern probes and compared bytes. Boundary
+elapsed time is advisory.
 
 Unpinned runs report crossings of these broad order-of-magnitude thresholds as
 advisories:
