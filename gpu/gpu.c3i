@@ -488,3 +488,805 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong recording_commands;
     ulong native_commands;
 }
+
+// A shader-visible 64-bit GPU address. Distinct from a plain ulong so it can't
+// be confused with sizes, offsets, or handles.
+typedef GpuAddress = ulong;
+
+enum MemoryClass : int {
+    CPU_WRITE,
+    GPU_PRIVATE,
+    CPU_READ,
+    TEXTURE,
+}
+
+<* Non-owning identity and range into generic GPU data. *>
+struct GpuSpan {
+    ulong owner;
+    uint  index;
+    uint  generation;
+    usz   offset;
+    usz   size;
+}
+
+<* `size` must be nonzero; alignment zero selects 16 bytes. *>
+struct AllocationDesc {
+    usz         size;
+    usz         alignment;
+    MemoryClass memory_class;
+    QueueRoles  access;
+    TextureRequirements[] texture_requirements;
+    ZString     debug_name;
+}
+
+<* Immutable allocation properties and actual mapping behavior. *>
+struct AllocationInfo {
+    usz         size;
+    usz         alignment;
+    MemoryClass memory_class;
+    QueueRoles  access;
+    bool        mapped;
+    bool        coherent;
+    bool        addressable;
+}
+
+const usz MAX_MEMORY_HEAPS = 16;
+
+// Per-heap memory usage snapshot.
+struct MemoryHeapBudget {
+    ulong usage;
+    ulong budget;
+    ulong allocation_bytes;
+    ulong block_bytes;
+}
+
+// Device memory snapshot. `heaps[0..heap_count]` are valid.
+struct MemoryStats {
+    MemoryHeapBudget[MAX_MEMORY_HEAPS] heaps;
+    uint  heap_count;
+    ulong texture_count;
+    ulong live_allocation_count;
+}
+
+<* Opaque device-owned compatibility value for texture placement. *>
+typedef TextureCompatibility = uint128;
+
+const uint DEFAULT_TEXTURE_CAPACITY = 1024;
+
+<* Texel format for textures and swapchain images. *>
+enum Format : int {
+    UNDEFINED,
+    R8_UNORM,
+    R8_UINT,
+    RG8_UNORM,
+    RGBA8_UNORM,
+    RGBA8_SRGB,
+    BGRA8_UNORM,
+    BGRA8_SRGB,
+    R16_UINT,
+    R16_FLOAT,
+    RG16_FLOAT,
+    RGBA16_FLOAT,
+    R32_UINT,
+    R32_FLOAT,
+    RG32_FLOAT,
+    RGBA32_FLOAT,
+    D32_FLOAT,
+}
+
+<* Rasterization samples per texel. The zero value is single-sampled. *>
+enum SampleCount : int {
+    ONE,
+    TWO,
+    FOUR,
+    EIGHT,
+    SIXTEEN,
+    THIRTY_TWO,
+    SIXTY_FOUR,
+}
+
+<* Sampler texel filtering. *>
+enum Filter : int {
+    NEAREST,
+    LINEAR,
+}
+
+<* How samplers treat coordinates outside [0, 1]. *>
+enum AddressMode : int {
+    REPEAT,
+    MIRRORED_REPEAT,
+    CLAMP_TO_EDGE,
+    CLAMP_TO_BORDER,
+}
+
+// Texture usage flags. Bitstruct of bools, composed by field-set.
+bitstruct TextureUsage : uint {
+    // Sampled through the descriptor heap.
+    bool sampled      : 0;
+    // Storage-image access from shaders.
+    bool storage      : 1;
+    // Render-pass color target.
+    bool color_attach : 2;
+    // Render-pass depth target.
+    bool depth_attach : 3;
+    // Source of copies/readbacks.
+    bool transfer_src : 4;
+    // Destination of uploads/copies.
+    bool transfer_dst : 5;
+}
+
+<* Individually creatable optimal-tiling format features. Feature
+   combinations must be checked with supports_texture_desc. *>
+bitstruct TextureFormatFeatures : uint {
+    bool sampled       : 0;
+    bool storage       : 1;
+    bool color_attach  : 2;
+    bool depth_attach  : 3;
+    bool transfer_src  : 4;
+    bool transfer_dst  : 5;
+    bool linear_filter : 6;
+}
+
+<* Texture sample counts implemented end-to-end by the backend. *>
+bitstruct TextureSampleCountSupport : uint {
+    bool one        : 0;
+    bool two        : 1;
+    bool four       : 2;
+    bool eight      : 3;
+    bool sixteen    : 4;
+    bool thirty_two : 5;
+    bool sixty_four : 6;
+}
+
+<* Library-creatable support for one format. *>
+struct TextureFormatSupport {
+    TextureFormatFeatures     features;
+    TextureSampleCountSupport sample_counts;
+}
+
+<* Storage requirements for one texture descriptor. *>
+struct TextureRequirements {
+    usz                  size;
+    usz                  alignment;
+    TextureCompatibility compatibility;
+    bool                 dedicated_only;
+}
+
+<* Independently owned texture and allocation returned by dedicated creation. *>
+struct DedicatedTexture {
+    TextureHandle texture;
+    GpuAllocation allocation;
+}
+
+<* Creation parameters for create_texture. `access` must be a non-empty subset
+   of the device's selected queue roles. *>
+struct TextureDesc {
+    uint             width;
+    uint             height;
+    // 0 means 1.
+    uint             mip_levels;
+    // 0 means 1.
+    uint             array_layers;
+    Format           format;
+    TextureUsage     usage;
+    QueueRoles       access;
+    SampleCount      sample_count;
+    ZString          debug_name;
+}
+
+<* Subresource view of a texture; a zero-initialized desc is the full default view. *>
+struct TextureViewDesc {
+    uint   base_mip;
+    // 0 means all mips from base_mip.
+    uint   mip_count;
+    uint   base_layer;
+    // 0 means all layers from base_layer.
+    uint   layer_count;
+}
+
+<* Semantic parameters for intern_sampler. *>
+struct SamplerDesc {
+    Filter      min_filter;
+    Filter      mag_filter;
+    Filter      mip_filter;
+    AddressMode address_u;
+    AddressMode address_v;
+    AddressMode address_w;
+    // LOD values must be finite; min_lod must not exceed max_lod. The absolute
+    // mip_lod_bias value must not exceed caps.max_sampler_lod_bias.
+    float       mip_lod_bias;
+    float       min_lod;
+    float       max_lod;
+    // Requires caps.max_sampler_anisotropy > 0 and max_anisotropy >= 1.
+    bool        anisotropy_enable;
+    // Must be >= 1 when anisotropy_enable is set (INVALID_ARGUMENT
+    // otherwise); upper-bounded by caps.max_sampler_anisotropy.
+    float       max_anisotropy;
+    // With `compare`, enables depth-compare (shadow) sampling.
+    bool        compare_enable;
+    CompareOp   compare;
+    ZString     debug_name;
+}
+
+const uint DEFAULT_TEXTURE_HEAP_CAPACITY = 4096;
+const uint DEFAULT_SAMPLER_HEAP_CAPACITY = 256;
+const uint MAX_SHADER_HEAP_CAPACITY = 65_536;
+
+<* One create_texture_views input. A zero-initialized view description selects
+   the default view, matching a null description passed to create_texture_view. *>
+struct TextureViewCreateDesc {
+    TextureHandle   texture;
+    TextureViewDesc view;
+}
+
+// Default pipeline slot capacity when RuntimeDesc.pipeline_capacity is zero.
+const uint MAX_PIPELINES                  = 256;
+const uint MAX_COLOR_ATTACHMENTS          = 8;
+
+<* Shader stage associated with SPIR-V code. *>
+enum ShaderStage : int {
+    COMPUTE,
+    VERTEX,
+    FRAGMENT,
+}
+
+<* How draws assemble vertices into primitives. *>
+enum PrimitiveTopology : int {
+    TRIANGLES,
+    LINES,
+    POINTS,
+}
+
+<* Comparison function for depth testing. *>
+enum CompareOp : int {
+    NEVER,
+    LESS,
+    EQUAL,
+    LESS_EQUAL,
+    GREATER,
+    NOT_EQUAL,
+    GREATER_EQUAL,
+    ALWAYS,
+}
+
+<* Triangle facing discarded by the rasterizer. *>
+enum CullMode : int {
+    NONE,
+    FRONT,
+    BACK,
+}
+
+<* Winding order that counts as front-facing. *>
+enum FrontFace : int {
+    COUNTER_CLOCKWISE,
+    CLOCKWISE,
+}
+
+<* Triangle rasterization: filled or wireframe. LINE requires
+   DeviceCaps.line_polygon_mode. *>
+enum PolygonMode : int {
+    FILL,
+    LINE,
+}
+
+<* Multiplier for the source or destination term of the blend equation. *>
+enum BlendFactor : int {
+    ZERO,
+    ONE,
+    SRC_COLOR,
+    ONE_MINUS_SRC_COLOR,
+    SRC_ALPHA,
+    ONE_MINUS_SRC_ALPHA,
+    DST_ALPHA,
+    ONE_MINUS_DST_ALPHA,
+}
+
+<* Operator combining the weighted source and destination blend terms. *>
+enum BlendOp : int {
+    ADD,
+    SUBTRACT,
+    REVERSE_SUBTRACT,
+    MIN,
+    MAX,
+}
+
+<* Element width of an index buffer; indexed draws default to U32. *>
+enum IndexType : int {
+    U32,
+    U16,
+}
+
+<* Color channels written by one graphics target; zero disables all writes. *>
+bitstruct ColorWriteMask : uint {
+    bool red   : 0;
+    bool green : 1;
+    bool blue  : 2;
+    bool alpha : 3;
+}
+
+const ColorWriteMask COLOR_WRITE_ALL = {
+    .red   = true,
+    .green = true,
+    .blue  = true,
+    .alpha = true,
+};
+
+<* Borrowed SPIR-V preparation input; the bytes must match `stage`. *>
+struct ShaderDesc {
+    ShaderStage stage;
+    char[]      spirv;
+    // Null selects "main".
+    ZString     entry_point;
+    ZString     debug_name;
+}
+
+<* Borrowed shader IR with library-computed process-local identity. Keep the
+   referenced bytes immutable and alive while using this value. *>
+struct ShaderCode {
+    ShaderStage stage;
+    char[]      spirv;
+    ZString     entry_point;
+    ZString     debug_name;
+    ulong       digest;
+}
+
+<* Depth test/write state; the zero value means depth off. *>
+struct DepthState {
+    bool      test_enable;
+    bool      write_enable;
+    CompareOp compare;
+}
+
+<* Blend equation for one color target; disabled is the zero value. *>
+struct BlendState {
+    bool        enable;
+    BlendFactor src_color;
+    BlendFactor dst_color;
+    BlendOp     color_op;
+    BlendFactor src_alpha;
+    BlendFactor dst_alpha;
+    BlendOp     alpha_op;
+}
+
+<* Immutable format, blend equation, and write mask for one color target.
+   A zero write mask disables every channel; use COLOR_WRITE_ALL for RGBA. *>
+struct ColorTargetState {
+    Format         format;
+    BlendState     blend;
+    ColorWriteMask write_mask;
+}
+
+<* Pass-bounded raster state; zero means triangles, no culling,
+   counter-clockwise front faces, and disabled depth bias. *>
+struct DynamicRasterState {
+    PrimitiveTopology topology;
+    CullMode          cull_mode;
+    FrontFace         front_face;
+    bool              depth_bias_enable;
+    float             depth_bias_constant;
+    float             depth_bias_slope;
+    float             depth_bias_clamp;
+}
+
+<* Inputs to create_compute_pipeline; the layout uses the fixed RootPush ABI. *>
+struct ComputePipelineDesc {
+    ShaderCode shader;
+    ZString    debug_name;
+}
+
+<* Inputs to create_graphics_pipeline, targeting dynamic rendering. The layout
+   is fixed: the global heap set plus a 16-byte vertex/fragment root push range. *>
+struct GraphicsPipelineDesc {
+    ShaderCode         vertex_shader;
+    ShaderCode         fragment_shader;
+    ColorTargetState[] colors;
+    Format             depth_format;
+    SampleCount        sample_count;
+    PolygonMode        polygon_mode;
+    ZString            debug_name;
+}
+
+const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
+const uint DEFAULT_COMMAND_REFERENCES_PER_LIST = 64;
+const uint DEFAULT_COMMAND_PREPROCESS_PER_LIST = 4;
+const uint MAX_COMMAND_ALLOCATOR_CAPACITY = 4096;
+const uint MAX_COMMAND_REFERENCES_PER_LIST = 4096;
+const uint MAX_COMMAND_PREPROCESS_PER_LIST = 64;
+
+<* Generated-work record kind a scratch reservation serves. *>
+enum GeneratedWorkKind : int {
+    DRAW,
+    DRAW_INDEXED,
+    DISPATCH,
+}
+
+<* Unsigned 3-vector; dispatches take their workgroup counts as one. *>
+struct Vec3u {
+    uint x;
+    uint y;
+    uint z;
+}
+
+<* One pass-bounded dynamic viewport. All fields must be finite; width and
+   height are positive, while both depth endpoints are in [0, 1]. Set
+   max_depth to 1.0f for the conventional full depth range. *>
+struct Viewport {
+    float x;
+    float y;
+    float width;
+    float height;
+    float min_depth;
+    float max_depth;
+}
+
+<* One pass-bounded dynamic scissor. Zero extent is a valid empty clip. *>
+struct ScissorRect {
+    int x;
+    int y;
+    int width;
+    int height;
+}
+
+// Shader-writable indirect argument layouts; GLSL definitions are generated
+// in include/shaders/generated/shader_abi.glsl.
+struct DrawIndirectCommand {
+    uint vertex_count;
+    uint instance_count;
+    uint first_vertex;
+    uint first_instance;
+}
+$assert DrawIndirectCommand::size == 16;
+
+<* Shader-writable arguments for indexed indirect draws. *>
+struct DrawIndexedIndirectCommand {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int  vertex_offset;
+    uint first_instance;
+}
+$assert DrawIndexedIndirectCommand::size == 20;
+
+<* Shader-writable workgroup counts for cmd_dispatch_indirect. *>
+struct DispatchIndirectCommand {
+    uint x;
+    uint y;
+    uint z;
+}
+$assert DispatchIndirectCommand::size == 12;
+
+<* A fixed-capacity command recording owner bound to one exact queue. One
+   allocator is confined to one recording thread while recordings are live. *>
+struct CommandAllocator {
+    Device                 device;
+    Queue                  queue;
+    CommandAllocatorHandle handle;
+}
+
+<* Zero capacities select the documented defaults. Generated preprocess bytes
+   bound exact descriptor-driven reservations; zero disables reservations. *>
+struct CommandAllocatorDesc {
+    uint    command_buffer_capacity;
+    uint    max_resource_references_per_list;
+    uint    max_generated_preprocess_buffers_per_list;
+    usz     generated_preprocess_bytes;
+    ZString debug_name;
+}
+
+<* A recording command token. Successful end consumes it. *>
+struct CommandList {
+    Device            device;
+    CommandListHandle handle;
+    void*             encoder;
+}
+$assert CommandList::size <= ulong::size * 4;
+
+<* A one-shot executable command token. Submit or discard consumes it. *>
+struct ExecutableCommandList {
+    Device            device;
+    CommandListHandle handle;
+    void*             encoder;
+}
+$assert ExecutableCommandList::size <= ulong::size * 4;
+
+<* Cold reservation for one generated-work pipeline and command kind on one
+   allocator. Count bounds each call; buffer count bounds concurrent use. *>
+struct GeneratedScratchDesc {
+    PipelineHandle    pipeline;
+    GeneratedWorkKind kind;
+    uint              max_commands_per_list;
+    uint              preprocess_buffer_count;
+}
+
+<* Byte-range copy for cmd_copy_buffer; src and dst must have equal size and
+   must not overlap. *>
+struct BufferCopyDesc {
+    GpuSpan src;
+    GpuSpan dst;
+}
+
+// Zero-value defaults: extent 0 is the full mip level, layer_count 0 is one
+// layer, and row_length_texels 0 means tightly packed rows.
+struct BufferTextureCopyDesc {
+    GpuSpan       src;
+    uint          row_length_texels;
+    TextureHandle texture;
+    uint          mip;
+    uint          base_layer;
+    uint          layer_count;
+    uint          x;
+    uint          y;
+    uint          width;
+    uint          height;
+}
+
+<* Texture-to-buffer readback region; same zero-value defaults as
+   BufferTextureCopyDesc. *>
+struct TextureBufferCopyDesc {
+    TextureHandle texture;
+    GpuSpan       dst;
+    uint          row_length_texels;
+    uint          mip;
+    uint          base_layer;
+    uint          layer_count;
+    uint          x;
+    uint          y;
+    uint          width;
+    uint          height;
+}
+
+const uint DEFAULT_ATTACHMENT_VIEW_CAPACITY = 4096;
+
+<* What happens to an attachment's contents when a render pass begins. *>
+enum LoadOp : int {
+    LOAD,
+    CLEAR,
+    DONT_CARE,
+}
+
+<* Whether an attachment's contents persist after the render pass ends. *>
+enum StoreOp : int {
+    STORE,
+    DONT_CARE,
+}
+
+<* Color clear value. Use rgba for normalized/floating-point formats and
+   uint_rgba for unsigned-integer formats. *>
+union ClearColor {
+    float[4] rgba;
+    uint[4]  uint_rgba;
+}
+$assert ClearColor::size == 16;
+
+<* Depth clear value; depth in [0, 1]. *>
+struct ClearDepth {
+    float depth;
+}
+
+<* One texture subresource prepared for render-pass attachment use.
+   Ownership: release with destroy_attachment_view after GPU use completes. *>
+struct AttachmentViewDesc {
+    TextureHandle texture;
+    uint          mip_level;
+    uint          array_layer;
+}
+
+<* One color attachment and its optional single-sample resolve target. *>
+struct ColorTargetDesc {
+    AttachmentViewHandle view;
+    AttachmentViewHandle resolve_view;
+    LoadOp               load_op;
+    StoreOp              store_op;
+    ClearColor           clear;
+}
+
+<* One depth attachment. `clear` applies only with LoadOp.CLEAR. *>
+struct DepthTargetDesc {
+    AttachmentViewHandle view;
+    LoadOp               load_op;
+    StoreOp              store_op;
+    ClearDepth           clear;
+}
+
+<* A dynamic render pass. Every selected attachment must cover the render area. *>
+struct RenderPassDesc {
+    ColorTargetDesc[] colors;
+    DepthTargetDesc*  depth;
+    uint              width;
+    uint              height;
+}
+
+const ulong TIMEOUT_INFINITE = ulong::max;
+const CompletionPoint COMPLETION_POINT_INVALID = {};
+
+<* Execution scopes for a global barrier. `all` and `present` are exclusive. *>
+bitstruct StageMask : uint {
+    bool all             : 0;
+    bool host            : 1;
+    bool transfer        : 2;
+    bool compute         : 3;
+    bool vertex_shader   : 4;
+    bool fragment_shader : 5;
+    bool color_output    : 6;
+    bool depth_output    : 7;
+    bool present         : 8;
+}
+
+<* Explicit invalidation for special non-coherent GPU data paths. *>
+bitstruct HazardFlags : uint {
+    bool draw_arguments : 0;
+    bool descriptors    : 1;
+    bool depth_stencil  : 2;
+}
+
+<* Texture layout for explicit transitions. *>
+enum TextureLayout : int {
+    UNDEFINED,
+    TRANSFER_SOURCE,
+    TRANSFER_DESTINATION,
+    SAMPLED,
+    STORAGE,
+    COLOR_ATTACHMENT,
+    DEPTH_ATTACHMENT,
+    PRESENT,
+}
+
+<* Read/write intent for a texture state. The zero value means no access and is
+   valid only for `UNDEFINED` and `PRESENT` states. *>
+bitstruct TextureAccess : uint {
+    bool read  : 0;
+    bool write : 1;
+}
+
+<* Queue-owned submission progress. Copy and reuse until its device is destroyed. *>
+struct CompletionPoint {
+    Device device;
+    ulong  payload;
+}
+
+<* A published queue completion and the first destination stages that consume
+   its work. *>
+struct CompletionWait {
+    CompletionPoint point;
+    StageMask       before;
+}
+
+<* Global execution and memory dependency with no resource identity or range. *>
+struct Barrier {
+    StageMask   before;
+    StageMask   after;
+    HazardFlags hazards;
+}
+
+<* Layout, execution stages, and access intent for one texture use. The zero
+   value is the exact empty `UNDEFINED` source state. *>
+struct TextureState {
+    TextureLayout layout;
+    StageMask     stages;
+    TextureAccess access;
+}
+
+<* Explicit semantic transition for a texture subresource range. A zero `view`
+   selects the full texture. *>
+struct TextureBarrier {
+    TextureHandle   texture;
+    TextureViewDesc view;
+    TextureState    before;
+    TextureState    after;
+}
+
+const Queue QUEUE_INVALID = {};
+
+$assert(CompletionPoint::size <= ulong::size * 2);
+
+<* Semantic roles supported by one selected queue. *>
+bitstruct QueueRoles : uint {
+    bool graphics : 0;
+    bool compute  : 1;
+    bool transfer : 2;
+}
+
+<* Device-owned selected queue token. Copy or compare it as a whole; use
+   get_queue_info to inspect its identity and supported roles. *>
+struct Queue {
+    Device     device;
+    uint       id;
+    QueueRoles roles;
+}
+
+<* Stable device-local identity and supported roles for a live queue. *>
+struct QueueInfo {
+    uint       id;
+    QueueRoles roles;
+}
+
+<* Selected queue count under each semantic role. *>
+struct QueueCounts {
+    uint graphics;
+    uint compute;
+    uint transfer;
+}
+
+<* Semantic queues required at device creation. Each count is 0..255 and
+   requests distinct identities within that role. A marked distinct role must
+   be requested and may not alias another requested role. *>
+struct QueueRequirements {
+    QueueCounts counts;
+    QueueRoles distinct;
+}
+
+<* Work submitted to an explicit queue. Every wait names its first destination
+   stages. Non-zero readiness requires a graphics-capable queue and an explicit
+   supported destination stage, and is consumed only by successful submission. *>
+struct SubmitDesc {
+    ExecutableCommandList[] command_lists;
+    CompletionWait[]        completion_waits;
+    SwapchainReadiness      readiness;
+    StageMask               readiness_before;
+}
+
+const uint MAX_SWAPCHAINS = 8;
+const SwapchainReadiness SWAPCHAIN_READINESS_INVALID = {};
+
+
+<* Pacing of presentation; unsupported requested modes fall back to FIFO. *>
+enum PresentMode : int {
+    // Vsync; always available.
+    FIFO,
+    // No vsync; may tear.
+    IMMEDIATE,
+    // Low-latency vsync; may drop frames.
+    MAILBOX,
+}
+
+<* Present modes a swapchain's surface supports, from get_present_mode_support. *>
+bitstruct PresentModeSupport : uint {
+    bool fifo;
+    bool immediate;
+    bool mailbox;
+}
+
+
+<* Creation parameters for create_swapchain. *>
+struct SwapchainDesc {
+    uint        width;
+    uint        height;
+    Format      preferred_format;
+    PresentMode present_mode;
+    // 0 means backend default.
+    uint        image_count;
+    // Selects sRGB over UNORM encoding for the swapchain format.
+    bool        srgb;
+    ZString     debug_name;
+}
+
+<* Actual swapchain configuration selected by the backend. Dormant snapshots
+   use UNDEFINED format, zero extent/count, and FIFO as an ignored mode
+   sentinel. *>
+struct SwapchainInfo {
+    Format      format;
+    uint        width;
+    uint        height;
+    uint        image_count;
+    PresentMode present_mode;
+    bool        dormant;
+}
+
+<* One-shot acquisition readiness. Submission accepts it exactly once. *>
+struct SwapchainReadiness {
+    Device device;
+    ulong  payload;
+}
+$assert(SwapchainReadiness::size <= ulong::size * 2);
+
+<* Borrowed swapchain texture, its color attachment view, and its one-shot
+   acquisition identity. Resize invalidates both handles; an enqueued
+   presentation consumes the value. *>
+struct AcquiredImage {
+    TextureHandle        texture;
+    AttachmentViewHandle attachment_view;
+    SwapchainReadiness   readiness;
+    uint                 index;
+    bool                 suboptimal;
+    TextureState         prior_state;
+}

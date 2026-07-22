@@ -11,46 +11,9 @@ const uint MAX_SELECTED_QUEUE_IDENTITIES @private =
     MAX_REQUESTED_QUEUES_PER_ROLE * QUEUE_ROLE_COUNT;
 const uint MAX_SUBMIT_COMPLETION_WAITS @private = 1024;
 const uint MAX_SUBMIT_COMMAND_LISTS @private = 1024;
-const Queue QUEUE_INVALID = {};
 $assert(MAX_SELECTED_QUEUE_IDENTITIES - 1 <= ushort::max);
 $assert(MAX_SELECTED_QUEUE_IDENTITIES <= 1 << COMPLETION_QUEUE_BITS);
-$assert(CompletionPoint::size <= ulong::size * 2);
 
-<* Semantic roles supported by one selected queue. *>
-bitstruct QueueRoles : uint {
-    bool graphics : 0;
-    bool compute  : 1;
-    bool transfer : 2;
-}
-
-<* Device-owned selected queue token. Copy or compare it as a whole; use
-   get_queue_info to inspect its identity and supported roles. *>
-struct Queue {
-    Device     device;
-    uint       id;
-    QueueRoles roles;
-}
-
-<* Stable device-local identity and supported roles for a live queue. *>
-struct QueueInfo {
-    uint       id;
-    QueueRoles roles;
-}
-
-<* Selected queue count under each semantic role. *>
-struct QueueCounts {
-    uint graphics;
-    uint compute;
-    uint transfer;
-}
-
-<* Semantic queues required at device creation. Each count is 0..255 and
-   requests distinct identities within that role. A marked distinct role must
-   be requested and may not alias another requested role. *>
-struct QueueRequirements {
-    QueueCounts counts;
-    QueueRoles distinct;
-}
 
 struct QueueSelection @private {
     QueueCounts counts;
@@ -62,22 +25,7 @@ struct QueueSelection @private {
     QueueRoles[MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
 }
 
-<* Work submitted to an explicit queue. Every wait names its first destination
-   stages. Non-zero readiness requires a graphics-capable queue and an explicit
-   supported destination stage, and is consumed only by successful submission. *>
-struct SubmitDesc {
-    ExecutableCommandList[] command_lists;
-    CompletionWait[]        completion_waits;
-    SwapchainReadiness      readiness;
-    StageMask               readiness_before;
-}
 
-fn bool Queue.is_valid(self) => self.device.is_valid();
-fn bool Queue.equals(self, Queue other) @operator(==) {
-    return self.device == other.device
-        && self.id == other.id
-        && (uint)self.roles == (uint)other.roles;
-}
 
 fn Device completion_point_device(CompletionPoint point) @private {
     return point.device;
@@ -502,93 +450,4 @@ fn void? validate_completion_point(
         >= selected_queues(operation).identity_count) {
         return INVALID_HANDLE~;
     }
-}
-
-<* Return selected queue counts by semantic role; aliased roles count the same
-   queue. INVALID_HANDLE if the device is not live. *>
-fn QueueCounts? get_queue_counts(Device* device) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    return selected_queue_counts(&operation);
-}
-
-<* Return a device-owned queue identity for a semantic role and index. Aliased
-   roles return the same token. A dead device faults INVALID_HANDLE; an
-   unavailable index faults INVALID_ARGUMENT. *>
-fn Queue? get_queue(Device* device, QueueKind kind, uint index = 0) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    if (index >= selected_queue_count(&operation, kind)) return INVALID_ARGUMENT~;
-    return {
-        .device = *device,
-        .id     = selected_queue_id(&operation, kind, index),
-        .roles  = selected_queue_roles(&operation, kind, index),
-    };
-}
-
-<* Return a live queue's device-local identity and supported roles.
-   INVALID_HANDLE if the token is stale, foreign, or malformed. *>
-fn QueueInfo? get_queue_info(Device* device, Queue queue) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_queue(&operation, device, queue)!;
-    return {
-        .id    = queue.id,
-        .roles = queue.roles,
-    };
-}
-
-<* Submit executable command lists to `queue` and return reusable progress.
-   Successful submission consumes every list. *>
-fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
-    Device device = queue.device;
-    DeviceOperation operation = begin_device_operation(&device)!;
-    defer end_device_operation(&operation);
-    validate_queue(&operation, &device, queue)!;
-    if (desc == null) return INVALID_ARGUMENT~;
-    if (desc.command_lists.len > MAX_SUBMIT_COMMAND_LISTS) {
-        return INVALID_ARGUMENT~;
-    }
-    if (desc.completion_waits.len > MAX_SUBMIT_COMPLETION_WAITS) {
-        return INVALID_ARGUMENT~;
-    }
-    foreach (&commands : desc.command_lists) {
-        if (commands.device != device) return INVALID_HANDLE~;
-        executable_encoder(commands)!;
-        validate_resource_owner(
-            &operation,
-            commands.handle.owner,
-            ResourceOwnerKind.COMMAND,
-        )!;
-    }
-    foreach (wait : desc.completion_waits) {
-        validate_completion_point(&operation, &device, wait.point)!;
-        if (!submit_wait_stage_mask_valid(wait.before)) {
-            return INVALID_ARGUMENT~;
-        }
-    }
-    if (desc.readiness != SWAPCHAIN_READINESS_INVALID) {
-        if (!desc.readiness.is_valid()
-            || desc.readiness.device != device) {
-            return INVALID_HANDLE~;
-        }
-        if (!queue.roles.graphics) return INVALID_ARGUMENT~;
-        if (!submit_wait_stage_mask_valid(desc.readiness_before)) {
-            return INVALID_ARGUMENT~;
-        }
-    } else if ((uint)desc.readiness_before != 0) {
-        return INVALID_ARGUMENT~;
-    }
-    note_command_lifecycle_vtable_dispatch();
-    CompletionPoint point = operation.vtable.submit(queue, desc)!;
-    foreach (&commands : desc.command_lists) {
-        release_executable_command_pin_lease(&operation, commands);
-        *commands = {};
-    }
-    release_device_children(&operation, (ulong)desc.command_lists.len);
-    (void)release_retained_device_pins(
-        &operation,
-        (uint)desc.command_lists.len,
-    );
-    return point;
 }
