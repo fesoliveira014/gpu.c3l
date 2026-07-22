@@ -332,9 +332,12 @@ their originating command allocator. Each reservation is keyed by
 pipeline and generated-work kind; its count bound is translated into exact
 driver-reported size, alignment, and memory-type requirements. The allocator
 fixes the exact queue, reservation-table capacity, total native byte budget,
-and per-list retained-index ceiling. Warm recording returns
+and per-list retained-index ceiling. The reservation query's maximum count
+covers every smaller recording without a second native query, and even a
+zero-byte native requirement consumes one retained reservation slot. Warm
+recording returns
 `GENERATED_SCRATCH_EXHAUSTED` instead
-of allocating when the count or compatible-buffer supply is exhausted. Discard
+of allocating when the count or matching-slot supply is exhausted. Discard
 and completion return reserved buffers to the same allocator; another allocator
 never acquires them implicitly.
 

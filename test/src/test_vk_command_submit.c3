@@ -22,34 +22,6 @@ fn void record_empty_executables(
 }
 
 
-fn void generated_preprocess_reuse_requires_compatible_memory() @test {
-    vk::GeneratedPreprocessBuffer buffer = {
-        .address     = 0x4000,
-        .size        = 4096,
-        .memory_type = 3,
-    };
-    vk::MemoryRequirements requirements = {
-        .size             = 2048,
-        .alignment        = 256,
-        .memory_type_bits = 1 << 3,
-    };
-
-    assert(vk::generated_preprocess_compatible(&buffer, &requirements),
-        "matching capacity, alignment, and memory type permit reuse");
-    requirements.size = 8192;
-    assert(!vk::generated_preprocess_compatible(&buffer, &requirements),
-        "undersized preprocess storage is not reused");
-    requirements.size = 2048;
-    requirements.alignment = 0x8000;
-    assert(!vk::generated_preprocess_compatible(&buffer, &requirements),
-        "misaligned preprocess addresses are not reused");
-    requirements.alignment = 256;
-    requirements.memory_type_bits = 1 << 2;
-    assert(!vk::generated_preprocess_compatible(&buffer, &requirements),
-        "incompatible Vulkan memory types are not reused");
-}
-
-
 fn void command_tokens_are_small_owner_values() @test {
     assert(gpu::CommandList::size <= 32,
         "recording token stays within four machine words");

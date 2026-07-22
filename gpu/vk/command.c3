@@ -40,7 +40,6 @@ struct GeneratedPreprocessBuffer {
     vma::Allocation        allocation;
     vk::DeviceAddress      address;
     vk::DeviceSize         size;
-    uint                   memory_type;
     gpu::PipelineHandle    reservation_pipeline;
     gpu::GeneratedWorkKind reservation_kind;
     uint                   reservation_max_commands;
@@ -2588,29 +2587,14 @@ fn void? execute_generated_work(
     vk::GeneratedCommandsPipelineInfoEXT pipeline_info =
         vk::generated_commands_pipeline_info_ext()
             .set_pipeline(pipeline.pipeline);
-    vk::GeneratedCommandsMemoryRequirementsInfoEXT requirements_info =
-        vk::generated_commands_memory_requirements_info_ext()
-            .set_next(&pipeline_info)
-            .set_indirect_commands_layout(layout)
-            .set_max_sequence_count(max_count);
-    vk::MemoryRequirements2 requirements2 = vk::memory_requirements2();
-    state.device_dispatch.generated_work.get_memory_requirements(
-        state.device,
-        &requirements_info,
-        &requirements2,
-    );
-
-    GeneratedPreprocessBuffer* preprocess = null;
-    if (requirements2.memory_requirements.size > 0) {
-        preprocess = acquire_generated_preprocess_buffer(
-            state:        state,
-            record:       record,
-            pipeline:     pipeline.handle,
-            kind:         kind,
-            requirements: &requirements2.memory_requirements,
-            max_count:    max_count,
+    GeneratedPreprocessBuffer* preprocess =
+        acquire_generated_preprocess_buffer(
+            state:     state,
+            record:    record,
+            pipeline:  pipeline.handle,
+            kind:      kind,
+            max_count: max_count,
         )!;
-    }
     vk::GeneratedCommandsInfoEXT info = vk::generated_commands_info_ext()
         .set_next(&pipeline_info)
         .set_shader_stages(shader_stages)
@@ -2619,7 +2603,7 @@ fn void? execute_generated_work(
         .set_indirect_address_size((vk::DeviceSize)records.size)
         .set_max_sequence_count(max_count)
         .set_sequence_count_address((vk::DeviceAddress)(count.slot.gpu_base + (gpu::GpuAddress)count.offset));
-    if (preprocess != null) {
+    if (preprocess.size > 0) {
         info = info
             .set_preprocess_address(preprocess.address)
             .set_preprocess_size(preprocess.size);
@@ -2872,16 +2856,6 @@ fn void? checked_tracking_dispatch_generated(
     record_generated_dispatch(commands, &dispatch)!;
 }
 
-fn bool generated_preprocess_compatible(
-    GeneratedPreprocessBuffer* buffer,
-    vk::MemoryRequirements* requirements,
-) {
-    if (buffer.size < requirements.size || buffer.memory_type >= 32) return false;
-    if (requirements.alignment > 1
-        && buffer.address % requirements.alignment != 0) return false;
-    return (requirements.memory_type_bits & (1 << buffer.memory_type)) != 0;
-}
-
 fn void recycle_generated_preprocess_indices_locked(
     VkDeviceState* state,
     CommandAllocatorSlot* slot,
@@ -2961,7 +2935,6 @@ fn GeneratedPreprocessBuffer? allocate_generated_preprocess_buffer(
         .memory_type_bits = memory_type_bits,
     };
     GeneratedPreprocessBuffer buffer;
-    vma::AllocationInfo native_info;
     bool owns_pair;
     defer catch {
         if (owns_pair) state.allocator.destroy_buffer(buffer.buffer, buffer.allocation);
@@ -2972,14 +2945,13 @@ fn GeneratedPreprocessBuffer? allocate_generated_preprocess_buffer(
         min_alignment: alignment,
         out_buffer:    &buffer.buffer,
         out_alloc:     &buffer.allocation,
-        out_info:      &native_info,
+        out_info:      null,
     ))!;
     owns_pair = true;
     vk::BufferDeviceAddressInfo address_info =
         vk::buffer_device_address_info().set_buffer(buffer.buffer);
     buffer.address = vk::get_buffer_device_address(state.device, &address_info);
     buffer.size = size;
-    buffer.memory_type = native_info.memory_type;
     if (buffer.address == 0) return gpu::BACKEND_ERROR~;
     owns_pair = false;
     (void)state.generated_preprocess_allocations.add(1, AtomicOrdering.RELAXED);
@@ -2992,7 +2964,6 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     CommandRecord* record,
     gpu::PipelineHandle pipeline,
     gpu::GeneratedWorkKind kind,
-    vk::MemoryRequirements* requirements,
     uint max_count,
 ) {
     CommandAllocatorSlot* slot = lock_command_allocator_handle(
@@ -3008,11 +2979,7 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     foreach (index, &reserved : slot.reservations) {
         if (!generated_reservation_matches(reserved, pipeline, kind)
             || max_count > reserved.reservation_max_commands
-            || reserved.reservation_in_use
-            || !generated_preprocess_compatible(
-                reserved,
-                requirements,
-            )) continue;
+            || reserved.reservation_in_use) continue;
         reserved.reservation_in_use = true;
         slot.generated_reservations_in_use++;
         record.scratch.generated_preprocess_indices[

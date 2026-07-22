@@ -262,10 +262,13 @@ pipeline handle and generated-work kind, not by native pipeline identity, so
 alias handles require separate reservations. For each key, reservation queries
 `vkGetGeneratedCommandsMemoryRequirementsEXT` with the exact layout and maximum
 sequence count, then allocates the requested number of addressable VMA buffers
-using the returned size, alignment, and memory-type mask. Warm generated calls
-borrow a matching buffer, retain it through command completion, and return
+using the returned size, alignment, and memory-type mask. That query defines the
+maximum sequence count supported by the reservation, so smaller warm calls do
+not query requirements again. Warm generated calls claim a matching reservation
+slot, retain it through command completion, and return
 `GENERATED_SCRATCH_EXHAUSTED` without allocating when the count or available
-compatible-buffer bound is exhausted. Fixed reservation-table, byte-budget, or
+slot bound is exhausted. A zero-byte preprocess requirement still claims a slot
+for exact simultaneous-use accounting. Fixed reservation-table, byte-budget, or
 per-list index exhaustion returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` before
 native mutation. Discard and completion return each buffer to its owning
 allocator. `release_generated_scratch` removes one quiescent allocator's
