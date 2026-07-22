@@ -168,6 +168,15 @@ struct VkDeviceState {
     Atomic{ulong}              texture_barrier_state_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_native_assemblies @if(env::TESTING);
     Atomic{ulong}              texture_barrier_native_emissions @if(env::TESTING);
+    Atomic{ulong}              completion_native_counter_queries @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
+    Atomic{ulong}              completion_native_wait_calls @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
+    Atomic{ulong}              completion_retirement_passes @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
+    Atomic{ulong}              completion_retirement_lock_acquisitions @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
+    Atomic{ulong}              completion_cached_poll_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
+    Atomic{ulong}              completion_cached_wait_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
+    Atomic{ulong}              submit_completion_wait_calls;
+    CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
+    void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
     ulong                      pipelines_created;
     bool                       pipeline_creation_failure_enabled;
@@ -177,6 +186,8 @@ struct VkDeviceState {
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);
     TextureBarrierEmitHook     texture_barrier_emit_hook @if(env::TESTING);
     void*                      texture_barrier_emit_user_data @if(env::TESTING);
+    SubmissionCheckpointHook  submission_checkpoint_hook @if(env::TESTING);
+    void*                     submission_checkpoint_user_data @if(env::TESTING);
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;
@@ -789,8 +800,11 @@ fn bool? device_destroy_ready_with_query(
             AtomicOrdering.ACQUIRE,
         );
         if (expected == 0) continue;
+        if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
+            >= expected) continue;
 
         ulong current;
+        note_completion_counter_query(state);
         vk::Result result = query_fn(
             state.device,
             completion.timeline,

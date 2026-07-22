@@ -352,7 +352,7 @@ class PerformanceContractTests(unittest.TestCase):
             self.mutate(
                 root,
                 "gpu/vk/sync.c3",
-                "state.submit_stats.completion_wait_calls++;",
+                "(void)state.submit_completion_wait_calls.add(1, AtomicOrdering.RELAXED);",
                 "state.submit_stats.queue_submits++;",
             )
             errors = check_performance_contract.check(root)
@@ -544,18 +544,57 @@ class PerformanceContractTests(unittest.TestCase):
                 root,
                 "gpu/vk/lifetime.c3",
                 (
-                    "        if (completed[queue_id]\n"
-                    "            < gpu::completion_point_sequence(batch.completion)) {"
+                    "    release_completed_submitted_commands_locked(state, queue_id, target);\n"
+                    "    completion.retired_sequence.store(target, AtomicOrdering.RELEASE);"
                 ),
-                "        if (false) {",
+                (
+                    "    completion.retired_sequence.store(target, AtomicOrdering.RELEASE);\n"
+                    "    release_completed_submitted_commands_locked(state, queue_id, target);"
+                ),
             )
             errors = check_performance_contract.check(root)
             self.assertTrue(
                 any(
-                    "ownership flow must match reviewed source" in error
+                    "completion ordering" in error
+                    or "ownership flow must match reviewed source" in error
                     for error in errors
                 )
             )
+
+    def test_completion_poll_fast_path_reordering_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sync.c3",
+                "    ulong current;\n    note_completion_counter_query(state);",
+                (
+                    "    note_completion_counter_query(state);\n"
+                    "    ulong current;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "vk_poll_completion_with_query" in error
+                for error in errors
+            ))
+
+    def test_retirement_published_prefix_cap_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/lifetime.c3",
+                "        AtomicOrdering.ACQUIRE,",
+                "        AtomicOrdering.RELAXED,",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "retire_queue_through_locked" in error
+                for error in errors
+            ))
 
     def test_generated_hot_acquisition_allocation_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -125,7 +125,8 @@ explicit wait-before-reuse and wait-before-free behavior
 owner-derived command finalization
 format feature queries agree with adapter-backed texture creation
 command list begin/end/submit
-completion-point signaling and waits
+completion-point signaling, retired-prefix publication, cached polls/waits,
+and deterministic publication/concurrent-retirement races
 global semantic barrier hazard matrix submission
 copy upload -> readback
 root-pointer compute shader
@@ -252,7 +253,18 @@ cache-create seam whose retryable first attempt and successful empty second
 attempt emit no terminal diagnostic. Pure range and lookup helpers remain
 fault-only; operation-aware result helpers own specialized backend mapping and
 emit exactly once with stable operation context.
-Queue tests cover compact completion packing, monotonicity, exhaustion, stale and foreign ownership, unpublished values, native poll/wait, timeout retry, and no public child allocation. Submission coverage includes deterministic empty-work targeting, contiguous publication, exact completion/readiness destination masks, invalid and queue-unsupported stage rollback, same-queue validation and elision, distinct transfer/compute/graphics waits, foreign and later-sequence rejection, timeline-distance backpressure, sequence exhaustion, native failure rollback, device-loss discard, token consumption, and destruction readiness.
+Queue tests cover compact completion packing, monotonicity, exhaustion, stale
+and foreign ownership, unpublished values, native poll/wait, timeout retry,
+and no public child allocation. Deterministic seams pause after native
+acceptance and batch publication, rendezvous concurrent first polls, and prove
+the published-prefix cap, exact wait retirement, timeout preservation, and
+100,000 cached polls with zero native queries or retirement-lock acquisitions.
+Submission coverage also includes deterministic empty-work targeting,
+contiguous publication, exact completion/readiness destination masks, invalid
+and queue-unsupported stage rollback, same-queue validation and elision,
+distinct transfer/compute/graphics waits, foreign and later-sequence rejection,
+timeline-distance backpressure, sequence exhaustion, native failure rollback,
+device-loss discard, token consumption, and destruction readiness.
 
 Leak tests verify structured `resource_lifetime` delivery, including
 `GpuAllocation` identity/name metadata, stderr fallback without a callback,
@@ -417,10 +429,12 @@ allocations, command-buffer allocations/frees, image-view creations, VMA
 allocations, and generated-scratch misses must all be zero; command-buffer
 resets demonstrate reuse. The source contract follows every reachable Vulkan
 recording helper and rejects those operations except at explicit cold seams.
-Lifecycle measurements cover submission, completed-point polling, and
+Lifecycle measurements cover submission, cached completed-point polling, and
 immediate texture destruction.
 
-Run `python -B scripts/run_benchmarks.py` for validation-disabled release
+The lifecycle output requires `cached_poll_queries=0` and
+`retirement_locks=0` across each 100,000-poll measured interval. Run
+`python -B scripts/run_benchmarks.py` for validation-disabled release
 evidence. Run `python -B scripts/run_benchmarks.py --validation --output
 test/build/benchmark-report-validation.md` separately for debug-layer cost.
 Timing values remain advisory; exact schemas, zero hot-path invariants, broad

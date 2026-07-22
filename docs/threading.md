@@ -113,6 +113,10 @@ allocation, submit claims, and reclamation use `command_mutex`.
 When both resource and view-cache locks are needed, resource comes first.
 Submission releases `command_mutex` before locking the selected queue, so
 command-record and queue locks are not nested.
+Queue submission may acquire `resource_mutex` while holding its
+`submit_mutex` to publish or retire submitted-command metadata. This is the
+only queue/resource nesting order: `submit_mutex` precedes `resource_mutex`,
+and resource-locked paths never acquire a queue submission mutex.
 
 ## Texture-transition discipline
 
@@ -179,11 +183,24 @@ submissions are ordered by the queue. Cross-queue dependencies are explicit in
 and no application work boundary adds waits or signals. Same-queue waits are
 still stage-validated before the redundant native wait is elided.
 
-Polling or waiting a point advances cached progress for its queue. Command
-buffers from accepted submissions become reusable only after their covering
-point completes. Resource storage, raw addresses, shader indices, and mapped
-data remain the caller's responsibility: retain every owning token until all
-points covering its use have completed.
+Each queue release-publishes one retired prefix. Sequence N is retired
+only after native completion and after every published submitted-command batch
+through N has released validation references, recycled generated scratch, and
+retired its command buffer. Poll and wait acquire-load that prefix after point
+validation; an already-retired point performs no native call and acquires
+neither the queue nor resource mutex.
+
+Native progress is capped to the acquire-loaded contiguous published prefix
+before retirement. This prevents a native submission paused before metadata or
+point publication from exposing or releasing its predicted sequence. A first
+poll miss may query the queue timeline and retire the observed published
+prefix. A successful wait retires exactly its requested sequence; timeout
+preserves both the point and retired prefix. Headroom and threshold drains
+advance the same prefix.
+
+Resource storage, raw addresses, shader indices, and mapped data remain the
+caller's responsibility: retain every owning token until all points covering
+its use have completed.
 
 ## Submission lifetime
 

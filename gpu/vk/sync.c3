@@ -6,6 +6,11 @@ import vk;
 alias TextureBarrierEmitHook @if(env::TESTING) = fn void (
     void*, vk::ImageMemoryBarrier2*
 );
+alias SemaphoreWaitFn @private = fn vk::Result (
+    vk::Device,
+    vk::SemaphoreWaitInfo*,
+    ulong,
+);
 
 const gpu::StageMask TEXTURE_STATE_STAGE_MASK @private = {
     .all,
@@ -836,10 +841,11 @@ fn vk::Semaphore? create_private_timeline(VkDeviceState* state) @private {
     return semaphore;
 }
 
-fn bool? vk_poll_completion(
+fn bool? vk_poll_completion_with_query(
     gpu::Device* device,
     uint queue_id,
     ulong sequence,
+    SemaphoreCounterQueryFn query_fn,
 ) @private {
     VkDeviceState* state =
         (VkDeviceState*)gpu::device_backend_state_ptr(device);
@@ -848,24 +854,91 @@ fn bool? vk_poll_completion(
         queue_id,
         sequence,
     )!;
+    if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
+        note_completion_cached_poll_hit(state);
+        return true;
+    }
     ulong current;
+    note_completion_counter_query(state);
     check_backend_result(
         state:     state,
         operation: "poll_completion",
-        result:    vk::get_semaphore_counter_value(
+        result:    query_fn(
             state.device,
             completion.timeline,
             &current,
         ),
     )!;
     if (current < sequence) return false;
-    observe_queue_completion(completion, current);
-    release_completed_submitted_commands(
+    retire_queue_through(
+        state:            state,
+        completion:       completion,
+        queue_id:         queue_id,
+        native_completed: current,
+    );
+    return completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence;
+}
+
+fn bool? vk_poll_completion(
+    gpu::Device* device,
+    uint queue_id,
+    ulong sequence,
+) @private {
+    return vk_poll_completion_with_query(
+        device:   device,
+        queue_id: queue_id,
+        sequence: sequence,
+        query_fn: &real_semaphore_counter_query,
+    );
+}
+
+fn vk::Result real_semaphore_wait(
+    vk::Device device,
+    vk::SemaphoreWaitInfo* wait_info,
+    ulong timeout_ns,
+) @private {
+    return vk::wait_semaphores(device, wait_info, timeout_ns);
+}
+
+fn void? vk_wait_completion_with_wait(
+    gpu::Device* device,
+    uint queue_id,
+    ulong sequence,
+    ulong timeout_ns,
+    SemaphoreWaitFn wait_fn,
+) @private {
+    VkDeviceState* state =
+        (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    (void)state.submit_completion_wait_calls.add(1, AtomicOrdering.RELAXED);
+    QueueCompletionState* completion = published_queue_completion_state(
         state,
         queue_id,
-        current,
+        sequence,
+    )!;
+    if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
+        note_completion_cached_wait_hit(state);
+        return;
+    }
+    vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
+        .set_semaphore_count(1)
+        .set_semaphores((&completion.timeline)[:1])
+        .set_values((&sequence)[:1]);
+    note_completion_wait_call(state);
+    check_wait_backend_result(
+        state:     state,
+        operation: "wait_completion",
+        result:    wait_fn(
+            state.device,
+            &wait_info,
+            timeout_ns,
+        ),
+    )!;
+    retire_queue_through(
+        state:            state,
+        completion:       completion,
+        queue_id:         queue_id,
+        native_completed: sequence,
     );
-    return true;
 }
 
 fn void? vk_wait_completion(
@@ -874,31 +947,11 @@ fn void? vk_wait_completion(
     ulong sequence,
     ulong timeout_ns,
 ) @private {
-    VkDeviceState* state =
-        (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    state.submit_stats.completion_wait_calls++;
-    QueueCompletionState* completion = published_queue_completion_state(
-        state,
-        queue_id,
-        sequence,
-    )!;
-    vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
-        .set_semaphore_count(1)
-        .set_semaphores((&completion.timeline)[:1])
-        .set_values((&sequence)[:1]);
-    check_wait_backend_result(
-        state:     state,
-        operation: "wait_completion",
-        result:    vk::wait_semaphores(
-            state.device,
-            &wait_info,
-            timeout_ns,
-        ),
-    )!;
-    observe_queue_completion(completion, sequence);
-    release_completed_submitted_commands(
-        state,
-        queue_id,
-        sequence,
+    return vk_wait_completion_with_wait(
+        device:     device,
+        queue_id:   queue_id,
+        sequence:   sequence,
+        timeout_ns: timeout_ns,
+        wait_fn:    &real_semaphore_wait,
     );
 }
