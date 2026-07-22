@@ -909,7 +909,7 @@ fn void? vk_wait_completion_with_wait(
 ) @private {
     VkDeviceState* state =
         (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    state.submit_stats.completion_wait_calls++;
+    (void)state.submit_completion_wait_calls.add(1, AtomicOrdering.RELAXED);
     QueueCompletionState* completion = published_queue_completion_state(
         state,
         queue_id,

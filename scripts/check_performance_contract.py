@@ -120,7 +120,7 @@ LIFETIME_OWNERSHIP_DIGESTS = {
     "release_submitted_command_batch": "62e62aa38aadd18bf69a42b62d3851be0ce30b9007e948f9123261bcf091656e",
     "release_completed_submitted_commands_locked": "bd81cb2ab4514a5428d70fa75883594913b7e77d0c15f123593b008f7e0e50d4",
     "retire_queue_through_locked": "20a6ac45e04f5ef6af39283a325adbda8ede10c48439b4189b49db726afd03da",
-    "retire_queue_through": "6e8d7b88fc8128a07403ae71795b905927471bc3ab831da73b489ee2540df9ff",
+    "retire_queue_through": "f156456f232cebdcd4a42940d4bfcde11fbe13fb97e0e8b7954502ca630b022e",
     "destroy_submitted_commands": "1858d0b6e5a0d7659b1ed6ca6a08abf7e13f5577cdcea9cdc48dfdcde0d95d60",
     "drain_completed_submitted_commands_with_query": "72af65609acdec98806062f89af9b3381a402d28d29729fe8a8829699a88db19",
     "drain_completed_submitted_commands": "182036fc91b30152a2f76fd8a300f6b25efc1ff4d2260c4eafaa60fc00ba4314",
@@ -133,7 +133,7 @@ DEVICE_OWNERSHIP_DIGESTS = {
 
 SYNC_OWNERSHIP_DIGESTS = {
     "vk_poll_completion_with_query": "412d2e08adca4b1ba1d490369eea100e679c0f166bfe3fbda72a43714d0a9ce4",
-    "vk_wait_completion_with_wait": "c17f34789d064ff3b7329ab38659e11de15608a98116912fbd2752cd7c352b54",
+    "vk_wait_completion_with_wait": "b237ddbea1156e1a5ae3d814c60b9fecdb50f29ee5105038ec799f66d43ecb6a",
 }
 QUEUE_OWNERSHIP_DIGESTS = {
     "require_queue_completion_headroom_with_query": "c3f89d8dc421137f79ce5954587dd384cfe88059eda20e30216f7099cbaaaa07",

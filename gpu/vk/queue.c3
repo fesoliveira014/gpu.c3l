@@ -2303,5 +2303,9 @@ fn gpu::CompletionPoint? vk_submit(
 
 <* Snapshot of submit counters, exposed for whitebox accounting in tests. *>
 fn SubmitStats submit_stats(VkDeviceState* state) {
-    return state.submit_stats;
+    SubmitStats stats = state.submit_stats;
+    stats.completion_wait_calls = state.submit_completion_wait_calls.load(
+        AtomicOrdering.RELAXED,
+    );
+    return stats;
 }

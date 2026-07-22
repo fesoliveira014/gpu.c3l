@@ -174,6 +174,9 @@ struct VkDeviceState {
     Atomic{ulong}              completion_retirement_lock_acquisitions @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              completion_cached_poll_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              completion_cached_wait_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
+    Atomic{ulong}              submit_completion_wait_calls;
+    CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
+    void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
     ulong                      pipelines_created;
     bool                       pipeline_creation_failure_enabled;

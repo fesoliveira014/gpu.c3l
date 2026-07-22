@@ -352,7 +352,7 @@ class PerformanceContractTests(unittest.TestCase):
             self.mutate(
                 root,
                 "gpu/vk/sync.c3",
-                "state.submit_stats.completion_wait_calls++;",
+                "(void)state.submit_completion_wait_calls.add(1, AtomicOrdering.RELAXED);",
                 "state.submit_stats.queue_submits++;",
             )
             errors = check_performance_contract.check(root)

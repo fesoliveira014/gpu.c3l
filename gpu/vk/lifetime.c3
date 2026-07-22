@@ -4,6 +4,8 @@ import gpu @public;
 import vk;
 import std::atomic::types;
 
+alias CompletionRetirementLockHook @if(env::TESTING) = fn void (void*);
+
 const usz COMMAND_REFERENCE_INITIAL_CAPACITY = 16;
 const usz SUBMITTED_COMMAND_INITIAL_CAPACITY = 16;
 const uint SUBMITTED_COMMAND_DRAIN_THRESHOLD = 64;
@@ -376,17 +378,34 @@ fn void retire_queue_through(
     ulong retired = completion.retired_sequence.load(AtomicOrdering.ACQUIRE);
     if (native_completed <= retired) return;
 
+    $if env::TESTING:
+        if (state.completion_retirement_lock_hook != null) {
+            state.completion_retirement_lock_hook(
+                state.completion_retirement_lock_user_data,
+            );
+        }
+    $endif
+
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
+    note_completion_retirement_lock_acquisition(state);
     retired = completion.retired_sequence.load(AtomicOrdering.RELAXED);
     if (native_completed <= retired) return;
-    note_completion_retirement_lock_acquisition(state);
     retire_queue_through_locked(
         state:            state,
         completion:       completion,
         queue_id:         queue_id,
         native_completed: native_completed,
     );
+}
+
+fn void set_completion_retirement_lock_hook(
+    VkDeviceState* state,
+    CompletionRetirementLockHook hook,
+    void* user_data,
+) @if(env::TESTING) {
+    state.completion_retirement_lock_hook = hook;
+    state.completion_retirement_lock_user_data = user_data;
 }
 
 fn void? drain_completed_submitted_commands_with_query(
