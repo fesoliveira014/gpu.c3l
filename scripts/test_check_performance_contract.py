@@ -20,6 +20,7 @@ REQUIRED_PATHS = (
     "gpu/vk/pipeline_compute.c3",
     "gpu/vk/queue.c3",
     "gpu/vk/render_pass.c3",
+    "gpu/vk/shader.c3",
     "gpu/vk/sync.c3",
     "gpu/vk/texture.c3",
     "test/src/command_record_bench.c3",
@@ -408,10 +409,10 @@ class PerformanceContractTests(unittest.TestCase):
             self.mutate(
                 root,
                 "gpu/vk/pipeline_cache.c3",
-                "key.vertex_shader_digest = desc.shader.digest;",
+                ".fragment_shader = SHADER_ID_INVALID,",
                 (
-                    "key.vertex_shader_digest = desc.shader.digest;\n"
-                    "    key.sample_count = (int)desc.push_constant_size;"
+                    ".fragment_shader = SHADER_ID_INVALID,\n"
+                    "        .sample_count = (int)desc.push_constant_size,"
                 ),
             )
             errors = check_performance_contract.check(root)
@@ -451,6 +452,80 @@ class PerformanceContractTests(unittest.TestCase):
             self.assertTrue(
                 any("immutable key shape" in error for error in errors)
             )
+
+    def test_pipeline_cache_entry_cannot_own_shader_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/pipeline_cache.c3",
+                "PipelineKey                    key;",
+                (
+                    "PipelineKey                    key;\n"
+                    "    gpu::ShaderCode                cached_shader;"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "PipelineCacheEntry" in error
+                for error in errors
+            ))
+
+    def test_pipeline_lookup_cannot_call_renamed_shader_comparator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/pipeline_cache.c3",
+                "PipelineCacheTable* cache = &state.pipeline_cache;",
+                (
+                    "PipelineCacheTable* cache = &state.pipeline_cache;\n"
+                    "    compare_payload_equivalent(state);"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "unexpected calls" in error
+                for error in errors
+            ))
+
+    def test_pipeline_lookup_cannot_compare_spirv_directly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/pipeline_cache.c3",
+                "PipelineCacheTable* cache = &state.pipeline_cache;",
+                (
+                    "PipelineCacheTable* cache = &state.pipeline_cache;\n"
+                    "    mem::equals(state.shader_store.entries[0].spirv, "
+                    "state.shader_store.entries[0].spirv);"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "find_entry contains forbidden" in error
+                for error in errors
+            ))
+
+    def test_shader_interning_exact_byte_check_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/shader.c3",
+                "return mem::equals(entry.spirv, code.spirv);",
+                "return true;",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "collision verification" in error
+                for error in errors
+            ))
 
     def test_completion_point_allocation_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

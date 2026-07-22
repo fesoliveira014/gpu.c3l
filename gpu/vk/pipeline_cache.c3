@@ -42,8 +42,8 @@ $assert ColorTargetKey::size == 36;
 // assignment keeps the byte view deterministic for hashing. Command-time state
 // and debug_name stay out.
 struct PipelineKey {
-    ulong vertex_shader_digest;
-    ulong fragment_shader_digest;
+    ShaderId vertex_shader;
+    ShaderId fragment_shader;
     uint  color_target_count;
     ColorTargetKey[gpu::MAX_COLOR_ATTACHMENTS] color_targets;
     int   depth_format;
@@ -52,13 +52,11 @@ struct PipelineKey {
     int   kind;
     uint  reserved;
 }
-$assert PipelineKey::size == 328;
+$assert PipelineKey::size == 320;
 
 struct PipelineCacheEntry {
     ulong                          hash;
     PipelineKey                    key;
-    gpu::ShaderCode                first_shader;
-    gpu::ShaderCode                second_shader;
     vk::Pipeline                   pipeline;
     vk::PipelineLayout             layout;
     vk::IndirectCommandsLayoutEXT  generated_dispatch_layout;
@@ -179,60 +177,16 @@ fn void? create_driver_pipeline_cache(VkDeviceState* state, char[] cache_data) @
     return create_driver_pipeline_cache_with_ops(state, cache_data, &ops);
 }
 
-fn gpu::ShaderCode clone_shader_code(
-    VkDeviceState* state,
-    gpu::ShaderCode* source,
+fn PipelineKey build_graphics_key(
+    gpu::GraphicsPipelineDesc* desc,
+    ShaderId vertex_shader,
+    ShaderId fragment_shader,
 ) @private {
-    char[] spirv = alloc::new_array(
-        state.host_allocator,
-        char,
-        (sz)source.spirv.len,
-    );
-    mem::copy(spirv.ptr, source.spirv.ptr, source.spirv.len);
-    String entry_point = source.entry_point.str_view();
-    char[] entry_storage = alloc::new_array(
-        state.host_allocator,
-        char,
-        (sz)(entry_point.len + 1),
-    );
-    mem::copy(entry_storage.ptr, entry_point.ptr, entry_point.len);
-    entry_storage[entry_point.len] = 0;
-    return {
-        .stage       = source.stage,
-        .spirv       = spirv,
-        .entry_point = (ZString)entry_storage.ptr,
-        .digest      = source.digest,
+    PipelineKey key = {
+        .vertex_shader   = vertex_shader,
+        .fragment_shader = fragment_shader,
     };
-}
-
-fn void free_cloned_shader_code(
-    VkDeviceState* state,
-    gpu::ShaderCode* code,
-) @private {
-    if (code.spirv.ptr != null) {
-        alloc::free(state.host_allocator, code.spirv.ptr);
-    }
-    if (code.entry_point != null) {
-        alloc::free(state.host_allocator, (char*)code.entry_point);
-    }
-    *code = {};
-}
-
-fn bool cached_shader_codes_match(
-    PipelineCacheEntry* entry,
-    gpu::ShaderCode* first_shader,
-    gpu::ShaderCode* second_shader,
-) @private {
-    if (first_shader == null || !(entry.first_shader == *first_shader)) return false;
-    if (second_shader == null) return !entry.second_shader.is_valid();
-    return entry.second_shader == *second_shader;
-}
-
-fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
-    PipelineKey key = {};
     key.kind                   = (int)PipelineKind.GRAPHICS;
-    key.vertex_shader_digest   = desc.vertex_shader.digest;
-    key.fragment_shader_digest = desc.fragment_shader.digest;
     key.polygon_mode           = (int)desc.polygon_mode;
     key.depth_format           = (int)desc.depth_format;
     key.sample_count           = (int)desc.sample_count;
@@ -256,11 +210,12 @@ fn PipelineKey build_graphics_key(gpu::GraphicsPipelineDesc* desc) @private {
     return key;
 }
 
-fn PipelineKey build_compute_key(gpu::ComputePipelineDesc* desc) @private {
-    PipelineKey key = {};
-    key.kind                 = (int)PipelineKind.COMPUTE;
-    key.vertex_shader_digest = desc.shader.digest;
-    return key;
+fn PipelineKey build_compute_key(ShaderId shader) @private {
+    return {
+        .vertex_shader   = shader,
+        .fragment_shader = SHADER_ID_INVALID,
+        .kind            = (int)PipelineKind.COMPUTE,
+    };
 }
 
 fn ulong hash_key(PipelineKey* key) @private {
@@ -302,18 +257,17 @@ fn void unlink_entry(PipelineCacheTable* cache, uint idx) @private {
 
 <* Index of the live entry matching hash+key, or PIPELINE_ENTRY_NONE. *>
 fn uint find_entry(
-    PipelineCacheTable* cache,
+    VkDeviceState* state,
     ulong hash,
     PipelineKey* key,
-    gpu::ShaderCode* first_shader,
-    gpu::ShaderCode* second_shader,
 ) {
+    PipelineCacheTable* cache = &state.pipeline_cache;
     uint bucket = bucket_for(hash, (uint)cache.bucket_heads.len);
     for (uint cur = cache.bucket_heads[bucket]; cur != 0; ) {
+        note_pipeline_key_probe(state);
         PipelineCacheEntry* entry = &cache.entries[cur - 1];
         if (entry.hash == hash
-            && key_equals(&entry.key, key)
-            && cached_shader_codes_match(entry, first_shader, second_shader)) {
+            && key_equals(&entry.key, key)) {
             return cur - 1;
         }
         cur = entry.next_in_bucket;
@@ -324,9 +278,12 @@ fn uint find_entry(
 fn uint? insert_entry(
     VkDeviceState* state,
     PipelineCacheEntry value,
-    gpu::ShaderCode* first_shader,
-    gpu::ShaderCode* second_shader,
 ) {
+    $if env::TESTING:
+        if (state.pipeline_cache_insert_failure) {
+            return gpu::SLOT_TABLE_FULL~;
+        }
+    $endif
     PipelineCacheTable* cache = &state.pipeline_cache;
     uint idx;
     if (cache.free_head != PIPELINE_FREE_NONE) {
@@ -336,10 +293,6 @@ fn uint? insert_entry(
         idx = cache.next_new++;
     } else {
         return gpu::SLOT_TABLE_FULL~;
-    }
-    value.first_shader = clone_shader_code(state, first_shader);
-    if (second_shader != null) {
-        value.second_shader = clone_shader_code(state, second_shader);
     }
     cache.entries[idx] = value;
     cache.entries[idx].used = true;
@@ -353,8 +306,10 @@ fn void release_entry(VkDeviceState* state, uint entry_index) {
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[entry_index];
     if (--entry.refcount > 0) return;
     vk::destroy_pipeline(state.device, entry.pipeline, null);
-    free_cloned_shader_code(state, &entry.first_shader);
-    free_cloned_shader_code(state, &entry.second_shader);
+    release_shader_identity_locked(state, entry.key.vertex_shader)!!;
+    if (entry.key.fragment_shader != SHADER_ID_INVALID) {
+        release_shader_identity_locked(state, entry.key.fragment_shader)!!;
+    }
     unlink_entry(&state.pipeline_cache, entry_index);
     entry.used = false;
     entry.next_free = state.pipeline_cache.free_head;
@@ -378,6 +333,27 @@ fn void set_pipeline_creation_failure(VkDeviceState* state, usz index) {
 fn void clear_pipeline_creation_failure(VkDeviceState* state) {
     state.pipeline_creation_failure_enabled = false;
     state.pipeline_creation_failure_index = 0;
+}
+
+fn void set_pipeline_shader_create_result(
+    VkDeviceState* state,
+    vk::Result result,
+) @if(env::TESTING) {
+    state.pipeline_shader_create_result = result;
+}
+
+fn void set_pipeline_native_create_result(
+    VkDeviceState* state,
+    vk::Result result,
+) @if(env::TESTING) {
+    state.pipeline_native_create_result = result;
+}
+
+fn void set_pipeline_cache_insert_failure(
+    VkDeviceState* state,
+    bool enabled,
+) @if(env::TESTING) {
+    state.pipeline_cache_insert_failure = enabled;
 }
 
 fn bool pipeline_creation_should_fail(VkDeviceState* state, usz index) {
@@ -410,6 +386,44 @@ fn bool pipeline_cache_index_consistent(VkDeviceState* state) {
         }
     }
     return linked == pipeline_cache_entry_count(state);
+}
+
+fn PipelineIdentityProbeResult? probe_pipeline_identity_boundary(
+    VkDeviceState* state,
+    gpu::ShaderCode* code,
+) @if(env::TESTING || $feature(PIPELINE_CACHE_STATS)) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+
+    reset_pipeline_identity_stats(state);
+    ShaderId shader = retain_shader_identity_locked(state, code)!;
+    PipelineIdentityStats interning = pipeline_identity_stats(state);
+    PipelineKey key = build_compute_key(shader);
+    ulong hash = hash_key(&key);
+    uint? inserted_optional = insert_entry(
+        state,
+        {
+            .hash = hash,
+            .key  = key,
+        },
+    );
+    if (catch insert_fault = inserted_optional) {
+        release_shader_identity_locked(state, shader)!;
+        return insert_fault~;
+    }
+    uint inserted = inserted_optional;
+
+    reset_pipeline_identity_stats(state);
+    uint found = find_entry(state, hash, &key);
+    if (found != inserted) {
+        release_entry(state, inserted);
+        return gpu::BACKEND_ERROR~;
+    }
+    release_entry(state, inserted);
+    return {
+        .interning = interning,
+        .lookup    = pipeline_identity_stats(state),
+    };
 }
 
 <* Spec-recommended pre-screen; the driver retry is the real safety net. *>
@@ -511,6 +525,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
 
     state.pipeline_cache.entries = mem::new_array(PipelineCacheEntry, capacity);
     state.pipeline_cache.bucket_heads = mem::new_array(uint, next_pow2(capacity * 2));
+    create_shader_store(state, capacity)!;
 }
 
 fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
@@ -563,8 +578,6 @@ fn void destroy_pipeline_shared(VkDeviceState* state) {
         foreach (&entry : state.pipeline_cache.entries[:state.pipeline_cache.next_new]) {
             if (entry.used) {
                 vk::destroy_pipeline(state.device, entry.pipeline, null);
-                free_cloned_shader_code(state, &entry.first_shader);
-                free_cloned_shader_code(state, &entry.second_shader);
             }
         }
         mem::free(state.pipeline_cache.entries.ptr);
@@ -574,6 +587,7 @@ fn void destroy_pipeline_shared(VkDeviceState* state) {
         mem::free(state.pipeline_cache.bucket_heads.ptr);
         state.pipeline_cache.bucket_heads = {};
     }
+    destroy_shader_store(state);
     if (state.generated_dispatch_layout != null) {
         state.device_dispatch.generated_work.destroy_layout(
             state.device,

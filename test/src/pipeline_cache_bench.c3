@@ -4,6 +4,7 @@ import gpu;
 import gpu::vk @public;
 import std::io;
 import std::time;
+import std::core::mem;
 
 // Advisory, not gating: request one alias for each command-time raster-state
 // permutation, then measure duplicate single and batch cache lookup. The raster
@@ -16,6 +17,45 @@ const uint BENCH_RASTER_PERMUTATION_COUNT = 200;
 const uint BENCH_DUPLICATE_COUNT          = 200_000;
 const uint BENCH_BATCH_SIZE               = 64;
 const uint BENCH_BATCH_ROUNDS             = 2_000;
+const usz BENCH_SHADER_SMALL_BYTES        = 1_024;
+const usz BENCH_SHADER_MEDIUM_BYTES       = 64 * 1_024;
+const usz BENCH_SHADER_LARGE_BYTES        = 1_024 * 1_024;
+
+fn void probe_owned_shader_identity(
+    vk::VkDeviceState* state,
+    usz byte_count,
+) {
+    char[] spirv = mem::new_array(char, (sz)byte_count);
+    defer mem::free(spirv.ptr);
+    foreach (&byte : spirv) *byte = 0;
+    mem::copy(spirv.ptr, BENCH_VERT_SPIRV[..].ptr, 20);
+    gpu::ShaderDesc desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = spirv,
+        .entry_point = "main",
+    };
+    gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
+    std::time::Clock start = std::time::clock::now();
+    vk::PipelineIdentityProbeResult result =
+        vk::probe_pipeline_identity_boundary(state, &code)!!;
+    long elapsed_ns = (long)start.to_now();
+    assert(result.interning.shader_owned_bytes_cloned == byte_count,
+        "the interning boundary owns the complete synthetic shader");
+    assert(result.lookup.pipeline_key_probes == 1,
+        "the post-intern lookup compares one compact key");
+    assert(result.lookup.shader_owned_bytes_freed == byte_count,
+        "the probe releases its owned shader identity");
+    io::printfn(
+        "identity size_bytes=%d intern_probes=%d intern_bytes_compared=%d owned_bytes_cloned=%d pipeline_key_probes=%d owned_bytes_freed=%d elapsed_ns=%d",
+        byte_count,
+        result.interning.shader_intern_probes,
+        result.interning.shader_intern_bytes_compared,
+        result.interning.shader_owned_bytes_cloned,
+        result.lookup.pipeline_key_probes,
+        result.lookup.shader_owned_bytes_freed,
+        elapsed_ns,
+    );
+}
 
 fn gpu::DynamicRasterState raster_permutation(uint index) {
     gpu::DynamicRasterState raster = {
@@ -202,6 +242,10 @@ fn int main() {
         BENCH_BATCH_ROUNDS,
         batch_ns_per_create,
     );
+
+    probe_owned_shader_identity(state, BENCH_SHADER_SMALL_BYTES);
+    probe_owned_shader_identity(state, BENCH_SHADER_MEDIUM_BYTES);
+    probe_owned_shader_identity(state, BENCH_SHADER_LARGE_BYTES);
 
     foreach (handle : aliases) gpu::destroy_pipeline(&device, handle)!!;
 

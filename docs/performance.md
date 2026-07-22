@@ -36,7 +36,7 @@ The suite covers:
 | `command_record_bench` | Barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact one-visit-per-list duplicate-detection work |
-| `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup, and cached batches |
+| `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
 | `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; exact texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
 | `upload_throughput_bench` | Explicit uploads at 4 KiB, 256 KiB, and 4 MiB across 1/2/4 workers |
@@ -76,6 +76,13 @@ The submit-batch benchmark submits real executable command lists in batches of
 1, 8, 32, 128, and 1,024. Its feature-gated counters require exactly one token
 visit per list and zero epoch-reset cells for each ordinary batch. These exact
 work counts are blocking; `ns/submit` remains advisory.
+
+The pipeline-cache benchmark separately interns synthetic 1 KiB, 64 KiB, and
+1 MiB identities. For every size, its blocking counters require one complete
+owned clone and free and one compact-key probe. The source-contract gate proves
+that post-intern pipeline lookup has no SPIR-V byte path; interning probes and
+collision bytes are reported separately. Boundary elapsed time is advisory;
+the exact work counters and structural gate are the regression evidence.
 
 Release runs use deliberately broad order-of-magnitude thresholds:
 

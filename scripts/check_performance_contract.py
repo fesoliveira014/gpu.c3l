@@ -73,6 +73,28 @@ BOUND_PIPELINE_SNAPSHOT_FIELDS = (
     "kind",
     "render",
 )
+PIPELINE_KEY_FIELDS = (
+    "vertex_shader",
+    "fragment_shader",
+    "color_target_count",
+    "color_targets",
+    "depth_format",
+    "sample_count",
+    "polygon_mode",
+    "kind",
+    "reserved",
+)
+PIPELINE_CACHE_ENTRY_FIELDS = (
+    "hash",
+    "key",
+    "pipeline",
+    "layout",
+    "generated_dispatch_layout",
+    "refcount",
+    "next_free",
+    "next_in_bucket",
+    "used",
+)
 RECORDING_COLD_GROWTH_ALLOWLIST = frozenset((
     "ensure_command_reference_capacity",
 ))
@@ -353,6 +375,7 @@ def check(root: Path = ROOT) -> list[str]:
     command_state_source = read(root, "gpu/vk/command_state.c3")
     backend_device_source = read(root, "gpu/vk/device.c3")
     pipeline_cache_source = read(root, "gpu/vk/pipeline_cache.c3")
+    shader_source = read(root, "gpu/vk/shader.c3")
     pipeline_compute_source = read(root, "gpu/vk/pipeline_compute.c3")
     lifetime_source = read(root, "gpu/vk/lifetime.c3")
     command_bench = read(root, "test/src/command_record_bench.c3")
@@ -636,7 +659,9 @@ def check(root: Path = ROOT) -> list[str]:
     required_pipeline_key_tokens = (
         "ColorTargetKey[gpu::MAX_COLOR_ATTACHMENTS] color_targets;",
         "$assert ColorTargetKey::size == 36;",
-        "$assert PipelineKey::size == 328;",
+        "$assert PipelineKey::size == 320;",
+        "ShaderId vertex_shader;",
+        "ShaderId fragment_shader;",
     )
     for token in required_pipeline_key_tokens:
         if token not in pipeline_cache_source:
@@ -658,12 +683,80 @@ def check(root: Path = ROOT) -> list[str]:
         graphics_key,
         ("desc.topology", "desc.raster", "depth_bias", "cull_mode", "front_face"),
     )
+    pipeline_key_fields = struct_field_names(
+        pipeline_cache_source,
+        "PipelineKey",
+    )
+    if pipeline_key_fields != PIPELINE_KEY_FIELDS:
+        errors.append(
+            "gpu/vk/pipeline_cache.c3:PipelineKey must contain only the "
+            "reviewed ID and immutable-state fields"
+        )
+    pipeline_cache_entry_fields = struct_field_names(
+        pipeline_cache_source,
+        "PipelineCacheEntry",
+    )
+    if pipeline_cache_entry_fields != PIPELINE_CACHE_ENTRY_FIELDS:
+        errors.append(
+            "gpu/vk/pipeline_cache.c3:PipelineCacheEntry must contain only "
+            "the reviewed ID-keyed cache fields"
+        )
+
     compute_key = function_body(pipeline_cache_source, "build_compute_key")
-    if "desc.shader.digest" not in compute_key or "push_constant" in compute_key:
+    if (".vertex_shader   = shader" not in compute_key
+            or ".fragment_shader = SHADER_ID_INVALID" not in compute_key
+            or "push_constant" in compute_key):
         errors.append(
             "gpu/vk/pipeline_cache.c3 compute key must use shader identity "
             "with the fixed root layout"
         )
+
+    find_pipeline_entry = function_body(pipeline_cache_source, "find_entry")
+    reject_tokens(
+        errors,
+        "gpu/vk/pipeline_cache.c3",
+        "find_entry",
+        find_pipeline_entry,
+        (
+            "gpu::ShaderCode",
+            ".spirv",
+            "mem::equals",
+            "clone_shader",
+            "free_cloned_shader",
+            "shader_store",
+        ),
+    )
+    find_entry_calls = set(re.findall(
+        r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        mask_c3_comments(find_pipeline_entry),
+    )) - {"for", "if"}
+    unexpected_find_entry_calls = find_entry_calls - {
+        "bucket_for",
+        "note_pipeline_key_probe",
+        "key_equals",
+    }
+    if unexpected_find_entry_calls:
+        errors.append(
+            "gpu/vk/pipeline_cache.c3:find_entry must only hash/probe the "
+            "canonical ID key; unexpected calls: "
+            + ", ".join(sorted(unexpected_find_entry_calls))
+        )
+
+    shader_identity_equals = function_body(
+        shader_source,
+        "shader_store_entry_equals",
+    )
+    for token in (
+        "entry.stage != code.stage",
+        "entry.spirv.len != code.spirv.len",
+        "entry_point",
+        "mem::equals(entry.spirv, code.spirv)",
+    ):
+        if token not in shader_identity_equals:
+            errors.append(
+                "gpu/vk/shader.c3 collision verification is missing "
+                f"{token}"
+            )
 
     ownership_sources = (
         ("gpu/vk/command.c3", backend_source, BACKEND_OWNERSHIP_DIGESTS),

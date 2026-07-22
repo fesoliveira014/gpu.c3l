@@ -498,13 +498,15 @@ descriptor cell, owner count, generation, free list, or output token.
 ### Shader preparation and modules
 
 `ShaderCode` is borrowed CPU-side IR with library-computed identity, not a
-backend object. Pipeline creation checks the in-memory cache before compiling.
-On a miss, the backend creates a temporary `vk::ShaderModule`, validates
-reflection against the requested pipeline ABI, compiles the pipeline, and
-destroys the module before returning. Batch creation reuses one temporary
-module for each exact shader value and rolls back every created handle and cache
-entry before returning a fault. No shader-module handle or table crosses the
-public boundary.
+backend object. Before cache lookup, each device interns digest, stage, entry
+point, length, and exact SPIR-V into owned storage. Digest selects a bucket;
+exact comparison resolves collisions. Debug names do not participate in
+identity. On a miss, the backend creates a temporary `vk::ShaderModule` from
+the owned entry, validates reflection against the requested pipeline ABI,
+compiles the pipeline, and destroys the module before returning. Batch creation
+reuses one temporary module per `ShaderId` and rolls back every created handle,
+cache entry, and pending shader reference before returning a fault. No native
+shader-module handle crosses the public boundary.
 
 Reflection validation checks:
 
@@ -574,13 +576,15 @@ are outside the portable contract.
 ### Pipeline cache
 
 Two layers. A descriptor-keyed dedup cache (`PipelineKey` over immutable state,
-with refcounted aliases) sits in front of a driver `vk::PipelineCache`. Shader
-digests participate in the key, while cache matches also compare stage, entry
-point, length, and exact SPIR-V bytes. Cache entries clone those borrowed
-identity inputs with the device host allocator, so digest collisions stay
-distinct and a prepared value can be reused across devices. The driver cache is
-created with `RuntimeDesc.pipeline_cache_data` as initial data and exported
-through `get_pipeline_cache_size` / `get_pipeline_cache_data`.
+with refcounted aliases) sits in front of a driver `vk::PipelineCache`. The key
+and cache entry contain compact shader IDs, never borrowed `ShaderCode` or
+SPIR-V clones. Collision verification and the one owned clone happen only at
+the device interning boundary; pipeline lookup compares IDs and immutable state
+in average constant time. Cache entries own retained IDs. Last-alias release
+unlinks zero-reference identities and returns their slots to a free list, so
+capacity follows live cache ownership rather than historical churn. The driver
+cache is created with `RuntimeDesc.pipeline_cache_data` as initial data and
+exported through `get_pipeline_cache_size` / `get_pipeline_cache_data`.
 
 All compute pipelines borrow one device-owned pipeline layout with the fixed
 `RootPush` range. Generated dispatch likewise borrows one device-owned indirect

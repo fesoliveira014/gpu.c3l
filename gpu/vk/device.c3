@@ -137,6 +137,7 @@ struct VkDeviceState {
     RecordingContextTable      recording_contexts;
     CommandTable               commands;
     PipelineTable              pipelines;
+    ShaderStore                shader_store;
     PipelineCacheTable         pipeline_cache;
     vk::PipelineLayout         graphics_layout;
     vk::PipelineLayout         compute_layout;
@@ -185,6 +186,16 @@ struct VkDeviceState {
     void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
     ulong                      pipelines_created;
+    ulong                      shader_intern_probes @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
+    ulong                      shader_intern_bytes_compared @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
+    ulong                      shader_owned_bytes_cloned @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
+    ulong                      shader_owned_bytes_freed @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
+    ulong                      pipeline_key_probes @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
+    vk::Result                 pipeline_shader_create_result @if(env::TESTING);
+    vk::Result                 pipeline_native_create_result @if(env::TESTING);
+    bool                       pipeline_cache_insert_failure @if(env::TESTING);
+    ShaderId                   pipeline_prepare_poison_id @if(env::TESTING);
+    bool                       pipeline_prepare_poison_enabled @if(env::TESTING);
     bool                       pipeline_creation_failure_enabled;
     usz                        pipeline_creation_failure_index;
     GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);

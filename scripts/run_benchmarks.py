@@ -46,7 +46,10 @@ BENCHMARK_METHODS = {
         "batch_sizes=1,8,32,128,1024; exact token visits",
         "ns/submit; exact work units",
     ),
-    "pipeline_cache_bench": ("raster=200; duplicate=200000; batch=64x2000", "ns/create, ns/state"),
+    "pipeline_cache_bench": (
+        "raster=200; duplicate=200000; batch=64x2000; identity=1024,65536,1048576",
+        "ns/create, ns/state; exact identity work",
+    ),
     "async_overlap_bench": ("calibration=2; measured=5", "ms"),
 }
 
@@ -133,6 +136,7 @@ PIPELINE_CACHE_RASTER_RECORDING = re.compile(
     r"[0-9]+(?:\.[0-9]+)? ns/state$",
     re.MULTILINE,
 )
+PIPELINE_IDENTITY_SIZES = (1_024, 65_536, 1_048_576)
 
 REGRESSION_THRESHOLDS = {
     "allocation_bench": (
@@ -222,6 +226,20 @@ def require_measurement(output, target, enforce_thresholds=True):
         and not PIPELINE_CACHE_RASTER_RECORDING.search(output)
     ):
         raise ValueError(f"{target} raster recording evidence is missing")
+    if target == "pipeline_cache_bench":
+        for byte_count in PIPELINE_IDENTITY_SIZES:
+            evidence = re.compile(
+                rf"^identity size_bytes={byte_count} intern_probes=[0-9]+ "
+                rf"intern_bytes_compared=[0-9]+ "
+                rf"owned_bytes_cloned={byte_count} pipeline_key_probes=1 "
+                rf"owned_bytes_freed={byte_count} elapsed_ns=[0-9]+$",
+                re.MULTILINE,
+            )
+            if not evidence.search(output):
+                raise ValueError(
+                    f"{target} identity evidence for {byte_count} bytes is "
+                    "missing, malformed, or nonzero after interning"
+                )
     if enforce_thresholds:
         require_regression_thresholds(output, target)
 

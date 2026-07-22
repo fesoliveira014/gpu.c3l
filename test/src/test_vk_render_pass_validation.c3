@@ -139,8 +139,16 @@ fn void graphics_pipeline_key_distinguishes_sample_count() @test {
     gpu::GraphicsPipelineDesc four = one;
     four.sample_count = gpu::SampleCount.FOUR;
 
-    vk::PipelineKey one_key = vk::build_graphics_key(&one);
-    vk::PipelineKey four_key = vk::build_graphics_key(&four);
+    vk::PipelineKey one_key = vk::build_graphics_key(
+        &one,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    vk::PipelineKey four_key = vk::build_graphics_key(
+        &four,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
     assert(one_key.sample_count == (int)gpu::SampleCount.ONE,
         "zero-initialized pipeline keys select one sample");
     assert(four_key.sample_count == (int)gpu::SampleCount.FOUR,
@@ -169,8 +177,16 @@ fn void graphics_pipeline_key_zeroes_unobservable_and_unused_target_state() @tes
     gpu::GraphicsPipelineDesc second = first;
     second.colors = second_colors[..];
 
-    vk::PipelineKey first_key = vk::build_graphics_key(&first);
-    vk::PipelineKey second_key = vk::build_graphics_key(&second);
+    vk::PipelineKey first_key = vk::build_graphics_key(
+        &first,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    vk::PipelineKey second_key = vk::build_graphics_key(
+        &second,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
     assert(vk::key_equals(&first_key, &second_key),
         "disabled blend bytes are absent from canonical identity");
     assert(vk::hash_key(&first_key) == vk::hash_key(&second_key),

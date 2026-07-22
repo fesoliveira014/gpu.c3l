@@ -67,6 +67,21 @@ PIPELINE_OUTPUT = "\n".join(
         "raster recording (requested=200 native=1): 99.0 ns/state",
         "phase 2 (duplicate, 200000 at full alias set): 1388.1 ns/create",
         "phase 3 (cached batch, 64x2000): 2454.9 ns/create",
+        (
+            "identity size_bytes=1024 intern_probes=0 "
+            "intern_bytes_compared=0 owned_bytes_cloned=1024 "
+            "pipeline_key_probes=1 owned_bytes_freed=1024 elapsed_ns=1200"
+        ),
+        (
+            "identity size_bytes=65536 intern_probes=0 "
+            "intern_bytes_compared=0 owned_bytes_cloned=65536 "
+            "pipeline_key_probes=1 owned_bytes_freed=65536 elapsed_ns=8400"
+        ),
+        (
+            "identity size_bytes=1048576 intern_probes=0 "
+            "intern_bytes_compared=0 owned_bytes_cloned=1048576 "
+            "pipeline_key_probes=1 owned_bytes_freed=1048576 elapsed_ns=94000"
+        ),
     )
 )
 SUBMIT_BATCH_OUTPUT = "\n".join(
@@ -137,8 +152,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(
             runner.BENCHMARK_METHODS["pipeline_cache_bench"],
             (
-                "raster=200; duplicate=200000; batch=64x2000",
-                "ns/create, ns/state",
+                "raster=200; duplicate=200000; batch=64x2000; identity=1024,65536,1048576",
+                "ns/create, ns/state; exact identity work",
             ),
         )
         self.assertEqual(
@@ -411,6 +426,28 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 PIPELINE_OUTPUT.replace("99.0 ns/state", "missing"),
                 "pipeline_cache_bench",
             )
+
+    def test_pipeline_cache_requires_every_identity_size(self):
+        runner = load_runner()
+        missing = next(
+            line
+            for line in PIPELINE_OUTPUT.splitlines()
+            if "size_bytes=65536" in line
+        )
+        with self.assertRaisesRegex(ValueError, "65536 bytes"):
+            runner.require_measurement(
+                PIPELINE_OUTPUT.replace(missing, ""),
+                "pipeline_cache_bench",
+            )
+
+    def test_pipeline_cache_rejects_malformed_identity_evidence(self):
+        runner = load_runner()
+        output = PIPELINE_OUTPUT.replace(
+            "owned_bytes_cloned=1048576",
+            "owned_bytes_cloned=1_048_576",
+        )
+        with self.assertRaisesRegex(ValueError, "1048576 bytes"):
+            runner.require_measurement(output, "pipeline_cache_bench")
 
     def test_upload_target_rejects_generic_measurement(self):
         runner = load_runner()

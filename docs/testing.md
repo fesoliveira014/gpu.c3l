@@ -398,13 +398,19 @@ records; all three generated commands then verify observable output and safe
 zero-root execution. Command
 validation separately covers unsupported capability, count bounds, alignment,
 short spans, zero work, index formats, and generated-preprocess barrier masks.
-`vk_pipeline_cache` uses a test-only synchronization hook immediately before a
-generated-dispatch layout read, creates another compute pipeline on a second
-thread, and verifies that recording observes the device's unchanged singleton
-layout through the bound pipeline slot. The platform-independent source
-contract rejects retired compute-layout-cache storage, per-pipeline compute
-layout creation, dynamic raster fields in `PipelineKey`, and loss of per-target
-immutable key state. It also
+`vk_pipeline_cache` covers collision-safe device-owned shader interning,
+cache-hit reference stability, last-alias release, unique free-list churn,
+full-capacity preflight, and exact cleanup after partial shader preparation,
+reflection, native shader, native pipeline, cache insertion, and mid-batch
+faults. It also uses a test-only
+synchronization hook immediately before a generated-dispatch layout read,
+creates another compute pipeline on a second thread, and verifies that recording
+observes the device's unchanged singleton layout through the bound pipeline
+slot. The platform-independent source contract rejects retired
+compute-layout-cache storage, per-pipeline compute layout creation, dynamic
+raster fields in `PipelineKey`, loss of per-target immutable key state, shader
+payloads in cache entries, and byte work or renamed comparison helpers in
+`find_entry`. It also
 walks every Vulkan recording root and reachable helper across backend files,
 rejecting device/backend re-resolution, command-table lookup, lifecycle-vtable
 dispatch, post-bind pipeline resolution, and bound-cell generation validation.
@@ -426,7 +432,11 @@ list with no rollover work. Its elapsed times are advisory. The pipeline-cache
 target requests 200 topology/cull/front-face/depth-bias permutations through
 `cmd_set_raster_state`, reports the requested count, native graphics creates,
 cache entries/aliases, and recording/create timings; all permutations share
-one immutable pipeline. Command recording covers
+one immutable pipeline. It additionally reports exact interning, clone/free,
+and compact-key probe counts for 1 KiB, 64 KiB, and 1 MiB identities. The
+source contract, rather than a vacuous zero counter, proves that post-intern
+pipeline lookup has no shader-byte path; elapsed boundary time remains
+advisory. Command recording covers
 ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
 generated dispatch. It measures five 64-record lists after an untimed 64-record
 warmup. Before warmup, the calling worker reserves 64 preprocess buffers sized
