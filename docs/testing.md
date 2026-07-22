@@ -400,7 +400,7 @@ c3c build texture_view_operations --path test/cpu
 c3c build command_wrapper_bench --path test/cpu -O1
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
-python -m unittest scripts.test_check_docs scripts.test_check_public_api scripts.test_check_backend_dispatch scripts.test_check_swapchain_acquire_policy
+python -m unittest scripts.test_check_docs scripts.test_check_public_api scripts.test_check_backend_dispatch scripts.test_check_retired_api scripts.test_check_swapchain_acquire_policy
 python scripts/check_docs.py
 python scripts/check_public_api.py
 python scripts/check_backend_dispatch.py
