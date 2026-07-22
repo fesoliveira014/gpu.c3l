@@ -17,11 +17,13 @@ page doesn't explain it, that's a bug in this page — file an issue.
   own userdata, and must not call gpu.c3l because internal locks may be held.
   Userdata lives through `destroy_device`; no callback occurs after it returns.
   A configured callback also enables structured teardown diagnostics when
-  validation is disabled. Normal live children are rejected before teardown;
-  diagnostics cover internal, partial-initialization, and device-loss state.
+  trusted policy is selected. Normal live children are rejected before
+  teardown; diagnostics cover internal, partial-initialization, and device-loss
+  state.
   A null callback disables structured delivery without changing returned
-  faults; validation-enabled teardown retains stderr output. Descriptor/cache
-  diagnostics are emitted by device-owned operation
+  faults; `OBJECT_BOUNDARIES`/`FULL` teardown retains stderr output. Callback
+  presence enables no checks, tracking, Vulkan layers, or names.
+  Descriptor/cache diagnostics are emitted by device-owned operation
   boundaries; pure lookup, range, and context-free result helpers remain
   fault-only to prevent duplicate or context-free messages.
 
@@ -35,9 +37,10 @@ page doesn't explain it, that's a bug in this page — file an issue.
   described per pass begin (`RenderPassDesc`) and that is the whole model.
 - **Texture history is caller-owned.** `TextureBarrier.before` asserts the
   layout, stages, and access established by earlier ordering. The backend
-  validates and lowers that state once, but stores no global or per-subresource
-  layout history and inserts no repair transition. Applications must retain
-  separate history for independently transitioned mip/layer ranges.
+  validates those semantics under `ContractValidation.FULL` and lowers the
+  state once in every policy, but stores no global or per-subresource layout
+  history and inserts no repair transition. Applications must retain separate
+  history for independently transitioned mip/layer ranges.
 - **Async compute is capability-gated.** A distinct compute queue is used
   when available and reported by `DeviceCaps.async_compute`. Resources declare
   their semantic access roles; distinct admitted families use private concurrent
@@ -110,28 +113,32 @@ Two sizing rules that bite:
   `TextureView` recycles its raw index immediately. Wait or discard every use
   before releasing the view, and do not leave stale indices in GPU-visible
   data. Sampler indices remain stable until device destruction.
-- **Validation-off pipeline lifetime is caller-owned.** Runtime validation
-  retains bound pipelines and rejects early destruction with `RESOURCE_IN_USE`.
-  Without validation, keep every bound pipeline live through command completion;
-  destroying one earlier violates the caller contract and does not guarantee an
-  `INVALID_HANDLE` fault on later recording calls.
+- **Tracking-off resource lifetime is caller-owned.** With
+  `track_resource_lifetimes = true`, command records retain explicitly named
+  allocations, spans, textures, attachment views, and pipelines; early
+  destruction returns `RESOURCE_IN_USE`. With tracking off, recording allocates
+  no reference storage and teardown adds no wait or deferred destruction. Keep
+  every referenced owner live until commands are discarded or covering
+  completion points are observed. GPU addresses and shader-visible indices
+  remain caller-owned even when tracking is on.
 - **Transient data is caller-owned.** Applications choose allocation reuse and
   concurrency policy. Flush CPU writes before submission, retain the covering
   completion point, and wait or poll before rewriting or freeing storage.
-- **Referenced textures grow with the command record.** There is no 16-texture
-  recording cap; the backend starts at 16 entries and doubles the host
-  allocation as distinct textures are retained. Call `submit` or discard the
-  token to release those references.
+- **Tracked references grow with the command record.** When lifetime tracking
+  is enabled there is no 16-resource recording cap; the backend starts at 16
+  entries and doubles the host allocation as distinct resources are retained.
+  Call `submit` or discard the token to release those references. Tracking-off
+  records keep this storage empty.
 
 ## 3. Driver and environment quirks
 
 | Symptom | Cause | Workaround | Notes |
 |---|---|---|---|
 | Segfault on any image/sampler access, lavapipe + descriptor-buffer heap | Mesa 25.0.7 lavapipe descriptor-buffer bug | no caller action; automatic selection uses descriptor indexing when it satisfies the request | retest on Mesa upgrade |
-| `UNSUPPORTED_FEATURE` at device create with validation on | `vulkan-validationlayers` not installed | install it, or `enable_validation = false` | — |
+| `UNSUPPORTED_FEATURE` at runtime create with Vulkan validation on | `vulkan-validationlayers` not installed | install it, or leave `enable_vulkan_validation = false`; `ContractValidation.FULL` still works without layers | — |
 | Windows: driver not found in elevated shells despite `VK_DRIVER_FILES` | elevated processes ignore loader env vars | register the ICD under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` (CI does this for mesa-dist-win) | elevated shells only |
 | Pipeline-cache blob is 32 bytes, warm start ≈ cold | lavapipe returns a header-only blob (no compiled-shader payload) | expected; real drivers populate it — `pipeline_cache_timing` prints blob size as the signal | — |
-| Multithreaded recording shows ~1× scaling with validation on | the validation layer locks every `vkCmd*` | benchmark with validation off; gate correctness with it on (`multithreaded_recording` does both) | — |
+| Multithreaded recording shows ~1× scaling with Vulkan validation on | the Khronos layer locks every `vkCmd*` | benchmark with layers off; gate native correctness with layers on (`multithreaded_recording` does both) | — |
 | FIFO present does not throttle under xvfb | virtual displays have no vblank | expected; pacing numbers under xvfb are structural only (`present_mode_explorer`) | — |
 | Schema field named `sampler` (or other GLSL keyword) breaks shader compile | generator emits the name verbatim into GLSL | rename the field (for example, `heap_sampler`) | reserved names are not rewritten |
 | `TYPE_OPTIONAL` c3c crash building the library with debug info | c3c 0.8.0/0.8.1 debug-codegen bug on optional-of-struct vtable signatures | no consumer action; the in-tree vtable uses an out parameter | `scripts/c3c_bug_repro/` |

@@ -30,7 +30,9 @@ const usz[3] PIPELINE_IDENTITY_SCALE_BYTES = {
 fn gpu::Device make_cache_test_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_pipeline_cache_test",
     };
     return create_test_device(&desc)!!;
@@ -39,7 +41,9 @@ fn gpu::Device make_cache_test_device() {
 fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .pipeline_capacity = pipeline_capacity,
         .application_name  = "gpu_pipeline_cache_capacity_test",
     };

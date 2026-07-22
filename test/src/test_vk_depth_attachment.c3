@@ -27,7 +27,9 @@ struct DepthCtx {
 fn gpu::Device make_depth_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_depth_test",
     };
     return create_test_device(&desc)!!;

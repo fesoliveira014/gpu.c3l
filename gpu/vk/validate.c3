@@ -138,7 +138,7 @@ fn void? validate_texture_queue_access(
     );
 }
 
-fn void? validate_texture_recording_access(
+fn void? validate_texture_recording_access_only(
     VkDeviceState* state,
     CommandRecord* record,
     TextureSlot* slot,
@@ -152,6 +152,13 @@ fn void? validate_texture_recording_access(
         handle:    handle,
         operation: operation,
     )!;
+}
+
+fn void? track_texture_command_reference(
+    VkDeviceState* state,
+    CommandRecord* record,
+    gpu::TextureHandle handle,
+) @private {
     return track_command_reference(
         state,
         record,
@@ -209,7 +216,7 @@ fn void? validate_span_queue_access(
     );
 }
 
-fn void? validate_span_recording_access(
+fn void? validate_span_recording_access_only(
     VkDeviceState* state,
     CommandRecord* record,
     ResolvedSpan* resolved,
@@ -223,6 +230,13 @@ fn void? validate_span_recording_access(
         span:        span,
         operation:   operation,
     )!;
+}
+
+fn void? track_span_command_reference(
+    VkDeviceState* state,
+    CommandRecord* record,
+    gpu::GpuSpan* span,
+) @private {
     return track_command_reference(
         state,
         record,
@@ -325,9 +339,25 @@ fn usz? index_element_size(gpu::IndexType index_type) {
     }
 }
 
+fn usz trusted_index_element_size(gpu::IndexType index_type) =>
+    index_type == gpu::IndexType.U16 ? 2 : 4;
+
+fn ResolvedSpan? lower_index_span(
+    VkDeviceState* state,
+    gpu::GpuSpan* span,
+    gpu::IndexType index_type,
+    usz required,
+) {
+    ResolvedSpan resolved = resolve_span_slot(state, span, required)!;
+    if (resolved.offset % trusted_index_element_size(index_type) != 0) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return resolved;
+}
+
 <* Resolve an index span and validate bounds, usage, alignment, and queue access.
    `required` is zero when GPU-written arguments provide the index count. *>
-fn ResolvedSpan? resolve_index_span(
+fn ResolvedSpan? validate_and_lower_index_span(
     VkDeviceState* state,
     CommandRecord* record,
     gpu::GpuSpan* span,
@@ -336,7 +366,7 @@ fn ResolvedSpan? resolve_index_span(
     ZString operation,
 ) {
     ResolvedSpan resolved = resolve_span_slot(state, span, required)!;
-    validate_span_recording_access(
+    validate_span_recording_access_only(
         state:     state,
         record:    record,
         resolved:  &resolved,

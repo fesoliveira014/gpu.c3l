@@ -56,6 +56,7 @@ enum gpu::BackendKind
 enum gpu::BlendFactor
 enum gpu::BlendOp
 enum gpu::CompareOp
+enum gpu::ContractValidation
 enum gpu::CullMode
 enum gpu::DebugMessageSeverity
 enum gpu::DebugResourceKind
@@ -123,6 +124,7 @@ function gpu::cmd_set_raster_state
 function gpu::cmd_set_scissor
 function gpu::cmd_set_viewport
 function gpu::cmd_texture_barrier
+function gpu::contract_validation_is_known
 function gpu::create_attachment_view
 function gpu::create_compute_pipeline
 function gpu::create_compute_pipelines
@@ -150,6 +152,7 @@ function gpu::end_commands
 function gpu::enumerate_adapters
 function gpu::flush_mapped_span
 function gpu::free_allocation
+function gpu::full_validation_runtime_desc
 function gpu::get_adapter_diagnostics
 function gpu::get_adapter_info
 function gpu::get_allocation_info

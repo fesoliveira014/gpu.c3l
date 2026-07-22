@@ -163,6 +163,13 @@ synchronously on the arbitrary application or driver thread chosen by Vulkan;
 multiple callbacks may run concurrently, with no cross-thread ordering or
 library serialization.
 
+Callback presence changes delivery only. `ContractValidation.TRUSTED` does not
+gain detailed misuse checks, lifetime tracking stays controlled by
+`track_resource_lifetimes`, and Vulkan layers stay controlled by
+`enable_vulkan_validation`. `FULL` contract diagnostics can therefore be
+delivered with Vulkan layers disabled. Teardown leak scans run under
+`OBJECT_BOUNDARIES`/`FULL` or whenever a callback is present.
+
 The callback must be nonblocking and must not call gpu.c3l. Delivery can occur
 while internal resource or queue locks are held, so reentry may deadlock. Copy
 borrowed fields into application-owned synchronized storage and return. The
@@ -185,7 +192,7 @@ still stage-validated before the redundant native wait is elided.
 
 Each queue release-publishes one retired prefix. Sequence N is retired
 only after native completion and after every published submitted-command batch
-through N has released validation references, recycled generated scratch, and
+through N has released any tracked command references, recycled generated scratch, and
 retired its command buffer. Poll and wait acquire-load that prefix after point
 validation; an already-retired point performs no native call and acquires
 neither the queue nor resource mutex.
@@ -208,6 +215,11 @@ its use have completed.
 acquired image. Resource destruction is immediate and never waits. Discard
 recording or executable command tokens and wait for every returned
 `CompletionPoint` that may reference a resource before destroying it.
-Validation returns `RESOURCE_IN_USE` for detected explicit references.
+With `track_resource_lifetimes = true`, explicit command resources are retained
+through recording, executable, and incomplete-submission phases, so early
+destruction returns `RESOURCE_IN_USE`. With tracking disabled, records allocate
+and update no reference storage and retirement performs no reference-release
+work; observing completion before destruction is solely the caller's contract.
+GPU addresses and shader-visible indices remain caller-managed in both modes.
 `destroy_device` queries every published queue sequence without blocking and
 returns `DEVICE_BUSY` while any is incomplete.

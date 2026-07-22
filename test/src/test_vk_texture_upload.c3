@@ -9,7 +9,9 @@ const usz MIP1_BYTES = (UP_SIZE / 2) * (UP_SIZE / 2) * 4;
 fn gpu::Device make_upload_test_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_texture_upload_test",
     };
     return create_test_device(&desc)!!;

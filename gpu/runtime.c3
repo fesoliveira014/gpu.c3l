@@ -19,6 +19,13 @@ const uint MAX_RUNTIMES @private = 16;
 const uint MAX_ADAPTERS_PER_RUNTIME @private = (uint)ushort::max + 1;
 const uint MAX_RUNTIME_GENERATION @private = 0x00FF_FFFF;
 
+<* Public contract checking applied by the library. *>
+enum ContractValidation : int {
+    TRUSTED,
+    OBJECT_BOUNDARIES,
+    FULL,
+}
+
 bitstruct Runtime : ulong {
     uint index      : 0..31;
     uint generation : 32..55;
@@ -30,12 +37,14 @@ const Runtime RUNTIME_INVALID = {};
 <* Runtime discovery configuration; zero-initialized fields select defaults. *>
 struct RuntimeDesc {
     BackendKind          backend;
-    bool                 enable_validation;
-    bool                 enable_debug_names;
-    uint                 texture_heap_capacity;
-    uint                 sampler_heap_capacity;
-    uint                 texture_capacity;
-    uint                 pipeline_capacity;
+    ContractValidation  contract_validation;
+    bool                track_resource_lifetimes;
+    bool                enable_vulkan_validation;
+    bool                enable_debug_names;
+    uint                texture_heap_capacity;
+    uint                sampler_heap_capacity;
+    uint                texture_capacity;
+    uint                pipeline_capacity;
     // Borrowed input copied by create_runtime for later device creation.
     char[]               pipeline_cache_data;
     ZString              application_name;
@@ -70,6 +79,29 @@ RuntimeData[MAX_RUNTIMES] runtime_slots @private;
 
 <* True when the token is not the invalid zero value. *>
 fn bool Runtime.is_valid(self) => (ulong)self != 0;
+
+<* Return the former all-validation-enabled runtime configuration. *>
+fn RuntimeDesc full_validation_runtime_desc() => {
+    .backend                  = BackendKind.VULKAN,
+    .contract_validation      = ContractValidation.FULL,
+    .track_resource_lifetimes = true,
+    .enable_vulkan_validation = true,
+};
+
+fn bool contract_validation_is_known(ContractValidation policy) {
+    switch (policy) {
+        case ContractValidation.TRUSTED:
+        case ContractValidation.OBJECT_BOUNDARIES:
+        case ContractValidation.FULL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+fn void? validate_contract_validation(ContractValidation policy) @private {
+    if (!contract_validation_is_known(policy)) return INVALID_ARGUMENT~;
+}
 
 fn RuntimeData* resolve_runtime(Runtime* runtime) @private {
     if (runtime == null || !runtime.is_valid()) return null;
@@ -164,6 +196,7 @@ fn void? runtime_release_device(Runtime* runtime) @private {
 
 fn void? validate_runtime_desc(RuntimeDesc* desc) @private {
     if (desc == null) return INVALID_ARGUMENT~;
+    validate_contract_validation(desc.contract_validation)!;
     if (desc.texture_heap_capacity > MAX_SHADER_HEAP_CAPACITY
         || desc.sampler_heap_capacity > MAX_SHADER_HEAP_CAPACITY
         || desc.texture_capacity > MAX_SHADER_HEAP_CAPACITY

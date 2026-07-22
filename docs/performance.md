@@ -1,8 +1,8 @@
 # Performance
 
 Benchmarks are advisory measurements with hard structural guards. Compare
-numbers only when the compiler, optimization level, adapter, driver, validation
-state, and queue topology match.
+numbers only when the compiler, optimization level, adapter, driver, contract
+policy, lifetime-tracking and Vulkan-layer state, and queue topology match.
 
 ## Run
 
@@ -12,20 +12,54 @@ Install the native dependencies in [Testing](testing.md), then run:
 python -B scripts/run_benchmarks.py
 ```
 
-The runner builds every target with C3 `-O1`, disables validation and implicit
-layers, validates output schemas and zero-work fields, and writes
-`test/build/benchmark-report.md`. Use a separate report for validation cost:
+The runner builds every target once with C3 `-O1`, uses trusted/no-tracking/no-
+layer defaults for release evidence, validates output schemas and zero-work
+fields, and writes `test/build/benchmark-report.md`. The command-recording
+target is the exception: the same built executable and fixed workload run in
+this required order:
+
+| Mode | Contract | Tracking | Vulkan layers |
+|---|---|---:|---:|
+| 1 | `TRUSTED` | off | off |
+| 2 | `OBJECT_BOUNDARIES` | off | off |
+| 3 | `FULL` | on | off |
+| 4 | `FULL` | on | on |
+
+Only mode 1 participates in release timing thresholds. All four elapsed times
+remain advisory; their exact work counters are blocking. To collect the
+former all-enabled debug configuration for the other benchmark devices in a
+separate report, run:
 
 ```sh
 python -B scripts/run_benchmarks.py --validation \
   --output test/build/benchmark-report-validation.md
 ```
 
-Validation mode enables `RuntimeDesc.enable_validation` for every benchmark
-device. It does not evaluate or report release timing thresholds, and pinned
-comparison flags are rejected in this mode. Do not compare its timings with the
-release baseline. The validation layer must recognize every enabled Vulkan
-extension; otherwise its diagnostics invalidate the timing run.
+`--validation` selects `FULL`, lifetime tracking on, and Vulkan validation on
+for benchmark devices that do not have an explicit policy matrix. It does not
+evaluate or report their release timing thresholds, and pinned comparison flags
+are rejected. Do not compare those timings with the release baseline. The
+validation layer must recognize every enabled Vulkan extension; otherwise its
+diagnostics invalidate the timing run. `command_record_bench` always uses its
+four explicit modes, even during this separate report.
+
+For a direct command-only run, build once and set all three required variables:
+
+```sh
+c3c build command_record_bench --path test -O1
+GPU_C3L_BENCH_CONTRACT=trusted GPU_C3L_BENCH_TRACKING=false GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
+GPU_C3L_BENCH_CONTRACT=object_boundaries GPU_C3L_BENCH_TRACKING=false GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
+GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_TRACKING=true GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
+GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_TRACKING=true GPU_C3L_BENCH_LAYERS=true ./test/build/command_record_bench
+```
+
+The executable rejects missing or malformed policy variables. Each output has
+one exact `validation policy=...` line reporting semantic checks, tracking
+calls, reference allocations/increments/releases, and layer selection. Trusted
+and object-boundary modes require every policy-work counter to be zero. Both
+full modes require semantic and tracking work, releases must equal increments,
+and allocations cannot exceed increments. Every warm interval must report zero
+device registry, command-table, pipeline-table/cache, and policy reselection.
 
 ## Evidence and regression gates
 
@@ -65,7 +99,9 @@ subsystem snapshots:
 | Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and zero post-intern shader work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Exact collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
-Warm command-buffer reset is expected reuse evidence. Host/VMA allocation,
+Warm command-buffer reset is expected reuse evidence. In tracking modes, any
+warm host allocation must equal the reported command-reference allocation
+count; every other host allocation remains prohibited. VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
 and registry, retained-pin, lifecycle-vtable, command-table, and policy work
 remain prohibited. Binding an opaque pipeline handle performs exactly one
@@ -143,8 +179,8 @@ identity with `--validation`, is rejected.
 ### Pipeline identity snapshot
 
 Pipeline bind performs the only generation-checked pipeline-table lookup and
-the only pipeline-cache resolution for a command interval. Validation mode
-retains the pipeline through discard or completion; later direct, indirect,
+the only pipeline-cache resolution for a command interval. Lifetime-tracking
+modes retain the pipeline through discard or completion; later direct, indirect,
 generated, and render-pass commands read only the cached native snapshot and
 kind/render metadata. Exact bind-time counters followed by a reset after
 pipeline-table/cache churn require zero post-bind resolution during dispatch.
@@ -168,7 +204,7 @@ runner parses.
 
 ## Windows baseline
 
-Three complete validation-disabled suite runs were recorded on 2026-07-20:
+Three complete historical release-policy suite runs were recorded on 2026-07-20:
 
 ```text
 host: Windows 11 build 26200
@@ -176,7 +212,7 @@ compiler: C3 0.8.0_2
 optimization: -O1
 adapter: NVIDIA GeForce RTX 4090, Vulkan api_version=4210991
 driver: NVIDIA, id=4, version=2417000448
-validation: disabled
+validation: contract=TRUSTED tracking=false layers=false
 queues: graphics=0:0 compute=0:1 transfer=1:0
 ```
 
@@ -208,11 +244,11 @@ VMA allocations, and generated-scratch misses. Command-buffer resets are
 expected reuse evidence. The runner publishes cold and warm work-counter lines
 and at least 320 generated preprocess reuse events for the measured lists.
 
-The installed local validation layer was Vulkan 1.3.250 and did not recognize
+The installed local Vulkan validation layer was Vulkan 1.3.250 and did not recognize
 the newer generated-command and maintenance structures used by the current
-driver. It emitted compatibility diagnostics, so no validation-enabled timing
-is published from that layer. The separate runner mode is the reproducible
-path for collecting debug cost with a matching layer.
+driver. It emitted compatibility diagnostics, so no layer-enabled timing is
+published from that layer. The separate runner mode is the reproducible path
+for collecting debug cost with a matching layer.
 
 ## Interpretation
 

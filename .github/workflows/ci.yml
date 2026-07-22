@@ -15,7 +15,7 @@ env:
     vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
     vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
     vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading vk_performance
-    vk_queue vk_debug upload_bench_observation vk_device_request
+    vk_queue vk_debug upload_bench_observation vk_device_request vk_validation_policy
 
 jobs:
   linux:
@@ -87,8 +87,10 @@ jobs:
       - name: Generator unit tests
         run: c3c test unit --path tools/gen_shader_abi
 
-      - name: Benchmark output contract tests
-        run: python3 -B -m unittest scripts.test_run_benchmarks
+      - name: Benchmark and command policy contract tests
+        run: |
+          python3 -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy
+          python3 -B scripts/check_command_policy.py
 
       - name: ABI drift gate
         run: python3 scripts/gen_abi.py --check
@@ -295,8 +297,10 @@ jobs:
       - name: Generator unit tests
         run: c3c test unit --path tools/gen_shader_abi
 
-      - name: Benchmark output contract tests
-        run: python -B -m unittest scripts.test_run_benchmarks
+      - name: Benchmark and command policy contract tests
+        run: |
+          python -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy
+          python -B scripts/check_command_policy.py
 
       - name: ABI drift gate
         run: C3C="$(cygpath -w "$(command -v c3c)")" python scripts/gen_abi.py --check

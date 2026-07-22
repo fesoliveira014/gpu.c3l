@@ -89,7 +89,7 @@ struct TextureSlot {
     uint               array_layers;
     uint               live_descriptor_views;
     Atomic{bool}       presented;
-    Atomic{uint}        validation_references;
+    Atomic{uint}        tracked_command_references;
     bool               swapchain_owned;
     bool               placed;
     gpu::GpuAllocation placement;
@@ -1347,9 +1347,9 @@ fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @pri
         return gpu::RESOURCE_IN_USE~;
     }
     vk::Image image = slot.image;
-    if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+    if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
         drain_completed_submitted_commands(state)!;
-        if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+        if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
             return gpu::RESOURCE_IN_USE~;
         }
     }

@@ -777,6 +777,21 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "ContractValidation",
+                        "kind": "enum",
+                        "members": [
+                            {
+                                "name": name,
+                                "type": {"name": "ContractValidation"},
+                            }
+                            for name in (
+                                "TRUSTED",
+                                "OBJECT_BOUNDARIES",
+                                "FULL",
+                            )
+                        ],
+                    },
+                    {
                         "name": "RuntimeDesc",
                         "kind": "struct",
                         "members": [
@@ -785,7 +800,15 @@ def valid_document() -> dict:
                                 "type": {"name": "BackendKind"},
                             },
                             {
-                                "name": "enable_validation",
+                                "name": "contract_validation",
+                                "type": {"name": "ContractValidation"},
+                            },
+                            {
+                                "name": "track_resource_lifetimes",
+                                "type": {"name": "bool"},
+                            },
+                            {
+                                "name": "enable_vulkan_validation",
                                 "type": {"name": "bool"},
                             },
                             {
@@ -2721,6 +2744,18 @@ method gpu::Runtime.is_valid
         failures = check_public_api.validate_document(document)
         self.assertIn("RuntimeDesc must match the strict schema", failures)
         self.assertIn("DeviceCaps.sampler_heap_capacity must be a uint", failures)
+
+    def test_requires_contract_validation_policy_order(self) -> None:
+        document = valid_document()
+        policy = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "ContractValidation"
+        )
+        policy["members"].reverse()
+        self.assertIn(
+            "ContractValidation must match the strict policy order",
+            check_public_api.validate_document(document),
+        )
 
     def test_requires_generated_work_capability_and_limit(self) -> None:
         document = valid_document()

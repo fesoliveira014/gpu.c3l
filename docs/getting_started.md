@@ -22,9 +22,10 @@ sudo apt install -y mesa-vulkan-drivers vulkan-validationlayers glslang-tools
 
 `mesa-vulkan-drivers` includes **lavapipe**, a CPU implementation of
 Vulkan 1.3, and `vulkan-validationlayers` is required because the program
-below turns validation on — the right default while learning an explicit
-API — everything in this walkthrough (and the entire library test
-suite) runs on it, so a machine with no GPU at all is fine. If you have a
+below explicitly requests the Khronos layer through the full-validation helper
+— the right default while learning an explicit API. Everything in this
+walkthrough (and the entire library test suite) runs on lavapipe, so a machine
+with no GPU at all is fine. If you have a
 real GPU with a Vulkan driver, nothing changes.
 
 ### Windows
@@ -191,11 +192,8 @@ fn int main() {
 }
 
 fn void? run() {
-    gpu::RuntimeDesc runtime_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
-        .application_name  = "hello_gpu",
-    };
+    gpu::RuntimeDesc runtime_desc = gpu::full_validation_runtime_desc();
+    runtime_desc.application_name = "hello_gpu";
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
@@ -329,9 +327,22 @@ Troubleshooting the two most likely faults:
 - `UNSUPPORTED_BACKEND` — the loader found no driver. Point it at lavapipe
   explicitly:
   `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json ./build/hello_gpu`
-- `UNSUPPORTED_FEATURE` — `enable_validation = true` but the validation
+- `UNSUPPORTED_FEATURE` — `enable_vulkan_validation = true` but the Khronos
   layer is not installed (`vulkan-validationlayers` on apt; on Windows it
-  ships with the Vulkan SDK). Install it, or set `enable_validation = false`.
+  ships with the Vulkan SDK). Install it, or leave
+  `enable_vulkan_validation = false`. Detailed library diagnostics remain
+  available by selecting `ContractValidation.FULL`; Vulkan layers are an
+  independent control.
+
+`full_validation_runtime_desc()` selects `FULL`, lifetime tracking on, and
+Vulkan validation on. For a production trusted path, a zero-initialized
+descriptor with `.backend = VULKAN` selects trusted checks, no command-resource
+retention, and no Vulkan layers. In that mode you must discard commands or
+observe every covering `CompletionPoint` before destroying any referenced
+resource. Every policy still protects host pointer/slice/range access, integer
+overflow, command state and internal tables, public device ownership, Vulkan
+result handling, and creation rollback. A callback or debug names can be added
+to either configuration without enabling checks, tracking, or layers.
 
 ## 6. Where to go next
 

@@ -143,24 +143,25 @@ fn void disabled_descriptor_heap_bind_returns_unsupported_feature() @test {
     assert(bind_fault == gpu::UNSUPPORTED_FEATURE, "disabled descriptor heaps cannot be bound");
 }
 
-fn void disabled_heap_preflights_pipeline_binds() @test {
+fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
     gpu::vk::VkDeviceState state = {};
     gpu::PipelineHandle cached = { .index = 7, .generation = 3 };
     gpu::PipelineHandle requested = { .index = 11, .generation = 5 };
     gpu::vk::CommandRecord record = {
-        .command_buffer = (vk::CommandBuffer)null,
+        .state = gpu::vk::CommandState.RECORDING,
         .bound_pipeline = {
             .handle      = cached,
             .cache_entry = 19,
         },
     };
+    gpu::CommandEncoderState encoder = {
+        .backend_state   = &state,
+        .backend_command = &record,
+    };
 
-    fault bind_fault = @catch(gpu::vk::bind_pipeline_state(
-        state:    &state,
-        record:   &record,
-        pipeline: requested,
-    ));
-    assert(bind_fault == gpu::UNSUPPORTED_FEATURE, "pipeline binding preflights a disabled heap");
+    fault bind_fault = @catch(gpu::vk::checked_bind_pipeline(&encoder, requested));
+    assert(bind_fault == gpu::UNSUPPORTED_FEATURE,
+        "pipeline binding preflight rejects a disabled descriptor heap");
     assert(record.bound_pipeline.handle == cached,
         "rejected binding preserves the active pipeline");
     assert(record.bound_pipeline.cache_entry == 19,
@@ -170,7 +171,9 @@ fn void disabled_heap_preflights_pipeline_binds() @test {
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::RuntimeDesc desc = {
         .backend               = gpu::BackendKind.VULKAN,
-        .enable_validation     = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .texture_heap_capacity = tex_capacity,
         .sampler_heap_capacity = smp_capacity,
         .application_name      = "gpu_descriptor_heap_test",
@@ -1615,7 +1618,7 @@ fn void device_loss_teardown_accepts_live_texture_view_accounting() @test {
     )) == gpu::DEVICE_LOST,
         "the fixture enters forced device-loss teardown");
 
-    state.validation = false;
+    state.validation_policy.contract = gpu::ContractValidation.TRUSTED;
     destroy_test_device(&device)!!;
 }
 

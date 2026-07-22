@@ -212,7 +212,9 @@ fn void capture_texture_diagnostic(gpu::DebugMessage* message, void* user_data) 
 fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture) {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_texture_diagnostic_test",
         .debug_callback    = &capture_texture_diagnostic,
         .debug_user_data   = capture,
@@ -223,7 +225,9 @@ fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture)
 fn gpu::Device make_texture_test_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_texture_test",
     };
     return create_test_device(&desc)!!;
@@ -932,7 +936,7 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.reference_count;
-    uint validation_references_before = slot.validation_references.load(
+    uint tracked_references_before = slot.tracked_command_references.load(
         AtomicOrdering.RELAXED,
     );
     TextureBarrierEmitCapture capture;
@@ -975,8 +979,8 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
     assert(capture.calls == 0, "invalid destination state never reaches emission");
     assert(record.reference_count == references_before,
         "failed state validation rolls back the command reference");
-    assert(slot.validation_references.load(AtomicOrdering.RELAXED)
-            == validation_references_before,
+    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED)
+            == tracked_references_before,
         "failed state validation rolls back the texture validation reference");
 }
 
@@ -1212,7 +1216,7 @@ fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
         &device,
     );
     vk::TextureSlot* texture_slot = state.textures.get(texture)!!;
-    uint references_before = texture_slot.validation_references.load(
+    uint references_before = texture_slot.tracked_command_references.load(
         AtomicOrdering.RELAXED,
     );
     uint next_new = state.attachment_views.next_new;
@@ -1223,7 +1227,7 @@ fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
     assert(@catch(gpu::create_attachment_view(&device, &view_desc))
         == gpu::SLOT_TABLE_FULL,
         "attachment publication capacity faults after cold native creation");
-    assert(texture_slot.validation_references.load(AtomicOrdering.RELAXED)
+    assert(texture_slot.tracked_command_references.load(AtomicOrdering.RELAXED)
         == references_before,
         "failed attachment publication does not retain the texture");
     state.attachment_views.next_new = next_new;
@@ -1300,7 +1304,9 @@ fn void recorded_attachment_view_destruction_is_retryable() @test {
 fn void raised_texture_capacity_holds_more_than_default() @test {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .texture_capacity  = 2048,
         .application_name  = "gpu_texture_capacity_test",
     };

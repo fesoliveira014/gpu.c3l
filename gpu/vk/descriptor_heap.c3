@@ -676,7 +676,8 @@ fn void? validate_texture_view_increment(
     uint pending_count,
     ZString operation,
 ) @private {
-    if (!state.validation) return;
+    if (state.validation_policy.contract
+        != gpu::ContractValidation.FULL) return;
     uint capacity = (uint)state.strict_heap.descriptors.texture_cells.len;
     if (pending_count > capacity
         || owner.live_descriptor_views > capacity - pending_count) {
@@ -692,7 +693,8 @@ fn void? validate_texture_view_decrement(
     VkDeviceState* state,
     TextureSlot* owner,
 ) @private {
-    if (!state.validation || owner.live_descriptor_views != 0) return;
+    if (state.validation_policy.contract != gpu::ContractValidation.FULL
+        || owner.live_descriptor_views != 0) return;
     return report_texture_view_accounting_failure(
         state,
         "destroy_texture_view",

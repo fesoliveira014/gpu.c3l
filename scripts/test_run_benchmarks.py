@@ -47,6 +47,11 @@ COMMAND_OUTPUT = "\n".join(
             "pipeline_table=0 pipeline_cache=0 policy=0"
         ),
         (
+            "validation policy=trusted tracking=false layers=false "
+            "semantic_checks=0 tracking_calls=0 reference_allocations=0 "
+            "reference_increments=0 reference_releases=0"
+        ),
+        (
             "cold work: host_allocations=5 command_buffer_allocations=1 "
             "command_buffer_frees=0 command_buffer_resets=3 "
             "image_view_creations=0 vma_allocations=64 "
@@ -60,6 +65,32 @@ COMMAND_OUTPUT = "\n".join(
         ),
         "generated preprocess: reuse_events=320",
     )
+)
+OBJECT_BOUNDARIES_COMMAND_OUTPUT = COMMAND_OUTPUT.replace(
+    "policy=trusted",
+    "policy=object_boundaries",
+)
+FULL_COMMAND_OUTPUT = COMMAND_OUTPUT.replace(
+    (
+        "policy=trusted tracking=false layers=false semantic_checks=0 "
+        "tracking_calls=0 reference_allocations=0 reference_increments=0 "
+        "reference_releases=0"
+    ),
+    (
+        "policy=full tracking=true layers=false semantic_checks=300330 "
+        "tracking_calls=200335 reference_allocations=0 "
+        "reference_increments=25 reference_releases=25"
+    ),
+)
+FULL_LAYERS_COMMAND_OUTPUT = FULL_COMMAND_OUTPUT.replace(
+    "layers=false",
+    "layers=true",
+)
+COMMAND_POLICY_OUTPUTS = (
+    COMMAND_OUTPUT,
+    OBJECT_BOUNDARIES_COMMAND_OUTPUT,
+    FULL_COMMAND_OUTPUT,
+    FULL_LAYERS_COMMAND_OUTPUT,
 )
 PIPELINE_OUTPUT = "\n".join(
     (
@@ -287,9 +318,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
         source = BENCH_LIFETIME.read_text(encoding="utf-8")
         self.assertIn('env::tget_var("GPU_C3L_BENCH_VALIDATION")', source)
         self.assertIn(
-            "runtime_desc.enable_validation = bench_validation_enabled()",
+            "runtime_desc.contract_validation = gpu::ContractValidation.FULL",
             source,
         )
+        self.assertIn("&& !explicit_policy", source)
         self.assertIn("gpu::create_runtime(&runtime_desc)", source)
 
     def test_context_requires_reproducibility_fields(self):
@@ -505,8 +537,86 @@ class BenchmarkRunnerTests(unittest.TestCase):
                     warm_line,
                     warm_line.replace(f"{field}=0", f"{field}=1"),
                 )
-                with self.assertRaisesRegex(ValueError, "warm recording work"):
+                error = (
+                    "allocation mismatch"
+                    if field == "host_allocations"
+                    else "warm recording work"
+                )
+                with self.assertRaisesRegex(ValueError, error):
                     runner.require_measurement(output, "command_record_bench")
+
+    def test_command_policy_matrix_requires_every_mode_in_order(self):
+        runner = load_runner()
+        runner.require_command_policy_matrix(COMMAND_POLICY_OUTPUTS)
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            runner.require_command_policy_matrix(COMMAND_POLICY_OUTPUTS[:-1])
+        wrong_order = (
+            COMMAND_POLICY_OUTPUTS[1],
+            COMMAND_POLICY_OUTPUTS[0],
+            *COMMAND_POLICY_OUTPUTS[2:],
+        )
+        with self.assertRaisesRegex(ValueError, "mode mismatch"):
+            runner.require_command_policy_matrix(wrong_order)
+
+    def test_command_policy_matrix_rejects_malformed_or_mismatched_policy(self):
+        runner = load_runner()
+        malformed = list(COMMAND_POLICY_OUTPUTS)
+        malformed[0] = malformed[0].replace(
+            "validation policy=trusted",
+            "validation contract=trusted",
+        )
+        with self.assertRaisesRegex(ValueError, "malformed"):
+            runner.require_command_policy_matrix(malformed)
+
+        tracking_mismatch = list(COMMAND_POLICY_OUTPUTS)
+        tracking_mismatch[1] = tracking_mismatch[1].replace(
+            "tracking=false",
+            "tracking=true",
+        )
+        with self.assertRaisesRegex(ValueError, "mode mismatch"):
+            runner.require_command_policy_matrix(tracking_mismatch)
+
+        layer_mismatch = list(COMMAND_POLICY_OUTPUTS)
+        layer_mismatch[2] = layer_mismatch[2].replace(
+            "layers=false",
+            "layers=true",
+        )
+        with self.assertRaisesRegex(ValueError, "mode mismatch"):
+            runner.require_command_policy_matrix(layer_mismatch)
+
+    def test_command_policy_matrix_rejects_wrong_work_relationships(self):
+        runner = load_runner()
+        trusted_work = list(COMMAND_POLICY_OUTPUTS)
+        trusted_work[0] = trusted_work[0].replace(
+            "semantic_checks=0",
+            "semantic_checks=1",
+        )
+        with self.assertRaisesRegex(ValueError, "forbidden semantic work"):
+            runner.require_command_policy_matrix(trusted_work)
+
+        missing_full_work = list(COMMAND_POLICY_OUTPUTS)
+        missing_full_work[2] = missing_full_work[2].replace(
+            "semantic_checks=300330",
+            "semantic_checks=0",
+        )
+        with self.assertRaisesRegex(ValueError, "missing semantic work"):
+            runner.require_command_policy_matrix(missing_full_work)
+
+        reference_mismatch = list(COMMAND_POLICY_OUTPUTS)
+        reference_mismatch[2] = reference_mismatch[2].replace(
+            "reference_allocations=0",
+            "reference_allocations=26",
+        )
+        with self.assertRaisesRegex(ValueError, "allocation/increment mismatch"):
+            runner.require_command_policy_matrix(reference_mismatch)
+
+        policy_reselection = list(COMMAND_POLICY_OUTPUTS)
+        policy_reselection[3] = policy_reselection[3].replace(
+            "pipeline_cache=0 policy=0",
+            "pipeline_cache=0 policy=1",
+        )
+        with self.assertRaisesRegex(ValueError, "policy reselection"):
+            runner.require_command_policy_matrix(policy_reselection)
 
     def test_allocation_measurement_rejects_extra_fields(self):
         runner = load_runner()

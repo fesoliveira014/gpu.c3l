@@ -106,7 +106,9 @@ fn int concurrent_submit_worker(void* raw_args) {
 fn gpu::Device make_submit_stats_test_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_submit_stats_test",
     };
     return create_test_device(&desc)!!;

@@ -121,11 +121,27 @@ COMMAND_RECORD_COLD_WORK = re.compile(
     re.MULTILINE,
 )
 COMMAND_RECORD_WARM_WORK = re.compile(
-    r"^warm work: host_allocations=0 command_buffer_allocations=0 "
+    r"^warm work: host_allocations=(?P<host_allocations>[0-9]+) "
+    r"command_buffer_allocations=0 "
     r"command_buffer_frees=0 command_buffer_resets=[1-9][0-9]* "
     r"image_view_creations=0 vma_allocations=0 "
     r"generated_scratch_misses=0$",
     re.MULTILINE,
+)
+COMMAND_POLICY_EVIDENCE = re.compile(
+    r"^validation policy=(?P<policy>trusted|object_boundaries|full) "
+    r"tracking=(?P<tracking>true|false) layers=(?P<layers>true|false) "
+    r"semantic_checks=(?P<semantic_checks>[0-9]+) "
+    r"tracking_calls=(?P<tracking_calls>[0-9]+) "
+    r"reference_allocations=(?P<reference_allocations>[0-9]+) "
+    r"reference_increments=(?P<reference_increments>[0-9]+) "
+    r"reference_releases=(?P<reference_releases>[0-9]+)$"
+)
+COMMAND_POLICY_MODES = (
+    ("trusted", False, False),
+    ("object_boundaries", False, False),
+    ("full", True, False),
+    ("full", True, True),
 )
 PIPELINE_CACHE_MATRIX = re.compile(
     r"^phase 1 \(raster matrix, requested=200 native=1 "
@@ -236,6 +252,90 @@ def require_sampler_lookup_evidence(output):
             )
 
 
+def require_command_policy_evidence(output, expected=None):
+    lines = [
+        line for line in output.splitlines()
+        if line.startswith("validation ")
+    ]
+    if len(lines) != 1:
+        raise ValueError(
+            "command_record_bench validation policy evidence is missing or duplicated"
+        )
+    match = COMMAND_POLICY_EVIDENCE.fullmatch(lines[0])
+    if match is None:
+        raise ValueError("command_record_bench validation policy evidence is malformed")
+    policy = match.group("policy")
+    tracking = match.group("tracking") == "true"
+    layers = match.group("layers") == "true"
+    actual = (policy, tracking, layers)
+    if expected is not None and actual != expected:
+        raise ValueError(
+            "command_record_bench policy mode mismatch: "
+            f"{actual} != {expected}"
+        )
+    counters = {
+        field: int(match.group(field))
+        for field in (
+            "semantic_checks",
+            "tracking_calls",
+            "reference_allocations",
+            "reference_increments",
+            "reference_releases",
+        )
+    }
+    if policy == "full":
+        if counters["semantic_checks"] == 0:
+            raise ValueError("command_record_bench full policy is missing semantic work")
+    elif counters["semantic_checks"] != 0:
+        raise ValueError(
+            "command_record_bench trusted lowering performed forbidden semantic work"
+        )
+    reference_fields = (
+        "tracking_calls",
+        "reference_allocations",
+        "reference_increments",
+        "reference_releases",
+    )
+    if tracking:
+        if (
+            counters["tracking_calls"] == 0
+            or counters["reference_increments"] == 0
+            or counters["reference_releases"] == 0
+        ):
+            raise ValueError("command_record_bench tracking policy is missing work")
+        if counters["reference_allocations"] > counters["reference_increments"]:
+            raise ValueError(
+                "command_record_bench reference allocation/increment mismatch"
+            )
+        if counters["reference_releases"] != counters["reference_increments"]:
+            raise ValueError(
+                "command_record_bench reference release/increment mismatch"
+            )
+    elif any(counters[field] != 0 for field in reference_fields):
+        raise ValueError(
+            "command_record_bench tracking-off policy performed forbidden reference work"
+        )
+    warm = COMMAND_RECORD_WARM_WORK.search(output)
+    if warm is not None:
+        host_allocations = int(warm.group("host_allocations"))
+        if host_allocations != counters["reference_allocations"]:
+            raise ValueError(
+                "command_record_bench warm host/reference allocation mismatch"
+            )
+    return actual, counters
+
+
+def require_command_policy_matrix(outputs):
+    if len(outputs) != len(COMMAND_POLICY_MODES):
+        raise ValueError("command_record_bench four-mode policy matrix is incomplete")
+    for output, expected in zip(outputs, COMMAND_POLICY_MODES):
+        require_command_policy_evidence(output, expected)
+        if not COMMAND_RECORD_RESOLUTION.search(output):
+            raise ValueError(
+                "command_record_bench warm policy reselection is nonzero"
+            )
+
+
 def require_measurement(
     output,
     target,
@@ -275,6 +375,8 @@ def require_measurement(
         raise ValueError(f"{target} cold recording work evidence is missing")
     if target == "command_record_bench" and not COMMAND_RECORD_WARM_WORK.search(output):
         raise ValueError(f"{target} warm recording work is missing or nonzero")
+    if target == "command_record_bench":
+        require_command_policy_evidence(output)
     if target == "pipeline_cache_bench" and not PIPELINE_CACHE_MATRIX.search(output):
         raise ValueError(
             f"{target} raster matrix did not collapse to one native pipeline"
@@ -411,6 +513,38 @@ def main():
     timing_advisories = []
     for target in BENCHMARK_TARGETS:
         iterations, units = BENCHMARK_METHODS[target]
+        if target == "command_record_bench":
+            command_outputs = []
+            for policy, tracking, layers in COMMAND_POLICY_MODES:
+                command_env = env.copy()
+                command_env["GPU_C3L_BENCH_CONTRACT"] = policy
+                command_env["GPU_C3L_BENCH_TRACKING"] = str(tracking).lower()
+                command_env["GPU_C3L_BENCH_LAYERS"] = str(layers).lower()
+                output = run(
+                    (str(executable(root, target)),),
+                    root,
+                    command_env,
+                )
+                command_outputs.append(output)
+                trusted_release = (
+                    policy,
+                    tracking,
+                    layers,
+                ) == COMMAND_POLICY_MODES[0]
+                timing_advisories.extend(require_measurement(
+                    output,
+                    target,
+                    enforce_thresholds=pinned and trusted_release,
+                    evaluate_thresholds=trusted_release,
+                ))
+                annotated = f"iterations={iterations}\nunits={units}\n{output}"
+                title = (
+                    f"{target} [{policy} tracking={str(tracking).lower()} "
+                    f"layers={str(layers).lower()}]"
+                )
+                lines.append(report_section(title, annotated))
+            require_command_policy_matrix(command_outputs)
+            continue
         output = run((str(executable(root, target)),), root, env)
         timing_advisories.extend(require_measurement(
             output,

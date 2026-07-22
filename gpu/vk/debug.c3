@@ -137,7 +137,13 @@ fn fault report_contract_failure(
         .invariant      = invariant,
         .backend_text   = backend_text,
     };
-    gpu::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    gpu::DebugMessageCallback callback = state.command_diagnostics.callback == null
+        ? null
+        : *state.command_diagnostics.callback;
+    void* user_data = state.command_diagnostics.user_data == null
+        ? null
+        : *state.command_diagnostics.user_data;
+    gpu::dispatch_debug_message(callback, user_data, &message);
     return public_fault;
 }
 
@@ -327,6 +333,9 @@ fn uint report_resource_leaks(VkDeviceState* state) {
 }
 
 fn void? vk_cmd_begin_label(gpu::CommandEncoderState* commands, ZString label, float[4] color) @private {
+    if (commands == null || commands.backend_state == null
+        || commands.backend_command == null) return gpu::COMMAND_RECORDING_ERROR~;
+    if (label == null) return gpu::INVALID_ARGUMENT~;
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING
@@ -340,6 +349,8 @@ fn void? vk_cmd_begin_label(gpu::CommandEncoderState* commands, ZString label, f
 }
 
 fn void? vk_cmd_end_label(gpu::CommandEncoderState* commands) @private {
+    if (commands == null || commands.backend_state == null
+        || commands.backend_command == null) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING

@@ -143,6 +143,7 @@ fn void ensure_command_reference_capacity(
         CommandResourceReference,
         (sz)capacity,
     );
+    note_command_reference_allocation(state);
     note_recording_host_allocation(state);
     for (uint i = 0; i < record.reference_count; i++) {
         grown[i] = record.references[i];
@@ -160,9 +161,11 @@ fn void? track_command_reference(
     uint index,
     uint generation,
 ) {
-    if (!state.validation && owner != state.attachment_views.owner) return;
+    note_command_tracking_call(state);
     CommandResourceReference reference = {
-        .owner = owner, .index = index, .generation = generation,
+        .owner      = owner,
+        .index      = index,
+        .generation = generation,
     };
     for (uint i = 0; i < record.reference_count; i++) {
         if (same_resource_reference(&record.references[i], &reference)) return;
@@ -170,17 +173,17 @@ fn void? track_command_reference(
     ensure_command_reference_capacity(state, record);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    retain_validation_reference(state, reference)!;
+    retain_tracked_command_reference(state, reference)!;
+    note_command_reference_increment(state);
     record.references[record.reference_count++] = reference;
 }
 
-fn TextureSlot*? resolve_texture_command_reference(
+fn TextureSlot*? resolve_tracked_texture_command_reference(
     VkDeviceState* state,
     CommandRecord* record,
     gpu::TextureHandle handle,
 ) {
-    if (!state.validation) return state.textures.get(handle);
-
+    note_command_tracking_call(state);
     CommandResourceReference reference = {
         .owner      = handle.owner,
         .index      = handle.index,
@@ -196,10 +199,9 @@ fn TextureSlot*? resolve_texture_command_reference(
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;
-    // Texture table storage is fixed until device teardown, and this retained
-    // reference prevents the slot from being destroyed or reused.
-    reference.validation_references = &slot.validation_references;
-    reference.validation_references.add(1, AtomicOrdering.RELAXED);
+    reference.tracked_command_references = &slot.tracked_command_references;
+    reference.tracked_command_references.add(1, AtomicOrdering.RELAXED);
+    note_command_reference_increment(state);
     record.references[record.reference_count++] = reference;
     return slot;
 }
@@ -212,7 +214,7 @@ fn void free_command_references(
         record.reference_count = 0;
         return;
     }
-    release_validation_references(
+    release_tracked_command_references(
         state,
         record.references,
         record.reference_count,
@@ -229,7 +231,7 @@ fn void rollback_command_references(
 ) {
     while (record.reference_count > checkpoint) {
         record.reference_count--;
-        release_validation_reference(
+        release_tracked_command_reference(
             state,
             record.references[record.reference_count],
         );

@@ -10,6 +10,34 @@ fn RuntimeDesc runtime_desc() {
     };
 }
 
+fn void contract_validation_defaults_to_trusted() @test {
+    RuntimeDesc desc;
+    assert(
+        desc.contract_validation == ContractValidation.TRUSTED,
+        "the zero runtime descriptor selects trusted contract validation"
+    );
+    assert(gpu::contract_validation_is_known(ContractValidation.TRUSTED));
+    assert(gpu::contract_validation_is_known(ContractValidation.OBJECT_BOUNDARIES));
+    assert(gpu::contract_validation_is_known(ContractValidation.FULL));
+}
+
+fn void full_validation_runtime_desc_enables_every_policy() @test {
+    RuntimeDesc desc = gpu::full_validation_runtime_desc();
+    assert(desc.backend == BackendKind.VULKAN);
+    assert(desc.contract_validation == ContractValidation.FULL);
+    assert(desc.track_resource_lifetimes);
+    assert(desc.enable_vulkan_validation);
+}
+
+fn void unknown_contract_validation_is_rejected() @test {
+    RuntimeDesc desc = runtime_desc();
+    desc.contract_validation = bitcast(99, ContractValidation);
+    assert(
+        @catch(gpu::create_runtime(&desc)) == gpu::INVALID_ARGUMENT,
+        "unknown contract validation ordinals are rejected before backend work"
+    );
+}
+
 fn void runtime_and_adapter_tokens_are_compact() @test {
     assert(Runtime::size == ulong::size, "Runtime is one opaque 64-bit token");
     assert(Adapter::size == ulong::size, "Adapter is one opaque 64-bit token");

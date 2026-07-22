@@ -690,12 +690,12 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
     )!!;
     vk::AllocationSlot* slot = fixture.state.allocations.get(allocation)!!;
     vk::CommandResourceReference[1] references = {{
-        .owner                 = allocation.owner,
-        .index                 = allocation.index,
-        .generation            = allocation.generation,
-        .validation_references = &slot.validation_references,
+        .owner                      = allocation.owner,
+        .index                      = allocation.index,
+        .generation                 = allocation.generation,
+        .tracked_command_references = &slot.tracked_command_references,
     }};
-    vk::retain_validation_reference(&fixture.state, references[0])!!;
+    vk::retain_tracked_command_reference(&fixture.state, references[0])!!;
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,
@@ -716,7 +716,7 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         1,
     );
     fixture.state.resource_mutex.unlock();
-    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 0
+    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
         && fixture.state.submitted_command_count == 0,
         "the first retirement releases the ownership record exactly once");
     vk::free_allocation_for_state_with_ops(
@@ -1072,7 +1072,9 @@ fn void allocation_table_teardown_destroys_each_live_pair_once() @test {
 fn gpu::Device create_allocation_test_device(ZString name) {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = name,
     };
     return create_test_device(&desc)!!;

@@ -13,7 +13,7 @@ struct VkRuntimeState {
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;
     VkAdapterState[]           adapters;
-    bool                       validation;
+    DeviceValidationPolicy     validation_policy;
     bool                       debug_names;
     uint                       texture_heap_capacity;
     uint                       sampler_heap_capacity;
@@ -147,6 +147,23 @@ const gpu::RuntimeBackendVTable VK_RUNTIME_VTABLE @private = {
     .supports_queue_requirements = &vk_supports_queue_requirements,
 };
 
+fn VkInstanceDesc runtime_instance_desc(
+    gpu::RuntimeDesc* desc,
+    vk::DebugUtilsMessengerCreateInfoEXT* messenger_info,
+) {
+    return {
+        .enable_validation         = desc.enable_vulkan_validation,
+        .enable_debug_utils        = desc.enable_vulkan_validation
+            || desc.enable_debug_names
+            || desc.debug_callback != null,
+        .enable_available_surfaces = true,
+        .application_name          = desc.application_name,
+        .debug_messenger_info      = desc.enable_vulkan_validation
+            ? messenger_info
+            : null,
+    };
+}
+
 fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     VkRuntimeState* state = mem::new(VkRuntimeState);
     defer catch {
@@ -155,7 +172,11 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
 
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
-    state.validation = desc.enable_validation;
+    state.validation_policy = {
+        .contract        = desc.contract_validation,
+        .track_lifetimes = desc.track_resource_lifetimes,
+        .vulkan_layers   = desc.enable_vulkan_validation,
+    };
     state.debug_names = desc.enable_debug_names;
     state.texture_heap_capacity = desc.texture_heap_capacity;
     state.sampler_heap_capacity = desc.sampler_heap_capacity;
@@ -175,17 +196,7 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     }
     vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
         runtime_debug_messenger_create_info(state);
-    VkInstanceDesc instance_desc = {
-        .enable_validation         = desc.enable_validation,
-        .enable_debug_utils        = desc.enable_validation
-            || desc.enable_debug_names
-            || desc.debug_callback != null,
-        .enable_available_surfaces = true,
-        .application_name          = desc.application_name,
-        .debug_messenger_info      = desc.enable_validation
-            ? &messenger_info
-            : null,
-    };
+    VkInstanceDesc instance_desc = runtime_instance_desc(desc, &messenger_info);
     VkInstanceCreateResult instance_result =
         create_vk_instance(&instance_desc)!;
     state.instance = instance_result.instance;

@@ -216,7 +216,48 @@ Do not make SDL3 a required dependency of the shipped library unless a public he
 
 ## 6. Validation policy
 
-All Vulkan tests should support validation-enabled runs.
+Policy tests treat contract depth, lifetime tracking, Vulkan layers, debug
+names, and callback delivery as independent inputs. The required command matrix
+is:
+
+| Contract | Tracking | Vulkan layers | Detailed semantic work | Reference work |
+|---|---:|---:|---:|---:|
+| `TRUSTED` | off | off | zero | zero |
+| `OBJECT_BOUNDARIES` | off | off | zero | zero |
+| `FULL` | on | off | nonzero | nonzero |
+| `FULL` | on | on | nonzero | nonzero |
+
+Additional tests cover all six contract/tracking combinations and both layer,
+callback, and debug-name values. `OBJECT_BOUNDARIES` must reject stale and
+foreign public identities without entering detailed command checking. `FULL`
+must return the same library fault and structured diagnostic with Vulkan layers
+off or on. Callback- or name-only trusted configurations must not request the
+Khronos layer or enable command checks/tracking.
+
+Every mode must preserve the mandatory safety floor: null/slice/range and
+overflow protection needed before host access, command-state/internal-table
+integrity, public device ownership, Vulkan result/device-loss handling, and
+transactional creation rollback. Tests for trusted mode distinguish these
+requirements from semantic misuse that is intentionally a caller contract.
+
+Run the dedicated matrix on a pinned headless ICD:
+
+```sh
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
+  c3c test vk_validation_policy --path test
+```
+
+It covers the complete runtime matrix, exact table selection, zero tracking
+storage when disabled, exact retain/release behavior when enabled, early
+destruction, recording/executable/submitted/device-loss cleanup, callback and
+layer independence, teardown predicates, mandatory safety, and partial-create
+rollback. The source graph checker prevents policy branches and cross-policy
+calls from re-entering warm command paths:
+
+```sh
+python -B -m unittest scripts.test_check_command_policy
+python -B scripts/check_command_policy.py
+```
 
 Validation requirements:
 
@@ -259,7 +300,7 @@ successful destruction, exact single and repeated-owner batch counts,
 transactional overflow/underflow diagnostics, and one ownership work unit for
 texture destruction at descriptor high-water marks 16, 4,096, and 65,536.
 Swapchain tests charge one work unit per wrapped image examined while retaining
-texture and attachment validation-reference guards.
+texture and attachment tracked-reference guards when tracking is selected.
 Queue tests cover compact completion packing, monotonicity, exhaustion, stale
 and foreign ownership, unpublished values, native poll/wait, timeout retry,
 and no public child allocation. Deterministic seams pause after native
@@ -275,7 +316,7 @@ device-loss discard, token consumption, and destruction readiness.
 
 Leak tests verify structured `resource_lifetime` delivery, including
 `GpuAllocation` identity/name metadata, stderr fallback without a callback,
-and callback-active reporting when `enable_validation = false`.
+and callback-active reporting under trusted/no-tracking/no-layer policy.
 Concurrency coverage uses a synchronized application-owned sink; callbacks are
 not assumed serialized or reentrant. Device-registry coverage includes
 simultaneous publication, destruction, closing overlap, and shared-runtime
@@ -384,7 +425,7 @@ The blocking headless matrix is shared by Linux and Windows:
 vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
 vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
 vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading vk_performance
-vk_queue vk_debug upload_bench_observation vk_device_request
+vk_queue vk_debug upload_bench_observation vk_device_request vk_validation_policy
 ```
 
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.
@@ -488,15 +529,16 @@ probe counts for head, middle, tail, and miss lookups.
 The lifecycle output requires `cached_poll_queries=0` and
 `retirement_locks=0` across each 100,000-poll measured interval and zero native
 completion queries/waits, device waits, and deferred-release enqueues in their
-respective intervals. Run
-`python -B scripts/run_benchmarks.py` for validation-disabled release
-evidence. Run `python -B scripts/run_benchmarks.py --validation --output
-test/build/benchmark-report-validation.md` separately for debug-layer cost.
-Exact schemas and zero-work invariants are blocking; timings are advisory unless
-the runner, driver, and comparison profile are all explicitly pinned.
-Validation runs skip release timing comparisons and reject pinned comparison
-flags. See
-[Performance](performance.md) for methods and baselines.
+respective intervals. Run `python -B scripts/run_benchmarks.py`; one build of
+`command_record_bench` executes the four policy rows above with the same fixed
+workload. The runner enforces exact policy fields, zero trusted/boundary work,
+nonzero full/tracking work, balanced increments/releases, and zero warm policy
+reselection. Only trusted/no-tracking/no-layer command timings participate in
+release threshold evaluation. `--validation` still supplies the separate
+all-enabled debug run for the other benchmark devices; those timings are not
+release comparisons and pinned comparison flags are rejected. Exact schemas
+and work invariants are blocking; timings are advisory unless runner, driver,
+and profile are explicitly pinned. See [Performance](performance.md).
 
 Run the behavioral performance targets directly with:
 
@@ -700,6 +742,7 @@ Before first release:
 ```text
 pure CPU tests pass
 headless Vulkan tests pass validation-clean
+validation-policy matrix and command-policy source checks pass
 root-pointer compute sample works
 bindless texture compute sample works
 offscreen graphics sample readback matches expected output

@@ -47,7 +47,7 @@
     // CI. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
     "command_record_bench": {
       "type": "executable",
-      "features": [ "COMMAND_RESOLUTION_STATS" ],
+      "features": [ "COMMAND_RESOLUTION_STATS", "VALIDATION_POLICY_STATS" ],
       "sources": [ "src/command_record_bench.c3" ]
     },
     // Advisory submission, completed-point polling, and immediate destruction
@@ -178,6 +178,10 @@
     "vk_debug": {
       "type": "test",
       "sources": [ "src/test_vk_debug_report.c3" ]
+    },
+    "vk_validation_policy": {
+      "type": "test",
+      "sources": [ "src/test_vk_validation_policy.c3" ]
     }
   }
 }

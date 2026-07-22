@@ -53,7 +53,9 @@ fn vk::Result lifetime_counter_query(
 fn gpu::Device make_lifetime_test_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
-        .enable_validation = true,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
         .application_name  = "gpu_immediate_lifetime_test",
     };
     return create_test_device(&desc)!!;
@@ -392,14 +394,14 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
         index:      view.index,
         generation: view.generation,
     )!!;
-    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 1,
+    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 1,
         "recording retains the borrowed attachment view");
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
-    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 1
+    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
         && state.submitted_command_count == 1,
         "submission transfers the borrowed-view reference to the completion batch");
 
@@ -415,12 +417,12 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
         p_wait_info:   &wait_info,
         timeout:       ulong::max,
     ) == vk::Result.SUCCESS, "the submitted command reaches completion");
-    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 1
+    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
         && state.submitted_command_count == 1,
         "completion alone preserves the borrowed-view reference until drain");
 
     vk::drain_completed_submitted_commands(state)!!;
-    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 0
+    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
         && state.submitted_command_count == 0,
         "drain releases the completed borrowed-view reference");
     vk::QueueCompletionState* completion_state =
@@ -440,7 +442,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
         && work.cached_poll_hits == 1,
         "post-drain polling performs no native or retirement-lock work");
     vk::drain_completed_submitted_commands(state)!!;
-    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 0
+    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
         && state.submitted_command_count == 0,
         "a repeated drain cannot release the borrowed-view reference twice");
 }
@@ -523,7 +525,10 @@ fn void failed_command_validation_retains_no_resource_reference() @test {
 
 fn void submitted_command_reservations_prevent_capacity_overcommit() @test {
     vk::VkDeviceState state = {
-        .validation     = true,
+        .validation_policy = {
+            .contract        = gpu::ContractValidation.FULL,
+            .track_lifetimes = true,
+        },
         .host_allocator = &allocators::LIBC_ALLOCATOR,
     };
     vk::ensure_submitted_command_capacity(&state, 15);
@@ -561,7 +566,10 @@ fn void submitted_command_reservations_prevent_capacity_overcommit() @test {
 
 fn void incomplete_reference_drain_is_deterministic() @test {
     vk::VkDeviceState state = {
-        .validation     = true,
+        .validation_policy = {
+            .contract        = gpu::ContractValidation.FULL,
+            .track_lifetimes = true,
+        },
         .host_allocator = &allocators::LIBC_ALLOCATOR,
     };
     vk::QueueCompletionState[1] completions = {{
@@ -637,20 +645,20 @@ fn void completed_submission_release_boundary_is_exact() @test {
         .id     = 0,
         .roles  = { .graphics },
     };
-    Atomic{uint} first_validation_reference;
-    Atomic{uint} second_validation_reference;
-    Atomic{uint} third_validation_reference;
-    first_validation_reference.store(1, AtomicOrdering.RELAXED);
-    second_validation_reference.store(1, AtomicOrdering.RELAXED);
-    third_validation_reference.store(1, AtomicOrdering.RELAXED);
+    Atomic{uint} first_tracked_command_reference;
+    Atomic{uint} second_tracked_command_reference;
+    Atomic{uint} third_tracked_command_reference;
+    first_tracked_command_reference.store(1, AtomicOrdering.RELAXED);
+    second_tracked_command_reference.store(1, AtomicOrdering.RELAXED);
+    third_tracked_command_reference.store(1, AtomicOrdering.RELAXED);
     vk::CommandResourceReference[1] first_references = {{
-        .validation_references = &first_validation_reference,
+        .tracked_command_references = &first_tracked_command_reference,
     }};
     vk::CommandResourceReference[1] second_references = {{
-        .validation_references = &second_validation_reference,
+        .tracked_command_references = &second_tracked_command_reference,
     }};
     vk::CommandResourceReference[1] third_references = {{
-        .validation_references = &third_validation_reference,
+        .tracked_command_references = &third_tracked_command_reference,
     }};
     vk::GeneratedPreprocessBuffer[1] first_preprocess = {{
         .reservation_context = context,
@@ -710,9 +718,9 @@ fn void completed_submission_release_boundary_is_exact() @test {
         "sequence N - 1 retires only its covered batch");
     assert(incomplete.freed == before.freed,
         "sequence N - 1 cannot free the submitted command buffer");
-    assert(first_validation_reference.load(AtomicOrdering.RELAXED) == 0
-        && second_validation_reference.load(AtomicOrdering.RELAXED) == 1
-        && third_validation_reference.load(AtomicOrdering.RELAXED) == 1,
+    assert(first_tracked_command_reference.load(AtomicOrdering.RELAXED) == 0
+        && second_tracked_command_reference.load(AtomicOrdering.RELAXED) == 1
+        && third_tracked_command_reference.load(AtomicOrdering.RELAXED) == 1,
         "sequence N - 1 releases only its stable retained counter pointer");
     assert(!reserved_preprocess[0].reservation_in_use
         && reserved_preprocess[1].reservation_in_use
@@ -738,8 +746,8 @@ fn void completed_submission_release_boundary_is_exact() @test {
         "sequence N retires every batch covered by that sequence");
     assert(completed.freed == before.freed,
         "a null native buffer performs no backend free");
-    assert(second_validation_reference.load(AtomicOrdering.RELAXED) == 0
-        && third_validation_reference.load(AtomicOrdering.RELAXED) == 0,
+    assert(second_tracked_command_reference.load(AtomicOrdering.RELAXED) == 0
+        && third_tracked_command_reference.load(AtomicOrdering.RELAXED) == 0,
         "sequence N releases every stable retained counter pointer");
     assert(!reserved_preprocess[1].reservation_in_use
         && !reserved_preprocess[2].reservation_in_use,

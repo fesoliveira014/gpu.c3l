@@ -14,7 +14,7 @@ struct PipelineSlot {
     vk::PipelineLayout              layout;
     vk::IndirectCommandsLayoutEXT   generated_dispatch_layout;
     uint                            entry;
-    Atomic{uint}                    validation_references;
+    Atomic{uint}                    tracked_command_references;
 }
 
 struct PipelineCell {
@@ -370,9 +370,9 @@ fn void? vk_destroy_pipeline(gpu::Device* device, gpu::PipelineHandle handle) @p
     if (generated_scratch_references_pipeline(state, handle)) {
         return gpu::RESOURCE_IN_USE~;
     }
-    if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+    if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
         drain_completed_submitted_commands(state)!;
-        if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
+        if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
             return gpu::RESOURCE_IN_USE~;
         }
     }
