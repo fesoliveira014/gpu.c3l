@@ -616,16 +616,29 @@ fn void identical_shader_bytes_from_distinct_storage_deduplicate() @test {
     gpu::ComputePipelineDesc second_pipeline_desc = {
         .shader             = second_code,
     };
+    vk::VkDeviceState* state = cache_test_state(&device);
 
+    vk::reset_pipeline_identity_stats(state);
     gpu::PipelineHandle first =
         gpu::create_compute_pipeline(&device, &first_pipeline_desc)!!;
     gpu::PipelineHandle second =
         gpu::create_compute_pipeline(&device, &second_pipeline_desc)!!;
+    vk::PipelineIdentityStats stats = vk::pipeline_identity_stats(state);
     assert(cache_entry_count(&device) == 1,
         "identical IR bytes from distinct storage share one cache entry");
+    assert(stats.shader_intern_probes == 1
+            && stats.shader_intern_bytes_compared == source.len,
+        "distinct storage performs one exact identity comparison");
+    assert(stats.shader_owned_bytes_cloned == source.len,
+        "distinct storage owns one canonical SPIR-V clone");
+    assert(stats.pipeline_key_probes == 1,
+        "distinct storage reaches one compact pipeline-key cache hit");
 
     gpu::destroy_pipeline(&device, first)!!;
     gpu::destroy_pipeline(&device, second)!!;
+    stats = vk::pipeline_identity_stats(state);
+    assert(stats.shader_owned_bytes_freed == source.len,
+        "the final alias frees the canonical SPIR-V clone exactly once");
 }
 
 fn void shader_store_cache_hit_reference_is_stable() @test {
@@ -655,8 +668,9 @@ fn void shader_store_cache_hit_reference_is_stable() @test {
     vk::PipelineIdentityStats hit_stats = vk::pipeline_identity_stats(state);
     assert(state.shader_store.entries[(uint)shader_id].refcount == 1,
         "a cache hit releases its temporary shader reference");
-    assert(hit_stats.shader_intern_bytes_compared == shader.spirv.len,
-        "interning verifies exact bytes once at the identity boundary");
+    assert(hit_stats.shader_intern_probes == 1
+            && hit_stats.shader_intern_bytes_compared == shader.spirv.len,
+        "interning probes and verifies exact bytes once at the identity boundary");
     assert(hit_stats.shader_owned_bytes_cloned == 0,
         "a cache hit does not clone an existing shader identity");
     assert(hit_stats.pipeline_key_probes == 1,
@@ -710,8 +724,11 @@ fn void shader_store_collision_verification_is_exact() @test {
         vk::pipeline_identity_stats(state);
     assert(first_id != distinct_id,
         "equal digests with different bytes receive distinct shader IDs");
-    assert(collision_stats.shader_intern_bytes_compared == first.spirv.len,
-        "a digest collision compares the complete equal-length payload");
+    assert(collision_stats.shader_intern_probes == 1
+            && collision_stats.shader_intern_bytes_compared == first.spirv.len,
+        "a digest collision probes and compares the complete payload once");
+    assert(collision_stats.shader_owned_bytes_cloned == first.spirv.len * 2,
+        "collision-separated identities each own one complete clone");
     assert(vk::shader_store_live_count(state) == 2,
         "both collision-separated identities remain live");
     assert(vk::shader_store_index_consistent(state),
@@ -721,8 +738,11 @@ fn void shader_store_collision_verification_is_exact() @test {
     vk::release_shader_identity_locked(state, first_id)!!;
     vk::release_shader_identity_locked(state, distinct_id)!!;
     state.resource_mutex.unlock();
+    collision_stats = vk::pipeline_identity_stats(state);
     assert(vk::shader_store_live_count(state) == 0,
         "releasing both collision identities empties the store");
+    assert(collision_stats.shader_owned_bytes_freed == first.spirv.len * 2,
+        "releasing both collision identities frees both complete clones");
 }
 
 fn void shader_store_reuses_entries_across_unique_churn() @test {

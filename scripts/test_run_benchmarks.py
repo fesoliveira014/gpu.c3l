@@ -75,16 +75,22 @@ PIPELINE_OUTPUT = "\n".join(
         (
             "identity size_bytes=1024 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=1024 "
+            "lookup_shader_intern_probes=0 lookup_shader_bytes_compared=0 "
+            "lookup_owned_bytes_cloned=0 "
             "pipeline_key_probes=1 owned_bytes_freed=1024 elapsed_ns=1200"
         ),
         (
             "identity size_bytes=65536 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=65536 "
+            "lookup_shader_intern_probes=0 lookup_shader_bytes_compared=0 "
+            "lookup_owned_bytes_cloned=0 "
             "pipeline_key_probes=1 owned_bytes_freed=65536 elapsed_ns=8400"
         ),
         (
             "identity size_bytes=1048576 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=1048576 "
+            "lookup_shader_intern_probes=0 lookup_shader_bytes_compared=0 "
+            "lookup_owned_bytes_cloned=0 "
             "pipeline_key_probes=1 owned_bytes_freed=1048576 elapsed_ns=94000"
         ),
     )
@@ -100,10 +106,10 @@ DESCRIPTOR_CHURN_OUTPUT = "\n".join(
     (
         "iterations=320/worker units=ns/descriptor,ns/op",
         "phase sampler intern+publish hits workers=1: 120.0 ns/op, 1.00x scaling vs 1 thread",
-        "sampler lookup occupancy=8 bucket_count=16 probes=1 elapsed_ns=20",
-        "sampler lookup occupancy=64 bucket_count=128 probes=1 elapsed_ns=20",
-        "sampler lookup occupancy=1024 bucket_count=2048 probes=1 elapsed_ns=20",
-        "sampler lookup occupancy=65536 bucket_count=131072 probes=1 elapsed_ns=20",
+        "sampler lookup occupancy=8 bucket_count=16 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
+        "sampler lookup occupancy=64 bucket_count=128 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
+        "sampler lookup occupancy=1024 bucket_count=2048 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
+        "sampler lookup occupancy=65536 bucket_count=131072 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
     )
 )
 
@@ -375,7 +381,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "descriptor_churn_bench",
         )
         missing = DESCRIPTOR_CHURN_OUTPUT.replace(
-            "sampler lookup occupancy=64 bucket_count=128 probes=1 elapsed_ns=20\n",
+            "sampler lookup occupancy=64 bucket_count=128 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20\n",
             "",
         )
         with self.assertRaisesRegex(ValueError, "tiers"):
@@ -384,8 +390,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_descriptor_churn_rejects_malformed_sampler_evidence(self):
         runner = load_runner()
         malformed = DESCRIPTOR_CHURN_OUTPUT.replace(
-            "probes=1 elapsed_ns=20",
-            "probe_count=1 elapsed_ns=20",
+            "probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
+            "probe_count=1 empty_bucket_miss_probes=0 elapsed_ns=20",
             1,
         )
         with self.assertRaisesRegex(ValueError, "malformed"):
@@ -423,6 +429,16 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 )
                 with self.assertRaisesRegex(ValueError, "probes"):
                     runner.require_measurement(output, "descriptor_churn_bench")
+
+    def test_descriptor_churn_rejects_nonzero_empty_bucket_miss_work(self):
+        runner = load_runner()
+        output = DESCRIPTOR_CHURN_OUTPUT.replace(
+            "empty_bucket_miss_probes=0",
+            "empty_bucket_miss_probes=1",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "malformed"):
+            runner.require_measurement(output, "descriptor_churn_bench")
 
     def test_lifecycle_measurement_rejects_nonzero_invariants(self):
         runner = load_runner()
@@ -645,6 +661,16 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "owned_bytes_cloned=1_048_576",
         )
         with self.assertRaisesRegex(ValueError, "1048576 bytes"):
+            runner.require_measurement(output, "pipeline_cache_bench")
+
+    def test_pipeline_cache_rejects_post_intern_shader_work(self):
+        runner = load_runner()
+        output = PIPELINE_OUTPUT.replace(
+            "lookup_shader_bytes_compared=0",
+            "lookup_shader_bytes_compared=1",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "1024 bytes"):
             runner.require_measurement(output, "pipeline_cache_bench")
 
     def test_upload_target_rejects_generic_measurement(self):

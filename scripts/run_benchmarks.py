@@ -142,7 +142,8 @@ SAMPLER_LOOKUP_OCCUPANCIES = (8, 64, 1_024, 65_536)
 SAMPLER_LOOKUP_EVIDENCE = re.compile(
     r"^sampler lookup occupancy=(?P<occupancy>[0-9]+) "
     r"bucket_count=(?P<bucket_count>[0-9]+) "
-    r"probes=(?P<probes>[0-9]+) elapsed_ns=(?P<elapsed_ns>[0-9]+)$"
+    r"probes=(?P<probes>[0-9]+) empty_bucket_miss_probes=0 "
+    r"elapsed_ns=(?P<elapsed_ns>[0-9]+)$"
 )
 
 REGRESSION_THRESHOLDS = {
@@ -288,7 +289,10 @@ def require_measurement(
             evidence = re.compile(
                 rf"^identity size_bytes={byte_count} intern_probes=[0-9]+ "
                 rf"intern_bytes_compared=[0-9]+ "
-                rf"owned_bytes_cloned={byte_count} pipeline_key_probes=1 "
+                rf"owned_bytes_cloned={byte_count} "
+                rf"lookup_shader_intern_probes=0 "
+                rf"lookup_shader_bytes_compared=0 "
+                rf"lookup_owned_bytes_cloned=0 pipeline_key_probes=1 "
                 rf"owned_bytes_freed={byte_count} elapsed_ns=[0-9]+$",
                 re.MULTILINE,
             )

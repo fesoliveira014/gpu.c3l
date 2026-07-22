@@ -231,13 +231,15 @@ fn void run_sampler_lookup_probe(
             && (result.bucket_count & (result.bucket_count - 1)) == 0
             && result.probes >= 1
             && result.probes <= 8
+            && result.empty_bucket_miss_probes == 0
             && vk::sampler_table_index_consistent(&table),
         "sampler lookup probe must report bounded indexed work");
     io::printfn(
-        "sampler lookup occupancy=%d bucket_count=%d probes=%d elapsed_ns=%d",
+        "sampler lookup occupancy=%d bucket_count=%d probes=%d empty_bucket_miss_probes=%d elapsed_ns=%d",
         result.occupancy,
         result.bucket_count,
         result.probes,
+        result.empty_bucket_miss_probes,
         elapsed_ns,
     );
 }

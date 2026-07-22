@@ -10,6 +10,8 @@ const char[*] PERFORMANCE_VERT_SPIRV =
 const char[*] PERFORMANCE_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
+const uint PERFORMANCE_PIPELINE_CHURN_COUNT = 16;
+
 fn gpu::Device make_performance_invariant_device() {
     gpu::RuntimeDesc desc = {
         .backend          = gpu::BackendKind.VULKAN,
@@ -113,6 +115,30 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     gpu::CommandResolutionStats after_bind =
         gpu::command_resolution_stats();
     assert_warm_command_resolution(after_bind, 1, 1);
+    gpu::PipelineHandle[PERFORMANCE_PIPELINE_CHURN_COUNT] churned_pipelines;
+    for (uint i = 0; i < churned_pipelines.len; i++) {
+        churned_pipelines[i] = gpu::create_compute_pipeline(
+            &device,
+            &pipeline_desc,
+        )!!;
+    }
+    foreach (churned : churned_pipelines) {
+        assert(churned != pipeline,
+            "pipeline-table churn publishes distinct owning handles");
+        gpu::destroy_pipeline(&device, churned)!!;
+    }
+    gpu::CommandResolutionStats after_churn =
+        gpu::command_resolution_stats();
+    assert(after_churn.pipeline_table_lookups
+            == after_bind.pipeline_table_lookups
+                + PERFORMANCE_PIPELINE_CHURN_COUNT * 2
+        && after_churn.pipeline_cache_lookups
+            == after_bind.pipeline_cache_lookups,
+        "pipeline churn performs two table lookups per destroyed alias and no cache lookup");
+    gpu::reset_command_resolution_stats();
+    gpu::CommandResolutionStats post_churn =
+        gpu::command_resolution_stats();
+    assert_warm_command_resolution(post_churn, 0);
     gpu::cmd_dispatch(
         commands: &commands,
         root:     test_span_address(&device, root.span),
@@ -138,13 +164,13 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     );
     assert(after.command_buffer_resets == before.command_buffer_resets + 1,
         "warm begin resets its reusable command buffer");
-    assert_warm_command_resolution(resolution, 2, 1);
+    assert_warm_command_resolution(resolution, 1);
     assert(resolution.pipeline_table_lookups
-            == after_bind.pipeline_table_lookups
+            == post_churn.pipeline_table_lookups
         && resolution.pipeline_cache_lookups
-            == after_bind.pipeline_cache_lookups,
-        "dispatch performs no additional pipeline resolution");
-    assert(resolution.native_commands == after_bind.native_commands + 2,
+            == post_churn.pipeline_cache_lookups,
+        "dispatch performs no pipeline resolution after cache churn");
+    assert(resolution.native_commands == post_churn.native_commands + 2,
         "dispatch emits one root push and one native dispatch");
     gpu::discard_executable_commands(&executable)!!;
 }

@@ -433,10 +433,9 @@ target requests 200 topology/cull/front-face/depth-bias permutations through
 `cmd_set_raster_state`, reports the requested count, native graphics creates,
 cache entries/aliases, and recording/create timings; all permutations share
 one immutable pipeline. It additionally reports exact interning, clone/free,
-and compact-key probe counts for 1 KiB, 64 KiB, and 1 MiB identities. The
-source contract, rather than a vacuous zero counter, proves that post-intern
-pipeline lookup has no shader-byte path; elapsed boundary time remains
-advisory. Command recording covers
+and compact-key probe counts for 1 KiB, 64 KiB, and 1 MiB identities. Separate
+lookup-side counters require zero shader probes, byte comparisons, and clones
+after interning; elapsed boundary time remains advisory. Command recording covers
 ordinary and semantic-hazard barriers, indirect dispatch, and capability-gated
 generated dispatch. It measures five 64-record lists after an untimed 64-record
 warmup. Before warmup, the calling worker reserves 64 preprocess buffers sized
@@ -471,7 +470,8 @@ examined. The accompanying elapsed times are advisory.
 
 The same benchmark reports sampler lookup occupancy 8, 64, 1,024, and 65,536
 through production hash/bucket/link/equality helpers. The runner requires a
-power-of-two bucket count at least twice occupancy and one through eight probes
+power-of-two bucket count at least twice occupancy, one through eight probes for
+the selected hit, and zero candidate probes for a guaranteed empty-bucket miss
 at every tier. Collision, rollback, bucket consistency, concurrent publication,
 and teardown are covered by Vulkan and CPU tests. Collision-chain scenarios
 require exact candidate-probe counts for head, middle, tail, and miss lookups.

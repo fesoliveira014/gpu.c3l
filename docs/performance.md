@@ -90,8 +90,9 @@ The same target builds synthetic sampler tables at occupancy 8, 64, 1,024, and
 65,536 with the production canonical hash, bucket, link, equality, and lookup
 helpers. Every tier requires a power-of-two bucket count at least twice the
 occupancy and between one and eight candidate probes for the selected hit.
-Elapsed lookup time is advisory; exact occupancy, shape, and probe work are the
-blocking evidence.
+Every tier also requires zero candidate probes for a guaranteed empty-bucket
+miss. Elapsed lookup time is advisory; exact occupancy, shape, and probe work
+are the blocking evidence.
 
 The submit-batch benchmark submits real executable command lists in batches of
 1, 8, 32, 128, and 1,024. Its feature-gated counters require exactly one token
@@ -102,8 +103,8 @@ The pipeline-cache benchmark separately interns synthetic 1 KiB, 64 KiB, and
 1 MiB identities. For every size, its blocking counters require one complete
 owned clone and free and one compact-key probe. Collision and distinct-storage
 tests require exact intern probes and compared bytes while cache lookup requires
-only the compact key. Boundary elapsed time is advisory; the exact work counters
-are the regression evidence.
+zero shader probes, byte comparisons, and clones after interning. Boundary
+elapsed time is advisory; the exact work counters are the regression evidence.
 
 Unpinned runs report crossings of these broad order-of-magnitude thresholds as
 advisories:
@@ -141,8 +142,8 @@ Pipeline bind performs the only generation-checked pipeline-table lookup and
 the only pipeline-cache resolution for a command interval. Validation mode
 retains the pipeline through discard or completion; later direct, indirect,
 generated, and render-pass commands read only the cached native snapshot and
-kind/render metadata. The source contract rejects post-bind table/cache
-resolution and retained cell-generation validation seams.
+kind/render metadata. Exact bind-time counters followed by a reset after
+pipeline-table/cache churn require zero post-bind resolution during dispatch.
 
 An advisory llvmpipe run on 2026-07-21 (Mesa 25.0.7, LLVM 15.0.7) requested
 200 dynamic raster states for one immutable graphics descriptor:
