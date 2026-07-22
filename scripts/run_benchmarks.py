@@ -18,6 +18,7 @@ BENCHMARK_TARGETS = (
     "upload_throughput_bench",
     "command_record_bench",
     "lifecycle_bench",
+    "submit_batch_bench",
     "pipeline_cache_bench",
     "async_overlap_bench",
 )
@@ -40,6 +41,10 @@ BENCHMARK_METHODS = {
     "lifecycle_bench": (
         "submit=256x5; poll=100000x5; destroy=300x5",
         "ns/submit, ns/poll, ns/destroy",
+    ),
+    "submit_batch_bench": (
+        "batch_sizes=1,8,32,128,1024; exact token visits",
+        "ns/submit; exact work units",
     ),
     "pipeline_cache_bench": ("raster=200; duplicate=200000; batch=64x2000", "ns/create, ns/state"),
     "async_overlap_bench": ("calibration=2; measured=5", "ms"),
@@ -91,6 +96,7 @@ LIFECYCLE_SCHEMA = re.compile(
     r"invariants: point_allocations=0 destruction_waits=0 "
     r"deferred_releases=0 cached_poll_queries=0 retirement_locks=0\Z"
 )
+SUBMIT_BATCH_SIZES = (1, 8, 32, 128, 1024)
 COMMAND_RECORD_INVARIANTS = re.compile(
     r"^invariants: registry_locks=0 recording_allocations=0 "
     r"draw_compilations=0 preprocess_allocations=0$",
@@ -184,6 +190,19 @@ def require_measurement(output, target, enforce_thresholds=True):
             raise ValueError(f"{target} output does not match the exact schema")
     if target == "lifecycle_bench" and not LIFECYCLE_SCHEMA.fullmatch(output):
         raise ValueError(f"{target} output does not match the exact schema")
+    if target == "submit_batch_bench":
+        for size in SUBMIT_BATCH_SIZES:
+            pattern = re.compile(
+                rf"^submit batch size={size}: {ALLOCATION_NUMBER} ns/submit "
+                rf"token_visits={size} epoch_reset_cells=0$",
+                re.MULTILINE,
+            )
+            if not pattern.search(output):
+                raise ValueError(
+                    f"{target} is missing exact work for batch size {size}"
+                )
+        if "submit batch leaks=0" not in output:
+            raise ValueError(f"{target} reports live resources")
     if target == "command_record_bench" and not COMMAND_RECORD_INVARIANTS.search(output):
         raise ValueError(f"{target} recording invariants are missing or nonzero")
     if target == "command_record_bench" and not COMMAND_RECORD_RESOLUTION.search(output):

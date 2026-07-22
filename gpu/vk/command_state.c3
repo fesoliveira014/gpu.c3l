@@ -40,6 +40,7 @@ struct CommandRecord {
     RecordingContextHandle      context;
     gpu::Queue                  queue;
     CommandState                state;
+    ulong                       submit_visit_epoch;
     uint                        active_render_width;
     uint                        active_render_height;
     RenderCompatibility         active_render;

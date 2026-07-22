@@ -272,8 +272,12 @@ RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> c
 `begin_commands` creates a record in `RECORDING`. Render passes nest into
 `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes
 the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
-batch as `SUBMITTING`. Validation or native failure restores it without
-publishing queue progress. Success publishes one `CompletionPoint` and
+batch as `SUBMITTING`. Duplicate detection visits the submitted records once,
+using a device-local epoch stored on each record; ordinary work is proportional
+to the command-list count rather than the square of it. Epoch rollover scans the
+allocated command table once before reusing epoch one. Validation or native
+failure restores it without publishing queue progress. Success publishes one
+`CompletionPoint` and
 invalidates every submitted token and alias. Completion observation and discard
 retire native buffers to their recording context. The context owner resets
 compatible buffers before its next begin and reuses their host-side reference

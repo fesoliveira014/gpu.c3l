@@ -11,6 +11,16 @@ fn ulong command_submit_count(gpu::Device* device) {
     return vk::submit_stats(state).queue_submits;
 }
 
+fn void record_empty_executables(
+    gpu::Queue queue,
+    gpu::ExecutableCommandList[] out_lists,
+) {
+    foreach (&out_list : out_lists) {
+        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        *out_list = gpu::end_commands(&commands)!!;
+    }
+}
+
 
 fn void generated_preprocess_reuse_requires_compatible_memory() @test {
     vk::GeneratedPreprocessBuffer buffer = {
@@ -304,15 +314,250 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[2] duplicates = { cmd_executable, cmd_executable };
     gpu::SubmitDesc bad = { .command_lists = duplicates[..] };
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::reset_submit_duplicate_work_counters(state);
     ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &bad));
     assert(rejected == gpu::COMMAND_RECORDING_ERROR, "duplicate tokens fault before submission");
     assert(command_submit_count(&device) == before, "duplicate-token rejection records no queue submit");
+    vk::SubmitDuplicateWorkCounters duplicate_work =
+        vk::submit_duplicate_work_counters(state);
+    assert(duplicate_work.token_visits == 2
+            && duplicate_work.epoch_reset_cells == 0,
+        "a two-token duplicate faults after two linear visits");
 
     gpu::ExecutableCommandList[1] one = { cmd_executable };
     gpu::SubmitDesc good = { .command_lists = one[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &good)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+}
+
+fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
+    const uint BATCH_SIZE = 128;
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::ExecutableCommandList[BATCH_SIZE] unique;
+    record_empty_executables(queue, unique[..]);
+    bool consumed;
+    defer {
+        if (!consumed) {
+            foreach (&list : unique) discard_test_executable(list)!!;
+        }
+    }
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    ulong submits_before = command_submit_count(&device);
+
+    gpu::ExecutableCommandList[BATCH_SIZE] beginning = unique;
+    beginning[1] = unique[0];
+    vk::reset_submit_duplicate_work_counters(state);
+    gpu::SubmitDesc beginning_desc = { .command_lists = beginning[..] };
+    assert(@catch(gpu::submit(queue, &beginning_desc))
+            == gpu::COMMAND_RECORDING_ERROR,
+        "a duplicate at the beginning rejects the batch");
+    assert(vk::submit_duplicate_work_counters(state).token_visits == 2,
+        "a beginning duplicate stops after two visits");
+
+    gpu::ExecutableCommandList[BATCH_SIZE] middle = unique;
+    middle[BATCH_SIZE / 2] = unique[0];
+    vk::reset_submit_duplicate_work_counters(state);
+    gpu::SubmitDesc middle_desc = { .command_lists = middle[..] };
+    assert(@catch(gpu::submit(queue, &middle_desc))
+            == gpu::COMMAND_RECORDING_ERROR,
+        "a duplicate in the middle rejects the batch");
+    assert(vk::submit_duplicate_work_counters(state).token_visits
+            == BATCH_SIZE / 2 + 1,
+        "a middle duplicate stops at its exact position");
+
+    gpu::ExecutableCommandList[BATCH_SIZE] final = unique;
+    final[BATCH_SIZE - 1] = unique[0];
+    vk::reset_submit_duplicate_work_counters(state);
+    gpu::SubmitDesc final_desc = { .command_lists = final[..] };
+    assert(@catch(gpu::submit(queue, &final_desc))
+            == gpu::COMMAND_RECORDING_ERROR,
+        "a duplicate at the end rejects the batch");
+    assert(vk::submit_duplicate_work_counters(state).token_visits
+            == BATCH_SIZE,
+        "an end duplicate remains one visit per submitted item");
+    assert(command_submit_count(&device) == submits_before,
+        "all duplicate positions reject before native submit");
+    foreach (list : unique) {
+        assert(state.commands.get(list.handle)!!.state
+                == vk::CommandState.EXECUTABLE,
+            "duplicate faults preserve every command record as executable");
+    }
+
+    vk::reset_submit_duplicate_work_counters(state);
+    gpu::SubmitDesc retry = { .command_lists = unique[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &retry)!!;
+    consumed = true;
+    assert(vk::submit_duplicate_work_counters(state).token_visits
+            == BATCH_SIZE,
+        "a distinct retry uses a fresh epoch and visits every record once");
+    gpu::wait_completion(completion)!!;
+}
+
+fn void duplicate_fault_allows_subset_retry_and_remaining_discards() @test {
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::ExecutableCommandList[3] lists;
+    record_empty_executables(queue, lists[..]);
+    gpu::ExecutableCommandList[4] duplicate = {
+        lists[0],
+        lists[1],
+        lists[0],
+        lists[2],
+    };
+    gpu::SubmitDesc duplicate_submit = {
+        .command_lists = duplicate[..],
+    };
+    assert(@catch(gpu::submit(queue, &duplicate_submit))
+            == gpu::COMMAND_RECORDING_ERROR,
+        "a duplicate batch faults before consuming any distinct record");
+
+    gpu::ExecutableCommandList[1] retry = { lists[0] };
+    gpu::SubmitDesc retry_submit = { .command_lists = retry[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &retry_submit)!!;
+    gpu::discard_executable_commands(&lists[1])!!;
+    gpu::discard_executable_commands(&lists[2])!!;
+    gpu::wait_completion(completion)!!;
+}
+
+fn void submit_valid_batch_sizes_visit_each_record_once() @test {
+    const uint MAX_BATCH_SIZE = 1_024;
+    uint[5] batch_sizes = { 1, 8, 32, 128, 1_024 };
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+
+    foreach (batch_size : batch_sizes) {
+        gpu::ExecutableCommandList[MAX_BATCH_SIZE] lists;
+        record_empty_executables(queue, lists[:batch_size]);
+        vk::reset_submit_duplicate_work_counters(state);
+        ulong submits_before = command_submit_count(&device);
+        gpu::SubmitDesc submit = {
+            .command_lists = lists[:batch_size],
+        };
+
+        gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+
+        vk::SubmitDuplicateWorkCounters work =
+            vk::submit_duplicate_work_counters(state);
+        assert(work.token_visits == batch_size
+                && work.epoch_reset_cells == 0,
+            "a valid batch performs one duplicate visit per command record");
+        assert(command_submit_count(&device) == submits_before + 1,
+            "a valid batch performs one native queue submit");
+        gpu::wait_completion(completion)!!;
+    }
+}
+
+fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::ExecutableCommandList[3] lists;
+    record_empty_executables(queue, lists[..]);
+    gpu::CommandListHandle discarded_handle = lists[2].handle;
+    gpu::discard_executable_commands(&lists[2])!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::CommandCell* unused =
+        &state.commands.slots[discarded_handle.index];
+    uint unused_generation = unused.generation;
+    vk::CommandRecord* unvisited_live = state.commands.get(lists[1].handle)!!;
+    unvisited_live.submit_visit_epoch = ulong::max;
+    gpu::ExecutableCommandList[2] duplicate = { lists[0], lists[0] };
+    gpu::SubmitDesc submit = { .command_lists = duplicate[..] };
+
+    state.next_submit_visit_epoch = ulong::max - 1;
+    vk::reset_submit_duplicate_work_counters(state);
+    assert(@catch(gpu::submit(queue, &submit))
+            == gpu::COMMAND_RECORDING_ERROR,
+        "the maximum epoch remains usable for duplicate detection");
+    vk::SubmitDuplicateWorkCounters maximum =
+        vk::submit_duplicate_work_counters(state);
+    assert(state.next_submit_visit_epoch == ulong::max
+            && maximum.token_visits == 2
+            && maximum.epoch_reset_cells == 0,
+        "the maximum epoch is used once without a rollover sweep");
+
+    vk::reset_submit_duplicate_work_counters(state);
+    assert(@catch(gpu::submit(queue, &submit))
+            == gpu::COMMAND_RECORDING_ERROR,
+        "the rollover epoch still detects an in-attempt duplicate");
+    vk::SubmitDuplicateWorkCounters rollover =
+        vk::submit_duplicate_work_counters(state);
+    assert(state.next_submit_visit_epoch == 1
+            && rollover.token_visits == 2
+            && rollover.epoch_reset_cells == state.commands.next_new,
+        "rollover clears each allocated cell then uses epoch one");
+    assert(!unused.used && unused.generation == unused_generation,
+        "rollover preserves unused command-cell lifecycle state");
+    assert(unvisited_live.submit_visit_epoch == 0,
+        "rollover clears old stamps on live records outside the submitted batch");
+
+    state.next_submit_visit_epoch = ulong::max - 1;
+    gpu::ExecutableCommandList[1] unvisited_retry = { lists[1] };
+    gpu::SubmitDesc unvisited_submit = {
+        .command_lists = unvisited_retry[..],
+    };
+    gpu::CompletionPoint unvisited_completion =
+        gpu::submit(queue, &unvisited_submit)!!;
+    assert(state.next_submit_visit_epoch == ulong::max,
+        "the cleared live record remains valid when its old epoch is reused");
+    gpu::wait_completion(unvisited_completion)!!;
+
+    gpu::ExecutableCommandList[1] retry = { lists[0] };
+    gpu::SubmitDesc retry_submit = { .command_lists = retry[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &retry_submit)!!;
+    gpu::wait_completion(completion)!!;
+}
+
+fn void empty_submit_preserves_duplicate_epoch_and_work() @test {
+    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    state.next_submit_visit_epoch = 73;
+    vk::reset_submit_duplicate_work_counters(state);
+    gpu::SubmitDesc submit = {};
+
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+
+    vk::SubmitDuplicateWorkCounters work =
+        vk::submit_duplicate_work_counters(state);
+    assert(state.next_submit_visit_epoch == 73
+            && work.token_visits == 0
+            && work.epoch_reset_cells == 0,
+        "empty submit signals without allocating a duplicate epoch");
+    gpu::wait_completion(completion)!!;
 }
 
 fn void readiness_only_submit_validates_stale_swapchain() @test {

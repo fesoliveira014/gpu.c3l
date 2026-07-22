@@ -649,7 +649,12 @@ happens during device or encoder setup and remains outside warm recording.
 
 Submission preflights the batch under the command-table mutex. It rejects stale,
 duplicate, non-executable, or wrong-queue tokens before claiming records. A
-failure before native acceptance restores every claim; success commits pending
+nonempty attempt allocates one nonzero device-local visit epoch and stamps each
+resolved record as it is visited, so duplicate detection performs one record
+visit per input until rejection or completion. When the epoch space is
+exhausted, the next attempt clears live stamps across the allocated command
+cells once before restarting at epoch one. Empty submissions allocate no epoch.
+A failure before native acceptance restores every claim; success commits pending
 texture state and invalidates each encoder before its command-table index becomes
 reusable. No fallible token resolution occurs after native acceptance.
 

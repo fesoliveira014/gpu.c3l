@@ -30,6 +30,14 @@ struct SubmissionCheckpointWorkerArgs {
     gpu::CompletionPoint       submitted;
 }
 
+struct ConcurrentSubmitWorkerArgs {
+    gpu::Queue                  queue;
+    gpu::ExecutableCommandList  executable;
+    Atomic{uint}*               ready;
+    Atomic{bool}*               release;
+    gpu::CompletionPoint        submitted;
+}
+
 fn void gate_submission_checkpoint(
     void* user_data,
     vk::SubmissionCheckpoint checkpoint,
@@ -55,6 +63,21 @@ fn int submission_checkpoint_worker(void* raw_args) {
     return 0;
 }
 
+fn int concurrent_submit_worker(void* raw_args) {
+    ConcurrentSubmitWorkerArgs* args =
+        (ConcurrentSubmitWorkerArgs*)raw_args;
+    (void)args.ready.add(1, AtomicOrdering.RELEASE);
+    while (!args.release.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        gpu::ExecutableCommandList[1] lists = { args.executable };
+        gpu::SubmitDesc desc = { .command_lists = lists[..] };
+        gpu::CompletionPoint? submitted = gpu::submit(args.queue, &desc);
+        if (catch submitted) return 1;
+        args.submitted = submitted;
+    };
+    return 0;
+}
+
 fn gpu::Device make_submit_stats_test_device() {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -62,6 +85,52 @@ fn gpu::Device make_submit_stats_test_device() {
         .application_name  = "gpu_submit_stats_test",
     };
     return create_test_device(&desc)!!;
+}
+
+fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
+    const uint WORKER_COUNT = 2;
+    gpu::Device device = make_submit_stats_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    Atomic{uint} ready;
+    Atomic{bool} release;
+    ConcurrentSubmitWorkerArgs[WORKER_COUNT] args;
+    Thread[WORKER_COUNT] workers;
+
+    foreach (i, &worker : workers) {
+        gpu::CommandList commands = gpu::begin_commands(queue)!!;
+        args[i] = {
+            .queue      = queue,
+            .executable = gpu::end_commands(&commands)!!,
+            .ready      = &ready,
+            .release    = &release,
+        };
+        worker.create(&concurrent_submit_worker, &args[i])!!;
+    }
+    while (ready.load(AtomicOrdering.ACQUIRE) < WORKER_COUNT) thread::yield();
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::reset_submit_duplicate_work_counters(state);
+    ulong submits_before = stats_of(&device).queue_submits;
+    release.store(true, AtomicOrdering.RELEASE);
+
+    foreach (i, &worker : workers) {
+        assert(worker.join()!! == 0,
+            "each concurrent submit succeeds");
+    }
+    vk::SubmitDuplicateWorkCounters work =
+        vk::submit_duplicate_work_counters(state);
+    assert(work.token_visits == WORKER_COUNT
+            && work.epoch_reset_cells == 0,
+        "concurrent submits charge one visit under distinct serialized epochs");
+    assert(stats_of(&device).queue_submits == submits_before + WORKER_COUNT,
+        "both concurrent submits reach the native queue");
+    foreach (&worker_args : args) {
+        gpu::wait_completion(worker_args.submitted)!!;
+    }
 }
 
 fn vk::SubmitStats stats_of(gpu::Device* device) {
