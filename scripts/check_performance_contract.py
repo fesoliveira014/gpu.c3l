@@ -386,6 +386,7 @@ def scans_slot_table(body: str) -> bool:
     )
     return any(
         re.search(rf"\b{re.escape(receiver)}\.count\b", code)
+        or re.search(rf"\b{re.escape(receiver)}\.slots\.len\b", code)
         for receiver in receivers
     )
 
@@ -432,6 +433,27 @@ def check(root: Path = ROOT) -> list[str]:
                 "gpu/vk/sampler.c3 is missing hashed sampler-index token "
                 f"{token}"
             )
+    sampler_lookup = function_body(sampler_source, "find_sampler_cell")
+    if "current = cell.next_in_bucket;" not in sampler_lookup:
+        errors.append(
+            "gpu/vk/sampler.c3:find_sampler_cell must advance through bucket links"
+        )
+    device_creation = mask_c3_comments(function_body(
+        backend_device_source,
+        "create_vk_device_from_runtime",
+    ))
+    strict_sampler_creation = re.search(
+        r"if\s*\(\s*state\.strict_heap\.enabled\s*\)\s*\{"
+        r"[^{}]*\bcreate_sampler_table\s*\(\s*state\s*\)\s*!\s*;",
+        device_creation,
+    )
+    if (
+        strict_sampler_creation is None
+        or device_creation.count("create_sampler_table(state)!;") != 1
+    ):
+        errors.append(
+            "gpu/vk/device.c3 must allocate the sampler table only for strict devices"
+        )
 
     backend_functions = source_functions(root, "gpu/vk")
     sampler_reachable = reachable_recording_functions(
@@ -459,6 +481,10 @@ def check(root: Path = ROOT) -> list[str]:
         if scans_slot_table(body):
             errors.append(
                 f"{relative}:{name} traverses the published sampler prefix"
+            )
+        if re.search(rf"(?<![.\w]){re.escape(name)}\s*\(", code):
+            errors.append(
+                f"{relative}:{name} performs forbidden recursive sampler lookup"
             )
 
     poll_completion = function_body(sync_source, "vk_poll_completion_with_query")

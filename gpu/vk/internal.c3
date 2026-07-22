@@ -31,9 +31,9 @@ struct SamplerKey {
     float            mip_lod_bias;
     float            min_lod;
     float            max_lod;
-    bool             anisotropy_enable;
+    uint             anisotropy_enable;
     float            max_anisotropy;
-    bool             compare_enable;
+    uint             compare_enable;
     gpu::CompareOp   compare;
 }
 $assert SamplerKey::size == 52;
@@ -117,21 +117,21 @@ fn SamplerKey canonical_sampler_key(
             ? device_max_anisotropy
             : desc.max_anisotropy;
     }
-    SamplerKey key = {};
-    key.min_filter        = desc.min_filter;
-    key.mag_filter        = desc.mag_filter;
-    key.mip_filter        = desc.mip_filter;
-    key.address_u         = desc.address_u;
-    key.address_v         = desc.address_v;
-    key.address_w         = desc.address_w;
-    key.mip_lod_bias      = canonical_sampler_float(desc.mip_lod_bias);
-    key.min_lod           = canonical_sampler_float(desc.min_lod);
-    key.max_lod           = canonical_sampler_float(desc.max_lod);
-    key.anisotropy_enable = desc.anisotropy_enable;
-    key.max_anisotropy    = canonical_sampler_float(max_anisotropy);
-    key.compare_enable    = desc.compare_enable;
-    key.compare           = desc.compare_enable ? desc.compare : {};
-    return key;
+    return {
+        .min_filter        = desc.min_filter,
+        .mag_filter        = desc.mag_filter,
+        .mip_filter        = desc.mip_filter,
+        .address_u         = desc.address_u,
+        .address_v         = desc.address_v,
+        .address_w         = desc.address_w,
+        .mip_lod_bias      = canonical_sampler_float(desc.mip_lod_bias),
+        .min_lod           = canonical_sampler_float(desc.min_lod),
+        .max_lod           = canonical_sampler_float(desc.max_lod),
+        .anisotropy_enable = desc.anisotropy_enable ? 1 : 0,
+        .max_anisotropy    = canonical_sampler_float(max_anisotropy),
+        .compare_enable    = desc.compare_enable ? 1 : 0,
+        .compare           = desc.compare_enable ? desc.compare : {},
+    };
 }
 
 fn HeapDescriptorTotals descriptor_heap_totals(uint tex_capacity, uint smp_capacity) {

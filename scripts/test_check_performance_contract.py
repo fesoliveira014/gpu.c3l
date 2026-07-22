@@ -93,6 +93,64 @@ class PerformanceContractTests(unittest.TestCase):
                 "whole-table sampler scan" in error for error in errors
             ))
 
+    def test_reviewed_sampler_lookup_capacity_scan_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sampler.c3",
+                "    while (current != 0) {",
+                (
+                    "    for (uint index = 0; index < table.slots.len; index++) {\n"
+                    "        (void)table.slots[index];\n"
+                    "    }\n"
+                    "    while (current != 0) {"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "find_sampler_cell traverses the published sampler prefix"
+                in error for error in errors
+            ))
+
+    def test_reviewed_sampler_lookup_chain_advance_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sampler.c3",
+                "        current = cell.next_in_bucket;",
+                "        current = 0;",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "find_sampler_cell must advance through bucket links" in error
+                for error in errors
+            ))
+
+    def test_recursive_sampler_lookup_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sampler.c3",
+                "    uint current = table.bucket_heads[sampler_bucket(",
+                (
+                    "    if (table.slots.len == 0) {\n"
+                    "        return find_sampler_cell(state, table, hash, key);\n"
+                    "    }\n"
+                    "    uint current = table.bucket_heads[sampler_bucket("
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "find_sampler_cell performs forbidden recursive sampler lookup"
+                in error for error in errors
+            ))
+
     def test_relocated_sampler_table_scan_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -140,6 +198,28 @@ class PerformanceContractTests(unittest.TestCase):
             errors = check_performance_contract.check(root)
             self.assertTrue(any(
                 "SamplerTable must contain fixed slots" in error
+                for error in errors
+            ))
+
+    def test_non_strict_sampler_table_allocation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/device.c3",
+                (
+                    "    if (state.strict_heap.enabled) {\n"
+                    "        create_sampler_table(state)!;"
+                ),
+                (
+                    "    create_sampler_table(state)!;\n"
+                    "    if (state.strict_heap.enabled) {"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "allocate the sampler table only for strict devices" in error
                 for error in errors
             ))
 

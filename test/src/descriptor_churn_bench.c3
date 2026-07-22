@@ -220,20 +220,25 @@ fn void run_sampler_lookup_probe(
     vk::VkDeviceState* state,
     uint occupancy,
 ) {
+    vk::SamplerTable table = vk::create_sampler_lookup_probe_table(occupancy);
+    defer vk::destroy_sampler_lookup_probe_table(&table);
+    std::time::Clock start = std::time::clock::now();
     vk::SamplerLookupProbeResult result =
-        vk::probe_sampler_lookup(state, occupancy);
+        vk::probe_sampler_lookup(state, &table);
+    long elapsed_ns = (long)start.to_now();
     assert(result.occupancy == occupancy
             && result.bucket_count >= occupancy * 2
             && (result.bucket_count & (result.bucket_count - 1)) == 0
             && result.probes >= 1
-            && result.probes <= 8,
+            && result.probes <= 8
+            && vk::sampler_table_index_consistent(&table),
         "sampler lookup probe must report bounded indexed work");
     io::printfn(
         "sampler lookup occupancy=%d bucket_count=%d probes=%d elapsed_ns=%d",
         result.occupancy,
         result.bucket_count,
         result.probes,
-        result.elapsed_ns,
+        elapsed_ns,
     );
 }
 

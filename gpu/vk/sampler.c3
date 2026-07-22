@@ -4,7 +4,6 @@ import gpu @public;
 import vk;
 import std::core::mem;
 import std::math;
-import std::time;
 
 const uint SAMPLER_CELL_NONE = uint::max;
 
@@ -31,11 +30,10 @@ struct SamplerLookupProbeResult
     uint  occupancy;
     uint  bucket_count;
     ulong probes;
-    ulong elapsed_ns;
 }
 
 fn uint sampler_bucket(ulong hash, uint bucket_count) {
-    return (uint)((hash ^ (hash >> 32)) & (ulong)(bucket_count - 1));
+    return bucket_for(hash, bucket_count);
 }
 
 fn void link_sampler_cell(SamplerTable* table, uint index) {
@@ -126,23 +124,13 @@ fn bool sampler_table_index_consistent(
     };
 }
 
-fn SamplerLookupProbeResult probe_sampler_lookup(
-    VkDeviceState* state,
+fn SamplerTable create_sampler_lookup_probe_table(
     uint occupancy,
 ) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
-    SamplerLookupProbeResult result = {
-        .occupancy   = occupancy,
-        .bucket_count = next_pow2(occupancy * 2),
-    };
-    if (occupancy == 0) return result;
-
     SamplerTable table = {
         .slots        = mem::new_array(SamplerCell, occupancy),
-        .bucket_heads = mem::new_array(uint, result.bucket_count),
+        .bucket_heads = mem::new_array(uint, next_pow2(occupancy * 2)),
     };
-    defer mem::free(table.slots.ptr);
-    defer mem::free(table.bucket_heads.ptr);
-
     for (uint index = 0; index < occupancy; index++) {
         SamplerKey key = { .mip_lod_bias = (float)(index + 1) };
         table.slots[index] = {
@@ -153,21 +141,37 @@ fn SamplerLookupProbeResult probe_sampler_lookup(
         link_sampler_cell(&table, index);
         table.count++;
     }
+    return table;
+}
+
+fn void destroy_sampler_lookup_probe_table(
+    SamplerTable* table,
+) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+    mem::free(table.slots.ptr);
+    mem::free(table.bucket_heads.ptr);
+    *table = {};
+}
+
+fn SamplerLookupProbeResult probe_sampler_lookup(
+    VkDeviceState* state,
+    SamplerTable* table,
+) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+    SamplerLookupProbeResult result = {
+        .occupancy    = table.count,
+        .bucket_count = (uint)table.bucket_heads.len,
+    };
+    if (table.count == 0) return result;
 
     SamplerCell* expected = &table.slots[0];
     reset_sampler_lookup_stats(state);
-    std::time::Clock start = std::time::clock::now();
     uint found = find_sampler_cell(
         state: state,
-        table: &table,
+        table: table,
         hash:  expected.hash,
         key:   &expected.key,
     );
-    result.elapsed_ns = (ulong)start.to_now();
     result.probes = sampler_lookup_stats(state).lookup_probes;
-    if (found != 0 || !sampler_table_index_consistent(&table)) {
-        result.probes = 0;
-    }
+    if (found != 0) result.probes = 0;
     return result;
 }
 
@@ -426,9 +430,9 @@ fn gpu::SamplerIndex? vk_intern_sampler(
         .set_address_mode_v(sampler_address_mode_to_vk(key.address_v))
         .set_address_mode_w(sampler_address_mode_to_vk(key.address_w))
         .set_mip_lod_bias(key.mip_lod_bias)
-        .set_anisotropy_enable(key.anisotropy_enable ? vk::TRUE : vk::FALSE)
+        .set_anisotropy_enable(key.anisotropy_enable != 0 ? vk::TRUE : vk::FALSE)
         .set_max_anisotropy(key.max_anisotropy)
-        .set_compare_enable(key.compare_enable ? vk::TRUE : vk::FALSE)
+        .set_compare_enable(key.compare_enable != 0 ? vk::TRUE : vk::FALSE)
         .set_compare_op(compare_op_to_vk(key.compare))
         .set_min_lod(key.min_lod)
         .set_max_lod(key.max_lod);

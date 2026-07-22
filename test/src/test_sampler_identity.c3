@@ -179,6 +179,8 @@ fn void sampler_keys_normalize_inactive_and_effective_fields() @test {
     assert(gpu::vk::hash_sampler_key(&base_key)
             == gpu::vk::hash_sampler_key(&inactive_key),
         "canonical aliases have identical byte hashes");
+    assert(base_key.anisotropy_enable == 0 && base_key.compare_enable == 0,
+        "disabled sampler flags use canonical zero words");
 
     SamplerDesc clamped_a = base;
     clamped_a.anisotropy_enable = true;
@@ -198,6 +200,8 @@ fn void sampler_keys_normalize_inactive_and_effective_fields() @test {
     assert(gpu::vk::hash_sampler_key(&clamped_a_key)
             == gpu::vk::hash_sampler_key(&clamped_b_key),
         "clamped anisotropy aliases have identical byte hashes");
+    assert(clamped_a_key.anisotropy_enable == 1,
+        "enabled sampler flags use canonical one words");
 }
 
 fn void sampler_identity_exhaustion_is_transactional() @test {
