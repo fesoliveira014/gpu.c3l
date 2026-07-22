@@ -125,7 +125,7 @@ explicit wait-before-reuse and wait-before-free behavior
 owner-derived command finalization
 format feature queries agree with adapter-backed texture creation
 command list begin/end/submit
-completion-point signaling, strong retired-prefix publication, cached polls/waits,
+completion-point signaling, retired-prefix publication, cached polls/waits,
 and deterministic publication/concurrent-retirement races
 global semantic barrier hazard matrix submission
 copy upload -> readback

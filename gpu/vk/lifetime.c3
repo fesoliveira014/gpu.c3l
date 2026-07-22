@@ -349,6 +349,8 @@ fn void note_completion_cached_wait_hit(VkDeviceState* state) {
     $endif
 }
 
+<* Retires through min(native_completed, published_sequence): native progress
+   never crosses a submission publication gap. Requires `resource_mutex`. *>
 fn void retire_queue_through_locked(
     VkDeviceState* state,
     QueueCompletionState* completion,
@@ -369,6 +371,8 @@ fn void retire_queue_through_locked(
     completion.retired_sequence.store(target, AtomicOrdering.RELEASE);
 }
 
+<* Lock-free pre-check, then locked retirement with a double-check; losers of
+   the lock race still observe the winner's release-published prefix. *>
 fn void retire_queue_through(
     VkDeviceState* state,
     QueueCompletionState* completion,

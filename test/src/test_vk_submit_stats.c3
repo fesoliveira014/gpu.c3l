@@ -597,7 +597,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
         "sufficient headroom reaches the injected native submit");
     assert(completion_counter_query_calls == 1
         && completion.retired_sequence.load(AtomicOrdering.ACQUIRE) == 2,
-        "a required headroom query advances the strong retired prefix");
+        "a required headroom query advances the retired prefix");
     assert(lists[0].handle.is_valid(),
         "native rejection after headroom preserves the executable token");
 

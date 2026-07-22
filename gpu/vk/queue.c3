@@ -77,6 +77,8 @@ struct SubmitStats {
     ulong completion_wait_calls;
 }
 
+<* Advisory relaxed counters for completion-path work, whitebox-exposed via
+   completion_work_counters and reset_completion_work_counters. *>
 struct CompletionWorkCounters @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS)) {
     ulong native_counter_queries;
     ulong native_wait_calls;

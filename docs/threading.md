@@ -183,7 +183,7 @@ submissions are ordered by the queue. Cross-queue dependencies are explicit in
 and no application work boundary adds waits or signals. Same-queue waits are
 still stage-validated before the redundant native wait is elided.
 
-Each queue release-publishes one strong retired prefix. Sequence N is retired
+Each queue release-publishes one retired prefix. Sequence N is retired
 only after native completion and after every published submitted-command batch
 through N has released validation references, recycled generated scratch, and
 retired its command buffer. Poll and wait acquire-load that prefix after point
@@ -196,7 +196,7 @@ point publication from exposing or releasing its predicted sequence. A first
 poll miss may query the queue timeline and retire the observed published
 prefix. A successful wait retires exactly its requested sequence; timeout
 preserves both the point and retired prefix. Headroom and threshold drains
-advance the same strong prefix, with no weaker completion cache.
+advance the same prefix.
 
 Resource storage, raw addresses, shader indices, and mapped data remain the
 caller's responsibility: retain every owning token until all points covering

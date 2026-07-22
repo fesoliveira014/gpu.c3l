@@ -221,7 +221,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
         )!!;
     assert(completion_state.retired_sequence.load(AtomicOrdering.ACQUIRE)
         == gpu::completion_point_sequence(completion),
-        "the explicit drain publishes the strong retired prefix");
+        "the explicit drain publishes the retired prefix");
     vk::reset_completion_work_counters(state);
     assert(gpu::poll_completion(completion)!!,
         "the drained point uses the cached poll path");
@@ -604,6 +604,6 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
         "the threshold drain releases every covered batch");
     assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE)
         == vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
-        "the threshold drain publishes the strong retired prefix");
+        "the threshold drain publishes the retired prefix");
     vk::destroy_submitted_commands(&state);
 }
