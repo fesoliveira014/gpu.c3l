@@ -142,6 +142,10 @@
       "type": "test",
       "sources": [ "src/test_vk_offscreen_triangle.c3", "src/offscreen_abi.c3" ]
     },
+    "vk_performance": {
+      "type": "test",
+      "sources": [ "src/test_vk_performance_invariants.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
+    },
     "vk_swapchain": {
       "type": "test",
       "sources": [ "src/test_vk_swapchain.c3", "src/test_vk_wsi_diagnostics.c3" ]

@@ -2,6 +2,7 @@ module gpu::vk @private;
 
 import gpu @public;
 import vk;
+import std::core::env;
 import std::atomic::types;
 
 alias CompletionRetirementLockHook @if(env::TESTING) = fn void (void*);

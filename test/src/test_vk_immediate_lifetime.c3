@@ -6,10 +6,37 @@ import vk;
 import std::core::mem::alloc;
 import std::core::mem::allocators;
 import std::atomic::types;
+import std::thread;
+import std::time;
 
 const char[*] LIFETIME_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
+const long QUIESCENT_RELEASE_DEADLINE_NS = 5_000_000_000;
 ulong lifetime_counter_value;
 uint lifetime_counter_query_calls;
+
+struct QuiescentReleaseWorkerArgs {
+    gpu::Device*       device;
+    gpu::GpuAllocation allocation;
+    Atomic{bool}       entered;
+    Atomic{bool}       finished;
+    fault              failure;
+    bool               failed;
+}
+
+fn int quiescent_release_worker(void* raw_args) {
+    QuiescentReleaseWorkerArgs* args =
+        (QuiescentReleaseWorkerArgs*)raw_args;
+    args.entered.store(true, AtomicOrdering.RELEASE);
+    if (catch release_fault = gpu::free_allocation(
+        args.device,
+        &args.allocation,
+    )) {
+        args.failure = release_fault;
+        args.failed = true;
+    }
+    args.finished.store(true, AtomicOrdering.RELEASE);
+    return 0;
+}
 
 fn vk::Result lifetime_counter_query(
     vk::Device device,
@@ -77,13 +104,166 @@ fn void unreferenced_destroy_is_immediate() @test {
     defer destroy_test_device(&device)!!;
     OwnedSpan owned = make_lifetime_span(&device, "immediate_unreferenced");
     gpu::GpuAllocation stale = owned.allocation;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::device_backend_state(device);
+    vk::reset_completion_work_counters(state);
 
     gpu::free_allocation(&device, &owned.allocation)!!;
     owned.span = {};
 
+    vk::CompletionWorkCounters completion =
+        vk::completion_work_counters(state);
     assert(!owned.allocation.is_valid(), "successful release consumes the allocation token");
     assert(@catch(gpu::get_allocation_info(&device, stale)) == gpu::INVALID_HANDLE,
         "immediate release invalidates copied tokens without a lifecycle boundary");
+    assert(completion.native_counter_queries == 0
+        && completion.native_wait_calls == 0,
+        "quiescent release performs no native completion query or wait");
+}
+
+fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
+    gpu::Device device = make_lifetime_test_device();
+    defer destroy_test_device(&device)!!;
+    OwnedSpan owned = make_lifetime_span(&device, "stalled_queue_unrelated");
+    defer {
+        if (owned.allocation.is_valid()) {
+            free_owned_span(&device, &owned)!!;
+        }
+    }
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::device_backend_state(device);
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    vk::Semaphore blocker;
+    vk::Fence fence;
+    Thread worker;
+    bool blocker_live;
+    bool fence_live;
+    bool submission_live;
+    bool worker_created;
+    bool worker_joined;
+    defer {
+        if (blocker_live && submission_live) {
+            vk::SemaphoreSignalInfo cleanup_signal =
+                vk::semaphore_signal_info()
+                    .set_semaphore(blocker)
+                    .set_value(1);
+            (void)vk::signal_semaphore(state.device, &cleanup_signal);
+        }
+        if (worker_created && !worker_joined) {
+            (void)worker.join();
+        }
+        if (fence_live && submission_live) {
+            (void)vk::wait_for_fences(
+                device:      state.device,
+                fence_count: 1,
+                p_fences:    &fence,
+                wait_all:    vk::TRUE,
+                timeout:     ulong::max,
+            );
+        }
+        if (fence_live) vk::destroy_fence(state.device, fence, null);
+        if (blocker_live) {
+            vk::destroy_semaphore(state.device, blocker, null);
+        }
+    }
+    blocker = vk::create_private_timeline(state)!!;
+    blocker_live = true;
+    vk::FenceCreateInfo fence_info = vk::fence_create_info();
+    vk::Result fence_create_result = vk::create_fence(
+        device:        state.device,
+        p_create_info: &fence_info,
+        p_allocator:   null,
+        p_fence:       &fence,
+    );
+    if (fence_create_result == vk::Result.SUCCESS) fence_live = true;
+    vk::check_backend_result(
+        state:     state,
+        operation: "create stalled-queue fence",
+        result:    fence_create_result,
+    )!!;
+    vk::SemaphoreSubmitInfo wait = vk::semaphore_submit_info()
+        .set_semaphore(blocker)
+        .set_value(1)
+        .set_stage_mask(
+            vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        );
+    vk::SubmitInfo2 submit = vk::submit_info2()
+        .set_wait_semaphore_infos((&wait)[:1]);
+    completion.submit_mutex.lock()!!;
+    vk::Result submit_result = vk::queue_submit2(
+        queue:        completion.queue,
+        submit_count: 1,
+        p_submits:    &submit,
+        fence:        fence,
+    );
+    completion.submit_mutex.unlock();
+    if (submit_result == vk::Result.SUCCESS) submission_live = true;
+    vk::check_backend_result(
+        state:     state,
+        operation: "submit stalled queue work",
+        result:    submit_result,
+    )!!;
+    vk::reset_completion_work_counters(state);
+    QuiescentReleaseWorkerArgs args = {
+        .device     = &device,
+        .allocation = owned.allocation,
+    };
+    worker.create(&quiescent_release_worker, &args)!!;
+    worker_created = true;
+    while (!args.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    std::time::Clock deadline = std::time::clock::now();
+    while (!args.finished.load(AtomicOrdering.ACQUIRE)
+        && (long)deadline.to_now() < QUIESCENT_RELEASE_DEADLINE_NS) {
+        thread::yield();
+    }
+    bool finished_before_signal = args.finished.load(AtomicOrdering.ACQUIRE);
+
+    vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
+        .set_semaphore(blocker)
+        .set_value(1);
+    vk::Result signal_result = vk::signal_semaphore(state.device, &signal);
+    int worker_result;
+    bool worker_join_failed;
+    int? joined = worker.join();
+    worker_joined = true;
+    if (catch join_fault = joined) {
+        (void)join_fault;
+        worker_join_failed = true;
+    } else {
+        worker_result = joined;
+    }
+    vk::Result fence_result = vk::wait_for_fences(
+        device:      state.device,
+        fence_count: 1,
+        p_fences:    &fence,
+        wait_all:    vk::TRUE,
+        timeout:     ulong::max,
+    );
+    vk::destroy_fence(state.device, fence, null);
+    fence_live = false;
+    vk::destroy_semaphore(state.device, blocker, null);
+    blocker_live = false;
+    submission_live = false;
+    if (!args.failed) {
+        owned.allocation = {};
+        owned.span = {};
+    }
+    vk::CompletionWorkCounters work = vk::completion_work_counters(state);
+
+    assert(signal_result == vk::Result.SUCCESS
+        && fence_result == vk::Result.SUCCESS,
+        "the stalled submission resumes and completes during cleanup");
+    assert(!worker_join_failed && worker_result == 0 && !args.failed,
+        "quiescent release succeeds on the worker: %s", args.failure);
+    assert(finished_before_signal,
+        "quiescent release does not wait for unrelated queue or device idle");
+    assert(work.native_counter_queries == 0 && work.native_wait_calls == 0,
+        "quiescent release performs no native completion query or wait");
 }
 
 fn void recording_references_reject_allocation_release() @test {

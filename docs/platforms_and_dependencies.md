@@ -293,6 +293,7 @@ These belong in testing documentation, not in core code.
 linux (ubuntu-24.04, blocking):
     pinned c3c release, glslc, mesa-vulkan-drivers (lavapipe)
     generator unit tests, gen_abi.py --check, build_shaders.py
+    benchmark-schema tests and deterministic behavioral performance targets
     full test-target sweep under VK_DRIVER_FILES (any failure fails the job)
     c3c docgen API reference, uploaded as the api-reference artifact
 
@@ -300,14 +301,23 @@ docs-walkthrough (ubuntu-24.04, blocking):
     executes docs/getting_started.md verbatim via scripts/run_doc.py on a
     bare runner — the walkthrough is its own regression test
 
-windows (windows-2022, blocking except the last step):
+windows (windows-2022, blocking):
     pinned c3c release, Vulkan SDK, MSVC env
     VMA static lib built in-job (build-vma-windows.sh)
     generator unit tests, gen_abi.py --check, build_shaders.py
-    link proof (smoke) + pure-CPU test targets
+    link proof (smoke), pure-CPU targets, benchmark-schema tests, and
+    deterministic behavioral performance targets
     lavapipe (mesa-dist-win) registered under the HKLM Vulkan driver key,
-    then the Vulkan sweep — advisory, continue-on-error
+    then the full Vulkan sweep — any non-capability-gated failure fails the job
 ```
+
+Behavioral counter and ownership assertions are blocking on both platforms.
+Nanosecond comparisons are advisory unless a runner, driver, and comparison
+profile are explicitly pinned. Capability-gated scenarios always print
+`EXERCISED` or `NOT EXERCISED`; portable lanes accept declared unavailability,
+while `REQUIRED_GPU_CAPABILITIES` makes selected execution states mandatory.
+The pinned Windows mesa-dist-win lane requires `generated-work` and
+`generated-scratch-reservation`; the portable Linux lane does not.
 
 The c3c version is pinned once, in the workflow's `C3C_VERSION` env var
 (currently 0.8.0). Tool downloads are cached by version key. Compiler upgrades

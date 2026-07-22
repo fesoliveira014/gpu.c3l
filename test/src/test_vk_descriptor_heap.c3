@@ -1320,7 +1320,8 @@ fn void sampler_hash_collisions_preserve_distinct_keys() @test {
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
-    vk::set_sampler_hash_override(state, true, 0x5a5a5a5a5a5a5a5a);
+    const ulong COLLISION_HASH = 0x5a5a5a5a5a5a5a5a;
+    vk::set_sampler_hash_override(state, true, COLLISION_HASH);
 
     gpu::SamplerDesc first_desc = {
         .min_filter = gpu::Filter.NEAREST,
@@ -1329,6 +1330,10 @@ fn void sampler_hash_collisions_preserve_distinct_keys() @test {
     };
     gpu::SamplerDesc second_desc = first_desc;
     second_desc.mag_filter = gpu::Filter.LINEAR;
+    gpu::SamplerDesc third_desc = first_desc;
+    third_desc.min_filter = gpu::Filter.LINEAR;
+    gpu::SamplerDesc missing_desc = first_desc;
+    missing_desc.address_u = gpu::AddressMode.REPEAT;
     vk::SamplerKey first_key = vk::canonical_sampler_key(
         &first_desc,
         state.max_sampler_anisotropy,
@@ -1337,27 +1342,71 @@ fn void sampler_hash_collisions_preserve_distinct_keys() @test {
         &second_desc,
         state.max_sampler_anisotropy,
     );
-    assert(!vk::sampler_key_equal(&first_key, &second_key),
+    vk::SamplerKey third_key = vk::canonical_sampler_key(
+        &third_desc,
+        state.max_sampler_anisotropy,
+    );
+    vk::SamplerKey missing_key = vk::canonical_sampler_key(
+        &missing_desc,
+        state.max_sampler_anisotropy,
+    );
+    assert(!vk::sampler_key_equal(&first_key, &second_key)
+            && !vk::sampler_key_equal(&first_key, &third_key)
+            && !vk::sampler_key_equal(&second_key, &third_key),
         "the collision seam receives distinct canonical keys");
 
-    vk::reset_sampler_lookup_stats(state);
     gpu::SamplerIndex first = gpu::intern_sampler(&device, &first_desc)!!;
     gpu::SamplerIndex second = gpu::intern_sampler(&device, &second_desc)!!;
-    gpu::SamplerIndex duplicate = gpu::intern_sampler(&device, &first_desc)!!;
-    vk::SamplerLookupStats stats = vk::sampler_lookup_stats(state);
+    gpu::SamplerIndex third = gpu::intern_sampler(&device, &third_desc)!!;
 
-    assert(first != second && duplicate == first,
-        "full key equality resolves forced hash collisions exactly");
-    assert(state.samplers.count == 2
-            && state.strict_heap.descriptors.sampler_next_new == 2,
-        "a collision publishes exactly two cells and descriptors");
+    assert(first != second && first != third && second != third,
+        "full key equality preserves every forced-hash collision identity");
+    assert(state.samplers.count == 3
+            && state.strict_heap.descriptors.sampler_next_new == 3,
+        "a collision publishes exactly three cells and descriptors");
     assert(state.samplers.slots[0].native != null
-            && state.samplers.slots[1].native != null,
-        "both colliding identities own native samplers");
+            && state.samplers.slots[1].native != null
+            && state.samplers.slots[2].native != null,
+        "all colliding identities own native samplers");
     assert(state.samplers.slots[0].hash == state.samplers.slots[1].hash,
         "the distinct identities occupy one forced-hash chain");
-    assert(stats.lookup_probes == 3,
-        "collision lookup visits each candidate exactly once");
+
+    vk::reset_sampler_lookup_stats(state);
+    assert(vk::find_sampler_cell(
+            state: state,
+            table: &state.samplers,
+            hash:  COLLISION_HASH,
+            key:   &third_key,
+        ) == 2
+        && vk::sampler_lookup_stats(state).lookup_probes == 1,
+        "collision-chain head lookup probes one candidate");
+    vk::reset_sampler_lookup_stats(state);
+    assert(vk::find_sampler_cell(
+            state: state,
+            table: &state.samplers,
+            hash:  COLLISION_HASH,
+            key:   &second_key,
+        ) == 1
+        && vk::sampler_lookup_stats(state).lookup_probes == 2,
+        "collision-chain middle lookup probes two candidates");
+    vk::reset_sampler_lookup_stats(state);
+    assert(vk::find_sampler_cell(
+            state: state,
+            table: &state.samplers,
+            hash:  COLLISION_HASH,
+            key:   &first_key,
+        ) == 0
+        && vk::sampler_lookup_stats(state).lookup_probes == 3,
+        "collision-chain tail lookup probes three candidates");
+    vk::reset_sampler_lookup_stats(state);
+    assert(vk::find_sampler_cell(
+            state: state,
+            table: &state.samplers,
+            hash:  COLLISION_HASH,
+            key:   &missing_key,
+        ) == vk::SAMPLER_CELL_NONE
+        && vk::sampler_lookup_stats(state).lookup_probes == 3,
+        "same-bucket miss probes the complete collision chain once");
     assert(vk::sampler_table_index_consistent(&state.samplers),
         "the forced-collision bucket index is structurally consistent");
     vk::set_sampler_hash_override(state, false, 0);

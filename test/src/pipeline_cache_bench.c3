@@ -43,14 +43,21 @@ fn void probe_owned_shader_identity(
         "the interning boundary owns the complete synthetic shader");
     assert(result.lookup.pipeline_key_probes == 1,
         "the post-intern lookup compares one compact key");
+    assert(result.lookup.shader_intern_probes == 0
+            && result.lookup.shader_intern_bytes_compared == 0
+            && result.lookup.shader_owned_bytes_cloned == 0,
+        "the post-intern lookup performs no shader identity work");
     assert(result.lookup.shader_owned_bytes_freed == byte_count,
         "the probe releases its owned shader identity");
     io::printfn(
-        "identity size_bytes=%d intern_probes=%d intern_bytes_compared=%d owned_bytes_cloned=%d pipeline_key_probes=%d owned_bytes_freed=%d elapsed_ns=%d",
+        "identity size_bytes=%d intern_probes=%d intern_bytes_compared=%d owned_bytes_cloned=%d lookup_shader_intern_probes=%d lookup_shader_bytes_compared=%d lookup_owned_bytes_cloned=%d pipeline_key_probes=%d owned_bytes_freed=%d elapsed_ns=%d",
         byte_count,
         result.interning.shader_intern_probes,
         result.interning.shader_intern_bytes_compared,
         result.interning.shader_owned_bytes_cloned,
+        result.lookup.shader_intern_probes,
+        result.lookup.shader_intern_bytes_compared,
+        result.lookup.shader_owned_bytes_cloned,
         result.lookup.pipeline_key_probes,
         result.lookup.shader_owned_bytes_freed,
         elapsed_ns,

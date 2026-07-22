@@ -38,6 +38,20 @@ struct ConcurrentSubmitWorkerArgs {
     gpu::CompletionPoint        submitted;
 }
 
+fn vk::Result accept_injected_publication_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)submits;
+    (void)fence;
+    assert(submit_count == 1,
+        "the publication seam observes one native submission");
+    return vk::Result.SUCCESS;
+}
+
 fn void gate_submission_checkpoint(
     void* user_data,
     vk::SubmissionCheckpoint checkpoint,
@@ -58,7 +72,18 @@ fn int submission_checkpoint_worker(void* raw_args) {
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
         gpu::ExecutableCommandList[1] lists = { args.executable };
         gpu::SubmitDesc desc = { .command_lists = lists[..] };
-        args.submitted = gpu::submit(args.queue, &desc)!!;
+        args.submitted = vk::vk_submit_with(
+            args.queue,
+            &desc,
+            &accept_injected_publication_submit,
+        )!!;
+        gpu::Device device = args.queue.device;
+        gpu::DeviceOperation operation = gpu::begin_device_operation(
+            &device,
+        )!!;
+        release_submitted_executables(&operation, lists[..]);
+        args.executable = lists[0];
+        gpu::end_device_operation(&operation);
     };
     return 0;
 }
@@ -254,7 +279,23 @@ fn void prove_submission_publication_gap(
         gpu::completion_point_sequence(prior) + 1,
     )!!;
 
+    OwnedSpan retained = allocate_owned_span(
+        device:       &device,
+        size:         256,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "publication_retained_resource",
+    )!!;
+
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::track_command_reference(
+        state:      state,
+        record:     record,
+        owner:      retained.allocation.owner,
+        index:      retained.allocation.index,
+        generation: retained.allocation.generation,
+    )!!;
     SubmissionCheckpointWorkerArgs args = {
         .queue      = queue,
         .executable = gpu::end_commands(&commands)!!,
@@ -273,37 +314,69 @@ fn void prove_submission_publication_gap(
     completion_counter_query_calls = 0;
     completion_counter_value = gpu::completion_point_sequence(predicted);
     completion_counter_result = vk::Result.SUCCESS;
-    assert(@catch(vk::vk_poll_completion_with_query(
-        device:   &device,
-        queue_id: queue.id,
-        sequence: gpu::completion_point_sequence(predicted),
-        query_fn: &query_completion_counter,
-    )) == gpu::INVALID_HANDLE,
-        "a predicted point remains private across the submission checkpoint");
-    assert(completion_counter_query_calls == 0,
-        "an unpublished predicted point reaches no native query");
-    assert(vk::vk_poll_completion_with_query(
-        device:   &device,
-        queue_id: queue.id,
-        sequence: gpu::completion_point_sequence(prior),
-        query_fn: &query_completion_counter,
-    )!!, "the prior point can observe newer native progress");
-    assert(completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
-        == gpu::completion_point_sequence(prior),
-        "native progress is capped to the published prefix");
-    uint expected_batches = checkpoint
-            == vk::SubmissionCheckpoint.BATCHES_PUBLISHED
-        ? 1
-        : 0;
+    if (checkpoint == vk::SubmissionCheckpoint.TOKEN_PUBLISHED) {
+        assert(vk::published_queue_completion_state(
+            state,
+            queue.id,
+            gpu::completion_point_sequence(predicted),
+        )!! == completion,
+            "the token-publication checkpoint exposes the predicted point to observers");
+    } else {
+        assert(@catch(vk::vk_poll_completion_with_query(
+            device:   &device,
+            queue_id: queue.id,
+            sequence: gpu::completion_point_sequence(predicted),
+            query_fn: &query_completion_counter,
+        )) == gpu::INVALID_HANDLE,
+            "a predicted point remains private across the submission checkpoint");
+        assert(completion_counter_query_calls == 0,
+            "an unpublished predicted point reaches no native query");
+        assert(vk::vk_poll_completion_with_query(
+            device:   &device,
+            queue_id: queue.id,
+            sequence: gpu::completion_point_sequence(prior),
+            query_fn: &query_completion_counter,
+        )!!, "the prior point can observe newer native progress");
+        assert(completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
+            == gpu::completion_point_sequence(prior),
+            "native progress is capped to the published prefix");
+    }
+    uint expected_batches = checkpoint == vk::SubmissionCheckpoint.NATIVE_ACCEPTED
+        ? 0
+        : 1;
     assert(state.submitted_command_count == expected_batches,
         "the checkpoint exposes only its intended batch-publication phase");
+    if (checkpoint != vk::SubmissionCheckpoint.NATIVE_ACCEPTED) {
+        vk::SubmittedCommandBatch* batch = &state.submitted_commands[0];
+        assert(batch.reference_count == 1
+            && batch.references[0].owner == retained.allocation.owner
+            && batch.references[0].index == retained.allocation.index
+            && batch.references[0].generation
+                == retained.allocation.generation,
+            "the submitted batch owns every transferred resource before observation");
+    }
+    if (checkpoint == vk::SubmissionCheckpoint.BATCHES_PUBLISHED) {
+        assert(@catch(gpu::free_allocation(
+            &device,
+            &retained.allocation,
+        )) == gpu::RESOURCE_IN_USE,
+            "caller release during submitted ownership faults RESOURCE_IN_USE");
+        assert(retained.allocation.is_valid()
+            && gpu::get_allocation_info(
+                &device,
+                retained.allocation,
+            )!!.size == retained.span.size,
+            "rejected submitted release preserves the caller token and native resource");
+    }
 
     gate.release.store(true, AtomicOrdering.RELEASE);
     assert(worker.join()!! == 0 && args.submitted == predicted,
         "submission resumes and publishes the predicted point");
-    assert(completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
-        == gpu::completion_point_sequence(prior),
-        "resuming publication does not invent native retirement");
+    if (checkpoint != vk::SubmissionCheckpoint.TOKEN_PUBLISHED) {
+        assert(completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
+            == gpu::completion_point_sequence(prior),
+            "resuming private publication does not invent native retirement");
+    }
     assert(vk::vk_poll_completion_with_query(
         device:   &device,
         queue_id: queue.id,
@@ -312,6 +385,15 @@ fn void prove_submission_publication_gap(
     )!!, "a later observation retires the published submission");
     assert(state.submitted_command_count == 0,
         "full retirement releases the published command batch");
+    gpu::free_allocation(&device, &retained.allocation)!!;
+    retained.span = {};
+    gpu::DeviceOperation operation = gpu::begin_device_operation(
+        &device,
+        true,
+    )!!;
+    assert(operation.slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
+        "publication regression leaves no public child live");
+    gpu::end_device_operation(&operation);
 }
 
 fn void native_acceptance_remains_capped_before_batch_publication() @test {
@@ -323,6 +405,12 @@ fn void native_acceptance_remains_capped_before_batch_publication() @test {
 fn void batch_publication_remains_private_before_point_publication() @test {
     prove_submission_publication_gap(
         vk::SubmissionCheckpoint.BATCHES_PUBLISHED,
+    );
+}
+
+fn void token_publication_follows_complete_ownership_transfer() @test {
+    prove_submission_publication_gap(
+        vk::SubmissionCheckpoint.TOKEN_PUBLISHED,
     );
 }
 

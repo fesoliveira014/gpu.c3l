@@ -30,6 +30,7 @@ struct SamplerLookupProbeResult
     uint  occupancy;
     uint  bucket_count;
     ulong probes;
+    ulong empty_bucket_miss_probes;
 }
 
 fn uint sampler_bucket(ulong hash, uint bucket_count) {
@@ -172,6 +173,29 @@ fn SamplerLookupProbeResult probe_sampler_lookup(
     );
     result.probes = sampler_lookup_stats(state).lookup_probes;
     if (found != 0) result.probes = 0;
+    bool observed_empty_bucket;
+    foreach (uint bucket, uint head : table.bucket_heads) {
+        if (head != 0) continue;
+        SamplerKey missing_key;
+        reset_sampler_lookup_stats(state);
+        uint missing = find_sampler_cell(
+            state: state,
+            table: table,
+            hash:  (ulong)bucket,
+            key:   &missing_key,
+        );
+        if (missing != SAMPLER_CELL_NONE) {
+            result.empty_bucket_miss_probes = ulong::max;
+        } else {
+            result.empty_bucket_miss_probes =
+                sampler_lookup_stats(state).lookup_probes;
+        }
+        observed_empty_bucket = true;
+        break;
+    }
+    if (!observed_empty_bucket) {
+        result.empty_bucket_miss_probes = ulong::max;
+    }
     return result;
 }
 

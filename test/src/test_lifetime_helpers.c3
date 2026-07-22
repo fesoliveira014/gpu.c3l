@@ -94,6 +94,18 @@ fn void? discard_test_executable(gpu::ExecutableCommandList* commands) {
     }
 }
 
+fn void release_submitted_executables(
+    gpu::DeviceOperation* operation,
+    gpu::ExecutableCommandList[] commands,
+) {
+    foreach (&command : commands) {
+        gpu::release_executable_command_pin_lease(operation, command);
+        *command = {};
+    }
+    gpu::release_device_children(operation, (ulong)commands.len);
+    (void)gpu::release_retained_device_pins(operation, (uint)commands.len);
+}
+
 fn gpu::AttachmentViewHandle? create_test_attachment_view(
     gpu::Device* device,
     gpu::TextureHandle texture,
@@ -298,6 +310,7 @@ fn void? readback_test_texture_data(
 fn void assert_warm_command_resolution(
     gpu::CommandResolutionStats stats,
     ulong expected_commands,
+    ulong expected_pipeline_lookups = 0,
 ) @if(env::TESTING) {
     assert(stats.device_registry_resolutions == 0,
         "warm commands do not resolve the device registry");
@@ -307,10 +320,10 @@ fn void assert_warm_command_resolution(
         "warm commands do not load the lifecycle vtable");
     assert(stats.command_table_lookups == 0,
         "warm commands do not resolve the command table");
-    assert(stats.pipeline_table_lookups == 0,
-        "warm commands do not resolve the pipeline table after bind");
-    assert(stats.pipeline_cache_lookups == 0,
-        "warm commands do not resolve the pipeline cache after bind");
+    assert(stats.pipeline_table_lookups == expected_pipeline_lookups,
+        "warm commands perform the expected pipeline table lookups");
+    assert(stats.pipeline_cache_lookups == expected_pipeline_lookups,
+        "warm commands perform the expected pipeline cache lookups");
     assert(stats.command_policy_selections == 0,
         "warm commands do not select a command policy");
     assert(stats.recording_commands == expected_commands,

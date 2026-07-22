@@ -168,6 +168,9 @@ struct VkDeviceState {
     Atomic{ulong}              recording_image_view_creations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              recording_vma_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_scratch_misses @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              generated_dispatch_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              generated_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    Atomic{ulong}              generated_indexed_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
     Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);

@@ -2,6 +2,10 @@
 
 import importlib.util
 import pathlib
+import subprocess
+import sys
+import tempfile
+import textwrap
 import unittest
 
 
@@ -20,8 +24,9 @@ LIFECYCLE_OUTPUT = "\n".join(
         "completion poll: iterations=100000 repetitions=5 median=125.0 ns/poll",
         "texture destroy: iterations=300 repetitions=5 median=410.0 ns/destroy",
         (
-            "invariants: point_allocations=0 destruction_waits=0 "
-            "deferred_releases=0 cached_poll_queries=0 retirement_locks=0"
+            "invariants: point_allocations=0 destruction_queries=0 "
+            "destruction_completion_waits=0 cached_poll_queries=0 "
+            "retirement_locks=0"
         ),
     )
 )
@@ -70,16 +75,22 @@ PIPELINE_OUTPUT = "\n".join(
         (
             "identity size_bytes=1024 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=1024 "
+            "lookup_shader_intern_probes=0 lookup_shader_bytes_compared=0 "
+            "lookup_owned_bytes_cloned=0 "
             "pipeline_key_probes=1 owned_bytes_freed=1024 elapsed_ns=1200"
         ),
         (
             "identity size_bytes=65536 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=65536 "
+            "lookup_shader_intern_probes=0 lookup_shader_bytes_compared=0 "
+            "lookup_owned_bytes_cloned=0 "
             "pipeline_key_probes=1 owned_bytes_freed=65536 elapsed_ns=8400"
         ),
         (
             "identity size_bytes=1048576 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=1048576 "
+            "lookup_shader_intern_probes=0 lookup_shader_bytes_compared=0 "
+            "lookup_owned_bytes_cloned=0 "
             "pipeline_key_probes=1 owned_bytes_freed=1048576 elapsed_ns=94000"
         ),
     )
@@ -95,10 +106,10 @@ DESCRIPTOR_CHURN_OUTPUT = "\n".join(
     (
         "iterations=320/worker units=ns/descriptor,ns/op",
         "phase sampler intern+publish hits workers=1: 120.0 ns/op, 1.00x scaling vs 1 thread",
-        "sampler lookup occupancy=8 bucket_count=16 probes=1 elapsed_ns=20",
-        "sampler lookup occupancy=64 bucket_count=128 probes=1 elapsed_ns=20",
-        "sampler lookup occupancy=1024 bucket_count=2048 probes=1 elapsed_ns=20",
-        "sampler lookup occupancy=65536 bucket_count=131072 probes=1 elapsed_ns=20",
+        "sampler lookup occupancy=8 bucket_count=16 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
+        "sampler lookup occupancy=64 bucket_count=128 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
+        "sampler lookup occupancy=1024 bucket_count=2048 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
+        "sampler lookup occupancy=65536 bucket_count=131072 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
     )
 )
 
@@ -112,6 +123,89 @@ def load_runner():
 
 
 class BenchmarkRunnerTests(unittest.TestCase):
+    def run_main_harness(
+        self,
+        benchmark_output: str,
+        threshold: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], pathlib.Path]:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        report = pathlib.Path(directory.name) / "report.md"
+        harness = textwrap.dedent(
+            """
+            import importlib.util
+            import pathlib
+            import re
+            import sys
+
+            script = pathlib.Path(sys.argv[1])
+            report = pathlib.Path(sys.argv[2])
+            benchmark_output = sys.argv[3]
+            threshold = sys.argv[4] == "threshold"
+            spec = importlib.util.spec_from_file_location("run_benchmarks", script)
+            runner = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(runner)
+            runner.BENCHMARK_TARGETS = ("probe_bench",)
+            runner.BENCHMARK_METHODS = {
+                "probe_bench": ("synthetic=1", "ns/op"),
+            }
+            runner.REGRESSION_THRESHOLDS = {}
+            if threshold:
+                runner.REGRESSION_THRESHOLDS = {
+                    "probe_bench": ((
+                        "probe",
+                        re.compile(r"value=(?P<value>[0-9]+(?:\\.[0-9]+)?)"),
+                        10.0,
+                        True,
+                    ),),
+                }
+
+            def fake_executable(root, target):
+                return pathlib.Path(target)
+
+            def fake_run(command, cwd, env=None):
+                command = tuple(str(part) for part in command)
+                if command[0] == sys.executable:
+                    return ""
+                if command[0] == "c3c":
+                    if "--version" in command:
+                        return "C3 Compiler Version: 0.8.0"
+                    return ""
+                target = pathlib.Path(command[0]).name
+                if target == "benchmark_info":
+                    return "\\n".join((
+                        'adapter: name="probe" type=cpu',
+                        'driver: name="probe" id=0 version=0',
+                        'validation: enabled=false',
+                        'queues: graphics=0:0 compute=0:0 transfer=0:0',
+                    ))
+                if target == "probe_bench":
+                    return benchmark_output
+                raise AssertionError(command)
+
+            runner.executable = fake_executable
+            runner.run = fake_run
+            sys.argv = [str(script), "--output", str(report)]
+            raise SystemExit(runner.main())
+            """
+        )
+        result = subprocess.run(
+            (
+                sys.executable,
+                "-B",
+                "-c",
+                harness,
+                str(SCRIPT),
+                str(report),
+                benchmark_output,
+                "threshold" if threshold else "plain",
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return result, report
+
     def test_allocation_benchmark_uses_explicit_cpu_write_allocations(self):
         runner = load_runner()
         self.assertEqual(
@@ -287,7 +381,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "descriptor_churn_bench",
         )
         missing = DESCRIPTOR_CHURN_OUTPUT.replace(
-            "sampler lookup occupancy=64 bucket_count=128 probes=1 elapsed_ns=20\n",
+            "sampler lookup occupancy=64 bucket_count=128 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20\n",
             "",
         )
         with self.assertRaisesRegex(ValueError, "tiers"):
@@ -296,8 +390,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_descriptor_churn_rejects_malformed_sampler_evidence(self):
         runner = load_runner()
         malformed = DESCRIPTOR_CHURN_OUTPUT.replace(
-            "probes=1 elapsed_ns=20",
-            "probe_count=1 elapsed_ns=20",
+            "probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
+            "probe_count=1 empty_bucket_miss_probes=0 elapsed_ns=20",
             1,
         )
         with self.assertRaisesRegex(ValueError, "malformed"):
@@ -336,12 +430,22 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "probes"):
                     runner.require_measurement(output, "descriptor_churn_bench")
 
+    def test_descriptor_churn_rejects_nonzero_empty_bucket_miss_work(self):
+        runner = load_runner()
+        output = DESCRIPTOR_CHURN_OUTPUT.replace(
+            "empty_bucket_miss_probes=0",
+            "empty_bucket_miss_probes=1",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "malformed"):
+            runner.require_measurement(output, "descriptor_churn_bench")
+
     def test_lifecycle_measurement_rejects_nonzero_invariants(self):
         runner = load_runner()
         for field in (
             "point_allocations",
-            "destruction_waits",
-            "deferred_releases",
+            "destruction_queries",
+            "destruction_completion_waits",
             "cached_poll_queries",
             "retirement_locks",
         ):
@@ -461,7 +565,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     runner.require_measurement(output, "allocation_bench")
 
-    def test_regression_thresholds_reject_order_of_magnitude_slowdowns(self):
+    def test_unpinned_regression_thresholds_are_advisory(self):
         runner = load_runner()
         cases = (
             ("allocation_bench", ALLOCATION_OUTPUT.replace("23.75", "5001.0")),
@@ -474,8 +578,52 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         for target, output in cases:
             with self.subTest(target=target):
-                with self.assertRaisesRegex(ValueError, "regression threshold"):
-                    runner.require_measurement(output, target)
+                advisories = runner.require_measurement(output, target)
+                self.assertEqual(len(advisories), 1)
+                self.assertIn("regression threshold", advisories[0])
+
+    def test_pinned_regression_thresholds_are_required(self):
+        runner = load_runner()
+        output = ALLOCATION_OUTPUT.replace("23.75", "5001.0")
+        with self.assertRaisesRegex(ValueError, "regression threshold"):
+            runner.require_measurement(
+                output,
+                "allocation_bench",
+                enforce_thresholds=True,
+            )
+
+    def test_validation_rejects_pinned_comparison(self):
+        result = subprocess.run(
+            (
+                sys.executable,
+                str(SCRIPT),
+                "--validation",
+                "--pinned-runner",
+                "runner",
+                "--pinned-driver",
+                "driver",
+                "--comparison-profile",
+                "profile",
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "--validation cannot be combined with pinned comparison fields",
+            result.stderr,
+        )
+
+    def test_validation_skips_release_threshold_evaluation(self):
+        runner = load_runner()
+        output = ALLOCATION_OUTPUT.replace("23.75", "5001.0")
+        advisories = runner.require_measurement(
+            output,
+            "allocation_bench",
+            evaluate_thresholds=False,
+        )
+        self.assertEqual(advisories, [])
 
     def test_pipeline_cache_requires_one_native_raster_pipeline(self):
         runner = load_runner()
@@ -515,6 +663,16 @@ class BenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "1048576 bytes"):
             runner.require_measurement(output, "pipeline_cache_bench")
 
+    def test_pipeline_cache_rejects_post_intern_shader_work(self):
+        runner = load_runner()
+        output = PIPELINE_OUTPUT.replace(
+            "lookup_shader_bytes_compared=0",
+            "lookup_shader_bytes_compared=1",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "1024 bytes"):
+            runner.require_measurement(output, "pipeline_cache_bench")
+
     def test_upload_target_rejects_generic_measurement(self):
         runner = load_runner()
         with self.assertRaisesRegex(ValueError, "uploads/s units"):
@@ -542,18 +700,23 @@ class BenchmarkRunnerTests(unittest.TestCase):
             )
 
     def test_main_validates_raw_output_before_annotation(self):
-        source = SCRIPT.read_text(encoding="utf-8")
-        main = source[source.index("def main()"):]
-        validation_call = (
-            "require_measurement(output, target, "
-            "enforce_thresholds=not args.validation)"
+        result, report = self.run_main_harness("12.5 ns/op")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("iteration count", result.stderr)
+        self.assertFalse(report.exists())
+
+    def test_main_surfaces_unpinned_advisories_on_stderr(self):
+        result, report = self.run_main_harness(
+            "iterations=1 value=20.0 20.0 ns/op",
+            threshold=True,
         )
-        self.assertIn(validation_call, main)
-        self.assertIn('"--validation"', main)
-        self.assertIn('"1" if args.validation else "0"', main)
-        validation = main.index(validation_call)
-        annotation = main.index('annotated = f"iterations={iterations}')
-        self.assertLess(validation, annotation)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        advisory = (
+            "ADVISORY: probe_bench probe exceeded regression threshold: "
+            "20 > 10"
+        )
+        self.assertIn(advisory, result.stderr)
+        self.assertIn(advisory, report.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

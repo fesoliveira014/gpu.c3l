@@ -5,6 +5,7 @@ import gpu::vk @public;
 import vk;
 import vma;
 import std::core::mem;
+import std::atomic::types;
 
 const ulong ALLOCATION_TEST_OWNER = 91;
 
@@ -671,6 +672,77 @@ fn void allocation_transaction_rolls_back_every_failure() @test {
         expected_fault:   gpu::SLOT_TABLE_FULL,
         expected_destroy: 1,
     );
+}
+
+fn void repeated_retirement_and_release_destroy_allocation_once() @test {
+    AllocationTransactionFixture fixture;
+    init_allocation_transaction_fixture(
+        &fixture,
+        AllocationFailurePoint.NONE,
+    );
+    defer (void)fixture.state.resource_mutex.destroy();
+    vk::AllocationNativeOps ops = allocation_probe_ops(&fixture.probe);
+    gpu::AllocationDesc desc = allocation_transaction_desc();
+    gpu::GpuAllocation allocation = vk::allocate_memory_for_state_with_ops(
+        &fixture.state,
+        &desc,
+        &ops,
+    )!!;
+    vk::AllocationSlot* slot = fixture.state.allocations.get(allocation)!!;
+    vk::CommandResourceReference[1] references = {{
+        .owner                 = allocation.owner,
+        .index                 = allocation.index,
+        .generation            = allocation.generation,
+        .validation_references = &slot.validation_references,
+    }};
+    vk::retain_validation_reference(&fixture.state, references[0])!!;
+    gpu::Queue queue = {
+        .device = { .generation = 1 },
+        .id     = 0,
+    };
+    gpu::CompletionPoint completion = gpu::make_completion_point(queue, 1)!!;
+    vk::SubmittedCommandBatch[1] batches = {{
+        .completion      = completion,
+        .references      = references[..],
+        .reference_count = 1,
+    }};
+    fixture.state.submitted_commands = batches[..];
+    fixture.state.submitted_command_count = 1;
+
+    fixture.state.resource_mutex.lock()!!;
+    vk::release_completed_submitted_commands_locked(
+        &fixture.state,
+        queue.id,
+        1,
+    );
+    fixture.state.resource_mutex.unlock();
+    assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 0
+        && fixture.state.submitted_command_count == 0,
+        "the first retirement releases the ownership record exactly once");
+    vk::free_allocation_for_state_with_ops(
+        &fixture.state,
+        allocation,
+        &ops,
+    )!!;
+    assert(fixture.probe.destroy_count == 1,
+        "the released allocation reaches native destruction exactly once");
+
+    fixture.state.resource_mutex.lock()!!;
+    vk::release_completed_submitted_commands_locked(
+        &fixture.state,
+        queue.id,
+        1,
+    );
+    fixture.state.resource_mutex.unlock();
+    assert(fixture.state.submitted_command_count == 0,
+        "repeated retirement finds no ownership record to release again");
+    assert(@catch(vk::free_allocation_for_state_with_ops(
+        &fixture.state,
+        allocation,
+        &ops,
+    )) == gpu::INVALID_HANDLE
+        && fixture.probe.destroy_count == 1,
+        "repeated release cannot destroy the native allocation twice");
 }
 
 fn void check_allocation_memory_policy(gpu::MemoryClass memory_class) {
