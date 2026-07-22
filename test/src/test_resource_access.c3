@@ -77,7 +77,6 @@ fn gpu::AllocationDesc resource_access_allocation_desc(gpu::QueueRoles access) {
 
 fn gpu::TextureDesc resource_access_texture_desc(gpu::QueueRoles access) {
     return {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .width     = 1,
         .height    = 1,
         .format    = gpu::Format.R8_UNORM,

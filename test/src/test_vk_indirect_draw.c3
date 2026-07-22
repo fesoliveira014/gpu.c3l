@@ -63,7 +63,6 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
     ctx.pipeline = gpu::create_graphics_pipeline(device, &pipe_desc)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 1,
         .height    = 1,
@@ -80,8 +79,7 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(device, &sampler_desc)!!;
-    ctx.smp_index = gpu::publish_sampler(device, sampler)!!;
+    ctx.smp_index = gpu::intern_sampler(device, &sampler_desc)!!;
 
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
     upload_test_texture_data(
@@ -102,7 +100,6 @@ fn void destroy_ind_draw_ctx(gpu::Device* device, IndDrawCtx* ctx) {
 
 fn gpu::TextureHandle make_ind_target(gpu::Device* device) {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = IND_RT,
         .height    = IND_RT,
@@ -568,6 +565,13 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         indexed_target,
     )!!;
     defer destroy_test_attachment_view(&device, &indexed_view)!!;
+    gpu::TextureHandle null_target = make_ind_target(&device);
+    defer gpu::destroy_texture(&device, null_target)!!;
+    gpu::AttachmentViewHandle null_view = create_test_attachment_view(
+        &device,
+        null_target,
+    )!!;
+    defer destroy_test_attachment_view(&device, &null_view)!!;
 
     gpu::ShaderDesc build_shader_desc = {
         .stage       = gpu::ShaderStage.COMPUTE,
@@ -618,6 +622,76 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         debug_name:   "generated_work_count",
     )!!;
     defer free_owned_span(&device, &count)!!;
+    OwnedSpan null_draw_records = allocate_owned_span(
+        device:       &device,
+        size:         gpu::GeneratedDrawRecord::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "null_generated_draw_records",
+    )!!;
+    defer free_owned_span(&device, &null_draw_records)!!;
+    OwnedSpan null_indexed_records = allocate_owned_span(
+        device:       &device,
+        size:         gpu::GeneratedDrawIndexedRecord::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "null_generated_indexed_records",
+    )!!;
+    defer free_owned_span(&device, &null_indexed_records)!!;
+    OwnedSpan null_dispatch_records = allocate_owned_span(
+        device:       &device,
+        size:         gpu::GeneratedDispatchRecord::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "null_generated_dispatch_records",
+    )!!;
+    defer free_owned_span(&device, &null_dispatch_records)!!;
+    OwnedSpan null_count = allocate_owned_span(
+        device:       &device,
+        size:         uint::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "null_generated_count",
+    )!!;
+    defer free_owned_span(&device, &null_count)!!;
+    gpu::GeneratedDrawRecord* null_draw =
+        (gpu::GeneratedDrawRecord*)test_span_mapping(
+            &device,
+            null_draw_records.span,
+        ).ptr;
+    *null_draw = {
+        .vertex_root_gpu   = (gpu::GpuAddress)0,
+        .fragment_root_gpu = (gpu::GpuAddress)0,
+        .arguments         = { .vertex_count = 3, .instance_count = 1 },
+    };
+    gpu::GeneratedDrawIndexedRecord* null_indexed =
+        (gpu::GeneratedDrawIndexedRecord*)test_span_mapping(
+            &device,
+            null_indexed_records.span,
+        ).ptr;
+    *null_indexed = {
+        .vertex_root_gpu   = (gpu::GpuAddress)0,
+        .fragment_root_gpu = (gpu::GpuAddress)0,
+        .arguments         = { .index_count = 3, .instance_count = 1 },
+    };
+    gpu::GeneratedDispatchRecord* null_dispatch =
+        (gpu::GeneratedDispatchRecord*)test_span_mapping(
+            &device,
+            null_dispatch_records.span,
+        ).ptr;
+    *null_dispatch = {
+        .root_gpu  = (gpu::GpuAddress)0,
+        .arguments = { .x = 1, .y = 1, .z = 1 },
+    };
+    uint* null_count_value = (uint*)test_span_mapping(
+        &device,
+        null_count.span,
+    ).ptr;
+    *null_count_value = 1;
+    gpu::flush_mapped_span(&device, null_draw_records.span)!!;
+    gpu::flush_mapped_span(&device, null_indexed_records.span)!!;
+    gpu::flush_mapped_span(&device, null_dispatch_records.span)!!;
+    gpu::flush_mapped_span(&device, null_count.span)!!;
 
     OwnedSpan vertices = allocate_owned_span(
         device:       &device,
@@ -737,19 +811,19 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .pipeline                = dispatch_pipeline,
         .kind                    = gpu::GeneratedWorkKind.DISPATCH,
         .max_commands_per_list   = 1,
-        .preprocess_buffer_count = 1,
+        .preprocess_buffer_count = 2,
     };
     gpu::GeneratedScratchDesc draw_scratch = {
         .pipeline                = draw.pipeline,
         .kind                    = gpu::GeneratedWorkKind.DRAW,
         .max_commands_per_list   = 1,
-        .preprocess_buffer_count = 1,
+        .preprocess_buffer_count = 2,
     };
     gpu::GeneratedScratchDesc indexed_scratch = {
         .pipeline                = draw.pipeline,
         .kind                    = gpu::GeneratedWorkKind.DRAW_INDEXED,
         .max_commands_per_list   = 1,
-        .preprocess_buffer_count = 1,
+        .preprocess_buffer_count = 2,
     };
     gpu::reserve_generated_scratch(queue, &dispatch_scratch)!!;
     gpu::reserve_generated_scratch(queue, &draw_scratch)!!;
@@ -772,6 +846,42 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .hazards = { .draw_arguments = true },
     };
     gpu::cmd_barrier(&commands, &generated_ready)!!;
+
+    bind_test_compute_pipeline(&commands, dispatch_pipeline);
+    gpu::cmd_dispatch_generated(
+        commands:           &commands,
+        records:            null_dispatch_records.span,
+        count_span:         null_count.span,
+        max_dispatch_count: 1,
+    )!!;
+
+    record_target_to_attach(&commands, null_target);
+    gpu::ColorTargetDesc[1] null_colors = {{
+        .view     = null_view,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc null_pass = {
+        .colors = null_colors[..],
+        .width  = IND_RT,
+        .height = IND_RT,
+    };
+    gpu::cmd_begin_render_pass(&commands, &null_pass)!!;
+    bind_test_graphics_pipeline(&commands, draw.pipeline);
+    gpu::cmd_draw_generated(
+        commands:      &commands,
+        records:       null_draw_records.span,
+        count_span:    null_count.span,
+        max_draw_count: 1,
+    )!!;
+    gpu::cmd_draw_indexed_generated(
+        commands:      &commands,
+        records:       null_indexed_records.span,
+        count_span:    null_count.span,
+        max_draw_count: 1,
+        index_span:    indices.span,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
 
     bind_test_compute_pipeline(&commands, dispatch_pipeline);
     gpu::reset_command_resolution_stats();
@@ -953,6 +1063,13 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     gpu::cmd_draw_indirect(
         commands:      &cmd,
+        vertex_root:   (gpu::GpuAddress)0,
+        fragment_root: (gpu::GpuAddress)0,
+        args:          args_span,
+        draw_count:    1,
+    )!!;
+    gpu::cmd_draw_indirect(
+        commands:      &cmd,
         vertex_root:   test_span_address(&device, verts_span),
         fragment_root: test_span_address(&device, frag_span),
         args:          args_span,
@@ -1067,6 +1184,11 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     };
     gpu::cmd_barrier(&cmd, &args_ready)!!;
     bind_test_compute_pipeline(&cmd, double_pipeline);
+    gpu::cmd_dispatch_indirect(
+        commands: &cmd,
+        root:     (gpu::GpuAddress)0,
+        args:     dispatch_args,
+    )!!;
     gpu::cmd_dispatch_indirect(
         commands: &cmd,
         root:     test_span_address(&device, double_root_span),

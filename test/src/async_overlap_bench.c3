@@ -250,7 +250,7 @@ fn int main() {
     comp_root.elem_count = DISPATCH_GROUPS * OVERLAP_WORKGROUP;
 
     gpu::TextureDesc rt_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D, .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE,
+        .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE,
         .access    = { .graphics, .compute, .transfer },
         .format = gpu::Format.RGBA8_UNORM, .usage = { .color_attach }, .debug_name = "overlap_rt",
     };

@@ -512,13 +512,13 @@ fn void compositional_texture_states_map_exactly() @test {
     }
 }
 
-fn void sampled_depth_state_chooses_depth_stencil_read_only_layout() @test {
+fn void sampled_depth_state_chooses_depth_read_only_layout() @test {
     gpu::vk::TextureStateScope sampled = gpu::vk::texture_state_to_vk(
         gpu::sampled_at({ .fragment_shader }),
-        gpu::Format.D24_UNORM_S8_UINT,
+        gpu::Format.D32_FLOAT,
     );
     assert(sampled.layout == vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-        "sampled depth-stencil textures use the joint read-only layout");
+        "sampled depth textures use the read-only layout");
 }
 
 fn void sampled_descriptor_layout_matches_semantic_layout() @test {
@@ -613,7 +613,7 @@ fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {
     assert(color.layer_count == 2);
 
     gpu::vk::TextureSlot depth_slot = {
-        .format       = gpu::Format.D24_UNORM_S8_UINT,
+        .format       = gpu::Format.D32_FLOAT,
         .mip_levels   = 1,
         .array_layers = 1,
     };
@@ -629,9 +629,7 @@ fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {
         depth_barrier.view,
         &depth_slot,
     )!!;
-    ulong expected_aspects =
-        (ulong)vk::ImageAspectFlagBits.DEPTH_BIT
-        | (ulong)vk::ImageAspectFlagBits.STENCIL_BIT;
+    ulong expected_aspects = (ulong)vk::ImageAspectFlagBits.DEPTH_BIT;
     assert((ulong)depth.aspect_mask == expected_aspects);
 }
 
@@ -659,11 +657,6 @@ fn void texture_barrier_range_rejects_invalid_ranges() @test {
     assert(@catch(gpu::vk::resolve_texture_barrier_range(barrier.view, &slot))
             == gpu::INVALID_ARGUMENT,
         "a layer range extending past the texture is invalid");
-
-    barrier.view = { .format = gpu::Format.R32_FLOAT };
-    assert(@catch(gpu::vk::resolve_texture_barrier_range(barrier.view, &slot))
-            == gpu::INVALID_ARGUMENT,
-        "format reinterpretation is invalid");
 
 }
 

@@ -196,10 +196,8 @@ Public descriptor:
 
 ```text
 TextureDesc
-    TextureDimension dimension
     uint width
     uint height
-    uint depth
     uint mip_levels
     uint array_layers
     Format format
@@ -401,8 +399,7 @@ remain a caller precondition.
 A texture with live views and an allocation with live placed or dedicated
 textures also return `RESOURCE_IN_USE`. Destroying a `TextureView` recycles its
 raw shader index immediately; stale shader data is therefore a caller lifetime
-violation. Sampler identities and published indices instead remain live until
-device teardown.
+violation. Sampler indices instead remain live until device teardown.
 
 `destroy_device` remains non-blocking and returns `DEVICE_BUSY` while queue
 work is incomplete.

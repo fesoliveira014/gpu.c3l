@@ -20,7 +20,6 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width      = UP_SIZE,
         .height     = UP_SIZE,
@@ -42,8 +41,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex smp_index = gpu::intern_sampler(&device, &sampler_desc)!!;
     OwnedSpan staging = allocate_owned_span(
         device:       &device,
         size:         MIP0_BYTES + MIP1_BYTES,
@@ -233,7 +231,6 @@ fn void storage_write_direct_readback() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = UP_SIZE,
         .height    = UP_SIZE,
@@ -344,7 +341,6 @@ fn void copy_validation_faults() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = UP_SIZE,
         .height    = UP_SIZE,
@@ -407,7 +403,6 @@ fn void mip_subset_view_sampled() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width      = UP_SIZE,
         .height     = UP_SIZE,
@@ -435,8 +430,7 @@ fn void mip_subset_view_sampled() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex smp_index = gpu::intern_sampler(&device, &sampler_desc)!!;
     OwnedSpan staging = allocate_owned_span(
         device:       &device,
         size:         MIP0_BYTES + MIP1_BYTES,

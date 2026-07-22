@@ -14,8 +14,8 @@ struct StubRuntimeState {
 }
 
 struct StubSamplerSlot {
-    SamplerKey   key;
-    gpu::Sampler sampler;
+    SamplerKey        key;
+    gpu::SamplerIndex index;
 }
 
 struct StubDeviceState {
@@ -30,7 +30,6 @@ struct StubDeviceState {
     uint                 sampler_count;
     uint                 sampler_intern_attempts;
     uint                 sampler_native_creates;
-    uint                 sampler_publish_attempts;
     bool                 allocation_live;
     bool                 texture_live;
     bool                 swapchain_live;
@@ -55,6 +54,7 @@ uint swapchain_create_attempts @private;
 uint allocation_create_attempts @private;
 uint allocation_free_attempts @private;
 uint texture_destroy_attempts @private;
+uint sampler_native_destroys @private;
 
 fn void lock_stub_samplers(StubDeviceState* state) @private {
     while (state.sampler_lock.set(AtomicOrdering.ACQUIRE)) {
@@ -66,7 +66,7 @@ fn void unlock_stub_samplers(StubDeviceState* state) @private {
     (void)state.sampler_lock.clear(AtomicOrdering.RELEASE);
 }
 
-fn gpu::Sampler? intern_stub_sampler(
+fn gpu::SamplerIndex? intern_stub_sampler(
     gpu::Device* device,
     gpu::SamplerDesc* desc,
 ) {
@@ -83,41 +83,18 @@ fn gpu::Sampler? intern_stub_sampler(
     SamplerKey key = canonical_sampler_key(desc, 16.0f);
     for (uint i = 0; i < state.sampler_count; i++) {
         if (sampler_key_equal(&state.samplers[i].key, &key)) {
-            return state.samplers[i].sampler;
+            return state.samplers[i].index;
         }
     }
     if (state.sampler_count >= STUB_SAMPLER_CAPACITY) {
         return gpu::SLOT_TABLE_FULL~;
     }
-    uint index = state.sampler_count;
-    gpu::Sampler sampler = {
-        .owner = gpu::resource_owner_tag(
-            state.resource_owner,
-            gpu::ResourceOwnerKind.SAMPLER,
-        ),
-        .index      = index,
-        .generation = 1,
-    };
-    state.samplers[index] = { .key = key, .sampler = sampler };
+    uint slot = state.sampler_count;
+    gpu::SamplerIndex index = { .value = slot + 1 };
+    state.samplers[slot] = { .key = key, .index = index };
     state.sampler_count++;
     state.sampler_native_creates++;
-    return sampler;
-}
-
-fn gpu::SamplerIndex? publish_stub_sampler(
-    gpu::Device* device,
-    gpu::Sampler sampler,
-) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
-    if (state == null) return gpu::INVALID_HANDLE~;
-    lock_stub_samplers(state);
-    defer unlock_stub_samplers(state);
-    state.sampler_publish_attempts++;
-    if (sampler.index >= state.sampler_count
-        || state.samplers[sampler.index].sampler != sampler) {
-        return gpu::INVALID_HANDLE~;
-    }
-    return { .value = sampler.index + 1 };
+    return index;
 }
 
 fn uint stub_sampler_intern_attempt_count(gpu::Device* device) {
@@ -134,12 +111,7 @@ fn uint stub_sampler_native_create_count(gpu::Device* device) {
     return state.sampler_native_creates;
 }
 
-fn uint stub_sampler_publish_attempt_count(gpu::Device* device) {
-    StubDeviceState* state = (StubDeviceState*)gpu::device_backend_state_ptr(device);
-    lock_stub_samplers(state);
-    defer unlock_stub_samplers(state);
-    return state.sampler_publish_attempts;
-}
+fn uint stub_sampler_native_destroy_count() => sampler_native_destroys;
 
 fn void destroy_stub_runtime(void* backend_state) {
     StubRuntimeState* state = (StubRuntimeState*)backend_state;
@@ -387,6 +359,7 @@ fn void destroy_stub_device(void* backend_state) {
     if (state.swapchain_live) {
         gpu::surface_release_swapchain(&state.surface)!!;
     }
+    sampler_native_destroys += state.sampler_count;
     device_temporary_destroys++;
     mem::free(state);
 }
@@ -536,7 +509,6 @@ const gpu::BackendVTable STUB_DEVICE_VTABLE @private = {
     .create_placed_texture    = &create_stub_placed_texture,
     .destroy_texture          = &destroy_stub_texture,
     .intern_sampler           = &intern_stub_sampler,
-    .publish_sampler          = &publish_stub_sampler,
     .create_swapchain         = &create_stub_swapchain,
     .destroy_swapchain        = &destroy_stub_swapchain,
 };

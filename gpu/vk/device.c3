@@ -125,6 +125,7 @@ struct VkDeviceState {
     bool                       draw_indirect_count;
     GeneratedWorkSupport       generated_work;
     float                      max_sampler_anisotropy;
+    vk::Result                 sampler_create_result @if(env::TESTING);
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;
@@ -368,7 +369,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .destroy_texture_view        = &vk_destroy_texture_view,
     .create_texture_views        = &vk_create_texture_views,
     .intern_sampler              = &vk_intern_sampler,
-    .publish_sampler             = &vk_publish_sampler,
     .create_compute_pipeline     = &vk_create_compute_pipeline,
     .create_graphics_pipeline    = &vk_create_graphics_pipeline,
     .create_compute_pipelines    = &vk_create_compute_pipelines,

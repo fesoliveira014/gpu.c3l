@@ -506,7 +506,6 @@ fn void multi_role_access_stays_exclusive_on_single_family() @test {
     gpu::free_allocation(&device, &allocation)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
@@ -602,7 +601,6 @@ fn void resource_access_families_include_every_identity_of_one_role() @test {
 
 fn void resource_texture_create_info_uses_exact_access_families() @test {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute },
         .width     = 4,
         .height    = 4,

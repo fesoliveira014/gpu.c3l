@@ -146,7 +146,6 @@ fn gpu::GpuAllocation init_placement_fixture(PlacementFixture* fixture) {
 
 fn gpu::TextureDesc placement_test_desc() {
     return {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .compute },
         .width     = 4,
         .height    = 4,
@@ -542,7 +541,6 @@ fn void texture_create_destroy() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics, .compute },
         .width      = 16,
         .height     = 16,
@@ -565,7 +563,6 @@ fn void texture_unsupported_desc_rejected() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc depth_storage = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 16,
@@ -576,7 +573,6 @@ fn void texture_unsupported_desc_rejected() @test {
     assert(storage_fault == gpu::INVALID_ARGUMENT, "storage usage on a depth format faults INVALID_ARGUMENT");
 
     gpu::TextureDesc color_with_depth_usage = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 16,
@@ -587,7 +583,6 @@ fn void texture_unsupported_desc_rejected() @test {
     assert(cross_fault == gpu::INVALID_ARGUMENT, "depth_attach on a color format faults INVALID_ARGUMENT");
 
     gpu::TextureDesc transfer_only = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 16,
@@ -599,18 +594,6 @@ fn void texture_unsupported_desc_rejected() @test {
     assert(view_fault == gpu::INVALID_ARGUMENT,
         "a view on a non-shader-visible texture faults INVALID_ARGUMENT");
     gpu::destroy_texture(&device, staging_target)!!;
-
-    gpu::TextureDesc not_2d = {
-        .dimension = gpu::TextureDimension.TEX_3D,
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 16,
-        .height    = 16,
-        .depth     = 16,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .sampled },
-    };
-    fault dim_fault = @catch(gpu::create_texture(&device, &not_2d));
-    assert(dim_fault == gpu::INVALID_ARGUMENT, "non-2D dimensions fault INVALID_ARGUMENT");
 }
 
 fn void texture_stale_handle_rejected() @test {
@@ -618,7 +601,6 @@ fn void texture_stale_handle_rejected() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 8,
         .height    = 8,
@@ -637,7 +619,6 @@ fn void texture_barrier_records_texture_states() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 8,
         .height    = 8,
@@ -687,7 +668,6 @@ fn void texture_multi_mip_create_destroy() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics, .compute },
         .width      = 16,
         .height     = 16,
@@ -710,7 +690,6 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics, .compute },
         .width      = 16,
         .height     = 16,
@@ -744,7 +723,6 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension    = gpu::TextureDimension.TEX_2D,
         .access       = { .graphics },
         .width        = 16,
         .height       = 16,
@@ -833,7 +811,6 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute },
         .width     = 16,
         .height    = 16,
@@ -937,7 +914,6 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics },
         .width      = 8,
         .height     = 8,
@@ -1009,7 +985,6 @@ fn void texture_barrier_rejects_unsupported_texture_states() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics },
         .width     = 8,
         .height    = 8,
@@ -1051,7 +1026,6 @@ fn void texture_barrier_stale_handle_rejected() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 8,
         .height    = 8,
@@ -1121,7 +1095,6 @@ fn void attachment_views_own_exact_subresources_and_retain_textures() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics },
         .width      = 16,
         .height     = 8,
@@ -1162,7 +1135,6 @@ fn void default_attachment_view_aliases_texture_native_view() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics },
         .width     = 4,
         .height    = 4,
@@ -1190,7 +1162,6 @@ fn void swapchain_owned_attachment_view_rejects_caller_destruction() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics },
         .width     = 4,
         .height    = 4,
@@ -1224,7 +1195,6 @@ fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics },
         .width      = 8,
         .height     = 8,
@@ -1272,7 +1242,6 @@ fn void foreign_attachment_view_destroy_rejects_without_consuming() @test {
     gpu::Device foreign = make_texture_test_device();
     defer destroy_test_device(&foreign)!!;
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics },
         .width     = 4,
         .height    = 4,
@@ -1297,7 +1266,6 @@ fn void recorded_attachment_view_destruction_is_retryable() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics },
         .width     = 4,
         .height    = 4,
@@ -1343,7 +1311,6 @@ fn void raised_texture_capacity_holds_more_than_default() @test {
     gpu::TextureHandle[] handles = mem::new_array(gpu::TextureHandle, COUNT);
     defer mem::free(handles.ptr);
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 1,
         .height    = 1,
@@ -1354,31 +1321,11 @@ fn void raised_texture_capacity_holds_more_than_default() @test {
     foreach (h : handles) gpu::destroy_texture(&device, h)!!;
 }
 
-fn void unsupported_dimensions_fault() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDimension[3] dims = { gpu::TextureDimension.TEX_1D, gpu::TextureDimension.TEX_3D, gpu::TextureDimension.CUBE };
-    foreach (dim : dims) {
-        gpu::TextureDesc desc = {
-            .dimension = dim,
-            .access    = { .graphics, .compute, .transfer },
-            .width     = 4,
-            .height    = 4,
-            .format    = gpu::Format.RGBA8_UNORM,
-            .usage     = { .sampled },
-        };
-        fault f = @catch(gpu::create_texture(&device, &desc));
-        assert(f == gpu::INVALID_ARGUMENT, "unsupported dimension faults INVALID_ARGUMENT");
-    }
-}
-
 fn void transfer_only_texture_round_trips() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
@@ -1464,9 +1411,6 @@ fn void texture_capability_queries_match_creation() @test {
 
     foreach (format : formats) {
         gpu::TextureFormatSupport support = gpu::get_texture_format_support(&device, format)!!;
-        assert(support.dimensions.tex_2d, "creatable formats report 2D support");
-        assert(!support.dimensions.tex_1d && !support.dimensions.tex_3d
-            && !support.dimensions.cube, "unimplemented dimensions stay masked");
         assert(support.sample_counts.one, "single-sample support is reported");
         bool is_depth = format == gpu::Format.D32_FLOAT;
         gpu::TextureUsage attachment_usage = is_depth
@@ -1493,7 +1437,6 @@ fn void texture_capability_queries_match_creation() @test {
         };
         foreach (i, sample_count : sample_counts) {
             gpu::TextureDesc sample_desc = {
-                .dimension    = gpu::TextureDimension.TEX_2D,
                 .access       = { .graphics, .compute, .transfer },
                 .width        = 4,
                 .height       = 4,
@@ -1512,7 +1455,6 @@ fn void texture_capability_queries_match_creation() @test {
             if (!is_depth && usage.depth_attach) continue;
 
             gpu::TextureDesc desc = {
-                .dimension = gpu::TextureDimension.TEX_2D,
                 .access    = { .graphics, .compute, .transfer },
                 .width     = 4,
                 .height    = 4,
@@ -1541,33 +1483,10 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
     gpu::TextureFormatSupport undefined_support =
         gpu::get_texture_format_support(&device, gpu::Format.UNDEFINED)!!;
     assert((uint)undefined_support.features == 0
-        && (uint)undefined_support.dimensions == 0
         && (uint)undefined_support.sample_counts == 0,
         "undefined format reports empty support");
 
-    gpu::TextureFormatSupport d24_support =
-        gpu::get_texture_format_support(&device, gpu::Format.D24_UNORM_S8_UINT)!!;
-    assert((uint)d24_support.features == 0
-        && (uint)d24_support.dimensions == 0
-        && (uint)d24_support.sample_counts == 0,
-        "D24S8 reports empty support until the rendering path supports it end to end");
-
-    gpu::TextureDesc d24_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 4,
-        .height    = 4,
-        .format    = gpu::Format.D24_UNORM_S8_UINT,
-        .usage     = { .depth_attach },
-    };
-    assert(!gpu::supports_texture_desc(&device, &d24_desc)!!,
-        "D24S8 exact descriptor preflights false");
-    fault d24_fault = @catch(gpu::create_texture(&device, &d24_desc));
-    assert(d24_fault == gpu::INVALID_ARGUMENT,
-        "D24S8 texture creation remains INVALID_ARGUMENT");
-
     gpu::TextureDesc invalid = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics, .compute },
         .width      = 16,
         .height     = 16,
@@ -1582,7 +1501,6 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
         "deterministically invalid descriptor keeps INVALID_ARGUMENT");
 
     gpu::TextureDesc beyond_adapter = {
-        .dimension    = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width        = 1,
         .height       = 1,
@@ -1608,7 +1526,6 @@ fn void invalid_texture_descriptor_diagnostic_preserves_fault() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc invalid = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics, .compute },
         .width      = 0,
         .height     = 16,
@@ -1648,7 +1565,6 @@ fn void unsupported_texture_capability_diagnostic_preserves_fault() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc unsupported = {
-        .dimension    = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width        = 1,
         .height       = 1,
@@ -1689,7 +1605,6 @@ fn void texture_barrier_invalid_use_diagnostic_identifies_resource() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics, .compute },
         .width      = 8,
         .height     = 8,
@@ -1752,7 +1667,6 @@ fn void texture_barrier_state_diagnostics_name_nested_side_fields() @test {
     gpu::Device device = make_texture_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics },
         .width      = 8,
         .height     = 8,
@@ -1805,7 +1719,6 @@ fn void placed_texture_requirements_validate_and_release_storage() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc texture_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute },
         .width     = 16,
         .height    = 16,

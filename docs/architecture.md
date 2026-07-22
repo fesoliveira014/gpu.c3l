@@ -17,8 +17,7 @@ GpuSpan         -> non-owning identity and range
 GpuAddress      -> shader-visible data address
 TextureView     -> owner-bearing published-view lifetime
 TextureIndex    -> shader-visible texture heap index
-Sampler         -> immutable device-interned sampler identity
-SamplerIndex    -> shader-visible sampler heap index
+SamplerIndex    -> stable device-lifetime sampler heap index
 ```
 
 Draw and dispatch commands pass root GPU addresses. Shaders follow pointers to structured data and use texture/sampler indices for image access. Barriers are explicit. Resource lifetimes are explicit.
@@ -208,7 +207,7 @@ changing the token or generation. Successful teardown increments the generation
 and invalidates the passed token. Device loss bypasses child and progress checks
 after pins retire; command tokens remain discardable after loss.
 
-Device-owned table handles and values, including `GpuAllocation`, `Sampler`, and
+Device-owned table handles and values, including `GpuAllocation` and
 `TextureView`, carry an opaque device-and-kind owner plus a local slot and
 generation. Backend tables reject foreign owners before validating liveness and
 generation. `GpuSpan` carries the same identity plus offset and size, but does
@@ -216,7 +215,7 @@ not own storage. Command tokens derive ownership from their device.
 Shader-visible `TextureIndex`, `SamplerIndex`, and `GpuAddress` values contain no
 owner or generation metadata. They are direct device-local values whose lifetime
 the caller must preserve. `TextureView` owns a recyclable texture index;
-published sampler indices remain stable until device destruction.
+sampler indices remain stable until device destruction.
 
 ### Queues
 
@@ -351,7 +350,8 @@ The Vulkan backend may use private `BufferHandle`, `BufferDesc`, and
 
 ### Textures
 
-Textures represent images and views without exposing backend objects.
+Textures represent implicit 2D images, including mip chains and array layers,
+and same-format views without exposing backend objects.
 `create_texture` owns its storage. `get_texture_requirements` and
 `create_placed_texture` let the application group compatible textures into
 explicit allocations. Requirements are immutable device-owned values.
@@ -363,9 +363,8 @@ overlap before native creation. Texture destruction never releases caller-owned 
 
 `TextureHandle` owns the image. `TextureView` is the owner- and
 generation-checked CPU token for one published image view; its `TextureIndex`
-field is the raw 32-bit shader-visible heap value. `Sampler` is an immutable,
-owner-bearing identity interned from semantic state. `SamplerIndex` is its
-stable strict shader-heap publication.
+field is the raw 32-bit shader-visible heap value. `SamplerIndex` is returned
+directly by semantic-state interning and remains stable for the device lifetime.
 
 This separation matters:
 
@@ -373,7 +372,6 @@ This separation matters:
 TextureHandle -> image lifetime and commands
 TextureView   -> published-view lifetime and CPU validation
 TextureIndex  -> generation-free sampled/storage shader value
-Sampler       -> device-lifetime immutable identity
 SamplerIndex  -> generation-free, device-lifetime shader value
 ```
 
@@ -525,8 +523,9 @@ cmd_dispatch(command_list, root_gpu, groups)
 ```
 
 Binding selects the active compute pipeline and descriptor heap. Dispatch
-requires that active kind, pushes the nonzero root address, and executes without
-native pipeline creation.
+requires that active kind, pushes the root address unchanged, and executes
+without native pipeline creation. Zero is valid when the shader avoids
+dereferencing it.
 
 ### Graphics
 
@@ -549,7 +548,8 @@ viewport, and scissor state persist across pipeline binds until another setter
 or the next pass begin. Their setters, including `cmd_set_raster_state`, require
 an active render pass. They remain outside pipeline keys, so handle aliasing
 cannot overwrite caller-selected command state. Draws require an active
-graphics pipeline and nonzero roots and perform no native pipeline creation.
+graphics pipeline, push both roots unchanged, and perform no native pipeline
+creation.
 
 Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex input is allowed for simple paths, but it is not the preferred data model.
 
@@ -600,8 +600,7 @@ The public API exposes device-wide view and sampler publication:
 create_texture_view(device, texture, view_desc) -> TextureView?
 destroy_texture_view(device, view) -> void?
 create_texture_views(device, descs, out_views) -> void?
-intern_sampler(device, desc) -> Sampler?
-publish_sampler(device, sampler) -> SamplerIndex?
+intern_sampler(device, desc) -> SamplerIndex?
 ```
 
 The strict request initializes one inline, device-owned heap group. Callers
@@ -609,10 +608,9 @@ request texture and sampler capacities; descriptor objects, native features,
 dispatch, and pipeline state remain private. An unrequested group owns none of
 that state; current public request validation requires strict semantics.
 
-Sampler interning is independent of that optional heap group. The backend keeps
-one append-only sampler table per device, deduplicates equal effective state,
-and destroys every native sampler during device teardown. Strict publication
-adds at most one heap entry per identity and never transfers native ownership.
+The backend keeps one append-only sampler table per strict-enabled device,
+deduplicates equal effective state, publishes the index in the same transaction,
+and destroys every native sampler during device teardown.
 
 The backend prefers descriptor indexing when it satisfies the requested
 capacities and falls back to descriptor buffers when available. Callers cannot

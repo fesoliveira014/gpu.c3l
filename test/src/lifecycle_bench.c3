@@ -76,7 +76,6 @@ fn double measure_completed_polls(
 
 fn gpu::TextureHandle create_bench_texture(gpu::Device* device) {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,

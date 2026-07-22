@@ -71,8 +71,8 @@ null-safe, exactly-once structured debug dispatch and userdata preservation
 invalid-backend callback delivery with callback-enabled/disabled fault parity
 borrowed field and explicit absent-fault representation
 synthetic allocation sharing plans and exact buffer create-info mode/indices
-sampler identity canonicalization, semantic deduplication, table exhaustion,
-cross-device rejection, and concurrent convergence
+sampler canonicalization, stable-index deduplication, table exhaustion, and
+concurrent convergence
 ```
 
 Pure CPU tests should be exhaustive where practical.
@@ -138,8 +138,8 @@ retention, in-flight destruction rejection, and allocation-free pass begin
 borrowed swapchain-view build/acquire/render guards and resize invalidation
 texture-view capacity, batch rollback, immediate index reuse, stale and
 cross-device release rejection, and concurrent publication/release
-sampler interning, stable strict publication, publication exhaustion, concurrent
-intern-and-publish convergence, and device-owned teardown
+sampler interning, stable indices, heap/table/native-create rollback, concurrent
+convergence, and device-owned teardown
 ```
 
 Allocation queue-family regressions pin aliased and distinct creation plans
@@ -301,16 +301,16 @@ Test names describe behavior, not roadmap or ticket labels.
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
 | Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback, completion-safe context-local command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/raster/depth state, retired execution signatures, and zero execution-time pipeline creation. |
-| Compute | root pointer shader read/write, readback, active-pipeline kind and root validation. |
+| Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline, raster, and depth state; nonzero stage roots; per-target blend/write masks; dynamic raster/viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
+| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline, raster, and depth state; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster/viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, per-target immutable identity, and singleton compute/generated-dispatch layouts. |
 | Threading | automatic per-worker recording contexts, private command-buffer and generated-scratch reuse, parallel record, identical submit. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
-| Depth | depth attachment creation, depth-tested draw, readback. |
-| Indirect draw | compute-written draw args, indirect draw, readback. |
+| Depth | depth attachment creation, depth-tested draw, exact nonzero mip/layer selection, neighboring-subresource isolation, and readback. |
+| Indirect draw | compute-written draw args, direct/indirect/generated zero-root execution, indirect draw, and readback. |
 
 Private heap selection has deterministic mocked coverage for both available
 implementations, no available implementation, and indexing limits below the
@@ -384,10 +384,12 @@ vk_queue vk_debug upload_bench_observation vk_device_request
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.
 `vk_depth` covers validation-clean offscreen color/depth rendering, including a
 supported multisample source, average color resolve, explicit attachment
-transitions, depth testing, and pixel readback. `vk_indirect` conditionally runs
+transitions, exact nonzero mip/layer isolation, depth testing, and pixel readback.
+`vk_indirect` conditionally runs
 a native generated-work workload when the adapter exposes the semantic
 capability: a compute producer writes draw, indexed-draw, dispatch, and count
-records; all three generated commands then verify observable output. Command
+records; all three generated commands then verify observable output and safe
+zero-root execution. Command
 validation separately covers unsupported capability, count bounds, alignment,
 short spans, zero work, index formats, and generated-preprocess barrier masks.
 `vk_pipeline_cache` uses a test-only synchronization hook immediately before a

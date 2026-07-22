@@ -24,17 +24,6 @@ enum Format : int {
     RG32_FLOAT,
     RGBA32_FLOAT,
     D32_FLOAT,
-    // Declared for API stability; current backend queries report unsupported.
-    D24_UNORM_S8_UINT,
-}
-
-<* Texture dimensionality. Only TEX_2D creates today; the others are
-   declared for API stability and fault INVALID_ARGUMENT at creation. *>
-enum TextureDimension : int {
-    TEX_1D,
-    TEX_2D,
-    TEX_3D,
-    CUBE,
 }
 
 <* Rasterization samples per texel. The zero value is single-sampled. *>
@@ -90,14 +79,6 @@ bitstruct TextureFormatFeatures : uint {
     bool linear_filter : 6;
 }
 
-<* Texture dimensions implemented end-to-end by the backend. *>
-bitstruct TextureDimensionSupport : uint {
-    bool tex_1d : 0;
-    bool tex_2d : 1;
-    bool tex_3d : 2;
-    bool cube   : 3;
-}
-
 <* Texture sample counts implemented end-to-end by the backend. *>
 bitstruct TextureSampleCountSupport : uint {
     bool one        : 0;
@@ -112,7 +93,6 @@ bitstruct TextureSampleCountSupport : uint {
 <* Library-creatable support for one format. *>
 struct TextureFormatSupport {
     TextureFormatFeatures     features;
-    TextureDimensionSupport   dimensions;
     TextureSampleCountSupport sample_counts;
 }
 
@@ -133,10 +113,8 @@ struct DedicatedTexture {
 <* Creation parameters for create_texture. `access` must be a non-empty subset
    of the device's selected queue roles. *>
 struct TextureDesc {
-    TextureDimension dimension;
     uint             width;
     uint             height;
-    uint             depth;
     // 0 means 1.
     uint             mip_levels;
     // 0 means 1.
@@ -150,8 +128,6 @@ struct TextureDesc {
 
 <* Subresource view of a texture; a zero-initialized desc is the full default view. *>
 struct TextureViewDesc {
-    // UNDEFINED means the texture's own format; reinterpretation is unsupported.
-    Format format;
     uint   base_mip;
     // 0 means all mips from base_mip.
     uint   mip_count;
@@ -258,8 +234,7 @@ fn bool sample_count_valid(SampleCount sample_count) @private {
 }
 
 fn bool texture_desc_valid(TextureDesc* desc) @private {
-    if (desc.dimension != TextureDimension.TEX_2D) return false;
-    if (desc.width == 0 || desc.height == 0 || desc.depth > 1) return false;
+    if (desc.width == 0 || desc.height == 0) return false;
     if (texture_mip_levels(desc) > texture_full_mip_chain(desc.width, desc.height)) return false;
     if (!texture_format_in_backend_profile(desc.format)) return false;
 
@@ -397,11 +372,12 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
     release_device_children(&operation);
 }
 
-<* Intern an immutable device-owned sampler identity. Identical semantic
-   descriptions return the same value; debug_name is not semantic. *>
-fn Sampler? intern_sampler(Device* device, SamplerDesc* desc) {
+<* Intern and publish an immutable device-lifetime sampler index. Identical
+   semantic descriptions return the same value; debug_name is not semantic. *>
+fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
+    if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     return operation.vtable.intern_sampler(device, desc);
 }

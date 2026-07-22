@@ -454,12 +454,11 @@ internal heap remain scoped to their owning `Device`.
 Public indices map to descriptor entries. Neither path changes the public API
 or shader material records.
 
-Sampler identity is not owned by either descriptor path. Every device has an
-append-only sampler table keyed by normalized semantic state. Interning occurs
-under the resource mutex, creates at most one native sampler for an equal key,
-and retains it until device teardown. A strict-enabled device may publish that
-identity once into the selected sampler heap; repeated publication returns the
-same index, while a capacity fault leaves the identity unpublished and valid.
+Every strict-enabled device has an append-only sampler table keyed by normalized
+semantic state. Interning occurs under the resource mutex, creates at most one
+native sampler for an equal key, publishes its descriptor and index in the same
+transaction, and retains it until device teardown. Repeated interning returns
+the same index; a capacity or native-create fault consumes no table or heap slot.
 
 ### Descriptor slot policy
 
@@ -477,7 +476,7 @@ token also carries the device-owner identity and current generation, while its
 `TextureIndex` field is only the shader value: zero is invalid and a live value
 encodes the zero-based physical slot plus one. Destruction validates owner and
 generation before recycling the slot. Device teardown reports leaked texture
-views. Sampler entries are device-owned and are not individually releasable.
+views. Sampler indices are device-owned and are not individually releasable.
 
 Batch creation uses a prepare/commit transaction under the resource lock.
 Preparation validates every item and resolves its native view without consuming
@@ -793,7 +792,7 @@ reject color counts above the library or selected-device limit
 validate every color source handle, usage, mip/layer range, and selected-mip extent
 require one sample count across color and depth sources
 validate each resolve as distinct, single-sample, same-format color attachment
-validate the depth handle, usage, and mip-zero extent
+validate the depth handle, usage, and selected mip/layer extent
 preflight any bound pipeline against color formats, depth format, and samples
 transition only if caller explicitly requested via barrier before begin
 create views and build attachment infos only after all targets validate

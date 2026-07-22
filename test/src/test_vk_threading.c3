@@ -68,7 +68,6 @@ fn int creation_storm_worker(void* arg) {
         )!!;
 
         gpu::TextureDesc tex_desc = {
-            .dimension = gpu::TextureDimension.TEX_2D,
             .access    = { .graphics, .compute, .transfer },
             .width     = 4,
             .height    = 4,
@@ -89,8 +88,7 @@ fn int creation_storm_worker(void* arg) {
             .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
             .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
         };
-        gpu::Sampler sampler_identity = gpu::intern_sampler(args.device, &sampler_desc)!!;
-        gpu::SamplerIndex sampler = gpu::publish_sampler(args.device, sampler_identity)!!;
+        gpu::SamplerIndex sampler = gpu::intern_sampler(args.device, &sampler_desc)!!;
 
         if (!buffer.allocation.is_valid() || !texture.is_valid()
             || !view.is_valid() || !view.index.is_valid()
@@ -157,7 +155,6 @@ fn void texture_view_cache_uses_device_allocator_across_threads() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension    = gpu::TextureDimension.TEX_2D,
         .access       = { .graphics },
         .width        = 8,
         .height       = 8,
@@ -215,7 +212,6 @@ fn void render_view_recording_avoids_texture_view_cache_lock() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics },
         .width      = 8,
         .height     = 8,
@@ -258,7 +254,6 @@ struct SamplerRaceArgs {
     gpu::SamplerDesc* desc;
     Atomic{uint}*     ready;
     Atomic{bool}*     release;
-    gpu::Sampler      sampler;
     gpu::SamplerIndex index;
 }
 
@@ -268,12 +263,11 @@ fn int sampler_race_worker(void* raw_args) {
     while (!args.release.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
-    args.sampler = gpu::intern_sampler(args.device, args.desc)!!;
-    args.index = gpu::publish_sampler(args.device, args.sampler)!!;
+    args.index = gpu::intern_sampler(args.device, args.desc)!!;
     return 0;
 }
 
-fn void concurrent_sampler_interning_and_publication_converges() @test {
+fn void concurrent_sampler_interning_converges() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
     gpu::SamplerDesc desc = {
@@ -302,17 +296,15 @@ fn void concurrent_sampler_interning_and_publication_converges() @test {
     release.store(true, AtomicOrdering.RELEASE);
     foreach (&worker : threads) assert(worker.join()!! == 0);
     for (uint i = 1; i < THR_THREADS; i++) {
-        assert(args[i].sampler == args[0].sampler,
-            "concurrent interning returns one sampler identity");
         assert(args[i].index == args[0].index,
-            "concurrent publication returns one stable index");
+            "concurrent interning returns one stable index");
     }
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
     assert(state.samplers.count == 1,
         "concurrent interning creates one native sampler cell");
     assert(state.strict_heap.descriptors.sampler_next_new == 1,
-        "concurrent publication writes one strict heap entry");
+        "concurrent interning writes one strict heap entry");
 }
 
 struct PipelineRaceArgs {
@@ -754,7 +746,6 @@ fn void parallel_recording_disjoint_texture_transitions() @test {
     gpu::TextureHandle[THR_THREADS] textures;
     for (uint i = 0; i < THR_THREADS; i++) {
         gpu::TextureDesc tex_desc = {
-            .dimension = gpu::TextureDimension.TEX_2D,
             .access    = { .graphics, .compute, .transfer },
             .width     = 4,
             .height    = 4,

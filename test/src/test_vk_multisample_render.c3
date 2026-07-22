@@ -29,7 +29,6 @@ fn gpu::TextureHandle make_multisample_target(
     ZString debug_name,
 ) {
     gpu::TextureDesc desc = {
-        .dimension    = gpu::TextureDimension.TEX_2D,
         .access       = { .graphics },
         .width        = DP_RT,
         .height       = DP_RT,

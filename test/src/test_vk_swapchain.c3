@@ -749,7 +749,6 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     }
 
     gpu::TextureDesc backing_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics },
         .width     = 4,
         .height    = 4,

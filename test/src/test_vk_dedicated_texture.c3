@@ -163,7 +163,6 @@ fn void init_dedicated_fixture(DedicatedTextureFixture* fixture) {
 
 fn gpu::TextureDesc dedicated_test_texture_desc() {
     return {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .compute },
         .width     = 4,
         .height    = 4,
@@ -369,7 +368,6 @@ fn void dedicated_texture_native_lifetime_is_independently_owned() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc texture_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute },
         .width     = 16,
         .height    = 16,

@@ -41,7 +41,6 @@ fn ZString phase_name(BenchPhase phase) {
 
 fn void run_texture_op(gpu::Device* device) {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,

@@ -31,7 +31,6 @@ fn uint unorm_byte(float value) {
 
 fn gpu::TextureHandle make_render_target(gpu::Device* device, uint mips = 1) {
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width      = RT_SIZE,
         .height     = RT_SIZE,
@@ -202,7 +201,6 @@ fn void offscreen_textured_triangle() @test {
 
     // Flat-color pattern texture, uploaded through the staging path.
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
@@ -221,8 +219,7 @@ fn void offscreen_textured_triangle() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex smp_index = gpu::intern_sampler(&device, &sampler_desc)!!;
     OwnedSpan staging = allocate_owned_span(
         device:       &device,
         size:         4 * 4 * 4,
@@ -346,6 +343,20 @@ fn void offscreen_textured_triangle() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     bind_test_graphics_pipeline(&cmd, pipeline);
+    gpu::cmd_draw(
+        commands:       &cmd,
+        vertex_root:    (gpu::GpuAddress)0,
+        fragment_root:  test_span_address(&device, frag_span),
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_draw(
+        commands:       &cmd,
+        vertex_root:    test_span_address(&device, verts_span),
+        fragment_root:  (gpu::GpuAddress)0,
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, verts_span),
@@ -694,14 +705,14 @@ fn void graphics_pipeline_depth_format_validation() @test {
     gpu::PipelineHandle depth_pipeline = gpu::create_graphics_pipeline(&device, &with_depth)!!;
     gpu::destroy_pipeline(&device, depth_pipeline)!!;
 
-    gpu::GraphicsPipelineDesc packed_depth = {
+    gpu::GraphicsPipelineDesc color_as_depth = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
         .colors          = pipeline_colors[..],
-        .depth_format    = gpu::Format.D24_UNORM_S8_UINT,
+        .depth_format    = gpu::Format.RGBA8_UNORM,
     };
-    assert(@catch(gpu::create_graphics_pipeline(&device, &packed_depth)) == gpu::INVALID_ARGUMENT,
-        "D24_UNORM_S8_UINT faults INVALID_ARGUMENT");
+    assert(@catch(gpu::create_graphics_pipeline(&device, &color_as_depth)) == gpu::INVALID_ARGUMENT,
+        "a color format used as depth faults INVALID_ARGUMENT");
 
     gpu::GraphicsPipelineDesc no_attachments = {
         .vertex_shader   = vert,

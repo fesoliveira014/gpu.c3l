@@ -25,10 +25,9 @@ union ClearColor {
 }
 $assert ClearColor::size == 16;
 
-<* Depth/stencil clear value; depth in [0, 1]. *>
-struct ClearDepthStencil {
+<* Depth clear value; depth in [0, 1]. *>
+struct ClearDepth {
     float depth;
-    uint  stencil;
 }
 
 <* One texture subresource prepared for render-pass attachment use.
@@ -53,7 +52,7 @@ struct DepthTargetDesc {
     AttachmentViewHandle view;
     LoadOp               load_op;
     StoreOp              store_op;
-    ClearDepthStencil    clear;
+    ClearDepth           clear;
 }
 
 <* A dynamic render pass. Every selected attachment must cover the render area. *>

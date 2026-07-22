@@ -71,6 +71,11 @@ fn void root_pointer_compute_readback() @test {
         root:     test_span_address(&device, root_span),
         groups:   { (COUNT + ROOT_POINTER_WORKGROUP - 1) / ROOT_POINTER_WORKGROUP, 1, 1 },
     )!!;
+    gpu::cmd_dispatch(
+        commands: &commands,
+        root:     (gpu::GpuAddress)0,
+        groups:   { 1, 1, 1 },
+    )!!;
     gpu::Barrier host_read = {
         .before = { .compute = true },
         .after = { .host = true },

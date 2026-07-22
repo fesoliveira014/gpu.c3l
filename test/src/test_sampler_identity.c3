@@ -7,14 +7,12 @@ import std::thread;
 
 const uint SAMPLER_INTERN_WORKER_COUNT = 8;
 
-$assert Sampler::size <= ulong::size * 2;
-
 struct SamplerInternWorkerArgs {
     Device*       device;
     SamplerDesc*  desc;
     Atomic{uint}* ready;
     Atomic{bool}* release;
-    Sampler       sampler;
+    SamplerIndex  index;
     fault         failure;
 }
 
@@ -53,38 +51,20 @@ fn int sampler_intern_worker(void* raw_args) {
     while (!args.release.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
-    Sampler? sampler = gpu::intern_sampler(args.device, args.desc);
-    if (catch intern_fault = sampler) {
+    SamplerIndex? index = gpu::intern_sampler(args.device, args.desc);
+    if (catch intern_fault = index) {
         args.failure = intern_fault;
         return 1;
     } else {
-        args.sampler = sampler;
+        args.index = index;
         return 0;
     }
-}
-
-fn void sampler_identity_is_owner_bearing() @test {
-    Sampler first = { .owner = 7, .index = 3, .generation = 1 };
-    Sampler same = first;
-    Sampler different_owner = first;
-    Sampler different_index = first;
-    Sampler different_generation = first;
-    different_owner.owner++;
-    different_index.index++;
-    different_generation.generation++;
-
-    assert(first.is_valid(), "owner and generation make a sampler valid");
-    assert(first == same, "copied sampler identity compares equal");
-    assert(first != different_owner, "owner participates in sampler identity");
-    assert(first != different_index, "index participates in sampler identity");
-    assert(first != different_generation,
-        "generation participates in sampler identity");
-    assert(!gpu::SAMPLER_INVALID.is_valid(), "the zero sampler is invalid");
 }
 
 fn void sampler_interning_pins_public_contract() @test {
     Runtime runtime = sampler_test_runtime();
     Device device = sampler_test_device(&runtime);
+    uint destroys_before = gpu::vk::stub_sampler_native_destroy_count();
     ulong children_before =
         gpu::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
 
@@ -104,55 +84,36 @@ fn void sampler_interning_pins_public_contract() @test {
 
     SamplerDesc first_desc = sampler_test_desc();
     first_desc.debug_name = "first_debug_name";
-    Sampler first = gpu::intern_sampler(&device, &first_desc)!!;
-    Sampler duplicate = gpu::intern_sampler(&device, &first_desc)!!;
+    SamplerIndex first = gpu::intern_sampler(&device, &first_desc)!!;
+    SamplerIndex duplicate = gpu::intern_sampler(&device, &first_desc)!!;
     SamplerDesc renamed_desc = first_desc;
     renamed_desc.debug_name = "renamed_debug_name";
-    Sampler renamed = gpu::intern_sampler(&device, &renamed_desc)!!;
+    SamplerIndex renamed = gpu::intern_sampler(&device, &renamed_desc)!!;
     SamplerDesc filter_desc = first_desc;
     filter_desc.min_filter = Filter.LINEAR;
-    Sampler different_filter = gpu::intern_sampler(&device, &filter_desc)!!;
+    SamplerIndex different_filter = gpu::intern_sampler(&device, &filter_desc)!!;
     SamplerDesc address_desc = first_desc;
     address_desc.address_u = AddressMode.CLAMP_TO_BORDER;
-    Sampler different_address = gpu::intern_sampler(&device, &address_desc)!!;
+    SamplerIndex different_address = gpu::intern_sampler(&device, &address_desc)!!;
 
-    assert(first == duplicate, "identical descriptions share sampler identity");
-    assert(first == renamed, "debug names do not participate in sampler identity");
+    assert(first == duplicate, "identical descriptions share a sampler index");
+    assert(first == renamed, "debug names do not participate in sampler interning");
     assert(first != different_filter,
-        "filter changes produce distinct sampler identities");
+        "filter changes produce distinct sampler indices");
     assert(first != different_address,
-        "address changes produce distinct sampler identities");
+        "address changes produce distinct sampler indices");
     assert(gpu::vk::stub_sampler_native_create_count(&device) == 3,
         "only semantic descriptions create backend samplers");
 
-    SamplerIndex published = gpu::publish_sampler(&device, first)!!;
-    assert(published.is_valid(), "a live sampler publishes a shader index");
+    assert(first.is_valid(), "interning returns a live shader index");
     ulong children_after =
         gpu::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
     assert(children_after == children_before,
-        "interning and publication retain no device child");
+        "interning retains no device child");
 
     gpu::destroy_device(&device)!!;
-    gpu::destroy_runtime(&runtime)!!;
-}
-
-fn void foreign_sampler_rejects_before_publication_mutation() @test {
-    Runtime runtime = sampler_test_runtime();
-    Device first_device = sampler_test_device(&runtime);
-    Device second_device = sampler_test_device(&runtime);
-    SamplerDesc desc = sampler_test_desc();
-    Sampler first_sampler = gpu::intern_sampler(&first_device, &desc)!!;
-    uint attempts_before =
-        gpu::vk::stub_sampler_publish_attempt_count(&second_device);
-
-    assert(@catch(gpu::publish_sampler(&second_device, first_sampler))
-        == gpu::INVALID_HANDLE);
-    assert(gpu::vk::stub_sampler_publish_attempt_count(&second_device)
-        == attempts_before,
-        "foreign samplers stop before backend publication mutation");
-
-    gpu::destroy_device(&first_device)!!;
-    gpu::destroy_device(&second_device)!!;
+    assert(gpu::vk::stub_sampler_native_destroy_count() == destroys_before + 3,
+        "device teardown destroys each interned native sampler exactly once");
     gpu::destroy_runtime(&runtime)!!;
 }
 
@@ -183,9 +144,9 @@ fn void concurrent_identical_sampler_interning_is_deduplicated() @test {
     foreach (&worker : workers) {
         if (worker.join()!! != 0) all_joined = false;
     }
-    bool all_equal = args[0].sampler.is_valid();
+    bool all_equal = args[0].index.is_valid();
     for (uint i = 1; i < SAMPLER_INTERN_WORKER_COUNT; i++) {
-        if (args[i].sampler != args[0].sampler) all_equal = false;
+        if (args[i].index != args[0].index) all_equal = false;
     }
 
     assert(all_joined, "every sampler interning worker succeeds");
@@ -237,11 +198,11 @@ fn void sampler_identity_exhaustion_is_transactional() @test {
     Runtime runtime = sampler_test_runtime();
     Device device = sampler_test_device(&runtime);
     SamplerDesc desc = sampler_test_desc();
-    Sampler first;
+    SamplerIndex first;
     for (uint i = 0; i < 16; i++) {
         desc.mip_lod_bias = (float)i;
-        Sampler sampler = gpu::intern_sampler(&device, &desc)!!;
-        if (i == 0) first = sampler;
+        SamplerIndex index = gpu::intern_sampler(&device, &desc)!!;
+        if (i == 0) first = index;
     }
     uint creates_before = gpu::vk::stub_sampler_native_create_count(&device);
     desc.mip_lod_bias = 16.0f;
@@ -255,15 +216,14 @@ fn void sampler_identity_exhaustion_is_transactional() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void sampler_identity_survives_without_strict_capability() @test {
+fn void sampler_interning_requires_strict_capability() @test {
     Device device = gpu::vk::stub_create_strict_disabled_device()!!;
     SamplerDesc desc = sampler_test_desc();
-    Sampler sampler = gpu::intern_sampler(&device, &desc)!!;
-    uint attempts_before = gpu::vk::stub_sampler_publish_attempt_count(&device);
-    assert(@catch(gpu::publish_sampler(&device, sampler))
+    uint attempts_before = gpu::vk::stub_sampler_intern_attempt_count(&device);
+    assert(@catch(gpu::intern_sampler(&device, &desc))
         == gpu::UNSUPPORTED_FEATURE);
-    assert(gpu::vk::stub_sampler_publish_attempt_count(&device)
+    assert(gpu::vk::stub_sampler_intern_attempt_count(&device)
         == attempts_before,
-        "strict-disabled publication stops before backend mutation");
+        "strict-disabled interning stops before backend mutation");
     gpu::destroy_device(&device)!!;
 }

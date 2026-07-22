@@ -66,13 +66,3 @@ fn void? create_texture_views(
     operation.vtable.create_texture_views(device, descs, out_views)!;
     retain_device_children(&operation, (ulong)descs.len);
 }
-
-<* Publish an interned sampler to the strict shader-visible heap. Requires
-   strict capability; repeated publication returns the same device-lifetime index. *>
-fn SamplerIndex? publish_sampler(Device* device, Sampler sampler) {
-    DeviceOperation operation = begin_device_operation(device)!;
-    defer end_device_operation(&operation);
-    validate_resource_owner(&operation, sampler.owner, ResourceOwnerKind.SAMPLER)!;
-    if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
-    return operation.vtable.publish_sampler(device, sampler);
-}

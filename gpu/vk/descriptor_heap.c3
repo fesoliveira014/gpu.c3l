@@ -848,7 +848,7 @@ fn vk::ImageView? resolve_descriptor_texture_view(
             generation:          texture.generation,
             debug_name:          slot_name(&slot.debug_name[0]),
             rejected_field:      view_field,
-            invariant:           "view must select a valid texture subresource range and format",
+            invariant:           "view must select a valid texture subresource range",
             backend_text:        null,
         )~;
     }

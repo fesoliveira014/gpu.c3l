@@ -489,12 +489,12 @@ fn void interned_sampler_keeps_first_debug_name() @test {
     }
 
     gpu::SamplerDesc first_desc = { .debug_name = "first_sampler" };
-    gpu::Sampler first = gpu::intern_sampler(&device, &first_desc)!!;
+    gpu::SamplerIndex first = gpu::intern_sampler(&device, &first_desc)!!;
     gpu::SamplerDesc duplicate_desc = first_desc;
     duplicate_desc.debug_name = "later_sampler";
-    gpu::Sampler duplicate = gpu::intern_sampler(&device, &duplicate_desc)!!;
+    gpu::SamplerIndex duplicate = gpu::intern_sampler(&device, &duplicate_desc)!!;
 
-    assert(first == duplicate, "debug names do not change sampler identity");
+    assert(first == duplicate, "debug names do not change sampler interning");
     assert(capture.calls == 1, "only the first interned sampler assigns a native name");
     assert(capture.object_type == vk::ObjectType.SAMPLER,
         "the native name identifies a Vulkan sampler");
@@ -537,7 +537,6 @@ fn void leak_reporters_count_leaks() @test {
     )!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width      = 8,
         .height     = 8,
@@ -562,8 +561,7 @@ fn void leak_reporters_count_leaks() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex sampler_index = gpu::intern_sampler(&device, &sampler_desc)!!;
     assert(texture_index.is_valid() && sampler_index.is_valid(),
         "published shader indices are valid");
 
@@ -668,7 +666,6 @@ fn void stats_cover_public_allocations_textures_and_budgets() @test {
     gpu::TextureHandle[2] textures;
     for (uint i = 0; i < 2; i++) {
         gpu::TextureDesc desc = {
-            .dimension = gpu::TextureDimension.TEX_2D,
             .access    = { .graphics, .compute, .transfer },
             .width     = 4,
             .height    = 4,
@@ -698,7 +695,6 @@ fn void labels_record_validation_clean() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc rt_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 8,
         .height    = 8,

@@ -57,8 +57,7 @@ fn void run_texture_batched_op(gpu::Device* device, gpu::TextureHandle texture) 
 
 fn void run_sampler_op(gpu::Device* device) {
     gpu::SamplerDesc desc = {};
-    gpu::Sampler sampler = gpu::intern_sampler(device, &desc)!!;
-    gpu::SamplerIndex index = gpu::publish_sampler(device, sampler)!!;
+    gpu::SamplerIndex index = gpu::intern_sampler(device, &desc)!!;
 }
 
 fn void run_phase_op(gpu::Device* device, BenchPhase phase, gpu::TextureHandle texture) {
@@ -118,7 +117,6 @@ fn gpu::TextureHandle[BENCH_MAX_WORKERS] make_texture_pool(gpu::Device* device) 
     gpu::TextureHandle[BENCH_MAX_WORKERS] textures;
     foreach (&handle : textures) {
         gpu::TextureDesc desc = {
-            .dimension = gpu::TextureDimension.TEX_2D,
             .access    = { .graphics, .compute, .transfer },
             .width     = 4,
             .height    = 4,

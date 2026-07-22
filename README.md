@@ -13,9 +13,8 @@ two ideas:
   or descriptor churn for generic data.
 - **One bindless heap for textures and samplers.** An owner-bearing
   `TextureView` exposes the raw `TextureIndex` stored in root data;
-  `SamplerIndex` is likewise a raw shader-visible value. Sampler state is
-  interned as a device-owned `Sampler` identity, then published once into the
-  strict heap.
+  `SamplerIndex` is likewise a raw shader-visible value. Interning sampler state
+  returns one stable device-lifetime index.
 
 ```c3
 gpu::GpuSpan input_span = gpu::get_allocation_span(&device, input)!;

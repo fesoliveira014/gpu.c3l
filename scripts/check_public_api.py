@@ -235,6 +235,11 @@ RETIRED_SOURCE_SYMBOLS = (
     "frames_in_flight",
     "ARENA_FULL",
     "FRAME,",
+    "TextureDimension",
+    "D24_UNORM_S8_UINT",
+    "ClearDepthStencil",
+    "SAMPLER_INVALID",
+    "publish_sampler(",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -389,6 +394,49 @@ def validate_document(document: dict) -> list[str]:
         for entry in public_surface.get("variables", [])
     }
 
+    for retired_type in (
+        "TextureDimension",
+        "TextureDimensionSupport",
+        "ClearDepthStencil",
+        "Sampler",
+    ):
+        if retired_type in types:
+            failures.append(f"retired public type {retired_type}")
+    if "SAMPLER_INVALID" in variables:
+        failures.append("retired public constant SAMPLER_INVALID")
+    if "publish_sampler" in functions:
+        failures.append("retired public function publish_sampler")
+
+    format_definition = types.get("Format")
+    expected_formats = (
+        "UNDEFINED",
+        "R8_UNORM",
+        "R8_UINT",
+        "RG8_UNORM",
+        "RGBA8_UNORM",
+        "RGBA8_SRGB",
+        "BGRA8_UNORM",
+        "BGRA8_SRGB",
+        "R16_UINT",
+        "R16_FLOAT",
+        "RG16_FLOAT",
+        "RGBA16_FLOAT",
+        "R32_UINT",
+        "R32_FLOAT",
+        "RG32_FLOAT",
+        "RGBA32_FLOAT",
+        "D32_FLOAT",
+    )
+    if (
+        format_definition is None
+        or format_definition.get("kind") != "enum"
+        or tuple(
+            member.get("name")
+            for member in format_definition.get("members", [])
+        ) != expected_formats
+    ):
+        failures.append("Format must match the strict backend profile")
+
     sample_count = types.get("SampleCount")
     expected_sample_counts = (
         "ONE",
@@ -509,9 +557,41 @@ def validate_document(document: dict) -> list[str]:
     ):
         failures.append("COLOR_WRITE_ALL must enable every color channel")
 
-    texture_desc_fields = dict(member_schema(types.get("TextureDesc")))
-    if texture_desc_fields.get("sample_count") != "SampleCount":
-        failures.append("TextureDesc.sample_count must be SampleCount")
+    texture_schemas = (
+        (
+            "TextureDesc",
+            (
+                ("width", "uint"),
+                ("height", "uint"),
+                ("mip_levels", "uint"),
+                ("array_layers", "uint"),
+                ("format", "Format"),
+                ("usage", "TextureUsage"),
+                ("access", "QueueRoles"),
+                ("sample_count", "SampleCount"),
+                ("debug_name", "ZString"),
+            ),
+        ),
+        (
+            "TextureViewDesc",
+            (
+                ("base_mip", "uint"),
+                ("mip_count", "uint"),
+                ("base_layer", "uint"),
+                ("layer_count", "uint"),
+            ),
+        ),
+        (
+            "TextureFormatSupport",
+            (
+                ("features", "TextureFormatFeatures"),
+                ("sample_counts", "TextureSampleCountSupport"),
+            ),
+        ),
+    )
+    for type_name, expected_members in texture_schemas:
+        if member_schema(types.get(type_name)) != expected_members:
+            failures.append(f"{type_name} must match the strict schema")
 
     strict_render_enums = (
         (
@@ -545,10 +625,10 @@ def validate_document(document: dict) -> list[str]:
             "ClearColor must expose typed color values",
         ),
         (
-            "ClearDepthStencil",
+            "ClearDepth",
             "struct",
-            (("depth", "float"), ("stencil", "uint")),
-            "ClearDepthStencil must match the strict schema",
+            (("depth", "float"),),
+            "ClearDepth must match the strict schema",
         ),
         (
             "AttachmentViewDesc",
@@ -579,7 +659,7 @@ def validate_document(document: dict) -> list[str]:
                 ("view", "AttachmentViewHandle"),
                 ("load_op", "LoadOp"),
                 ("store_op", "StoreOp"),
-                ("clear", "ClearDepthStencil"),
+                ("clear", "ClearDepth"),
             ),
             "DepthTargetDesc must match the strict schema",
         ),
@@ -717,10 +797,6 @@ def validate_document(document: dict) -> list[str]:
         ),
         "intern_sampler": (
             ("Device*", "SamplerDesc*"),
-            "Sampler?",
-        ),
-        "publish_sampler": (
-            ("Device*", "Sampler"),
             "SamplerIndex?",
         ),
         "create_texture_view": (
@@ -914,7 +990,6 @@ def validate_document(document: dict) -> list[str]:
     }
     required_parameter_names = {
         "intern_sampler": ("device", "desc"),
-        "publish_sampler": ("device", "sampler"),
         "create_texture_view": ("device", "texture", "desc"),
         "destroy_texture_view": ("device", "view"),
         "create_texture_views": ("device", "descs", "out_views"),
@@ -1018,7 +1093,6 @@ def validate_document(document: dict) -> list[str]:
 
     for name, kind in (
         ("GpuAllocation", "struct"),
-        ("Sampler", "struct"),
         ("TextureView", "struct"),
         ("TextureIndex", "bitstruct"),
         ("SamplerIndex", "bitstruct"),
@@ -1095,14 +1169,6 @@ def validate_document(document: dict) -> list[str]:
                 ("preprocess_buffer_count", "uint"),
             ),
             "GeneratedScratchDesc must match the exact public schema",
-        ),
-        "Sampler": (
-            (
-                ("owner", "ulong"),
-                ("index", "uint"),
-                ("generation", "uint"),
-            ),
-            "Sampler must match the exact identity schema",
         ),
         "TextureView": (
             (

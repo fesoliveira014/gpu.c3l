@@ -195,7 +195,6 @@ fn vk::Format format_to_vk(gpu::Format format) {
         case gpu::Format.RG32_FLOAT:        return vk::Format.R32G32_SFLOAT;
         case gpu::Format.RGBA32_FLOAT:      return vk::Format.R32G32B32A32_SFLOAT;
         case gpu::Format.D32_FLOAT:         return vk::Format.D32_SFLOAT;
-        case gpu::Format.D24_UNORM_S8_UINT: return vk::Format.D24_UNORM_S8_UINT;
         default:                            return vk::Format.UNDEFINED;
     }
 }
@@ -233,7 +232,6 @@ fn bool? format_supports_sample_count(
     gpu::SampleCount sample_count,
 ) @private {
     gpu::TextureDesc desc = {
-        .dimension    = gpu::TextureDimension.TEX_2D,
         .width        = 1,
         .height       = 1,
         .format       = format,
@@ -275,7 +273,6 @@ fn gpu::TextureFormatSupport? vk_get_texture_format_support(
     bool creatable = support.features.sampled || support.features.storage
         || support.features.color_attach || support.features.depth_attach
         || support.features.transfer_src || support.features.transfer_dst;
-    support.dimensions.tex_2d = creatable;
     support.sample_counts.one = creatable;
 
     gpu::TextureUsage attachment_usage;
@@ -353,12 +350,10 @@ fn bool? texture_desc_supported(VkDeviceState* state, gpu::TextureDesc* desc) @p
 
     uint mip_levels = desc.mip_levels == 0 ? 1 : desc.mip_levels;
     uint array_layers = desc.array_layers == 0 ? 1 : desc.array_layers;
-    uint depth = desc.depth == 0 ? 1 : desc.depth;
     bool supports_sample_count = ((uint)properties.sample_counts
         & (uint)sample_count_to_vk(desc.sample_count)) != 0;
     return desc.width <= properties.max_extent.width
         && desc.height <= properties.max_extent.height
-        && depth <= properties.max_extent.depth
         && mip_levels <= properties.max_mip_levels
         && array_layers <= properties.max_array_layers
         && supports_sample_count;
@@ -370,7 +365,6 @@ fn bool? format_supports_usage(
     gpu::TextureUsage usage,
 ) @private {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .width     = 1,
         .height    = 1,
         .format    = format,
@@ -408,7 +402,6 @@ fn usz format_texel_size(gpu::Format format) {
         case gpu::Format.RG32_FLOAT:        return 8;
         case gpu::Format.RGBA32_FLOAT:      return 16;
         case gpu::Format.D32_FLOAT:         return 4;
-        case gpu::Format.D24_UNORM_S8_UINT: return 4;
         default:                            return 0;
     }
 }
@@ -431,8 +424,6 @@ fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     switch (format) {
         case gpu::Format.D32_FLOAT:
             return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.DEPTH_BIT;
-        case gpu::Format.D24_UNORM_S8_UINT:
-            return (vk::ImageAspectFlags)((uint)vk::ImageAspectFlagBits.DEPTH_BIT | (uint)vk::ImageAspectFlagBits.STENCIL_BIT);
         default:
             return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.COLOR_BIT;
     }
@@ -498,7 +489,6 @@ fn vk::ImageView? resolve_texture_view_tracked(
 ) @private {
     *creation = {};
     if (view == null) return slot.default_view;
-    if (view.format != gpu::Format.UNDEFINED && view.format != slot.format) return gpu::INVALID_ARGUMENT~;
     if (view.base_mip >= slot.mip_levels || view.base_layer >= slot.array_layers) return gpu::INVALID_ARGUMENT~;
 
     uint mip_count   = view.mip_count == 0 ? slot.mip_levels - view.base_mip : view.mip_count;

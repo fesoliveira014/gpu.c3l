@@ -10,6 +10,15 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "test" / "retired_api"
 
 FIXTURES = {
+    "texture_dimension": "TextureDimension",
+    "d24_unorm_s8_uint": "D24_UNORM_S8_UINT",
+    "clear_depth_stencil": "ClearDepthStencil",
+    "sampler_identity": "Sampler",
+    "sampler_invalid": "SAMPLER_INVALID",
+    "publish_sampler": "publish_sampler",
+    "texture_desc_dimension": "dimension",
+    "texture_desc_depth": "depth",
+    "texture_view_desc_format": "format",
     "device_desc": "DeviceDesc",
     "create_device_from_desc": "create_device_from_desc",
     "create_sampler": "create_sampler",
@@ -100,6 +109,9 @@ ERROR_DIAGNOSTIC = re.compile(
 )
 
 INVALID_MEMBER_TYPES = {
+    "texture_desc_dimension": "TextureDesc",
+    "texture_desc_depth": "TextureDesc",
+    "texture_view_desc_format": "TextureViewDesc",
     "submit_waits": "SubmitDesc",
     "submit_signals": "SubmitDesc",
     "retired_graphics_pipeline_depth": "GraphicsPipelineDesc",
@@ -112,6 +124,7 @@ INVALID_MEMBER_TYPES = {
 }
 
 ENUM_VALUES = {
+    "d24_unorm_s8_uint": ("Format", "D24_UNORM_S8_UINT"),
     "debug_frame": ("DebugResourceKind", "FRAME"),
     "debug_semaphore": ("DebugResourceKind", "SEMAPHORE"),
     "debug_persistent_span": ("DebugResourceKind", "PERSISTENT_SPAN"),
@@ -138,6 +151,66 @@ RETIRED_PIPELINE_SIGNATURES = {
     "retired_cmd_draw_indexed_indirect_pipeline",
     "retired_cmd_draw_indexed_indirect_count_pipeline",
 }
+
+LIVE_SCAN_ROOTS = (
+    ROOT / "gpu",
+    ROOT / "test" / "cpu",
+    ROOT / "test" / "src",
+    ROOT / "docs",
+    ROOT / "README.md",
+)
+LIVE_SCAN_SUFFIXES = {".c3", ".json", ".md", ".txt"}
+LIVE_RETIRED_PATTERNS = {
+    "TextureDimension": re.compile(r"\bTextureDimension\b"),
+    "D24_UNORM_S8_UINT": re.compile(r"\bD24_UNORM_S8_UINT\b"),
+    "ClearDepthStencil": re.compile(r"\bClearDepthStencil\b"),
+    "public Sampler": re.compile(
+        r"\bgpu::Sampler\b|\bstruct\s+Sampler\b|(?<!::)\bSampler\s+sampler\b"
+    ),
+    "SAMPLER_INVALID": re.compile(r"\bSAMPLER_INVALID\b"),
+    "publish_sampler": re.compile(r"\bpublish_sampler\b"),
+}
+RETIRED_DESC_FIELDS = {
+    "TextureDesc.dimension/depth": re.compile(
+        r"\bTextureDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*\{"
+        r"(?:(?!\};).)*?\.(?:dimension|depth)\s*=",
+        re.DOTALL,
+    ),
+    "TextureViewDesc.format": re.compile(
+        r"\bTextureViewDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*\{"
+        r"(?:(?!\};).)*?\.format\s*=",
+        re.DOTALL,
+    ),
+}
+
+
+def live_scan_files(roots: tuple[Path, ...] = LIVE_SCAN_ROOTS):
+    for root in roots:
+        paths = [root] if root.is_file() else root.rglob("*")
+        for path in paths:
+            if not path.is_file() or path.suffix not in LIVE_SCAN_SUFFIXES:
+                continue
+            relative = path.relative_to(ROOT)
+            if relative.parts[:2] == ("docs", "specs"):
+                continue
+            yield path
+
+
+def find_live_retired_usages(
+    roots: tuple[Path, ...] = LIVE_SCAN_ROOTS,
+) -> list[str]:
+    failures = []
+    for path in live_scan_files(roots):
+        source = path.read_text(encoding="utf-8")
+        for marker, pattern in LIVE_RETIRED_PATTERNS.items():
+            for match in pattern.finditer(source):
+                line = source.count("\n", 0, match.start()) + 1
+                failures.append(f"{path.relative_to(ROOT)}:{line}: {marker}")
+        for marker, pattern in RETIRED_DESC_FIELDS.items():
+            for match in pattern.finditer(source):
+                line = source.count("\n", 0, match.start()) + 1
+                failures.append(f"{path.relative_to(ROOT)}:{line}: {marker}")
+    return failures
 
 
 def diagnostic_points_to_retired_member(
@@ -260,7 +333,7 @@ def has_expected_diagnostic(
 
 
 def main() -> int:
-    failures = []
+    failures = find_live_retired_usages()
     for target, retired_symbol in FIXTURES.items():
         result = subprocess.run(
             ["c3c", "build", target, "--path", str(PROJECT)],

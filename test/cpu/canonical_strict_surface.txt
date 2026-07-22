@@ -15,7 +15,6 @@ bitstruct gpu::SamplerIndex
 bitstruct gpu::StageMask
 bitstruct gpu::Surface
 bitstruct gpu::TextureAccess
-bitstruct gpu::TextureDimensionSupport
 bitstruct gpu::TextureFormatFeatures
 bitstruct gpu::TextureIndex
 bitstruct gpu::TextureSampleCountSupport
@@ -42,7 +41,6 @@ constant gpu::QUEUE_INVALID
 constant gpu::RESOURCE_OWNER_KIND_COUNT
 constant gpu::RUNTIME_INVALID
 constant gpu::SAMPLER_INDEX_INVALID
-constant gpu::SAMPLER_INVALID
 constant gpu::SURFACE_INVALID
 constant gpu::SWAPCHAIN_HANDLE_INVALID
 constant gpu::SWAPCHAIN_READINESS_INVALID
@@ -75,7 +73,6 @@ enum gpu::QueueKind
 enum gpu::SampleCount
 enum gpu::ShaderStage
 enum gpu::StoreOp
-enum gpu::TextureDimension
 enum gpu::TextureLayout
 fault gpu::BACKEND_ERROR
 fault gpu::COMMAND_RECORDING_ERROR
@@ -176,7 +173,6 @@ function gpu::invalidate_mapped_span
 function gpu::poll_completion
 function gpu::prepare_shader_code
 function gpu::present
-function gpu::publish_sampler
 function gpu::release_generated_scratch
 function gpu::request_presentation
 function gpu::request_queues
@@ -210,8 +206,6 @@ method gpu::PipelineHandle.is_valid
 method gpu::Queue.equals
 method gpu::Queue.is_valid
 method gpu::Runtime.is_valid
-method gpu::Sampler.equals
-method gpu::Sampler.is_valid
 method gpu::SamplerIndex.is_valid
 method gpu::ShaderCode.equals
 method gpu::ShaderCode.is_valid
@@ -242,7 +236,7 @@ struct gpu::Barrier
 struct gpu::BlendState
 struct gpu::BufferCopyDesc
 struct gpu::BufferTextureCopyDesc
-struct gpu::ClearDepthStencil
+struct gpu::ClearDepth
 struct gpu::ColorTargetState
 struct gpu::ColorTargetDesc
 struct gpu::CommandList
@@ -280,7 +274,6 @@ struct gpu::QueueRequirements
 struct gpu::RenderPassDesc
 struct gpu::RootPush
 struct gpu::RuntimeDesc
-struct gpu::Sampler
 struct gpu::SamplerDesc
 struct gpu::ScissorRect
 struct gpu::ShaderCode

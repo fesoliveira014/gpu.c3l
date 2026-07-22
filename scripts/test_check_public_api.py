@@ -103,15 +103,9 @@ def valid_document() -> dict:
                     },
                     api_function(
                         "intern_sampler",
-                        "Sampler?",
-                        ("device", "Device*"),
-                        ("desc", "SamplerDesc*"),
-                    ),
-                    api_function(
-                        "publish_sampler",
                         "SamplerIndex?",
                         ("device", "Device*"),
-                        ("sampler", "Sampler"),
+                        ("desc", "SamplerDesc*"),
                     ),
                     api_function(
                         "create_texture_view",
@@ -585,13 +579,26 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "Format",
+                        "kind": "enum",
+                        "members": [
+                            {"name": name, "type": {"name": "Format"}}
+                            for name in (
+                                "UNDEFINED", "R8_UNORM", "R8_UINT",
+                                "RG8_UNORM", "RGBA8_UNORM", "RGBA8_SRGB",
+                                "BGRA8_UNORM", "BGRA8_SRGB", "R16_UINT",
+                                "R16_FLOAT", "RG16_FLOAT", "RGBA16_FLOAT",
+                                "R32_UINT", "R32_FLOAT", "RG32_FLOAT",
+                                "RGBA32_FLOAT", "D32_FLOAT",
+                            )
+                        ],
+                    },
+                    {
                         "name": "TextureDesc",
                         "kind": "struct",
                         "members": [
-                            {"name": "dimension", "type": {"name": "TextureDimension"}},
                             {"name": "width", "type": {"name": "uint"}},
                             {"name": "height", "type": {"name": "uint"}},
-                            {"name": "depth", "type": {"name": "uint"}},
                             {"name": "mip_levels", "type": {"name": "uint"}},
                             {"name": "array_layers", "type": {"name": "uint"}},
                             {"name": "format", "type": {"name": "Format"}},
@@ -599,6 +606,24 @@ def valid_document() -> dict:
                             {"name": "access", "type": {"name": "QueueRoles"}},
                             {"name": "sample_count", "type": {"name": "SampleCount"}},
                             {"name": "debug_name", "type": {"name": "ZString"}},
+                        ],
+                    },
+                    {
+                        "name": "TextureViewDesc",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "base_mip", "type": {"name": "uint"}},
+                            {"name": "mip_count", "type": {"name": "uint"}},
+                            {"name": "base_layer", "type": {"name": "uint"}},
+                            {"name": "layer_count", "type": {"name": "uint"}},
+                        ],
+                    },
+                    {
+                        "name": "TextureFormatSupport",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "features", "type": {"name": "TextureFormatFeatures"}},
+                            {"name": "sample_counts", "type": {"name": "TextureSampleCountSupport"}},
                         ],
                     },
                     {
@@ -626,11 +651,10 @@ def valid_document() -> dict:
                         ],
                     },
                     {
-                        "name": "ClearDepthStencil",
+                        "name": "ClearDepth",
                         "kind": "struct",
                         "members": [
                             {"name": "depth", "type": {"name": "float"}},
-                            {"name": "stencil", "type": {"name": "uint"}},
                         ],
                     },
                     {
@@ -660,7 +684,7 @@ def valid_document() -> dict:
                             {"name": "view", "type": {"name": "AttachmentViewHandle"}},
                             {"name": "load_op", "type": {"name": "LoadOp"}},
                             {"name": "store_op", "type": {"name": "StoreOp"}},
-                            {"name": "clear", "type": {"name": "ClearDepthStencil"}},
+                            {"name": "clear", "type": {"name": "ClearDepth"}},
                         ],
                     },
                     {
@@ -704,15 +728,6 @@ def valid_document() -> dict:
                             {"name": "kind", "type": {"name": "GeneratedWorkKind"}},
                             {"name": "max_commands_per_list", "type": {"name": "uint"}},
                             {"name": "preprocess_buffer_count", "type": {"name": "uint"}},
-                        ],
-                    },
-                    {
-                        "name": "Sampler",
-                        "kind": "struct",
-                        "members": [
-                            {"name": "owner", "type": {"name": "ulong"}},
-                            {"name": "index", "type": {"name": "uint"}},
-                            {"name": "generation", "type": {"name": "uint"}},
                         ],
                     },
                     {
@@ -1774,7 +1789,7 @@ method gpu::Runtime.is_valid
             (
                 "TextureDesc",
                 "sample_count",
-                "TextureDesc.sample_count must be SampleCount",
+                "TextureDesc must match the strict schema",
             ),
             (
                 "GraphicsPipelineDesc",
@@ -1856,9 +1871,9 @@ method gpu::Runtime.is_valid
                 "ClearColor must expose typed color values",
             ),
             (
-                "ClearDepthStencil",
+                "ClearDepth",
                 lambda entry: entry["members"].pop(),
-                "ClearDepthStencil must match the strict schema",
+                "ClearDepth must match the strict schema",
             ),
             (
                 "AttachmentViewDesc",
@@ -2669,15 +2684,15 @@ method gpu::Runtime.is_valid
             failures,
         )
 
-    def test_rejects_wrong_sampler_identity_schema(self) -> None:
+    def test_rejects_retired_sampler_identity_schema(self) -> None:
         document = valid_document()
-        sampler = next(
-            entry for entry in document["modules"]["gpu"]["types"]
-            if entry["name"] == "Sampler"
-        )
-        sampler["members"][2]["name"] = "revision"
+        document["modules"]["gpu"]["types"].append({
+            "name": "Sampler",
+            "kind": "struct",
+            "members": [],
+        })
         self.assertIn(
-            "Sampler must match the exact identity schema",
+            "retired public type Sampler",
             check_public_api.validate_document(document),
         )
 
@@ -2822,13 +2837,16 @@ method gpu::Runtime.is_valid
         functions = document["modules"]["gpu"]["functions"]
         intern = next(entry for entry in functions
             if entry["name"] == "intern_sampler")
-        publish = next(entry for entry in functions
-            if entry["name"] == "publish_sampler")
-        intern["return_type"]["name"] = "SamplerIndex?"
-        publish["members"][1]["type"]["name"] = "SamplerIndex"
+        intern["return_type"]["name"] = "Sampler?"
+        functions.append(api_function(
+            "publish_sampler",
+            "SamplerIndex?",
+            ("device", "Device*"),
+            ("sampler", "Sampler"),
+        ))
         failures = check_public_api.validate_document(document)
         self.assertIn("intern_sampler has the wrong return type", failures)
-        self.assertIn("publish_sampler has the wrong parameters", failures)
+        self.assertIn("retired public function publish_sampler", failures)
 
     def test_rejects_wrong_texture_view_operation_contracts(self) -> None:
         document = valid_document()
