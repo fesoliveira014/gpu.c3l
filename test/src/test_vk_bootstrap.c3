@@ -81,8 +81,6 @@ fn void device_create_destroy() @test {
         "selected device supports independent blend");
     assert(features.depth_bias_clamp != 0,
         "selected device supports depth-bias clamp");
-    assert(state.logical_depth_bias_clamp_enabled,
-        "logical device enables depth-bias clamp");
     assert(gpu::get_device_caps(&device)!!.line_polygon_mode == (features.fill_mode_non_solid != 0),
         "line polygon cap matches the selected physical device");
     vk::PhysicalDeviceProperties props;

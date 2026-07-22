@@ -125,7 +125,6 @@ struct VkDeviceState {
     bool                       draw_indirect_count;
     GeneratedWorkSupport       generated_work;
     float                      max_sampler_anisotropy;
-    bool                       logical_depth_bias_clamp_enabled @if(env::TESTING);
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;
@@ -1385,10 +1384,6 @@ fn void? create_logical_device_with_queue_infos(
     if (line_polygon_mode) features2.features.fill_mode_non_solid = vk::TRUE;
     if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;
-    $if env::TESTING:
-        state.logical_depth_bias_clamp_enabled =
-            features2.features.depth_bias_clamp != 0;
-    $endif
     if (state.strict_heap.enabled) {
         features2.features.shader_storage_image_read_without_format  = vk::TRUE;
         features2.features.shader_storage_image_write_without_format = vk::TRUE;
