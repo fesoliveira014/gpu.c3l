@@ -149,6 +149,10 @@ fn void run_texture_destroy_high_water(
 ) {
     gpu::TextureHandle[BENCH_LIFECYCLE_ITERS] textures;
     foreach (&texture : textures) *texture = make_bench_texture(device);
+    uint texture_next_new_before =
+        state.strict_heap.descriptors.texture_next_new;
+    defer state.strict_heap.descriptors.texture_next_new =
+        texture_next_new_before;
     state.strict_heap.descriptors.texture_next_new = high_water;
     vk::reset_texture_view_accounting(state);
 
@@ -177,17 +181,24 @@ fn void run_swapchain_ownership_high_water(
 ) {
     vk::SwapchainSlot slot = { .image_count = (uint)textures.len };
     foreach (i, texture : textures) slot.textures[i] = texture;
+    uint texture_next_new_before =
+        state.strict_heap.descriptors.texture_next_new;
+    defer state.strict_heap.descriptors.texture_next_new =
+        texture_next_new_before;
     state.strict_heap.descriptors.texture_next_new = high_water;
     vk::reset_texture_view_accounting(state);
 
-    state.resource_mutex.lock()!!;
-    std::time::Clock start = std::time::clock::now();
-    for (uint i = 0; i < BENCH_SWAPCHAIN_CHECK_ITERS; i++) {
-        assert(!vk::swapchain_images_referenced_locked(state, &slot)!!,
-            "unreferenced benchmark textures must remain releasable");
+    long elapsed_ns;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        std::time::Clock start = std::time::clock::now();
+        for (uint i = 0; i < BENCH_SWAPCHAIN_CHECK_ITERS; i++) {
+            assert(!vk::swapchain_images_referenced_locked(state, &slot)!!,
+                "unreferenced benchmark textures must remain releasable");
+        }
+        elapsed_ns = (long)start.to_now();
     }
-    long elapsed_ns = (long)start.to_now();
-    state.resource_mutex.unlock();
 
     vk::TextureViewAccountingCounters counters =
         vk::texture_view_accounting(state);
