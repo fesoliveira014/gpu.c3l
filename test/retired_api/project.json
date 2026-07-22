@@ -32,6 +32,42 @@
   ],
   "output": "build",
   "targets": {
+    "texture_dimension": {
+      "type": "object-files",
+      "sources": [ "texture_dimension.c3" ]
+    },
+    "d24_unorm_s8_uint": {
+      "type": "object-files",
+      "sources": [ "d24_unorm_s8_uint.c3" ]
+    },
+    "clear_depth_stencil": {
+      "type": "object-files",
+      "sources": [ "clear_depth_stencil.c3" ]
+    },
+    "sampler_identity": {
+      "type": "object-files",
+      "sources": [ "sampler_identity.c3" ]
+    },
+    "sampler_invalid": {
+      "type": "object-files",
+      "sources": [ "sampler_invalid.c3" ]
+    },
+    "publish_sampler": {
+      "type": "object-files",
+      "sources": [ "publish_sampler.c3" ]
+    },
+    "texture_desc_dimension": {
+      "type": "object-files",
+      "sources": [ "texture_desc_dimension.c3" ]
+    },
+    "texture_desc_depth": {
+      "type": "object-files",
+      "sources": [ "texture_desc_depth.c3" ]
+    },
+    "texture_view_desc_format": {
+      "type": "object-files",
+      "sources": [ "texture_view_desc_format.c3" ]
+    },
     "device_desc": {
       "type": "object-files",
       "sources": [

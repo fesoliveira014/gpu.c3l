@@ -12,6 +12,37 @@ from scripts import check_retired_api
 
 
 class RetiredApiCheckTests(unittest.TestCase):
+    def test_live_scan_includes_indexed_planning_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            live = root / "docs" / "api.md"
+            planning = root / "docs" / "specs" / "current.md"
+            live.parent.mkdir(parents=True)
+            planning.parent.mkdir(parents=True)
+            live.write_text("SamplerIndex is public.\n", encoding="utf-8")
+            planning.write_text("publish_sampler\n", encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                self.assertEqual(
+                    check_retired_api.find_live_retired_usages((root / "docs",)),
+                    ["docs/specs/current.md:1: publish_sampler"],
+                )
+
+    def test_live_scan_reports_named_and_struct_field_usage(self) -> None:
+        source = (
+            "gpu::TextureDesc desc = { .dimension = value };\n"
+            "gpu::publish_sampler(device, sampler)!;\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            path = root / "test" / "src" / "positive.c3"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                failures = check_retired_api.find_live_retired_usages((path,))
+            self.assertEqual(len(failures), 2)
+            self.assertTrue(any("TextureDesc.dimension/depth" in item for item in failures))
+            self.assertTrue(any("publish_sampler" in item for item in failures))
+
     def test_accepts_exact_retired_pipeline_signature_diagnostic(self) -> None:
         source = (
             "gpu::cmd_dispatch(commands, pipeline, root, {})!;\n"

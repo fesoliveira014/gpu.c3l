@@ -44,7 +44,7 @@ Backend API and driver versions are diagnostic information. Applications select 
 - Texture requirements are queried before creation and report whether dedicated backing is required.
 - Placed texture creation validates caller-provided memory before mutation.
 - Dedicated texture creation transactionally publishes separate texture and allocation tokens.
-- Samplers are immutable device-interned values and require no individual destruction. Strict sampler-heap publication returns a separate shader index; compatibility-only devices retain sampler identity without creating the strict heap.
+- Sampler descriptions intern directly to stable device-lifetime shader indices and require no individual destruction. Compatibility-only devices have no strict sampler heap and reject interning before backend mutation.
 - VMA remains private.
 - Non-WSI resource destruction is immediate. No live recording command list, executable command token, or incomplete submission may reference the resource. Strict presentation integration applies the same no-hidden-wait rule to swapchain destruction and resize.
 - Readback uses a caller-owned `CPU_READ` allocation and span, copy, completion

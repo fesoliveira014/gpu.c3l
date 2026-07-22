@@ -74,8 +74,7 @@ fn void texture_transition_preserves_compositional_states() @test {
     )!!;
 
     assert(barrier.texture == texture, "transition preserves the texture handle");
-    assert(barrier.view.format == gpu::Format.UNDEFINED
-        && barrier.view.base_mip == 0
+    assert(barrier.view.base_mip == 0
         && barrier.view.mip_count == 0
         && barrier.view.base_layer == 0
         && barrier.view.layer_count == 0,
@@ -102,8 +101,7 @@ fn void texture_view_transition_preserves_subresource_range() @test {
     )!!;
 
     assert(barrier.texture == texture, "view transition preserves the texture handle");
-    assert(barrier.view.format == view.format
-        && barrier.view.base_mip == view.base_mip
+    assert(barrier.view.base_mip == view.base_mip
         && barrier.view.mip_count == view.mip_count
         && barrier.view.base_layer == view.base_layer
         && barrier.view.layer_count == view.layer_count,

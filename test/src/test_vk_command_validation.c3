@@ -108,7 +108,6 @@ fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
     ctx.graphics = gpu::create_graphics_pipeline(device, &pipe_desc)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 1,
         .height    = 1,
@@ -125,8 +124,7 @@ fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(device, &sampler_desc)!!;
-    ctx.smp_index = gpu::publish_sampler(device, sampler)!!;
+    ctx.smp_index = gpu::intern_sampler(device, &sampler_desc)!!;
 
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
     upload_test_texture_data(
@@ -147,7 +145,6 @@ fn void destroy_val_draw_ctx(gpu::Device* device, ValDrawCtx* ctx) {
 
 fn gpu::TextureHandle make_val_target(gpu::Device* device) {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = VAL_RT,
         .height    = VAL_RT,
@@ -159,7 +156,6 @@ fn gpu::TextureHandle make_val_target(gpu::Device* device) {
 
 fn gpu::TextureHandle make_val_color_target(gpu::Device* device, uint width, uint height, uint mip_levels) {
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width      = width,
         .height     = height,
@@ -172,7 +168,6 @@ fn gpu::TextureHandle make_val_color_target(gpu::Device* device, uint width, uin
 
 fn gpu::TextureHandle make_val_depth_target(gpu::Device* device, uint width, uint height) {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = width,
         .height    = height,
@@ -184,7 +179,6 @@ fn gpu::TextureHandle make_val_depth_target(gpu::Device* device, uint width, uin
 
 fn gpu::TextureHandle make_val_depth_target_mips(gpu::Device* device, uint width, uint height, uint mip_levels) {
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width      = width,
         .height     = height,
@@ -313,7 +307,6 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     defer free_owned_span(&device, &buffer)!!;
 
     gpu::TextureDesc texture_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .width     = 1,
         .height    = 1,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -375,7 +368,6 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
         "allocation reuse advances the generation");
 
     gpu::TextureDesc copy_texture_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .width     = 1,
         .height    = 1,
         .format    = gpu::Format.RGBA8_UNORM,
@@ -550,7 +542,6 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc admitted_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .width      = 4,
         .height     = 4,
         .mip_levels = 2,
@@ -861,13 +852,16 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
 
     gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
     gpu::reset_command_resolution_stats();
-    fault missing_compute_root = @catch(gpu::cmd_dispatch(
+    gpu::vk::reset_root_push_observation();
+    gpu::cmd_dispatch(
         commands: &commands,
         root:     (gpu::GpuAddress)0,
-        groups:   { 1, 1, 1 },
-    ));
-    assert(missing_compute_root == gpu::INVALID_ARGUMENT,
-        "dispatch rejects a missing compute root");
+        groups:   { 0, 0, 0 },
+    )!!;
+    gpu::vk::RootPushObservation compute_roots =
+        gpu::vk::root_push_observation();
+    assert(compute_roots.compute == (gpu::GpuAddress)0,
+        "dispatch pushes a null compute root unchanged");
     gpu::cmd_dispatch(
         commands: &commands,
         root:     root,
@@ -914,24 +908,31 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
 
     gpu::DepthState depth = {};
     gpu::cmd_set_depth_state(&commands, &depth)!!;
-    fault missing_vertex_root = @catch(gpu::cmd_draw(
+    gpu::vk::reset_root_push_observation();
+    gpu::cmd_draw(
         commands:      &commands,
         vertex_root:   (gpu::GpuAddress)0,
         fragment_root: root,
         vertex_count:  0,
         instance_count: 0,
-    ));
-    assert(missing_vertex_root == gpu::INVALID_ARGUMENT,
-        "draw rejects a missing vertex root");
-    fault missing_fragment_root = @catch(gpu::cmd_draw(
+    )!!;
+    gpu::vk::RootPushObservation vertex_roots =
+        gpu::vk::root_push_observation();
+    assert(vertex_roots.vertex == (gpu::GpuAddress)0
+        && vertex_roots.fragment == root,
+        "draw pushes a null vertex root unchanged");
+    gpu::cmd_draw(
         commands:      &commands,
         vertex_root:   root,
         fragment_root: (gpu::GpuAddress)0,
         vertex_count:  0,
         instance_count: 0,
-    ));
-    assert(missing_fragment_root == gpu::INVALID_ARGUMENT,
-        "draw rejects a missing fragment root");
+    )!!;
+    gpu::vk::RootPushObservation fragment_roots =
+        gpu::vk::root_push_observation();
+    assert(fragment_roots.vertex == root
+        && fragment_roots.fragment == (gpu::GpuAddress)0,
+        "draw pushes a null fragment root unchanged");
 
     gpu::DepthState invalid_depth = depth;
     int invalid_compare = 99;
@@ -1809,7 +1810,6 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
@@ -1855,7 +1855,6 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
@@ -1901,7 +1900,6 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
@@ -2066,7 +2064,6 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .transfer },
         .width     = 1,
         .height    = 1,
@@ -2583,7 +2580,6 @@ fn void buffer_to_texture_access_diagnostic_precedes_recording() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc texture_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics },
         .width      = 1,
         .height     = 1,
@@ -2659,7 +2655,6 @@ fn void texture_copy_span_usage_diagnostics_are_semantic() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc texture_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .transfer },
         .width      = 1,
         .height     = 1,
@@ -2783,7 +2778,6 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::GpuSpan args_full = args_buffer.span;
     gpu::GpuSpan escaped_args = args_full.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
     gpu::TextureDesc usage_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width = 8, .height = 8, .format = gpu::Format.RGBA8_UNORM,
         .usage = { .sampled, .color_attach }, .debug_name = "usage_target",
@@ -2796,7 +2790,6 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &usage_view)!!;
     gpu::TextureDesc color_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width = 8, .height = 8, .format = gpu::Format.RGBA8_UNORM,
         .usage = { .color_attach }, .debug_name = "color_target",

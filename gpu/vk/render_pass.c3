@@ -300,7 +300,7 @@ fn void? vk_cmd_begin_render_pass(
         depth_attachment.store_op = store_op_to_vk(desc.depth.store_op);
         depth_attachment.clear_value.depth_stencil = {
             .depth   = desc.depth.clear.depth,
-            .stencil = desc.depth.clear.stencil,
+            .stencil = 0,
         };
         rendering.p_depth_attachment = &depth_attachment;
     }
@@ -484,18 +484,6 @@ fn BoundPipeline*? validate_graphics_execution_state(
         operation:     operation,
     )!;
     if (!record.depth_state_set) return gpu::COMMAND_RECORDING_ERROR~;
-    validate_root_address(
-        state:          state,
-        root:           vertex_root,
-        operation:      operation,
-        rejected_field: "vertex_root",
-    )!;
-    validate_root_address(
-        state:          state,
-        root:           fragment_root,
-        operation:      operation,
-        rejected_field: "fragment_root",
-    )!;
     return pipeline;
 }
 
@@ -509,6 +497,10 @@ fn void push_graphics_roots(
         .vertex_root_gpu   = vertex_root,
         .fragment_root_gpu = fragment_root,
     };
+    $if env::TESTING:
+        last_vertex_root.store((ulong)push.vertex_root_gpu, AtomicOrdering.RELAXED);
+        last_fragment_root.store((ulong)push.fragment_root_gpu, AtomicOrdering.RELAXED);
+    $endif
     uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT
         | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     vk::cmd_push_constants(

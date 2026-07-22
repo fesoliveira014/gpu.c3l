@@ -444,7 +444,6 @@ fn void texture_placement_contract_is_strongly_typed() @test {
 
 fn TextureDesc texture_allocation_desc() {
     return {
-        .dimension = TextureDimension.TEX_2D,
         .width     = 4,
         .height    = 4,
         .format    = Format.RGBA8_UNORM,

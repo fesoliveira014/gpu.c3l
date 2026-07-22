@@ -55,7 +55,6 @@ fn void pin_memory_and_resources() {
     gpu::TextureDesc texture_desc = {
         .width  = 1,
         .height = 1,
-        .depth  = 1,
         .format = gpu::Format.RGBA8_UNORM,
         .usage  = { .sampled },
         .access = {
@@ -69,7 +68,6 @@ fn void pin_memory_and_resources() {
     gpu::TextureViewDesc view_desc = {};
     gpu::TextureView view = {};
     gpu::SamplerDesc sampler_desc = {};
-    gpu::Sampler sampler = {};
     gpu::TextureViewCreateDesc[1] view_descs = {
         { .texture = texture },
     };
@@ -105,7 +103,6 @@ fn void pin_memory_and_resources() {
     );
     (void)gpu::create_attachment_view(&device, &attachment_desc);
     (void)gpu::intern_sampler(&device, &sampler_desc);
-    (void)gpu::publish_sampler(&device, sampler);
     (void)gpu::destroy_attachment_view(&device, attachment_view);
     (void)gpu::destroy_texture_view(&device, view);
     (void)gpu::destroy_texture(&device, texture);

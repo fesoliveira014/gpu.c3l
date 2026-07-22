@@ -182,9 +182,8 @@ gpu::SamplerDesc shadow_sampler_desc = {
     .compare_enable = true,
     .compare = gpu::CompareOp.LESS_EQUAL,
 };
-gpu::Sampler shadow_sampler = gpu::intern_sampler(&device, &shadow_sampler_desc)!;
 gpu::SamplerIndex shadow_sampler_index =
-    gpu::publish_sampler(&device, shadow_sampler)!;
+    gpu::intern_sampler(&device, &shadow_sampler_desc)!;
 // The shadow pipeline has no color targets and uses D32. Bias is pass state.
 gpu::cmd_bind_pipeline(&cmd, shadow_pipeline)!;
 gpu::DynamicRasterState raster = {

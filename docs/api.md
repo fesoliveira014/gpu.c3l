@@ -306,19 +306,18 @@ contain an opaque device-and-kind owner identity plus a local slot and generatio
 GpuAllocation
 TextureHandle
 TextureView
-Sampler
 PipelineHandle
 SwapchainHandle
 ```
 
 Owning tokens have zero-valued invalid constants such as
 `GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`, `TEXTURE_VIEW_INVALID`,
-`SAMPLER_INVALID`, and their peers.
+and their peers.
 `token.is_valid()` checks the owner and generation; operations also validate
 the local slot generation. Public code should not inspect or construct the
 representation.
 
-Handles, `Sampler`, `TextureView`, `Queue`, `GpuSpan`, command tokens, and
+Handles, `TextureView`, `Queue`, `GpuSpan`, command tokens, and
 synchronization values are runtime-only owner-bearing tokens scoped to one
 device. `TextureIndex`, `SamplerIndex`, and `GpuAddress` are raw device-local
 shader values without owner or generation metadata. Do not persist, serialize,
@@ -347,8 +346,9 @@ GpuSpan
 The identity fields are opaque. Consumers may copy a complete span only while
 its owning allocation remains live. Do not construct or mutate the identity.
 Mapping, address, access, bounds, and native backing remain device-owned and are
-recovered when a public operation resolves the span. A zero `GpuAddress` is
-invalid.
+recovered when a public operation resolves the span. A zero `GpuAddress` is a
+valid root value. Whether a shader may dereference it is application-defined
+and depends on the device's robustness behavior.
 
 `GpuSpan` slicing is explicit:
 
@@ -374,7 +374,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime` | the selected backend is unavailable |
-| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, `publish_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler` | null or malformed input, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, a borrowed swapchain attachment view was passed for destruction, or the requested generated-scratch key is not reserved |
@@ -385,7 +385,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `RESOURCE_IN_USE` | resource or swapchain destruction/resize, `free_allocation`, generated-scratch reservation/release, `destroy_device`, `destroy_runtime`, `destroy_surface` | recording, executable, incomplete submitted work, a texture view, generated-scratch reservation, or unfinished presentation still references the resource; a placed or dedicated texture depends on an allocation; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
 | `SLOT_TABLE_FULL` | runtime, device, allocation, and resource creates; `intern_sampler`; `begin_commands`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
 | `GENERATED_SCRATCH_EXHAUSTED` | generated draw/dispatch recording | the calling thread has no compatible reserved preprocess buffer for the pipeline, generated-work kind, command count, or concurrent retained-list demand |
-| `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `publish_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler publication leave existing entries untouched |
+| `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `intern_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler interning leave existing entries untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
 | `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V structure or backend reflection/module rejection |
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
@@ -505,7 +505,6 @@ R32_FLOAT
 RG32_FLOAT
 RGBA32_FLOAT
 D32_FLOAT
-D24_UNORM_S8_UINT   (current backend profile reports unsupported)
 ```
 
 ### Textures and shader-visible views
@@ -530,12 +529,6 @@ TextureFormatFeatures
     bool transfer_dst
     bool linear_filter
 
-TextureDimensionSupport
-    bool tex_1d
-    bool tex_2d
-    bool tex_3d
-    bool cube
-
 TextureSampleCountSupport
     bool one
     bool two
@@ -547,7 +540,6 @@ TextureSampleCountSupport
 
 TextureFormatSupport
     TextureFormatFeatures features
-    TextureDimensionSupport dimensions
     TextureSampleCountSupport sample_counts
 
 TextureCompatibility
@@ -563,12 +555,6 @@ DedicatedTexture
     TextureHandle texture
     GpuAllocation allocation
 
-TextureDimension
-    TEX_1D   (query false; creation faults INVALID_ARGUMENT)
-    TEX_2D   (current backend profile)
-    TEX_3D   (query false; creation faults INVALID_ARGUMENT)
-    CUBE     (query false; creation faults INVALID_ARGUMENT)
-
 SampleCount
     ONE
     TWO
@@ -579,10 +565,8 @@ SampleCount
     SIXTY_FOUR
 
 TextureDesc
-    TextureDimension dimension
     uint width
     uint height
-    uint depth
     uint mip_levels
     uint array_layers
     Format format
@@ -592,7 +576,6 @@ TextureDesc
     ZString debug_name
 
 TextureViewDesc
-    Format format
     uint base_mip
     uint mip_count
     uint base_layer
@@ -632,8 +615,8 @@ query used by creation, but the bits are independent; use
 `supports_texture_desc` for a usage combination. The backend profile masks every
 dimension except 2D. Higher sample-count bits report exact color-attachment or
 depth-attachment descriptors, as appropriate for the format. Per-format usages,
-sample counts, and linear filtering remain adapter-dependent; D24S8 reports
-empty support until the rendering path supports it end to end.
+sample counts, and linear filtering remain adapter-dependent. Depth support is
+D32-only.
 `supports_texture_desc` returns false for an empty, unknown, or unavailable
 access set.
 
@@ -670,7 +653,7 @@ Passing a stale or foreign view to `destroy_texture_view` faults before heap
 mutation. Texture-view publication requires strict capability and returns
 `UNSUPPORTED_FEATURE` before backend work otherwise. Distinct subresource views
 are governed by the device-wide heap capacity, with no smaller fixed per-texture
-publication limit. Published sampler indices remain stable until device
+publication limit. Sampler indices remain stable until device
 destruction.
 
 `create_texture_views` batch-publishes N views under one lock hold and ends in
@@ -714,26 +697,38 @@ SamplerDesc
     CompareOp compare
     ZString debug_name
 
-Sampler                       (opaque owner | slot | generation)
-intern_sampler(Device* device, SamplerDesc* desc) -> Sampler?
-publish_sampler(Device* device, Sampler sampler) -> SamplerIndex?
+intern_sampler(Device* device, SamplerDesc* desc) -> SamplerIndex?
 ```
 
-`intern_sampler` returns an immutable device-owned identity. Descriptions with
+`intern_sampler` returns one stable shader-visible index. Descriptions with
 the same effective filtering, addressing, LOD, anisotropy, and comparison state
-return the same `Sampler`; `debug_name` is not part of identity. LOD values must
+return the same `SamplerIndex`; `debug_name` is not part of identity. LOD values must
 be finite, the absolute `mip_lod_bias` must not exceed
 `DeviceCaps.max_sampler_lod_bias`, and `min_lod` must not exceed `max_lod`.
 Undefined filter, address, or enabled comparison enum values fault
 `INVALID_ARGUMENT`. Anisotropy requires the reported device capability. Sampler
-identities and their native objects live
-until device destruction and have no individual destroy operation.
+indices and their native objects live until device destruction and have no
+individual destroy operation. Repeated interning is idempotent.
+`DESCRIPTOR_HEAP_FULL` consumes no table or heap entry; a device without strict
+capability returns `UNSUPPORTED_FEATURE` before backend mutation.
 
-`publish_sampler` is separate and requires strict capability. It returns one
-stable shader-visible `SamplerIndex` for the identity. Repeated publication is
-idempotent. `DESCRIPTOR_HEAP_FULL` leaves the identity valid and consumes no
-entry; a device without strict capability returns `UNSUPPORTED_FEATURE` before
-backend publication.
+### Breaking migration
+
+Texture shape is implicitly 2D, view format is always the texture's format,
+and sampler interning now returns the shader index in one call:
+
+```c3
+gpu::TextureDesc texture_desc = {
+    .width  = 1024,
+    .height = 1024,
+    .format = gpu::Format.RGBA8_UNORM,
+    .usage  = { .sampled },
+    .access = { .graphics },
+};
+gpu::SamplerIndex index = gpu::intern_sampler(device, &sampler_desc)!!;
+```
+
+No placeholder texture-shape or view-format fields are required.
 
 ## 8. Shader and pipeline API
 
@@ -1022,7 +1017,7 @@ concurrent sharing only for distinct admitted families.
 
 Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
 `TextureBufferCopyDesc`, `ClearColor`,
-`ClearDepthStencil`) are documented in the generated reference.
+`ClearDepth`) are documented in the generated reference.
 
 ### Pipeline command state and dispatch
 
@@ -1044,9 +1039,9 @@ expected generation, native pipeline/layout, kind, render compatibility,
 cache-entry identity, and generated-work layout. Later draws and dispatches use
 that snapshot and reject a destroyed or reused slot before native handle use;
 they do not resolve pipeline-table or cache state again. Dispatch requires an
-active compute pipeline and a nonzero root
-address. Graphics draws require an active graphics pipeline, nonzero vertex and
-fragment roots, and explicit depth state for the current render pass.
+active compute pipeline. Graphics draws require an active graphics pipeline
+and explicit depth state for the current render pass. Root addresses, including
+zero, are pushed unchanged.
 `cmd_set_raster_state` and `cmd_set_depth_state` require an active render pass;
 outside one they fault `COMMAND_RECORDING_ERROR`. Raster validation is atomic:
 invalid enum values or non-finite enabled depth-bias factors return
@@ -1054,7 +1049,7 @@ invalid enum values or non-finite enabled depth-bias factors return
 Pass begin emits a zero `DynamicRasterState` and resets the explicit depth-state
 requirement, while viewport and scissor receive their full-pass defaults.
 Execution with no required state returns
-`COMMAND_RECORDING_ERROR`; a wrong active pipeline kind or zero root returns
+`COMMAND_RECORDING_ERROR`; a wrong active pipeline kind returns
 `INVALID_ARGUMENT`.
 
 Each group count may be zero and must not exceed the corresponding component
@@ -1099,7 +1094,7 @@ DepthTargetDesc
     AttachmentViewHandle view
     LoadOp load_op
     StoreOp store_op
-    ClearDepthStencil clear
+    ClearDepth clear
 
 RenderPassDesc
     ColorTargetDesc[] colors
@@ -1215,7 +1210,7 @@ immediately before) each pass. Compute bindings persist across passes.
 Render-pass boundaries and resolves add no synchronization; callers declare
 all attachment transitions and later shader/transfer visibility explicitly.
 
-Depth clear values are explicit: a zero-initialized `ClearDepthStencil`
+Depth clear values are explicit: a zero-initialized `ClearDepth`
 clears depth to **0.0**, which fails every LESS-compare draw. The standard
 far-plane clear is an explicit `{ .depth = 1.0 }`; reverse-Z setups clear to
 0.0 deliberately.

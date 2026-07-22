@@ -8,13 +8,11 @@ import std::math;
 struct SamplerCell {
     SamplerKey        key;
     vk::Sampler       native;
-    gpu::Sampler      sampler;
-    gpu::SamplerIndex published;
+    gpu::SamplerIndex index;
 }
 
 struct SamplerTable {
     SamplerCell[] slots;
-    ulong         owner;
     uint          count;
 }
 
@@ -180,6 +178,7 @@ fn vk::SamplerAddressMode sampler_address_mode_to_vk(
 }
 
 fn void? create_sampler_table(VkDeviceState* state) @private {
+    if (!state.strict_heap.enabled) return;
     vk::PhysicalDeviceProperties properties;
     vk::get_physical_device_properties(state.physical_device, &properties);
     uint capacity = properties.limits.max_sampler_allocation_count;
@@ -187,10 +186,6 @@ fn void? create_sampler_table(VkDeviceState* state) @private {
         capacity = gpu::MAX_SHADER_HEAP_CAPACITY;
     }
     if (capacity == 0) return gpu::UNSUPPORTED_FEATURE~;
-    state.samplers.owner = gpu::resource_owner_tag(
-        state.resource_owner,
-        gpu::ResourceOwnerKind.SAMPLER,
-    );
     state.samplers.slots = mem::new_array(SamplerCell, capacity);
 }
 
@@ -208,23 +203,15 @@ fn void destroy_sampler_table(VkDeviceState* state) @private {
     table.count = 0;
 }
 
-fn SamplerCell*? sampler_cell_get(
-    SamplerTable* table,
-    gpu::Sampler sampler,
-) @private {
-    if (sampler.owner != table.owner
-        || sampler.generation != 1
-        || sampler.index >= table.count) {
-        return gpu::INVALID_HANDLE~;
-    }
-    SamplerCell* cell = &table.slots[sampler.index];
-    if (cell.sampler != sampler || cell.native == null) {
-        return gpu::INVALID_HANDLE~;
-    }
-    return cell;
+fn void set_sampler_create_result(
+    gpu::Device* device,
+    vk::Result result,
+) @if(env::TESTING) {
+    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    state.sampler_create_result = result;
 }
 
-fn gpu::Sampler? vk_intern_sampler(
+fn gpu::SamplerIndex? vk_intern_sampler(
     gpu::Device* device,
     gpu::SamplerDesc* desc,
 ) @private {
@@ -235,9 +222,25 @@ fn gpu::Sampler? vk_intern_sampler(
 
     SamplerTable* table = &state.samplers;
     foreach (&cell : table.slots[:table.count]) {
-        if (sampler_key_equal(&cell.key, &key)) return cell.sampler;
+        if (sampler_key_equal(&cell.key, &key)) return cell.index;
     }
     if (table.count >= table.slots.len) return gpu::SLOT_TABLE_FULL~;
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    if (heap.sampler_next_new >= state.strict_heap.sampler_capacity) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "intern_sampler",
+            public_fault:        gpu::DESCRIPTOR_HEAP_FULL,
+            resource_kind:       gpu::DebugResourceKind.SAMPLER,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          desc.debug_name,
+            rejected_field:      "RuntimeDesc.sampler_heap_capacity",
+            invariant:           "must exceed interned samplers",
+            backend_text:        null,
+        )~;
+    }
 
     vk::SamplerCreateInfo sampler_info = vk::sampler_create_info()
         .set_mag_filter(sampler_filter_to_vk(key.mag_filter))
@@ -257,15 +260,31 @@ fn gpu::Sampler? vk_intern_sampler(
         .set_max_lod(key.max_lod);
 
     vk::Sampler native;
-    check_backend_result(
-        state:     state,
-        operation: "intern_sampler",
-        result:    vk::create_sampler(
+    vk::Result create_result;
+    $if env::TESTING:
+        create_result = state.sampler_create_result;
+        if (create_result == vk::Result.SUCCESS) {
+            create_result = vk::create_sampler(
+                device:        state.device,
+                p_create_info: &sampler_info,
+                p_allocator:   null,
+                p_sampler:     &native,
+            );
+        } else {
+            state.sampler_create_result = vk::Result.SUCCESS;
+        }
+    $else
+        create_result = vk::create_sampler(
             device:        state.device,
             p_create_info: &sampler_info,
             p_allocator:   null,
             p_sampler:     &native,
-        ),
+        );
+    $endif
+    check_backend_result(
+        state:     state,
+        operation: "intern_sampler",
+        result:    create_result,
     )!;
     set_object_name(
         state:         state,
@@ -274,51 +293,15 @@ fn gpu::Sampler? vk_intern_sampler(
         name:          desc.debug_name,
     );
 
-    uint index = table.count;
-    gpu::Sampler sampler = {
-        .owner      = table.owner,
-        .index      = index,
-        .generation = 1,
-    };
-    table.slots[index] = {
-        .key     = key,
-        .native  = native,
-        .sampler = sampler,
+    uint slot = heap.sampler_next_new;
+    write_sampler_descriptor(state, slot, native);
+    gpu::SamplerIndex index = { .value = slot + 1 };
+    table.slots[table.count] = {
+        .key    = key,
+        .native = native,
+        .index  = index,
     };
     table.count++;
-    return sampler;
-}
-
-fn gpu::SamplerIndex? vk_publish_sampler(
-    gpu::Device* device,
-    gpu::Sampler sampler,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-
-    SamplerCell* cell = sampler_cell_get(&state.samplers, sampler)!;
-    if (!state.strict_heap.enabled) return gpu::UNSUPPORTED_FEATURE~;
-    if (cell.published.is_valid()) return cell.published;
-
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
-    if (heap.sampler_next_new >= state.strict_heap.sampler_capacity) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "publish_sampler",
-            public_fault:        gpu::DESCRIPTOR_HEAP_FULL,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: true,
-            index:               sampler.index,
-            generation:          sampler.generation,
-            debug_name:          null,
-            rejected_field:      "RuntimeDesc.sampler_heap_capacity",
-            invariant:           "must exceed published samplers",
-            backend_text:        null,
-        )~;
-    }
-    uint slot = heap.sampler_next_new++;
-    write_sampler_descriptor(state, slot, cell.native);
-    cell.published = { .value = slot + 1 };
-    return cell.published;
+    heap.sampler_next_new++;
+    return index;
 }

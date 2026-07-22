@@ -275,7 +275,6 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     gpu::TextureDesc texture_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = CACHE_RT_SIZE,
         .height    = CACHE_RT_SIZE,
@@ -664,7 +663,6 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     // The offscreen fragment shader samples the heap, so a 1x1 white pattern
     // texture and a sampler feed both draws.
     gpu::TextureDesc tex_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 1,
         .height    = 1,
@@ -683,8 +681,7 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex smp_index = gpu::intern_sampler(&device, &sampler_desc)!!;
     char[4] white = { (char)255, (char)255, (char)255, (char)255 };
     upload_test_texture_data(
         device:   &device,
@@ -695,7 +692,6 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     )!!;
 
     gpu::TextureDesc rt_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = CACHE_RT_SIZE,
         .height    = CACHE_RT_SIZE,
@@ -969,7 +965,6 @@ fn void alias_survives_peer_destroy() @test {
     gpu::destroy_pipeline(&device, doomed)!!;
 
     gpu::TextureDesc rt_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = CACHE_RT_SIZE,
         .height    = CACHE_RT_SIZE,

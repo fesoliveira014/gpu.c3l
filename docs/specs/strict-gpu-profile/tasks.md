@@ -217,14 +217,13 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ## Milestone 5 — Binding and pipelines
 
-### 5.1 Interned sampler identity and strict publication
+### 5.1 Strict sampler interning to shader indices
 
-- [x] Split immutable device-interned `Sampler` identity from capability-gated strict heap publication in `gpu/texture.c3`, `gpu/descriptor_heap.c3`, and corresponding Vulkan files.
+- [x] Intern sampler descriptions directly to capability-gated strict shader indices in `gpu/texture.c3` and the corresponding Vulkan files.
   - **Depends on:** 2.2 and 2.3.
-  - **Contract:** sampler identity works on compatibility-only devices; strict publication returns a backend-neutral shader index only when strict capability is enabled; samplers live until device destruction.
-  - **Edges:** duplicate descriptors, exhaustion, unsupported strict publication, cross-device sampler, and concurrent interning.
-  - **Verify:** CPU interning/concurrency tests and strict-only, compatibility-only, and combined-device publication tests.
-  - **Verification deferral:** the public compatibility-only and combined-device matrix remains gated on task 8.2; the 5.1 implementation slice covers strict-only publication and a private strict-disabled backend seam.
+  - **Contract:** `intern_sampler` returns a stable backend-neutral `SamplerIndex` only when strict capability is enabled; the index, heap entry, and native sampler live until device destruction; there is no separate public sampler identity or publication step.
+  - **Edges:** duplicate descriptors, table and heap exhaustion, unsupported strict interning, native creation failure, and concurrent interning.
+  - **Verify:** CPU interning/concurrency tests plus Vulkan strict-disabled, exhaustion, transactionality, and device-teardown tests.
 
 ### 5.2 Device-wide strict texture and sampler heaps
 

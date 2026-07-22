@@ -17,7 +17,6 @@ fn gpu::TextureHandle make_transition_texture(
     uint mip_levels = 1,
 ) {
     gpu::TextureDesc desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics, .compute, .transfer },
         .width      = 4,
         .height     = 4,

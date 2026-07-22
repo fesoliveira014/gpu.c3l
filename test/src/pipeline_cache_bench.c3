@@ -38,7 +38,6 @@ fn double record_raster_matrix(
     gpu::DynamicRasterState[] rasters,
 ) {
     gpu::TextureDesc target_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics },
         .width      = 1,
         .height     = 1,

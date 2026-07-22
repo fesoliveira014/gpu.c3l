@@ -125,6 +125,7 @@ struct VkDeviceState {
     bool                       draw_indirect_count;
     GeneratedWorkSupport       generated_work;
     float                      max_sampler_anisotropy;
+    vk::Result                 sampler_create_result @if(env::TESTING);
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;
@@ -368,7 +369,6 @@ const gpu::BackendVTable VK_VTABLE @private = {
     .destroy_texture_view        = &vk_destroy_texture_view,
     .create_texture_views        = &vk_create_texture_views,
     .intern_sampler              = &vk_intern_sampler,
-    .publish_sampler             = &vk_publish_sampler,
     .create_compute_pipeline     = &vk_create_compute_pipeline,
     .create_graphics_pipeline    = &vk_create_graphics_pipeline,
     .create_compute_pipelines    = &vk_create_compute_pipelines,
@@ -733,12 +733,12 @@ fn gpu::Device? create_vk_device_from_runtime(
         AttachmentViewCell,
         gpu::DEFAULT_ATTACHMENT_VIEW_CAPACITY,
     );
-    create_sampler_table(state)!;
     if (state.presentation.enabled) {
         state.presentation.swapchains.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN);
         state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     }
     if (state.strict_heap.enabled) {
+        create_sampler_table(state)!;
         create_descriptor_heap(state)!;
         reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;
         create_pipeline_shared(state, desc.pipeline_cache_data, pipeline_capacity)!;

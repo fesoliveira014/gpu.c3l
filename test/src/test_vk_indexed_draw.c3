@@ -43,7 +43,6 @@ fn void u16v_draw(
     gpu::GpuSpan* rb_span,
 ) {
     gpu::TextureDesc rt_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = U16V_RT,
         .height    = U16V_RT,

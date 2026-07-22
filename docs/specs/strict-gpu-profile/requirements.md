@@ -93,8 +93,8 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - Destroying a texture does not release its placement.
 - Destroying a GPU-visible resource is immediate and never waits or defers. No live recording command list, executable command token, or incomplete submission may reference it.
 - Releasing an allocation with live placed textures faults without consuming the allocation.
-- Samplers are immutable device-interned values and are released with the device.
-- Sampler identity is available to compatibility-only devices; strict sampler-heap publication is a separate capability-gated operation.
+- On strict devices, sampler descriptions intern directly to stable shader-visible `SamplerIndex` values that are released with the device.
+- Compatibility-only devices have no strict sampler heap and reject sampler interning before backend mutation; there is no separate public sampler identity or publication operation.
 - VMA types and allocation policies remain private.
 
 ### Strict binding and pipelines

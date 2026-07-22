@@ -65,13 +65,13 @@ page doesn't explain it, that's a bug in this page — file an issue.
   `docs/getting_started.md`.
 - **C3 0.8.0 pinned.** The language is pre-1.0 and syntax moves between
   releases; the pin is deliberate and bumped explicitly.
-- **2D textures only.** `TEX_1D`/`TEX_3D`/`CUBE` remain outside the backend
-  profile. Multisample textures are supported for color/depth attachments when
-  the adapter reports the requested count; they have one mip and cannot be
-  sampled, stored, or transferred directly.
-- **D24S8 remains outside the backend profile.** Graphics pipelines and render
-  passes are D32-only, so capability queries report empty D24S8 support and
-  creation faults `INVALID_ARGUMENT`.
+- **Textures are implicitly 2D and views preserve format.** Descriptors select
+  width, height, mip count, and array-layer count; they expose no shape or view
+  reinterpretation switch. Multisample textures are supported for color/depth
+  attachments when the adapter reports the requested count; they have one mip
+  and cannot be sampled, stored, or transferred directly.
+- **Depth attachments are D32-only.** No public stencil attachment format or
+  stencil clear state is exposed.
 - **Matrices are not a schema type.** The ABI DSL has no `mat4`; matrices
   travel as four `vec4` columns and are reassembled in the shader
   (`mat4(c0, c1, c2, c3)`). This keeps layout rules trivial (`docs/shader_abi.md`).
@@ -86,7 +86,7 @@ exists (else the limit is compile-time).
 |---|---|---|---|
 | Texture views in the heap | 4096 default, 65 536 max (`DEFAULT_TEXTURE_HEAP_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `texture_heap_capacity` | `DESCRIPTOR_HEAP_FULL` |
 | Sampler descriptors | 256 default, 65 536 max (`DEFAULT_SAMPLER_HEAP_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `sampler_heap_capacity` | `DESCRIPTOR_HEAP_FULL` |
-| Interned sampler identities | selected-device `maxSamplerAllocationCount`, capped at 65 536 | — | `SLOT_TABLE_FULL` |
+| Interned samplers | selected-device `maxSamplerAllocationCount`, capped at 65 536 | — | `SLOT_TABLE_FULL` |
 | Sampler mip LOD bias | Absolute value up to selected-device `maxSamplerLodBias`, reported by `DeviceCaps.max_sampler_lod_bias` | — | `INVALID_ARGUMENT` |
 | Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY` in `gpu/texture.c3`; `MAX_SHADER_HEAP_CAPACITY` in `gpu/descriptor_heap.c3`) | `texture_capacity` | `SLOT_TABLE_FULL` |
 | Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
@@ -109,7 +109,7 @@ Two sizing rules that bite:
 - **Shader-visible indices have caller-managed lifetime.** Destroying a
   `TextureView` recycles its raw index immediately. Wait or discard every use
   before releasing the view, and do not leave stale indices in GPU-visible
-  data. Published sampler indices remain stable until device destruction.
+  data. Sampler indices remain stable until device destruction.
 - **Transient data is caller-owned.** Applications choose allocation reuse and
   concurrency policy. Flush CPU writes before submission, retain the covering
   completion point, and wait or poll before rewriting or freeing storage.
@@ -150,14 +150,14 @@ Texture format support is queried separately because it depends on both the
 backend profile and the physical adapter:
 
 - `get_texture_format_support(device, format)` reports individually
-  creatable optimal-tiling usages, linear filterability, backend dimensions,
+  creatable optimal-tiling usages, linear filterability,
   and backend sample counts. Individual usage bits do not guarantee that a
   combination is supported.
 - `supports_texture_desc(device, desc)` checks an exact descriptor,
   including combined usages and adapter extent/mip/layer limits, without
   allocating. Use it to preflight optional formats and adapt asset choices.
 
-The required backend profile is 2D. Per-format usages, sample counts, and
-filterability are optional adapter capabilities. The support summary masks 1D,
-3D, cube, and D24S8. Higher sample-count bits reflect exact color-attachment or
+The required backend profile is implicit 2D with same-format views and D32
+depth. Per-format usages, sample counts, and filterability are optional adapter
+capabilities. Higher sample-count bits reflect exact color-attachment or
 depth-attachment descriptors supported end to end.

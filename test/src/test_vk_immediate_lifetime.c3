@@ -241,7 +241,6 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc texture_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 8,
         .height    = 8,
@@ -298,7 +297,6 @@ fn void failed_command_validation_retains_no_resource_reference() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics },
         .width     = 8,
         .height    = 8,

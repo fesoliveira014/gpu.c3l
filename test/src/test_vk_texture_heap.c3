@@ -29,7 +29,6 @@ fn void bindless_texture_write_then_sample() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc tex_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width      = TEX_SIZE,
         .height     = TEX_SIZE,
@@ -50,8 +49,7 @@ fn void bindless_texture_write_then_sample() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex smp_index = gpu::intern_sampler(&device, &sampler_desc)!!;
     OwnedSpan output = allocate_owned_span(
         device:       &device,
         size:         TEX_SIZE * TEX_SIZE * 16,
@@ -238,7 +236,6 @@ fn void storage_write_then_fragment_sample() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc sampled_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics, .compute },
         .width      = TEX_SIZE,
         .height     = TEX_SIZE,
@@ -252,7 +249,6 @@ fn void storage_write_then_fragment_sample() @test {
     defer gpu::destroy_texture_view(&device, sampled_view)!!;
 
     gpu::TextureDesc target_desc = {
-        .dimension  = gpu::TextureDimension.TEX_2D,
         .access     = { .graphics, .transfer },
         .width      = STORAGE_GRAPHICS_TARGET_SIZE,
         .height     = STORAGE_GRAPHICS_TARGET_SIZE,
@@ -272,8 +268,7 @@ fn void storage_write_then_fragment_sample() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex sampler_index = gpu::intern_sampler(&device, &sampler_desc)!!;
 
     gpu::ShaderDesc write_shader_desc = {
         .stage       = gpu::ShaderStage.COMPUTE,
@@ -525,8 +520,7 @@ fn void anisotropic_sampler_caps_honest() @test {
     };
     if (gpu::get_device_caps(&device)!!.max_sampler_anisotropy > 0) {
         // Creation succeeds (max_anisotropy clamps to the device limit).
-        gpu::Sampler sampler = gpu::intern_sampler(&device, &aniso)!!;
-        gpu::SamplerIndex smp = gpu::publish_sampler(&device, sampler)!!;
+        gpu::SamplerIndex smp = gpu::intern_sampler(&device, &aniso)!!;
     } else {
         fault err = @catch(gpu::intern_sampler(&device, &aniso));
         assert(err == gpu::UNSUPPORTED_FEATURE, "expected UNSUPPORTED_FEATURE, got %s", err);
@@ -561,6 +555,5 @@ fn void anisotropy_range_validated() @test {
         .anisotropy_enable = true,
         .max_anisotropy    = 1.0e6f,
     };
-    gpu::Sampler clamped_sampler = gpu::intern_sampler(&device, &huge)!!;
-    gpu::SamplerIndex clamped = gpu::publish_sampler(&device, clamped_sampler)!!;
+    gpu::SamplerIndex clamped = gpu::intern_sampler(&device, &huge)!!;
 }

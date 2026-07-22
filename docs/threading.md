@@ -38,7 +38,7 @@ token's retained device pin while another call can still be in flight.
 | `create_texture` / `destroy_texture` | S | |
 | `create_attachment_view` / `destroy_attachment_view` | S | immutable render subresource; destroy happens-after every command reference |
 | `create_texture_view` / `create_texture_views` / `destroy_texture_view` | S | owner and generation are validated before heap mutation |
-| `intern_sampler` / `publish_sampler` | S | equal interning and repeated publication converge under the device resource lock |
+| `intern_sampler` | S | equal descriptions converge on one stable index under the device resource lock |
 | `prepare_shader_code` | S | pure read of caller-owned immutable bytes and strings |
 | `create_compute_pipeline` / `create_graphics_pipeline` / `create_compute_pipelines` / `create_graphics_pipelines` / `destroy_pipeline` | S | single and batch creation serialize on a device-wide creation lock; a same-key request converges to one entry |
 | `get_memory_stats` / `build_memory_report` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |

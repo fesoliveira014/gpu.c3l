@@ -60,7 +60,6 @@ fn gpu::PipelineHandle make_depth_pipeline(gpu::Device* device, DepthCtx* ctx, b
 
 fn gpu::TextureHandle make_depth_texture(gpu::Device* device, bool sampled = false) {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = DP_RT,
         .height    = DP_RT,
@@ -72,7 +71,6 @@ fn gpu::TextureHandle make_depth_texture(gpu::Device* device, bool sampled = fal
 
 fn gpu::TextureHandle make_color_target(gpu::Device* device) {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = DP_RT,
         .height    = DP_RT,
@@ -565,8 +563,7 @@ fn void sampled_depth_matches_readback() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::SamplerIndex smp_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex smp_index = gpu::intern_sampler(&device, &sampler_desc)!!;
     gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DEPTH_SAMPLE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
     gpu::ComputePipelineDesc comp_desc = { .shader = comp };
@@ -659,12 +656,244 @@ fn void sampled_depth_matches_readback() @test {
     assert(*sampled == NEAR_Z, "heap-sampled depth matches the rendered z");
 }
 
+fn void depth_nonzero_mip_layer_isolated() @test {
+    const uint MIP_SIZE = DP_RT / 2;
+    const usz MIP_BYTES = MIP_SIZE * MIP_SIZE * float::size;
+    gpu::Device device = make_depth_device();
+    defer destroy_test_device(&device)!!;
+    DepthCtx ctx = make_depth_ctx();
+    gpu::TextureDesc texture_desc = {
+        .width        = DP_RT,
+        .height       = DP_RT,
+        .mip_levels   = 2,
+        .array_layers = 2,
+        .format       = gpu::Format.D32_FLOAT,
+        .usage        = { .depth_attach, .transfer_src },
+        .access       = { .graphics, .compute, .transfer },
+    };
+    gpu::TextureHandle depth = gpu::create_texture(&device, &texture_desc)!!;
+    defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewDesc target_desc = {
+        .texture     = depth,
+        .mip_level   = 1,
+        .array_layer = 1,
+    };
+    gpu::AttachmentViewHandle target = gpu::create_attachment_view(
+        &device,
+        &target_desc,
+    )!!;
+    defer gpu::destroy_attachment_view(&device, target)!!;
+    gpu::AttachmentViewDesc other_layer_desc = {
+        .texture     = depth,
+        .mip_level   = 1,
+        .array_layer = 0,
+    };
+    gpu::AttachmentViewHandle other_layer = gpu::create_attachment_view(
+        &device,
+        &other_layer_desc,
+    )!!;
+    defer gpu::destroy_attachment_view(&device, other_layer)!!;
+    gpu::AttachmentViewDesc other_mip_desc = {
+        .texture     = depth,
+        .mip_level   = 0,
+        .array_layer = 1,
+    };
+    gpu::AttachmentViewHandle other_mip = gpu::create_attachment_view(
+        &device,
+        &other_mip_desc,
+    )!!;
+    defer gpu::destroy_attachment_view(&device, other_mip)!!;
+
+    OwnedSpan target_readback = make_readback(&device, MIP_BYTES);
+    defer free_owned_span(&device, &target_readback)!!;
+    OwnedSpan layer_readback = make_readback(&device, MIP_BYTES);
+    defer free_owned_span(&device, &layer_readback)!!;
+    OwnedSpan mip_readback = make_readback(&device, DP_DEPTH_BYTES);
+    defer free_owned_span(&device, &mip_readback)!!;
+    gpu::PipelineHandle pipeline = make_depth_pipeline(
+        device:     &device,
+        ctx:        &ctx,
+        with_color: false,
+    );
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    OwnedSpan vertices = write_tri(&device, NEAR_Z);
+    defer free_owned_span(&device, &vertices)!!;
+    OwnedSpan color = write_color(&device, { 1.0f, 1.0f, 1.0f, 1.0f });
+    defer free_owned_span(&device, &color)!!;
+
+    gpu::TextureState depth_state = {
+        .layout = gpu::TextureLayout.DEPTH_ATTACHMENT,
+        .stages = { .depth_output },
+        .access = { .read, .write },
+    };
+    gpu::TextureViewDesc target_range = {
+        .base_mip    = 1,
+        .mip_count   = 1,
+        .base_layer  = 1,
+        .layer_count = 1,
+    };
+    gpu::TextureViewDesc layer_range = {
+        .base_mip    = 1,
+        .mip_count   = 1,
+        .base_layer  = 0,
+        .layer_count = 1,
+    };
+    gpu::TextureViewDesc mip_range = {
+        .base_mip    = 0,
+        .mip_count   = 1,
+        .base_layer  = 1,
+        .layer_count = 1,
+    };
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::TextureBarrier target_to_depth = gpu::texture_view_transition(
+        texture: depth,
+        view:    target_range,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   depth_state,
+    )!!;
+    gpu::TextureBarrier layer_to_depth = gpu::texture_view_transition(
+        texture: depth,
+        view:    layer_range,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   depth_state,
+    )!!;
+    gpu::TextureBarrier mip_to_depth = gpu::texture_view_transition(
+        texture: depth,
+        view:    mip_range,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   depth_state,
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &target_to_depth)!!;
+    gpu::cmd_texture_barrier(&commands, &layer_to_depth)!!;
+    gpu::cmd_texture_barrier(&commands, &mip_to_depth)!!;
+
+    gpu::DepthTargetDesc layer_target = {
+        .view     = other_layer,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+        .clear    = { .depth = 0.5f },
+    };
+    gpu::RenderPassDesc layer_pass = {
+        .depth  = &layer_target,
+        .width  = MIP_SIZE,
+        .height = MIP_SIZE,
+    };
+    gpu::cmd_begin_render_pass(&commands, &layer_pass)!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+    gpu::DepthTargetDesc mip_target = {
+        .view     = other_mip,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+        .clear    = { .depth = 0.75f },
+    };
+    gpu::RenderPassDesc mip_pass = {
+        .depth  = &mip_target,
+        .width  = DP_RT,
+        .height = DP_RT,
+    };
+    gpu::cmd_begin_render_pass(&commands, &mip_pass)!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+    gpu::DepthTargetDesc selected_target = {
+        .view     = target,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+        .clear    = { .depth = 1.0f },
+    };
+    gpu::RenderPassDesc selected_pass = {
+        .depth  = &selected_target,
+        .width  = MIP_SIZE,
+        .height = MIP_SIZE,
+    };
+    gpu::cmd_begin_render_pass(&commands, &selected_pass)!!;
+    bind_test_graphics_pipeline(
+        &commands,
+        pipeline,
+        { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS },
+    );
+    gpu::cmd_draw(
+        commands:      &commands,
+        vertex_root:   test_span_address(&device, vertices.span),
+        fragment_root: test_span_address(&device, color.span),
+        vertex_count:  3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    gpu::TextureState transfer_state = {
+        .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+        .stages = { .transfer },
+        .access = { .read },
+    };
+    target_to_depth.before = depth_state;
+    target_to_depth.after = transfer_state;
+    layer_to_depth.before = depth_state;
+    layer_to_depth.after = transfer_state;
+    mip_to_depth.before = depth_state;
+    mip_to_depth.after = transfer_state;
+    gpu::cmd_texture_barrier(&commands, &target_to_depth)!!;
+    gpu::cmd_texture_barrier(&commands, &layer_to_depth)!!;
+    gpu::cmd_texture_barrier(&commands, &mip_to_depth)!!;
+    gpu::TextureBufferCopyDesc target_copy = {
+        .texture    = depth,
+        .dst        = target_readback.span,
+        .mip        = 1,
+        .base_layer = 1,
+    };
+    gpu::cmd_copy_texture_to_buffer(&commands, &target_copy)!!;
+    gpu::TextureBufferCopyDesc layer_copy = {
+        .texture    = depth,
+        .dst        = layer_readback.span,
+        .mip        = 1,
+        .base_layer = 0,
+    };
+    gpu::cmd_copy_texture_to_buffer(&commands, &layer_copy)!!;
+    gpu::TextureBufferCopyDesc mip_copy = {
+        .texture    = depth,
+        .dst        = mip_readback.span,
+        .mip        = 0,
+        .base_layer = 1,
+    };
+    gpu::cmd_copy_texture_to_buffer(&commands, &mip_copy)!!;
+    gpu::Barrier host_read = {
+        .before = { .transfer = true },
+        .after  = { .host = true },
+    };
+    gpu::cmd_barrier(&commands, &host_read)!!;
+    submit_and_finish(&device, &commands);
+    gpu::invalidate_mapped_span(&device, target_readback.span)!!;
+    gpu::invalidate_mapped_span(&device, layer_readback.span)!!;
+    gpu::invalidate_mapped_span(&device, mip_readback.span)!!;
+
+    float* selected = (float*)test_span_mapping(
+        &device,
+        target_readback.span,
+    ).ptr;
+    assert(selected[MIP_SIZE / 2 * MIP_SIZE + MIP_SIZE / 2] == NEAR_Z,
+        "draw writes the selected nonzero mip and layer");
+    assert(selected[0] == 1.0f,
+        "the selected subresource keeps its clear outside the draw");
+    float* untouched_layer = (float*)test_span_mapping(
+        &device,
+        layer_readback.span,
+    ).ptr;
+    assert(untouched_layer[MIP_SIZE / 2 * MIP_SIZE + MIP_SIZE / 2] == 0.5f,
+        "drawing one layer leaves the neighboring layer unchanged");
+    float* untouched_mip = (float*)test_span_mapping(
+        &device,
+        mip_readback.span,
+    ).ptr;
+    assert(untouched_mip[DP_RT / 2 * DP_RT + DP_RT / 2] == 0.75f,
+        "drawing one mip leaves the neighboring mip unchanged");
+}
+
 fn void depth_pass_validation_faults() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
 
     gpu::TextureDesc sampled_only_desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = DP_RT,
         .height    = DP_RT,
@@ -717,8 +946,7 @@ fn void compare_sampler_exact_results() @test {
         .compare_enable = true,
         .compare        = gpu::CompareOp.LESS,
     };
-    gpu::Sampler shadow_sampler = gpu::intern_sampler(&device, &shadow_desc)!!;
-    gpu::SamplerIndex shadow_smp = gpu::publish_sampler(&device, shadow_sampler)!!;
+    gpu::SamplerIndex shadow_smp = gpu::intern_sampler(&device, &shadow_desc)!!;
     gpu::ShaderDesc probe_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = SHADOW_PROBE_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode probe = gpu::prepare_shader_code(&probe_sd)!!;
     gpu::ComputePipelineDesc probe_desc = { .shader = probe };

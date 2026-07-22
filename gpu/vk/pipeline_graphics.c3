@@ -211,7 +211,6 @@ fn void? validate_graphics_pipeline_desc(
             || (target.blend.enable && color_format_is_integer(target.format))
             || target.format == gpu::Format.UNDEFINED
             || target.format == gpu::Format.D32_FLOAT
-            || target.format == gpu::Format.D24_UNORM_S8_UINT
             || format_to_vk(target.format) == vk::Format.UNDEFINED) {
             return gpu::INVALID_ARGUMENT~;
         }

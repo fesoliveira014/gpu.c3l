@@ -74,8 +74,7 @@ struct TextureBarrierWorkCounters @if(env::TESTING) {
 }
 
 fn bool texture_format_is_depth_stencil(gpu::Format format) @private {
-    return format == gpu::Format.D32_FLOAT
-        || format == gpu::Format.D24_UNORM_S8_UINT;
+    return format == gpu::Format.D32_FLOAT;
 }
 
 fn bool texture_layout_known(gpu::TextureLayout layout) @private {
@@ -459,9 +458,6 @@ fn vk::ImageSubresourceRange? resolve_texture_barrier_range(
     gpu::TextureViewDesc view,
     TextureSlot* slot,
 ) @private {
-    if (view.format != gpu::Format.UNDEFINED && view.format != slot.format) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     if (view.base_mip >= slot.mip_levels
         || view.base_layer >= slot.array_layers) {
         return gpu::INVALID_ARGUMENT~;

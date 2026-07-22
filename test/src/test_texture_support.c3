@@ -4,7 +4,6 @@ import gpu @public;
 
 fn gpu::TextureDesc valid_texture_desc() {
     return {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 8,
@@ -28,12 +27,6 @@ fn void texture_desc_profile_rejects_invalid_shape() @test {
     desc = valid_texture_desc();
     desc.height = 0;
     assert(!gpu::texture_desc_valid(&desc), "zero height is invalid");
-    desc = valid_texture_desc();
-    desc.depth = 2;
-    assert(!gpu::texture_desc_valid(&desc), "2D depth above one is invalid");
-    desc = valid_texture_desc();
-    desc.dimension = gpu::TextureDimension.TEX_3D;
-    assert(!gpu::texture_desc_valid(&desc), "unimplemented dimensions are invalid");
     desc = valid_texture_desc();
     desc.mip_levels = 6;
     assert(!gpu::texture_desc_valid(&desc), "mip count beyond the full chain is invalid");
@@ -59,13 +52,6 @@ fn void texture_desc_profile_rejects_unsupported_formats() @test {
     gpu::TextureDesc desc = valid_texture_desc();
     desc.format = gpu::Format.UNDEFINED;
     assert(!gpu::texture_desc_valid(&desc), "undefined format is invalid");
-    desc.format = gpu::Format.D24_UNORM_S8_UINT;
-    desc.usage = { .depth_attach };
-    assert(!gpu::texture_desc_valid(&desc), "D24S8 is outside the end-to-end backend profile");
-    desc.usage = { .color_attach };
-    assert(!gpu::texture_desc_valid(&desc), "D24S8 color usage remains invalid");
-    desc.usage = { .transfer_dst };
-    assert(!gpu::texture_desc_valid(&desc), "D24S8 transfer usage remains invalid");
 }
 
 fn void texture_view_publication_requires_strict_capability() @test {

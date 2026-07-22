@@ -170,7 +170,6 @@ fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
     Device device = gpu::create_device(&adapter, &request)!!;
     AllocationDesc allocation_desc = device_creation_allocation_desc();
     TextureDesc texture_desc = {
-        .dimension = TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 16,
         .height    = 16,

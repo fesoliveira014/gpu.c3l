@@ -179,7 +179,6 @@ fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
 
 fn gpu::TextureHandle make_heap_texture(gpu::Device* device) {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width     = 4,
         .height    = 4,
@@ -191,7 +190,6 @@ fn gpu::TextureHandle make_heap_texture(gpu::Device* device) {
 
 fn gpu::TextureHandle make_heap_view_texture(gpu::Device* device) {
     gpu::TextureDesc desc = {
-        .dimension    = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics, .compute, .transfer },
         .width        = 16,
         .height       = 16,
@@ -264,30 +262,28 @@ fn void descriptor_sampler_failures_report_context() @test {
         "descriptor usage fault and texture identity are exact");
 
     gpu::SamplerDesc sampler_desc = {};
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex sampler_index = gpu::intern_sampler(&device, &sampler_desc)!!;
     gpu::SamplerDesc other_desc = { .mag_filter = gpu::Filter.LINEAR };
-    gpu::Sampler other = gpu::intern_sampler(&device, &other_desc)!!;
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::DESCRIPTOR_HEAP_FULL,
         expected_kind:       gpu::DebugResourceKind.SAMPLER,
-        expected_identity:   true,
-        expected_index:      other.index,
-        expected_generation: other.generation,
-        expected_operation:  "publish_sampler",
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "intern_sampler",
         expected_field:      "RuntimeDesc.sampler_heap_capacity",
-        expected_invariant:  "must exceed published samplers",
+        expected_invariant:  "must exceed interned samplers",
     );
-    fault sampler_full = @catch(gpu::publish_sampler(&device, other));
+    fault sampler_full = @catch(gpu::intern_sampler(&device, &other_desc));
     assert(sampler_full == gpu::DESCRIPTOR_HEAP_FULL
             && capture.calls == 4 && capture.matched,
-        "sampler publication capacity fault and diagnostic are exact");
+        "sampler interning capacity fault and diagnostic are exact");
 
-    assert(gpu::publish_sampler(&device, sampler)!! == sampler_index,
-        "an existing sampler publication remains available when the heap is full");
+    assert(gpu::intern_sampler(&device, &sampler_desc)!! == sampler_index,
+        "an existing sampler remains available when the heap is full");
     state.debug_callback = null;
-    fault fallback = @catch(gpu::publish_sampler(&device, other));
+    fault fallback = @catch(gpu::intern_sampler(&device, &other_desc));
     assert(fallback == sampler_full && capture.calls == 4,
         "null callback preserves fault parity without a structured duplicate");}
 
@@ -312,6 +308,57 @@ fn void texture_view_round_trip() @test {
     fault stale_fault = @catch(gpu::destroy_texture_view(&device, view));
     assert(stale_fault == gpu::INVALID_HANDLE,
         "destroying a stale view faults INVALID_HANDLE");
+}
+
+fn void texture_view_multi_layer_ranges_select_array_views() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
+
+    gpu::TextureViewDesc full_range = {};
+    gpu::TextureView full = gpu::create_texture_view(
+        &device,
+        texture,
+        &full_range,
+    )!!;
+    defer gpu::destroy_texture_view(&device, full)!!;
+    assert(cached_texture_view_count(state, texture) == 0,
+        "the normalized full multi-layer range reuses the default array view");
+
+    gpu::TextureViewDesc array_range = {
+        .base_mip    = 1,
+        .mip_count   = 2,
+        .base_layer  = 1,
+        .layer_count = 2,
+    };
+    gpu::TextureView array_view = gpu::create_texture_view(
+        &device,
+        texture,
+        &array_range,
+    )!!;
+    defer gpu::destroy_texture_view(&device, array_view)!!;
+    assert(slot.views[0].used
+            && slot.views[0].view_type == vk::ImageViewType.TYPE_2D_ARRAY,
+        "a multi-layer subrange creates a 2D-array native view");
+
+    gpu::TextureViewDesc layer_range = {
+        .base_mip    = 1,
+        .mip_count   = 2,
+        .base_layer  = 1,
+        .layer_count = 1,
+    };
+    gpu::TextureView layer_view = gpu::create_texture_view(
+        &device,
+        texture,
+        &layer_range,
+    )!!;
+    defer gpu::destroy_texture_view(&device, layer_view)!!;
+    assert(slot.views[1].used
+            && slot.views[1].view_type == vk::ImageViewType.TYPE_2D,
+        "a one-layer subrange creates a 2D native view");
 }
 
 fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
@@ -450,17 +497,6 @@ fn void texture_view_stale_texture_rejected() @test {
 
     fault texture_fault = @catch(gpu::create_texture_view(&device, texture, null));
     assert(texture_fault == gpu::INVALID_HANDLE, "registering a destroyed texture faults INVALID_HANDLE");
-}
-
-fn void texture_view_bad_view_rejected() @test {
-    gpu::Device device = make_heap_test_device(8, 4);
-    defer destroy_test_device(&device)!!;
-    gpu::TextureHandle texture = make_heap_texture(&device);
-    defer gpu::destroy_texture(&device, texture)!!;
-
-    gpu::TextureViewDesc reinterpret = { .format = gpu::Format.R32_UINT };
-    fault view_fault = @catch(gpu::create_texture_view(&device, texture, &reinterpret));
-    assert(view_fault == gpu::INVALID_ARGUMENT, "format-reinterpreting views fault INVALID_ARGUMENT");
 }
 
 fn void texture_view_overflowing_view_range_rejected() @test {
@@ -874,7 +910,7 @@ fn void texture_views_batch_created_descriptor_blocks_texture_destroy() @test {
     gpu::destroy_texture(&device, texture)!!;
 }
 
-fn void sampler_interning_and_publication_are_stable() @test {
+fn void sampler_interning_is_stable() @test {
     gpu::Device device = make_heap_test_device(8, 2);
     defer destroy_test_device(&device)!!;
 
@@ -885,41 +921,54 @@ fn void sampler_interning_and_publication_are_stable() @test {
         .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
-    gpu::Sampler first = gpu::intern_sampler(&device, &desc)!!;
-    gpu::Sampler duplicate = gpu::intern_sampler(&device, &desc)!!;
-    assert(first == duplicate, "identical sampler descriptions share identity");
-
-    gpu::SamplerIndex first_index = gpu::publish_sampler(&device, first)!!;
-    gpu::SamplerIndex duplicate_index = gpu::publish_sampler(&device, duplicate)!!;
+    gpu::SamplerIndex first_index = gpu::intern_sampler(&device, &desc)!!;
+    gpu::SamplerIndex duplicate_index = gpu::intern_sampler(&device, &desc)!!;
     assert(first_index == duplicate_index,
-        "repeated publication returns the stable sampler index");
+        "identical sampler descriptions return the stable sampler index");
 
     gpu::SamplerDesc second_desc = desc;
     second_desc.mag_filter = gpu::Filter.LINEAR;
-    gpu::Sampler second = gpu::intern_sampler(&device, &second_desc)!!;
-    gpu::SamplerIndex second_index = gpu::publish_sampler(&device, second)!!;
+    gpu::SamplerIndex second_index = gpu::intern_sampler(&device, &second_desc)!!;
     assert(second_index.is_valid() && second_index != first_index,
         "a distinct sampler consumes the next publication slot");
 
     gpu::SamplerDesc third_desc = desc;
     third_desc.address_u = gpu::AddressMode.REPEAT;
-    gpu::Sampler third = gpu::intern_sampler(&device, &third_desc)!!;
-    fault full_fault = @catch(gpu::publish_sampler(&device, third));
+    fault full_fault = @catch(gpu::intern_sampler(&device, &third_desc));
     assert(full_fault == gpu::DESCRIPTOR_HEAP_FULL,
-        "publishing past sampler capacity faults DESCRIPTOR_HEAP_FULL");
-    assert(third.is_valid(), "publication exhaustion preserves sampler identity");
-    assert(gpu::publish_sampler(&device, first)!! == first_index,
-        "an existing publication succeeds after heap exhaustion");
-    gpu::Sampler forged = first;
-    forged.generation++;
-    fault forged_fault = @catch(gpu::publish_sampler(&device, forged));
-    assert(forged_fault == gpu::INVALID_HANDLE,
-        "a manufactured sampler generation is rejected");
+        "interning past sampler capacity faults DESCRIPTOR_HEAP_FULL");
+    assert(gpu::intern_sampler(&device, &desc)!! == first_index,
+        "an existing sampler succeeds after heap exhaustion");
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
-    assert(state.samplers.count == 3
+    assert(state.samplers.count == 2
             && state.strict_heap.descriptors.sampler_next_new == 2,
-        "failed publication preserves identity and heap state");
+        "failed interning preserves table and heap state");
+}
+
+fn void sampler_native_create_failure_is_transactional() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    uint table_count = state.samplers.count;
+    uint heap_count = state.strict_heap.descriptors.sampler_next_new;
+    gpu::SamplerDesc desc = { .mag_filter = gpu::Filter.LINEAR };
+
+    vk::set_sampler_create_result(
+        &device,
+        vk::Result.ERROR_OUT_OF_HOST_MEMORY,
+    );
+    assert(@catch(gpu::intern_sampler(&device, &desc))
+        == gpu::OUT_OF_HOST_MEMORY,
+        "native sampler creation faults without publication");
+    assert(state.samplers.count == table_count
+            && state.strict_heap.descriptors.sampler_next_new == heap_count,
+        "native sampler creation failure preserves both counts");
+
+    gpu::SamplerIndex index = gpu::intern_sampler(&device, &desc)!!;
+    assert(index.value == heap_count + 1,
+        "a retry uses the unchanged next sampler index");
 }
 
 fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
@@ -1004,8 +1053,7 @@ fn void live_descriptors_block_device_destruction() @test {
     gpu::TextureView descriptor = gpu::create_texture_view(&device, texture, null)!!;
 
     gpu::SamplerDesc desc = {};
-    gpu::Sampler sampler = gpu::intern_sampler(&device, &desc)!!;
-    gpu::SamplerIndex sampler_index = gpu::publish_sampler(&device, sampler)!!;
+    gpu::SamplerIndex sampler_index = gpu::intern_sampler(&device, &desc)!!;
 
     assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
         "live descriptors block device destruction");
@@ -1353,7 +1401,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         && stale_outputs[0].generation == 7,
         "batch stale texture rejection preserves outputs");
 
-    gpu::TextureViewDesc bad_view = { .format = gpu::Format.R32_UINT };
+    gpu::TextureViewDesc bad_view = { .base_mip = uint::max };
     gpu::TextureViewCreateDesc[1] bad_view_descs = { { .texture = texture, .view = bad_view } };
     gpu::TextureView[1] bad_view_outputs = { { .owner = 29, .index.value = 23, .generation = 9 } };
     expect_descriptor_diagnostic(
@@ -1365,7 +1413,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_generation: texture.generation,
         expected_operation:  "create_texture_views",
         expected_field:      "descs[].view",
-        expected_invariant:  "view must select a valid texture subresource range and format",
+        expected_invariant:  "view must select a valid texture subresource range",
     );
     fault view = @catch(gpu::create_texture_views(&device, bad_view_descs[..], bad_view_outputs[..]));
     assert(view == gpu::INVALID_ARGUMENT && capture.calls == 3 && capture.matched,

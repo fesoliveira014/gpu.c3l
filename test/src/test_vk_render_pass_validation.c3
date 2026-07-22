@@ -9,7 +9,6 @@ fn gpu::TextureHandle make_render_validation_target(
     gpu::Format format,
 ) {
     gpu::TextureDesc desc = {
-        .dimension = gpu::TextureDimension.TEX_2D,
         .access    = { .graphics },
         .width     = VAL_RT,
         .height    = VAL_RT,
@@ -39,7 +38,6 @@ fn vk::AttachmentViewSlot* render_validation_view_slot(
 
 fn void texture_create_info_uses_requested_sample_count() @test {
     gpu::TextureDesc desc = {
-        .dimension    = gpu::TextureDimension.TEX_2D,
         .access       = { .graphics },
         .width        = 16,
         .height       = 16,

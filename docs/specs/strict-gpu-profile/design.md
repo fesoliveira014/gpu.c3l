@@ -289,9 +289,13 @@ A texture-view allocation returns:
 
 Destroying the ownership token immediately releases the index for reuse. No live recording command list, executable command token, or incomplete submission may reference it. Shader indices contain no generation bits, so stale shader data is a caller lifetime violation.
 
-`Sampler` is an immutable device-local value returned by interning a semantic sampler description. Identical descriptions return the same value. Native sampler objects live until device destruction, and compatibility descriptor writes accept this value even on a compatibility-only device.
-
-Strict sampler-heap publication is separate from sampler identity. On a device with the strict capability, publishing a sampler returns a stable fixed-width `SamplerIndex` or a heap-capacity fault. The index and its heap entry live until device destruction. Compatibility-only devices create no strict sampler heap and cannot publish or query a `SamplerIndex`.
+On a device with the strict capability, `intern_sampler` validates and interns a
+semantic sampler description directly into the sampler heap. Identical semantic
+descriptions return the same stable fixed-width `SamplerIndex`; debug names do
+not participate in identity. The index, heap entry, and native sampler live
+until device destruction. Compatibility-only devices create no strict sampler
+heap and reject interning before backend mutation. There is no separate public
+sampler identity or publication step.
 
 ## Shader code and pipeline creation
 
@@ -392,7 +396,11 @@ Resize, dormant surfaces, out-of-date swapchains, surface loss, and device loss 
 
 There is no public pipeline-layout object unless an independent semantic need is demonstrated.
 
-Descriptor kinds use GPU-shaped terms for spans, sampled textures, storage textures, and samplers. Batched writes accept shared `GpuSpan`, texture-view, and `Sampler` values.
+Descriptor kinds use GPU-shaped terms for spans, sampled textures, storage
+textures, and samplers. Batched writes accept shared `GpuSpan` and texture-view
+values. The compatibility sampler-write value requires a separate design before
+that extension is implemented; the current public surface exposes no standalone
+sampler identity.
 
 Transient arenas reset only after the caller-provided completion point is complete. Persistent arenas support individual set release. Native pool allocation, fragmentation, and rollover remain private.
 
@@ -514,7 +522,7 @@ Regenerated tasks retain completed stabilization work as a concise historical re
 
 - Handle packing, generation, cross-device rejection, closing-state transitions, active-operation pinning, and concurrent registry tests.
 - Device-request composition and transactional failure tests.
-- Allocation-range, mapped-memory visibility, placed and dedicated texture, immediate-release, queue-access, descriptor-arena, sampler-interning, strict sampler publication, and shader-hash tests.
+- Allocation-range, mapped-memory visibility, placed and dedicated texture, immediate-release, queue-access, descriptor-arena, sampler interning transactionality and exhaustion, and shader-hash tests.
 - Completion-point packing, monotonicity, poll/wait, cross-queue, stale, and failed-submit tests.
 - Command and submission state-machine tests.
 - Strict/compat nominal type compile-fail fixtures in both directions.

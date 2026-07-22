@@ -48,6 +48,16 @@ struct CommandRecordingStats {
     ulong recording_allocations;
 }
 
+struct RootPushObservation @if(env::TESTING) {
+    gpu::GpuAddress compute;
+    gpu::GpuAddress vertex;
+    gpu::GpuAddress fragment;
+}
+
+Atomic{ulong} last_compute_root @if(env::TESTING);
+Atomic{ulong} last_vertex_root @if(env::TESTING);
+Atomic{ulong} last_fragment_root @if(env::TESTING);
+
 struct RetiredCommandBuffer {
     vk::CommandPool             pool;
     vk::CommandBuffer           buffer;
@@ -118,6 +128,20 @@ fn RecordingContextState*? RecordingContextTable.get(
         return gpu::INVALID_HANDLE~;
     }
     return &cell.value;
+}
+
+fn void reset_root_push_observation() @if(env::TESTING) {
+    last_compute_root.store(0, AtomicOrdering.RELAXED);
+    last_vertex_root.store(0, AtomicOrdering.RELAXED);
+    last_fragment_root.store(0, AtomicOrdering.RELAXED);
+}
+
+fn RootPushObservation root_push_observation() @if(env::TESTING) {
+    return {
+        .compute = (gpu::GpuAddress)last_compute_root.load(AtomicOrdering.RELAXED),
+        .vertex = (gpu::GpuAddress)last_vertex_root.load(AtomicOrdering.RELAXED),
+        .fragment = (gpu::GpuAddress)last_fragment_root.load(AtomicOrdering.RELAXED),
+    };
 }
 
 fn void note_recording_host_allocation(VkDeviceState* state) {
@@ -1351,28 +1375,6 @@ fn BoundPipeline*? active_bound_pipeline(
     return pipeline;
 }
 
-fn void? validate_root_address(
-    VkDeviceState* state,
-    gpu::GpuAddress root,
-    ZString operation,
-    ZString rejected_field,
-) @private {
-    if (root != (gpu::GpuAddress)0) return;
-    return report_contract_failure(
-        state:               state,
-        operation:           operation,
-        public_fault:        gpu::INVALID_ARGUMENT,
-        resource_kind:       gpu::DebugResourceKind.NONE,
-        has_public_identity: false,
-        index:               0,
-        generation:          0,
-        debug_name:          null,
-        rejected_field:      rejected_field,
-        invariant:           "root GPU address must be nonzero",
-        backend_text:        null,
-    )~;
-}
-
 fn void? validate_pipeline_render_compatibility(
     BoundPipeline* pipeline,
     RenderCompatibility* render,
@@ -1495,6 +1497,9 @@ fn void push_compute_root(
     gpu::GpuAddress root,
 ) @private {
     gpu::RootPush push = { .root_gpu = root };
+    $if env::TESTING:
+        last_compute_root.store((ulong)push.root_gpu, AtomicOrdering.RELAXED);
+    $endif
     vk::cmd_push_constants(
         command_buffer: record.command_buffer,
         layout:         pipeline.layout,
@@ -1519,12 +1524,6 @@ fn void? vk_cmd_dispatch(
         record:        record,
         expected_kind: PipelineKind.COMPUTE,
         operation:     "cmd_dispatch",
-    )!;
-    validate_root_address(
-        state:          state,
-        root:           root,
-        operation:      "cmd_dispatch",
-        rejected_field: "root",
     )!;
     if (catch limit_fault = gpu::validate_dispatch_groups(groups, state.caps.max_compute_work_group_count)) {
         return report_contract_failure(
@@ -1564,12 +1563,6 @@ fn void? vk_cmd_dispatch_indirect(
         record:        record,
         expected_kind: PipelineKind.COMPUTE,
         operation:     "cmd_dispatch_indirect",
-    )!;
-    validate_root_address(
-        state:          state,
-        root:           root,
-        operation:      "cmd_dispatch_indirect",
-        rejected_field: "root",
     )!;
     uint reference_checkpoint = record.reference_count;
     defer catch rollback_command_references(state, record, reference_checkpoint);

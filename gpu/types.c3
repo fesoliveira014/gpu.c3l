@@ -63,14 +63,6 @@ struct TextureView {
 }
 $assert TextureView::size <= ulong::size * 2;
 
-<* Immutable device-interned sampler identity. *>
-struct Sampler {
-    ulong owner;
-    uint  index;
-    uint  generation;
-}
-$assert Sampler::size <= ulong::size * 2;
-
 struct PipelineHandle {
     ulong owner;
     uint  index;
@@ -97,7 +89,6 @@ const GpuAllocation        GPU_ALLOCATION_INVALID         = {};
 const TextureHandle        TEXTURE_HANDLE_INVALID         = {};
 const AttachmentViewHandle ATTACHMENT_VIEW_HANDLE_INVALID = {};
 const TextureView          TEXTURE_VIEW_INVALID           = {};
-const Sampler              SAMPLER_INVALID                = {};
 const PipelineHandle       PIPELINE_HANDLE_INVALID        = {};
 const SwapchainHandle      SWAPCHAIN_HANDLE_INVALID       = {};
 const CommandListHandle    COMMAND_LIST_HANDLE_INVALID    = {};
@@ -130,12 +121,6 @@ fn bool TextureView.is_valid(self) {
     return self.owner != 0 && self.index.is_valid() && self.generation != 0;
 }
 fn bool TextureView.equals(self, TextureView other) @operator(==) {
-    return self.owner == other.owner
-        && self.index == other.index
-        && self.generation == other.generation;
-}
-fn bool Sampler.is_valid(self) => self.owner != 0 && self.generation != 0;
-fn bool Sampler.equals(self, Sampler other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
