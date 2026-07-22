@@ -137,11 +137,7 @@ fn AcquiredImage? acquire_next_image(
 ) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    return operation.vtable.acquire_next_image(
-        device,
-        swapchain,
-        timeout_ns,
-    );
+    return operation.vtable.acquire_next_image(device, swapchain, timeout_ns);
 }
 
 <* Present and consume an acquired image after its readiness-consuming submit.
