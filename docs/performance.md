@@ -34,7 +34,7 @@ The suite covers:
 |---|---|
 | `allocation_bench` | Explicit `CPU_WRITE` allocation and free |
 | `command_record_bench` | Barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording |
-| `lifecycle_bench` | Submission, completed-point polling, and immediate texture destruction |
+| `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup, and cached batches |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
 | `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers |
@@ -57,6 +57,12 @@ fields in immutable pipeline keys. It walks the reachable Vulkan recording
 graph and rejects host allocation, native command-buffer allocation/free,
 image-view creation, and VMA allocation outside named cold seams. Its mutation
 tests run without a Vulkan ICD.
+
+The lifecycle benchmark first establishes full retirement for each measured
+point, then resets completion-work counters before 100,000 repeated polls. The
+measured interval requires zero native counter queries and zero retirement-lock
+acquisitions; these counters are compiled only for tests and this benchmark
+target.
 
 Release runs use deliberately broad order-of-magnitude thresholds:
 
@@ -126,7 +132,7 @@ The table reports the median of the three target medians and their full range.
 Every run reported:
 
 ```text
-invariants: point_allocations=0 destruction_waits=0 deferred_releases=0
+invariants: point_allocations=0 destruction_waits=0 deferred_releases=0 cached_poll_queries=0 retirement_locks=0
 ```
 
 Generated-dispatch timing is reported only for runs using an explicit

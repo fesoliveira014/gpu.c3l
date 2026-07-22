@@ -14,9 +14,17 @@ alias QueueSubmit2Fn @private = fn vk::Result (
     vk::SubmitInfo2*,
     vk::Fence,
 );
+alias SubmissionCheckpointHook @if(env::TESTING) = fn void (
+    void*, SubmissionCheckpoint, gpu::CompletionPoint
+);
 
 const uint MAX_QUEUE_FAMILIES = gpu::MAX_SELECTED_QUEUE_IDENTITIES + 4;
 const uint MAX_SELECTED_QUEUE_INDICES = 3;
+
+enum SubmissionCheckpoint : uint {
+    NATIVE_ACCEPTED,
+    BATCHES_PUBLISHED,
+}
 
 struct QueueFamilies {
     gpu::QueueRoles selected;
@@ -69,6 +77,15 @@ struct SubmitStats {
     ulong completion_wait_calls;
 }
 
+struct CompletionWorkCounters @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS)) {
+    ulong native_counter_queries;
+    ulong native_wait_calls;
+    ulong retirement_passes;
+    ulong retirement_lock_acquisitions;
+    ulong cached_poll_hits;
+    ulong cached_wait_hits;
+}
+
 struct QueueCompletionState {
     vk::Queue       queue;
     vk::Semaphore   timeline;
@@ -77,8 +94,8 @@ struct QueueCompletionState {
     QueueFamilyFlags queue_flags;
     ulong           native_id;
     ulong           next_sequence;
-    ulong           observed_completed_sequence;
     Atomic{ulong}   published_sequence;
+    Atomic{ulong}   retired_sequence;
     bool            bound;
 }
 
@@ -1635,6 +1652,8 @@ fn void? create_queue_completions(
     );
     foreach (&completion : state.queue_completions) {
         completion.submit_mutex.init()!;
+        completion.published_sequence.store(0, AtomicOrdering.RELAXED);
+        completion.retired_sequence.store(0, AtomicOrdering.RELAXED);
     }
 
     bind_queue_completion_role(
@@ -1685,6 +1704,8 @@ fn void? create_queue_completions(
 fn void destroy_queue_completions(VkDeviceState* state) @private {
     if (state == null || state.queue_completions.ptr == null) return;
     foreach (&completion : state.queue_completions) {
+        completion.published_sequence.store(0, AtomicOrdering.RELAXED);
+        completion.retired_sequence.store(0, AtomicOrdering.RELAXED);
         if (completion.timeline != null && state.device != null) {
             vk::destroy_semaphore(state.device, completion.timeline, null);
             completion.timeline = (vk::Semaphore)null;
@@ -1757,6 +1778,7 @@ fn gpu::Queue? queue_token_for_kind(
 fn void? require_queue_completion_headroom_with_query(
     VkDeviceState* state,
     QueueCompletionState* completion,
+    uint queue_id,
     SemaphoreCounterQueryFn query_fn,
 ) @private {
     if (completion.next_sequence == gpu::MAX_COMPLETION_SEQUENCE) {
@@ -1764,10 +1786,13 @@ fn void? require_queue_completion_headroom_with_query(
     }
 
     ulong prospective = completion.next_sequence + 1;
-    ulong completed = completion.observed_completed_sequence;
+    ulong completed = completion.retired_sequence.load(
+        AtomicOrdering.ACQUIRE,
+    );
     ulong limit = state.max_timeline_semaphore_value_difference;
     if (prospective <= completed || prospective - completed <= limit) return;
 
+    note_completion_counter_query(state);
     vk::Result result = query_fn(
         state.device,
         completion.timeline,
@@ -1778,12 +1803,39 @@ fn void? require_queue_completion_headroom_with_query(
         operation: "submit",
         result:    result,
     )!;
-    if (completed > completion.observed_completed_sequence) {
-        completion.observed_completed_sequence = completed;
-    }
+    retire_queue_through(
+        state:            state,
+        completion:       completion,
+        queue_id:         queue_id,
+        native_completed: completed,
+    );
+    completed = completion.retired_sequence.load(AtomicOrdering.ACQUIRE);
     if (prospective > completed && prospective - completed > limit) {
         return gpu::DEVICE_BUSY~;
     }
+}
+
+fn void reach_submission_checkpoint(
+    VkDeviceState* state,
+    SubmissionCheckpoint checkpoint,
+    gpu::CompletionPoint point,
+) @if(env::TESTING) {
+    if (state.submission_checkpoint_hook != null) {
+        state.submission_checkpoint_hook(
+            state.submission_checkpoint_user_data,
+            checkpoint,
+            point,
+        );
+    }
+}
+
+fn void set_submission_checkpoint_hook(
+    VkDeviceState* state,
+    SubmissionCheckpointHook hook,
+    void* user_data,
+) @if(env::TESTING) {
+    state.submission_checkpoint_hook = hook;
+    state.submission_checkpoint_user_data = user_data;
 }
 
 <* Reserve the next point while holding the queue's submission lock. *>
@@ -1925,18 +1977,6 @@ fn Mutex* native_queue_mutex_for(VkDeviceState* state, vk::Queue queue) @private
 
 fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
     return native_queue_mutex_for(state, state.presentation.queue);
-}
-
-fn void observe_queue_completion(
-    QueueCompletionState* completion,
-    ulong completed_sequence,
-) @private {
-    completion.submit_mutex.lock()!!;
-    defer completion.submit_mutex.unlock();
-
-    if (completed_sequence > completion.observed_completed_sequence) {
-        completion.observed_completed_sequence = completed_sequence;
-    }
 }
 
 fn SubmitInputs? resolve_and_claim_submit_inputs(
@@ -2166,9 +2206,10 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         {
             defer completion.submit_mutex.unlock();
             require_queue_completion_headroom_with_query(
-                state,
-                completion,
-                counter_query_fn,
+                state:      state,
+                completion: completion,
+                queue_id:   queue.id,
+                query_fn:   counter_query_fn,
             )!;
             gpu::CompletionPoint point = reserve_queue_completion_locked(
                 state,
@@ -2191,6 +2232,14 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 )!;
             }
 
+            $if env::TESTING:
+                reach_submission_checkpoint(
+                    state,
+                    SubmissionCheckpoint.NATIVE_ACCEPTED,
+                    point,
+                );
+            $endif
+
             publish_submitted_commands(
                 state,
                 records,
@@ -2198,6 +2247,13 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 command_reservation,
             );
             command_reservation = 0;
+            $if env::TESTING:
+                reach_submission_checkpoint(
+                    state,
+                    SubmissionCheckpoint.BATCHES_PUBLISHED,
+                    point,
+                );
+            $endif
             state.submit_stats.queue_submits++;
             state.submit_stats.completion_point_publications++;
             if (swapchain != null) {

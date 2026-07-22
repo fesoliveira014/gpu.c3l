@@ -3,10 +3,13 @@ module gpu_test;
 import gpu @public;
 import gpu::vk @public;
 import vk;
+import std::core::mem::alloc;
 import std::core::mem::allocators;
+import std::atomic::types;
 
 const char[*] LIFETIME_COMP_SPIRV = $embed("shaders/root_pointer.comp.spv");
 ulong lifetime_counter_value;
+uint lifetime_counter_query_calls;
 
 fn vk::Result lifetime_counter_query(
     vk::Device device,
@@ -15,6 +18,7 @@ fn vk::Result lifetime_counter_query(
 ) {
     (void)device;
     (void)semaphore;
+    lifetime_counter_query_calls++;
     *value = lifetime_counter_value;
     return vk::Result.SUCCESS;
 }
@@ -210,6 +214,22 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 0
         && state.submitted_command_count == 0,
         "drain releases the completed borrowed-view reference");
+    vk::QueueCompletionState* completion_state =
+        vk::queue_completion_state(
+            state,
+            gpu::completion_point_queue_id(completion),
+        )!!;
+    assert(completion_state.retired_sequence.load(AtomicOrdering.ACQUIRE)
+        == gpu::completion_point_sequence(completion),
+        "the explicit drain publishes the strong retired prefix");
+    vk::reset_completion_work_counters(state);
+    assert(gpu::poll_completion(completion)!!,
+        "the drained point uses the cached poll path");
+    vk::CompletionWorkCounters work = vk::completion_work_counters(state);
+    assert(work.native_counter_queries == 0
+        && work.retirement_lock_acquisitions == 0
+        && work.cached_poll_hits == 1,
+        "post-drain polling performs no native or retirement-lock work");
     vk::drain_completed_submitted_commands(state)!!;
     assert(slot.validation_references.load(AtomicOrdering.RELAXED) == 0
         && state.submitted_command_count == 0,
@@ -348,6 +368,7 @@ fn void incomplete_reference_drain_is_deterministic() @test {
         .timeline = (vk::Semaphore)(uptr)1,
         .bound    = true,
     }};
+    completions[0].published_sequence.store(7, AtomicOrdering.RELEASE);
     state.queue_completions = completions[..];
     vk::ensure_submitted_command_capacity(&state, 1);
     gpu::Queue queue = {
@@ -386,34 +407,203 @@ fn void completed_submission_release_boundary_is_exact() @test {
     defer (void)state.resource_mutex.destroy();
     state.command_mutex.init()!!;
     defer (void)state.command_mutex.destroy();
-    vk::ensure_submitted_command_capacity(&state, 1);
+    vk::RecordingContextCell[1] context_cells;
+    state.recording_contexts.slots = context_cells[..];
+    vk::RecordingContextHandle context = state.recording_contexts.alloc({})!!;
+    vk::RecordingContextState* context_state =
+        state.recording_contexts.get(context)!!;
+    vk::GeneratedPreprocessBuffer[3] reserved_preprocess = {{
+        .reservation_in_use = true,
+    }, {
+        .reservation_in_use = true,
+    }, {
+        .reservation_in_use = true,
+    }};
+    context_state.reserved_preprocess = reserved_preprocess[..];
+    defer {
+        if (context_state.retired_commands.ptr != null) {
+            alloc::free(
+                state.host_allocator,
+                context_state.retired_commands.ptr,
+            );
+        }
+    }
+    vk::QueueCompletionState[1] completions = {{ .bound = true }};
+    state.queue_completions = completions[..];
+    completions[0].published_sequence.store(9, AtomicOrdering.RELEASE);
+    vk::ensure_submitted_command_capacity(&state, 3);
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,
         .roles  = { .graphics },
     };
+    Atomic{uint} first_validation_reference;
+    Atomic{uint} second_validation_reference;
+    Atomic{uint} third_validation_reference;
+    first_validation_reference.store(1, AtomicOrdering.RELAXED);
+    second_validation_reference.store(1, AtomicOrdering.RELAXED);
+    third_validation_reference.store(1, AtomicOrdering.RELAXED);
+    vk::CommandResourceReference[1] first_references = {{
+        .validation_references = &first_validation_reference,
+    }};
+    vk::CommandResourceReference[1] second_references = {{
+        .validation_references = &second_validation_reference,
+    }};
+    vk::CommandResourceReference[1] third_references = {{
+        .validation_references = &third_validation_reference,
+    }};
+    vk::GeneratedPreprocessBuffer[1] first_preprocess = {{
+        .reservation_context = context,
+        .reservation_index   = 0,
+        .reservation_owned   = true,
+    }};
+    vk::GeneratedPreprocessBuffer[1] second_preprocess = {{
+        .reservation_context = context,
+        .reservation_index   = 1,
+        .reservation_owned   = true,
+    }};
+    vk::GeneratedPreprocessBuffer[1] third_preprocess = {{
+        .reservation_context = context,
+        .reservation_index   = 2,
+        .reservation_owned   = true,
+    }};
     state.submitted_commands[0] = {
-        .completion = gpu::make_completion_point(queue, 7)!!,
+        .completion                 = gpu::make_completion_point(queue, 7)!!,
+        .context                    = context,
+        .command_buffer             = (vk::CommandBuffer)(uptr)1,
+        .references                 = first_references[..],
+        .reference_count            = 1,
+        .generated_preprocess       = first_preprocess[..],
+        .generated_preprocess_count = 1,
     };
-    state.submitted_command_count = 1;
+    state.submitted_commands[1] = {
+        .completion                 = gpu::make_completion_point(queue, 8)!!,
+        .context                    = context,
+        .command_buffer             = (vk::CommandBuffer)(uptr)2,
+        .references                 = second_references[..],
+        .reference_count            = 1,
+        .generated_preprocess       = second_preprocess[..],
+        .generated_preprocess_count = 1,
+    };
+    state.submitted_commands[2] = {
+        .completion                 = gpu::make_completion_point(queue, 8)!!,
+        .context                    = context,
+        .command_buffer             = (vk::CommandBuffer)(uptr)3,
+        .references                 = third_references[..],
+        .reference_count            = 1,
+        .generated_preprocess       = third_preprocess[..],
+        .generated_preprocess_count = 1,
+    };
+    state.submitted_command_count = 3;
 
     vk::CommandBufferStats before = vk::command_buffer_stats(&state);
     state.resource_mutex.lock()!!;
-    vk::release_completed_submitted_commands_locked(&state, 0, 6);
+    vk::retire_queue_through_locked(
+        state:            &state,
+        completion:       &completions[0],
+        queue_id:         0,
+        native_completed: 7,
+    );
     state.resource_mutex.unlock();
     vk::CommandBufferStats incomplete = vk::command_buffer_stats(&state);
-    assert(incomplete.pending == before.pending,
-        "sequence N - 1 preserves the submitted command buffer");
+    assert(incomplete.pending == before.pending - 1,
+        "sequence N - 1 retires only its covered batch");
     assert(incomplete.freed == before.freed,
         "sequence N - 1 cannot free the submitted command buffer");
+    assert(first_validation_reference.load(AtomicOrdering.RELAXED) == 0
+        && second_validation_reference.load(AtomicOrdering.RELAXED) == 1
+        && third_validation_reference.load(AtomicOrdering.RELAXED) == 1,
+        "sequence N - 1 releases only its stable retained counter pointer");
+    assert(!reserved_preprocess[0].reservation_in_use
+        && reserved_preprocess[1].reservation_in_use
+        && reserved_preprocess[2].reservation_in_use,
+        "sequence N - 1 recycles only its covered preprocess reservation");
+    assert(context_state.retired_command_count == 1
+        && context_state.retired_commands[0].buffer
+            == (vk::CommandBuffer)(uptr)1,
+        "sequence N - 1 retires only its covered command buffer");
+    assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 7,
+        "sequence N - 1 publishes only the exact retired prefix");
 
     state.resource_mutex.lock()!!;
-    vk::release_completed_submitted_commands_locked(&state, 0, 7);
+    vk::retire_queue_through_locked(
+        state:            &state,
+        completion:       &completions[0],
+        queue_id:         0,
+        native_completed: 8,
+    );
     state.resource_mutex.unlock();
     vk::CommandBufferStats completed = vk::command_buffer_stats(&state);
-    assert(completed.pending == before.pending - 1,
-        "sequence N retires the submitted command buffer");
+    assert(completed.pending == 0,
+        "sequence N retires every batch covered by that sequence");
     assert(completed.freed == before.freed,
         "a null native buffer performs no backend free");
+    assert(second_validation_reference.load(AtomicOrdering.RELAXED) == 0
+        && third_validation_reference.load(AtomicOrdering.RELAXED) == 0,
+        "sequence N releases every stable retained counter pointer");
+    assert(!reserved_preprocess[1].reservation_in_use
+        && !reserved_preprocess[2].reservation_in_use,
+        "sequence N recycles every covered preprocess reservation");
+    assert(context_state.retired_command_count == 3,
+        "sequence N retires every covered command buffer");
+    assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 8,
+        "sequence N publishes only after all covered batches retire");
+    state.resource_mutex.lock()!!;
+    vk::retire_queue_through_locked(
+        state:            &state,
+        completion:       &completions[0],
+        queue_id:         0,
+        native_completed: 9,
+    );
+    state.resource_mutex.unlock();
+    assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 9,
+        "an empty submission advances the retired prefix without a synthetic batch");
+    vk::destroy_submitted_commands(&state);
+}
+
+fn void threshold_drain_queries_once_and_publishes_retirement() @test {
+    vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
+    };
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
+    vk::QueueCompletionState[1] completions = {{
+        .timeline = (vk::Semaphore)(uptr)1,
+        .bound    = true,
+    }};
+    state.queue_completions = completions[..];
+    completions[0].published_sequence.store(
+        vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
+        AtomicOrdering.RELEASE,
+    );
+    vk::ensure_submitted_command_capacity(
+        &state,
+        vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
+    );
+    gpu::Queue queue = {
+        .device = { .generation = 1 },
+        .id     = 0,
+        .roles  = { .graphics },
+    };
+    for (uint i = 0; i < vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD; i++) {
+        state.submitted_commands[i] = {
+            .completion = gpu::make_completion_point(queue, (ulong)i + 1)!!,
+        };
+    }
+    state.submitted_command_count = vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD;
+    lifetime_counter_value = vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD;
+    lifetime_counter_query_calls = 0;
+
+    vk::drain_submitted_commands_if_needed_with_query(
+        &state,
+        &lifetime_counter_query,
+    )!!;
+    assert(lifetime_counter_query_calls == 1,
+        "the threshold drain queries one represented queue once");
+    assert(state.submitted_command_count == 0,
+        "the threshold drain releases every covered batch");
+    assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE)
+        == vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
+        "the threshold drain publishes the strong retired prefix");
     vk::destroy_submitted_commands(&state);
 }

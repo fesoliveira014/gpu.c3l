@@ -86,8 +86,9 @@ POINT_ALLOCATION_FORBIDDEN = (
 OWNERSHIP_TRANSFER_CALLEES = (
     "release_submitted_command_batch",
     "release_completed_submitted_commands_locked",
+    "retire_queue_through_locked",
+    "retire_queue_through",
     "drain_completed_submitted_commands_with_query",
-    "release_completed_submitted_commands",
     "publish_submitted_commands",
     "release_command",
     "vk_submit_with_queries",
@@ -118,22 +119,25 @@ LIFETIME_OWNERSHIP_DIGESTS = {
     "publish_submitted_commands": "cdbc47b4f1b25be4fc79e04f6ae8ff410b219ab6854924df0edabd389376f066",
     "release_submitted_command_batch": "62e62aa38aadd18bf69a42b62d3851be0ce30b9007e948f9123261bcf091656e",
     "release_completed_submitted_commands_locked": "bd81cb2ab4514a5428d70fa75883594913b7e77d0c15f123593b008f7e0e50d4",
+    "retire_queue_through_locked": "20a6ac45e04f5ef6af39283a325adbda8ede10c48439b4189b49db726afd03da",
+    "retire_queue_through": "6e8d7b88fc8128a07403ae71795b905927471bc3ab831da73b489ee2540df9ff",
     "destroy_submitted_commands": "1858d0b6e5a0d7659b1ed6ca6a08abf7e13f5577cdcea9cdc48dfdcde0d95d60",
-    "release_completed_submitted_commands": "55704517d5dbeb414da3f31d973f083bcd7f0cf6203d058bd70f84b466fa19bd",
-    "drain_completed_submitted_commands_with_query": "1dbd22577aa1f69899421ecfd011a78cd5c0db7b8bf61e20f57dc9a35a38aec9",
+    "drain_completed_submitted_commands_with_query": "72af65609acdec98806062f89af9b3381a402d28d29729fe8a8829699a88db19",
     "drain_completed_submitted_commands": "182036fc91b30152a2f76fd8a300f6b25efc1ff4d2260c4eafaa60fc00ba4314",
-    "drain_submitted_commands_if_needed": "98335236132105a4225003e82c431d6c0bfe68d998260320edce4d00302e5ff8",
+    "drain_submitted_commands_if_needed_with_query": "4bfb18e43bb0a25f357179f3e0d84bb1baed481b10fb5738e30ffd98e4d7ed10",
+    "drain_submitted_commands_if_needed": "c97ab94eaa1307124bce6b53002c80b262624054629ad715c900ab1f53e73930",
 }
 DEVICE_OWNERSHIP_DIGESTS = {
     "destroy_state": "b3fbea364f5723c79a3804460bedd5a96eae9fe636d44e78677b6d9fddea0a19",
 }
 
 SYNC_OWNERSHIP_DIGESTS = {
-    "vk_poll_completion": "2514773c830d417af21f1c9a87a917a83b4630fbfc87bfbeb80d058b290208b8",
-    "vk_wait_completion": "1152d19168b8fbf057ecea0b8cfc540adb169c1b7e3239aa56f8d95141ab0543",
+    "vk_poll_completion_with_query": "412d2e08adca4b1ba1d490369eea100e679c0f166bfe3fbda72a43714d0a9ce4",
+    "vk_wait_completion_with_wait": "c17f34789d064ff3b7329ab38659e11de15608a98116912fbd2752cd7c352b54",
 }
 QUEUE_OWNERSHIP_DIGESTS = {
-    "vk_submit_with_queries": "1381785a9d38240b65bffd1c569ee8932f80514ba09c340d55b2ffbc6e2a182a",
+    "require_queue_completion_headroom_with_query": "c3f89d8dc421137f79ce5954587dd384cfe88059eda20e30216f7099cbaaaa07",
+    "vk_submit_with_queries": "c78440eaacec31ec5a8e6648404bda079b58ca9ee47ed93828eac74007204329",
     "vk_submit_with": "773cfe5518f228b74c72265329eeb46a1db722334cabe1f57b0f0f4a5e3dc9e1",
     "vk_submit": "383f58739300051514fa01012860a73d7b96601c6d8040ffcbf1f864d111196a",
 }
@@ -276,6 +280,25 @@ def reject_tokens(
             errors.append(f"{relative}:{name} contains forbidden {token}")
 
 
+def require_token_order(
+    errors: list[str],
+    relative: str,
+    name: str,
+    body: str,
+    tokens: tuple[str, ...],
+) -> None:
+    position = -1
+    for token in tokens:
+        next_position = body.find(token, position + 1)
+        if next_position < 0:
+            errors.append(f"{relative}:{name} is missing ordered token {token}")
+            return
+        if next_position <= position:
+            errors.append(f"{relative}:{name} has invalid completion ordering")
+            return
+        position = next_position
+
+
 def check(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     public_source = read(root, "gpu/command.c3")
@@ -293,6 +316,77 @@ def check(root: Path = ROOT) -> list[str]:
     lifetime_source = read(root, "gpu/vk/lifetime.c3")
     command_bench = read(root, "test/src/command_record_bench.c3")
     lifecycle_bench = read(root, "test/src/lifecycle_bench.c3")
+
+    poll_completion = function_body(sync_source, "vk_poll_completion_with_query")
+    require_token_order(
+        errors,
+        "gpu/vk/sync.c3",
+        "vk_poll_completion_with_query",
+        poll_completion,
+        (
+            "retired_sequence.load(AtomicOrdering.ACQUIRE)",
+            "note_completion_counter_query(state);",
+            "query_fn(",
+            "retire_queue_through(",
+        ),
+    )
+    wait_completion = function_body(sync_source, "vk_wait_completion_with_wait")
+    require_token_order(
+        errors,
+        "gpu/vk/sync.c3",
+        "vk_wait_completion_with_wait",
+        wait_completion,
+        (
+            "retired_sequence.load(AtomicOrdering.ACQUIRE)",
+            "vk::semaphore_wait_info()",
+            "note_completion_wait_call(state);",
+            "wait_fn(",
+            "retire_queue_through(",
+        ),
+    )
+    retire_locked = function_body(lifetime_source, "retire_queue_through_locked")
+    require_token_order(
+        errors,
+        "gpu/vk/lifetime.c3",
+        "retire_queue_through_locked",
+        retire_locked,
+        (
+            "published_sequence.load(",
+            "AtomicOrdering.ACQUIRE",
+            "retired_sequence.load(AtomicOrdering.RELAXED)",
+            "release_completed_submitted_commands_locked(",
+            "retired_sequence.store(target, AtomicOrdering.RELEASE)",
+        ),
+    )
+    retire_outer = function_body(lifetime_source, "retire_queue_through")
+    require_token_order(
+        errors,
+        "gpu/vk/lifetime.c3",
+        "retire_queue_through",
+        retire_outer,
+        (
+            "retired_sequence.load(AtomicOrdering.ACQUIRE)",
+            "state.resource_mutex.lock()",
+            "retire_queue_through_locked(",
+        ),
+    )
+    headroom = function_body(
+        queue_source,
+        "require_queue_completion_headroom_with_query",
+    )
+    require_token_order(
+        errors,
+        "gpu/vk/queue.c3",
+        "require_queue_completion_headroom_with_query",
+        headroom,
+        (
+            "retired_sequence.load(",
+            "AtomicOrdering.ACQUIRE",
+            "query_fn(",
+            "retire_queue_through(",
+            "retired_sequence.load(AtomicOrdering.ACQUIRE)",
+        ),
+    )
 
     masked_sync = mask_c3_comments(sync_source)
     for token in RETIRED_TEXTURE_BARRIER_PATHS:
@@ -762,7 +856,7 @@ def check(root: Path = ROOT) -> list[str]:
             lifecycle_bench,
             "test/src/lifecycle_bench.c3",
             "invariants: point_allocations=%d destruction_waits=%d "
-            "deferred_releases=%d",
+            "deferred_releases=%d cached_poll_queries=%d retirement_locks=%d",
         ),
         (
             lifecycle_bench,

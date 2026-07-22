@@ -53,6 +53,7 @@
     // timing; executable so it never gates CI. Needs an ICD.
     "lifecycle_bench": {
       "type": "executable",
+      "features": [ "COMPLETION_RETIREMENT_STATS" ],
       "sources": [ "src/lifecycle_bench.c3" ]
     },
     // Advisory resource and shader-code operation timing across worker counts 1/2/4;

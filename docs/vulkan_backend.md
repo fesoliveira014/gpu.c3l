@@ -766,10 +766,21 @@ CompletionWait
     StageMask before
 ```
 
-Host poll and wait reject unpublished sequences and query the owning timeline
-directly. Successful observation advances cached progress when it covers the
-latest published sequence. Device destruction performs the same non-blocking
-query and returns `DEVICE_BUSY` while work is incomplete.
+Host poll and wait reject unpublished sequences. Each selected queue owns an
+atomic retired prefix whose release-store follows validation-reference
+release, generated-preprocess recycling, and command-buffer retirement for all
+published submissions through that sequence. An acquire load satisfying the
+requested point is the complete fast path: no Vulkan call, submission mutex, or
+resource mutex.
+
+On a cache miss, poll queries the owning timeline once and caps native progress
+to the acquire-loaded contiguous published prefix before retiring metadata.
+This cap keeps a submission that is natively accepted but not yet publicly
+published invisible. Wait calls `vkWaitSemaphores` once and, on success,
+retires exactly the requested sequence; timeout advances nothing. Timeline
+headroom and submitted-command drains publish through the same retired prefix.
+Device-destruction counter queries remain non-retiring readiness checks because
+accepted teardown releases all remaining CPU metadata directly.
 
 ## 15. Render pass implementation
 

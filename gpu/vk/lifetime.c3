@@ -293,17 +293,99 @@ fn void release_completed_submitted_commands_locked(
     }
 }
 
-fn void release_completed_submitted_commands(
+fn void note_completion_counter_query(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+        (void)state.completion_native_counter_queries.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_completion_wait_call(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+        (void)state.completion_native_wait_calls.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_completion_retirement_pass(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+        (void)state.completion_retirement_passes.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_completion_retirement_lock_acquisition(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+        (void)state.completion_retirement_lock_acquisitions.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_completion_cached_poll_hit(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+        (void)state.completion_cached_poll_hits.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_completion_cached_wait_hit(VkDeviceState* state) {
+    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+        (void)state.completion_cached_wait_hits.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void retire_queue_through_locked(
     VkDeviceState* state,
+    QueueCompletionState* completion,
     uint queue_id,
-    ulong completed_sequence,
+    ulong native_completed,
 ) {
+    ulong published = completion.published_sequence.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    ulong target = native_completed < published
+        ? native_completed
+        : published;
+    ulong retired = completion.retired_sequence.load(AtomicOrdering.RELAXED);
+    if (target <= retired) return;
+
+    note_completion_retirement_pass(state);
+    release_completed_submitted_commands_locked(state, queue_id, target);
+    completion.retired_sequence.store(target, AtomicOrdering.RELEASE);
+}
+
+fn void retire_queue_through(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    uint queue_id,
+    ulong native_completed,
+) {
+    ulong retired = completion.retired_sequence.load(AtomicOrdering.ACQUIRE);
+    if (native_completed <= retired) return;
+
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    release_completed_submitted_commands_locked(
-        state,
-        queue_id,
-        completed_sequence,
+    retired = completion.retired_sequence.load(AtomicOrdering.RELAXED);
+    if (native_completed <= retired) return;
+    note_completion_retirement_lock_acquisition(state);
+    retire_queue_through_locked(
+        state:            state,
+        completion:       completion,
+        queue_id:         queue_id,
+        native_completed: native_completed,
     );
 }
 
@@ -313,12 +395,12 @@ fn void? drain_completed_submitted_commands_with_query(
 ) {
     bool[gpu::MAX_SELECTED_QUEUE_IDENTITIES] queried;
     ulong[gpu::MAX_SELECTED_QUEUE_IDENTITIES] completed;
-    uint i;
-    while (i < state.submitted_command_count) {
+    for (uint i = 0; i < state.submitted_command_count; i++) {
         SubmittedCommandBatch* batch = &state.submitted_commands[i];
         uint queue_id = gpu::completion_point_queue_id(batch.completion);
         QueueCompletionState* completion = queue_completion_state(state, queue_id)!;
         if (!queried[queue_id]) {
+            note_completion_counter_query(state);
             check_device_result(
                 state,
                 query_fn(
@@ -329,12 +411,21 @@ fn void? drain_completed_submitted_commands_with_query(
             )!;
             queried[queue_id] = true;
         }
-        if (completed[queue_id]
-            < gpu::completion_point_sequence(batch.completion)) {
-            i++;
-            continue;
-        }
-        release_submitted_command_batch(state, i);
+    }
+    for (uint queue_id = 0;
+        queue_id < gpu::MAX_SELECTED_QUEUE_IDENTITIES;
+        queue_id++) {
+        if (!queried[queue_id]) continue;
+        QueueCompletionState* completion = queue_completion_state(
+            state,
+            queue_id,
+        )!;
+        retire_queue_through_locked(
+            state:            state,
+            completion:       completion,
+            queue_id:         queue_id,
+            native_completed: completed[queue_id],
+        );
     }
 }
 
@@ -345,12 +436,62 @@ fn void? drain_completed_submitted_commands(VkDeviceState* state) {
     );
 }
 
-fn void? drain_submitted_commands_if_needed(VkDeviceState* state) {
+fn void? drain_submitted_commands_if_needed_with_query(
+    VkDeviceState* state,
+    SemaphoreCounterQueryFn query_fn,
+) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     if (state.submitted_command_count
         < SUBMITTED_COMMAND_DRAIN_THRESHOLD) return;
-    drain_completed_submitted_commands_with_query(state, &real_semaphore_counter_query)!;
+    drain_completed_submitted_commands_with_query(state, query_fn)!;
+}
+
+fn void? drain_submitted_commands_if_needed(VkDeviceState* state) {
+    return drain_submitted_commands_if_needed_with_query(
+        state,
+        &real_semaphore_counter_query,
+    );
+}
+
+fn CompletionWorkCounters completion_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS)) {
+    return {
+        .native_counter_queries = state.completion_native_counter_queries.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .native_wait_calls = state.completion_native_wait_calls.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .retirement_passes = state.completion_retirement_passes.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .retirement_lock_acquisitions =
+            state.completion_retirement_lock_acquisitions.load(
+                AtomicOrdering.RELAXED,
+            ),
+        .cached_poll_hits = state.completion_cached_poll_hits.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .cached_wait_hits = state.completion_cached_wait_hits.load(
+            AtomicOrdering.RELAXED,
+        ),
+    };
+}
+
+fn void reset_completion_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS)) {
+    state.completion_native_counter_queries.store(0, AtomicOrdering.RELAXED);
+    state.completion_native_wait_calls.store(0, AtomicOrdering.RELAXED);
+    state.completion_retirement_passes.store(0, AtomicOrdering.RELAXED);
+    state.completion_retirement_lock_acquisitions.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
+    state.completion_cached_poll_hits.store(0, AtomicOrdering.RELAXED);
+    state.completion_cached_wait_hits.store(0, AtomicOrdering.RELAXED);
 }
 
 fn void destroy_submitted_commands(VkDeviceState* state) {

@@ -54,13 +54,22 @@ fn double measure_submissions(
     return (double)elapsed_ns / (double)SUBMISSION_ITERATIONS;
 }
 
-fn double measure_completed_polls(gpu::CompletionPoint point) {
+fn double measure_completed_polls(
+    gpu::CompletionPoint point,
+    vk::VkDeviceState* state,
+    ulong* native_queries,
+    ulong* retirement_locks,
+) {
+    vk::reset_completion_work_counters(state);
     bool all_complete = true;
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMPLETION_POLL_ITERATIONS; i++) {
         all_complete = gpu::poll_completion(point)!! && all_complete;
     }
     long elapsed_ns = (long)start.to_now();
+    vk::CompletionWorkCounters work = vk::completion_work_counters(state);
+    *native_queries += work.native_counter_queries;
+    *retirement_locks += work.retirement_lock_acquisitions;
     assert(all_complete, "completed point remains complete");
     return (double)elapsed_ns / (double)COMPLETION_POLL_ITERATIONS;
 }
@@ -115,10 +124,19 @@ fn int main() {
     gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::CompletionPoint warm_completion;
     (void)measure_submissions(queue, &warm_completion);
-    (void)measure_completed_polls(warm_completion);
+    ulong warm_native_queries;
+    ulong warm_retirement_locks;
+    (void)measure_completed_polls(
+        point:            warm_completion,
+        state:            state,
+        native_queries:   &warm_native_queries,
+        retirement_locks: &warm_retirement_locks,
+    );
     ulong warm_destruction_waits;
     ulong warm_deferred_releases;
     (void)measure_texture_destruction(
@@ -127,8 +145,6 @@ fn int main() {
         &warm_deferred_releases,
     );
 
-    vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::SubmitStats submit_before = vk::submit_stats(state);
 
     double[LIFECYCLE_REPETITIONS] submission_results;
@@ -137,9 +153,16 @@ fn int main() {
     gpu::CompletionPoint completion;
     ulong destruction_waits;
     ulong deferred_releases;
+    ulong cached_poll_native_queries;
+    ulong cached_poll_retirement_locks;
     for (uint i = 0; i < LIFECYCLE_REPETITIONS; i++) {
         submission_results[i] = measure_submissions(queue, &completion);
-        poll_results[i] = measure_completed_polls(completion);
+        poll_results[i] = measure_completed_polls(
+            point:            completion,
+            state:            state,
+            native_queries:   &cached_poll_native_queries,
+            retirement_locks: &cached_poll_retirement_locks,
+        );
         destruction_results[i] = measure_texture_destruction(
             &device,
             &destruction_waits,
@@ -160,6 +183,10 @@ fn int main() {
         "immediate destruction performs no device wait");
     assert(deferred_releases == 0,
         "immediate destruction enqueues no deferred release");
+    assert(cached_poll_native_queries == 0,
+        "cached completed polls perform no native counter queries");
+    assert(cached_poll_retirement_locks == 0,
+        "cached completed polls acquire no retirement lock");
 
     io::printfn(
         "submission: iterations=%d repetitions=%d median=%.1f ns/submit",
@@ -180,10 +207,12 @@ fn int main() {
         lifecycle_median(destruction_results),
     );
     io::printfn(
-        "invariants: point_allocations=%d destruction_waits=%d deferred_releases=%d",
+        "invariants: point_allocations=%d destruction_waits=%d deferred_releases=%d cached_poll_queries=%d retirement_locks=%d",
         point_allocations,
         destruction_waits,
         deferred_releases,
+        cached_poll_native_queries,
+        cached_poll_retirement_locks,
     );
     return 0;
 }
