@@ -30,6 +30,10 @@ const char[*] REFLECT_MULTI_ENTRY_SPIRV =
     $embed("shaders/multi_entry_root.comp.spv");
 const char[*] REFLECT_REVERSED_GRAPHICS_SPIRV =
     $embed("shaders/graphics_reversed_members.vert.spv");
+const char[*] REFLECT_GRAPHICS_SIZE_8_SPIRV =
+    $embed("shaders/graphics_size_8.vert.spv");
+const char[*] REFLECT_GRAPHICS_SECOND_OFFSET_4_SPIRV =
+    $embed("shaders/graphics_second_offset_4.vert.spv");
 const char[*] REFLECT_RENAMED_SPIRV     = $embed("shaders/root_renamed.comp.spv");
 
 const ZString ENTRY_POINT_OVER_CAP = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
@@ -173,6 +177,39 @@ fn void? check_fixture_root_abi(
     }
     defer reflect_module.destroy();
     vk::check_root_push_abi(reflect_module, entry_point, stage)!;
+}
+
+fn void assert_reflected_shader_rejected(
+    gpu::Device* device,
+    char[] spirv,
+    gpu::ShaderStage stage,
+    ZString message,
+) {
+    gpu::ShaderDesc desc = {
+        .stage       = stage,
+        .spirv       = spirv,
+        .entry_point = "main",
+    };
+    gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(*device);
+    ulong reflections_before = vk::shader_reflection_validation_count(state);
+    ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
+
+    fault shader_fault = @catch(vk::create_pipeline_shader_module(
+        state:          state,
+        code:           &code,
+        expected_stage: stage,
+        operation:      "test_shader_reflection",
+        rejected_field: "ShaderCode",
+    ));
+
+    assert(shader_fault == gpu::SHADER_INVALID,
+        "expected SHADER_INVALID, got %s: %s", shader_fault, message);
+    assert(vk::shader_reflection_validation_count(state) == reflections_before + 1,
+        "one malformed shader performs one reflection validation");
+    assert(vk::pipeline_shader_create_attempt_count(state) == native_attempts_before,
+        "reflection rejection precedes native shader creation");
 }
 
 fn void heap_conforming_shader_accepted() @test {
@@ -381,6 +418,30 @@ fn void reversed_graphics_member_order_rejected() @test {
         "graphics root members with reversed offsets fault SHADER_INVALID");
 }
 
+fn void graphics_size_8_rejected_before_native_creation() @test {
+    gpu::Device device = make_reflection_test_device();
+    defer destroy_test_device(&device)!!;
+
+    assert_reflected_shader_rejected(
+        device:  &device,
+        spirv:   REFLECT_GRAPHICS_SIZE_8_SPIRV[..],
+        stage:   gpu::ShaderStage.VERTEX,
+        message: "an 8-byte graphics root faults SHADER_INVALID",
+    );
+}
+
+fn void graphics_second_member_offset_4_rejected_before_native_creation() @test {
+    gpu::Device device = make_reflection_test_device();
+    defer destroy_test_device(&device)!!;
+
+    assert_reflected_shader_rejected(
+        device:  &device,
+        spirv:   REFLECT_GRAPHICS_SECOND_OFFSET_4_SPIRV[..],
+        stage:   gpu::ShaderStage.VERTEX,
+        message: "a graphics second member at offset 4 faults SHADER_INVALID",
+    );
+}
+
 fn void foreign_set_rejected() @test {
     gpu::Device device = make_reflection_test_device();
     defer destroy_test_device(&device)!!;
@@ -441,6 +502,30 @@ fn void reflected_stage_mismatch_rejected_before_native_creation() @test {
         "a reflected execution model mismatch faults SHADER_INVALID");
     assert(vk::pipeline_shader_create_attempt_count(state) == native_attempts_before,
         "reflected stage rejection precedes native shader creation");
+}
+
+fn void vertex_module_reflected_as_fragment_rejected_before_native_creation() @test {
+    gpu::Device device = make_reflection_test_device();
+    defer destroy_test_device(&device)!!;
+
+    assert_reflected_shader_rejected(
+        device:  &device,
+        spirv:   REFLECT_VERTEX_SPIRV[..],
+        stage:   gpu::ShaderStage.FRAGMENT,
+        message: "a vertex module declared as fragment faults SHADER_INVALID",
+    );
+}
+
+fn void fragment_module_reflected_as_vertex_rejected_before_native_creation() @test {
+    gpu::Device device = make_reflection_test_device();
+    defer destroy_test_device(&device)!!;
+
+    assert_reflected_shader_rejected(
+        device:  &device,
+        spirv:   REFLECT_FRAGMENT_SPIRV[..],
+        stage:   gpu::ShaderStage.VERTEX,
+        message: "a fragment module declared as vertex faults SHADER_INVALID",
+    );
 }
 
 fn void oversized_push_constant_rejected() @test {

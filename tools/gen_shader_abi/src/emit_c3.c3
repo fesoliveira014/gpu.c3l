@@ -8,6 +8,11 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
     out.appendf("module %s;\n", module_name);
     if (module_name != "gpu") out.append("\nimport gpu;\n");
 
+    foreach (&decl : schema.types) {
+        TypeInfo base = types.entries.get(decl.base_name)!!;
+        out.appendf("\ntypedef %s = %s;\n", decl.name, base.c3_name);
+    }
+
     uint max_push_members = max_push_member_count(schema);
     if (max_push_members > 0) {
         out.append("\nstruct RootAbiMemberSpec @private {\n");
@@ -22,11 +27,6 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
         out.append("    uint member_count;\n");
         out.appendf("    RootAbiMemberSpec[%d] members;\n", max_push_members);
         out.append("}\n");
-    }
-
-    foreach (&decl : schema.types) {
-        TypeInfo base = types.entries.get(decl.base_name)!!;
-        out.appendf("\ntypedef %s = %s;\n", decl.name, base.c3_name);
     }
 
     if (schema.consts.len() > 0) out.append("\n");
