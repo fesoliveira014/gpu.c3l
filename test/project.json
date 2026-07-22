@@ -50,6 +50,16 @@
       "features": [ "COMMAND_RESOLUTION_STATS", "VALIDATION_POLICY_STATS" ],
       "sources": [ "src/command_record_bench.c3" ]
     },
+    // Advisory direct Vulkan/public command-path and submitted lifecycle
+    // calibration. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
+    "command_path_baseline_bench": {
+      "type": "executable",
+      "features": [ "COMMAND_RECORDING_WORK_STATS" ],
+      "sources": [
+        "src/command_path_baseline_bench.c3",
+        "src/command_path_baseline_native.c3"
+      ]
+    },
     // Advisory submission, completed-point polling, and immediate destruction
     // timing; executable so it never gates CI. Needs an ICD.
     "lifecycle_bench": {
@@ -144,7 +154,7 @@
     },
     "vk_performance": {
       "type": "test",
-      "sources": [ "src/test_vk_performance_invariants.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
+      "sources": [ "src/test_vk_performance_invariants.c3", "src/test_command_path_native_work.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
     },
     "vk_swapchain": {
       "type": "test",

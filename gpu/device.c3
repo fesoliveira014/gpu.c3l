@@ -375,9 +375,13 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong native_commands;
 }
 
-<* Test and benchmark counters for allocation-capable recording seams. Compare
+<* Private test and benchmark counters for structural recording work. Compare
    relaxed snapshots only around externally synchronized cold or warm work. *>
-struct RecordingWorkCounters @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+struct RecordingWorkCounters @private @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
     ulong host_allocations;
     ulong command_pool_creations;
     ulong command_buffer_allocations;
@@ -385,6 +389,7 @@ struct RecordingWorkCounters @if(env::TESTING || $feature(COMMAND_RESOLUTION_STA
     ulong command_buffer_resets;
     ulong image_view_creations;
     ulong vma_allocations;
+    ulong registry_lock_acquisitions;
     ulong generated_scratch_misses;
     ulong generated_dispatch_emissions;
     ulong generated_draw_emissions;
@@ -537,6 +542,14 @@ fn void unlock_device_registry() @private {
 
 fn ulong device_registry_lock_count() @private {
     return device_registry_lock_acquisitions.load(AtomicOrdering.RELAXED);
+}
+
+fn void reset_device_registry_lock_count() @private @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    device_registry_lock_acquisitions.store(0, AtomicOrdering.RELAXED);
 }
 
 fn ulong? allocate_device_resource_owner() @private {

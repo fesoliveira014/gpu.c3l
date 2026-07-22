@@ -251,7 +251,9 @@ fn RootPushObservation root_push_observation() @if(env::TESTING) {
 }
 
 fn void note_recording_host_allocation(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING
+            || $feature(COMMAND_RESOLUTION_STATS)
+            || $feature(COMMAND_RECORDING_WORK_STATS):
         (void)state.recording_host_allocations.add(
             1,
             AtomicOrdering.RELAXED,
@@ -260,13 +262,17 @@ fn void note_recording_host_allocation(VkDeviceState* state) {
 }
 
 fn void note_command_buffer_reset(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING
+            || $feature(COMMAND_RESOLUTION_STATS)
+            || $feature(COMMAND_RECORDING_WORK_STATS):
         (void)state.command_buffer_resets.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 
 fn void note_command_buffer_allocation(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING
+            || $feature(COMMAND_RESOLUTION_STATS)
+            || $feature(COMMAND_RECORDING_WORK_STATS):
         (void)state.recording_command_buffer_allocations.add(
             1,
             AtomicOrdering.RELAXED,
@@ -275,7 +281,9 @@ fn void note_command_buffer_allocation(VkDeviceState* state) {
 }
 
 fn void note_command_pool_creation(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING
+            || $feature(COMMAND_RESOLUTION_STATS)
+            || $feature(COMMAND_RECORDING_WORK_STATS):
         (void)state.recording_command_pool_creations.add(
             1,
             AtomicOrdering.RELAXED,
@@ -284,7 +292,9 @@ fn void note_command_pool_creation(VkDeviceState* state) {
 }
 
 fn void note_command_buffer_free(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING
+            || $feature(COMMAND_RESOLUTION_STATS)
+            || $feature(COMMAND_RECORDING_WORK_STATS):
         (void)state.recording_command_buffer_frees.add(
             1,
             AtomicOrdering.RELAXED,
@@ -293,7 +303,9 @@ fn void note_command_buffer_free(VkDeviceState* state) {
 }
 
 fn void note_recording_vma_allocation(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING
+            || $feature(COMMAND_RESOLUTION_STATS)
+            || $feature(COMMAND_RECORDING_WORK_STATS):
         (void)state.recording_vma_allocations.add(
             1,
             AtomicOrdering.RELAXED,
@@ -3020,8 +3032,12 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
    measured interval. *>
 fn gpu::RecordingWorkCounters command_recording_work_counters(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
-    return {
+) @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    gpu::RecordingWorkCounters counters = {
         .host_allocations = state.recording_host_allocations.load(
             AtomicOrdering.RELAXED,
         ),
@@ -3044,25 +3060,33 @@ fn gpu::RecordingWorkCounters command_recording_work_counters(
         .vma_allocations = state.recording_vma_allocations.load(
             AtomicOrdering.RELAXED,
         ),
-        .generated_scratch_misses = state.generated_scratch_misses.load(
+        .registry_lock_acquisitions = gpu::device_registry_lock_count(),
+    };
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        counters.generated_scratch_misses = state.generated_scratch_misses.load(
             AtomicOrdering.RELAXED,
-        ),
-        .generated_dispatch_emissions =
-            state.generated_dispatch_emissions.load(AtomicOrdering.RELAXED),
-        .generated_draw_emissions = state.generated_draw_emissions.load(
+        );
+        counters.generated_dispatch_emissions =
+            state.generated_dispatch_emissions.load(AtomicOrdering.RELAXED);
+        counters.generated_draw_emissions = state.generated_draw_emissions.load(
             AtomicOrdering.RELAXED,
-        ),
-        .generated_indexed_draw_emissions =
+        );
+        counters.generated_indexed_draw_emissions =
             state.generated_indexed_draw_emissions.load(
                 AtomicOrdering.RELAXED,
-            ),
-    };
+            );
+    $endif
+    return counters;
 }
 
 <* Reset test/benchmark recording-work counters while recording is quiescent. *>
 fn void reset_command_recording_work_counters(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+) @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
     state.recording_host_allocations.store(0, AtomicOrdering.RELAXED);
     state.recording_command_pool_creations.store(0, AtomicOrdering.RELAXED);
     state.recording_command_buffer_allocations.store(
@@ -3073,13 +3097,51 @@ fn void reset_command_recording_work_counters(
     state.command_buffer_resets.store(0, AtomicOrdering.RELAXED);
     state.recording_image_view_creations.store(0, AtomicOrdering.RELAXED);
     state.recording_vma_allocations.store(0, AtomicOrdering.RELAXED);
-    state.generated_scratch_misses.store(0, AtomicOrdering.RELAXED);
-    state.generated_dispatch_emissions.store(0, AtomicOrdering.RELAXED);
-    state.generated_draw_emissions.store(0, AtomicOrdering.RELAXED);
-    state.generated_indexed_draw_emissions.store(
-        0,
-        AtomicOrdering.RELAXED,
-    );
+    gpu::reset_device_registry_lock_count();
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        state.generated_scratch_misses.store(0, AtomicOrdering.RELAXED);
+        state.generated_dispatch_emissions.store(0, AtomicOrdering.RELAXED);
+        state.generated_draw_emissions.store(0, AtomicOrdering.RELAXED);
+        state.generated_indexed_draw_emissions.store(
+            0,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn gpu::RecordingWorkCounters command_recording_work_delta(
+    gpu::RecordingWorkCounters after,
+    gpu::RecordingWorkCounters before,
+) @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    return {
+        .host_allocations = after.host_allocations - before.host_allocations,
+        .command_pool_creations = after.command_pool_creations
+            - before.command_pool_creations,
+        .command_buffer_allocations = after.command_buffer_allocations
+            - before.command_buffer_allocations,
+        .command_buffer_frees = after.command_buffer_frees
+            - before.command_buffer_frees,
+        .command_buffer_resets = after.command_buffer_resets
+            - before.command_buffer_resets,
+        .image_view_creations = after.image_view_creations
+            - before.image_view_creations,
+        .vma_allocations = after.vma_allocations - before.vma_allocations,
+        .registry_lock_acquisitions = after.registry_lock_acquisitions
+            - before.registry_lock_acquisitions,
+        .generated_scratch_misses = after.generated_scratch_misses
+            - before.generated_scratch_misses,
+        .generated_dispatch_emissions = after.generated_dispatch_emissions
+            - before.generated_dispatch_emissions,
+        .generated_draw_emissions = after.generated_draw_emissions
+            - before.generated_draw_emissions,
+        .generated_indexed_draw_emissions =
+            after.generated_indexed_draw_emissions
+                - before.generated_indexed_draw_emissions,
+    };
 }
 
 fn vk::IndirectCommandsLayoutEXT? create_generated_work_layout(

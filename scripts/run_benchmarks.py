@@ -16,6 +16,8 @@ BENCHMARK_TARGETS = (
     "resource_create_bench",
     "descriptor_churn_bench",
     "upload_throughput_bench",
+    "command_wrapper_bench",
+    "command_path_baseline_bench",
     "command_record_bench",
     "lifecycle_bench",
     "submit_batch_bench",
@@ -33,6 +35,14 @@ BENCHMARK_METHODS = {
     "upload_throughput_bench": (
         "warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4",
         "uploads/s",
+    ),
+    "command_wrapper_bench": (
+        "operations=5; direct/public=20000x5; alternating order",
+        "ns/op; advisory public/direct ratio; exact observation",
+    ),
+    "command_path_baseline_bench": (
+        "operations=5; direct/public=20000x5; lifecycle=0,1,16,256x5",
+        "ns/op; advisory ratio; exact work and equivalence",
     ),
     "command_record_bench": (
         "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; cold/warm work counters",
@@ -55,6 +65,10 @@ BENCHMARK_METHODS = {
 
 C3_BUILD_FLAGS = ("-O1",)
 
+BENCHMARK_PROJECTS = {
+    "command_wrapper_bench": "test/cpu",
+}
+
 
 CONTEXT_FIELDS = ("adapter:", "driver:", "validation:", "queues:")
 # A unit token alone is not enough: the startup header already declares
@@ -62,6 +76,7 @@ CONTEXT_FIELDS = ("adapter:", "driver:", "validation:", "queues:")
 MEASURED_VALUE = re.compile(
     r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|create|submit|poll|destroy)|ms)\b"
     r"|uploads_per_sec=\d[\d,.]*\b"
+    r"|(?:direct|public)_median_ns=\d[\d,.]*\b"
 )
 UPLOAD_MEASUREMENT = re.compile(
     r"\bworkers=\d+\s+payload_bytes=\d+\s+iterations=\d+\s+"
@@ -144,6 +159,103 @@ COMMAND_POLICY_MODES = (
     ("full", True, False),
     ("full", True, True),
 )
+COMMAND_PATH_OPERATIONS = (
+    "dispatch",
+    "draw",
+    "barrier",
+    "viewport",
+    "copy_buffer",
+)
+COMMAND_PATH_NATIVE_CALLS = {
+    "dispatch": 2,
+    "draw": 2,
+    "barrier": 1,
+    "viewport": 1,
+    "copy_buffer": 1,
+}
+COMMAND_WRAPPER_CHECKSUMS = {
+    "dispatch": 600_000,
+    "draw": 1_000_000,
+    "barrier": 1_400_000,
+    "viewport": 2_200_000,
+    "copy_buffer": 2_600_000,
+}
+COMMAND_WRAPPER_OPERATION = re.compile(
+    r"^command_path_cpu operation=(?P<operation>[a-z_]+) "
+    r"iterations=(?P<iterations>[0-9]+) repetitions=(?P<repetitions>[0-9]+) "
+    r"checksum=(?P<checksum>[0-9]+) "
+    r"direct_min_ns=(?P<direct_min>[0-9]+(?:\.[0-9]+)?) "
+    r"direct_median_ns=(?P<direct_median>[0-9]+(?:\.[0-9]+)?) "
+    r"direct_max_ns=(?P<direct_max>[0-9]+(?:\.[0-9]+)?) "
+    r"public_min_ns=(?P<public_min>[0-9]+(?:\.[0-9]+)?) "
+    r"public_median_ns=(?P<public_median>[0-9]+(?:\.[0-9]+)?) "
+    r"public_max_ns=(?P<public_max>[0-9]+(?:\.[0-9]+)?) "
+    r"ratio=(?P<ratio>[0-9]+(?:\.[0-9]+)?)$"
+)
+COMMAND_WRAPPER_CHECK = re.compile(
+    r"^command_path_cpu_check operations=(?P<operations>[0-9]+) "
+    r"observed=(?P<observed>[0-9]+) expected=(?P<expected>[0-9]+) "
+    r"status=pass$"
+)
+COMMAND_PATH_VK_POLICY = re.compile(
+    r"^command_path_vk_policy validation=trusted tracking=false layers=false "
+    r"resolution_stats=false recording_work_stats=true$"
+)
+COMMAND_PATH_VK_OPERATION = re.compile(
+    r"^command_path_vk operation=(?P<operation>[a-z_]+) "
+    r"iterations=(?P<iterations>[0-9]+) repetitions=(?P<repetitions>[0-9]+) "
+    r"native_calls_per_iteration=(?P<native_calls>[0-9]+) "
+    r"direct_min_ns=(?P<direct_min>[0-9]+(?:\.[0-9]+)?) "
+    r"direct_median_ns=(?P<direct_median>[0-9]+(?:\.[0-9]+)?) "
+    r"direct_max_ns=(?P<direct_max>[0-9]+(?:\.[0-9]+)?) "
+    r"public_min_ns=(?P<public_min>[0-9]+(?:\.[0-9]+)?) "
+    r"public_median_ns=(?P<public_median>[0-9]+(?:\.[0-9]+)?) "
+    r"public_max_ns=(?P<public_max>[0-9]+(?:\.[0-9]+)?) "
+    r"ratio=(?P<ratio>[0-9]+(?:\.[0-9]+)?)$"
+)
+COMMAND_PATH_VK_WORK = re.compile(
+    r"^command_path_vk_work operation=(?P<operation>[a-z_]+) loops=(?P<loops>[0-9]+) "
+    r"host_allocations=(?P<host_allocations>[0-9]+) "
+    r"command_pool_creations=(?P<command_pool_creations>[0-9]+) "
+    r"command_buffer_allocations=(?P<command_buffer_allocations>[0-9]+) "
+    r"command_buffer_frees=(?P<command_buffer_frees>[0-9]+) "
+    r"command_buffer_resets=(?P<command_buffer_resets>[0-9]+) "
+    r"image_view_creations=(?P<image_view_creations>[0-9]+) "
+    r"vma_allocations=(?P<vma_allocations>[0-9]+) "
+    r"registry_lock_acquisitions=(?P<registry_lock_acquisitions>[0-9]+) "
+    r"shader_module_creations=(?P<shader_module_creations>[0-9]+) "
+    r"pipeline_creations=(?P<pipeline_creations>[0-9]+) status=pass$"
+)
+COMMAND_PATH_VK_EQUIVALENCE = re.compile(
+    r"^command_path_vk_equivalence operation=(?P<operation>[a-z_]+) "
+    r"elements=(?P<elements>[0-9]+) expected_checksum=(?P<expected>[0-9]+) "
+    r"direct_checksum=(?P<direct>[0-9]+) public_checksum=(?P<public>[0-9]+) "
+    r"pairwise=true status=pass$"
+)
+COMMAND_PATH_LIFECYCLE_CASES = (0, 1, 16, 256)
+COMMAND_PATH_VK_LIFECYCLE = re.compile(
+    r"^command_path_vk_lifecycle commands=(?P<commands>[0-9]+) "
+    r"repetitions=(?P<repetitions>[0-9]+) "
+    r"min_ns=(?P<minimum>[0-9]+(?:\.[0-9]+)?) "
+    r"median_ns=(?P<median>[0-9]+(?:\.[0-9]+)?) "
+    r"max_ns=(?P<maximum>[0-9]+(?:\.[0-9]+)?) "
+    r"paired_delta_median_ns=(?P<paired_delta>-?[0-9]+(?:\.[0-9]+)?) "
+    r"incremental_ns_per_command=(?P<incremental>-?[0-9]+(?:\.[0-9]+)?)$"
+)
+COMMAND_PATH_VK_LIFECYCLE_WORK = re.compile(
+    r"^command_path_vk_lifecycle_work commands=(?P<commands>[0-9]+) "
+    r"samples=(?P<samples>[0-9]+) "
+    r"host_allocations=(?P<host_allocations>[0-9]+) "
+    r"command_pool_creations=(?P<command_pool_creations>[0-9]+) "
+    r"command_buffer_allocations=(?P<command_buffer_allocations>[0-9]+) "
+    r"command_buffer_frees=(?P<command_buffer_frees>[0-9]+) "
+    r"command_buffer_resets=(?P<command_buffer_resets>[0-9]+) "
+    r"image_view_creations=(?P<image_view_creations>[0-9]+) "
+    r"vma_allocations=(?P<vma_allocations>[0-9]+) "
+    r"registry_lock_acquisitions=(?P<registry_lock_acquisitions>[0-9]+) "
+    r"shader_module_creations=(?P<shader_module_creations>[0-9]+) "
+    r"pipeline_creations=(?P<pipeline_creations>[0-9]+) status=pass$"
+)
 PIPELINE_CACHE_MATRIX = re.compile(
     r"^phase 1 \(raster matrix, requested=200 native=1 "
     r"cache_entries=1 aliases=200\): [0-9]+(?:\.[0-9]+)? ns/create$",
@@ -190,6 +302,256 @@ def require_context_fields(output):
     for field in CONTEXT_FIELDS:
         if field not in output:
             raise ValueError(f"benchmark context is missing {field[:-1]}")
+
+
+def require_command_wrapper_evidence(output):
+    lines = output.splitlines()
+    if len(lines) != len(COMMAND_PATH_OPERATIONS) + 1:
+        raise ValueError(
+            "command_wrapper_bench record count is missing or duplicated"
+        )
+    for line, expected_operation in zip(
+        lines[:len(COMMAND_PATH_OPERATIONS)],
+        COMMAND_PATH_OPERATIONS,
+    ):
+        match = COMMAND_WRAPPER_OPERATION.fullmatch(line)
+        if match is None:
+            raise ValueError("command_wrapper_bench operation record is malformed")
+        if match.group("operation") != expected_operation:
+            raise ValueError(
+                "command_wrapper_bench operation order or identity mismatch"
+            )
+        if int(match.group("iterations")) != 20_000:
+            raise ValueError("command_wrapper_bench iteration count mismatch")
+        if int(match.group("repetitions")) != 5:
+            raise ValueError("command_wrapper_bench repetition count mismatch")
+        if int(match.group("checksum")) != COMMAND_WRAPPER_CHECKSUMS[expected_operation]:
+            raise ValueError("command_wrapper_bench operation checksum mismatch")
+        direct = tuple(
+            float(match.group(field))
+            for field in ("direct_min", "direct_median", "direct_max")
+        )
+        public = tuple(
+            float(match.group(field))
+            for field in ("public_min", "public_median", "public_max")
+        )
+        if not (0.0 < direct[0] <= direct[1] <= direct[2]):
+            raise ValueError("command_wrapper_bench direct timing range is invalid")
+        if not (0.0 < public[0] <= public[1] <= public[2]):
+            raise ValueError("command_wrapper_bench public timing range is invalid")
+        ratio = float(match.group("ratio"))
+        calculated = public[1] / direct[1]
+        if abs(ratio - calculated) > max(1e-6, calculated * 1e-6):
+            raise ValueError("command_wrapper_bench ratio calculation mismatch")
+    check = COMMAND_WRAPPER_CHECK.fullmatch(lines[-1])
+    if check is None:
+        raise ValueError("command_wrapper_bench observation check is malformed")
+    if int(check.group("operations")) != len(COMMAND_PATH_OPERATIONS):
+        raise ValueError("command_wrapper_bench operation check count mismatch")
+    observed = int(check.group("observed"))
+    expected = int(check.group("expected"))
+    if observed != expected or expected != 7_800_000:
+        raise ValueError("command_wrapper_bench observation mismatch")
+
+
+def require_command_path_vulkan_evidence(output):
+    lines = output.splitlines()
+    operation_count = len(COMMAND_PATH_OPERATIONS)
+    lifecycle_count = len(COMMAND_PATH_LIFECYCLE_CASES)
+    expected_records = 1 + operation_count * 2 + 2 + lifecycle_count * 2
+    if len(lines) != expected_records:
+        raise ValueError(
+            "command_path_baseline_bench record count is missing or duplicated"
+        )
+    if COMMAND_PATH_VK_POLICY.fullmatch(lines[0]) is None:
+        raise ValueError("command_path_baseline_bench policy record is malformed")
+
+    operation_lines = lines[1:1 + operation_count]
+    work_lines = lines[1 + operation_count:1 + operation_count * 2]
+    for line, work_line, expected_operation in zip(
+        operation_lines,
+        work_lines,
+        COMMAND_PATH_OPERATIONS,
+    ):
+        match = COMMAND_PATH_VK_OPERATION.fullmatch(line)
+        if match is None:
+            raise ValueError(
+                "command_path_baseline_bench operation record is malformed"
+            )
+        if match.group("operation") != expected_operation:
+            raise ValueError(
+                "command_path_baseline_bench operation order or identity mismatch"
+            )
+        if int(match.group("iterations")) != 20_000:
+            raise ValueError(
+                "command_path_baseline_bench operation iteration count mismatch"
+            )
+        if int(match.group("repetitions")) != 5:
+            raise ValueError(
+                "command_path_baseline_bench operation repetition count mismatch"
+            )
+        if int(match.group("native_calls")) != COMMAND_PATH_NATIVE_CALLS[expected_operation]:
+            raise ValueError(
+                "command_path_baseline_bench native work count mismatch"
+            )
+        direct = tuple(
+            float(match.group(field))
+            for field in ("direct_min", "direct_median", "direct_max")
+        )
+        public = tuple(
+            float(match.group(field))
+            for field in ("public_min", "public_median", "public_max")
+        )
+        if not (0.0 < direct[0] <= direct[1] <= direct[2]):
+            raise ValueError(
+                "command_path_baseline_bench direct timing range is invalid"
+            )
+        if not (0.0 < public[0] <= public[1] <= public[2]):
+            raise ValueError(
+                "command_path_baseline_bench public timing range is invalid"
+            )
+        ratio = float(match.group("ratio"))
+        calculated = public[1] / direct[1]
+        if abs(ratio - calculated) > max(1e-6, calculated * 1e-6):
+            raise ValueError(
+                "command_path_baseline_bench ratio calculation mismatch"
+            )
+
+        work = COMMAND_PATH_VK_WORK.fullmatch(work_line)
+        if work is None:
+            raise ValueError(
+                "command_path_baseline_bench operation work record is malformed"
+            )
+        if work.group("operation") != expected_operation:
+            raise ValueError(
+                "command_path_baseline_bench work order or identity mismatch"
+            )
+        if int(work.group("loops")) != 10:
+            raise ValueError(
+                "command_path_baseline_bench operation work loop count mismatch"
+            )
+        work_fields = (
+            "host_allocations",
+            "command_pool_creations",
+            "command_buffer_allocations",
+            "command_buffer_frees",
+            "command_buffer_resets",
+            "image_view_creations",
+            "vma_allocations",
+            "registry_lock_acquisitions",
+            "shader_module_creations",
+            "pipeline_creations",
+        )
+        if any(int(work.group(field)) != 0 for field in work_fields):
+            raise ValueError(
+                "command_path_baseline_bench operation structural work is nonzero"
+            )
+
+    equivalence_start = 1 + operation_count * 2
+    equivalence_lines = lines[equivalence_start:equivalence_start + 2]
+    for line, expected_operation in zip(
+        equivalence_lines,
+        ("dispatch", "copy_buffer"),
+    ):
+        match = COMMAND_PATH_VK_EQUIVALENCE.fullmatch(line)
+        if match is None:
+            raise ValueError(
+                "command_path_baseline_bench equivalence record is malformed"
+            )
+        if match.group("operation") != expected_operation:
+            raise ValueError(
+                "command_path_baseline_bench equivalence order or identity mismatch"
+            )
+        if int(match.group("elements")) != 64:
+            raise ValueError(
+                "command_path_baseline_bench equivalence element count mismatch"
+            )
+        expected = int(match.group("expected"))
+        direct = int(match.group("direct"))
+        public = int(match.group("public"))
+        if expected == 0 or direct != expected or public != expected:
+            raise ValueError(
+                "command_path_baseline_bench equivalence checksum mismatch"
+            )
+
+    lifecycle_start = equivalence_start + 2
+    lifecycle_lines = lines[lifecycle_start:lifecycle_start + lifecycle_count]
+    lifecycle_work_lines = lines[lifecycle_start + lifecycle_count:]
+    for line, work_line, expected_commands in zip(
+        lifecycle_lines,
+        lifecycle_work_lines,
+        COMMAND_PATH_LIFECYCLE_CASES,
+    ):
+        match = COMMAND_PATH_VK_LIFECYCLE.fullmatch(line)
+        if match is None:
+            raise ValueError(
+                "command_path_baseline_bench lifecycle record is malformed"
+            )
+        if int(match.group("commands")) != expected_commands:
+            raise ValueError(
+                "command_path_baseline_bench lifecycle order or command count mismatch"
+            )
+        if int(match.group("repetitions")) != 5:
+            raise ValueError(
+                "command_path_baseline_bench lifecycle repetition count mismatch"
+            )
+        timings = tuple(
+            float(match.group(field))
+            for field in ("minimum", "median", "maximum")
+        )
+        if not (0.0 < timings[0] <= timings[1] <= timings[2]):
+            raise ValueError(
+                "command_path_baseline_bench lifecycle timing range is invalid"
+            )
+        paired_delta = float(match.group("paired_delta"))
+        incremental = float(match.group("incremental"))
+        if expected_commands == 0:
+            if paired_delta != 0.0 or incremental != 0.0:
+                raise ValueError(
+                    "command_path_baseline_bench zero lifecycle increment is nonzero"
+                )
+        else:
+            calculated = paired_delta / expected_commands
+            if abs(incremental - calculated) > max(1e-3, abs(calculated) * 1e-6):
+                raise ValueError(
+                    "command_path_baseline_bench lifecycle increment calculation mismatch"
+                )
+
+        work = COMMAND_PATH_VK_LIFECYCLE_WORK.fullmatch(work_line)
+        if work is None:
+            raise ValueError(
+                "command_path_baseline_bench lifecycle work record is malformed"
+            )
+        if int(work.group("commands")) != expected_commands:
+            raise ValueError(
+                "command_path_baseline_bench lifecycle work command count mismatch"
+            )
+        if int(work.group("samples")) != 5:
+            raise ValueError(
+                "command_path_baseline_bench lifecycle work sample count mismatch"
+            )
+        zero_fields = (
+            "host_allocations",
+            "command_pool_creations",
+            "command_buffer_allocations",
+            "command_buffer_frees",
+            "image_view_creations",
+            "vma_allocations",
+            "shader_module_creations",
+            "pipeline_creations",
+        )
+        if any(int(work.group(field)) != 0 for field in zero_fields):
+            raise ValueError(
+                "command_path_baseline_bench lifecycle unrelated work is nonzero"
+            )
+        if int(work.group("command_buffer_resets")) != 5:
+            raise ValueError(
+                "command_path_baseline_bench lifecycle reset count mismatch"
+            )
+        if int(work.group("registry_lock_acquisitions")) != 0:
+            raise ValueError(
+                "command_path_baseline_bench lifecycle registry-lock count mismatch"
+            )
 
 
 def evaluate_regression_thresholds(output, target, enforce=False):
@@ -343,6 +705,10 @@ def require_measurement(
     enforce_thresholds=False,
     evaluate_thresholds=True,
 ):
+    if target == "command_wrapper_bench":
+        require_command_wrapper_evidence(output)
+    if target == "command_path_baseline_bench":
+        require_command_path_vulkan_evidence(output)
     if target == "allocation_bench":
         for phase, pattern in ALLOCATION_PHASES:
             if not pattern.search(output):
@@ -439,9 +805,18 @@ def run(command, cwd, env=None):
     return result.stdout.rstrip()
 
 
+def benchmark_build_targets():
+    targets = ("benchmark_info",) + BENCHMARK_TARGETS
+    return tuple(
+        (target, BENCHMARK_PROJECTS.get(target, "test"))
+        for target in targets
+    )
+
+
 def executable(root, target):
     suffix = ".exe" if os.name == "nt" else ""
-    return root / "test" / "build" / f"{target}{suffix}"
+    project = BENCHMARK_PROJECTS.get(target, "test")
+    return root / project / "build" / f"{target}{suffix}"
 
 
 def report_section(title, output):
@@ -485,10 +860,9 @@ def main():
     env["GPU_C3L_BENCH_VALIDATION"] = "1" if args.validation else "0"
     env["VK_LOADER_LAYERS_DISABLE"] = "~implicit~"
 
-    targets = ("benchmark_info",) + BENCHMARK_TARGETS
     run((sys.executable, "scripts/build_shaders.py"), root, env)
-    for target in targets:
-        run(("c3c",) + C3_BUILD_FLAGS + ("build", target, "--path", "test"), root, env)
+    for target, project in benchmark_build_targets():
+        run(("c3c",) + C3_BUILD_FLAGS + ("build", target, "--path", project), root, env)
 
     context = run((str(executable(root, "benchmark_info")),), root, env)
     require_context_fields(context)

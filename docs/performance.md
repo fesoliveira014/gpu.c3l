@@ -45,6 +45,8 @@ are rejected. Do not compare those timings with the release baseline. The
 validation layer must recognize every enabled Vulkan extension; otherwise its
 diagnostics invalidate the timing run. `command_record_bench` always uses its
 four explicit modes, even during this separate report.
+`command_path_baseline_bench` likewise keeps its fixed trusted, tracking-off,
+layers-off policy so its native/public comparison stays on the release contract.
 
 For a direct command-only run, build once and set all three required variables:
 
@@ -69,6 +71,54 @@ one pool creation, and one complete native command-buffer allocation separately
 from warm recording. All four policy modes require zero warm host/native/VMA
 allocation; tracking modes use the reference slab allocated at allocator create.
 
+### Command-path baselines
+
+The command-path baseline separates four kinds of evidence so driver cost does
+not obscure library work:
+
+1. `command_wrapper_bench` is an ICD-free CPU floor. It compares an observable
+   direct no-op with the equivalent public wrapper for dispatch, draw, barrier,
+   viewport, and buffer copy.
+2. `command_path_baseline_bench` records the same five operations through
+   direct Vulkan and public gpu.c3l paths, using separate warmed command lists
+   from one device and alternating which path is timed first.
+3. Dispatch and buffer-copy equivalence executes both paths into distinct,
+   pre-seeded outputs. Each output must match a non-zero expectation and its
+   paired output.
+4. Full lifecycle cases measure begin, bind, 0/1/16/256 commands, end, submit,
+   and successful completion wait. Non-zero cases also report incremental cost
+   per command relative to the zero-command case.
+
+The paired operation timers include only warmed command recording. Handles,
+native objects, command lists, and other shared prerequisites are resolved or
+created before timing. Structural snapshots around every operation loop must
+show zero host or pool allocation, command-buffer allocation/reset, image-view
+or VMA allocation, shader-module or native-pipeline creation, and device-registry
+lock acquisition. Lifecycle cases allow only the exact command-list
+allocation/reset work required by their contract and reject unrelated work.
+
+Run the CPU floor without Vulkan dependencies:
+
+```sh
+c3c build command_wrapper_bench --path test/cpu -O1
+./test/cpu/build/command_wrapper_bench
+```
+
+Run the native baseline with the normal Vulkan loader, VMA, SPIRV-Reflect, and
+a headless Vulkan 1.3 ICD available:
+
+```sh
+python3 scripts/build_shaders.py
+c3c build command_path_baseline_bench --path test -O1
+VK_DRIVER_FILES=/path/to/icd.json ./test/build/command_path_baseline_bench
+```
+
+Both targets emit exact machine-readable records. The runner rejects missing,
+duplicated, malformed, out-of-range, or internally inconsistent operation,
+work, equivalence, and lifecycle records. Minimum/median/maximum times and
+direct/public ratios remain advisory; structural and semantic failures are
+blocking.
+
 ## Evidence and regression gates
 
 The suite covers:
@@ -76,6 +126,8 @@ The suite covers:
 | Target | Evidence |
 |---|---|
 | `allocation_bench` | Explicit `CPU_WRITE` allocation and free |
+| `command_wrapper_bench` | ICD-free direct no-op and public-wrapper floor for five command classes, with exact volatile observation |
+| `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero hidden structural work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
 | `command_record_bench` | Barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact one-visit-per-list duplicate-detection work |

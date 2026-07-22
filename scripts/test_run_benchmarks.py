@@ -145,6 +145,51 @@ DESCRIPTOR_CHURN_OUTPUT = "\n".join(
         "sampler lookup occupancy=65536 bucket_count=131072 probes=1 empty_bucket_miss_probes=0 elapsed_ns=20",
     )
 )
+COMMAND_WRAPPER_OUTPUT = "\n".join(
+    (
+        "command_path_cpu operation=dispatch iterations=20000 repetitions=5 checksum=600000 direct_min_ns=1.000 direct_median_ns=2.000 direct_max_ns=3.000 public_min_ns=4.000 public_median_ns=5.000 public_max_ns=6.000 ratio=2.500000",
+        "command_path_cpu operation=draw iterations=20000 repetitions=5 checksum=1000000 direct_min_ns=1.000 direct_median_ns=2.000 direct_max_ns=3.000 public_min_ns=4.000 public_median_ns=5.000 public_max_ns=6.000 ratio=2.500000",
+        "command_path_cpu operation=barrier iterations=20000 repetitions=5 checksum=1400000 direct_min_ns=1.000 direct_median_ns=2.000 direct_max_ns=3.000 public_min_ns=4.000 public_median_ns=5.000 public_max_ns=6.000 ratio=2.500000",
+        "command_path_cpu operation=viewport iterations=20000 repetitions=5 checksum=2200000 direct_min_ns=1.000 direct_median_ns=2.000 direct_max_ns=3.000 public_min_ns=4.000 public_median_ns=5.000 public_max_ns=6.000 ratio=2.500000",
+        "command_path_cpu operation=copy_buffer iterations=20000 repetitions=5 checksum=2600000 direct_min_ns=1.000 direct_median_ns=2.000 direct_max_ns=3.000 public_min_ns=4.000 public_median_ns=5.000 public_max_ns=6.000 ratio=2.500000",
+        "command_path_cpu_check operations=5 observed=7800000 expected=7800000 status=pass",
+    )
+)
+COMMAND_PATH_VK_OUTPUT = "\n".join(
+    (
+        "command_path_vk_policy validation=trusted tracking=false layers=false resolution_stats=false recording_work_stats=true",
+        *tuple(
+            f"command_path_vk operation={operation} iterations=20000 repetitions=5 native_calls_per_iteration={native_calls} direct_min_ns=1.000 direct_median_ns=2.000 direct_max_ns=3.000 public_min_ns=4.000 public_median_ns=5.000 public_max_ns=6.000 ratio=2.500000"
+            for operation, native_calls in (
+                ("dispatch", 2),
+                ("draw", 2),
+                ("barrier", 1),
+                ("viewport", 1),
+                ("copy_buffer", 1),
+            )
+        ),
+        *tuple(
+            f"command_path_vk_work operation={operation} loops=10 host_allocations=0 command_pool_creations=0 command_buffer_allocations=0 command_buffer_frees=0 command_buffer_resets=0 image_view_creations=0 vma_allocations=0 registry_lock_acquisitions=0 shader_module_creations=0 pipeline_creations=0 status=pass"
+            for operation in (
+                "dispatch",
+                "draw",
+                "barrier",
+                "viewport",
+                "copy_buffer",
+            )
+        ),
+        "command_path_vk_equivalence operation=dispatch elements=64 expected_checksum=2080 direct_checksum=2080 public_checksum=2080 pairwise=true status=pass",
+        "command_path_vk_equivalence operation=copy_buffer elements=64 expected_checksum=6112 direct_checksum=6112 public_checksum=6112 pairwise=true status=pass",
+        "command_path_vk_lifecycle commands=0 repetitions=5 min_ns=100.000 median_ns=110.000 max_ns=120.000 paired_delta_median_ns=0.000 incremental_ns_per_command=0.000",
+        "command_path_vk_lifecycle commands=1 repetitions=5 min_ns=190.000 median_ns=210.000 max_ns=230.000 paired_delta_median_ns=100.000 incremental_ns_per_command=100.000",
+        "command_path_vk_lifecycle commands=16 repetitions=5 min_ns=250.000 median_ns=270.000 max_ns=290.000 paired_delta_median_ns=160.000 incremental_ns_per_command=10.000",
+        "command_path_vk_lifecycle commands=256 repetitions=5 min_ns=2600.000 median_ns=2670.000 max_ns=2700.000 paired_delta_median_ns=2560.000 incremental_ns_per_command=10.000",
+        *tuple(
+            f"command_path_vk_lifecycle_work commands={commands} samples=5 host_allocations=0 command_pool_creations=0 command_buffer_allocations=0 command_buffer_frees=0 command_buffer_resets=5 image_view_creations=0 vma_allocations=0 registry_lock_acquisitions=0 shader_module_creations=0 pipeline_creations=0 status=pass"
+            for commands in (0, 1, 16, 256)
+        ),
+    )
+)
 
 
 
@@ -255,6 +300,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "resource_create_bench",
                 "descriptor_churn_bench",
                 "upload_throughput_bench",
+                "command_wrapper_bench",
+                "command_path_baseline_bench",
                 "command_record_bench",
                 "lifecycle_bench",
                 "submit_batch_bench",
@@ -268,6 +315,26 @@ class BenchmarkRunnerTests(unittest.TestCase):
             ("warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4", "uploads/s"),
         )
         self.assertIn("repetitions=5", runner.BENCHMARK_METHODS["command_record_bench"][0])
+        self.assertEqual(
+            runner.BENCHMARK_PROJECTS["command_wrapper_bench"],
+            "test/cpu",
+        )
+        self.assertIn(
+            "lifecycle=0,1,16,256x5",
+            runner.BENCHMARK_METHODS["command_path_baseline_bench"][0],
+        )
+        self.assertIn(
+            ("command_wrapper_bench", "test/cpu"),
+            runner.benchmark_build_targets(),
+        )
+        self.assertIn(
+            ("command_record_bench", "test"),
+            runner.benchmark_build_targets(),
+        )
+        self.assertIn(
+            ("command_path_baseline_bench", "test"),
+            runner.benchmark_build_targets(),
+        )
         self.assertIn(
             "generated=64 prewarm+64/repetition",
             runner.BENCHMARK_METHODS["command_record_bench"][0],
@@ -315,6 +382,254 @@ class BenchmarkRunnerTests(unittest.TestCase):
             source,
         )
         self.assertIn("uint measured_iterations", source)
+
+    def test_command_wrapper_measurement_accepts_exact_schema(self):
+        runner = load_runner()
+        runner.require_measurement(COMMAND_WRAPPER_OUTPUT, "command_wrapper_bench")
+
+    def test_command_wrapper_measurement_rejects_schema_mutations(self):
+        runner = load_runner()
+        operation_line = COMMAND_WRAPPER_OUTPUT.splitlines()[0]
+        mutations = (
+            (COMMAND_WRAPPER_OUTPUT.replace(operation_line + "\n", "", 1), "record count"),
+            (COMMAND_WRAPPER_OUTPUT.replace("operation=draw", "operation=dispatch", 1), "identity"),
+            (COMMAND_WRAPPER_OUTPUT.replace("iterations=20000", "iterations=19999", 1), "iteration"),
+            (COMMAND_WRAPPER_OUTPUT.replace("repetitions=5", "repetitions=4", 1), "repetition"),
+            (COMMAND_WRAPPER_OUTPUT.replace("checksum=600000", "checksum=599999", 1), "checksum"),
+            (COMMAND_WRAPPER_OUTPUT.replace("direct_min_ns=1.000", "direct_min_ns=3.000", 1), "direct timing"),
+            (COMMAND_WRAPPER_OUTPUT.replace("public_max_ns=6.000", "public_max_ns=4.000", 1), "public timing"),
+            (COMMAND_WRAPPER_OUTPUT.replace("ratio=2.500000", "ratio=2.000000", 1), "ratio"),
+            (COMMAND_WRAPPER_OUTPUT.replace("observed=7800000", "observed=7799999"), "observation"),
+            (COMMAND_WRAPPER_OUTPUT.replace("status=pass", "status=fail"), "check"),
+        )
+        for output, error in mutations:
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(ValueError, error):
+                    runner.require_measurement(output, "command_wrapper_bench")
+
+    def test_command_path_vulkan_measurement_accepts_exact_schema(self):
+        runner = load_runner()
+        runner.require_measurement(
+            COMMAND_PATH_VK_OUTPUT,
+            "command_path_baseline_bench",
+        )
+
+    def test_command_path_vulkan_measurement_rejects_schema_mutations(self):
+        runner = load_runner()
+        first_operation = COMMAND_PATH_VK_OUTPUT.splitlines()[1]
+        mutations = (
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(first_operation + "\n", "", 1),
+                "record count",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "validation=trusted",
+                    "validation=full",
+                    1,
+                ),
+                "policy",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "operation=draw",
+                    "operation=dispatch",
+                    1,
+                ),
+                "identity",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("iterations=20000", "iterations=1", 1),
+                "iteration",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("repetitions=5", "repetitions=4", 1),
+                "repetition",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "native_calls_per_iteration=2",
+                    "native_calls_per_iteration=1",
+                    1,
+                ),
+                "native work",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("direct_min_ns=1.000", "direct_min_ns=3.000", 1),
+                "direct timing",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("ratio=2.500000", "ratio=2.000000", 1),
+                "ratio",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("public_max_ns=6.000", "public_max_ns=4.000", 1),
+                "public timing",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("loops=10", "loops=9", 1),
+                "loop count",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "command_path_vk_work operation=draw",
+                    "command_path_vk_work operation=dispatch",
+                    1,
+                ),
+                "work order",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("host_allocations=0", "host_allocations=1", 1),
+                "structural work",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "shader_module_creations=0",
+                    "shader_module_creations=1",
+                    1,
+                ),
+                "structural work",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "pipeline_creations=0",
+                    "pipeline_creations=1",
+                    1,
+                ),
+                "structural work",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "pipeline_creations=0 status=pass",
+                    "pipeline_creations=0 status=fail",
+                    1,
+                ),
+                "work record",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "operation=copy_buffer elements=64",
+                    "operation=copy_buffer elements=63",
+                    1,
+                ),
+                "element count",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "operation=copy_buffer elements=64 expected_checksum=6112",
+                    "operation=dispatch elements=64 expected_checksum=6112",
+                    1,
+                ),
+                "equivalence order",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("direct_checksum=2080", "direct_checksum=2079", 1),
+                "checksum",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "expected_checksum=2080 direct_checksum=2080 public_checksum=2080",
+                    "expected_checksum=0 direct_checksum=0 public_checksum=0",
+                    1,
+                ),
+                "checksum",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("pairwise=true", "pairwise=false", 1),
+                "equivalence record",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "commands=16 repetitions=5",
+                    "commands=15 repetitions=5",
+                    1,
+                ),
+                "command count",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace("min_ns=100.000", "min_ns=120.000", 1),
+                "lifecycle timing",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "paired_delta_median_ns=0.000 incremental_ns_per_command=0.000",
+                    "paired_delta_median_ns=1.000 incremental_ns_per_command=1.000",
+                    1,
+                ),
+                "zero lifecycle increment",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "paired_delta_median_ns=160.000 incremental_ns_per_command=10.000",
+                    "paired_delta_median_ns=160.000 incremental_ns_per_command=9.000",
+                    1,
+                ),
+                "increment calculation",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "commands=0 samples=5",
+                    "commands=0 samples=4",
+                    1,
+                ),
+                "sample count",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "command_path_vk_lifecycle_work commands=16",
+                    "command_path_vk_lifecycle_work commands=15",
+                    1,
+                ),
+                "work command count",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "commands=0 samples=5 host_allocations=0",
+                    "commands=0 samples=5 host_allocations=1",
+                    1,
+                ),
+                "unrelated work",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "command_buffer_resets=5",
+                    "command_buffer_resets=4",
+                    1,
+                ),
+                "reset count",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "command_path_vk_lifecycle_work commands=0 samples=5 host_allocations=0 command_pool_creations=0 command_buffer_allocations=0 command_buffer_frees=0 command_buffer_resets=5 image_view_creations=0 vma_allocations=0 registry_lock_acquisitions=0",
+                    "command_path_vk_lifecycle_work commands=0 samples=5 host_allocations=0 command_pool_creations=0 command_buffer_allocations=0 command_buffer_frees=0 command_buffer_resets=5 image_view_creations=0 vma_allocations=0 registry_lock_acquisitions=1",
+                    1,
+                ),
+                "registry-lock count",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "command_path_vk_lifecycle_work commands=0 samples=5 host_allocations=0 command_pool_creations=0 command_buffer_allocations=0 command_buffer_frees=0 command_buffer_resets=5 image_view_creations=0 vma_allocations=0 registry_lock_acquisitions=0 shader_module_creations=0",
+                    "command_path_vk_lifecycle_work commands=0 samples=5 host_allocations=0 command_pool_creations=0 command_buffer_allocations=0 command_buffer_frees=0 command_buffer_resets=5 image_view_creations=0 vma_allocations=0 registry_lock_acquisitions=0 shader_module_creations=1",
+                    1,
+                ),
+                "unrelated work",
+            ),
+            (
+                COMMAND_PATH_VK_OUTPUT.replace(
+                    "command_path_vk_lifecycle_work commands=0 samples=5 host_allocations=0 command_pool_creations=0 command_buffer_allocations=0 command_buffer_frees=0 command_buffer_resets=5 image_view_creations=0 vma_allocations=0 registry_lock_acquisitions=0 shader_module_creations=0 pipeline_creations=0",
+                    "command_path_vk_lifecycle_work commands=0 samples=5 host_allocations=0 command_pool_creations=0 command_buffer_allocations=0 command_buffer_frees=0 command_buffer_resets=5 image_view_creations=0 vma_allocations=0 registry_lock_acquisitions=0 shader_module_creations=0 pipeline_creations=1",
+                    1,
+                ),
+                "unrelated work",
+            ),
+        )
+        for output, error in mutations:
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(ValueError, error):
+                    runner.require_measurement(
+                        output,
+                        "command_path_baseline_bench",
+                    )
 
     def test_validation_mode_reaches_every_benchmark_device(self):
         source = BENCH_LIFETIME.read_text(encoding="utf-8")
