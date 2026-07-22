@@ -144,6 +144,10 @@ Two sizing rules that bite:
   and `generated_preprocess_bytes` limits their total exact driver-reported
   bytes. Reservation occurs only while the allocator is quiescent. Recreate a
   quiescent allocator with larger values after a capacity fault.
+- **Infinite swapchain acquisition is platform-conditional.**
+  `TIMEOUT_INFINITE` maps to the native infinite timeout. Use it only when the
+  surface platform guarantees presentation forward progress; otherwise use the
+  nonblocking default or a finite nanosecond budget.
 
 ## 3. Driver and environment quirks
 

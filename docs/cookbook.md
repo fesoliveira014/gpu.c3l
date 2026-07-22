@@ -358,7 +358,11 @@ gpu::ColorTargetState[1] pipeline_colors = {{
     .write_mask = gpu::COLOR_WRITE_ALL,
 }};
 
-gpu::AcquiredImage acquired = gpu::acquire_next_image(&device, swapchain)!;
+gpu::AcquiredImage acquired = gpu::acquire_next_image(
+    &device,
+    swapchain,
+    2_000_000,
+)!;
 gpu::TextureState color_attachment = {
     .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
     .stages = { .color_output = true },

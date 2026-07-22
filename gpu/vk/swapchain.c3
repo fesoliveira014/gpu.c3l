@@ -10,6 +10,7 @@ alias SwapchainCompletionPollFn = fn bool? (
     gpu::Device*,
     gpu::CompletionPoint,
 );
+alias SwapchainAcquireFn = vk::PFN_vkAcquireNextImageKHR;
 alias SwapchainFenceStatusFn = fn vk::Result (
     vk::Device,
     vk::Fence,
@@ -31,7 +32,6 @@ const ulong READINESS_SWAPCHAIN_INDEX_MASK =
     (1ull << READINESS_SWAPCHAIN_INDEX_BITS) - 1;
 const ulong READINESS_SWAPCHAIN_GENERATION_MASK =
     (1ull << READINESS_SWAPCHAIN_GENERATION_BITS) - 1;
-const ulong ACQUIRE_TIMEOUT_NS = 1_000_000_000;
 const uint SWAPCHAIN_ACQUIRE_SLOT_COUNT = 2;
 
 struct SwapchainSlot {
@@ -56,6 +56,13 @@ struct SwapchainSlot {
     uint                     pending_image;
     vk::Semaphore            pending_acquire_semaphore;
     gpu::CompletionPoint     render_completion;
+}
+
+struct SwapchainAcquisitionCandidate {
+    gpu::SwapchainReadiness readiness;
+    uint                    acquisition;
+    uint                    semaphore_index;
+    vk::Semaphore           semaphore;
 }
 
 struct SwapchainCell {
@@ -366,17 +373,6 @@ fn uint? select_acquire_semaphore_with(
         }
     }
     return gpu::WAIT_TIMEOUT~;
-}
-
-fn uint? select_acquire_semaphore(
-    gpu::Device* device,
-    SwapchainSlot* slot,
-) @private {
-    return select_acquire_semaphore_with(
-        device,
-        slot,
-        &poll_swapchain_completion,
-    );
 }
 
 fn void commit_swapchain_submit(
@@ -1111,22 +1107,136 @@ fn gpu::SwapchainInfo? vk_get_swapchain_info(gpu::Device* device, gpu::Swapchain
 fn gpu::AcquiredImage? vk_acquire_next_image(
     gpu::Device* device,
     gpu::SwapchainHandle handle,
+    ulong timeout_ns,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
+    return vk_acquire_next_image_with(
+        device:      device,
+        state:       state,
+        handle:      handle,
+        timeout_ns:  timeout_ns,
+        poll_fn:     &poll_swapchain_completion,
+        acquire_fn:  state.device_dispatch.presentation.acquire_next_image,
+    );
+}
+
+fn SwapchainAcquisitionCandidate? prepare_swapchain_acquisition(
+    gpu::Device* device,
+    WsiDiagnosticContext* context,
+    SwapchainSlot* slot,
+    gpu::SwapchainHandle handle,
+    SwapchainCompletionPollFn poll_fn,
+) {
+    check_swapchain_acquire_lifecycle(context, slot)!;
+    uint acquisition = next_swapchain_acquisition(slot.acquisition)!;
+    gpu::SwapchainReadiness readiness = make_swapchain_readiness(
+        *device,
+        handle,
+        acquisition,
+    )!;
+    if (slot.acquire_semaphores.len == 0
+        || slot.acquire_semaphores.len != slot.acquire_retirements.len) {
+        return report_wsi_backend_failure(
+            context:      context,
+            public_fault: gpu::BACKEND_ERROR,
+            backend_text: "swapchain acquire semaphore ring invariant failed",
+        )~;
+    }
+    uint semaphore_index = select_acquire_semaphore_with(
+        device,
+        slot,
+        poll_fn,
+    )!;
+    vk::Semaphore semaphore = slot.acquire_semaphores[semaphore_index];
+    if (semaphore == null) {
+        return report_wsi_backend_failure(
+            context:      context,
+            public_fault: gpu::BACKEND_ERROR,
+            backend_text: "swapchain acquire semaphore is null",
+        )~;
+    }
+    return {
+        .readiness       = readiness,
+        .acquisition     = acquisition,
+        .semaphore_index = semaphore_index,
+        .semaphore       = semaphore,
+    };
+}
+
+fn gpu::AcquiredImage? commit_acquired_image(
+    WsiDiagnosticContext* context,
+    SwapchainSlot* slot,
+    gpu::SwapchainHandle handle,
+    SwapchainAcquisitionCandidate candidate,
+    uint image_index,
+    bool suboptimal,
+) {
+    if (image_index >= slot.image_count
+        || image_index >= MAX_SWAPCHAIN_IMAGES) {
+        return report_wsi_backend_failure(
+            context:      context,
+            public_fault: gpu::BACKEND_ERROR,
+            backend_text: "native acquire returned an invalid image index",
+        )~;
+    }
+    gpu::AttachmentViewHandle attachment_view =
+        slot.attachment_views[image_index];
+    if (!attachment_view.is_valid()) {
+        return report_wsi_backend_failure(
+            context:      context,
+            public_fault: gpu::BACKEND_ERROR,
+            backend_text: "swapchain attachment view invariant failed",
+        )~;
+    }
+    gpu::TextureHandle texture_handle = slot.textures[image_index];
+    TextureSlot* texture = resolve_swapchain_texture_for_operation(
+        context: context,
+        handle:  texture_handle,
+    )!;
+    gpu::AcquiredImage image = make_acquired_image(
+        texture:         texture,
+        handle:          texture_handle,
+        attachment_view: attachment_view,
+        readiness:       candidate.readiness,
+        index:           image_index,
+        suboptimal:      suboptimal,
+    );
+
+    slot.acquire_pending = true;
+    slot.readiness_consumed = false;
+    slot.acquisition = candidate.acquisition;
+    slot.next_acquire_semaphore = (candidate.semaphore_index + 1)
+        % (uint)slot.acquire_semaphores.len;
+    slot.pending_acquire_semaphore_index = candidate.semaphore_index;
+    slot.pending_image = image_index;
+    slot.pending_acquire_semaphore = candidate.semaphore;
+    slot.render_completion = {};
+    return image;
+}
+
+fn gpu::AcquiredImage? vk_acquire_next_image_with(
+    gpu::Device* device,
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+    ulong timeout_ns,
+    SwapchainCompletionPollFn poll_fn,
+    SwapchainAcquireFn acquire_fn,
+) {
     WsiDiagnosticContext context = { .state = state, .operation = "acquire_next_image" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
-    check_swapchain_acquire_lifecycle(&context, slot)!;
-    uint acquisition = next_swapchain_acquisition(slot.acquisition)!;
-
-    uint acquire_semaphore_index = select_acquire_semaphore(device, slot)!;
-    vk::Semaphore acquire_semaphore =
-        slot.acquire_semaphores[acquire_semaphore_index];
+    SwapchainAcquisitionCandidate candidate = prepare_swapchain_acquisition(
+        device:   device,
+        context:  &context,
+        slot:     slot,
+        handle:   handle,
+        poll_fn:  poll_fn,
+    )!;
     uint image_index = 0;
-    vk::Result result = state.device_dispatch.presentation.acquire_next_image(
+    vk::Result result = acquire_fn(
         state.device,
         slot.swapchain,
-        ACQUIRE_TIMEOUT_NS,
-        acquire_semaphore,
+        timeout_ns,
+        candidate.semaphore,
         (vk::Fence)null,
         &image_index,
     );
@@ -1135,32 +1245,13 @@ fn gpu::AcquiredImage? vk_acquire_next_image(
         kind:    WsiResultKind.ACQUIRE,
         result:  result,
     )!;
-
-    TextureSlot* texture = resolve_swapchain_texture_for_operation(
-        context: &context,
-        handle:  slot.textures[image_index],
-    )!;
-    gpu::SwapchainReadiness readiness = make_swapchain_readiness(
-        *device,
-        handle,
-        acquisition,
-    )!;
-    slot.acquire_pending = true;
-    slot.readiness_consumed = false;
-    slot.acquisition = acquisition;
-    slot.next_acquire_semaphore = (acquire_semaphore_index + 1)
-        % (uint)slot.acquire_semaphores.len;
-    slot.pending_acquire_semaphore_index = acquire_semaphore_index;
-    slot.pending_image = image_index;
-    slot.pending_acquire_semaphore = acquire_semaphore;
-    slot.render_completion = {};
-    return make_acquired_image(
-        texture:         texture,
-        handle:          slot.textures[image_index],
-        attachment_view: slot.attachment_views[image_index],
-        readiness:       readiness,
-        index:           image_index,
-        suboptimal:      result == vk::Result.SUBOPTIMAL_KHR,
+    return commit_acquired_image(
+        context:     &context,
+        slot:        slot,
+        handle:      handle,
+        candidate:   candidate,
+        image_index: image_index,
+        suboptimal:  result == vk::Result.SUBOPTIMAL_KHR,
     );
 }
 

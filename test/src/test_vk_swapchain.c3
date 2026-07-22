@@ -6,13 +6,222 @@ import std::core::mem;
 import vma;
 import vk;
 
+const ulong ACQUIRE_FINITE_TIMEOUT_NS = 2_000_000;
+const ulong ACQUIRE_FIXTURE_OWNER = 101;
+
+struct AcquisitionStateSnapshot {
+    bool                                              acquire_pending;
+    bool                                              readiness_consumed;
+    uint                                              acquisition;
+    uint                                              next_acquire_semaphore;
+    uint                                              pending_acquire_semaphore_index;
+    uint                                              pending_image;
+    vk::Semaphore                                     pending_acquire_semaphore;
+    gpu::CompletionPoint                              render_completion;
+    gpu::CompletionPoint[gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT] retirements;
+}
+
+struct AcquisitionFixture {
+    gpu::Device                                                   device;
+    gpu::vk::VkDeviceState                                       state;
+    gpu::vk::SwapchainCell[1]                                    swapchain_cells;
+    gpu::vk::TextureCell[1]                                      texture_cells;
+    vk::Semaphore[gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT]         semaphores;
+    gpu::CompletionPoint[gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT]  retirements;
+    gpu::SwapchainHandle                                         handle;
+}
+
 uint captured_present_calls;
 uint captured_fence_status_calls;
 uint captured_fence_reset_calls;
+uint captured_acquire_calls;
+uint captured_acquire_image_index;
+ulong captured_acquire_timeout;
+ulong captured_public_acquire_timeout;
+vk::Result captured_acquire_result;
+vk::Semaphore captured_acquire_semaphore;
 vk::Image borrowed_view_backing_image;
 uint borrowed_view_swapchain_creates;
 uint borrowed_view_swapchain_destroys;
 uint borrowed_view_acquires;
+
+fn vk::Result capture_acquire(
+    vk::Device device,
+    vk::SwapchainKHR swapchain,
+    ulong timeout,
+    vk::Semaphore semaphore,
+    vk::Fence fence,
+    uint* image_index,
+) {
+    (void)device;
+    (void)swapchain;
+    (void)fence;
+    captured_acquire_calls++;
+    captured_acquire_timeout = timeout;
+    captured_acquire_semaphore = semaphore;
+    *image_index = captured_acquire_image_index;
+    return captured_acquire_result;
+}
+
+fn void reset_acquire_capture(vk::Result result, uint image_index = 0) {
+    captured_acquire_calls = 0;
+    captured_acquire_timeout = 0;
+    captured_acquire_semaphore = (vk::Semaphore)null;
+    captured_acquire_result = result;
+    captured_acquire_image_index = image_index;
+}
+
+fn void capture_public_acquire_destroy(void* backend_state) {
+    (void)backend_state;
+}
+
+fn gpu::AcquiredImage? capture_public_acquire(
+    gpu::Device* device,
+    gpu::SwapchainHandle swapchain,
+    ulong timeout_ns,
+) {
+    (void)device;
+    (void)swapchain;
+    captured_public_acquire_timeout = timeout_ns;
+    return gpu::WAIT_TIMEOUT~;
+}
+
+gpu::BackendVTable capture_public_acquire_vtable = {
+    .destroy_device     = &capture_public_acquire_destroy,
+    .acquire_next_image = &capture_public_acquire,
+};
+
+fn void initialize_acquisition_fixture(AcquisitionFixture* fixture) {
+    fixture.device = { .index = 1, .generation = 1 };
+    fixture.state.device = (vk::Device)1;
+    fixture.state.textures = {
+        .slots = fixture.texture_cells[..],
+        .owner = ACQUIRE_FIXTURE_OWNER,
+    };
+    gpu::TextureHandle texture = fixture.state.textures.alloc({})!!;
+    fixture.state.presentation.swapchains = {
+        .slots = fixture.swapchain_cells[..],
+        .owner = ACQUIRE_FIXTURE_OWNER + 1,
+    };
+    fixture.semaphores[0] = (vk::Semaphore)11;
+    fixture.semaphores[1] = (vk::Semaphore)13;
+    fixture.retirements[0] = {
+        .device  = fixture.device,
+        .payload = 3ull << gpu::COMPLETION_QUEUE_BITS,
+    };
+    fixture.retirements[1] = {};
+    gpu::vk::SwapchainSlot slot = {
+        .swapchain          = (vk::SwapchainKHR)17,
+        .image_count        = 1,
+        .acquire_semaphores = fixture.semaphores[..],
+        .acquire_retirements = fixture.retirements[..],
+    };
+    slot.textures[0] = texture;
+    slot.attachment_views[0] = {
+        .owner      = ACQUIRE_FIXTURE_OWNER + 2,
+        .generation = 1,
+    };
+    fixture.handle = fixture.state.presentation.swapchains.alloc(slot)!!;
+}
+
+fn void reset_acquisition_state(AcquisitionFixture* fixture) {
+    gpu::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    slot.acquire_pending = false;
+    slot.readiness_consumed = true;
+    slot.acquisition = 11;
+    slot.next_acquire_semaphore = 1;
+    slot.pending_acquire_semaphore_index = 0;
+    slot.pending_image = 7;
+    slot.pending_acquire_semaphore = (vk::Semaphore)19;
+    slot.render_completion = {
+        .device  = fixture.device,
+        .payload = 5ull << gpu::COMPLETION_QUEUE_BITS,
+    };
+    fixture.retirements[0] = {
+        .device  = fixture.device,
+        .payload = 3ull << gpu::COMPLETION_QUEUE_BITS,
+    };
+    fixture.retirements[1] = {};
+}
+
+fn AcquisitionStateSnapshot snapshot_acquisition_state(
+    gpu::vk::SwapchainSlot* slot,
+) {
+    AcquisitionStateSnapshot snapshot = {
+        .acquire_pending                 = slot.acquire_pending,
+        .readiness_consumed              = slot.readiness_consumed,
+        .acquisition                     = slot.acquisition,
+        .next_acquire_semaphore          = slot.next_acquire_semaphore,
+        .pending_acquire_semaphore_index = slot.pending_acquire_semaphore_index,
+        .pending_image                   = slot.pending_image,
+        .pending_acquire_semaphore       = slot.pending_acquire_semaphore,
+        .render_completion               = slot.render_completion,
+    };
+    foreach (index, retirement : slot.acquire_retirements) {
+        snapshot.retirements[index] = retirement;
+    }
+    return snapshot;
+}
+
+fn void assert_acquisition_state_unchanged(
+    gpu::vk::SwapchainSlot* slot,
+    AcquisitionStateSnapshot expected,
+) {
+    assert(slot.acquire_pending == expected.acquire_pending,
+        "failed acquire preserves acquire_pending");
+    assert(slot.readiness_consumed == expected.readiness_consumed,
+        "failed acquire preserves readiness_consumed");
+    assert(slot.acquisition == expected.acquisition,
+        "failed acquire preserves the acquisition identity");
+    assert(slot.next_acquire_semaphore == expected.next_acquire_semaphore,
+        "failed acquire preserves the acquire ring cursor");
+    assert(slot.pending_acquire_semaphore_index
+        == expected.pending_acquire_semaphore_index,
+        "failed acquire preserves the pending semaphore index");
+    assert(slot.pending_image == expected.pending_image,
+        "failed acquire preserves the pending image");
+    assert(slot.pending_acquire_semaphore
+        == expected.pending_acquire_semaphore,
+        "failed acquire preserves the pending semaphore");
+    assert(slot.render_completion == expected.render_completion,
+        "failed acquire preserves render completion");
+    foreach (index, retirement : slot.acquire_retirements) {
+        assert(retirement == expected.retirements[index],
+            "failed acquire preserves every retirement entry");
+    }
+}
+
+fn gpu::AcquiredImage? run_captured_acquire(
+    AcquisitionFixture* fixture,
+    ulong timeout_ns,
+) {
+    return gpu::vk::vk_acquire_next_image_with(
+        device:     &fixture.device,
+        state:      &fixture.state,
+        handle:     fixture.handle,
+        timeout_ns: timeout_ns,
+        poll_fn:    &poll_no_retirement,
+        acquire_fn: &capture_acquire,
+    );
+}
+
+fn void assert_mapped_acquire_failure_preserves_state(
+    AcquisitionFixture* fixture,
+    vk::Result result,
+    fault expected_fault,
+) {
+    gpu::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
+    reset_acquire_capture(result);
+    fault actual_fault = @catch(run_captured_acquire(fixture, 0));
+    assert(actual_fault == expected_fault,
+        "native acquire result maps to the expected public fault");
+    assert(captured_acquire_calls == 1,
+        "mapped native acquire failure calls the native seam once");
+    assert_acquisition_state_unchanged(slot, before);
+}
 
 fn vk::Result borrowed_view_surface_capabilities(
     vk::PhysicalDevice physical_device,
@@ -585,6 +794,222 @@ fn bool? poll_no_retirement(
     return false;
 }
 
+fn void acquire_timeout_values_reach_native_unchanged() @test {
+    AcquisitionFixture fixture = {};
+    initialize_acquisition_fixture(&fixture);
+    reset_acquisition_state(&fixture);
+    gpu::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
+    ulong[3] timeouts = {
+        0,
+        ACQUIRE_FINITE_TIMEOUT_NS,
+        gpu::TIMEOUT_INFINITE,
+    };
+
+    foreach (timeout_ns : timeouts) {
+        reset_acquire_capture(vk::Result.TIMEOUT);
+        fault timeout = @catch(run_captured_acquire(&fixture, timeout_ns));
+        assert(timeout == gpu::WAIT_TIMEOUT,
+            "explicit acquire timeout remains retryable");
+        assert(captured_acquire_calls == 1,
+            "each timeout value reaches the native seam once");
+        assert(captured_acquire_timeout == timeout_ns,
+            "zero, finite, and infinite timeouts reach Vulkan unchanged");
+        assert_acquisition_state_unchanged(slot, before);
+    }
+}
+
+fn void public_acquire_default_reaches_backend_as_zero() @test {
+    uint backend_state;
+    gpu::Device device = gpu::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &capture_public_acquire_vtable,
+        backend_state: &backend_state,
+    )!!;
+    defer gpu::destroy_device(&device)!!;
+
+    captured_public_acquire_timeout = gpu::TIMEOUT_INFINITE;
+    fault default_timeout = @catch(gpu::acquire_next_image(&device, {}));
+    assert(default_timeout == gpu::WAIT_TIMEOUT,
+        "public acquire preserves the backend timeout fault");
+    assert(captured_public_acquire_timeout == 0,
+        "omitting timeout_ns reaches the backend as zero");
+
+    fault finite_timeout = @catch(gpu::acquire_next_image(
+        &device,
+        {},
+        ACQUIRE_FINITE_TIMEOUT_NS,
+    ));
+    assert(finite_timeout == gpu::WAIT_TIMEOUT,
+        "explicit finite acquire preserves the backend timeout fault");
+    assert(captured_public_acquire_timeout == ACQUIRE_FINITE_TIMEOUT_NS,
+        "the public wrapper forwards an explicit timeout unchanged");
+}
+
+fn void retryable_acquire_failures_preserve_candidate_for_success() @test {
+    AcquisitionFixture fixture = {};
+    initialize_acquisition_fixture(&fixture);
+    reset_acquisition_state(&fixture);
+    gpu::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
+
+    reset_acquire_capture(vk::Result.NOT_READY);
+    fault not_ready = @catch(run_captured_acquire(&fixture, 0));
+    vk::Semaphore first_semaphore = captured_acquire_semaphore;
+    assert(not_ready == gpu::WAIT_TIMEOUT,
+        "native not-ready remains retryable");
+    assert_acquisition_state_unchanged(slot, before);
+
+    reset_acquire_capture(vk::Result.TIMEOUT);
+    fault timeout = @catch(run_captured_acquire(
+        &fixture,
+        ACQUIRE_FINITE_TIMEOUT_NS,
+    ));
+    assert(timeout == gpu::WAIT_TIMEOUT,
+        "native timeout remains retryable");
+    assert(captured_acquire_semaphore == first_semaphore,
+        "timeout retries the same uncommitted semaphore candidate");
+    assert_acquisition_state_unchanged(slot, before);
+
+    reset_acquire_capture(vk::Result.SUCCESS);
+    gpu::AcquiredImage image = run_captured_acquire(
+        &fixture,
+        ACQUIRE_FINITE_TIMEOUT_NS,
+    )!!;
+    assert(captured_acquire_semaphore == first_semaphore,
+        "success commits the same candidate used by prior retries");
+    assert(slot.acquire_pending && !slot.readiness_consumed,
+        "successful acquire publishes one pending readiness");
+    assert(slot.acquisition == before.acquisition + 1,
+        "successful acquire advances the identity exactly once");
+    assert(slot.next_acquire_semaphore == 0
+        && slot.pending_acquire_semaphore_index == 1,
+        "successful acquire advances the ring cursor exactly once");
+    assert(slot.pending_acquire_semaphore == first_semaphore
+        && slot.pending_image == 0,
+        "successful acquire publishes the native image and semaphore");
+    assert(!slot.render_completion.is_valid(),
+        "successful acquire clears the prior render completion");
+    assert(image.readiness.is_valid() && !image.suboptimal,
+        "successful acquire returns the committed readiness");
+
+    reset_acquire_capture(vk::Result.SUCCESS);
+    fault duplicate = @catch(run_captured_acquire(&fixture, 0));
+    assert(duplicate == gpu::INVALID_RESOURCE_STATE,
+        "a committed acquisition blocks a second acquire");
+    assert(captured_acquire_calls == 0,
+        "the lifecycle guard blocks native mutation after one commit");
+}
+
+fn void suboptimal_acquire_commits_once() @test {
+    AcquisitionFixture fixture = {};
+    initialize_acquisition_fixture(&fixture);
+    reset_acquisition_state(&fixture);
+    gpu::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    uint prior_acquisition = slot.acquisition;
+
+    reset_acquire_capture(vk::Result.SUBOPTIMAL_KHR);
+    gpu::AcquiredImage image = run_captured_acquire(&fixture, 0)!!;
+    assert(captured_acquire_calls == 1,
+        "suboptimal acquire calls the native seam once");
+    assert(image.suboptimal && slot.acquire_pending,
+        "suboptimal acquire commits a usable acquired image");
+    assert(slot.acquisition == prior_acquisition + 1,
+        "suboptimal acquire advances the identity exactly once");
+}
+
+fn void mapped_acquire_errors_preserve_transaction_state() @test {
+    AcquisitionFixture fixture = {};
+    initialize_acquisition_fixture(&fixture);
+    reset_acquisition_state(&fixture);
+
+    assert_mapped_acquire_failure_preserves_state(
+        &fixture,
+        vk::Result.ERROR_OUT_OF_DATE_KHR,
+        gpu::SWAPCHAIN_OUT_OF_DATE,
+    );
+    assert_mapped_acquire_failure_preserves_state(
+        &fixture,
+        vk::Result.ERROR_SURFACE_LOST_KHR,
+        gpu::SURFACE_LOST,
+    );
+    assert_mapped_acquire_failure_preserves_state(
+        &fixture,
+        vk::Result.ERROR_OUT_OF_HOST_MEMORY,
+        gpu::OUT_OF_HOST_MEMORY,
+    );
+    assert_mapped_acquire_failure_preserves_state(
+        &fixture,
+        vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
+        gpu::OUT_OF_DEVICE_MEMORY,
+    );
+    assert_mapped_acquire_failure_preserves_state(
+        &fixture,
+        vk::Result.ERROR_DEVICE_LOST,
+        gpu::DEVICE_LOST,
+    );
+}
+
+fn void exhausted_acquisition_identity_precedes_native_acquire() @test {
+    AcquisitionFixture fixture = {};
+    initialize_acquisition_fixture(&fixture);
+    reset_acquisition_state(&fixture);
+    gpu::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    slot.acquisition = uint::max;
+    AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
+
+    reset_acquire_capture(vk::Result.SUCCESS);
+    fault exhausted = @catch(run_captured_acquire(&fixture, 0));
+    assert(exhausted == gpu::SLOT_TABLE_FULL,
+        "maximum acquisition identity faults before wrapping");
+    assert(captured_acquire_calls == 0,
+        "identity exhaustion precedes the native acquire");
+    assert_acquisition_state_unchanged(slot, before);
+}
+
+fn void busy_acquire_ring_precedes_native_acquire() @test {
+    AcquisitionFixture fixture = {};
+    initialize_acquisition_fixture(&fixture);
+    reset_acquisition_state(&fixture);
+    gpu::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    fixture.retirements[1] = {
+        .device  = fixture.device,
+        .payload = 7ull << gpu::COMPLETION_QUEUE_BITS,
+    };
+    AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
+
+    reset_acquire_capture(vk::Result.SUCCESS);
+    fault busy = @catch(run_captured_acquire(&fixture, 0));
+    assert(busy == gpu::WAIT_TIMEOUT,
+        "an all-busy acquire ring remains retryable");
+    assert(captured_acquire_calls == 0,
+        "an all-busy acquire ring makes no native call");
+    assert_acquisition_state_unchanged(slot, before);
+}
+
+fn void invalid_native_acquire_index_preserves_transaction_state() @test {
+    AcquisitionFixture fixture = {};
+    initialize_acquisition_fixture(&fixture);
+    reset_acquisition_state(&fixture);
+    gpu::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
+
+    reset_acquire_capture(vk::Result.SUCCESS, uint::max);
+    fault invalid_index = @catch(run_captured_acquire(&fixture, 0));
+    assert(invalid_index == gpu::BACKEND_ERROR,
+        "an invalid native image index becomes a backend error");
+    assert(captured_acquire_calls == 1,
+        "the invalid index comes from exactly one native acquire");
+    assert_acquisition_state_unchanged(slot, before);
+}
+
 fn void acquire_semaphores_retire_before_reuse() @test {
     gpu::Device device = { .generation = 1 };
     assert(gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT == 2,
@@ -917,6 +1342,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::AcquiredImage acquired = gpu::vk::vk_acquire_next_image(
         &device,
         swapchain,
+        0,
     )!!;
     gpu::TextureHandle old_texture = acquired.texture;
     gpu::AttachmentViewHandle old_view = acquired.attachment_view;

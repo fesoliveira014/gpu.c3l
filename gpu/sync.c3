@@ -1,5 +1,6 @@
 module gpu;
 
+const ulong TIMEOUT_INFINITE = ulong::max;
 const CompletionPoint COMPLETION_POINT_INVALID = {};
 const uint STAGE_MASK_BITS @private = 0x01FF;
 
@@ -185,7 +186,10 @@ fn bool? poll_completion(CompletionPoint point) {
 
 <* Wait up to timeout_ns for the queue to complete this point. A timeout leaves
    the point unchanged and faults WAIT_TIMEOUT, so the wait may be retried. *>
-fn void? wait_completion(CompletionPoint point, ulong timeout_ns = ulong::max) {
+fn void? wait_completion(
+    CompletionPoint point,
+    ulong timeout_ns = TIMEOUT_INFINITE,
+) {
     Device device = point.device;
     DeviceOperation operation = begin_device_operation(&device)!;
     defer end_device_operation(&operation);

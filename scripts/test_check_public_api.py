@@ -106,6 +106,22 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "acquire_next_image",
+                        "return_type": {"name": "AcquiredImage?"},
+                        "members": [
+                            {"name": "device", "type": {"name": "Device*"}},
+                            {
+                                "name": "swapchain",
+                                "type": {"name": "SwapchainHandle"},
+                            },
+                            {
+                                "name": "timeout_ns",
+                                "type": {"name": "ulong"},
+                                "default_value": "0",
+                            },
+                        ],
+                    },
+                    {
                         "name": "allocate_memory",
                         "return_type": {"name": "GpuAllocation?"},
                         "members": [
@@ -412,15 +428,23 @@ def valid_document() -> dict:
                         ("args", "GpuSpan"),
                     ),
                 ],
-                "variables": [{
-                    "name": "COLOR_WRITE_ALL",
-                    "kind": "constant",
-                    "type": {"name": "ColorWriteMask"},
-                    "value": (
-                        "{ .red = true, .green = true, .blue = true, "
-                        ".alpha = true, }"
-                    ),
-                }],
+                "variables": [
+                    {
+                        "name": "COLOR_WRITE_ALL",
+                        "kind": "constant",
+                        "type": {"name": "ColorWriteMask"},
+                        "value": (
+                            "{ .red = true, .green = true, .blue = true, "
+                            ".alpha = true, }"
+                        ),
+                    },
+                    {
+                        "name": "TIMEOUT_INFINITE",
+                        "kind": "constant",
+                        "type": {"name": "ulong"},
+                        "value": "18446744073709551615",
+                    },
+                ],
                 "types": [
                     {
                         "name": "ColorWriteMask",
@@ -1944,6 +1968,50 @@ method gpu::Runtime.is_valid
         self.assertIn(
             "COLOR_WRITE_ALL must enable every color channel",
             check_public_api.validate_document(document),
+        )
+
+    def test_requires_explicit_swapchain_acquisition_timeout_contract(self) -> None:
+        document = valid_document()
+        acquire = next(
+            entry for entry in document["modules"]["gpu"]["functions"]
+            if entry["name"] == "acquire_next_image"
+        )
+        acquire["members"][2]["default_value"] = "1000000000"
+        self.assertIn(
+            "acquire_next_image must default timeout_ns to zero",
+            check_public_api.validate_document(document),
+        )
+
+        document = valid_document()
+        acquire = next(
+            entry for entry in document["modules"]["gpu"]["functions"]
+            if entry["name"] == "acquire_next_image"
+        )
+        acquire["members"].pop()
+        self.assertIn(
+            "acquire_next_image has the wrong parameters",
+            check_public_api.validate_document(document),
+        )
+
+        document = valid_document()
+        timeout = next(
+            entry for entry in document["modules"]["gpu"]["variables"]
+            if entry["name"] == "TIMEOUT_INFINITE"
+        )
+        timeout["value"] = "1000000000"
+        self.assertIn(
+            "TIMEOUT_INFINITE must equal ulong::max",
+            check_public_api.validate_document(document),
+        )
+
+    def test_rejects_retired_backend_acquisition_timeout_policy(self) -> None:
+        failures = check_public_api.validate_private_backend_source(
+            Path("gpu/vk/swapchain.c3"),
+            "const ulong ACQUIRE_TIMEOUT_NS = 1_000_000_000;\n",
+        )
+        self.assertIn(
+            "retired backend ACQUIRE_TIMEOUT_NS in gpu/vk/swapchain.c3",
+            failures,
         )
 
     def test_requires_full_render_pass_schema(self) -> None:

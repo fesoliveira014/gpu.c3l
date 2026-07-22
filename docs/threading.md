@@ -32,7 +32,7 @@ token's retained device pin while another call can still be in flight.
 | `submit` / `present` | E | externally synchronize each acquired image; submit consumes readiness, present consumes the image |
 | `poll_completion` / `wait_completion` | S | reusable value queries; host waits do not consume the point |
 | `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction rejects pending acquisition or use and never waits |
-| `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; resize rejects pending acquisition or use and never waits |
+| `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; acquire waits only for its caller-selected timeout (zero by default), while resize never waits |
 | `allocate_memory` / `free_allocation` | S | internally synchronized; free must happen-after the last use |
 | `get_allocation_info` / `get_allocation_span` / `get_span_mapping` / `get_span_address` | S | lock-free slot resolution |
 | `flush_mapped_span` / `invalidate_mapped_span` | S | lock-free validation; coherent no-op; native calls are internally synchronized |

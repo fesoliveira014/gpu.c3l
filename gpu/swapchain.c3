@@ -127,13 +127,21 @@ fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) 
     return operation.vtable.get_swapchain_info(device, swapchain);
 }
 
-<* Acquire a borrowed texture, its color attachment view, and one-shot
-   readiness. WAIT_TIMEOUT is retryable; out-of-date requires resize and
-   surface loss requires replacement. *>
-fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain) {
+<* Acquire with a nonblocking default. Finite values are nanoseconds;
+   TIMEOUT_INFINITE requires platform-guaranteed presentation progress.
+   WAIT_TIMEOUT preserves the swapchain for retry. *>
+fn AcquiredImage? acquire_next_image(
+    Device* device,
+    SwapchainHandle swapchain,
+    ulong timeout_ns = 0,
+) {
     DeviceOperation operation = begin_device_operation(device)!;
     defer end_device_operation(&operation);
-    return operation.vtable.acquire_next_image(device, swapchain);
+    return operation.vtable.acquire_next_image(
+        device,
+        swapchain,
+        timeout_ns,
+    );
 }
 
 <* Present and consume an acquired image after its readiness-consuming submit.

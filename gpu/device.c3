@@ -180,7 +180,7 @@ alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*,
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
 alias GetSwapchainInfoFn @private      = fn SwapchainInfo? (Device*, SwapchainHandle);
-alias AcquireNextImageFn @private      = fn AcquiredImage? (Device*, SwapchainHandle);
+alias AcquireNextImageFn @private      = fn AcquiredImage? (Device*, SwapchainHandle, ulong);
 alias PresentFn @private               = fn void? (Device*, AcquiredImage*, CompletionPoint);
 alias GetPresentModeSupportFn @private = fn PresentModeSupport? (Device*, SwapchainHandle);
 

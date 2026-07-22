@@ -882,8 +882,17 @@ Acquire first checks identity headroom, then scans the private ring from its nex
 slot and polls each slot's retirement `CompletionPoint`. If neither slot is
 retired, it returns `WAIT_TIMEOUT` without calling `vkAcquireNextImageKHR`.
 Otherwise it passes the selected semaphore to the native acquire.
-Success advances the ring and publishes a `SwapchainReadiness` packed from
-device, swapchain slot and generation, and a non-repeating acquisition sequence.
+The caller's exact nanosecond timeout is passed with it; zero is nonblocking.
+`ulong::max` requests an infinite wait and is used only when the surface
+platform guarantees presentation forward progress.
+
+Preparation computes the next acquisition and selects a semaphore without
+mutating the slot. `TIMEOUT`, `NOT_READY`, and every mapped error preserve the
+pending-acquisition fields, ring cursor, render completion, and retirement
+points. Native success first validates the image index and wrapped resources,
+then commits the acquisition as one logical transaction. Success advances the
+ring and publishes a `SwapchainReadiness` packed from device, swapchain slot and
+generation, and a non-repeating acquisition sequence.
 Successful submission associates the selected slot with the returned render
 completion. The native semaphore never enters the public value.
 

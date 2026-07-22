@@ -678,14 +678,18 @@ identical on either path.
 ## 10. Swapchain model
 
 ```text
-acquired = acquire_next_image(device, swapchain)
+acquired = acquire_next_image(device, swapchain, timeout_ns)
 rendered = submit(graphics, command lists + acquired.readiness before color output)
 present(device, acquired, rendered)
 ```
 
 Acquisition returns a borrowed texture, its swapchain-owned color attachment
 view, and a compact one-shot readiness value. Callers render with the view but
-do not destroy it.
+do not destroy it. The caller-selected timeout reaches native acquisition
+unchanged; zero is nonblocking and is the public default. Timeout and every
+failed native result preserve the complete pending-acquisition and semaphore-
+retirement state. Success validates the returned image and publishes the
+acquisition sequence, selected semaphore, image, and readiness together.
 Submission validates the exact device, swapchain generation, acquisition
 identity, graphics role, and caller-provided first destination stages before
 waiting the private native acquire bridge.
