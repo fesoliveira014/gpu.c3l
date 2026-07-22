@@ -1,7 +1,7 @@
 abi gpu_core;
 
-// Push constant payloads (docs/shader_abi.md section 10). Shaders bind them
-// with a hand-written block: layout(push_constant) uniform Push { RootPush pc; };
+// Push constant payloads (docs/shader_abi.md section 10). Shaders bind their
+// fields directly in a hand-written layout(push_constant) block.
 push RootPush {
     GpuAddress root_gpu;
 }

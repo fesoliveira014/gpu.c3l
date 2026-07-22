@@ -1721,6 +1721,9 @@ fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test 
     gpu::PipelineHandle[3] pipelines;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
+    ulong reflections_before = vk::shader_reflection_validation_count(state);
+    ulong native_shader_attempts_before =
+        vk::pipeline_shader_create_attempt_count(state);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
     vk::reset_pipeline_identity_stats(state);
 
@@ -1732,6 +1735,11 @@ fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test 
     assert(cache_entry_count(&device) == 2, "duplicate descriptions share deterministic pipeline identity");
     assert(vk::pipeline_shader_module_create_count(state) - shader_modules_before == 2,
         "each distinct shader IR creates one temporary native module per batch");
+    assert(vk::shader_reflection_validation_count(state) - reflections_before == 2,
+        "each distinct shader IR performs one exact reflection validation per batch");
+    assert(vk::pipeline_shader_create_attempt_count(state)
+            - native_shader_attempts_before == 2,
+        "each distinct shader IR performs one native shader-create attempt per batch");
     assert(vk::pipeline_native_create_count(state) - native_pipelines_before == 2,
         "only distinct compute pipeline identities reach native creation");
 
@@ -1763,6 +1771,9 @@ fn void graphics_pipeline_batch_reuses_shared_shader_modules() @test {
     gpu::PipelineHandle[2] pipelines;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
+    ulong reflections_before = vk::shader_reflection_validation_count(state);
+    ulong native_shader_attempts_before =
+        vk::pipeline_shader_create_attempt_count(state);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 
     gpu::create_graphics_pipelines(&device, descs[..], pipelines[..])!!;
@@ -1770,6 +1781,11 @@ fn void graphics_pipeline_batch_reuses_shared_shader_modules() @test {
     assert(cache_entry_count(&device) == 2, "distinct blend identities publish distinct graphics pipelines");
     assert(vk::pipeline_shader_module_create_count(state) - shader_modules_before == 2,
         "shared vertex and fragment IR each create one temporary native module per batch");
+    assert(vk::shader_reflection_validation_count(state) - reflections_before == 2,
+        "shared vertex and fragment IR each perform one exact reflection validation");
+    assert(vk::pipeline_shader_create_attempt_count(state)
+            - native_shader_attempts_before == 2,
+        "shared vertex and fragment IR each perform one native shader-create attempt");
     assert(vk::pipeline_native_create_count(state) - native_pipelines_before == 2,
         "each distinct graphics identity reaches native creation once");
 

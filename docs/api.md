@@ -430,7 +430,7 @@ backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
 | `GENERATED_SCRATCH_EXHAUSTED` | generated draw/dispatch recording | the originating allocator has no compatible reserved preprocess buffer for the pipeline, generated-work kind, command count, or concurrent retained-list demand |
 | `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `intern_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler interning leave existing entries untouched |
 | `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
-| `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V structure or backend reflection/module rejection |
+| `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V, a missing or stage-mismatched selected entry point, a selected-entry descriptor convention violation, a non-exact root push-constant block, or backend shader-module rejection |
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
 | `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, execution without a bound pipeline, draw without required per-pass depth state, duplicate command token in one submit batch, or token that is already being submitted |
@@ -806,7 +806,12 @@ The caller keeps the bytes and strings immutable and alive whenever the value is
 used. The digest is opaque and process-local: do not inspect, modify, serialize,
 or persist it. Stage, entry point, length, and exact bytes participate in shader
 identity; `debug_name` does not. One prepared value may be reused across
-pipelines and devices. There is no public shader-module handle.
+pipelines and devices. Pipeline creation reflects only the selected entry point.
+It permits no push-constant block, or requires one declared block to match the
+selected stage's generated root ABI exactly; reflected names are ignored. A
+reflection mismatch returns `SHADER_INVALID` before native shader creation or
+pipeline publication. Supplying valid shader code in the wrong pipeline role
+returns `INVALID_ARGUMENT`. There is no public shader-module handle.
 
 ### Compute pipelines
 

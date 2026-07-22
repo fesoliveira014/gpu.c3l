@@ -515,21 +515,30 @@ descriptor cell, owner count, generation, free list, or output token.
 backend object. Before cache lookup, each device interns digest, stage, entry
 point, length, and exact SPIR-V into owned storage. Digest selects a bucket;
 exact comparison resolves collisions. Debug names do not participate in
-identity. On a miss, the backend creates a temporary `vk::ShaderModule` from
-the owned entry, validates reflection against the requested pipeline ABI,
-compiles the pipeline, and destroys the module before returning. Batch creation
-reuses one temporary module per `ShaderId` and rolls back every created handle,
-cache entry, and pending shader reference before returning a fault. No native
-shader-module handle crosses the public boundary.
+identity. On a miss, the backend reflects the owned entry against the requested
+pipeline ABI before creating a temporary `vk::ShaderModule`, compiles the
+pipeline, and destroys the module before returning. Batch creation reflects
+and creates at most one temporary module per `ShaderId`, and rolls back every
+created handle, cache entry, and pending shader reference before returning a
+fault. No native shader-module handle crosses the public boundary.
 
 Reflection validation checks:
 
 ```text
 entry point exists and matches the declared stage
-push constant blocks fit the stage's root-push range
-unexpected descriptor sets are rejected
-descriptor heap bindings match convention
+descriptor and push-constant enumeration is scoped to the selected entry point
+unexpected descriptor sets are rejected and heap bindings match convention
+an absent push-constant block is accepted
+a present block is unique, starts at offset zero, and exactly matches the
+    generated compute or graphics block/member numeric shape
 ```
+
+The exact check compares block size, member count and order, byte offsets and
+sizes, scalar widths, signedness, and integer/float kind. It rejects vectors,
+matrices, arrays, nested structs, booleans, and references; reflected names are
+ignored. Reflection failures return `SHADER_INVALID` before native shader
+creation, pipeline-cache mutation, or output publication. Caller-side pipeline
+role errors remain `INVALID_ARGUMENT`.
 
 ### Compute pipeline
 

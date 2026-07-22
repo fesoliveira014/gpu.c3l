@@ -162,6 +162,7 @@ Two sizing rules that bite:
 | Multithreaded recording shows ~1× scaling with Vulkan validation on | the Khronos layer locks every `vkCmd*` | benchmark with layers off; gate native correctness with layers on (`multithreaded_recording` does both) | — |
 | FIFO present does not throttle under xvfb | virtual displays have no vblank | expected; pacing numbers under xvfb are structural only (`present_mode_explorer`) | — |
 | Schema field named `sampler` (or other GLSL keyword) breaks shader compile | generator emits the name verbatim into GLSL | rename the field (for example, `heap_sampler`) | reserved names are not rewritten |
+| Pipeline creation returns `SHADER_INVALID` for a size-correct root push block | exact reflection rejects a nested `RootPush`/`GraphicsRootPush` struct because its member shape differs | declare the generated fields directly in the push block, in schema order | reflected member names may differ; numeric shape may not |
 | `TYPE_OPTIONAL` c3c crash building the library with debug info | c3c 0.8.0/0.8.1 debug-codegen bug on optional-of-struct vtable signatures | no consumer action; the in-tree vtable uses an out parameter | `scripts/c3c_bug_repro/` |
 
 ## 4. Capability queries

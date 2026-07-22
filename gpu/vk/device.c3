@@ -217,6 +217,8 @@ struct VkDeviceState {
     void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
     ulong                      pipelines_created;
+    ulong                      shader_reflection_validations @if(env::TESTING);
+    ulong                      pipeline_shader_create_attempts @if(env::TESTING);
     ulong                      shader_intern_probes @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
     ulong                      shader_intern_bytes_compared @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
     ulong                      shader_owned_bytes_cloned @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));

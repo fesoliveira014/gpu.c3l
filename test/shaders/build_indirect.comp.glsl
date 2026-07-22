@@ -8,7 +8,9 @@ layout(buffer_reference, std430) writeonly buffer IndexedArgs { DrawIndexedIndir
 layout(buffer_reference, std430) writeonly buffer PlainArgs { DrawIndirectCommand cmds[]; };
 layout(buffer_reference, std430) writeonly buffer DispatchArgs { DispatchIndirectCommand cmd; };
 layout(buffer_reference, std430) writeonly buffer CountBuf { uint value; };
-layout(push_constant) uniform Push { RootPush pc; };
+layout(push_constant) uniform Push {
+    uint64_t root_gpu;
+} pc;
 
 void main() {
     BuildRoot root = BuildRoot(pc.root_gpu);

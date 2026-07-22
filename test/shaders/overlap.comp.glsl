@@ -5,7 +5,9 @@
 layout(local_size_x = OVERLAP_WORKGROUP) in;
 
 layout(buffer_reference, std430) writeonly buffer DataBuf { float v[]; };
-layout(push_constant) uniform Push { RootPush pc; };
+layout(push_constant) uniform Push {
+    uint64_t root_gpu;
+} pc;
 
 void main() {
     OverlapComputeRoot root = OverlapComputeRoot(pc.root_gpu);

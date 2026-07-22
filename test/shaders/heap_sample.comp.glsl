@@ -6,7 +6,9 @@
 layout(local_size_x = HEAP_TILE, local_size_y = HEAP_TILE) in;
 
 layout(buffer_reference, std430) writeonly buffer OutBuf { vec4 texels[]; };
-layout(push_constant) uniform Push { RootPush pc; };
+layout(push_constant) uniform Push {
+    uint64_t root_gpu;
+} pc;
 
 void main() {
     SampleRoot root = SampleRoot(pc.root_gpu);

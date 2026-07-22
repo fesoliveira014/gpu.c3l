@@ -1,0 +1,21 @@
+OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %pc
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %Push Block
+OpMemberDecorate %Push 0 Offset 0
+%void = OpTypeVoid
+%function = OpTypeFunction %void
+%bool = OpTypeBool
+%u32 = OpTypeInt 32 0
+%u32_0 = OpConstant %u32 0
+%Push = OpTypeStruct %bool
+%push_ptr = OpTypePointer PushConstant %Push
+%push_bool_ptr = OpTypePointer PushConstant %bool
+%pc = OpVariable %push_ptr PushConstant
+%main = OpFunction %void None %function
+%label = OpLabel
+%member = OpAccessChain %push_bool_ptr %pc %u32_0
+%value = OpLoad %bool %member
+OpReturn
+OpFunctionEnd

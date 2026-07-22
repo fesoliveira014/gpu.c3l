@@ -114,6 +114,9 @@ fn void? Parser.parse_typedecl(&self, Schema* schema, TypeTable* types) {
         .kind = TypeKind.SEMANTIC,
         .size = base_info.size,
         .alignment = base_info.alignment,
+        .scalar_width = base_info.scalar_width,
+        .scalar_signed = base_info.scalar_signed,
+        .integer = base_info.integer,
         .c3_name = name.text,
         .glsl_name = base_info.glsl_name,
     });

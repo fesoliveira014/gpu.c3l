@@ -25,6 +25,10 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer BuildRoot {
     uint _pad1;
 };
 
+struct RootPush {
+    uint64_t root_gpu;
+};
+
 struct GraphicsRootPush {
     uint64_t vertex_root_gpu;
     uint64_t fragment_root_gpu;
