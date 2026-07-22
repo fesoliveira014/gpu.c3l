@@ -69,6 +69,7 @@
     // the native heap implementation automatically.
     "descriptor_churn_bench": {
       "type": "executable",
+      "features": [ "TEXTURE_VIEW_ACCOUNTING_STATS" ],
       "sources": [ "src/descriptor_churn_bench.c3" ]
     },
     // Advisory explicit caller-owned upload throughput across worker and

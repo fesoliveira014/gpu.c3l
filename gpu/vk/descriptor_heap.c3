@@ -83,6 +83,10 @@ struct PendingTextureWrite {
     vk::ImageView view;
 }
 
+struct TextureViewAccountingCounters @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS)) {
+    ulong cell_lookups;
+    ulong ownership_work_units;
+}
 
 fn void? report_descriptor_backend_failure(
     VkDeviceState* state,
@@ -603,10 +607,34 @@ fn vk::ImageLayout texture_descriptor_layout(
         : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL;
 }
 
+fn void reset_texture_view_accounting(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS)) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    state.texture_view_cell_lookups = 0;
+    state.texture_view_ownership_work_units = 0;
+}
+
+fn TextureViewAccountingCounters texture_view_accounting(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS)) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    return {
+        .cell_lookups         = state.texture_view_cell_lookups,
+        .ownership_work_units = state.texture_view_ownership_work_units,
+    };
+}
+
 fn TextureDescriptorCell*? texture_cell_get(
-    DescriptorHeapState* heap,
+    VkDeviceState* state,
     gpu::TextureView view,
 ) @private {
+    $if env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS):
+        state.texture_view_cell_lookups++;
+    $endif
+    DescriptorHeapState* heap = &state.strict_heap.descriptors;
     if (!view.index.is_valid()) return gpu::INVALID_HANDLE~;
     uint slot = texture_index_slot(view.index);
     if (slot >= heap.texture_cells.len || !heap.texture_cells[slot].used) {
@@ -616,6 +644,74 @@ fn TextureDescriptorCell*? texture_cell_get(
         return gpu::INVALID_HANDLE~;
     }
     return &heap.texture_cells[slot];
+}
+
+fn bool texture_has_live_descriptor_views(
+    VkDeviceState* state,
+    TextureSlot* texture,
+) @private {
+    $if env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS):
+        state.texture_view_ownership_work_units++;
+    $endif
+    return texture.live_descriptor_views != 0;
+}
+
+fn void? report_texture_view_accounting_failure(
+    VkDeviceState* state,
+    ZString operation,
+    ZString backend_text,
+) @private {
+    return report_descriptor_backend_failure(
+        state:          state,
+        operation:      operation,
+        public_fault:   gpu::BACKEND_ERROR,
+        backend_text:   backend_text,
+        backend_result: 0,
+    );
+}
+
+fn void? validate_texture_view_increment(
+    VkDeviceState* state,
+    TextureSlot* owner,
+    uint pending_count,
+    ZString operation,
+) @private {
+    if (!state.validation) return;
+    uint capacity = (uint)state.strict_heap.descriptors.texture_cells.len;
+    if (pending_count > capacity
+        || owner.live_descriptor_views > capacity - pending_count) {
+        return report_texture_view_accounting_failure(
+            state,
+            operation,
+            "texture view owner count exceeds descriptor heap capacity",
+        );
+    }
+}
+
+fn void? validate_texture_view_decrement(
+    VkDeviceState* state,
+    TextureSlot* owner,
+) @private {
+    if (!state.validation || owner.live_descriptor_views != 0) return;
+    return report_texture_view_accounting_failure(
+        state,
+        "destroy_texture_view",
+        "texture view owner count is zero for a live descriptor",
+    );
+}
+
+fn void recycle_texture_descriptor_slot(
+    DescriptorHeapState* heap,
+    gpu::TextureView view,
+    TextureDescriptorCell* cell,
+) @private {
+    if (!should_recycle_handle_generation(cell.generation)) {
+        cell.generation = HANDLE_GENERATION_MAX;
+        return;
+    }
+    cell.generation = next_handle_generation(cell.generation)!!;
+    heap.texture_free[heap.texture_free_count++] =
+        texture_index_slot(view.index);
 }
 
 <* Sampled and/or storage descriptor per the texture's usage, same slot in
@@ -887,6 +983,12 @@ fn gpu::TextureView? vk_create_texture_view(gpu::Device* device, gpu::TextureHan
             backend_text:        null,
         )~;
     }
+    validate_texture_view_increment(
+        state:         state,
+        owner:         texture_slot,
+        pending_count: 1,
+        operation:     "create_texture_view",
+    )!;
 
     CachedViewCreation creation;
     vk::ImageView image_view = resolve_descriptor_texture_view(
@@ -901,9 +1003,10 @@ fn gpu::TextureView? vk_create_texture_view(gpu::Device* device, gpu::TextureHan
 
     gpu::TextureView result;
     commit_texture_descriptor_item(
-        heap:     heap,
-        texture:  texture,
-        out_view: &result,
+        heap:         heap,
+        texture:      texture,
+        texture_slot: texture_slot,
+        out_view:     &result,
     );
     write_texture_descriptor(
         state,
@@ -920,6 +1023,7 @@ fn gpu::TextureView? vk_create_texture_view(gpu::Device* device, gpu::TextureHan
 fn void? prepare_texture_descriptor_item(
     VkDeviceState* state,
     gpu::TextureViewCreateDesc* desc,
+    uint pending_count,
     PendingTextureWrite* pending,
     CachedViewCreation* creation,
 ) @private {
@@ -929,6 +1033,12 @@ fn void? prepare_texture_descriptor_item(
         operation:     "create_texture_views",
         texture_field: "descs[].texture",
         usage_field:   "TextureDesc.usage",
+    )!;
+    validate_texture_view_increment(
+        state:         state,
+        owner:         texture_slot,
+        pending_count: pending_count,
+        operation:     "create_texture_views",
     )!;
     vk::ImageView image_view = resolve_descriptor_texture_view(
         state:      state,
@@ -948,6 +1058,7 @@ fn void? prepare_texture_descriptor_item(
 fn void commit_texture_descriptor_item(
     DescriptorHeapState* heap,
     gpu::TextureHandle texture,
+    TextureSlot* texture_slot,
     gpu::TextureView* out_view,
 ) @private {
     uint slot;
@@ -961,6 +1072,7 @@ fn void commit_texture_descriptor_item(
     cell.owner = texture;
     cell.used = true;
     cell.generation = next_handle_generation(cell.generation)!!;
+    texture_slot.live_descriptor_views++;
     *out_view = {
         .owner      = heap.texture_view_owner,
         .index      = texture_index_from_slot(slot),
@@ -1055,10 +1167,11 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
         for (uint i = 0; i < descs.len; i++) {
             CachedViewCreation creation;
             if (catch f = prepare_texture_descriptor_item(
-                state:    state,
-                desc:     &descs[i],
-                pending:  &pending[i],
-                creation: &creation,
+                state:         state,
+                desc:          &descs[i],
+                pending_count: (uint)descs.len,
+                pending:       &pending[i],
+                creation:      &creation,
             )) {
                 rollback_texture_view_creations(state, creations[:creation_count]);
                 return f~;
@@ -1067,7 +1180,12 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
         }
 
         for (uint i = 0; i < descs.len; i++) {
-            commit_texture_descriptor_item(heap, descs[i].texture, &out_views[i]);
+            commit_texture_descriptor_item(
+                heap:         heap,
+                texture:      descs[i].texture,
+                texture_slot: pending[i].texture_slot,
+                out_view:     &out_views[i],
+            );
         }
 
         if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
@@ -1115,7 +1233,8 @@ fn void? vk_destroy_texture_view(
     VkDeviceState* state = (VkDeviceState*)gpu::device_backend_state_ptr(device);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    if (catch f = texture_cell_get(&state.strict_heap.descriptors, view)) {
+    TextureDescriptorCell*? resolved = texture_cell_get(state, view);
+    if (catch f = resolved) {
         return report_contract_failure(
             state:               state,
             operation:           "destroy_texture_view",
@@ -1130,14 +1249,22 @@ fn void? vk_destroy_texture_view(
             backend_text:        null,
         )~;
     }
-    TextureDescriptorCell* cell =
-        texture_cell_get(&state.strict_heap.descriptors, view)!!;
-    cell.used = false;
-    if (!should_recycle_handle_generation(cell.generation)) {
-        cell.generation = HANDLE_GENERATION_MAX;
-        return;
+    TextureDescriptorCell* cell = resolved;
+    TextureSlot*? resolved_owner = state.textures.get(cell.owner);
+    if (catch resolved_owner) {
+        return report_texture_view_accounting_failure(
+            state,
+            "destroy_texture_view",
+            "live texture descriptor owner is missing",
+        );
     }
-    cell.generation = next_handle_generation(cell.generation)!!;
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
-    heap.texture_free[heap.texture_free_count++] = texture_index_slot(view.index);
+    TextureSlot* owner = resolved_owner;
+    validate_texture_view_decrement(state, owner)!;
+    cell.used = false;
+    owner.live_descriptor_views--;
+    recycle_texture_descriptor_slot(
+        &state.strict_heap.descriptors,
+        view,
+        cell,
+    );
 }

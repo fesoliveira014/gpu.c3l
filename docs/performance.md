@@ -37,7 +37,7 @@ The suite covers:
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup, and cached batches |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
-| `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers |
+| `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; exact texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
 | `upload_throughput_bench` | Explicit uploads at 4 KiB, 256 KiB, and 4 MiB across 1/2/4 workers |
 | `async_overlap_bench` | Serialized and independent graphics/compute submissions |
 
@@ -63,6 +63,13 @@ point, then resets completion-work counters before 100,000 repeated polls. The
 measured interval requires zero native counter queries and zero retirement-lock
 acquisitions; these counters are compiled only for tests and this benchmark
 target.
+
+The descriptor-churn benchmark separately varies descriptor high-water state at
+16, 4,096, and 65,536. Texture destruction must report exactly one ownership
+work unit per texture, and the swapchain seam exactly one per wrapped image
+examined, at every level. These exact counters are blocking; `ns/destroy` and
+`ns/check` remain advisory because runner, driver, build, and profile identity
+are not fully pinned by that single observation.
 
 Release runs use deliberately broad order-of-magnitude thresholds:
 

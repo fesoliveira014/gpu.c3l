@@ -128,7 +128,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         self.assertEqual(
             runner.BENCHMARK_METHODS["descriptor_churn_bench"],
-            ("320/worker; workers=1,2,4", "ns/descriptor, ns/op"),
+            (
+                "320/worker; workers=1,2,4; ownership highwater=16,4096,65536",
+                "ns/descriptor, ns/op, ns/destroy, ns/check; exact work units",
+            ),
         )
         self.assertEqual(runner.C3_BUILD_FLAGS, ("-O1",))
 

@@ -16,6 +16,9 @@ const uint BENCH_ITERS_PER_WORKER = 320;
 const uint BENCH_BATCH_SIZE = 16;
 const uint[3] BENCH_WORKER_COUNTS = { 1, 2, 4 };
 const uint BENCH_MAX_WORKERS = 4;
+const uint BENCH_LIFECYCLE_ITERS = 64;
+const uint BENCH_SWAPCHAIN_CHECK_ITERS = 10_000;
+const uint[3] BENCH_DESCRIPTOR_HIGH_WATER = { 16, 4_096, 65_536 };
 
 enum BenchPhase : int {
     TEXTURE_SINGLE,
@@ -128,6 +131,90 @@ fn gpu::TextureHandle[BENCH_MAX_WORKERS] make_texture_pool(gpu::Device* device) 
     return textures;
 }
 
+fn gpu::TextureHandle make_bench_texture(gpu::Device* device) {
+    gpu::TextureDesc desc = {
+        .access = { .graphics, .compute, .transfer },
+        .width  = 4,
+        .height = 4,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled, .storage },
+    };
+    return gpu::create_texture(device, &desc)!!;
+}
+
+fn void run_texture_destroy_high_water(
+    gpu::Device* device,
+    vk::VkDeviceState* state,
+    uint high_water,
+) {
+    gpu::TextureHandle[BENCH_LIFECYCLE_ITERS] textures;
+    foreach (&texture : textures) *texture = make_bench_texture(device);
+    uint texture_next_new_before =
+        state.strict_heap.descriptors.texture_next_new;
+    defer state.strict_heap.descriptors.texture_next_new =
+        texture_next_new_before;
+    state.strict_heap.descriptors.texture_next_new = high_water;
+    vk::reset_texture_view_accounting(state);
+
+    std::time::Clock start = std::time::clock::now();
+    foreach (texture : textures) gpu::destroy_texture(device, texture)!!;
+    long elapsed_ns = (long)start.to_now();
+
+    vk::TextureViewAccountingCounters counters =
+        vk::texture_view_accounting(state);
+    assert(counters.cell_lookups == 0,
+        "texture destruction must not inspect descriptor cells");
+    assert(counters.ownership_work_units == BENCH_LIFECYCLE_ITERS,
+        "texture destruction must charge one ownership decision per texture");
+    io::printfn(
+        "texture destroy highwater=%d: %.1f ns/destroy work_units=%d",
+        high_water,
+        (double)elapsed_ns / BENCH_LIFECYCLE_ITERS,
+        counters.ownership_work_units,
+    );
+}
+
+fn void run_swapchain_ownership_high_water(
+    vk::VkDeviceState* state,
+    gpu::TextureHandle[] textures,
+    uint high_water,
+) {
+    vk::SwapchainSlot slot = { .image_count = (uint)textures.len };
+    foreach (i, texture : textures) slot.textures[i] = texture;
+    uint texture_next_new_before =
+        state.strict_heap.descriptors.texture_next_new;
+    defer state.strict_heap.descriptors.texture_next_new =
+        texture_next_new_before;
+    state.strict_heap.descriptors.texture_next_new = high_water;
+    vk::reset_texture_view_accounting(state);
+
+    long elapsed_ns;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        std::time::Clock start = std::time::clock::now();
+        for (uint i = 0; i < BENCH_SWAPCHAIN_CHECK_ITERS; i++) {
+            assert(!vk::swapchain_images_referenced_locked(state, &slot)!!,
+                "unreferenced benchmark textures must remain releasable");
+        }
+        elapsed_ns = (long)start.to_now();
+    }
+
+    vk::TextureViewAccountingCounters counters =
+        vk::texture_view_accounting(state);
+    ulong expected_work =
+        (ulong)BENCH_SWAPCHAIN_CHECK_ITERS * (ulong)textures.len;
+    assert(counters.ownership_work_units == expected_work,
+        "swapchain ownership work must equal checks times wrapped images");
+    io::printfn(
+        "swapchain ownership highwater=%d images=%d: %.1f ns/check work_units=%d",
+        high_water,
+        textures.len,
+        (double)elapsed_ns / BENCH_SWAPCHAIN_CHECK_ITERS,
+        counters.ownership_work_units,
+    );
+}
+
 fn void run_bench_suite(gpu::RuntimeDesc* desc, ZString label) {
     gpu::Device device = create_bench_device(desc)!!;
     defer destroy_bench_device(&device)!!;
@@ -140,6 +227,15 @@ fn void run_bench_suite(gpu::RuntimeDesc* desc, ZString label) {
     run_phase(&device, BenchPhase.SAMPLER, textures[..]);
     io::printfn("%s: batch/single ratio (1 worker) = %.2fx", label, single_ns / batched_ns);
 
+    foreach (high_water : BENCH_DESCRIPTOR_HIGH_WATER) {
+        run_texture_destroy_high_water(&device, state, high_water);
+        run_swapchain_ownership_high_water(
+            state,
+            textures[..],
+            high_water,
+        );
+    }
+
     foreach (handle : textures) (void)gpu::destroy_texture(&device, handle);
     uint leaks = vk::report_resource_leaks(state);
     io::printfn("%s: leaks=%d", label, leaks);
@@ -148,8 +244,9 @@ fn void run_bench_suite(gpu::RuntimeDesc* desc, ZString label) {
 fn int main() {
     io::printfn("iterations=%d/worker units=ns/descriptor,ns/op", BENCH_ITERS_PER_WORKER);
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
-        .application_name = "gpu_descriptor_churn_bench",
+        .backend               = gpu::BackendKind.VULKAN,
+        .texture_heap_capacity = 65_536,
+        .application_name      = "gpu_descriptor_churn_bench",
     };
     run_bench_suite(&desc, "automatic heap");
     return 0;

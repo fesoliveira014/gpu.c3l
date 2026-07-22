@@ -169,6 +169,8 @@ struct VkDeviceState {
     Atomic{ulong}              texture_barrier_state_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_native_assemblies @if(env::TESTING);
     Atomic{ulong}              texture_barrier_native_emissions @if(env::TESTING);
+    ulong                      texture_view_cell_lookups @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS));
+    ulong                      texture_view_ownership_work_units @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS));
     Atomic{ulong}              completion_native_counter_queries @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              completion_native_wait_calls @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              completion_retirement_passes @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));

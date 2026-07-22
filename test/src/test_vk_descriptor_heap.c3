@@ -294,20 +294,45 @@ fn uint cached_texture_view_count(vk::VkDeviceState* state, gpu::TextureHandle t
     return count;
 }
 
+fn uint live_descriptor_view_count(
+    vk::VkDeviceState* state,
+    gpu::TextureHandle texture,
+) {
+    return state.textures.get(texture)!!.live_descriptor_views;
+}
+
 fn void texture_view_round_trip() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
 
     gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
     assert(view.is_valid() && view.index.is_valid(),
         "created view and its raw shader index are valid");
+    assert(live_descriptor_view_count(state, texture) == 1,
+        "descriptor publication increments its owning texture once");
+    vk::reset_texture_view_accounting(state);
     gpu::destroy_texture_view(&device, view)!!;
+    vk::TextureViewAccountingCounters destroyed =
+        vk::texture_view_accounting(state);
+    assert(destroyed.cell_lookups == 1,
+        "successful texture-view destruction performs one cell lookup");
+    assert(live_descriptor_view_count(state, texture) == 0,
+        "successful texture-view destruction decrements its owner once");
 
+    vk::reset_texture_view_accounting(state);
     fault stale_fault = @catch(gpu::destroy_texture_view(&device, view));
     assert(stale_fault == gpu::INVALID_HANDLE,
         "destroying a stale view faults INVALID_HANDLE");
+    vk::TextureViewAccountingCounters stale =
+        vk::texture_view_accounting(state);
+    assert(stale.cell_lookups == 1,
+        "stale destruction performs one rejected cell lookup");
+    assert(live_descriptor_view_count(state, texture) == 0,
+        "stale destruction leaves owner accounting unchanged");
 }
 
 fn void texture_view_multi_layer_ranges_select_array_views() @test {
@@ -381,6 +406,15 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
         (vk::VkDeviceState*)gpu::device_backend_state(second_device);
     uint first_free_before = first_state.strict_heap.descriptors.texture_free_count;
     uint second_free_before = second_state.strict_heap.descriptors.texture_free_count;
+    uint first_owner_before = live_descriptor_view_count(
+        first_state,
+        first_texture,
+    );
+    uint second_owner_before = live_descriptor_view_count(
+        second_state,
+        second_texture,
+    );
+    vk::reset_texture_view_accounting(second_state);
 
     fault foreign = @catch(gpu::destroy_texture_view(&second_device, first_view));
     assert(foreign == gpu::INVALID_HANDLE,
@@ -391,6 +425,15 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
     assert(first_state.strict_heap.descriptors.texture_cells[first_view.index.value - 1].used
         && second_state.strict_heap.descriptors.texture_cells[second_view.index.value - 1].used,
         "both coincident live cells survive the rejected release");
+    assert(live_descriptor_view_count(first_state, first_texture)
+            == first_owner_before
+        && live_descriptor_view_count(second_state, second_texture)
+            == second_owner_before,
+        "foreign release preserves both texture owner counts");
+    vk::TextureViewAccountingCounters rejected =
+        vk::texture_view_accounting(second_state);
+    assert(rejected.cell_lookups == 0,
+        "foreign device ownership rejects before backend cell lookup");
 
     gpu::destroy_texture_view(&first_device, first_view)!!;
     gpu::destroy_texture_view(&second_device, second_view)!!;
@@ -482,11 +525,248 @@ fn void texture_view_generation_exhaustion_retires_slot() @test {
 
     assert(cell.generation == vk::HANDLE_GENERATION_MAX,
         "an exhausted texture-view generation retires at the sentinel");
+    assert(live_descriptor_view_count(state, texture) == 0,
+        "terminal generation retirement decrements ownership exactly once");
     assert(state.strict_heap.descriptors.texture_free_count == 0,
         "an exhausted texture-view slot never returns to the free list");
     assert(@catch(gpu::create_texture_view(&device, texture, null))
         == gpu::DESCRIPTOR_HEAP_FULL,
         "a retired only slot cannot recycle to a stale generation");
+}
+
+fn void texture_view_zero_owner_count_faults_before_destruction_mutation() @test {
+    gpu::Device device = make_heap_test_device(4, 1);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::TextureSlot* owner = state.textures.get(texture)!!;
+    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    vk::TextureDescriptorCell* cell =
+        &heap.texture_cells[view.index.value - 1];
+    owner.live_descriptor_views = 0;
+    vk::TextureDescriptorCell cell_before = *cell;
+    uint free_count_before = heap.texture_free_count;
+    DescriptorBackendCapture capture = {
+        .expected_fault     = gpu::BACKEND_ERROR,
+        .expected_operation = "destroy_texture_view",
+        .expected_text      =
+            "texture view owner count is zero for a live descriptor",
+        .expected_result    = 0,
+    };
+    state.debug_callback = &capture_descriptor_backend_diagnostic;
+    state.debug_user_data = &capture;
+    vk::reset_texture_view_accounting(state);
+
+    fault accounting = @catch(gpu::destroy_texture_view(&device, view));
+
+    assert(accounting == gpu::BACKEND_ERROR
+            && capture.calls == 1 && capture.matched,
+        "zero owner accounting emits one exact backend invariant fault");
+    assert(cell.used == cell_before.used
+            && cell.owner == cell_before.owner
+            && cell.generation == cell_before.generation,
+        "decrement invariant failure preserves the descriptor cell");
+    assert(heap.texture_free_count == free_count_before,
+        "decrement invariant failure preserves the free list");
+    assert(owner.live_descriptor_views == 0,
+        "decrement invariant failure does not underflow the owner count");
+    vk::TextureViewAccountingCounters counters =
+        vk::texture_view_accounting(state);
+    assert(counters.cell_lookups == 1,
+        "decrement validation reuses the single resolved cell");
+
+    state.debug_callback = null;
+    owner.live_descriptor_views = 1;
+    gpu::destroy_texture_view(&device, view)!!;
+}
+
+fn void texture_view_missing_owner_faults_before_destruction_mutation() @test {
+    gpu::Device device = make_heap_test_device(4, 1);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::TextureSlot* owner = state.textures.get(texture)!!;
+    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    vk::TextureDescriptorCell* cell =
+        &heap.texture_cells[view.index.value - 1];
+    gpu::TextureHandle owner_before = cell.owner;
+    cell.owner.generation = 0;
+    vk::TextureDescriptorCell cell_before = *cell;
+    uint free_count_before = heap.texture_free_count;
+    DescriptorBackendCapture capture = {
+        .expected_fault     = gpu::BACKEND_ERROR,
+        .expected_operation = "destroy_texture_view",
+        .expected_text      = "live texture descriptor owner is missing",
+        .expected_result    = 0,
+    };
+    state.debug_callback = &capture_descriptor_backend_diagnostic;
+    state.debug_user_data = &capture;
+    vk::reset_texture_view_accounting(state);
+
+    fault accounting = @catch(gpu::destroy_texture_view(&device, view));
+
+    assert(accounting == gpu::BACKEND_ERROR
+            && capture.calls == 1 && capture.matched,
+        "a missing live descriptor owner emits one exact backend fault");
+    assert(cell.used == cell_before.used
+            && cell.owner == cell_before.owner
+            && cell.generation == cell_before.generation,
+        "missing owner failure preserves the descriptor cell");
+    assert(heap.texture_free_count == free_count_before,
+        "missing owner failure preserves the free list");
+    assert(owner.live_descriptor_views == 1,
+        "missing owner failure preserves the real owner count");
+    vk::TextureViewAccountingCounters counters =
+        vk::texture_view_accounting(state);
+    assert(counters.cell_lookups == 1,
+        "missing owner failure reuses the single resolved descriptor cell");
+
+    state.debug_callback = null;
+    cell.owner = owner_before;
+    gpu::destroy_texture_view(&device, view)!!;
+}
+
+fn void texture_view_increment_invariant_faults_transactionally() @test {
+    gpu::Device device = make_heap_test_device(8, 1);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::TextureSlot* owner = state.textures.get(texture)!!;
+    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    owner.live_descriptor_views = 8;
+    DescriptorBackendCapture capture = {
+        .expected_fault     = gpu::BACKEND_ERROR,
+        .expected_operation = "create_texture_view",
+        .expected_text      =
+            "texture view owner count exceeds descriptor heap capacity",
+        .expected_result    = 0,
+    };
+    state.debug_callback = &capture_descriptor_backend_diagnostic;
+    state.debug_user_data = &capture;
+    gpu::TextureViewDesc desc = {
+        .base_mip    = 1,
+        .mip_count   = 1,
+        .base_layer  = 1,
+        .layer_count = 1,
+    };
+
+    fault accounting = @catch(gpu::create_texture_view(
+        &device,
+        texture,
+        &desc,
+    ));
+
+    assert(accounting == gpu::BACKEND_ERROR
+            && capture.calls == 1 && capture.matched,
+        "single increment overflow emits one exact backend invariant fault");
+    assert(owner.live_descriptor_views == 8,
+        "single increment failure preserves the injected owner count");
+    assert(heap.texture_next_new == 0 && heap.texture_free_count == 0,
+        "single increment failure publishes no descriptor cell");
+    assert(cached_texture_view_count(state, texture) == 0,
+        "single increment failure precedes cached native-view creation");
+
+    state.debug_callback = null;
+    owner.live_descriptor_views = 0;
+}
+
+fn void texture_views_batch_increment_invariant_is_transactional() @test {
+    gpu::Device device = make_heap_test_device(8, 1);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::TextureSlot* owner = state.textures.get(texture)!!;
+    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    owner.live_descriptor_views = 7;
+    DescriptorBackendCapture capture = {
+        .expected_fault     = gpu::BACKEND_ERROR,
+        .expected_operation = "create_texture_views",
+        .expected_text      =
+            "texture view owner count exceeds descriptor heap capacity",
+        .expected_result    = 0,
+    };
+    state.debug_callback = &capture_descriptor_backend_diagnostic;
+    state.debug_user_data = &capture;
+    gpu::TextureViewCreateDesc[2] descs = {
+        { .texture = texture },
+        { .texture = texture },
+    };
+    gpu::TextureView[2] views = {
+        { .owner = 11, .index.value = 13, .generation = 17 },
+        { .owner = 19, .index.value = 23, .generation = 29 },
+    };
+    gpu::TextureView[2] views_before = views;
+
+    fault accounting = @catch(gpu::create_texture_views(
+        &device,
+        descs[..],
+        views[..],
+    ));
+
+    assert(accounting == gpu::BACKEND_ERROR
+            && capture.calls == 1 && capture.matched,
+        "repeated-owner batch overflow emits one exact invariant fault");
+    assert(owner.live_descriptor_views == 7,
+        "batch increment failure preserves the injected owner count");
+    assert(heap.texture_next_new == 0 && heap.texture_free_count == 0,
+        "batch increment failure publishes no descriptor cells");
+    assert(views[0] == views_before[0] && views[1] == views_before[1],
+        "batch increment failure leaves every output token unchanged");
+
+    state.debug_callback = null;
+    owner.live_descriptor_views = 0;
+}
+
+fn void texture_views_late_increment_invariant_rolls_back_cached_view() @test {
+    gpu::Device device = make_heap_test_device(8, 1);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle first = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, first)!!;
+    gpu::TextureHandle inconsistent = make_heap_view_texture(&device);
+    defer gpu::destroy_texture(&device, inconsistent)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::TextureSlot* inconsistent_owner = state.textures.get(inconsistent)!!;
+    inconsistent_owner.live_descriptor_views = 8;
+    gpu::TextureViewDesc new_view = {
+        .base_mip    = 1,
+        .mip_count   = 1,
+        .base_layer  = 1,
+        .layer_count = 1,
+    };
+    gpu::TextureViewCreateDesc[2] descs = {
+        { .texture = first, .view = new_view },
+        { .texture = inconsistent },
+    };
+    gpu::TextureView[2] views;
+
+    fault accounting = @catch(gpu::create_texture_views(
+        &device,
+        descs[..],
+        views[..],
+    ));
+
+    assert(accounting == gpu::BACKEND_ERROR,
+        "a later inconsistent owner rejects the complete batch");
+    assert(cached_texture_view_count(state, first) == 0,
+        "late increment validation rolls back an earlier cached native view");
+    assert(live_descriptor_view_count(state, first) == 0
+            && inconsistent_owner.live_descriptor_views == 8,
+        "late increment validation preserves every owner count");
+    assert(state.strict_heap.descriptors.texture_next_new == 0,
+        "late increment validation publishes no descriptor cells");
+
+    inconsistent_owner.live_descriptor_views = 0;
 }
 
 fn void texture_view_stale_texture_rejected() @test {
@@ -572,6 +852,29 @@ fn void destroy_texture_unaffected_by_unrelated_descriptor() @test {
     gpu::destroy_texture(&device, texture_b)!!;
 }
 
+fn void texture_destroy_ownership_work_is_high_water_invariant() @test {
+    gpu::Device device = make_heap_test_device(65_536, 1);
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    uint[3] high_water_marks = { 16, 4_096, 65_536 };
+
+    foreach (high_water : high_water_marks) {
+        gpu::TextureHandle texture = make_heap_texture(&device);
+        state.strict_heap.descriptors.texture_next_new = high_water;
+        vk::reset_texture_view_accounting(state);
+
+        gpu::destroy_texture(&device, texture)!!;
+
+        vk::TextureViewAccountingCounters counters =
+            vk::texture_view_accounting(state);
+        assert(counters.cell_lookups == 0,
+            "texture destruction does not inspect descriptor cells");
+        assert(counters.ownership_work_units == 1,
+            "texture destruction charges one ownership decision at every high-water mark");
+    }
+}
+
 fn void texture_views_batch_happy_path() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
@@ -588,6 +891,36 @@ fn void texture_views_batch_happy_path() @test {
         "batch-created indices occupy distinct slots");
 
     foreach (index : indices) gpu::destroy_texture_view(&device, index)!!;
+}
+
+fn void texture_views_batch_counts_repeated_owners_exactly() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle first = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, first)!!;
+    gpu::TextureHandle second = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, second)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+
+    gpu::TextureViewCreateDesc[4] descs = {
+        { .texture = first },
+        { .texture = second },
+        { .texture = first },
+        { .texture = first },
+    };
+    gpu::TextureView[4] views;
+    gpu::create_texture_views(&device, descs[..], views[..])!!;
+
+    assert(live_descriptor_view_count(state, first) == 3,
+        "a repeated batch owner counts each committed descriptor");
+    assert(live_descriptor_view_count(state, second) == 1,
+        "a distinct batch owner counts only its descriptor");
+
+    foreach (view : views) gpu::destroy_texture_view(&device, view)!!;
+    assert(live_descriptor_view_count(state, first) == 0
+        && live_descriptor_view_count(state, second) == 0,
+        "destroying a mixed-owner batch restores every owner count");
 }
 
 fn void texture_views_batch_fills_capacity_exactly() @test {
@@ -831,6 +1164,7 @@ fn void texture_views_mid_batch_fault_preserves_descriptor_state() @test {
     gpu::destroy_texture(&device, stale_texture)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    uint owner_count_before = live_descriptor_view_count(state, texture);
 
     vk::TextureDescriptorCell[8] cells_before;
     uint[8] free_before;
@@ -861,6 +1195,8 @@ fn void texture_views_mid_batch_fault_preserves_descriptor_state() @test {
 
     assert(heap.texture_free_count == free_count_before, "failure preserves free-list count");
     assert(heap.texture_next_new == next_new_before, "failure preserves the never-used slot cursor");
+    assert(live_descriptor_view_count(state, texture) == owner_count_before,
+        "failure preserves the prepared texture owner count");
     for (uint i = 0; i < 8; i++) {
         vk::TextureDescriptorCell before = cells_before[i];
         vk::TextureDescriptorCell after = heap.texture_cells[i];
@@ -1059,6 +1395,37 @@ fn void live_descriptors_block_device_destruction() @test {
         "live descriptors block device destruction");
     gpu::destroy_texture_view(&device, descriptor)!!;
     gpu::destroy_texture(&device, texture)!!;
+    destroy_test_device(&device)!!;
+}
+
+fn void device_loss_teardown_accepts_live_texture_view_accounting() @test {
+    gpu::Device device = make_heap_test_device(8, 1);
+    gpu::TextureHandle texture = make_heap_view_texture(&device);
+    gpu::TextureViewDesc desc = {
+        .base_mip    = 1,
+        .mip_count   = 1,
+        .base_layer  = 1,
+        .layer_count = 1,
+    };
+    gpu::TextureView view = gpu::create_texture_view(
+        &device,
+        texture,
+        &desc,
+    )!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    assert(view.is_valid()
+            && state.textures.get(texture)!!.live_descriptor_views == 1
+            && cached_texture_view_count(state, texture) == 1,
+        "device-loss fixture owns one descriptor and one cached native view");
+    assert(@catch(vk::check_backend_result(
+        state:     state,
+        operation: "descriptor accounting teardown",
+        result:    vk::Result.ERROR_DEVICE_LOST,
+    )) == gpu::DEVICE_LOST,
+        "the fixture enters forced device-loss teardown");
+
+    state.validation = false;
     destroy_test_device(&device)!!;
 }
 

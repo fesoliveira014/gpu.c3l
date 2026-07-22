@@ -660,15 +660,15 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
 }
 
 fn void swapchain_release_detects_shared_resource_references() @test {
-    gpu::vk::VkDeviceState state;
+    gpu::vk::VkDeviceState state = {};
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
     gpu::vk::TextureCell[1] textures;
     gpu::vk::AttachmentViewCell[1] attachment_views;
-    gpu::vk::TextureDescriptorCell[1] descriptors;
     state.textures.owner = 41;
     state.textures.slots = textures[..];
     state.attachment_views.owner = 43;
     state.attachment_views.slots = attachment_views[..];
-    state.strict_heap.descriptors.texture_cells = descriptors[..];
 
     gpu::TextureHandle texture = state.textures.alloc({})!!;
     gpu::AttachmentViewHandle attachment_view = state.attachment_views.alloc({
@@ -687,10 +687,15 @@ fn void swapchain_release_detects_shared_resource_references() @test {
         1,
         AtomicOrdering.RELAXED,
     );
+    gpu::vk::reset_texture_view_accounting(&state);
     assert(gpu::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
     )!!, "recorded or submitted texture use blocks release");
+    gpu::vk::TextureViewAccountingCounters texture_reference =
+        gpu::vk::texture_view_accounting(&state);
+    assert(texture_reference.ownership_work_units == 1,
+        "texture validation references still charge one ownership decision");
     state.textures.get(texture)!!.validation_references.sub(
         1,
         AtomicOrdering.RELAXED,
@@ -700,29 +705,94 @@ fn void swapchain_release_detects_shared_resource_references() @test {
         1,
         AtomicOrdering.RELAXED,
     );
+    gpu::vk::reset_texture_view_accounting(&state);
     assert(gpu::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
     )!!, "recorded or submitted attachment use blocks release");
+    gpu::vk::TextureViewAccountingCounters attachment_reference =
+        gpu::vk::texture_view_accounting(&state);
+    assert(attachment_reference.ownership_work_units == 1,
+        "attachment validation references still charge one ownership decision");
     state.attachment_views.get(attachment_view)!!.validation_references.sub(
         1,
         AtomicOrdering.RELAXED,
     );
 
-    descriptors[0] = { .owner = texture, .used = true };
-    state.strict_heap.descriptors.texture_next_new = 1;
+    uint[3] high_water_marks = { 16, 4_096, 65_536 };
+    foreach (high_water : high_water_marks) {
+        state.strict_heap.descriptors.texture_next_new = high_water;
+        gpu::vk::reset_texture_view_accounting(&state);
+        assert(!gpu::vk::swapchain_images_referenced_locked(
+            &state,
+            &slot,
+        )!!, "descriptor high-water alone does not block release");
+        gpu::vk::TextureViewAccountingCounters counters =
+            gpu::vk::texture_view_accounting(&state);
+        assert(counters.ownership_work_units == 1,
+            "one wrapped image charges one ownership decision at every high-water mark");
+    }
+
+    state.textures.get(texture)!!.live_descriptor_views = 1;
+    gpu::vk::reset_texture_view_accounting(&state);
     assert(gpu::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
     )!!, "a shared texture descriptor blocks release");
-
-    descriptors[0].used = false;
-    state.strict_heap.descriptors.texture_next_new = 0;
+    gpu::vk::TextureViewAccountingCounters live_view =
+        gpu::vk::texture_view_accounting(&state);
+    assert(live_view.ownership_work_units == 1,
+        "a live wrapped-image view is found with one ownership decision");
+    state.textures.get(texture)!!.live_descriptor_views = 0;
     state.attachment_views.free(attachment_view)!!;
     assert(!gpu::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
     )!!, "a missing internal attachment-view slot is ignored defensively");
+}
+
+fn void swapchain_release_ownership_work_tracks_examined_images() @test {
+    gpu::vk::VkDeviceState state = {};
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
+    gpu::vk::TextureCell[3] textures;
+    gpu::vk::AttachmentViewCell[3] attachment_views;
+    state.textures.owner = 47;
+    state.textures.slots = textures[..];
+    state.attachment_views.owner = 53;
+    state.attachment_views.slots = attachment_views[..];
+    gpu::vk::SwapchainSlot slot = { .image_count = 3 };
+
+    for (uint i = 0; i < slot.image_count; i++) {
+        slot.textures[i] = state.textures.alloc({})!!;
+        slot.attachment_views[i] = state.attachment_views.alloc({
+            .texture         = slot.textures[i],
+            .swapchain_owned = true,
+        })!!;
+    }
+
+    state.textures.get(slot.textures[2])!!.live_descriptor_views = 1;
+    gpu::vk::reset_texture_view_accounting(&state);
+    assert(gpu::vk::swapchain_images_referenced_locked(
+        &state,
+        &slot,
+    )!!, "a live view on the final wrapped image blocks release");
+    gpu::vk::TextureViewAccountingCounters final_image =
+        gpu::vk::texture_view_accounting(&state);
+    assert(final_image.ownership_work_units == 3,
+        "the final wrapped image requires one ownership decision per examined image");
+
+    state.textures.get(slot.textures[2])!!.live_descriptor_views = 0;
+    state.textures.get(slot.textures[0])!!.live_descriptor_views = 1;
+    gpu::vk::reset_texture_view_accounting(&state);
+    assert(gpu::vk::swapchain_images_referenced_locked(
+        &state,
+        &slot,
+    )!!, "a live view on the first wrapped image blocks release");
+    gpu::vk::TextureViewAccountingCounters first_image =
+        gpu::vk::texture_view_accounting(&state);
+    assert(first_image.ownership_work_units == 1,
+        "reference detection stops after the first live wrapped-image owner");
 }
 
 fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {

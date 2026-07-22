@@ -590,6 +590,8 @@ fn void leak_reporters_count_leaks() @test {
         "borrowed shader code is not a live resource");
     assert(capture.texture_descriptors == 1 && capture.samplers == 0,
         "device-owned samplers are not descriptor leaks");
+    assert(state.textures.get(texture)!!.live_descriptor_views == 1,
+        "leak reporting does not decrement owner counts during table sweeps");
     assert(capture.public_identities == 4,
         "only strict public resources carry slot identities");
     assert(capture.private_span_identity_hidden,

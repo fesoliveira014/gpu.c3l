@@ -87,6 +87,7 @@ struct TextureSlot {
     uint               height;
     uint               mip_levels;
     uint               array_layers;
+    uint               live_descriptor_views;
     Atomic{bool}       presented;
     Atomic{uint}        validation_references;
     bool               swapchain_owned;
@@ -766,14 +767,15 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
     vma::AllocationCreateInfo alloc_info = { .usage = vma::MemoryUsage.AUTO_PREFER_DEVICE };
 
     TextureSlot slot = {
-        .format         = desc.format,
-        .usage          = desc.usage,
-        .access         = desc.access,
-        .sample_count   = desc.sample_count,
-        .width          = desc.width,
-        .height         = desc.height,
-        .mip_levels     = mip_levels,
-        .array_layers   = array_layers,
+        .format                = desc.format,
+        .usage                 = desc.usage,
+        .access                = desc.access,
+        .sample_count          = desc.sample_count,
+        .width                 = desc.width,
+        .height                = desc.height,
+        .mip_levels            = mip_levels,
+        .array_layers          = array_layers,
+        .live_descriptor_views = 0,
     };
     vma::AllocationInfo allocation_info;
     check_texture_create_device_result(
@@ -1017,18 +1019,19 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     uint mip_levels = gpu::texture_mip_levels(desc);
     uint array_layers = gpu::texture_array_layers(desc);
     TextureSlot slot = {
-        .format           = desc.format,
-        .usage            = desc.usage,
-        .access           = desc.access,
-        .sample_count     = desc.sample_count,
-        .width            = desc.width,
-        .height           = desc.height,
-        .mip_levels       = mip_levels,
-        .array_layers     = array_layers,
-        .placed           = true,
-        .placement        = placement,
-        .placement_offset = offset,
-        .allocation_size  = requirements.size,
+        .format                = desc.format,
+        .usage                 = desc.usage,
+        .access                = desc.access,
+        .sample_count          = desc.sample_count,
+        .width                 = desc.width,
+        .height                = desc.height,
+        .mip_levels            = mip_levels,
+        .array_layers          = array_layers,
+        .live_descriptor_views = 0,
+        .placed                = true,
+        .placement             = placement,
+        .placement_offset      = offset,
+        .allocation_size       = requirements.size,
     };
 
     bool retained_placement;
@@ -1150,17 +1153,18 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
     uint mip_levels = gpu::texture_mip_levels(desc);
     uint array_layers = gpu::texture_array_layers(desc);
     TextureSlot texture_slot = {
-        .format           = desc.format,
-        .usage            = desc.usage,
-        .access           = desc.access,
-        .sample_count     = desc.sample_count,
-        .width            = desc.width,
-        .height           = desc.height,
-        .mip_levels       = mip_levels,
-        .array_layers     = array_layers,
-        .placed           = true,
-        .placement_offset = 0,
-        .allocation_size  = requirements.size,
+        .format                = desc.format,
+        .usage                 = desc.usage,
+        .access                = desc.access,
+        .sample_count          = desc.sample_count,
+        .width                 = desc.width,
+        .height                = desc.height,
+        .mip_levels            = mip_levels,
+        .array_layers          = array_layers,
+        .live_descriptor_views = 0,
+        .placed                = true,
+        .placement_offset      = 0,
+        .allocation_size       = requirements.size,
     };
     vma::AllocationInfo native_info;
     vma::Allocation native_allocation;
@@ -1339,9 +1343,8 @@ fn void? vk_destroy_texture(gpu::Device* device, gpu::TextureHandle handle) @pri
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;
     if (slot.swapchain_owned) return gpu::INVALID_ARGUMENT~;
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
-    foreach (&cell : heap.texture_cells[:heap.texture_next_new]) {
-        if (cell.used && cell.owner == handle) return gpu::RESOURCE_IN_USE~;
+    if (texture_has_live_descriptor_views(state, slot)) {
+        return gpu::RESOURCE_IN_USE~;
     }
     vk::Image image = slot.image;
     if (slot.validation_references.load(AtomicOrdering.RELAXED) > 0) {
