@@ -138,18 +138,53 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
     )!!;
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, queue.id)!!;
-    vk::Semaphore blocker = vk::create_private_timeline(state)!!;
+    vk::Semaphore blocker;
     vk::Fence fence;
+    Thread worker;
+    bool blocker_live;
+    bool fence_live;
+    bool submission_live;
+    bool worker_created;
+    bool worker_joined;
+    defer {
+        if (blocker_live && submission_live) {
+            vk::SemaphoreSignalInfo cleanup_signal =
+                vk::semaphore_signal_info()
+                    .set_semaphore(blocker)
+                    .set_value(1);
+            (void)vk::signal_semaphore(state.device, &cleanup_signal);
+        }
+        if (worker_created && !worker_joined) {
+            (void)worker.join();
+        }
+        if (fence_live && submission_live) {
+            (void)vk::wait_for_fences(
+                device:      state.device,
+                fence_count: 1,
+                p_fences:    &fence,
+                wait_all:    vk::TRUE,
+                timeout:     ulong::max,
+            );
+        }
+        if (fence_live) vk::destroy_fence(state.device, fence, null);
+        if (blocker_live) {
+            vk::destroy_semaphore(state.device, blocker, null);
+        }
+    }
+    blocker = vk::create_private_timeline(state)!!;
+    blocker_live = true;
     vk::FenceCreateInfo fence_info = vk::fence_create_info();
+    vk::Result fence_create_result = vk::create_fence(
+        device:        state.device,
+        p_create_info: &fence_info,
+        p_allocator:   null,
+        p_fence:       &fence,
+    );
+    if (fence_create_result == vk::Result.SUCCESS) fence_live = true;
     vk::check_backend_result(
         state:     state,
         operation: "create stalled-queue fence",
-        result:    vk::create_fence(
-            state.device,
-            &fence_info,
-            null,
-            &fence,
-        ),
+        result:    fence_create_result,
     )!!;
     vk::SemaphoreSubmitInfo wait = vk::semaphore_submit_info()
         .set_semaphore(blocker)
@@ -161,43 +196,18 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         .set_wait_semaphore_infos((&wait)[:1]);
     completion.submit_mutex.lock()!!;
     vk::Result submit_result = vk::queue_submit2(
-        completion.queue,
-        1,
-        &submit,
-        fence,
+        queue:        completion.queue,
+        submit_count: 1,
+        p_submits:    &submit,
+        fence:        fence,
     );
     completion.submit_mutex.unlock();
+    if (submit_result == vk::Result.SUCCESS) submission_live = true;
     vk::check_backend_result(
         state:     state,
         operation: "submit stalled queue work",
         result:    submit_result,
     )!!;
-    Thread worker;
-    bool native_cleanup_done;
-    bool worker_created;
-    bool worker_joined;
-    defer {
-        if (!native_cleanup_done) {
-            vk::SemaphoreSignalInfo cleanup_signal =
-                vk::semaphore_signal_info()
-                    .set_semaphore(blocker)
-                    .set_value(1);
-            (void)vk::signal_semaphore(state.device, &cleanup_signal);
-            if (worker_created && !worker_joined) {
-                (void)worker.join();
-            }
-            (void)vk::wait_for_fences(
-                state.device,
-                1,
-                &fence,
-                vk::TRUE,
-                ulong::max,
-            );
-            vk::destroy_fence(state.device, fence, null);
-            vk::destroy_semaphore(state.device, blocker, null);
-        }
-    }
-
     vk::reset_completion_work_counters(state);
     QuiescentReleaseWorkerArgs args = {
         .device     = &device,
@@ -228,15 +238,17 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         worker_result = joined;
     }
     vk::Result fence_result = vk::wait_for_fences(
-        state.device,
-        1,
-        &fence,
-        vk::TRUE,
-        ulong::max,
+        device:      state.device,
+        fence_count: 1,
+        p_fences:    &fence,
+        wait_all:    vk::TRUE,
+        timeout:     ulong::max,
     );
     vk::destroy_fence(state.device, fence, null);
+    fence_live = false;
     vk::destroy_semaphore(state.device, blocker, null);
-    native_cleanup_done = true;
+    blocker_live = false;
+    submission_live = false;
     if (!args.failed) {
         owned.allocation = {};
         owned.span = {};
