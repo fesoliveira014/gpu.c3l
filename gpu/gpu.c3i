@@ -486,6 +486,11 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong pipeline_table_lookups;
     ulong pipeline_cache_lookups;
     ulong command_policy_selections;
+    ulong encoder_cell_computations;
+    ulong encoder_lease_comparisons;
+    ulong encoder_field_comparisons;
+    ulong device_lost_loads;
+    ulong trusted_backend_capability_checks;
     ulong recording_commands;
     ulong native_commands;
 }

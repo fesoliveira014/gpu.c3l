@@ -667,9 +667,11 @@ ExecutableCommandList      ended, one-shot
 
 Both carry a device token, `CommandListHandle`, and opaque encoder pointer.
 Begin resolves the handle once and publishes a stable root encoder containing
-the selected command-operation table, `VkDeviceState*`, and fixed
-`CommandRecord*`. Warm recording uses those cached pointers; only lifecycle
-operations continue through the device vtable. The record identifies the
+one packed capability lease, the selected command-operation table,
+`VkDeviceState*`, and fixed `CommandRecord*`. Warm recording validates one
+bounded encoder cell and one lease comparison, then uses those cached pointers;
+trusted backend entries do not repeat capability null checks. Only lifecycle
+operations continue through the device vtable and report device loss. The record identifies the
 originating allocator and fixed buffer/scratch index, and owns the exact public
 queue, lifecycle state, bound-pipeline
 snapshot, and pending texture transitions.

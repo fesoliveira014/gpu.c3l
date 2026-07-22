@@ -1247,9 +1247,9 @@ fn PreparedBufferCopy? lower_buffer_copy(
     gpu::internal::CommandEncoderState* commands,
     gpu::BufferCopyDesc* desc,
 ) {
-    if (commands == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    if (desc == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -1284,25 +1284,32 @@ fn PreparedBufferCopy? validate_and_lower_buffer_copy(
     gpu::internal::CommandEncoderState* commands,
     gpu::BufferCopyDesc* desc,
 ) {
-    if (commands != null) {
-        CommandRecord* checked_record = encoder_command(commands);
-        if (checked_record != null
-            && checked_record.state != CommandState.RECORDING) {
-            VkDeviceState* checked_state = encoder_device_state(commands);
-            return report_contract_failure(
-                state:               checked_state,
-                operation:           "cmd_copy_buffer",
-                public_fault:        gpu::COMMAND_RECORDING_ERROR,
-                resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
-                has_public_identity: true,
-                index:               commands.handle.index,
-                generation:          commands.handle.generation,
-                debug_name:          null,
-                rejected_field:      "CommandList.state",
-                invariant:           "command must be recording outside a render pass",
-                backend_text:        null,
-            )~;
+    CommandRecord* checked_record = encoder_command(commands);
+    if (checked_record.state != CommandState.RECORDING) {
+        VkDeviceState* checked_state = encoder_device_state(commands);
+        uint command_index = 0;
+        uint command_generation = 0;
+        bool has_public_identity = false;
+        foreach (i, &cell : checked_state.commands.slots) {
+            if (&cell.value != checked_record) continue;
+            command_index = (uint)i;
+            command_generation = cell.generation;
+            has_public_identity = cell.used;
+            break;
         }
+        return report_contract_failure(
+            state:               checked_state,
+            operation:           "cmd_copy_buffer",
+            public_fault:        gpu::COMMAND_RECORDING_ERROR,
+            resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+            has_public_identity: has_public_identity,
+            index:               command_index,
+            generation:          command_generation,
+            debug_name:          null,
+            rejected_field:      "CommandList.state",
+            invariant:           "command must be recording outside a render pass",
+            backend_text:        null,
+        )~;
     }
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
     VkDeviceState* state = encoder_device_state(commands);
@@ -1467,9 +1474,8 @@ fn PreparedBufferFill? lower_buffer_fill(
     gpu::GpuSpan dst,
     uint value,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -1686,9 +1692,9 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
     gpu::internal::CommandEncoderState* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
-    if (commands == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    if (desc == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -1757,9 +1763,9 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
     gpu::internal::CommandEncoderState* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
-    if (commands == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    if (desc == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -2129,11 +2135,9 @@ fn BoundPipeline? lower_bound_pipeline(
     gpu::internal::CommandEncoderState* commands,
     gpu::PipelineHandle pipeline,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null
-        || (record.state != CommandState.RECORDING
-            && record.state != CommandState.RECORDING_RENDER_PASS)) {
+    if (record.state != CommandState.RECORDING
+        && record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -2325,9 +2329,8 @@ fn void? trusted_dispatch(
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     BoundPipeline pipeline = bound_pipeline_snapshot(record)!;
@@ -2356,9 +2359,8 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -2651,9 +2653,8 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);

@@ -293,6 +293,12 @@ ABI. Copies alias one encoder phase and record.
 Each device slot owns a fixed `MAX_DEVICE_COMMANDS` encoder array. Across all
 device slots this zero-initialized storage is capped at 16 MiB; operating-system
 pages commit as encoder cells are touched.
+Warm command entry validates the device and command indices, derives exactly
+one encoder cell, compares the opaque pointer to that cell, and compares one
+packed lease containing the device generation/index and command owner/generation.
+It does not repeat stored token-field, publication-pointer, or device-loss
+checks. Device loss is reported by lifecycle operations; explicit discard
+remains available so a lost device can release retained command state.
 
 State transitions:
 
@@ -575,7 +581,7 @@ and tracking: trusted/no-tracking, trusted/tracking, checked/no-tracking, or
 checked/tracking. `OBJECT_BOUNDARIES` uses the trusted command entries because
 its additional work belongs at public boundaries. The encoder snapshots the
 chosen pointer once; repeated `cmd_*` calls do not inspect contract, tracking,
-layer, callback, or naming policy. All four tables retain mandatory host
+layer, callback, naming policy, or encoder capability fields. All four tables retain mandatory host
 pointer/slice/range safety, overflow protection, internal state integrity,
 public ownership, Vulkan result handling, and rollback. Detailed command misuse
 outside that floor is a caller contract violation unless `FULL` is selected.

@@ -85,6 +85,32 @@ WARM_STACK_PATTERNS = {
         r"MAX_SUBMIT_COMPLETION_WAITS)[^\]\r\n]*\]"
     ),
 }
+ENCODER_PROOF_PATTERNS = {
+    "stored device comparison": re.compile(r"\bencoder\.device\b"),
+    "stored handle comparison": re.compile(r"\bencoder\.handle\b"),
+    "device-loss load": re.compile(
+        r"\b(?:device_lost|lost)\b[^;{}]*\bload\s*\("
+    ),
+    "operation-table null check": re.compile(
+        r"\bencoder\.ops\s*(?:==|!=)\s*null"
+    ),
+    "backend-state null check": re.compile(
+        r"\bencoder\.backend_state\s*(?:==|!=)\s*null"
+    ),
+    "backend-command null check": re.compile(
+        r"\bencoder\.backend_command\s*(?:==|!=)\s*null"
+    ),
+}
+TRUSTED_CAPABILITY_PATTERNS = {
+    "encoder null check": re.compile(r"\bcommands\s*(?:==|!=)\s*null"),
+    "command-record null check": re.compile(r"\brecord\s*(?:==|!=)\s*null"),
+    "backend-state null check": re.compile(
+        r"\bcommands\.backend_state\s*(?:==|!=)\s*null"
+    ),
+    "backend-command null check": re.compile(
+        r"\bcommands\.backend_command\s*(?:==|!=)\s*null"
+    ),
+}
 COLD_ALLOCATION_FUNCTIONS = frozenset((
     "allocate_command_buffers_real",
     "allocate_generated_preprocess_buffer",
@@ -365,6 +391,57 @@ def check(root: Path = ROOT) -> list[str]:
                     f"{table_name} reaches tracking work at "
                     f"{function.relative}:{function.line}:{function.name}"
                 )
+
+    trusted_roots = set(tables["TRUSTED_COMMAND_OPS"].values())
+    trusted_roots.update(tables["TRUSTED_TRACKING_COMMAND_OPS"].values())
+    for function in sorted(
+        reachable_functions(functions, trusted_roots),
+        key=lambda item: (item.relative, item.line, item.name),
+    ):
+        for label, pattern in TRUSTED_CAPABILITY_PATTERNS.items():
+            if pattern.search(function.body):
+                errors.append(
+                    "trusted command path reaches " + label + " at "
+                    f"{function.relative}:{function.line}:{function.name}"
+                )
+
+    encoder_path = root / "gpu" / "internal" / "command.c3"
+    if encoder_path.exists():
+        try:
+            encoder_source = encoder_path.read_text(encoding="utf-8")
+            encoder_functions = source_functions(
+                "gpu/internal/command.c3",
+                encoder_source,
+            )
+        except (OSError, ValueError) as error:
+            errors.append(str(error))
+            encoder_functions = []
+        command_encoders = [
+            function for function in encoder_functions
+            if function.name == "command_encoder"
+        ]
+        if len(command_encoders) != 1:
+            errors.append(
+                "command_encoder proof root is missing or duplicated"
+            )
+        else:
+            encoder = command_encoders[0]
+            for label, pattern in ENCODER_PROOF_PATTERNS.items():
+                if pattern.search(encoder.body):
+                    errors.append(
+                        "command_encoder performs " + label + " at "
+                        f"{encoder.relative}:{encoder.line}"
+                    )
+            proof_notes = (
+                "note_command_encoder_cell_computation(",
+                "note_command_encoder_lease_comparison(",
+            )
+            for note in proof_notes:
+                if encoder.body.count(note) != 1:
+                    errors.append(
+                        "command_encoder must record exactly one "
+                        + note.removesuffix("(")
+                    )
 
     missing_roots = sorted(CORE_COMMAND_ROOTS - set(functions))
     if missing_roots:

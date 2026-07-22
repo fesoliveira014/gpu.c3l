@@ -44,6 +44,7 @@ struct CommandPinFixture {
     uint         next_command;
     uint         allocator_creates;
     uint         allocator_destroy_calls;
+    gpu::Device  device;
     gpu::Queue   allocator_queue;
     gpu::CommandAllocatorDesc allocator_desc;
     bool         block_command;
@@ -58,6 +59,8 @@ struct CommandPinFixture {
     bool         reject_allocator_destroy;
     bool         return_invalid_allocator;
     bool         return_foreign_allocator;
+    bool         return_null_backend_state;
+    bool         return_null_backend_command;
 }
 
 struct StaleCommandWorkerArgs {
@@ -188,6 +191,7 @@ fn void? command_pin_begin(
     gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(&device);
     if (data == null || out_commands == null) return gpu::INVALID_HANDLE~;
     CommandPinFixture* fixture = (CommandPinFixture*)data.backend_state;
+    fixture.device = device;
     fixture.next_command++;
     *out_commands = {
         .device = device,
@@ -201,8 +205,8 @@ fn void? command_pin_begin(
         },
     };
     *out_backend = {
-        .state   = fixture,
-        .command = fixture,
+        .state   = fixture.return_null_backend_state ? null : fixture,
+        .command = fixture.return_null_backend_command ? null : fixture,
     };
 }
 
@@ -248,7 +252,7 @@ fn void? command_pin_barrier(
         (CommandPinFixture*)commands.backend_state;
     if (fixture == null) return gpu::INVALID_HANDLE~;
     gpu::internal::DeviceSlotControl control =
-        (gpu::internal::DeviceSlotControl)gpu::internal::device_slots[commands.device.index].control.load(
+        (gpu::internal::DeviceSlotControl)gpu::internal::device_slots[fixture.device.index].control.load(
             AtomicOrdering.ACQUIRE,
         );
     fixture.pins_during_command = control.pins;
@@ -552,7 +556,7 @@ fn gpu::CompletionPoint? command_pin_submit(
     if (fixture.submit_busy) return gpu::DEVICE_BUSY~;
     gpu::internal::CommandEncoderState*[gpu::internal::MAX_DEVICE_COMMANDS] encoders;
     foreach (i, &commands : desc.command_lists) {
-        encoders[i] = gpu::internal::executable_encoder(commands, true)!;
+        encoders[i] = gpu::internal::executable_encoder(commands)!;
     }
     if (fixture.lose_during_submit) gpu::internal::mark_device_lost(&device);
     foreach (encoder : encoders[:desc.command_lists.len]) {
@@ -984,10 +988,162 @@ fn void warm_command_dispatch_skips_resolution_paths() @test {
         "a warm barrier performs no pipeline resolution");
     assert(stats.command_policy_selections == 0,
         "warm recording does not reselect command policy");
+    assert(stats.encoder_cell_computations == 1,
+        "warm recording selects exactly one encoder cell");
+    assert(stats.encoder_lease_comparisons == 1,
+        "warm recording compares exactly one encoder lease");
+    assert(stats.encoder_field_comparisons == 0,
+        "warm recording performs no duplicate encoder field comparisons");
+    assert(stats.device_lost_loads == 0,
+        "warm recording performs no device-loss atomic load");
+    assert(stats.trusted_backend_capability_checks == 0,
+        "trusted backend recording repeats no capability checks");
     assert(stats.recording_commands == 1,
         "the counter distinguishes one recording operation from resolution");
 
     gpu::discard_commands(&commands)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void command_lease_changes_with_each_identity_component() @test {
+    gpu::Device device = {
+        .index      = 2,
+        .generation = 3,
+    };
+    gpu::CommandListHandle handle = {
+        .owner      = 4,
+        .index      = 5,
+        .generation = 6,
+    };
+    gpu::internal::CommandLease base =
+        gpu::internal::make_command_lease(device, handle);
+
+    gpu::Device next_device_index = device;
+    next_device_index.index++;
+    gpu::Device next_device_generation = device;
+    next_device_generation.generation++;
+    gpu::CommandListHandle next_owner = handle;
+    next_owner.owner++;
+    gpu::CommandListHandle next_command_generation = handle;
+    next_command_generation.generation++;
+
+    assert(gpu::internal::CommandLease::size == uint128::size,
+        "the command lease is one packed comparison value");
+    assert(base != gpu::internal::make_command_lease(next_device_index, handle),
+        "the lease includes device index identity");
+    assert(base != gpu::internal::make_command_lease(next_device_generation, handle),
+        "the lease includes device generation identity");
+    assert(base != gpu::internal::make_command_lease(device, next_owner),
+        "the lease includes command owner identity");
+    assert(base != gpu::internal::make_command_lease(device, next_command_generation),
+        "the lease includes command generation identity");
+
+    gpu::Device boundary_device = {
+        .index      = gpu::internal::MAX_DEVICES - 1,
+        .generation = 0xFF_FFFF,
+    };
+    gpu::CommandListHandle boundary_handle = {
+        .owner      = ulong::max,
+        .index      = gpu::internal::MAX_DEVICE_COMMANDS - 1,
+        .generation = uint::max,
+    };
+    gpu::internal::CommandLease expected =
+        (gpu::internal::CommandLease)(
+            ((uint128)ulong::max << 64)
+            | ((uint128)(gpu::internal::MAX_DEVICES - 1) << 56)
+            | ((uint128)0xFF_FFFF << 32)
+            | (uint128)uint::max
+        );
+    assert(gpu::internal::make_command_lease(
+            boundary_device,
+            boundary_handle,
+        ) == expected,
+        "the lease pins every identity field at its maximum accepted width");
+}
+
+fn void fabricated_command_encoder_pointer_is_rejected_before_dereference() @test {
+    CommandPinFixture fixture;
+    gpu::Device device = gpu::internal::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList commands = begin_command_pin(&device)!!;
+    gpu::CommandList fabricated = commands;
+    uint unrelated_storage;
+    fabricated.encoder = &unrelated_storage;
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after  = { .compute = true },
+    };
+
+    fault fabricated_fault = @catch(gpu::cmd_barrier(&fabricated, &barrier));
+
+    assert(fabricated_fault == gpu::INVALID_HANDLE,
+        "a fabricated encoder pointer is rejected as an invalid handle");
+    assert(!fixture.command_entered.load(AtomicOrdering.ACQUIRE),
+        "a fabricated encoder pointer is never dereferenced by the backend");
+    gpu::discard_commands(&commands)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void malformed_command_cell_selectors_are_rejected() @test {
+    CommandPinFixture fixture;
+    gpu::Device device = gpu::internal::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList commands = begin_command_pin(&device)!!;
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after  = { .compute = true },
+    };
+
+    gpu::CommandList reserved_device = commands;
+    reserved_device.device.reserved = 1;
+    gpu::CommandList out_of_range_device = commands;
+    out_of_range_device.device.index = gpu::internal::MAX_DEVICES;
+    gpu::CommandList out_of_range_command = commands;
+    out_of_range_command.handle.index = gpu::internal::MAX_DEVICE_COMMANDS;
+
+    assert(@catch(gpu::cmd_barrier(&reserved_device, &barrier))
+        == gpu::INVALID_HANDLE,
+        "reserved device bits are rejected before encoder-cell selection");
+    assert(@catch(gpu::cmd_barrier(&out_of_range_device, &barrier))
+        == gpu::INVALID_HANDLE,
+        "out-of-range devices are rejected before encoder-cell selection");
+    assert(@catch(gpu::cmd_barrier(&out_of_range_command, &barrier))
+        == gpu::INVALID_HANDLE,
+        "out-of-range command indices are rejected before encoder-cell selection");
+    assert(!fixture.command_entered.load(AtomicOrdering.ACQUIRE),
+        "malformed selectors never reach the backend");
+    gpu::discard_commands(&commands)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void recording_alias_is_rejected_after_end_phase_transition() @test {
+    CommandPinFixture fixture;
+    gpu::Device device = gpu::internal::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList commands = begin_command_pin(&device)!!;
+    gpu::CommandList recording_alias = commands;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after  = { .compute = true },
+    };
+
+    assert(@catch(gpu::cmd_barrier(&recording_alias, &barrier))
+        == gpu::COMMAND_RECORDING_ERROR,
+        "a recording alias is rejected after the encoder becomes executable");
+    gpu::discard_executable_commands(&executable)!!;
     gpu::destroy_device(&device)!!;
 }
 
@@ -1078,6 +1234,39 @@ fn void failed_encoder_publication_rolls_back_begin() @test {
         == gpu::internal::CommandEncoderPhase.INACTIVE,
         "failed publication exposes no encoder phase");
     gpu::destroy_device(&device)!!;
+}
+
+fn void missing_backend_publication_pointers_roll_back_begin() @test {
+    for (uint i = 0; i < 2; i++) {
+        CommandPinFixture fixture = {
+            .return_null_backend_state   = i == 0,
+            .return_null_backend_command = i == 1,
+        };
+        gpu::Device device = gpu::internal::register_device(
+            backend:       gpu::BackendKind.VULKAN,
+            caps:          {},
+            vtable:        &command_pin_vtable,
+            backend_state: &fixture,
+        )!!;
+        gpu::internal::DeviceSlot* slot =
+            &gpu::internal::device_slots[device.index];
+
+        fault begin_fault = @catch(begin_command_pin(&device));
+        gpu::internal::DeviceSlotControl control =
+            (gpu::internal::DeviceSlotControl)slot.control.load(
+                AtomicOrdering.ACQUIRE,
+            );
+
+        assert(begin_fault == gpu::BACKEND_ERROR,
+            "missing backend publication pointers fail begin");
+        assert(control.pins == 0
+            && slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
+            "partial publication rolls back lease, child, and retained pin");
+        assert(slot.command_encoders[fixture.next_command].phase
+            == gpu::internal::CommandEncoderPhase.INACTIVE,
+            "partial publication exposes no active encoder");
+        gpu::destroy_device(&device)!!;
+    }
 }
 
 fn void registration_accepts_per_device_command_operations() @test {
@@ -1255,7 +1444,8 @@ fn void lost_commands_can_be_discarded() @test {
         .before = { .compute = true },
         .after = { .compute = true },
     };
-    fault record_fault = @catch(gpu::cmd_barrier(&commands, &barrier));
+    gpu::cmd_barrier(&commands, &barrier)!!;
+    fault end_fault = @catch(gpu::end_commands(&commands));
     fault destroy_fault = @catch(gpu::destroy_device(&device));
     uint destroy_calls_before_discard =
         fixture.destroy_calls.load(AtomicOrdering.ACQUIRE);
@@ -1264,8 +1454,10 @@ fn void lost_commands_can_be_discarded() @test {
     gpu::internal::DeviceSlotControl after_discard =
         (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
 
-    assert(record_fault == gpu::DEVICE_LOST,
-        "lost command recording faults without consuming its token");
+    assert(fixture.command_entered.load(AtomicOrdering.ACQUIRE),
+        "recording reaches the trusted backend after device loss");
+    assert(end_fault == gpu::DEVICE_LOST,
+        "a lifecycle boundary reports loss without consuming the token");
     assert(destroy_fault == gpu::DEVICE_BUSY,
         "a lost device remains busy while a command retains its lifetime pin");
     assert(destroy_calls_before_discard == 0,
@@ -1274,6 +1466,33 @@ fn void lost_commands_can_be_discarded() @test {
         "discard releases a lost command lifetime pin");
     assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
         "discard releases a lost command child");
+    gpu::destroy_device(&device)!!;
+}
+
+fn void lost_executable_commands_can_be_discarded() @test {
+    CommandPinFixture fixture;
+    gpu::Device device = gpu::internal::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &fixture,
+    )!!;
+    gpu::CommandList commands = begin_command_pin(&device)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    gpu::internal::mark_device_lost(&device);
+
+    gpu::discard_executable_commands(&executable)!!;
+    gpu::internal::DeviceSlot* slot =
+        &gpu::internal::device_slots[device.index];
+    gpu::internal::DeviceSlotControl after_discard =
+        (gpu::internal::DeviceSlotControl)slot.control.load(
+            AtomicOrdering.ACQUIRE,
+        );
+
+    assert(after_discard.pins == 0,
+        "executable discard releases a lost command lifetime pin");
+    assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
+        "executable discard releases a lost command child");
     gpu::destroy_device(&device)!!;
 }
 

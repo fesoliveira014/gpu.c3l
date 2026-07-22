@@ -53,7 +53,9 @@ token's retained device pin while another call can still be in flight.
 
 Most public device operations take a short-lived atomic pin. `begin_commands`
 transfers its pin to the recording token and publishes a stable encoder cell.
-Recording calls validate that cell directly and do not borrow a registry pin.
+Recording calls select that bounded cell and compare one packed identity lease;
+they do not borrow a registry pin or load device-loss state. End, submit, and
+other lifecycle boundaries report loss, while discard remains available.
 Successful end transfers the same cell and pin ownership to the executable
 token; successful `submit` or executable discard invalidates the cell before
 releasing the pin.
@@ -149,6 +151,8 @@ ownership transfers.
   only through your synchronization. That hand-off is the happens-before edge.
 - Command records and root encoder cells live in fixed tables. `CommandList`
   carries the owner-bearing handle and an opaque pointer to its exact cell.
+  That cell publishes one packed lease for the device generation/index and
+  command owner/generation; a warm call compares it once after cell selection.
   Publication, recording-to-executable transfer, and invalidation follow Tier C
   confinement. Passing the token through caller synchronization is the required
   hand-off and makes the published cell visible; copies remain aliases and must

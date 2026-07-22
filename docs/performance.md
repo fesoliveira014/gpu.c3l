@@ -81,7 +81,9 @@ not obscure library work:
    viewport, and buffer copy.
 2. `command_path_baseline_bench` records the same five operations through
    direct Vulkan and public gpu.c3l paths, using separate warmed command lists
-   from one device and alternating which path is timed first.
+   from one device and alternating which path is timed first. The runner repeats
+   it for trusted/no-tracking, object-boundaries/no-tracking, full/tracking, and
+   full/tracking-with-layers policies.
 3. Dispatch and buffer-copy equivalence executes both paths into distinct,
    pre-seeded outputs. Each output must match a non-zero expectation and its
    paired output.
@@ -158,6 +160,12 @@ subsystem snapshots:
 | Bound pipeline snapshot | Exact bind-time table/cache lookups, zero post-bind resolution under cache churn, and unchanged layout use after backing-slot mutation |
 | Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and zero post-intern shader work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Exact collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
+
+Warm `CommandResolutionStats` require exactly one encoder-cell computation and
+one packed-lease comparison per recorded public command. Duplicate encoder-field
+comparisons, device-loss loads, and trusted-backend capability checks must stay
+at zero in every validation/tracking policy; this is structural evidence, not a
+wall-clock threshold.
 
 Warm command-buffer reset is expected reuse evidence. Warm host allocation is
 prohibited in every policy mode; tracking modes retain into fixed reference
