@@ -35,6 +35,7 @@ The suite covers:
 | `allocation_bench` | Explicit `CPU_WRITE` allocation and free |
 | `command_record_bench` | Barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
+| `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact one-visit-per-list duplicate-detection work |
 | `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup, and cached batches |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
 | `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; exact texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
@@ -70,6 +71,11 @@ work unit per texture, and the swapchain seam exactly one per wrapped image
 examined, at every level. These exact counters are blocking; `ns/destroy` and
 `ns/check` remain advisory because runner, driver, build, and profile identity
 are not fully pinned by that single observation.
+
+The submit-batch benchmark submits real executable command lists in batches of
+1, 8, 32, 128, and 1,024. Its feature-gated counters require exactly one token
+visit per list and zero epoch-reset cells for each ordinary batch. These exact
+work counts are blocking; `ns/submit` remains advisory.
 
 Release runs use deliberately broad order-of-magnitude thresholds:
 

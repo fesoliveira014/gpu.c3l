@@ -69,6 +69,13 @@ PIPELINE_OUTPUT = "\n".join(
         "phase 3 (cached batch, 64x2000): 2454.9 ns/create",
     )
 )
+SUBMIT_BATCH_OUTPUT = "\n".join(
+    ("iterations=batch_sizes=1,8,32,128,1024 units=ns/submit",) + tuple(
+        f"submit batch size={size}: 125.0 ns/submit "
+        f"token_visits={size} epoch_reset_cells=0"
+        for size in (1, 8, 32, 128, 1024)
+    ) + ("submit batch leaks=0",)
+)
 
 
 
@@ -98,6 +105,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "upload_throughput_bench",
                 "command_record_bench",
                 "lifecycle_bench",
+                "submit_batch_bench",
                 "pipeline_cache_bench",
                 "async_overlap_bench",
             ),
@@ -117,6 +125,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
             (
                 "submit=256x5; poll=100000x5; destroy=300x5",
                 "ns/submit, ns/poll, ns/destroy",
+            ),
+        )
+        self.assertEqual(
+            runner.BENCHMARK_METHODS["submit_batch_bench"],
+            (
+                "batch_sizes=1,8,32,128,1024; exact token visits",
+                "ns/submit; exact work units",
             ),
         )
         self.assertEqual(
@@ -206,6 +221,39 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_lifecycle_measurement_accepts_exact_schema(self):
         runner = load_runner()
         runner.require_measurement(LIFECYCLE_OUTPUT, "lifecycle_bench")
+
+    def test_submit_batch_measurement_requires_exact_linear_work(self):
+        runner = load_runner()
+        runner.require_measurement(SUBMIT_BATCH_OUTPUT, "submit_batch_bench")
+        for size in (1, 8, 32, 128, 1024):
+            with self.subTest(size=size):
+                output = SUBMIT_BATCH_OUTPUT.replace(
+                    f"token_visits={size}",
+                    f"token_visits={size + 1}",
+                    1,
+                )
+                with self.assertRaisesRegex(ValueError, f"batch size {size}"):
+                    runner.require_measurement(output, "submit_batch_bench")
+
+    def test_submit_batch_measurement_rejects_rollover_or_leaks(self):
+        runner = load_runner()
+        with self.assertRaisesRegex(ValueError, "batch size 1"):
+            runner.require_measurement(
+                SUBMIT_BATCH_OUTPUT.replace(
+                    "epoch_reset_cells=0",
+                    "epoch_reset_cells=1",
+                    1,
+                ),
+                "submit_batch_bench",
+            )
+        with self.assertRaisesRegex(ValueError, "live resources"):
+            runner.require_measurement(
+                SUBMIT_BATCH_OUTPUT.replace(
+                    "submit batch leaks=0",
+                    "submit batch leaks=1",
+                ),
+                "submit_batch_bench",
+            )
 
     def test_lifecycle_measurement_rejects_nonzero_invariants(self):
         runner = load_runner()

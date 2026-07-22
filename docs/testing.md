@@ -306,7 +306,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
-| Commands | begin/end/submit, timeline signal/wait, invalid state, transactional context-pool rollback, completion-safe context-local command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/raster/depth state, retired execution signatures, and zero execution-time pipeline creation. |
+| Commands | begin/end/submit, exact linear duplicate visits and epoch rollover, timeline signal/wait, invalid state, transactional context-pool rollback, completion-safe context-local command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/raster/depth state, retired execution signatures, and zero execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline, raster, and depth state; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster/viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
@@ -410,11 +410,14 @@ rejecting device/backend re-resolution, command-table lookup, lifecycle-vtable
 dispatch, and post-bind pipeline resolution. Helper-relocation mutations prove
 that moving forbidden work to another source file does not evade the gate.
 
-The benchmark runner builds eight executable targets with `-O1`:
+The benchmark runner builds nine executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
 `upload_throughput_bench`, `command_record_bench`, `lifecycle_bench`,
-`pipeline_cache_bench`, and `async_overlap_bench`. The pipeline-cache target
-requests 200 topology/cull/front-face/depth-bias permutations through
+`submit_batch_bench`, `pipeline_cache_bench`, and `async_overlap_bench`.
+The submit-batch target submits real batches of 1, 8, 32, 128, and 1,024
+executable lists and requires exactly one duplicate-detection record visit per
+list with no rollover work. Its elapsed times are advisory. The pipeline-cache
+target requests 200 topology/cull/front-face/depth-bias permutations through
 `cmd_set_raster_state`, reports the requested count, native graphics creates,
 cache entries/aliases, and recording/create timings; all permutations share
 one immutable pipeline. Command recording covers

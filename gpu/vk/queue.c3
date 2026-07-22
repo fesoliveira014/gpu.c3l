@@ -77,6 +77,11 @@ struct SubmitStats {
     ulong completion_wait_calls;
 }
 
+struct SubmitDuplicateWorkCounters @if(env::TESTING || $feature(SUBMIT_DUPLICATE_STATS)) {
+    ulong token_visits;
+    ulong epoch_reset_cells;
+}
+
 <* Advisory relaxed counters for completion-path work, whitebox-exposed via
    completion_work_counters and reset_completion_work_counters. *>
 struct CompletionWorkCounters @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS)) {
@@ -1981,6 +1986,51 @@ fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
     return native_queue_mutex_for(state, state.presentation.queue);
 }
 
+fn void note_submit_duplicate_token_visit(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(SUBMIT_DUPLICATE_STATS):
+        state.submit_duplicate_token_visits++;
+    $endif
+}
+
+fn void note_submit_epoch_reset_cell(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(SUBMIT_DUPLICATE_STATS):
+        state.submit_epoch_reset_cells++;
+    $endif
+}
+
+fn void reset_submit_duplicate_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(SUBMIT_DUPLICATE_STATS)) {
+    state.command_mutex.lock()!!;
+    defer state.command_mutex.unlock();
+    state.submit_duplicate_token_visits = 0;
+    state.submit_epoch_reset_cells = 0;
+}
+
+fn SubmitDuplicateWorkCounters submit_duplicate_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(SUBMIT_DUPLICATE_STATS)) {
+    state.command_mutex.lock()!!;
+    defer state.command_mutex.unlock();
+    return {
+        .token_visits      = state.submit_duplicate_token_visits,
+        .epoch_reset_cells = state.submit_epoch_reset_cells,
+    };
+}
+
+fn ulong next_submit_visit_epoch_locked(VkDeviceState* state) {
+    if (state.next_submit_visit_epoch == ulong::max) {
+        foreach (&cell : state.commands.slots[:state.commands.next_new]) {
+            note_submit_epoch_reset_cell(state);
+            if (cell.used) cell.value.submit_visit_epoch = 0;
+        }
+        state.next_submit_visit_epoch = 1;
+        return 1;
+    }
+    state.next_submit_visit_epoch++;
+    return state.next_submit_visit_epoch;
+}
+
 fn SubmitInputs? resolve_and_claim_submit_inputs(
     VkDeviceState* state,
     gpu::Queue queue,
@@ -2056,17 +2106,18 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
         );
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
+        ulong epoch = next_submit_visit_epoch_locked(state);
         foreach (i, &token : desc.command_lists) {
             if (token.device != device) return gpu::INVALID_HANDLE~;
-            for (sz j = 0; j < i; j++) {
-                if (desc.command_lists[j].handle == token.handle) {
-                    return gpu::COMMAND_RECORDING_ERROR~;
-                }
-            }
             gpu::CommandEncoderState* encoder =
                 gpu::executable_encoder(token)!;
             if (encoder.backend_state != state) return gpu::INVALID_HANDLE~;
             CommandRecord* record = encoder_command(encoder);
+            note_submit_duplicate_token_visit(state);
+            if (record.submit_visit_epoch == epoch) {
+                return gpu::COMMAND_RECORDING_ERROR~;
+            }
+            record.submit_visit_epoch = epoch;
             if (record.state != CommandState.EXECUTABLE) {
                 return gpu::COMMAND_RECORDING_ERROR~;
             }

@@ -132,6 +132,7 @@ struct VkDeviceState {
     Mutex                      pipeline_creation_mutex;
     Mutex                      texture_view_cache_mutex;
     Mutex                      command_mutex;
+    ulong                      next_submit_visit_epoch;
     bool                       compute_queue_distinct;
     RecordingContextTable      recording_contexts;
     CommandTable               commands;
@@ -178,6 +179,8 @@ struct VkDeviceState {
     Atomic{ulong}              completion_cached_poll_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              completion_cached_wait_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              submit_completion_wait_calls;
+    ulong                      submit_duplicate_token_visits @if(env::TESTING || $feature(SUBMIT_DUPLICATE_STATS));
+    ulong                      submit_epoch_reset_cells @if(env::TESTING || $feature(SUBMIT_DUPLICATE_STATS));
     CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
     void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
