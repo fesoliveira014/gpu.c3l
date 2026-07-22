@@ -190,9 +190,6 @@ def live_scan_files(roots: tuple[Path, ...] = LIVE_SCAN_ROOTS):
         for path in paths:
             if not path.is_file() or path.suffix not in LIVE_SCAN_SUFFIXES:
                 continue
-            relative = path.relative_to(ROOT)
-            if relative.parts[:2] == ("docs", "specs"):
-                continue
             yield path
 
 
