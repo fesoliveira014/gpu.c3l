@@ -388,9 +388,11 @@ complete and stale shader data must be removed.
 `ShaderCode` is borrowed CPU-side SPIR-V prepared by the library. Its opaque,
 process-local identity is derived from the bytes; stage and entry point complete
 the identity, while debug names do not. Callers keep the borrowed inputs
-immutable and alive while using the value. The same prepared code may be reused
-for multiple pipelines and devices. Native shader modules are temporary pipeline
-construction details, never public resources.
+immutable and alive for each creation call. Each device interns exact identity
+into one owned SPIR-V clone and represents it internally with a compact ID. The
+same prepared code may be reused for multiple pipelines and devices; each device
+owns independently. Native shader modules are temporary pipeline-construction
+details, never public resources.
 
 Pipelines are immutable shader execution objects. Creation is split by kind:
 
@@ -406,8 +408,10 @@ state, depth format, sample count, and polygon mode. Topology, cull mode,
 front face, depth bias, depth state, viewport, and scissor are command-time
 state. Compute pipelines share one device-owned `RootPush` layout and, when
 generated work is available, one generated-dispatch layout. Batch creation
-deduplicates exact shader code and pipeline identity, then publishes every
-handle transactionally. The pipeline cache fronts a serializable driver cache:
+reuses temporary modules by shader ID, deduplicates pipeline identity, and
+publishes every handle transactionally. Pipeline-cache entries own refcounted
+IDs, and the device recycles an identity after its last cache entry releases it.
+The pipeline cache fronts a serializable driver cache:
 `get_pipeline_cache_size` /
 `get_pipeline_cache_data` export the driver blob, and
 `RuntimeDesc.pipeline_cache_data` warm-starts it for devices created from that runtime.
