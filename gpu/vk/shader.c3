@@ -389,9 +389,9 @@ fn void? check_heap_convention(
 ) @private {
     uint count = 0;
     if (reflect_module.enumerate_entry_point_descriptor_bindings(
-        entry_point,
-        &count,
-        null,
+        entry_point: entry_point,
+        count:       &count,
+        bindings:    null,
     ) != spvreflect::ReflectResult.RESULT_SUCCESS) {
         return gpu::SHADER_INVALID~;
     }
@@ -401,9 +401,9 @@ fn void? check_heap_convention(
         spvreflect::DescriptorBinding*[] bindings =
             mem::talloc_array(spvreflect::DescriptorBinding*, (sz)count);
         if (reflect_module.enumerate_entry_point_descriptor_bindings(
-            entry_point,
-            &count,
-            bindings.ptr,
+            entry_point: entry_point,
+            count:       &count,
+            bindings:    bindings.ptr,
         )
             != spvreflect::ReflectResult.RESULT_SUCCESS) {
             return gpu::SHADER_INVALID~;
