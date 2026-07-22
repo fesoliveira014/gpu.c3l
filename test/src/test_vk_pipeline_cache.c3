@@ -21,6 +21,11 @@ const char[*] CACHE_ALT_COMP_SPIRV = $embed("shaders/heap_write.comp.spv");
 
 const uint CACHE_RT_SIZE = 16;
 const usz CACHE_RT_BYTES = CACHE_RT_SIZE * CACHE_RT_SIZE * 4;
+const usz[3] PIPELINE_IDENTITY_SCALE_BYTES = {
+    1_024,
+    64 * 1_024,
+    1_024 * 1_024,
+};
 
 fn gpu::Device make_cache_test_device() {
     gpu::RuntimeDesc desc = {
@@ -163,6 +168,35 @@ fn gpu::GraphicsPipelineDesc base_graphics_desc(
         .fragment_shader = shaders.frag,
         .colors          = colors,
     };
+}
+
+fn void assert_pipeline_identity_scale_work(
+    vk::VkDeviceState* state,
+    usz byte_count,
+) {
+    char[] spirv = mem::new_array(char, (sz)byte_count);
+    defer mem::free(spirv.ptr);
+    foreach (&byte : spirv) *byte = 0;
+    mem::copy(spirv.ptr, CACHE_COMP_SPIRV[..].ptr, 20);
+    gpu::ShaderDesc desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = spirv,
+        .entry_point = "main",
+    };
+    gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
+    vk::PipelineIdentityProbeResult result =
+        vk::probe_pipeline_identity_boundary(state, &code)!!;
+
+    assert(result.interning.shader_owned_bytes_cloned == byte_count,
+        "the identity boundary owns the complete scaled shader");
+    assert(result.lookup.pipeline_key_probes == 1,
+        "the scaled post-intern lookup compares one compact key");
+    assert(result.lookup.shader_intern_probes == 0
+            && result.lookup.shader_intern_bytes_compared == 0
+            && result.lookup.shader_owned_bytes_cloned == 0,
+        "the scaled post-intern lookup performs no shader identity work");
+    assert(result.lookup.shader_owned_bytes_freed == byte_count,
+        "the scaled identity probe frees its complete owned shader");
 }
 
 fn void identical_descs_alias_one_entry() @test {
@@ -639,6 +673,16 @@ fn void identical_shader_bytes_from_distinct_storage_deduplicate() @test {
     stats = vk::pipeline_identity_stats(state);
     assert(stats.shader_owned_bytes_freed == source.len,
         "the final alias frees the canonical SPIR-V clone exactly once");
+}
+
+fn void pipeline_identity_scale_lookup_performs_no_shader_work() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = cache_test_state(&device);
+
+    foreach (byte_count : PIPELINE_IDENTITY_SCALE_BYTES) {
+        assert_pipeline_identity_scale_work(state, byte_count);
+    }
 }
 
 fn void shader_store_cache_hit_reference_is_stable() @test {

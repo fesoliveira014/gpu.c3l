@@ -2,6 +2,7 @@ module gpu_test;
 
 import gpu @public;
 import gpu::vk @public;
+import vk;
 
 const char[*] PERFORMANCE_COMP_SPIRV =
     $embed("shaders/root_pointer.comp.spv");
@@ -11,6 +12,26 @@ const char[*] PERFORMANCE_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
 const uint PERFORMANCE_PIPELINE_CHURN_COUNT = 16;
+const usz BOUND_PIPELINE_SNAPSHOT_SIZE = 96;
+
+$assert vk::BoundPipeline::size == BOUND_PIPELINE_SNAPSHOT_SIZE;
+$assert vk::BoundPipeline::members.len == 7;
+$assert vk::BoundPipeline::members[0].name == "handle";
+$assert vk::BoundPipeline::members[0].type == gpu::PipelineHandle::typeid;
+$assert vk::BoundPipeline::members[1].name == "pipeline";
+$assert vk::BoundPipeline::members[1].type == vk::Pipeline::typeid;
+$assert vk::BoundPipeline::members[2].name == "layout";
+$assert vk::BoundPipeline::members[2].type == vk::PipelineLayout::typeid;
+$assert vk::BoundPipeline::members[3].name == "generated_dispatch_layout";
+$assert vk::BoundPipeline::members[3].type
+    == vk::IndirectCommandsLayoutEXT::typeid;
+$assert vk::BoundPipeline::members[4].name == "cache_entry";
+$assert vk::BoundPipeline::members[4].type == uint::typeid;
+$assert vk::BoundPipeline::members[5].name == "kind";
+$assert vk::BoundPipeline::members[5].type == vk::PipelineKind::typeid;
+$assert vk::BoundPipeline::members[6].name == "render";
+$assert vk::BoundPipeline::members[6].type
+    == vk::RenderCompatibility::typeid;
 
 fn gpu::Device make_performance_invariant_device() {
     gpu::RuntimeDesc desc = {
@@ -59,6 +80,32 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
         &pipeline_desc,
     )!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::ShaderDesc alternate_vertex_desc = {
+        .stage       = gpu::ShaderStage.VERTEX,
+        .spirv       = PERFORMANCE_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderDesc alternate_fragment_desc = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = PERFORMANCE_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ColorTargetState[1] alternate_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc alternate_desc = {
+        .vertex_shader = gpu::prepare_shader_code(&alternate_vertex_desc)!!,
+        .fragment_shader = gpu::prepare_shader_code(
+            &alternate_fragment_desc,
+        )!!,
+        .colors = alternate_colors[..],
+    };
+    gpu::PipelineHandle alternate_pipeline = gpu::create_graphics_pipeline(
+        &device,
+        &alternate_desc,
+    )!!;
+    defer gpu::destroy_pipeline(&device, alternate_pipeline)!!;
     OwnedSpan root = allocate_owned_span(
         device:       &device,
         size:         256,
@@ -139,11 +186,46 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     gpu::CommandResolutionStats post_churn =
         gpu::command_resolution_stats();
     assert_warm_command_resolution(post_churn, 0);
-    gpu::cmd_dispatch(
-        commands: &commands,
-        root:     test_span_address(&device, root.span),
-        groups:   { 1, 1, 1 },
-    )!!;
+    vk::PipelineCell* bound_cell = &state.pipelines.slots[pipeline.index];
+    vk::PipelineCell* alternate_cell =
+        &state.pipelines.slots[alternate_pipeline.index];
+    vk::Pipeline saved_pipeline = bound_cell.value.pipeline;
+    vk::PipelineLayout saved_layout = bound_cell.value.layout;
+    vk::IndirectCommandsLayoutEXT saved_generated_layout =
+        bound_cell.value.generated_dispatch_layout;
+    uint saved_entry = bound_cell.value.entry;
+    uint saved_generation = bound_cell.generation;
+    bool saved_used = bound_cell.used;
+    assert(saved_layout != alternate_cell.value.layout,
+        "the alternate pipeline provides a distinct backing layout");
+    vk::reset_root_push_observation();
+    {
+        defer {
+            bound_cell.value.pipeline = saved_pipeline;
+            bound_cell.value.layout = saved_layout;
+            bound_cell.value.generated_dispatch_layout =
+                saved_generated_layout;
+            bound_cell.value.entry = saved_entry;
+            bound_cell.generation = saved_generation;
+            bound_cell.used = saved_used;
+        };
+        bound_cell.value.pipeline = alternate_cell.value.pipeline;
+        bound_cell.value.layout = alternate_cell.value.layout;
+        bound_cell.value.generated_dispatch_layout =
+            alternate_cell.value.generated_dispatch_layout;
+        bound_cell.value.entry = alternate_cell.value.entry;
+        bound_cell.generation = pipeline.generation + 1;
+        bound_cell.used = false;
+        gpu::cmd_dispatch(
+            commands: &commands,
+            root:     test_span_address(&device, root.span),
+            groups:   { 1, 1, 1 },
+        )!!;
+        vk::RootPushObservation observation =
+            vk::root_push_observation();
+        assert(observation.compute_layout == (ulong)saved_layout,
+            "dispatch consumes the bind-time pipeline layout snapshot");
+    }
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;

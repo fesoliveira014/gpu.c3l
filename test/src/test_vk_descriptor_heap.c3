@@ -10,6 +10,7 @@ import std::core::mem::allocators;
 const uint DESCRIPTOR_BUFFER_USAGE = (uint)vk::BufferUsageFlagBits.RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT
     | (uint)vk::BufferUsageFlagBits.SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
     | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
+const uint SAMPLER_LOOKUP_SCALE_OCCUPANCY = 65_536;
 
 struct DescriptorDiagnosticCapture {
     uint calls;
@@ -199,6 +200,30 @@ fn gpu::TextureHandle make_heap_view_texture(gpu::Device* device) {
         .usage        = { .sampled, .storage },
     };
     return gpu::create_texture(device, &desc)!!;
+}
+
+fn void sampler_lookup_scale_empty_bucket_miss_has_zero_work() @test {
+    gpu::Device device = make_heap_test_device(1, 1);
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::SamplerTable table = vk::create_sampler_lookup_probe_table(
+        SAMPLER_LOOKUP_SCALE_OCCUPANCY,
+    );
+    defer vk::destroy_sampler_lookup_probe_table(&table);
+
+    vk::SamplerLookupProbeResult result =
+        vk::probe_sampler_lookup(state, &table);
+    assert(result.occupancy == SAMPLER_LOOKUP_SCALE_OCCUPANCY
+            && result.bucket_count == SAMPLER_LOOKUP_SCALE_OCCUPANCY * 2
+            && (result.bucket_count & (result.bucket_count - 1)) == 0,
+        "the scale probe publishes the exact sparse power-of-two table");
+    assert(result.probes >= 1 && result.probes <= 8,
+        "the scale probe hit examines at most eight candidates");
+    assert(result.empty_bucket_miss_probes == 0,
+        "a 65,536-entry empty-bucket miss examines zero candidates");
+    assert(vk::sampler_table_index_consistent(&table),
+        "the scale probe preserves the sampler bucket index");
 }
 
 fn void descriptor_sampler_failures_report_context() @test {
