@@ -165,7 +165,7 @@ struct VkDeviceState {
     Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
     Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_state_lowerings @if(env::TESTING);
+    Atomic{ulong}              texture_barrier_state_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_native_assemblies @if(env::TESTING);
     Atomic{ulong}              texture_barrier_native_emissions @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
@@ -175,8 +175,8 @@ struct VkDeviceState {
     GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);
     void*                       generated_dispatch_layout_read_user_data @if(env::TESTING);
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);
-    TextureBarrierEmitHook       texture_barrier_emit_hook @if(env::TESTING);
-    void*                        texture_barrier_emit_user_data @if(env::TESTING);
+    TextureBarrierEmitHook     texture_barrier_emit_hook @if(env::TESTING);
+    void*                      texture_barrier_emit_user_data @if(env::TESTING);
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
     SubmitStats                submit_stats;

@@ -168,7 +168,8 @@ runtime info: selected format/mode, clamped extent, actual image count
 image acquire/present
 resize and out-of-date recovery
 coherent info refresh and dormant sentinel after zero/failed resize
-exact empty UNDEFINED/PRESENT acquired-image prior state without a layout table
+exact empty UNDEFINED/PRESENT acquired-image prior state
+independent PRESENT source and first-consumer readiness scopes
 present mode selection
 application render-loop pacing sanity
 ```

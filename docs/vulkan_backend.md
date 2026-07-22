@@ -721,9 +721,11 @@ Presentation transitions use these exact synchronization2 scopes:
 The public `PRESENT` state has empty stages and access because the presentation
 engine is external to the Vulkan pipeline. Native lowering retains the fixed
 color-attachment-output/no-access WSI scope in both directions. The texture
-transitions keep their narrow caller-declared color-attachment scopes. The private acquire semaphore uses the exact
-`SubmitDesc.readiness_before` destination mask. The private present signal keeps
-the backend's full-submission scope.
+transitions keep their narrow caller-declared scopes. Independently, the private
+acquire semaphore uses the exact `SubmitDesc.readiness_before` destination mask
+for the first actual consumer of the acquired image; that wait scope is not
+derived from the fixed `PRESENT` barrier source. The private present signal
+keeps the backend's full-submission scope.
 
 ## 14. Timeline semaphores
 
@@ -890,8 +892,9 @@ lowering stay in one path in `gpu/vk/sync.c3` beside barrier construction
 because the layout-specific access mapping belongs to that operation.
 
 Shared helpers include format, usage, sampler, blend, topology, and global
-barrier conversion. Do not reintroduce the retired texture-use scope or a
-second barrier-to-native helper in command or resource files.
+barrier conversion. Texture-state validation, lowering, native barrier
+assembly, and emission form one path owned by `gpu/vk/sync.c3`; command and
+resource files do not duplicate that translation.
 
 ## 20. Backend acceptance criteria
 

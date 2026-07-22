@@ -313,7 +313,7 @@ def check(root: Path = ROOT) -> list[str]:
         ("validate_texture_queue_access(", 1),
         ("note_texture_barrier_range_resolution(state);", 1),
         ("resolve_texture_barrier_range(", 1),
-        ("note_texture_barrier_state_lowering(state);", 2),
+        ("note_texture_barrier_state_validation(state);", 2),
         ("texture_state_rejection(", 2),
         ("texture_state_to_vk(", 2),
         ("note_texture_barrier_native_assembly(state);", 1),

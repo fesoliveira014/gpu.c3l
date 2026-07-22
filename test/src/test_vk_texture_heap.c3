@@ -420,10 +420,10 @@ fn void storage_write_then_fragment_sample() @test {
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     bind_test_graphics_pipeline(&commands, graphics_pipeline);
     gpu::cmd_draw(
-        commands:      &commands,
-        vertex_root:   test_span_address(&device, vertices_span),
-        fragment_root: test_span_address(&device, fragment_root_span),
-        vertex_count:  3,
+        commands:       &commands,
+        vertex_root:    test_span_address(&device, vertices_span),
+        fragment_root:  test_span_address(&device, fragment_root_span),
+        vertex_count:   3,
         instance_count: 1,
     )!!;
     gpu::cmd_end_render_pass(&commands)!!;

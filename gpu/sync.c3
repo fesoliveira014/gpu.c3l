@@ -35,7 +35,8 @@ enum TextureLayout : int {
     PRESENT,
 }
 
-<* Read/write intent for a texture state. *>
+<* Read/write intent for a texture state. The zero value means no access and is
+   valid only for `UNDEFINED` and `PRESENT` states. *>
 bitstruct TextureAccess : uint {
     bool read  : 0;
     bool write : 1;
@@ -61,7 +62,8 @@ struct Barrier {
     HazardFlags hazards;
 }
 
-<* Layout, execution stages, and access intent for one texture use. *>
+<* Layout, execution stages, and access intent for one texture use. The zero
+   value is the exact empty `UNDEFINED` source state. *>
 struct TextureState {
     TextureLayout layout;
     StageMask     stages;
@@ -111,6 +113,8 @@ fn bool texture_layout_valid(TextureLayout layout) @private {
     }
 }
 
+<* Construct a sampled, read-only texture state at `stages`. This inserts no
+   synchronization; pass the result to a texture barrier. *>
 fn TextureState sampled_at(StageMask stages) {
     return {
         .layout = TextureLayout.SAMPLED,
@@ -119,6 +123,8 @@ fn TextureState sampled_at(StageMask stages) {
     };
 }
 
+<* Construct a storage texture state at `stages`, preserving `access`. This
+   inserts no synchronization; pass the result to a texture barrier. *>
 fn TextureState storage_at(StageMask stages, TextureAccess access) {
     return {
         .layout = TextureLayout.STORAGE,

@@ -866,7 +866,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::TextureBarrier to_color = {
         .texture = old_texture,
         .before  = acquired.prior_state,
-        .after = {
+        .after   = {
             .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
             .stages = { .color_output },
             .access = { .read, .write },
@@ -1110,7 +1110,7 @@ fn void swapchain_info_snapshots_are_coherent() @test {
     assert(slot.acquisition == 9, "dormancy does not reuse acquisition identities");
 }
 
-fn void acquired_image_reports_prior_semantic_use() @test {
+fn void acquired_image_reports_prior_state() @test {
     gpu::vk::TextureSlot texture;
     gpu::Device device = { .generation = 1 };
     gpu::SwapchainHandle swapchain = { .index = 1, .generation = 1 };

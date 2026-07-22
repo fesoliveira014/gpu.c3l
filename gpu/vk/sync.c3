@@ -7,8 +7,40 @@ alias TextureBarrierEmitHook @if(env::TESTING) = fn void (
     void*, vk::ImageMemoryBarrier2*
 );
 
-const uint TEXTURE_STATE_STAGE_BITS @private = 0x01FF;
-const uint TEXTURE_ACCESS_BITS @private = 0x03;
+const gpu::StageMask TEXTURE_STATE_STAGE_MASK @private = {
+    .all,
+    .host,
+    .transfer,
+    .compute,
+    .vertex_shader,
+    .fragment_shader,
+    .color_output,
+    .depth_output,
+    .present,
+};
+const gpu::StageMask TEXTURE_ALL_STAGE @private = { .all };
+const gpu::StageMask TEXTURE_TRANSFER_STAGE @private = { .transfer };
+const gpu::StageMask TEXTURE_SHADER_STAGE_MASK @private = {
+    .compute,
+    .vertex_shader,
+    .fragment_shader,
+};
+const gpu::StageMask TEXTURE_COLOR_OUTPUT_STAGE @private = { .color_output };
+const gpu::StageMask TEXTURE_DEPTH_OUTPUT_STAGE @private = { .depth_output };
+const gpu::TextureAccess TEXTURE_ACCESS_MASK @private = { .read, .write };
+const gpu::TextureAccess TEXTURE_READ_ACCESS @private = { .read };
+const gpu::TextureAccess TEXTURE_WRITE_ACCESS @private = { .write };
+
+enum TextureStateSide {
+    BEFORE,
+    AFTER,
+}
+
+enum TextureStateMember {
+    LAYOUT,
+    STAGES,
+    ACCESS,
+}
 
 struct TextureStateScope {
     vk::PipelineStageFlags2 stages;
@@ -31,7 +63,7 @@ struct TextureBarrierWorkCounters @if(env::TESTING) {
     ulong handle_resolutions;
     ulong access_validations;
     ulong range_resolutions;
-    ulong state_lowerings;
+    ulong state_validations;
     ulong native_assemblies;
     ulong native_emissions;
 }
@@ -57,6 +89,9 @@ fn bool texture_layout_known(gpu::TextureLayout layout) @private {
     }
 }
 
+<*
+ @require ((uint)access & ~(uint)TEXTURE_ACCESS_MASK) == 0 : "known texture access bits"
+*>
 fn vk::AccessFlags2 texture_access_to_vk(
     gpu::TextureLayout layout,
     gpu::TextureAccess access,
@@ -163,20 +198,24 @@ fn TextureStateScope texture_state_to_vk(
     }
 }
 
-fn ZString texture_state_field(bool before, ZString field) @private {
-    if (field.str_view() == "layout") {
-        return before
-            ? "TextureBarrier.before.layout"
-            : "TextureBarrier.after.layout";
+fn ZString texture_state_field(
+    TextureStateSide side,
+    TextureStateMember member,
+) @private {
+    switch (member) {
+        case TextureStateMember.LAYOUT:
+            return side == TextureStateSide.BEFORE
+                ? "TextureBarrier.before.layout"
+                : "TextureBarrier.after.layout";
+        case TextureStateMember.STAGES:
+            return side == TextureStateSide.BEFORE
+                ? "TextureBarrier.before.stages"
+                : "TextureBarrier.after.stages";
+        case TextureStateMember.ACCESS:
+            return side == TextureStateSide.BEFORE
+                ? "TextureBarrier.before.access"
+                : "TextureBarrier.after.access";
     }
-    if (field.str_view() == "stages") {
-        return before
-            ? "TextureBarrier.before.stages"
-            : "TextureBarrier.after.stages";
-    }
-    return before
-        ? "TextureBarrier.before.access"
-        : "TextureBarrier.after.access";
 }
 
 fn bool texture_shader_stages_supported(
@@ -198,26 +237,30 @@ fn TextureBarrierRejection texture_state_rejection(
     vk::QueueFlags flags,
     bool before,
 ) @private {
+    TextureStateSide side = before
+        ? TextureStateSide.BEFORE
+        : TextureStateSide.AFTER;
     if (!texture_layout_known(texture_state.layout)) {
         return {
-            .field     = texture_state_field(before, "layout"),
+            .field     = texture_state_field(side, TextureStateMember.LAYOUT),
             .invariant = "layout must be a known TextureLayout value",
         };
     }
     uint stages = (uint)texture_state.stages;
     uint access = (uint)texture_state.access;
-    if ((stages & TEXTURE_STATE_STAGE_BITS) != stages
+    if ((stages & (uint)TEXTURE_STATE_STAGE_MASK) != stages
         || texture_state.stages.host
         || texture_state.stages.present
-        || (texture_state.stages.all && stages != 1)) {
+        || (texture_state.stages.all
+            && stages != (uint)TEXTURE_ALL_STAGE)) {
         return {
-            .field     = texture_state_field(before, "stages"),
+            .field     = texture_state_field(side, TextureStateMember.STAGES),
             .invariant = "stages must contain known non-host pipeline stages and all must be exclusive",
         };
     }
-    if ((access & TEXTURE_ACCESS_BITS) != access) {
+    if ((access & (uint)TEXTURE_ACCESS_MASK) != access) {
         return {
-            .field     = texture_state_field(before, "access"),
+            .field     = texture_state_field(side, TextureStateMember.ACCESS),
             .invariant = "access must contain only read and write bits",
         };
     }
@@ -230,172 +273,174 @@ fn TextureBarrierRejection texture_state_rejection(
     bool shader_stages = texture_state.stages.compute
         || texture_state.stages.vertex_shader
         || texture_state.stages.fragment_shader;
-    bool exact_read = access == 1;
-    bool exact_write = access == 2;
+    bool exact_read = access == (uint)TEXTURE_READ_ACCESS;
+    bool exact_write = access == (uint)TEXTURE_WRITE_ACCESS;
     bool concrete_access = access != 0;
     bool all = texture_state.stages.all;
     bool depth_stencil = texture_format_is_depth_stencil(slot.format);
 
     switch (texture_state.layout) {
         case gpu::TextureLayout.UNDEFINED:
-            if (!before) {
+            if (side == TextureStateSide.AFTER) {
                 return {
-                    .field     = texture_state_field(before, "layout"),
+                    .field     = texture_state_field(side, TextureStateMember.LAYOUT),
                     .invariant = "UNDEFINED is source-only",
                 };
             }
             if (stages != 0) {
                 return {
-                    .field     = texture_state_field(before, "stages"),
+                    .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "UNDEFINED requires empty stages",
                 };
             }
             if (access != 0) {
                 return {
-                    .field     = texture_state_field(before, "access"),
+                    .field     = texture_state_field(side, TextureStateMember.ACCESS),
                     .invariant = "UNDEFINED requires empty access",
                 };
             }
         case gpu::TextureLayout.TRANSFER_SOURCE:
-            if (!(all || (texture_state.stages.transfer && stages == 1u << 2))
+            if (!(all || (texture_state.stages.transfer
+                    && stages == (uint)TEXTURE_TRANSFER_STAGE))
                 || !transfer) {
                 return {
-                    .field     = texture_state_field(before, "stages"),
+                    .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "transfer source requires transfer or all stages on a transfer-capable queue",
                 };
             }
             if (!exact_read) {
                 return {
-                    .field     = texture_state_field(before, "access"),
+                    .field     = texture_state_field(side, TextureStateMember.ACCESS),
                     .invariant = "transfer source requires read-only access",
                 };
             }
             if (!slot.usage.transfer_src) {
                 return {
-                    .field     = texture_state_field(before, "layout"),
+                    .field     = texture_state_field(side, TextureStateMember.LAYOUT),
                     .invariant = "texture usage must include transfer_src",
                 };
             }
         case gpu::TextureLayout.TRANSFER_DESTINATION:
-            if (!(all || (texture_state.stages.transfer && stages == 1u << 2))
+            if (!(all || (texture_state.stages.transfer
+                    && stages == (uint)TEXTURE_TRANSFER_STAGE))
                 || !transfer) {
                 return {
-                    .field     = texture_state_field(before, "stages"),
+                    .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "transfer destination requires transfer or all stages on a transfer-capable queue",
                 };
             }
             if (!exact_write) {
                 return {
-                    .field     = texture_state_field(before, "access"),
+                    .field     = texture_state_field(side, TextureStateMember.ACCESS),
                     .invariant = "transfer destination requires write-only access",
                 };
             }
             if (!slot.usage.transfer_dst) {
                 return {
-                    .field     = texture_state_field(before, "layout"),
+                    .field     = texture_state_field(side, TextureStateMember.LAYOUT),
                     .invariant = "texture usage must include transfer_dst",
                 };
             }
         case gpu::TextureLayout.SAMPLED:
             if (!(all || (shader_stages
-                    && (stages & ~((1u << 3) | (1u << 4) | (1u << 5))) == 0))
+                    && (stages & ~(uint)TEXTURE_SHADER_STAGE_MASK) == 0))
                 || !shader_queue
                 || !texture_shader_stages_supported(texture_state.stages, flags)) {
                 return {
-                    .field     = texture_state_field(before, "stages"),
+                    .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "sampled textures require supported shader stages or all",
                 };
             }
             if (!exact_read) {
                 return {
-                    .field     = texture_state_field(before, "access"),
+                    .field     = texture_state_field(side, TextureStateMember.ACCESS),
                     .invariant = "sampled textures require read-only access",
                 };
             }
             if (!slot.usage.sampled) {
                 return {
-                    .field     = texture_state_field(before, "layout"),
+                    .field     = texture_state_field(side, TextureStateMember.LAYOUT),
                     .invariant = "texture usage must include sampled",
                 };
             }
         case gpu::TextureLayout.STORAGE:
             if (!(all || (shader_stages
-                    && (stages & ~((1u << 3) | (1u << 4) | (1u << 5))) == 0))
+                    && (stages & ~(uint)TEXTURE_SHADER_STAGE_MASK) == 0))
                 || !shader_queue
                 || !texture_shader_stages_supported(texture_state.stages, flags)) {
                 return {
-                    .field     = texture_state_field(before, "stages"),
+                    .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "storage textures require supported shader stages or all",
                 };
             }
             if (!concrete_access) {
                 return {
-                    .field     = texture_state_field(before, "access"),
+                    .field     = texture_state_field(side, TextureStateMember.ACCESS),
                     .invariant = "storage textures require read, write, or read-write access",
                 };
             }
             if (!slot.usage.storage) {
                 return {
-                    .field     = texture_state_field(before, "layout"),
+                    .field     = texture_state_field(side, TextureStateMember.LAYOUT),
                     .invariant = "texture usage must include storage",
                 };
             }
         case gpu::TextureLayout.COLOR_ATTACHMENT:
             if (!(all || (texture_state.stages.color_output
-                    && stages == 1u << 6)) || !graphics) {
+                    && stages == (uint)TEXTURE_COLOR_OUTPUT_STAGE)) || !graphics) {
                 return {
-                    .field     = texture_state_field(before, "stages"),
+                    .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "color attachment requires color_output or all on a graphics queue",
                 };
             }
             if (!concrete_access) {
                 return {
-                    .field     = texture_state_field(before, "access"),
+                    .field     = texture_state_field(side, TextureStateMember.ACCESS),
                     .invariant = "color attachment requires read, write, or read-write access",
                 };
             }
             if (depth_stencil || !slot.usage.color_attach) {
                 return {
-                    .field     = texture_state_field(before, "layout"),
+                    .field     = texture_state_field(side, TextureStateMember.LAYOUT),
                     .invariant = "color attachment requires a non-depth color_attach texture",
                 };
             }
         case gpu::TextureLayout.DEPTH_ATTACHMENT:
             if (!(all || (texture_state.stages.depth_output
-                    && stages == 1u << 7)) || !graphics) {
+                    && stages == (uint)TEXTURE_DEPTH_OUTPUT_STAGE)) || !graphics) {
                 return {
-                    .field     = texture_state_field(before, "stages"),
+                    .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "depth attachment requires depth_output or all on a graphics queue",
                 };
             }
             if (!concrete_access) {
                 return {
-                    .field     = texture_state_field(before, "access"),
+                    .field     = texture_state_field(side, TextureStateMember.ACCESS),
                     .invariant = "depth attachment requires read, write, or read-write access",
                 };
             }
             if (!depth_stencil || !slot.usage.depth_attach) {
                 return {
-                    .field     = texture_state_field(before, "layout"),
+                    .field     = texture_state_field(side, TextureStateMember.LAYOUT),
                     .invariant = "depth attachment requires a depth_attach depth texture",
                 };
             }
         case gpu::TextureLayout.PRESENT:
             if (stages != 0) {
                 return {
-                    .field     = texture_state_field(before, "stages"),
+                    .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "PRESENT requires empty public stages",
                 };
             }
             if (access != 0) {
                 return {
-                    .field     = texture_state_field(before, "access"),
+                    .field     = texture_state_field(side, TextureStateMember.ACCESS),
                     .invariant = "PRESENT requires empty public access",
                 };
             }
             if (!slot.swapchain_owned || depth_stencil || !graphics) {
                 return {
-                    .field     = texture_state_field(before, "layout"),
+                    .field     = texture_state_field(side, TextureStateMember.LAYOUT),
                     .invariant = "PRESENT requires a swapchain color texture on a graphics queue",
                 };
             }
@@ -455,9 +500,9 @@ fn void note_texture_barrier_range_resolution(VkDeviceState* state) @private {
     $endif
 }
 
-fn void note_texture_barrier_state_lowering(VkDeviceState* state) @private {
+fn void note_texture_barrier_state_validation(VkDeviceState* state) @private {
     $if env::TESTING:
-        (void)state.texture_barrier_state_lowerings.add(1, AtomicOrdering.RELAXED);
+        (void)state.texture_barrier_state_validations.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 
@@ -550,16 +595,17 @@ fn LoweredTextureBarrier? validate_and_lower_texture_barrier(
         barrier.view,
         slot,
     );
-    if (catch range_result) {
+    if (catch range_fault = range_result) {
         TextureBarrierRejection rejection = {
             .field     = "TextureBarrier.view",
             .invariant = "view must select a valid texture subresource range without format reinterpretation",
         };
         return report_texture_barrier_rejection(
-            state:     state,
-            barrier:   barrier,
-            slot:      slot,
-            rejection: rejection,
+            state:        state,
+            barrier:      barrier,
+            slot:         slot,
+            rejection:    rejection,
+            public_fault: range_fault,
         )~;
     }
     vk::ImageSubresourceRange range = range_result;
@@ -568,7 +614,7 @@ fn LoweredTextureBarrier? validate_and_lower_texture_barrier(
         record.queue.id,
     )!;
 
-    note_texture_barrier_state_lowering(state);
+    note_texture_barrier_state_validation(state);
     TextureBarrierRejection rejection = texture_state_rejection(
         texture_state: barrier.before,
         slot:          slot,
@@ -588,7 +634,7 @@ fn LoweredTextureBarrier? validate_and_lower_texture_barrier(
         slot.format,
     );
 
-    note_texture_barrier_state_lowering(state);
+    note_texture_barrier_state_validation(state);
     rejection = texture_state_rejection(
         texture_state: barrier.after,
         slot:          slot,
@@ -741,7 +787,7 @@ fn TextureBarrierWorkCounters texture_barrier_work_counters(
         .range_resolutions = state.texture_barrier_range_resolutions.load(
             AtomicOrdering.RELAXED,
         ),
-        .state_lowerings = state.texture_barrier_state_lowerings.load(
+        .state_validations = state.texture_barrier_state_validations.load(
             AtomicOrdering.RELAXED,
         ),
         .native_assemblies = state.texture_barrier_native_assemblies.load(
@@ -760,7 +806,7 @@ fn void reset_texture_barrier_work_counters(
     state.textures.get_calls.store(0, AtomicOrdering.RELAXED);
     state.texture_barrier_access_validations.store(0, AtomicOrdering.RELAXED);
     state.texture_barrier_range_resolutions.store(0, AtomicOrdering.RELAXED);
-    state.texture_barrier_state_lowerings.store(0, AtomicOrdering.RELAXED);
+    state.texture_barrier_state_validations.store(0, AtomicOrdering.RELAXED);
     state.texture_barrier_native_assemblies.store(0, AtomicOrdering.RELAXED);
     state.texture_barrier_native_emissions.store(0, AtomicOrdering.RELAXED);
 }

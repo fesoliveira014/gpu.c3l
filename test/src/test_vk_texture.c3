@@ -632,7 +632,7 @@ fn void texture_stale_handle_rejected() @test {
     assert(stale_fault == gpu::INVALID_HANDLE, "double destroy faults INVALID_HANDLE");
 }
 
-fn void texture_barrier_records_semantic_uses() @test {
+fn void texture_barrier_records_texture_states() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
 
@@ -665,7 +665,7 @@ fn void texture_barrier_records_semantic_uses() @test {
             { .compute },
             { .read, .write },
         ),
-        .after = gpu::storage_at(
+        .after   = gpu::storage_at(
             { .compute },
             { .read, .write },
         ),
@@ -780,7 +780,7 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
             .layer_count = 1,
         },
         .before = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after = {
+        .after  = {
             .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
             .stages = { .transfer },
             .access = { .write },
@@ -794,7 +794,8 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
     assert(counters.handle_resolutions == 1, "barrier resolves its texture handle once");
     assert(counters.access_validations == 1, "barrier validates recording access once");
     assert(counters.range_resolutions == 1, "barrier resolves its view range once");
-    assert(counters.state_lowerings == 2, "barrier lowers each texture state once");
+    assert(counters.state_validations == 2,
+        "barrier validates each texture state once");
     assert(counters.native_assemblies == 1, "barrier assembles one native barrier");
     assert(counters.native_emissions == 1, "barrier emits one native barrier");
     assert(capture.calls == 1, "native emission hook receives exactly one barrier");
@@ -826,6 +827,110 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
         && capture.native.subresource_range.base_array_layer == 1
         && capture.native.subresource_range.layer_count == 1,
         "native barrier preserves the exact resolved color subresource range");
+}
+
+fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .dimension = gpu::TextureDimension.TEX_2D,
+        .access    = { .graphics, .compute },
+        .width     = 16,
+        .height    = 16,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = {
+            .transfer_dst,
+            .sampled,
+            .storage,
+            .color_attach,
+        },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::CommandList commands = gpu::begin_commands(
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+    )!!;
+    defer discard_test_commands(&commands)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state_ptr(&device);
+    vk::TextureSlot* slot = state.textures.get(texture)!!;
+    TextureBarrierEmitCapture capture;
+    vk::set_texture_barrier_emit_hook(
+        state,
+        &capture_texture_barrier_emit,
+        &capture,
+    );
+    defer vk::set_texture_barrier_emit_hook(state, null, null);
+
+    gpu::TextureBarrier sampled = {
+        .texture = texture,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = gpu::sampled_at({ .vertex_shader, .fragment_shader }),
+    };
+    gpu::cmd_texture_barrier(&commands, &sampled)!!;
+    vk::PipelineStageFlags2 sampled_stages = (vk::PipelineStageFlags2)(
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT
+            | (ulong)vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT
+    );
+    assert(capture.native.dst_stage_mask == sampled_stages,
+        "multi-stage sampled state preserves both shader stages");
+    assert(capture.native.dst_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        "sampled state lowers to sampled-read access");
+    assert(capture.native.new_layout
+            == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+        "sampled state lowers to the shader-read layout");
+
+    gpu::TextureBarrier storage = {
+        .texture = texture,
+        .before  = gpu::storage_at({ .compute }, { .write }),
+        .after   = gpu::storage_at({ .compute }, { .read }),
+    };
+    gpu::cmd_texture_barrier(&commands, &storage)!!;
+    assert(capture.native.src_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
+        && capture.native.dst_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+        "storage states preserve their compute stages");
+    assert(capture.native.src_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        "write-only storage source lowers to storage-write access");
+    assert(capture.native.dst_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_SHADER_STORAGE_READ_BIT,
+        "read-only storage destination lowers to storage-read access");
+    assert(capture.native.old_layout == vk::ImageLayout.GENERAL
+        && capture.native.new_layout == vk::ImageLayout.GENERAL,
+        "storage states lower to the general layout");
+
+    slot.swapchain_owned = true;
+    gpu::TextureBarrier present = {
+        .texture = texture,
+        .before  = { .layout = gpu::TextureLayout.PRESENT },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+    };
+    gpu::cmd_texture_barrier(&commands, &present)!!;
+    slot.swapchain_owned = false;
+    assert(capture.calls == 3,
+        "injected seam captures every composed texture barrier");
+    assert(capture.native.src_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        "present source lowers to the fixed color-output source scope");
+    assert(capture.native.src_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_NONE,
+        "present source lowers to no source access");
+    assert(capture.native.old_layout == vk::ImageLayout.PRESENT_SRC_KHR,
+        "present source lowers to the native presentation layout");
+    assert(capture.native.dst_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT
+        && capture.native.dst_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT
+        && capture.native.new_layout
+            == vk::ImageLayout.TRANSFER_DST_OPTIMAL,
+        "present-to-transfer lowers the exact destination scope and layout");
 }
 
 fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
@@ -866,7 +971,7 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
     gpu::TextureBarrier barrier = {
         .texture = texture,
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after = {
+        .after   = {
             .layout = gpu::TextureLayout.SAMPLED,
             .stages = { .fragment_shader },
         },
@@ -877,11 +982,16 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
 
     vk::TextureBarrierWorkCounters counters =
         vk::texture_barrier_work_counters(state);
-    assert(counters.helper_calls == 1);
-    assert(counters.handle_resolutions == 1);
-    assert(counters.access_validations == 1);
-    assert(counters.range_resolutions == 1);
-    assert(counters.state_lowerings == 2);
+    assert(counters.helper_calls == 1,
+        "invalid state uses one validation and lowering helper");
+    assert(counters.handle_resolutions == 1,
+        "invalid state resolves its texture handle once");
+    assert(counters.access_validations == 1,
+        "invalid state validates recording access once");
+    assert(counters.range_resolutions == 1,
+        "invalid state resolves its view range once");
+    assert(counters.state_validations == 2,
+        "invalid state validates both texture states");
     assert(counters.native_assemblies == 0,
         "invalid destination state assembles no native barrier");
     assert(counters.native_emissions == 0,
@@ -894,7 +1004,7 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
         "failed state validation rolls back the texture validation reference");
 }
 
-fn void texture_barrier_rejects_unsupported_semantic_uses() @test {
+fn void texture_barrier_rejects_unsupported_texture_states() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
 
@@ -994,7 +1104,7 @@ fn void texture_barrier_stale_handle_rejected() @test {
         "stale texture performs one authoritative lookup attempt");
     assert(counters.access_validations == 0
             && counters.range_resolutions == 0
-            && counters.state_lowerings == 0
+            && counters.state_validations == 0
             && counters.native_assemblies == 0
             && counters.native_emissions == 0
             && emission.calls == 0,
@@ -1662,7 +1772,7 @@ fn void texture_barrier_state_diagnostics_name_nested_side_fields() @test {
             .layout = gpu::TextureLayout.SAMPLED,
             .stages = { .fragment_shader },
         },
-        .after = gpu::sampled_at({ .fragment_shader }),
+        .after  = gpu::sampled_at({ .fragment_shader }),
     };
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
             == gpu::INVALID_ARGUMENT,
@@ -1678,7 +1788,7 @@ fn void texture_barrier_state_diagnostics_name_nested_side_fields() @test {
         .expected_invariant      = "stages must contain known non-host pipeline stages and all must be exclusive",
     };
     barrier.before = { .layout = gpu::TextureLayout.UNDEFINED };
-    barrier.after = {
+    barrier.after  = {
         .layout = gpu::TextureLayout.SAMPLED,
         .stages = { .host },
         .access = { .read },

@@ -1508,6 +1508,11 @@ pipeline. The Vulkan backend preserves the validated WSI policy by lowering
 the presentation-facing side to color-attachment-output with no access; the
 concrete rendering side still comes from the caller's state.
 
+`SubmitDesc.readiness_before` is independent of that fixed `PRESENT` source
+scope. It names the destination stages of the first command that consumes the
+acquired image, so it must match that consumer even when the first texture
+barrier starts from `PRESENT`.
+
 `UNDEFINED` supplies no source dependency and discards prior contents. Use it
 only for first use or after earlier access has been ordered separately.
 

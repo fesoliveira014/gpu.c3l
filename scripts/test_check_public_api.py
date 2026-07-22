@@ -2182,6 +2182,7 @@ method gpu::Runtime.is_valid
             "AcquiredImage must carry borrowed render handles, readiness, and compositional prior state",
             failures,
         )
+
     def test_rejects_resource_shaped_barrier_schema(self) -> None:
         document = valid_document()
         barrier = next(

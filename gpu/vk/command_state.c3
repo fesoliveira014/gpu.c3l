@@ -197,6 +197,8 @@ fn TextureSlot*? resolve_texture_command_reference(
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;
+    // Texture table storage is fixed until device teardown, and this retained
+    // reference prevents the slot from being destroyed or reused.
     reference.validation_references = &slot.validation_references;
     reference.validation_references.add(1, AtomicOrdering.RELAXED);
     record.references[record.reference_count++] = reference;

@@ -58,7 +58,7 @@ fn void mismatched_previous_use_remains_explicit_at_recording() @test {
         texture:  texture,
         view:     {},
         before:   gpu::sampled_at({ .fragment_shader }),
-        after: {
+        after:    {
             .layout = gpu::TextureLayout.TRANSFER_SOURCE,
             .stages = { .transfer },
             .access = { .read },
@@ -93,7 +93,7 @@ fn void explicit_transition_copy_and_sample_submit() @test {
         texture:  texture,
         view:     {},
         before:   { .layout = gpu::TextureLayout.UNDEFINED },
-        after: {
+        after:    {
             .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
             .stages = { .transfer },
             .access = { .write },
@@ -153,7 +153,7 @@ fn void partial_mip_transition_copy_submits() @test {
         texture:  texture,
         view:     view,
         before:   { .layout = gpu::TextureLayout.UNDEFINED },
-        after: {
+        after:    {
             .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
             .stages = { .transfer },
             .access = { .write },
@@ -211,7 +211,7 @@ fn void many_explicit_texture_transitions_submit() @test {
             texture:  texture,
             view:     {},
             before:   { .layout = gpu::TextureLayout.UNDEFINED },
-            after: {
+            after:    {
                 .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
                 .stages = { .transfer },
                 .access = { .write },
