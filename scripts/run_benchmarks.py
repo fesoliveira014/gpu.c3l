@@ -97,8 +97,8 @@ LIFECYCLE_SCHEMA = re.compile(
     rf"completion poll: iterations=100000 repetitions=5 median={ALLOCATION_NUMBER} ns/poll\r?\n"
     rf"texture destroy: iterations=300 repetitions=5 median={ALLOCATION_NUMBER} ns/destroy\r?\n"
     r"invariants: point_allocations=0 destruction_queries=0 "
-    r"destruction_completion_waits=0 destruction_device_waits=0 "
-    r"deferred_releases=0 cached_poll_queries=0 retirement_locks=0\Z"
+    r"destruction_completion_waits=0 cached_poll_queries=0 "
+    r"retirement_locks=0\Z"
 )
 SUBMIT_BATCH_SIZES = (1, 8, 32, 128, 1024)
 COMMAND_RECORD_INVARIANTS = re.compile(

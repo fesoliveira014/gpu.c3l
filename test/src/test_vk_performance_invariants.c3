@@ -108,8 +108,11 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     );
     ulong pipelines_before = vk::pipeline_native_create_count(state);
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
-    bind_test_compute_pipeline(&commands, pipeline);
     gpu::reset_command_resolution_stats();
+    bind_test_compute_pipeline(&commands, pipeline);
+    gpu::CommandResolutionStats after_bind =
+        gpu::command_resolution_stats();
+    assert_warm_command_resolution(after_bind, 1, 1);
     gpu::cmd_dispatch(
         commands: &commands,
         root:     test_span_address(&device, root.span),
@@ -135,7 +138,14 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     );
     assert(after.command_buffer_resets == before.command_buffer_resets + 1,
         "warm begin resets its reusable command buffer");
-    assert_warm_command_resolution(resolution, 1);
+    assert_warm_command_resolution(resolution, 2, 1);
+    assert(resolution.pipeline_table_lookups
+            == after_bind.pipeline_table_lookups
+        && resolution.pipeline_cache_lookups
+            == after_bind.pipeline_cache_lookups,
+        "dispatch performs no additional pipeline resolution");
+    assert(resolution.native_commands == after_bind.native_commands + 2,
+        "dispatch emits one root push and one native dispatch");
     gpu::discard_executable_commands(&executable)!!;
 }
 
@@ -226,8 +236,11 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     ulong pipelines_before = vk::pipeline_native_create_count(state);
     gpu::CommandList commands = gpu::begin_commands(queue)!!;
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
-    bind_test_graphics_pipeline(&commands, pipeline);
     gpu::reset_command_resolution_stats();
+    bind_test_graphics_pipeline(&commands, pipeline);
+    gpu::CommandResolutionStats after_bind =
+        gpu::command_resolution_stats();
+    assert_warm_command_resolution(after_bind, 2, 1);
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
@@ -237,7 +250,14 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     )!!;
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
-    assert_warm_command_resolution(resolution, 1);
+    assert_warm_command_resolution(resolution, 3, 1);
+    assert(resolution.pipeline_table_lookups
+            == after_bind.pipeline_table_lookups
+        && resolution.pipeline_cache_lookups
+            == after_bind.pipeline_cache_lookups,
+        "draw performs no additional pipeline resolution");
+    assert(resolution.native_commands == after_bind.native_commands + 2,
+        "draw emits one root push and one native draw");
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::RecordingWorkCounters after =

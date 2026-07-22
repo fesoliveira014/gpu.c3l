@@ -54,7 +54,7 @@
     // timing; executable so it never gates CI. Needs an ICD.
     "lifecycle_bench": {
       "type": "executable",
-      "features": [ "COMPLETION_RETIREMENT_STATS", "DESTRUCTION_WORK_STATS" ],
+      "features": [ "COMPLETION_RETIREMENT_STATS" ],
       "sources": [ "src/lifecycle_bench.c3" ]
     },
     // Advisory public submit timing with exact linear duplicate-work evidence.

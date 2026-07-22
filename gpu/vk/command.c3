@@ -688,12 +688,6 @@ fn void enqueue_retired_command_buffer_locked(
     GeneratedPreprocessBuffer[] generated_preprocess = {},
 ) {
     if (buffer == null) return;
-    $if env::TESTING || $feature(DESTRUCTION_WORK_STATS):
-        (void)state.destruction_deferred_release_enqueues.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
     RecordingContextState* context = state.recording_contexts.get(
         context_handle,
     )!!;

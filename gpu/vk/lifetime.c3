@@ -35,11 +35,6 @@ struct CommandBufferStats {
     uint  pending;
 }
 
-struct DestructionWorkCounters @if(env::TESTING || $feature(DESTRUCTION_WORK_STATS)) {
-    ulong device_waits;
-    ulong deferred_release_enqueues;
-}
-
 fn bool same_resource_reference(
     CommandResourceReference* left,
     CommandResourceReference* right,
@@ -521,30 +516,6 @@ fn void reset_completion_work_counters(
     );
     state.completion_cached_poll_hits.store(0, AtomicOrdering.RELAXED);
     state.completion_cached_wait_hits.store(0, AtomicOrdering.RELAXED);
-}
-
-fn DestructionWorkCounters destruction_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING || $feature(DESTRUCTION_WORK_STATS)) {
-    return {
-        .device_waits = state.destruction_device_waits.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .deferred_release_enqueues =
-            state.destruction_deferred_release_enqueues.load(
-                AtomicOrdering.RELAXED,
-            ),
-    };
-}
-
-fn void reset_destruction_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING || $feature(DESTRUCTION_WORK_STATS)) {
-    state.destruction_device_waits.store(0, AtomicOrdering.RELAXED);
-    state.destruction_deferred_release_enqueues.store(
-        0,
-        AtomicOrdering.RELAXED,
-    );
 }
 
 fn void destroy_submitted_commands(VkDeviceState* state) {

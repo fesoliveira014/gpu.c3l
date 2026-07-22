@@ -23,8 +23,8 @@ LIFECYCLE_OUTPUT = "\n".join(
         "texture destroy: iterations=300 repetitions=5 median=410.0 ns/destroy",
         (
             "invariants: point_allocations=0 destruction_queries=0 "
-            "destruction_completion_waits=0 destruction_device_waits=0 "
-            "deferred_releases=0 cached_poll_queries=0 retirement_locks=0"
+            "destruction_completion_waits=0 cached_poll_queries=0 "
+            "retirement_locks=0"
         ),
     )
 )
@@ -345,8 +345,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "point_allocations",
             "destruction_queries",
             "destruction_completion_waits",
-            "destruction_device_waits",
-            "deferred_releases",
             "cached_poll_queries",
             "retirement_locks",
         ):

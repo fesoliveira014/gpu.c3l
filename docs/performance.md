@@ -55,11 +55,11 @@ subsystem snapshots:
 
 | Invariant | Required observation |
 |---|---|
-| Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and post-bind `CommandResolutionStats` |
-| Warm render pass | `RecordingWorkCounters`, pipeline/shader creation counts, and native command emission |
+| Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and pre-bind `CommandResolutionStats` |
+| Warm render pass | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, and native command emission |
 | Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
-| Immediate destruction | `CompletionWorkCounters` plus `DestructionWorkCounters` |
+| Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
 | Submission ownership | Submitted-batch references, caller tokens, retained-reference counts, and ordered retirement state |
 | Bound pipeline snapshot | Exact bind-time table/cache lookups followed by zero post-bind resolution under cache churn |
 | Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and compact-key pipeline probes |
@@ -67,7 +67,11 @@ subsystem snapshots:
 
 Warm command-buffer reset is expected reuse evidence. Host/VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
-and post-bind registry/vtable/table/policy work remain prohibited.
+and registry, retained-pin, lifecycle-vtable, command-table, and policy work
+remain prohibited. Binding an opaque pipeline handle performs exactly one
+pipeline-table and one pipeline-cache lookup; dispatch and draw perform no
+additional resolution and each emits exactly one root push plus its native
+execution command.
 
 The lifecycle benchmark first establishes full retirement for each measured
 point, then resets completion-work counters before 100,000 repeated polls. The
@@ -189,7 +193,7 @@ The table reports the median of the three target medians and their full range.
 Every run reported:
 
 ```text
-invariants: point_allocations=0 destruction_queries=0 destruction_completion_waits=0 destruction_device_waits=0 deferred_releases=0 cached_poll_queries=0 retirement_locks=0
+invariants: point_allocations=0 destruction_queries=0 destruction_completion_waits=0 cached_poll_queries=0 retirement_locks=0
 ```
 
 Generated-dispatch timing is reported only for runs using an explicit

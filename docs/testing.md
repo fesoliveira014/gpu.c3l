@@ -415,8 +415,12 @@ from its cached native snapshot before discard releases ownership.
 begin/bind/dispatch/end and render-pass operations against existing pipelines,
 shaders, descriptor state, texture views, and allocations. Command-buffer reset
 is allowed; host/VMA allocation, command-buffer allocation/free, image-view
-creation, pipeline/shader creation, and post-bind registry/vtable/table/policy
-resolution are required to remain zero.
+creation, and pipeline/shader creation are required to remain zero. Resolution
+snapshots begin before pipeline binding: binding the opaque pipeline handle
+performs exactly one pipeline-table and one pipeline-cache lookup, while
+registry, retained-pin, lifecycle-vtable, command-table, and policy work remain
+zero. Dispatch and draw add no further resolution and each emits exactly one
+root push plus its native execution command.
 
 The benchmark runner builds nine executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
@@ -452,7 +456,12 @@ allocations, command-buffer allocations/frees, image-view creations, VMA
 allocations, and generated-scratch misses must all be zero; command-buffer
 resets demonstrate reuse.
 Lifecycle measurements cover submission, cached completed-point polling, and
-immediate texture destruction.
+immediate texture destruction. Required immediate-destruction tests use exact
+injected native-destroy counts and immediate handle invalidation to prove the
+release occurs before return. An unrelated queue stalled on an unsignaled
+timeline must remain stalled while destruction completes, proving destruction
+does not wait for queue or device idle; completion-work snapshots independently
+require zero native completion queries and waits.
 
 `descriptor_churn_bench` additionally reports texture-destruction and wrapped-
 image ownership work at descriptor high-water marks 16, 4,096, and 65,536. Its
