@@ -1,5 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
+import gpu;
 import std::hash::fnv64a;
 
 const uint SPIRV_MAGIC @private           = 0x07230203;

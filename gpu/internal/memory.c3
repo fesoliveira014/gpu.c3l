@@ -1,6 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
-import gpu::internal @public;
+import gpu;
 
 <* Overflow-safe bounds check: offset + size must fit in limit. A zero size
    only checks the offset; each caller defines what zero means. *>
@@ -24,7 +24,7 @@ fn bool memory_class_is_known(MemoryClass memory_class) @private {
 fn usz? normalized_allocation_alignment(usz alignment) @private {
     const usz MIN_ALLOCATION_ALIGNMENT = 16;
     if (alignment == 0) return MIN_ALLOCATION_ALIGNMENT;
-    if ((alignment & (alignment - 1)) != 0) return INVALID_ARGUMENT~;
+    if ((alignment & (alignment - 1)) != 0) return gpu::INVALID_ARGUMENT~;
     return max(alignment, MIN_ALLOCATION_ALIGNMENT);
 }
 
@@ -35,20 +35,20 @@ fn void? validate_texture_allocation(
     bool allow_dedicated = false,
 ) @private {
     if (desc.memory_class != MemoryClass.TEXTURE) {
-        if (desc.texture_requirements.len != 0) return INVALID_ARGUMENT~;
+        if (desc.texture_requirements.len != 0) return gpu::INVALID_ARGUMENT~;
         return;
     }
-    if (desc.texture_requirements.len == 0) return INVALID_ARGUMENT~;
+    if (desc.texture_requirements.len == 0) return gpu::INVALID_ARGUMENT~;
 
     uint compatibility = uint::max;
     foreach (&requirements : desc.texture_requirements) {
         if (requirements.size == 0 || requirements.alignment == 0) {
-            return INVALID_ARGUMENT~;
+            return gpu::INVALID_ARGUMENT~;
         }
         compatibility &= texture_compatibility_value(requirements.compatibility);
         if ((requirements.alignment & (requirements.alignment - 1)) != 0
             || !requirements.compatibility.is_valid()) {
-            return INVALID_ARGUMENT~;
+            return gpu::INVALID_ARGUMENT~;
         }
         gpu::internal::validate_resource_owner(
             operation,
@@ -56,10 +56,10 @@ fn void? validate_texture_allocation(
             gpu::internal::ResourceOwnerKind.ALLOCATION,
         )!;
         if (requirements.dedicated_only && !allow_dedicated) {
-            return UNSUPPORTED_FEATURE~;
+            return gpu::UNSUPPORTED_FEATURE~;
         }
-        if (desc.size < requirements.size) return INVALID_ARGUMENT~;
+        if (desc.size < requirements.size) return gpu::INVALID_ARGUMENT~;
         *alignment = max(*alignment, requirements.alignment);
     }
-    if (compatibility == 0) return INVALID_ARGUMENT~;
+    if (compatibility == 0) return gpu::INVALID_ARGUMENT~;
 }

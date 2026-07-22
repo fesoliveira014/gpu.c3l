@@ -8,10 +8,7 @@
   // Public facade, platform surfaces, shared internals, and the Vulkan backend.
   "sources": [
     "gpu/gpu.c3", "gpu/gpu.c3i", "gpu/internal/**",
-    "gpu/surface/**",
-    "gpu/memory.c3", "gpu/texture.c3",
-    "gpu/descriptor_heap.c3", "gpu/pipeline.c3", "gpu/command.c3", "gpu/render_pass.c3", "gpu/sync.c3", "gpu/queue.c3",
-    "gpu/swapchain.c3", "gpu/vk/**"
+    "gpu/surface/**", "gpu/vk/**"
   ],
   "targets": {
     "linux-x64": {

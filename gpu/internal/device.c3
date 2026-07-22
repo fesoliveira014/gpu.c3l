@@ -1,6 +1,6 @@
 module gpu::internal @private;
 
-import gpu @public;
+import gpu;
 import std::atomic;
 import std::atomic::types;
 import std::thread;
@@ -834,9 +834,9 @@ fn Device? register_device(
     if (queues.counts.graphics == 0
         && queues.counts.compute == 0
         && queues.counts.transfer == 0) {
-        queues = gpu::default_queue_selection(&caps);
+        queues = default_queue_selection(&caps);
     }
-    if (!gpu::queue_selection_is_well_formed(&queues)) return gpu::INVALID_ARGUMENT~;
+    if (!queue_selection_is_well_formed(&queues)) return gpu::INVALID_ARGUMENT~;
     caps.queues = queues.counts;
 
     lock_device_registry();

@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 
@@ -50,7 +51,7 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     }
 
     if (span.size == 0) return gpu::INVALID_ARGUMENT~;
-    if (!gpu::range_fits(slot.size, offset, span.size)) {
+    if (!gpu::internal::range_fits(slot.size, offset, span.size)) {
         return gpu::INVALID_ARGUMENT~;
     }
     void* mapping;
@@ -102,7 +103,7 @@ fn void? validate_operation_queue_access(
     ZString operation,
     ZString rejected_field,
 ) @private {
-    if (gpu::queue_access_intersects(access, queue_roles)) return;
+    if (gpu::internal::queue_access_intersects(access, queue_roles)) return;
     return report_contract_failure(
         state:               state,
         operation:           operation,
@@ -187,8 +188,8 @@ fn void? validate_span_queue_access(
 ) @private {
     gpu::DebugResourceKind resource_kind = span_resource_kind(state, span);
     if ((uint)resolved.access == 0
-        || !gpu::queue_roles_are_known(resolved.access)
-        || !gpu::queue_roles_are_subset(resolved.access, resolved.slot.access)) {
+        || !gpu::internal::queue_roles_are_known(resolved.access)
+        || !gpu::internal::queue_roles_are_subset(resolved.access, resolved.slot.access)) {
         return report_contract_failure(
             state:               state,
             operation:           operation,

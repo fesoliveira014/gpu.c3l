@@ -432,7 +432,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
 
     vk::QueueCompletionState* queue_completion =
         vk::queue_completion_state(state, queue.id)!!;
-    ulong sequence = gpu::completion_point_sequence(completion);
+    ulong sequence = gpu::internal::completion_point_sequence(completion);
     vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
         .set_semaphore_count(1)
         .set_semaphores((&queue_completion.timeline)[:1])
@@ -453,10 +453,10 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     vk::QueueCompletionState* completion_state =
         vk::queue_completion_state(
             state,
-            gpu::completion_point_queue_id(completion),
+            gpu::internal::completion_point_queue_id(completion),
         )!!;
     assert(completion_state.retired_sequence.load(AtomicOrdering.ACQUIRE)
-        == gpu::completion_point_sequence(completion),
+        == gpu::internal::completion_point_sequence(completion),
         "the explicit drain publishes the retired prefix");
     vk::reset_completion_work_counters(state);
     assert(gpu::poll_completion(completion)!!,
@@ -627,7 +627,7 @@ fn void incomplete_reference_drain_is_deterministic() @test {
     allocator_slot.mutex.init()!!;
     defer (void)allocator_slot.mutex.destroy();
     state.submitted_commands[0] = {
-        .completion       = gpu::make_completion_point(queue, 7)!!,
+        .completion       = gpu::internal::make_completion_point(queue, 7)!!,
         .allocator        = allocator,
         .allocator_buffer = 0,
     };
@@ -695,7 +695,7 @@ fn void successful_observation_drains_distinct_upstream_identity() @test {
     slot.mutex.init()!!;
     defer (void)slot.mutex.destroy();
     state.submitted_commands[0] = {
-        .completion = gpu::make_completion_point(upstream_queue, 3)!!,
+        .completion = gpu::internal::make_completion_point(upstream_queue, 3)!!,
         .allocator = allocator,
         .allocator_buffer = 0,
     };
@@ -822,17 +822,17 @@ fn void completed_submission_release_boundary_is_exact() @test {
     second_allocator_slot.mutex.init()!!;
     defer (void)second_allocator_slot.mutex.destroy();
     state.submitted_commands[0] = {
-        .completion       = gpu::make_completion_point(queue, 7)!!,
+        .completion       = gpu::internal::make_completion_point(queue, 7)!!,
         .allocator        = first_allocator,
         .allocator_buffer = 0,
     };
     state.submitted_commands[1] = {
-        .completion       = gpu::make_completion_point(queue, 8)!!,
+        .completion       = gpu::internal::make_completion_point(queue, 8)!!,
         .allocator        = second_allocator,
         .allocator_buffer = 0,
     };
     state.submitted_commands[2] = {
-        .completion       = gpu::make_completion_point(queue, 8)!!,
+        .completion       = gpu::internal::make_completion_point(queue, 8)!!,
         .allocator        = second_allocator,
         .allocator_buffer = 1,
     };
@@ -1083,7 +1083,7 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
     for (uint i = 0; i < vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD; i++) {
         scratch[i].in_use = true;
         state.submitted_commands[i] = {
-            .completion       = gpu::make_completion_point(queue, (ulong)i + 1)!!,
+            .completion       = gpu::internal::make_completion_point(queue, (ulong)i + 1)!!,
             .allocator        = allocator,
             .allocator_buffer = i,
         };

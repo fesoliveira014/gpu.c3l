@@ -88,7 +88,7 @@ fn char[]? get_stub_span_mapping(Device* device, GpuSpan span) {
     if (state.seen_desc.memory_class == MemoryClass.GPU_PRIVATE) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (!gpu::range_fits(state.seen_desc.size, span.offset, span.size)) {
+    if (!gpu::internal::range_fits(state.seen_desc.size, span.offset, span.size)) {
         return gpu::INVALID_ARGUMENT~;
     }
     return state.mapping[span.offset:span.size];
@@ -102,7 +102,7 @@ fn GpuAddress? get_stub_span_address(Device* device, GpuSpan span) {
         return gpu::INVALID_HANDLE~;
     }
     if (span.size == 0) return gpu::INVALID_ARGUMENT~;
-    if (!gpu::range_fits(state.seen_desc.size, span.offset, span.size)) {
+    if (!gpu::internal::range_fits(state.seen_desc.size, span.offset, span.size)) {
         return gpu::INVALID_ARGUMENT~;
     }
     return (GpuAddress)(0x1000 + span.offset);
@@ -128,7 +128,7 @@ fn TextureRequirements? get_stub_texture_requirements(
 ) {
     AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.requirements_calls++;
-    if (!gpu::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::internal::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
     return {
         .size          = 64,
         .alignment     = 64,
@@ -150,7 +150,7 @@ fn TextureHandle? create_stub_placed_texture(
 ) {
     AllocationStubState* state = (AllocationStubState*)gpu::internal::device_backend_state_ptr(device);
     state.placed_texture_calls++;
-    if (!gpu::texture_desc_valid(desc) || !state.live
+    if (!gpu::internal::texture_desc_valid(desc) || !state.live
         || allocation != state.allocation || offset > state.seen_desc.size - 64) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -217,7 +217,7 @@ gpu::internal::BackendVTable allocation_stub_vtable = {
 
 fn Device create_allocation_stub_device(AllocationStubState* state) {
     state.owner = gpu::internal::allocate_device_resource_owner()!!;
-    QueueSelection queues = gpu::queue_selection_for_requirements(
+    QueueSelection queues = gpu::internal::queue_selection_for_requirements(
         requirements: {
             .counts = { .compute = 1 },
         },

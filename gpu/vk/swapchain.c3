@@ -258,8 +258,8 @@ fn bool? poll_swapchain_completion(
 ) @private {
     return vk_poll_completion(
         device,
-        gpu::completion_point_queue_id(point),
-        gpu::completion_point_sequence(point),
+        gpu::internal::completion_point_queue_id(point),
+        gpu::internal::completion_point_sequence(point),
     );
 }
 

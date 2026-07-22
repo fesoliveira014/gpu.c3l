@@ -600,7 +600,7 @@ fn NonCoherentRange? normalize_mapped_memory_range(
     usz allocation_size,
     usz atom_size,
 ) {
-    if (size == 0 || !gpu::range_fits(allocation_size, offset, size)) {
+    if (size == 0 || !gpu::internal::range_fits(allocation_size, offset, size)) {
         return gpu::INVALID_ARGUMENT~;
     }
     if (!is_pow2(atom_size)) return gpu::BACKEND_ERROR~;
@@ -634,7 +634,7 @@ fn AllocationSlot*? resolve_mapped_allocation_span(
     AllocationSlot* slot = state.allocations.get(allocation)!;
     if (slot.texture_memory) return gpu::INVALID_ARGUMENT~;
     if (span.size == 0
-        || !gpu::range_fits(slot.backing.size, span.offset, span.size)) {
+        || !gpu::internal::range_fits(slot.backing.size, span.offset, span.size)) {
         return gpu::INVALID_ARGUMENT~;
     }
     if (slot.backing.cpu_base == null) return gpu::INVALID_ARGUMENT~;

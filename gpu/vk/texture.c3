@@ -373,7 +373,7 @@ fn bool? format_supports_usage(
         .usage     = usage,
         .access    = state.selected_queue_roles,
     };
-    if (!gpu::texture_desc_valid(&desc)) return false;
+    if (!gpu::internal::texture_desc_valid(&desc)) return false;
     return texture_desc_supported(state, &desc);
 }
 
@@ -381,7 +381,7 @@ fn bool? vk_supports_texture_desc(
     gpu::Device* device,
     gpu::TextureDesc* desc,
 ) @private {
-    if (!gpu::texture_desc_valid(desc)) return false;
+    if (!gpu::internal::texture_desc_valid(desc)) return false;
     VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     return texture_desc_supported(state, desc);
 }
@@ -630,8 +630,8 @@ fn vk::ImageCreateInfo make_texture_create_info(
         .set_image_type(vk::ImageType.TYPE_2D)
         .set_format(format_to_vk(desc.format))
         .set_extent({ .width = desc.width, .height = desc.height, .depth = 1 })
-        .set_mip_levels(gpu::texture_mip_levels(desc))
-        .set_array_layers(gpu::texture_array_layers(desc))
+        .set_mip_levels(gpu::internal::texture_mip_levels(desc))
+        .set_array_layers(gpu::internal::texture_array_layers(desc))
         .set_samples(sample_count_to_vk(desc.sample_count))
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
@@ -672,7 +672,7 @@ fn gpu::TextureRequirements? texture_requirements_for_state(
     VkDeviceState* state,
     gpu::TextureDesc* desc,
 ) {
-    if (!gpu::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::internal::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
     if (!texture_desc_supported(state, desc)!) return gpu::UNSUPPORTED_FEATURE~;
 
     uint[MAX_QUEUE_FAMILIES] families;
@@ -729,7 +729,7 @@ fn gpu::TextureRequirements? vk_get_texture_requirements(
 
 fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* desc) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (!gpu::texture_desc_valid(desc)) {
+    if (!gpu::internal::texture_desc_valid(desc)) {
         return report_contract_failure(
             state:               state,
             operation:           "create_texture",
@@ -759,8 +759,8 @@ fn gpu::TextureHandle? vk_create_texture(gpu::Device* device, gpu::TextureDesc* 
             backend_text:        "selected device does not support the texture descriptor",
         )~;
     }
-    uint mip_levels   = gpu::texture_mip_levels(desc);
-    uint array_layers = gpu::texture_array_layers(desc);
+    uint mip_levels   = gpu::internal::texture_mip_levels(desc);
+    uint array_layers = gpu::internal::texture_array_layers(desc);
     uint[MAX_QUEUE_FAMILIES] share_families;
     uint share_count = resource_queue_families(state, desc.access, share_families[..]);
     vk::ImageCreateInfo image_info =
@@ -989,14 +989,14 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     if (!allocation.texture_memory
         || requirements.alignment > allocation.alignment
         || allocation.dedicated_texture
-        || !gpu::queue_roles_are_subset(desc.access, allocation.access)
+        || !gpu::internal::queue_roles_are_subset(desc.access, allocation.access)
         || allocation.raw_info.memory_type >= 32) {
         return gpu::INVALID_ARGUMENT~;
     }
     uint selected_memory_type = 1 << allocation.raw_info.memory_type;
     if ((selected_memory_type
             & texture_compatibility_value(requirements.compatibility)) == 0
-        || !gpu::range_fits(allocation.size, offset, requirements.size)
+        || !gpu::internal::range_fits(allocation.size, offset, requirements.size)
         || placed_texture_overlaps(
             state,
             placement,
@@ -1017,8 +1017,8 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
         families[:family_count],
         true,
     );
-    uint mip_levels = gpu::texture_mip_levels(desc);
-    uint array_layers = gpu::texture_array_layers(desc);
+    uint mip_levels = gpu::internal::texture_mip_levels(desc);
+    uint array_layers = gpu::internal::texture_array_layers(desc);
     TextureSlot slot = {
         .format                = desc.format,
         .usage                 = desc.usage,
@@ -1110,7 +1110,7 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         || allocation_desc.texture_requirements.len == 0
         || allocation_desc.size != requirements.size
         || allocation_desc.alignment < requirements.alignment
-        || !gpu::queue_roles_are_subset(desc.access, allocation_desc.access)
+        || !gpu::internal::queue_roles_are_subset(desc.access, allocation_desc.access)
         || requirements.size == 0
         || requirements.alignment == 0
         || (requirements.alignment & (requirements.alignment - 1)) != 0
@@ -1151,8 +1151,8 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         .usage            = vma::MemoryUsage.GPU_ONLY,
         .memory_type_bits = memory_type_bits,
     };
-    uint mip_levels = gpu::texture_mip_levels(desc);
-    uint array_layers = gpu::texture_array_layers(desc);
+    uint mip_levels = gpu::internal::texture_mip_levels(desc);
+    uint array_layers = gpu::internal::texture_array_layers(desc);
     TextureSlot texture_slot = {
         .format                = desc.format,
         .usage                 = desc.usage,

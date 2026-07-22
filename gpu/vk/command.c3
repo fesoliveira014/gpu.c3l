@@ -1221,7 +1221,7 @@ fn void? vk_discard_commands(
     if (!state_matches || record.allocator != allocator_handle) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    if (encoder != null) gpu::invalidate_command_encoder(encoder);
+    if (encoder != null) gpu::internal::invalidate_command_encoder(encoder);
     release_tracked_command_references(
         state,
         record.scratch.references,
@@ -1967,7 +1967,7 @@ fn ResolvedSpan? lower_indirect_span(
     usz arg_size,
     uint count,
 ) {
-    usz required = gpu::indirect_argument_bytes(
+    usz required = gpu::internal::indirect_argument_bytes(
         argument_size: arg_size,
         count:         count,
         max_count:     uint::max,
@@ -2003,7 +2003,7 @@ fn ResolvedSpan? validate_and_lower_indirect_span(
             backend_text:        null,
         )~;
     }
-    usz? required_result = gpu::indirect_argument_bytes(
+    usz? required_result = gpu::internal::indirect_argument_bytes(
         argument_size: arg_size,
         count:         count,
         max_count:     max_count,
@@ -2295,7 +2295,7 @@ fn void? vk_cmd_dispatch(
         expected_kind: PipelineKind.COMPUTE,
         operation:     "cmd_dispatch",
     )!;
-    if (catch limit_fault = gpu::validate_dispatch_groups(groups, state.caps.max_compute_work_group_count)) {
+    if (catch limit_fault = gpu::internal::validate_dispatch_groups(groups, state.caps.max_compute_work_group_count)) {
         return report_contract_failure(
             state:               state,
             operation:           "cmd_dispatch",
@@ -2516,7 +2516,7 @@ fn ResolvedSpan? lower_generated_work_records(
     usz record_size,
     uint max_count,
 ) {
-    usz required = gpu::generated_work_bytes(
+    usz required = gpu::internal::generated_work_bytes(
         record_size,
         max_count,
         uint::max,
@@ -2535,7 +2535,7 @@ fn ResolvedSpan? validate_and_lower_generated_work_records(
     ZString operation,
 ) {
     validate_generated_work_count(state, max_count, operation, "max_count")!;
-    usz required = gpu::generated_work_bytes(
+    usz required = gpu::internal::generated_work_bytes(
         record_size,
         max_count,
         state.caps.max_generated_work_count,

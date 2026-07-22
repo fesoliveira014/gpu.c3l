@@ -1,5 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
+import gpu;
 import std::math;
 
 
@@ -26,7 +27,7 @@ fn bool store_op_valid(StoreOp op) @private {
 
 fn bool render_pass_desc_host_safe(RenderPassDesc* desc) @private {
     return desc != null
-        && desc.colors.len <= MAX_COLOR_ATTACHMENTS
+        && desc.colors.len <= gpu::MAX_COLOR_ATTACHMENTS
         && (desc.colors.len == 0 || desc.colors.ptr != null);
 }
 

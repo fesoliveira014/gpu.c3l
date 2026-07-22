@@ -2644,14 +2644,14 @@ method gpu::Runtime.is_valid
         )
 
     def test_rejects_sibling_modules_in_public_sources(self) -> None:
-        relative = Path("gpu/memory.c3")
+        relative = Path("gpu/gpu.c3")
         self.assertEqual(
             check_public_api.validate_public_module_source(
                 relative,
                 "struct AllocationInfo {}\n",
             ),
             [
-                "gpu/memory.c3 must declare public module gpu",
+                "gpu/gpu.c3 must declare public module gpu",
             ],
         )
 
@@ -2668,7 +2668,7 @@ method gpu::Runtime.is_valid
             ),
             [
                 (
-                    "gpu/memory.c3:3 public source may only declare "
+                    "gpu/gpu.c3:3 public source may only declare "
                     "gpu, found gpu::util"
                 ),
             ],

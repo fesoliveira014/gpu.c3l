@@ -17,7 +17,7 @@ const uint SHADER_STORE_MAX_PIPELINE_CAPACITY = 0x20000000;
 struct ShaderStoreEntry {
     ulong                             hash;
     char[]                            spirv;
-    char[gpu::SHADER_ENTRY_POINT_CAP] entry_point;
+    char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
     gpu::ShaderStage                  stage;
     uint                              refcount;
     uint                              next_free;
@@ -52,7 +52,7 @@ struct PipelineIdentityProbeResult @if(env::TESTING || $feature(PIPELINE_CACHE_S
 
 struct PipelineShaderModule {
     vk::ShaderModule shader_module;
-    char[gpu::SHADER_ENTRY_POINT_CAP] entry_point;
+    char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
 }
 
 struct PipelineBatchShader {
@@ -539,7 +539,7 @@ fn void? check_root_push_abi(
 fn void? copy_entry_point(char* dst, ZString source) @private {
     usz i = 0;
     while (source[i] != 0) {
-        if (i >= gpu::SHADER_ENTRY_POINT_CAP - 1) return gpu::INVALID_ARGUMENT~;
+        if (i >= gpu::internal::SHADER_ENTRY_POINT_CAP - 1) return gpu::INVALID_ARGUMENT~;
         dst[i] = source[i];
         i++;
     }

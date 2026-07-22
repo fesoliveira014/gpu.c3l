@@ -1369,7 +1369,7 @@ fn void maximum_queue_counts_share_full_native_range() @test {
 
 fn void maximum_distinct_queue_counts_use_disjoint_native_ranges() @test {
     vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, gpu::MAX_SELECTED_QUEUE_IDENTITIES),
+        family(QF_G | QF_C | QF_T, gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES),
     };
     gpu::QueueRequirements requirements = {
         .counts = {
@@ -1390,5 +1390,5 @@ fn void maximum_distinct_queue_counts_use_disjoint_native_ranges() @test {
     assert(picked.counts.compute == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
     assert(picked.counts.transfer == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
     assert(vk::requested_queue_count(&picked, 0, false)
-        == gpu::MAX_SELECTED_QUEUE_IDENTITIES);
+        == gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES);
 }

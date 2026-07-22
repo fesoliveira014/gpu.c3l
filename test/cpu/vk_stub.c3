@@ -218,7 +218,7 @@ fn bool? supports_stub_queue_requirements(
     if (state == null || requirements == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
-    gpu::QueueSelection? selection = gpu::queue_selection_for_requirements(
+    gpu::internal::QueueSelection? selection = gpu::internal::queue_selection_for_requirements(
         requirements:               *requirements,
         compute_aliases_graphics:    true,
         transfer_aliases_graphics:   true,
@@ -407,7 +407,7 @@ fn gpu::TextureRequirements? get_stub_texture_requirements(
 ) {
     StubDeviceState* state =
         (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (state == null || !gpu::texture_desc_valid(desc)) {
+    if (state == null || !gpu::internal::texture_desc_valid(desc)) {
         return gpu::INVALID_ARGUMENT~;
     }
     return {
@@ -546,7 +546,7 @@ fn gpu::Device? create_vk_device(
     last_device_adapter = *adapter;
     gpu::Surface presentation_surface = gpu::internal::requested_surface(*request);
     gpu::QueueRequirements requirements = gpu::internal::requested_queue_requirements(*request);
-    gpu::QueueSelection queues = gpu::queue_selection_for_requirements(
+    gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_requirements(
         requirements:               requirements,
         compute_aliases_graphics:    true,
         transfer_aliases_graphics:   true,

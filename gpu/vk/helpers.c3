@@ -423,7 +423,7 @@ fn vk::MemoryBarrier2 barrier_to_vk(
 }
 
 fn bool barrier_stage_mask_valid(gpu::StageMask stages) @private {
-    return gpu::stage_mask_valid(stages);
+    return gpu::internal::stage_mask_valid(stages);
 }
 
 fn ZString barrier_masks_rejected_field(gpu::Barrier* barrier) {

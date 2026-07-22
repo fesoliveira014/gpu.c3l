@@ -50,7 +50,7 @@ gpu::internal::BackendVTable resource_access_vtable = {
 };
 
 fn gpu::Device create_compute_only_resource_access_device(int* state) {
-    gpu::QueueSelection queues = gpu::queue_selection_for_requirements(
+    gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_requirements(
         requirements: {
             .counts = { .compute = 1 },
         },

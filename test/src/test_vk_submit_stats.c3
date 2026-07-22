@@ -435,9 +435,9 @@ fn void prove_submission_publication_gap(
         vk::queue_completion_state(state, queue.id)!!;
     gpu::CompletionPoint prior = vk::reserve_queue_completion(state, queue)!!;
     vk::publish_queue_completion(state, prior)!!;
-    gpu::CompletionPoint predicted = gpu::make_completion_point(
+    gpu::CompletionPoint predicted = gpu::internal::make_completion_point(
         queue,
-        gpu::completion_point_sequence(prior) + 1,
+        gpu::internal::completion_point_sequence(prior) + 1,
     )!!;
 
     OwnedSpan retained = allocate_owned_span(
@@ -499,20 +499,20 @@ fn void prove_submission_publication_gap(
         "allocator destruction stays retryably blocked across submission publication");
 
     completion_counter_query_calls = 0;
-    completion_counter_value = gpu::completion_point_sequence(predicted);
+    completion_counter_value = gpu::internal::completion_point_sequence(predicted);
     completion_counter_result = vk::Result.SUCCESS;
     if (checkpoint == vk::SubmissionCheckpoint.TOKEN_PUBLISHED) {
         assert(vk::published_queue_completion_state(
             state,
             queue.id,
-            gpu::completion_point_sequence(predicted),
+            gpu::internal::completion_point_sequence(predicted),
         )!! == completion,
             "the token-publication checkpoint exposes the predicted point to observers");
     } else {
         assert(@catch(vk::vk_poll_completion_with_query(
             device:   &device,
             queue_id: queue.id,
-            sequence: gpu::completion_point_sequence(predicted),
+            sequence: gpu::internal::completion_point_sequence(predicted),
             query_fn: &query_completion_counter,
         )) == gpu::INVALID_HANDLE,
             "a predicted point remains private across the submission checkpoint");
@@ -521,11 +521,11 @@ fn void prove_submission_publication_gap(
         assert(vk::vk_poll_completion_with_query(
             device:   &device,
             queue_id: queue.id,
-            sequence: gpu::completion_point_sequence(prior),
+            sequence: gpu::internal::completion_point_sequence(prior),
             query_fn: &query_completion_counter,
         )!!, "the prior point can observe newer native progress");
         assert(completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
-            == gpu::completion_point_sequence(prior),
+            == gpu::internal::completion_point_sequence(prior),
             "native progress is capped to the published prefix");
     }
     uint expected_batches = checkpoint == vk::SubmissionCheckpoint.NATIVE_ACCEPTED
@@ -569,13 +569,13 @@ fn void prove_submission_publication_gap(
         "submission resumes and publishes the predicted point");
     if (checkpoint != vk::SubmissionCheckpoint.TOKEN_PUBLISHED) {
         assert(completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
-            == gpu::completion_point_sequence(prior),
+            == gpu::internal::completion_point_sequence(prior),
             "resuming private publication does not invent native retirement");
     }
     assert(vk::vk_poll_completion_with_query(
         device:   &device,
         queue_id: queue.id,
-        sequence: gpu::completion_point_sequence(args.submitted),
+        sequence: gpu::internal::completion_point_sequence(args.submitted),
         query_fn: &query_completion_counter,
     )!!, "a later observation retires the published submission");
     assert(state.submitted_command_count == 0,
@@ -1046,7 +1046,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
     ulong next_before = completion.next_sequence;
 
-    completion.next_sequence = gpu::MAX_COMPLETION_SEQUENCE;
+    completion.next_sequence = gpu::internal::MAX_COMPLETION_SEQUENCE;
     counted_user_submit_calls = 0;
     completion_counter_query_calls = 0;
 
@@ -1064,7 +1064,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
         "sequence exhaustion requires no counter query");
     assert(counted_user_submit_calls == 0,
         "sequence exhaustion reaches no native queue submit");
-    assert(completion.next_sequence == gpu::MAX_COMPLETION_SEQUENCE,
+    assert(completion.next_sequence == gpu::internal::MAX_COMPLETION_SEQUENCE,
         "sequence exhaustion does not mutate queue state");
     assert(lists[0].handle.is_valid(),
         "sequence exhaustion preserves the executable token");
@@ -1398,7 +1398,7 @@ fn void empty_submit_returns_completion_point() @test {
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(point.is_valid(), "an empty submit still returns queue progress");
-    assert(gpu::completion_point_queue_id(point)
+    assert(gpu::internal::completion_point_queue_id(point)
         == state.graphics_completion_id,
         "an empty submit targets the selected graphics queue");
     assert(stats_of(&device).queue_submits == before.queue_submits + 1,

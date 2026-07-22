@@ -19,7 +19,7 @@ alias SubmissionCheckpointHook @if(env::TESTING) = fn void (
     void*, SubmissionCheckpoint, gpu::CompletionPoint
 );
 
-const uint MAX_QUEUE_FAMILIES = gpu::MAX_SELECTED_QUEUE_IDENTITIES + 4;
+const uint MAX_QUEUE_FAMILIES = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES + 4;
 const uint MAX_SELECTED_QUEUE_INDICES = 3;
 
 enum SubmissionCheckpoint : uint {
@@ -117,13 +117,13 @@ struct ResolvedCompletionWait {
 
 struct QueueSubmitScratch {
     Mutex mutex;
-    ResolvedCompletionWait[gpu::MAX_SUBMIT_COMPLETION_WAITS]
+    ResolvedCompletionWait[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS]
         completion_waits;
-    CommandRecord*[gpu::MAX_SUBMIT_COMMAND_LISTS] records;
-    gpu::internal::CommandEncoderState*[gpu::MAX_SUBMIT_COMMAND_LISTS] encoders;
-    vk::CommandBufferSubmitInfo[gpu::MAX_SUBMIT_COMMAND_LISTS]
+    CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS] records;
+    gpu::internal::CommandEncoderState*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS] encoders;
+    vk::CommandBufferSubmitInfo[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
         command_buffer_infos;
-    vk::SemaphoreSubmitInfo[gpu::MAX_SUBMIT_COMPLETION_WAITS + 1]
+    vk::SemaphoreSubmitInfo[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS + 1]
         wait_infos;
 }
 
@@ -1633,12 +1633,12 @@ fn uint swapchain_queue_families(
 
 fn void? bind_queue_completion_role(
     VkDeviceState* state,
-    gpu::QueueSelection* selection,
+    gpu::internal::QueueSelection* selection,
     gpu::QueueKind kind,
 ) @private {
     uint count = selected_native_queue_count(&state.queues, kind);
     for (uint index = 0; index < count; index++) {
-        uint identity = gpu::queue_selection_id(selection, kind, index);
+        uint identity = gpu::internal::queue_selection_id(selection, kind, index);
         ulong native_id = selected_native_queue(&state.queues, kind, index);
         QueueCompletionState* completion = &state.queue_completions[identity];
         if (completion.bound) {
@@ -1663,7 +1663,7 @@ fn void? bind_queue_completion_role(
 
 fn void? create_queue_completions(
     VkDeviceState* state,
-    gpu::QueueSelection* selection,
+    gpu::internal::QueueSelection* selection,
 ) @private {
     if (state == null || selection == null || selection.identity_count == 0) {
         return gpu::INVALID_ARGUMENT~;
@@ -1697,21 +1697,21 @@ fn void? create_queue_completions(
     )!;
 
     if (selection.counts.graphics > 0) {
-        state.graphics_completion_id = gpu::queue_selection_id(
+        state.graphics_completion_id = gpu::internal::queue_selection_id(
             selection,
             gpu::QueueKind.GRAPHICS,
             0,
         );
     }
     if (selection.counts.compute > 0) {
-        state.compute_completion_id = gpu::queue_selection_id(
+        state.compute_completion_id = gpu::internal::queue_selection_id(
             selection,
             gpu::QueueKind.COMPUTE,
             0,
         );
     }
     if (selection.counts.transfer > 0) {
-        state.transfer_completion_id = gpu::queue_selection_id(
+        state.transfer_completion_id = gpu::internal::queue_selection_id(
             selection,
             gpu::QueueKind.TRANSFER,
             0,
@@ -1812,7 +1812,7 @@ fn void? require_queue_completion_headroom_with_query(
     uint queue_id,
     SemaphoreCounterQueryFn query_fn,
 ) @private {
-    if (completion.next_sequence == gpu::MAX_COMPLETION_SEQUENCE) {
+    if (completion.next_sequence == gpu::internal::MAX_COMPLETION_SEQUENCE) {
         return gpu::SLOT_TABLE_FULL~;
     }
 
@@ -1884,7 +1884,7 @@ fn gpu::CompletionPoint? reserve_queue_completion_locked(
     if ((uint)completion.roles != (uint)queue.roles) {
         return gpu::INVALID_HANDLE~;
     }
-    return gpu::next_completion_point(queue, &completion.next_sequence);
+    return gpu::internal::next_completion_point(queue, &completion.next_sequence);
 }
 
 fn gpu::CompletionPoint? reserve_queue_completion(
@@ -1909,9 +1909,9 @@ fn void? cancel_queue_completion_locked(
     }
     QueueCompletionState* completion = queue_completion_state(
         state,
-        gpu::completion_point_queue_id(point),
+        gpu::internal::completion_point_queue_id(point),
     )!;
-    ulong sequence = gpu::completion_point_sequence(point);
+    ulong sequence = gpu::internal::completion_point_sequence(point);
     ulong published = completion.published_sequence.load(
         AtomicOrdering.ACQUIRE,
     );
@@ -1929,8 +1929,8 @@ fn void? publish_queue_completion_locked(
     if (state == null || point.device != state.owner || !point.is_valid()) {
         return gpu::INVALID_HANDLE~;
     }
-    uint queue_id = gpu::completion_point_queue_id(point);
-    ulong sequence = gpu::completion_point_sequence(point);
+    uint queue_id = gpu::internal::completion_point_queue_id(point);
+    ulong sequence = gpu::internal::completion_point_sequence(point);
     QueueCompletionState* completion = queue_completion_state(
         state,
         queue_id,
@@ -1950,7 +1950,7 @@ fn void? publish_queue_completion(
 ) {
     QueueCompletionState* completion = queue_completion_state(
         state,
-        gpu::completion_point_queue_id(point),
+        gpu::internal::completion_point_queue_id(point),
     )!;
     completion.submit_mutex.lock()!!;
     defer completion.submit_mutex.unlock();
@@ -2103,10 +2103,10 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
         foreach (i, wait : desc.completion_waits) {
             gpu::CompletionPoint point = wait.point;
             if (point.device != device) return gpu::INVALID_HANDLE~;
-            ulong sequence = gpu::completion_point_sequence(point);
+            ulong sequence = gpu::internal::completion_point_sequence(point);
             QueueCompletionState* source = published_queue_completion_state(
                 state,
-                gpu::completion_point_queue_id(point),
+                gpu::internal::completion_point_queue_id(point),
                 sequence,
             )!;
             vk::PipelineStageFlags2 stages = submit_wait_stages_to_vk(
@@ -2130,7 +2130,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             foreach (i, &token : desc.command_lists) {
                 if (token.device != device) return gpu::INVALID_HANDLE~;
                 gpu::internal::CommandEncoderState* encoder =
-                    gpu::executable_encoder(token)!;
+                    gpu::internal::executable_encoder(token)!;
                 if (encoder.backend_state != state) {
                     return gpu::INVALID_HANDLE~;
                 }
@@ -2159,7 +2159,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             ulong epoch = next_submit_visit_epoch_locked(state);
             foreach (i, &token : desc.command_lists) {
                 gpu::internal::CommandEncoderState* encoder =
-                    gpu::executable_encoder(token)!;
+                    gpu::internal::executable_encoder(token)!;
                 CommandRecord* record = encoder_command(encoder);
                 if (encoder != inputs.encoders[i]
                     || record != inputs.records[i]
@@ -2319,7 +2319,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 state,
                 queue,
             )!;
-            completion_signal.value = gpu::completion_point_sequence(point);
+            completion_signal.value = gpu::internal::completion_point_sequence(point);
 
             vk::Result result = submit_fn(
                 completion.queue,
@@ -2381,7 +2381,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             state.command_mutex.lock()!!;
             defer state.command_mutex.unlock();
             foreach (i, token : desc.command_lists) {
-                gpu::invalidate_command_encoder(inputs.encoders[i]);
+                gpu::internal::invalidate_command_encoder(inputs.encoders[i]);
                 release_command(state, token.handle);
             }
             claimed = false;

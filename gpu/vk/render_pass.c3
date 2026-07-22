@@ -260,7 +260,7 @@ fn void? validate_render_pass_desc_fields(
     VkDeviceState* state,
     gpu::RenderPassDesc* desc,
 ) {
-    if (!gpu::render_pass_desc_valid(desc)
+    if (!gpu::internal::render_pass_desc_valid(desc)
         || desc.colors.len > state.caps.max_color_attachments) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -931,7 +931,7 @@ fn PreparedIndexedDraw? lower_indexed_draw(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
-    usz required = gpu::indirect_argument_bytes(
+    usz required = gpu::internal::indirect_argument_bytes(
         argument_size: trusted_index_element_size(index_type),
         count:         index_count,
         max_count:     uint::max,

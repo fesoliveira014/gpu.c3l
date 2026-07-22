@@ -199,7 +199,7 @@ fn void? validate_graphics_pipeline_desc(
     gpu::GraphicsPipelineDesc* desc,
 ) {
     if (desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
-        || !gpu::sample_count_valid(desc.sample_count)
+        || !gpu::internal::sample_count_valid(desc.sample_count)
         || !polygon_mode_valid(desc.polygon_mode)) return gpu::INVALID_ARGUMENT~;
     if (desc.depth_format != gpu::Format.UNDEFINED
         && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;

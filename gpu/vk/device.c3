@@ -1035,8 +1035,8 @@ fn gpu::Device? create_vk_device_from_runtime(
     gpu::QueueRequirements requirements = queue_requirements == null
         ? gpu::internal::default_queue_requirements()
         : *queue_requirements;
-    gpu::QueueSelection queue_selection =
-        gpu::queue_selection_from_native_ids(
+    gpu::internal::QueueSelection queue_selection =
+        gpu::internal::queue_selection_from_native_ids(
             requirements: requirements,
             graphics:     families.graphics_ids[:families.counts.graphics],
             compute:      families.compute_ids[:families.counts.compute],

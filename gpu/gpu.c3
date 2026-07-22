@@ -520,14 +520,14 @@ fn String? build_memory_report(Device* device, bool detailed) {
    Valid while recording, including inside render passes; balance is the
    caller's responsibility. *>
 fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (label == null) return INVALID_ARGUMENT~;
     return encoder.ops.begin_label(encoder, label, color);
 }
 
 <* Counterpart of cmd_begin_label. *>
 fn void? cmd_end_label(CommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.end_label(encoder);
 }
 
@@ -536,12 +536,12 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null || desc.size == 0) return INVALID_ARGUMENT~;
-    if (!memory_class_is_known(desc.memory_class)) return INVALID_ARGUMENT~;
-    validate_queue_access(&operation, desc.access)!;
+    if (!gpu::internal::memory_class_is_known(desc.memory_class)) return INVALID_ARGUMENT~;
+    gpu::internal::validate_queue_access(&operation, desc.access)!;
 
     AllocationDesc normalized = *desc;
-    normalized.alignment = normalized_allocation_alignment(desc.alignment)!;
-    validate_texture_allocation(&operation, desc, &normalized.alignment)!;
+    normalized.alignment = gpu::internal::normalized_allocation_alignment(desc.alignment)!;
+    gpu::internal::validate_texture_allocation(&operation, desc, &normalized.alignment)!;
     GpuAllocation allocation = operation.vtable.allocate_memory(
         device,
         &normalized,
@@ -647,7 +647,7 @@ fn GpuSpan GpuSpan.unchecked_subspan(self, usz offset, usz size) {
 
 <* Derive a non-empty exact-sized range within this immediate parent. *>
 fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
-    if (size == 0 || !range_fits(self.size, offset, size)) {
+    if (size == 0 || !gpu::internal::range_fits(self.size, offset, size)) {
         return INVALID_ARGUMENT~;
     }
     if (offset > usz::max - self.offset) return INVALID_ARGUMENT~;
@@ -676,7 +676,7 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    if (!queue_access_is_valid(&operation, desc.access)) return false;
+    if (!gpu::internal::queue_access_is_valid(&operation, desc.access)) return false;
     return operation.vtable.supports_texture_desc(device, desc);
 }
 
@@ -685,7 +685,7 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access)!;
     return operation.vtable.get_texture_requirements(device, desc);
 }
 
@@ -695,7 +695,7 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access)!;
     TextureHandle texture = operation.vtable.create_texture(device, desc)!;
     gpu::internal::retain_device_children(&operation);
     return texture;
@@ -711,7 +711,7 @@ fn TextureHandle? create_placed_texture(
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access)!;
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
@@ -740,17 +740,17 @@ fn DedicatedTexture? create_dedicated_texture(
         || allocation_desc.memory_class != MemoryClass.TEXTURE) {
         return INVALID_ARGUMENT~;
     }
-    validate_queue_access(&operation, desc.access)!;
-    validate_queue_access(&operation, allocation_desc.access)!;
-    if (!queue_roles_are_subset(desc.access, allocation_desc.access)) {
+    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, allocation_desc.access)!;
+    if (!gpu::internal::queue_roles_are_subset(desc.access, allocation_desc.access)) {
         return INVALID_ARGUMENT~;
     }
 
     AllocationDesc normalized = *allocation_desc;
-    normalized.alignment = normalized_allocation_alignment(
+    normalized.alignment = gpu::internal::normalized_allocation_alignment(
         allocation_desc.alignment,
     )!;
-    validate_texture_allocation(
+    gpu::internal::validate_texture_allocation(
         operation:       &operation,
         desc:            allocation_desc,
         alignment:       &normalized.alignment,
@@ -842,18 +842,18 @@ fn void? create_texture_views(
 
 fn bool ShaderCode.is_valid(self) {
     if (self.digest == 0
-        || !shader_stage_valid(self.stage)
+        || !gpu::internal::shader_stage_valid(self.stage)
         || self.spirv.ptr == null
-        || self.spirv.len < SPIRV_HEADER_SIZE
+        || self.spirv.len < gpu::internal::SPIRV_HEADER_SIZE
         || self.spirv.len % uint::size != 0
         || self.entry_point == null) return false;
 
     uint magic;
     mem::copy(&magic, self.spirv.ptr, uint::size);
     usz entry_point_len = self.entry_point.str_view().len;
-    return magic == SPIRV_MAGIC
+    return magic == gpu::internal::SPIRV_MAGIC
         && entry_point_len > 0
-        && entry_point_len < SHADER_ENTRY_POINT_CAP;
+        && entry_point_len < gpu::internal::SHADER_ENTRY_POINT_CAP;
 }
 
 fn bool ShaderCode.equals(self, ShaderCode other) @operator(==) {
@@ -873,18 +873,18 @@ fn bool ShaderCode.equals(self, ShaderCode other) @operator(==) {
 <* Validate borrowed SPIR-V and compute its opaque process-local identity. *>
 fn ShaderCode? prepare_shader_code(ShaderDesc* desc) {
     if (desc == null) return INVALID_ARGUMENT~;
-    if (!shader_stage_valid(desc.stage)) return INVALID_ARGUMENT~;
+    if (!gpu::internal::shader_stage_valid(desc.stage)) return INVALID_ARGUMENT~;
     if (desc.spirv.ptr == null
-        || desc.spirv.len < SPIRV_HEADER_SIZE
+        || desc.spirv.len < gpu::internal::SPIRV_HEADER_SIZE
         || desc.spirv.len % uint::size != 0) return SHADER_INVALID~;
 
     uint magic;
     mem::copy(&magic, desc.spirv.ptr, uint::size);
-    if (magic != SPIRV_MAGIC) return SHADER_INVALID~;
+    if (magic != gpu::internal::SPIRV_MAGIC) return SHADER_INVALID~;
 
     ZString entry_point = desc.entry_point == null ? "main" : desc.entry_point;
     usz entry_point_len = entry_point.str_view().len;
-    if (entry_point_len == 0 || entry_point_len >= SHADER_ENTRY_POINT_CAP) {
+    if (entry_point_len == 0 || entry_point_len >= gpu::internal::SHADER_ENTRY_POINT_CAP) {
         return INVALID_ARGUMENT~;
     }
     return {
@@ -892,7 +892,7 @@ fn ShaderCode? prepare_shader_code(ShaderDesc* desc) {
         .spirv       = desc.spirv,
         .entry_point = entry_point,
         .debug_name  = desc.debug_name,
-        .digest      = shader_code_digest(desc.spirv),
+        .digest      = gpu::internal::shader_code_digest(desc.spirv),
     };
 }
 
@@ -995,7 +995,7 @@ fn CommandAllocator? create_command_allocator(
 ) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_queue(&operation, device, queue)!;
+    gpu::internal::validate_queue(&operation, device, queue)!;
 
     CommandAllocatorDesc normalized = desc == null ? {} : *desc;
     if (normalized.command_buffer_capacity == 0) {
@@ -1060,7 +1060,7 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
     }
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device, true)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_command_allocator(&operation, allocator)!;
+    gpu::internal::validate_command_allocator(&operation, allocator)!;
     if (operation.vtable.destroy_command_allocator == null) {
         return BACKEND_ERROR~;
     }
@@ -1081,14 +1081,14 @@ fn void? reserve_generated_scratch(
     if (allocator == null) return INVALID_HANDLE~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_command_allocator(&operation, allocator)!;
+    gpu::internal::validate_command_allocator(&operation, allocator)!;
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.pipeline.owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
     )!;
-    if (!generated_work_kind_valid(desc.kind)
+    if (!gpu::internal::generated_work_kind_valid(desc.kind)
         || desc.max_commands_per_list == 0
         || desc.preprocess_buffer_count == 0
         || desc.max_commands_per_list
@@ -1110,13 +1110,13 @@ fn void? release_generated_scratch(
     if (allocator == null) return INVALID_HANDLE~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_command_allocator(&operation, allocator)!;
+    gpu::internal::validate_command_allocator(&operation, allocator)!;
     gpu::internal::validate_resource_owner(
         &operation,
         pipeline.owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
     )!;
-    if (!generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
+    if (!gpu::internal::generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
     if (operation.vtable.release_generated_scratch == null) {
         return BACKEND_ERROR~;
     }
@@ -1134,7 +1134,7 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
     if (allocator == null) return INVALID_HANDLE~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_command_allocator(&operation, allocator)!;
+    gpu::internal::validate_command_allocator(&operation, allocator)!;
     gpu::internal::BackendVTable* vtable = operation.vtable;
     if (vtable.begin_commands == null) return BACKEND_ERROR~;
     CommandList commands;
@@ -1162,7 +1162,7 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
         return INVALID_HANDLE~;
     }
     lease_retained = true;
-    publish_command_encoder(&operation, &commands, &backend)!;
+    gpu::internal::publish_command_encoder(&operation, &commands, &backend)!;
     gpu::internal::retain_device_children(&operation);
     gpu::internal::transfer_device_operation_pin(&operation);
     backend_created = false;
@@ -1172,12 +1172,12 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
 
 <* Finish and consume a recording token. Failure leaves it recording. *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
-    gpu::internal::DeviceOperation operation = command_operation(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::command_operation(commands)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::note_command_lifecycle_vtable_dispatch();
     operation.vtable.end_commands(encoder)!;
-    transfer_command_encoder_to_executable(encoder);
+    gpu::internal::transfer_command_encoder_to_executable(encoder);
     ExecutableCommandList executable = {
         .device = commands.device,
         .handle = commands.handle,
@@ -1189,11 +1189,11 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
 
 <* Consume an unfinished recording, including after device loss. *>
 fn void? discard_commands(CommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(
         commands,
         allow_lost: true,
     )!;
-    gpu::internal::DeviceOperation operation = command_operation(
+    gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         commands,
         allow_lost: true,
     )!;
@@ -1217,11 +1217,11 @@ fn void? discard_commands(CommandList* commands) {
 
 <* Consume an executable token without submitting it. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = executable_encoder(
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::executable_encoder(
         commands,
         allow_lost: true,
     )!;
-    gpu::internal::DeviceOperation operation = executable_command_operation(
+    gpu::internal::DeviceOperation operation = gpu::internal::executable_command_operation(
         commands,
         allow_lost: true,
     )!;
@@ -1248,7 +1248,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return encoder.ops.copy_buffer(encoder, desc);
 }
@@ -1256,35 +1256,35 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
 <* Record a 32-bit-pattern fill over dst; its offset and size must be 4-byte
    multiples. *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.fill_buffer(encoder, dst, value);
 }
 
 <* The texture's effective layout must be TRANSFER_DST; the caller records
    the surrounding barriers. *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return encoder.ops.copy_buffer_to_texture(encoder, desc);
 }
 
 <* The texture's effective layout must be TRANSFER_SRC. *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return encoder.ops.copy_texture_to_buffer(encoder, desc);
 }
 
 <* Record a global semantic execution and memory barrier. *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return encoder.ops.barrier(encoder, barrier);
 }
 
 <* Record an explicit semantic texture transition. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return encoder.ops.texture_barrier(encoder, barrier);
 }
@@ -1292,7 +1292,7 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
 <* Bind the active compute or graphics pipeline for later execution commands.
    A failed bind leaves the previous active pipeline unchanged. *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.bind_pipeline(encoder, pipeline);
 }
 
@@ -1301,14 +1301,14 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    recording queue's role. Counts may be zero and may not exceed
    DeviceCaps.max_compute_work_group_count on any axis. *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.dispatch(encoder, root, groups);
 }
 
 <* Set separate dynamic depth state for subsequent draws in the active render
    pass. A failed update leaves the previous depth state unchanged. *>
 fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (depth == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_depth_state(encoder, depth);
 }
@@ -1317,7 +1317,7 @@ fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
    subsequent draws. Requires an active render pass. A failed update leaves
    the previous state unchanged. *>
 fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (raster == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_raster_state(encoder, raster);
 }
@@ -1325,7 +1325,7 @@ fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster)
 <* Set one pass-bounded dynamic viewport for subsequent draws. Requires an
    active render pass; malformed values fault INVALID_ARGUMENT. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_viewport(encoder, viewport);
 }
@@ -1333,7 +1333,7 @@ fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
 <* Set one pass-bounded dynamic scissor for subsequent draws. Requires an
    active render pass; malformed values fault INVALID_ARGUMENT. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_scissor(encoder, scissor);
 }
@@ -1342,7 +1342,7 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    Every allocation reachable from either root must admit the recording queue's
    role. *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.draw(
         encoder:        encoder,
         vertex_root:    vertex_root,
@@ -1356,7 +1356,7 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    Every allocation reachable from either root must admit the recording queue's
    role. *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.draw_indexed(
         encoder:        encoder,
         vertex_root:    vertex_root,
@@ -1375,7 +1375,7 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    from either root must admit the recording queue's role. draw_count may not
    exceed DeviceCaps.max_draw_indirect_count. *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.draw_indirect(
         encoder:       encoder,
         vertex_root:   vertex_root,
@@ -1391,7 +1391,7 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    DeviceCaps.max_draw_indirect_count. Every allocation reachable from either
    root must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.draw_indexed_indirect(
         encoder:       encoder,
         vertex_root:   vertex_root,
@@ -1409,7 +1409,7 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    DeviceCaps.draw_indirect_count. Every allocation reachable from either root
    must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.draw_indexed_indirect_count(
         encoder:        encoder,
         vertex_root:    vertex_root,
@@ -1427,7 +1427,7 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    DeviceCaps.max_compute_work_group_count component. Every allocation
    reachable from the root must admit the recording queue's role. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.dispatch_indirect(encoder, root, args);
 }
 
@@ -1435,7 +1435,7 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    at count_span selects the actual count. Ordering against producer writes is
    the caller's barrier with hazards.draw_arguments set. *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.draw_generated(
         encoder:        encoder,
         records:        records,
@@ -1446,7 +1446,7 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
 
 <* Indexed generated-work variant. Index bounds remain GPU execution-time data. *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.draw_indexed_generated(
         encoder:        encoder,
         records:        records,
@@ -1459,7 +1459,7 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
 
 <* Execute up to max_dispatch_count GPU-written dispatch records. *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.dispatch_generated(
         encoder:            encoder,
         records:            records,
@@ -1509,19 +1509,19 @@ fn void? destroy_attachment_view(
 <* Begin a pass without adding synchronization. Viewport and scissor default to
    the full render area. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
-    if (!render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
     return encoder.ops.begin_render_pass(encoder, desc);
 }
 
 <* End the active render pass without adding synchronization. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = recording_encoder(commands)!;
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     return encoder.ops.end_render_pass(encoder);
 }
 
 fn bool CompletionPoint.is_valid(self) => self.device.is_valid()
-    && completion_point_sequence(self) != 0;
+    && gpu::internal::completion_point_sequence(self) != 0;
 fn bool CompletionPoint.equals(self, CompletionPoint other) @operator(==) {
     return self.device == other.device && self.payload == other.payload;
 }
@@ -1554,8 +1554,8 @@ fn TextureBarrier? texture_view_transition(
     TextureState before,
     TextureState after,
 ) {
-    if (!texture_layout_valid(before.layout)
-        || !texture_layout_valid(after.layout)
+    if (!gpu::internal::texture_layout_valid(before.layout)
+        || !gpu::internal::texture_layout_valid(after.layout)
         || after.layout == TextureLayout.UNDEFINED) {
         return INVALID_ARGUMENT~;
     }
@@ -1587,12 +1587,12 @@ fn bool? poll_completion(CompletionPoint point) {
     Device device = point.device;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_completion_point(&operation, &device, point)!;
+    gpu::internal::validate_completion_point(&operation, &device, point)!;
     if (operation.vtable.poll_completion == null) return UNSUPPORTED_FEATURE~;
     return operation.vtable.poll_completion(
         &device,
-        completion_point_queue_id(point),
-        completion_point_sequence(point),
+        gpu::internal::completion_point_queue_id(point),
+        gpu::internal::completion_point_sequence(point),
     );
 }
 
@@ -1605,12 +1605,12 @@ fn void? wait_completion(
     Device device = point.device;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_completion_point(&operation, &device, point)!;
+    gpu::internal::validate_completion_point(&operation, &device, point)!;
     if (operation.vtable.wait_completion == null) return UNSUPPORTED_FEATURE~;
     return operation.vtable.wait_completion(
         &device,
-        completion_point_queue_id(point),
-        completion_point_sequence(point),
+        gpu::internal::completion_point_queue_id(point),
+        gpu::internal::completion_point_sequence(point),
         timeout_ns,
     );
 }
@@ -1627,7 +1627,7 @@ fn bool Queue.equals(self, Queue other) @operator(==) {
 fn QueueCounts? get_queue_counts(Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return selected_queue_counts(&operation);
+    return gpu::internal::selected_queue_counts(&operation);
 }
 
 <* Return a device-owned queue identity for a semantic role and index. Aliased
@@ -1636,11 +1636,11 @@ fn QueueCounts? get_queue_counts(Device* device) {
 fn Queue? get_queue(Device* device, QueueKind kind, uint index = 0) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    if (index >= selected_queue_count(&operation, kind)) return INVALID_ARGUMENT~;
+    if (index >= gpu::internal::selected_queue_count(&operation, kind)) return INVALID_ARGUMENT~;
     return {
         .device = *device,
-        .id     = selected_queue_id(&operation, kind, index),
-        .roles  = selected_queue_roles(&operation, kind, index),
+        .id     = gpu::internal::selected_queue_id(&operation, kind, index),
+        .roles  = gpu::internal::selected_queue_roles(&operation, kind, index),
     };
 }
 
@@ -1649,7 +1649,7 @@ fn Queue? get_queue(Device* device, QueueKind kind, uint index = 0) {
 fn QueueInfo? get_queue_info(Device* device, Queue queue) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_queue(&operation, device, queue)!;
+    gpu::internal::validate_queue(&operation, device, queue)!;
     return {
         .id    = queue.id,
         .roles = queue.roles,
@@ -1662,17 +1662,17 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     Device device = queue.device;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_queue(&operation, &device, queue)!;
+    gpu::internal::validate_queue(&operation, &device, queue)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    if (desc.command_lists.len > MAX_SUBMIT_COMMAND_LISTS) {
+    if (desc.command_lists.len > gpu::internal::MAX_SUBMIT_COMMAND_LISTS) {
         return INVALID_ARGUMENT~;
     }
-    if (desc.completion_waits.len > MAX_SUBMIT_COMPLETION_WAITS) {
+    if (desc.completion_waits.len > gpu::internal::MAX_SUBMIT_COMPLETION_WAITS) {
         return INVALID_ARGUMENT~;
     }
     foreach (&commands : desc.command_lists) {
         if (commands.device != device) return INVALID_HANDLE~;
-        executable_encoder(commands)!;
+        gpu::internal::executable_encoder(commands)!;
         gpu::internal::validate_resource_owner(
             &operation,
             commands.handle.owner,
@@ -1680,8 +1680,8 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
         )!;
     }
     foreach (wait : desc.completion_waits) {
-        validate_completion_point(&operation, &device, wait.point)!;
-        if (!submit_wait_stage_mask_valid(wait.before)) {
+        gpu::internal::validate_completion_point(&operation, &device, wait.point)!;
+        if (!gpu::internal::submit_wait_stage_mask_valid(wait.before)) {
             return INVALID_ARGUMENT~;
         }
     }
@@ -1691,7 +1691,7 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
             return INVALID_HANDLE~;
         }
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
-        if (!submit_wait_stage_mask_valid(desc.readiness_before)) {
+        if (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)) {
             return INVALID_ARGUMENT~;
         }
     } else if ((uint)desc.readiness_before != 0) {
@@ -1796,7 +1796,7 @@ fn void? present(
     if (image == null) return INVALID_ARGUMENT~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    validate_completion_point(&operation, device, render_completion)!;
+    gpu::internal::validate_completion_point(&operation, device, render_completion)!;
     operation.vtable.present(device, image, render_completion)!;
     *image = {};
 }

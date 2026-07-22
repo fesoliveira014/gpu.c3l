@@ -1,6 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
-import gpu::internal @public;
+import gpu;
 const uint QUEUE_ROLE_COUNT @private = 3;
 const uint QUEUE_ROLE_MASK @private = 0x7;
 const uint COMPLETION_QUEUE_BITS @private = 10;
@@ -45,10 +45,10 @@ fn CompletionPoint? make_completion_point(
     ulong sequence,
 ) @private {
     if (!queue.is_valid() || queue.id >= MAX_SELECTED_QUEUE_IDENTITIES) {
-        return INVALID_HANDLE~;
+        return gpu::INVALID_HANDLE~;
     }
     if (sequence == 0 || sequence > MAX_COMPLETION_SEQUENCE) {
-        return INVALID_ARGUMENT~;
+        return gpu::INVALID_ARGUMENT~;
     }
     return {
         .device  = queue.device,
@@ -60,8 +60,8 @@ fn CompletionPoint? next_completion_point(
     Queue queue,
     ulong* sequence,
 ) @private {
-    if (sequence == null) return INVALID_ARGUMENT~;
-    if (*sequence == MAX_COMPLETION_SEQUENCE) return SLOT_TABLE_FULL~;
+    if (sequence == null) return gpu::INVALID_ARGUMENT~;
+    if (*sequence == MAX_COMPLETION_SEQUENCE) return gpu::SLOT_TABLE_FULL~;
     CompletionPoint point = make_completion_point(queue, *sequence + 1)!;
     (*sequence)++;
     return point;
@@ -130,7 +130,7 @@ fn void? add_queue_role_identities(
         }
         if (identity == selection.identity_count) {
             if (selection.identity_count == MAX_SELECTED_QUEUE_IDENTITIES) {
-                return INVALID_ARGUMENT~;
+                return gpu::INVALID_ARGUMENT~;
             }
             identity_keys[identity] = native_id;
             selection.identity_count++;
@@ -139,15 +139,15 @@ fn void? add_queue_role_identities(
         QueueRoles* roles = &selection.identity_roles[identity];
         switch (kind) {
             case QueueKind.GRAPHICS:
-                if (roles.graphics) return INVALID_ARGUMENT~;
+                if (roles.graphics) return gpu::INVALID_ARGUMENT~;
                 roles.graphics = true;
                 selection.graphics_ids[index] = (ushort)identity;
             case QueueKind.COMPUTE:
-                if (roles.compute) return INVALID_ARGUMENT~;
+                if (roles.compute) return gpu::INVALID_ARGUMENT~;
                 roles.compute = true;
                 selection.compute_ids[index] = (ushort)identity;
             case QueueKind.TRANSFER:
-                if (roles.transfer) return INVALID_ARGUMENT~;
+                if (roles.transfer) return gpu::INVALID_ARGUMENT~;
                 roles.transfer = true;
                 selection.transfer_ids[index] = (ushort)identity;
         }
@@ -160,11 +160,11 @@ fn QueueSelection? queue_selection_from_native_ids(
     ulong[] compute,
     ulong[] transfer,
 ) @private {
-    if (!gpu::internal::queue_requirements_are_valid(requirements)) return INVALID_ARGUMENT~;
+    if (!gpu::internal::queue_requirements_are_valid(requirements)) return gpu::INVALID_ARGUMENT~;
     if (graphics.len != (usz)requirements.counts.graphics
         || compute.len != (usz)requirements.counts.compute
         || transfer.len != (usz)requirements.counts.transfer) {
-        return INVALID_ARGUMENT~;
+        return gpu::INVALID_ARGUMENT~;
     }
 
     QueueSelection selection = {
@@ -194,7 +194,7 @@ fn QueueSelection? queue_selection_from_native_ids(
     for (uint identity = 0; identity < selection.identity_count; identity++) {
         QueueRoles roles = selection.identity_roles[identity];
         if (queue_roles_violate_distinct(roles, requirements.distinct)) {
-            return UNSUPPORTED_FEATURE~;
+            return gpu::UNSUPPORTED_FEATURE~;
         }
     }
     return selection;
@@ -206,11 +206,11 @@ fn QueueSelection? queue_selection_for_requirements(
     bool transfer_aliases_graphics,
     bool transfer_aliases_compute,
 ) @private {
-    if (!gpu::internal::queue_requirements_are_valid(requirements)) return INVALID_ARGUMENT~;
+    if (!gpu::internal::queue_requirements_are_valid(requirements)) return gpu::INVALID_ARGUMENT~;
     if (requirements.counts.graphics > 1
         || requirements.counts.compute > 1
         || requirements.counts.transfer > 1) {
-        return UNSUPPORTED_FEATURE~;
+        return gpu::UNSUPPORTED_FEATURE~;
     }
 
     ulong next_native_id;
@@ -390,14 +390,14 @@ fn bool queue_access_is_valid(
 }
 
 fn void? validate_queue_access(gpu::internal::DeviceOperation* operation, QueueRoles access) @private {
-    if (!queue_access_is_valid(operation, access)) return INVALID_ARGUMENT~;
+    if (!queue_access_is_valid(operation, access)) return gpu::INVALID_ARGUMENT~;
 }
 
 fn void? validate_selected_queue_kind(
     gpu::internal::DeviceOperation* operation,
     QueueKind kind,
 ) @private {
-    if (selected_queue_count(operation, kind) == 0) return INVALID_ARGUMENT~;
+    if (selected_queue_count(operation, kind) == 0) return gpu::INVALID_ARGUMENT~;
 }
 
 fn uint selected_queue_id(
@@ -428,10 +428,10 @@ fn void? validate_queue(
     Queue queue,
 ) @private {
     if (operation == null || !operation.active || device == null || !queue.is_valid()) {
-        return INVALID_HANDLE~;
+        return gpu::INVALID_HANDLE~;
     }
     if (queue.device != *device || !queue_id_is_selected(operation, queue)) {
-        return INVALID_HANDLE~;
+        return gpu::INVALID_HANDLE~;
     }
 }
 
@@ -445,10 +445,10 @@ fn void? validate_completion_point(
         || device == null
         || !point.is_valid()
         || point.device != *device) {
-        return INVALID_HANDLE~;
+        return gpu::INVALID_HANDLE~;
     }
     if (completion_point_queue_id(point)
         >= selected_queues(operation).identity_count) {
-        return INVALID_HANDLE~;
+        return gpu::INVALID_HANDLE~;
     }
 }

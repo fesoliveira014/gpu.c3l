@@ -223,7 +223,7 @@ fn void? command_pin_discard(
         (CommandPinFixture*)gpu::internal::device_backend_state_ptr(device);
     if (fixture == null) return gpu::INVALID_HANDLE~;
     if (fixture.reject_discard) return gpu::DEVICE_BUSY~;
-    if (encoder != null) gpu::invalidate_command_encoder(encoder);
+    if (encoder != null) gpu::internal::invalidate_command_encoder(encoder);
     fixture.discard_entered.store(true, AtomicOrdering.RELEASE);
     while (fixture.block_discard
         && !fixture.discard_release.load(AtomicOrdering.ACQUIRE)) {
@@ -552,11 +552,11 @@ fn gpu::CompletionPoint? command_pin_submit(
     if (fixture.submit_busy) return gpu::DEVICE_BUSY~;
     gpu::internal::CommandEncoderState*[gpu::internal::MAX_DEVICE_COMMANDS] encoders;
     foreach (i, &commands : desc.command_lists) {
-        encoders[i] = gpu::executable_encoder(commands, true)!;
+        encoders[i] = gpu::internal::executable_encoder(commands, true)!;
     }
     if (fixture.lose_during_submit) gpu::internal::mark_device_lost(&device);
     foreach (encoder : encoders[:desc.command_lists.len]) {
-        gpu::invalidate_command_encoder(encoder);
+        gpu::internal::invalidate_command_encoder(encoder);
     }
     return {
         .device  = device,
@@ -1595,7 +1595,7 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
         .id     = 0,
         .roles  = { .graphics },
     };
-    gpu::CompletionPoint closing_point = gpu::make_completion_point(
+    gpu::CompletionPoint closing_point = gpu::internal::make_completion_point(
         closing_queue,
         1,
     )!!;

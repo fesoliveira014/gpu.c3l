@@ -702,7 +702,7 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         .device = { .generation = 1 },
         .id     = 0,
     };
-    gpu::CompletionPoint completion = gpu::make_completion_point(queue, 1)!!;
+    gpu::CompletionPoint completion = gpu::internal::make_completion_point(queue, 1)!!;
     vk::CommandScratch[1] scratch = {{
         .references      = references[..],
         .reference_count = 1,

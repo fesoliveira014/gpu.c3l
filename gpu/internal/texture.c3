@@ -1,5 +1,6 @@
-module gpu;
+module gpu::internal @private;
 
+import gpu;
 
 
 fn ulong texture_compatibility_owner(TextureCompatibility compatibility) @private {

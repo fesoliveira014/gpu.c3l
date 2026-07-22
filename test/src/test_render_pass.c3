@@ -1,5 +1,6 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
 
 fn gpu::AttachmentViewHandle render_test_view(uint index) {
@@ -21,7 +22,7 @@ fn gpu::RenderPassDesc valid_render_pass_desc(gpu::ColorTargetDesc[] colors) {
 fn void render_pass_descriptor_accepts_zero_value_operations() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = render_test_view(0) }};
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);
-    assert(gpu::render_pass_desc_valid(&desc),
+    assert(gpu::internal::render_pass_desc_valid(&desc),
         "zero-value load/store operations form a valid color pass");
 }
 
@@ -30,10 +31,10 @@ fn void render_pass_descriptor_rejects_invalid_structure() @test {
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);
 
     desc.width = 0;
-    assert(!gpu::render_pass_desc_valid(&desc), "zero width is invalid");
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "zero width is invalid");
     desc = valid_render_pass_desc(colors[..]);
     desc.colors = {};
-    assert(!gpu::render_pass_desc_valid(&desc), "a pass needs an attachment");
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "a pass needs an attachment");
 }
 
 fn void render_pass_descriptor_rejects_invalid_operations() @test {
@@ -41,10 +42,10 @@ fn void render_pass_descriptor_rejects_invalid_operations() @test {
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);
 
     *((int*)&colors[0].load_op) = 99;
-    assert(!gpu::render_pass_desc_valid(&desc), "invalid color load operation is rejected");
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "invalid color load operation is rejected");
     colors[0].load_op = gpu::LoadOp.LOAD;
     *((int*)&colors[0].store_op) = 99;
-    assert(!gpu::render_pass_desc_valid(&desc), "invalid color store operation is rejected");
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "invalid color store operation is rejected");
 
     gpu::DepthTargetDesc depth = {
         .view = render_test_view(1),
@@ -55,18 +56,18 @@ fn void render_pass_descriptor_rejects_invalid_operations() @test {
         .width  = 8,
         .height = 8,
     };
-    assert(!gpu::render_pass_desc_valid(&desc), "invalid depth load operation is rejected");
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "invalid depth load operation is rejected");
 }
 
 fn void render_pass_descriptor_validates_resolve_identity() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = render_test_view(0) }};
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);
     desc.colors[0].resolve_view = render_test_view(1);
-    assert(gpu::render_pass_desc_valid(&desc),
+    assert(gpu::internal::render_pass_desc_valid(&desc),
         "a distinct resolve attachment is structurally valid");
 
     desc.colors[0].resolve_view = desc.colors[0].view;
-    assert(!gpu::render_pass_desc_valid(&desc),
+    assert(!gpu::internal::render_pass_desc_valid(&desc),
         "an attachment cannot resolve into itself");
 }
 
@@ -81,12 +82,12 @@ fn void render_pass_descriptor_validates_depth_clear_range() @test {
         .width  = 8,
         .height = 8,
     };
-    assert(gpu::render_pass_desc_valid(&desc), "unit depth clear is valid");
+    assert(gpu::internal::render_pass_desc_valid(&desc), "unit depth clear is valid");
 
     depth.clear.depth = -0.1f;
-    assert(!gpu::render_pass_desc_valid(&desc), "negative depth clear is invalid");
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "negative depth clear is invalid");
     depth.clear.depth = 1.1f;
-    assert(!gpu::render_pass_desc_valid(&desc), "depth clear above one is invalid");
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "depth clear above one is invalid");
 }
 
 fn void render_sample_count_is_shared_by_textures_and_pipelines() @test {
@@ -99,14 +100,14 @@ fn void render_sample_count_is_shared_by_textures_and_pipelines() @test {
 
     texture.usage = { .color_attach };
     texture.sample_count = gpu::SampleCount.FOUR;
-    assert(gpu::texture_desc_valid(&texture),
+    assert(gpu::internal::texture_desc_valid(&texture),
         "multisample color attachments are structurally valid");
 
     texture.mip_levels = 2;
-    assert(!gpu::texture_desc_valid(&texture),
+    assert(!gpu::internal::texture_desc_valid(&texture),
         "multisample textures cannot have mip chains");
     texture.mip_levels = 1;
     texture.usage = { .sampled };
-    assert(!gpu::texture_desc_valid(&texture),
+    assert(!gpu::internal::texture_desc_valid(&texture),
         "multisample textures stay attachment-only in strict core");
 }

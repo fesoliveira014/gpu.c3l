@@ -1,5 +1,6 @@
 module gpu::vk @private;
 
+import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::core::env;
@@ -266,8 +267,8 @@ fn void release_completed_submitted_commands_locked(
     uint i;
     while (i < state.submitted_command_count) {
         SubmittedCommandBatch* batch = &state.submitted_commands[i];
-        if (gpu::completion_point_queue_id(batch.completion) != queue_id
-            || gpu::completion_point_sequence(batch.completion)
+        if (gpu::internal::completion_point_queue_id(batch.completion) != queue_id
+            || gpu::internal::completion_point_sequence(batch.completion)
                 > completed_sequence) {
             i++;
             continue;
@@ -360,8 +361,8 @@ fn void? retire_observed_completion_and_drain_with_query(
     ulong observed_completed,
     SemaphoreCounterQueryFn query_fn,
 ) {
-    bool[gpu::MAX_SELECTED_QUEUE_IDENTITIES] queried = {};
-    ulong[gpu::MAX_SELECTED_QUEUE_IDENTITIES] completed = {};
+    bool[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] queried = {};
+    ulong[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] completed = {};
     queried[observed_queue_id] = true;
     completed[observed_queue_id] = observed_completed;
 
@@ -378,7 +379,7 @@ fn void? retire_observed_completion_and_drain_with_query(
     note_completion_retirement_lock_acquisition(state);
     for (uint i = 0; i < state.submitted_command_count; i++) {
         SubmittedCommandBatch* batch = &state.submitted_commands[i];
-        uint queue_id = gpu::completion_point_queue_id(batch.completion);
+        uint queue_id = gpu::internal::completion_point_queue_id(batch.completion);
         if (queried[queue_id]) continue;
         QueueCompletionState* completion = queue_completion_state(
             state,
@@ -396,7 +397,7 @@ fn void? retire_observed_completion_and_drain_with_query(
         queried[queue_id] = true;
     }
     for (uint queue_id = 0;
-        queue_id < gpu::MAX_SELECTED_QUEUE_IDENTITIES;
+        queue_id < gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES;
         queue_id++) {
         if (!queried[queue_id]) continue;
         QueueCompletionState* completion = queue_completion_state(
@@ -425,11 +426,11 @@ fn void? drain_completed_submitted_commands_with_query(
     VkDeviceState* state,
     SemaphoreCounterQueryFn query_fn,
 ) {
-    bool[gpu::MAX_SELECTED_QUEUE_IDENTITIES] queried = {};
-    ulong[gpu::MAX_SELECTED_QUEUE_IDENTITIES] completed = {};
+    bool[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] queried = {};
+    ulong[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] completed = {};
     for (uint i = 0; i < state.submitted_command_count; i++) {
         SubmittedCommandBatch* batch = &state.submitted_commands[i];
-        uint queue_id = gpu::completion_point_queue_id(batch.completion);
+        uint queue_id = gpu::internal::completion_point_queue_id(batch.completion);
         QueueCompletionState* completion = queue_completion_state(state, queue_id)!;
         if (!queried[queue_id]) {
             note_completion_counter_query(state);
@@ -445,7 +446,7 @@ fn void? drain_completed_submitted_commands_with_query(
         }
     }
     for (uint queue_id = 0;
-        queue_id < gpu::MAX_SELECTED_QUEUE_IDENTITIES;
+        queue_id < gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES;
         queue_id++) {
         if (!queried[queue_id]) continue;
         QueueCompletionState* completion = queue_completion_state(

@@ -108,7 +108,7 @@ fn void initialize_acquisition_fixture(AcquisitionFixture* fixture) {
     fixture.semaphores[1] = (vk::Semaphore)13;
     fixture.retirements[0] = {
         .device  = fixture.device,
-        .payload = 3ull << gpu::COMPLETION_QUEUE_BITS,
+        .payload = 3ull << gpu::internal::COMPLETION_QUEUE_BITS,
     };
     fixture.retirements[1] = {};
     gpu::vk::SwapchainSlot slot = {
@@ -137,11 +137,11 @@ fn void reset_acquisition_state(AcquisitionFixture* fixture) {
     slot.pending_acquire_semaphore = (vk::Semaphore)19;
     slot.render_completion = {
         .device  = fixture.device,
-        .payload = 5ull << gpu::COMPLETION_QUEUE_BITS,
+        .payload = 5ull << gpu::internal::COMPLETION_QUEUE_BITS,
     };
     fixture.retirements[0] = {
         .device  = fixture.device,
-        .payload = 3ull << gpu::COMPLETION_QUEUE_BITS,
+        .payload = 3ull << gpu::internal::COMPLETION_QUEUE_BITS,
     };
     fixture.retirements[1] = {};
 }
@@ -647,7 +647,7 @@ fn void present_path_guards_precede_native_mutation() @test {
 
     gpu::CompletionPoint expected = {
         .device  = device,
-        .payload = 1ull << gpu::COMPLETION_QUEUE_BITS,
+        .payload = 1ull << gpu::internal::COMPLETION_QUEUE_BITS,
     };
     gpu::vk::SwapchainSlot pending = {
         .swapchain          = (vk::SwapchainKHR)1,
@@ -783,7 +783,7 @@ fn bool? poll_only_second_retirement(
     gpu::CompletionPoint point,
 ) {
     (void)device;
-    return gpu::completion_point_sequence(point) == 2;
+    return gpu::internal::completion_point_sequence(point) == 2;
 }
 
 fn bool? poll_no_retirement(
@@ -981,7 +981,7 @@ fn void busy_acquire_ring_precedes_native_acquire() @test {
         fixture.state.presentation.swapchains.get(fixture.handle)!!;
     fixture.retirements[1] = {
         .device  = fixture.device,
-        .payload = 7ull << gpu::COMPLETION_QUEUE_BITS,
+        .payload = 7ull << gpu::internal::COMPLETION_QUEUE_BITS,
     };
     AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
 
@@ -1016,8 +1016,8 @@ fn void acquire_semaphores_retire_before_reuse() @test {
     assert(gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT == 2,
         "the production acquire ring remains fixed at two slots");
     gpu::CompletionPoint[gpu::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT] retirements = {
-        { .device = device, .payload = 1ull << gpu::COMPLETION_QUEUE_BITS },
-        { .device = device, .payload = 2ull << gpu::COMPLETION_QUEUE_BITS },
+        { .device = device, .payload = 1ull << gpu::internal::COMPLETION_QUEUE_BITS },
+        { .device = device, .payload = 2ull << gpu::internal::COMPLETION_QUEUE_BITS },
     };
     gpu::vk::SwapchainSlot slot = {
         .acquire_retirements   = retirements[..],
@@ -1041,7 +1041,7 @@ fn void acquire_semaphores_retire_before_reuse() @test {
     assert(selected == 0, "a never-used semaphore is immediately available");
 
     slot.pending_acquire_semaphore_index = 0;
-    gpu::CompletionPoint submitted = { .device = device, .payload = 3ull << gpu::COMPLETION_QUEUE_BITS };
+    gpu::CompletionPoint submitted = { .device = device, .payload = 3ull << gpu::internal::COMPLETION_QUEUE_BITS };
     gpu::vk::commit_swapchain_submit(&slot, submitted);
     assert(slot.readiness_consumed && slot.render_completion == submitted,
         "successful submission commits readiness and render completion");
