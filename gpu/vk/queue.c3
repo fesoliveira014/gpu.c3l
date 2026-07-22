@@ -2018,7 +2018,7 @@ fn SubmitDuplicateWorkCounters submit_duplicate_work_counters(
     };
 }
 
-fn ulong next_submit_visit_epoch_locked(VkDeviceState* state) {
+fn ulong next_submit_visit_epoch_locked(VkDeviceState* state) @private {
     if (state.next_submit_visit_epoch == ulong::max) {
         foreach (&cell : state.commands.slots[:state.commands.next_new]) {
             note_submit_epoch_reset_cell(state);

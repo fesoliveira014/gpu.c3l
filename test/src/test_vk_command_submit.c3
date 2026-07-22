@@ -481,7 +481,6 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
     record_empty_executables(queue, lists[..]);
     gpu::CommandListHandle discarded_handle = lists[2].handle;
     gpu::discard_executable_commands(&lists[2])!!;
-    defer gpu::discard_executable_commands(&lists[1])!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
     vk::CommandCell* unused =
@@ -518,6 +517,17 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
         "rollover preserves unused command-cell lifecycle state");
     assert(unvisited_live.submit_visit_epoch == 0,
         "rollover clears old stamps on live records outside the submitted batch");
+
+    state.next_submit_visit_epoch = ulong::max - 1;
+    gpu::ExecutableCommandList[1] unvisited_retry = { lists[1] };
+    gpu::SubmitDesc unvisited_submit = {
+        .command_lists = unvisited_retry[..],
+    };
+    gpu::CompletionPoint unvisited_completion =
+        gpu::submit(queue, &unvisited_submit)!!;
+    assert(state.next_submit_visit_epoch == ulong::max,
+        "the cleared live record remains valid when its old epoch is reused");
+    gpu::wait_completion(unvisited_completion)!!;
 
     gpu::ExecutableCommandList[1] retry = { lists[0] };
     gpu::SubmitDesc retry_submit = { .command_lists = retry[..] };
