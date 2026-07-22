@@ -417,9 +417,12 @@ def main():
         annotated = f"iterations={iterations}\nunits={units}\n{output}"
         lines.append(report_section(target, annotated))
 
-    advisory_output = "none" if not timing_advisories else "\n".join(
+    advisory_lines = [
         f"ADVISORY: {message}" for message in timing_advisories
-    )
+    ]
+    advisory_output = "none" if not advisory_lines else "\n".join(advisory_lines)
+    for line in advisory_lines:
+        print(line, file=sys.stderr)
     lines.append(report_section("Timing advisories", advisory_output))
 
     output_path = args.output if args.output.is_absolute() else root / args.output

@@ -4,6 +4,8 @@ import importlib.util
 import pathlib
 import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 
 
@@ -115,6 +117,89 @@ def load_runner():
 
 
 class BenchmarkRunnerTests(unittest.TestCase):
+    def run_main_harness(
+        self,
+        benchmark_output: str,
+        threshold: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], pathlib.Path]:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        report = pathlib.Path(directory.name) / "report.md"
+        harness = textwrap.dedent(
+            """
+            import importlib.util
+            import pathlib
+            import re
+            import sys
+
+            script = pathlib.Path(sys.argv[1])
+            report = pathlib.Path(sys.argv[2])
+            benchmark_output = sys.argv[3]
+            threshold = sys.argv[4] == "threshold"
+            spec = importlib.util.spec_from_file_location("run_benchmarks", script)
+            runner = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(runner)
+            runner.BENCHMARK_TARGETS = ("probe_bench",)
+            runner.BENCHMARK_METHODS = {
+                "probe_bench": ("synthetic=1", "ns/op"),
+            }
+            runner.REGRESSION_THRESHOLDS = {}
+            if threshold:
+                runner.REGRESSION_THRESHOLDS = {
+                    "probe_bench": ((
+                        "probe",
+                        re.compile(r"value=(?P<value>[0-9]+(?:\\.[0-9]+)?)"),
+                        10.0,
+                        True,
+                    ),),
+                }
+
+            def fake_executable(root, target):
+                return pathlib.Path(target)
+
+            def fake_run(command, cwd, env=None):
+                command = tuple(str(part) for part in command)
+                if command[0] == sys.executable:
+                    return ""
+                if command[0] == "c3c":
+                    if "--version" in command:
+                        return "C3 Compiler Version: 0.8.0"
+                    return ""
+                target = pathlib.Path(command[0]).name
+                if target == "benchmark_info":
+                    return "\\n".join((
+                        'adapter: name="probe" type=cpu',
+                        'driver: name="probe" id=0 version=0',
+                        'validation: enabled=false',
+                        'queues: graphics=0:0 compute=0:0 transfer=0:0',
+                    ))
+                if target == "probe_bench":
+                    return benchmark_output
+                raise AssertionError(command)
+
+            runner.executable = fake_executable
+            runner.run = fake_run
+            sys.argv = [str(script), "--output", str(report)]
+            raise SystemExit(runner.main())
+            """
+        )
+        result = subprocess.run(
+            (
+                sys.executable,
+                "-B",
+                "-c",
+                harness,
+                str(SCRIPT),
+                str(report),
+                benchmark_output,
+                "threshold" if threshold else "plain",
+            ),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return result, report
+
     def test_allocation_benchmark_uses_explicit_cpu_write_allocations(self):
         runner = load_runner()
         self.assertEqual(
@@ -589,16 +674,23 @@ class BenchmarkRunnerTests(unittest.TestCase):
             )
 
     def test_main_validates_raw_output_before_annotation(self):
-        source = SCRIPT.read_text(encoding="utf-8")
-        main = source[source.index("def main()"):]
-        self.assertIn("timing_advisories.extend(require_measurement(", main)
-        self.assertIn("enforce_thresholds=pinned", main)
-        self.assertIn("evaluate_thresholds=not args.validation", main)
-        self.assertIn('"--validation"', main)
-        self.assertIn('"1" if args.validation else "0"', main)
-        validation = main.index("timing_advisories.extend(require_measurement(")
-        annotation = main.index('annotated = f"iterations={iterations}')
-        self.assertLess(validation, annotation)
+        result, report = self.run_main_harness("12.5 ns/op")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("iteration count", result.stderr)
+        self.assertFalse(report.exists())
+
+    def test_main_surfaces_unpinned_advisories_on_stderr(self):
+        result, report = self.run_main_harness(
+            "iterations=1 value=20.0 20.0 ns/op",
+            threshold=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        advisory = (
+            "ADVISORY: probe_bench probe exceeded regression threshold: "
+            "20 > 10"
+        )
+        self.assertIn(advisory, result.stderr)
+        self.assertIn(advisory, report.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -502,7 +502,9 @@ Capability-gated tests print one terminal `EXERCISED` or `NOT EXERCISED
 (<reason>)` line. Portable lanes accept declared unavailability while
 preserving every other blocking assertion. A pinned lane sets
 `REQUIRED_GPU_CAPABILITIES` and fails unless each named capability reports
-`EXERCISED`.
+`EXERCISED`. The version-pinned Windows mesa-dist-win lane requires
+`generated-work` and `generated-scratch-reservation`; Linux distro Mesa may
+report either as unavailable.
 
 Distinct-adapter ownership is gated deterministically by the CPU stub suite.
 `vk_device_request` also uses two physical adapters when both support the strict

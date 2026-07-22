@@ -94,6 +94,18 @@ fn void? discard_test_executable(gpu::ExecutableCommandList* commands) {
     }
 }
 
+fn void release_submitted_executables(
+    gpu::DeviceOperation* operation,
+    gpu::ExecutableCommandList[] commands,
+) {
+    foreach (&command : commands) {
+        gpu::release_executable_command_pin_lease(operation, command);
+        *command = {};
+    }
+    gpu::release_device_children(operation, (ulong)commands.len);
+    (void)gpu::release_retained_device_pins(operation, (uint)commands.len);
+}
+
 fn gpu::AttachmentViewHandle? create_test_attachment_view(
     gpu::Device* device,
     gpu::TextureHandle texture,

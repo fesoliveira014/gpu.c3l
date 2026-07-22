@@ -193,6 +193,9 @@ jobs:
   windows:
     runs-on: windows-2022
     timeout-minutes: 45
+    env:
+      REQUIRED_GPU_CAPABILITIES: >-
+        generated-work generated-scratch-reservation
     defaults:
       run:
         shell: bash

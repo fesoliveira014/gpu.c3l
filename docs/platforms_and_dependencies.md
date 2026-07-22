@@ -316,6 +316,8 @@ Nanosecond comparisons are advisory unless a runner, driver, and comparison
 profile are explicitly pinned. Capability-gated scenarios always print
 `EXERCISED` or `NOT EXERCISED`; portable lanes accept declared unavailability,
 while `REQUIRED_GPU_CAPABILITIES` makes selected execution states mandatory.
+The pinned Windows mesa-dist-win lane requires `generated-work` and
+`generated-scratch-reservation`; the portable Linux lane does not.
 
 The c3c version is pinned once, in the workflow's `C3C_VERSION` env var
 (currently 0.8.0). Tool downloads are cached by version key. Compiler upgrades

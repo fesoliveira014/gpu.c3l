@@ -81,13 +81,8 @@ fn int submission_checkpoint_worker(void* raw_args) {
         gpu::DeviceOperation operation = gpu::begin_device_operation(
             &device,
         )!!;
-        gpu::release_executable_command_pin_lease(
-            &operation,
-            &args.executable,
-        );
-        args.executable = {};
-        gpu::release_device_children(&operation);
-        (void)gpu::release_retained_device_pins(&operation, 1);
+        release_submitted_executables(&operation, lists[..]);
+        args.executable = lists[0];
         gpu::end_device_operation(&operation);
     };
     return 0;
