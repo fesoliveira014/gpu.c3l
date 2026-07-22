@@ -733,12 +733,12 @@ fn gpu::Device? create_vk_device_from_runtime(
         AttachmentViewCell,
         gpu::DEFAULT_ATTACHMENT_VIEW_CAPACITY,
     );
-    create_sampler_table(state)!;
     if (state.presentation.enabled) {
         state.presentation.swapchains.owner = gpu::resource_owner_tag(state.resource_owner, gpu::ResourceOwnerKind.SWAPCHAIN);
         state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     }
     if (state.strict_heap.enabled) {
+        create_sampler_table(state)!;
         create_descriptor_heap(state)!;
         reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;
         create_pipeline_shared(state, desc.pipeline_cache_data, pipeline_capacity)!;

@@ -24,6 +24,14 @@ fn uint live_device_slot_count() @private {
     return live_count;
 }
 
+fn void strict_disabled_state_owns_no_sampler_table() @test {
+    gpu::vk::VkDeviceState state;
+    gpu::vk::create_sampler_table(&state)!!;
+
+    assert(state.samplers.slots.ptr == null,
+        "a strict-disabled state allocates no sampler table");
+}
+
 fn void destroy_registry_blocker(void* backend_state) @private {
     (void)backend_state;
 }

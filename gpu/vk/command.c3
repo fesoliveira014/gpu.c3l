@@ -58,20 +58,6 @@ Atomic{ulong} last_compute_root @if(env::TESTING);
 Atomic{ulong} last_vertex_root @if(env::TESTING);
 Atomic{ulong} last_fragment_root @if(env::TESTING);
 
-fn void reset_root_push_observation() @if(env::TESTING) {
-    last_compute_root.store(0, AtomicOrdering.RELAXED);
-    last_vertex_root.store(0, AtomicOrdering.RELAXED);
-    last_fragment_root.store(0, AtomicOrdering.RELAXED);
-}
-
-fn RootPushObservation root_push_observation() @if(env::TESTING) {
-    return {
-        .compute = (gpu::GpuAddress)last_compute_root.load(AtomicOrdering.RELAXED),
-        .vertex = (gpu::GpuAddress)last_vertex_root.load(AtomicOrdering.RELAXED),
-        .fragment = (gpu::GpuAddress)last_fragment_root.load(AtomicOrdering.RELAXED),
-    };
-}
-
 struct RetiredCommandBuffer {
     vk::CommandPool             pool;
     vk::CommandBuffer           buffer;
@@ -142,6 +128,20 @@ fn RecordingContextState*? RecordingContextTable.get(
         return gpu::INVALID_HANDLE~;
     }
     return &cell.value;
+}
+
+fn void reset_root_push_observation() @if(env::TESTING) {
+    last_compute_root.store(0, AtomicOrdering.RELAXED);
+    last_vertex_root.store(0, AtomicOrdering.RELAXED);
+    last_fragment_root.store(0, AtomicOrdering.RELAXED);
+}
+
+fn RootPushObservation root_push_observation() @if(env::TESTING) {
+    return {
+        .compute = (gpu::GpuAddress)last_compute_root.load(AtomicOrdering.RELAXED),
+        .vertex = (gpu::GpuAddress)last_vertex_root.load(AtomicOrdering.RELAXED),
+        .fragment = (gpu::GpuAddress)last_fragment_root.load(AtomicOrdering.RELAXED),
+    };
 }
 
 fn void note_recording_host_allocation(VkDeviceState* state) {

@@ -199,14 +199,15 @@ def find_live_retired_usages(
     failures = []
     for path in live_scan_files(roots):
         source = path.read_text(encoding="utf-8")
+        relative_path = path.relative_to(ROOT).as_posix()
         for marker, pattern in LIVE_RETIRED_PATTERNS.items():
             for match in pattern.finditer(source):
                 line = source.count("\n", 0, match.start()) + 1
-                failures.append(f"{path.relative_to(ROOT)}:{line}: {marker}")
+                failures.append(f"{relative_path}:{line}: {marker}")
         for marker, pattern in RETIRED_DESC_FIELDS.items():
             for match in pattern.finditer(source):
                 line = source.count("\n", 0, match.start()) + 1
-                failures.append(f"{path.relative_to(ROOT)}:{line}: {marker}")
+                failures.append(f"{relative_path}:{line}: {marker}")
     return failures
 
 

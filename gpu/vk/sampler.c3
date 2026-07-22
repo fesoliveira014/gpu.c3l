@@ -178,6 +178,7 @@ fn vk::SamplerAddressMode sampler_address_mode_to_vk(
 }
 
 fn void? create_sampler_table(VkDeviceState* state) @private {
+    if (!state.strict_heap.enabled) return;
     vk::PhysicalDeviceProperties properties;
     vk::get_physical_device_properties(state.physical_device, &properties);
     uint capacity = properties.limits.max_sampler_allocation_count;
@@ -285,7 +286,6 @@ fn gpu::SamplerIndex? vk_intern_sampler(
         operation: "intern_sampler",
         result:    create_result,
     )!;
-    defer catch vk::destroy_sampler(state.device, native, null);
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.SAMPLER,
