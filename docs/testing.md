@@ -706,7 +706,11 @@ the full public module plus a stub backend, linking no native libraries — a
 clean checkout runs them with no Vulkan/VMA installed, and CI runs them
 before any native setup.
 
-Shared CPU/shader structs come from `.abi` schemas (see `docs/shader_abi.md` §12). Generated outputs are committed; `scripts/gen_abi.py --check` is the drift gate — run it as part of any full test sweep, and rerun `scripts/gen_abi.py` (then `scripts/build_shaders.py`) after editing a schema.
+Shared CPU/shader structs come from `.abi` schemas (see `docs/shader_abi.md`
+§12). Generated outputs are committed; `scripts/gen_abi.py --check` is the drift
+gate — run it as part of any full test sweep, and rerun `scripts/gen_abi.py`
+(then `scripts/build_shaders.py`) after editing a schema. Run the split-generator
+unit coverage with `python3 -B -m unittest scripts.test_gen_abi`.
 
 CI tiers (`.github/workflows/ci.yml`):
 

@@ -1,9 +1,9 @@
 module gpu::internal @private;
 
 import gpu;
+
 const uint MAX_SURFACES @private = 64;
 const uint MAX_SURFACE_GENERATION @private = 0x00FF_FFFF;
-
 
 struct SurfaceData @private {
     uint    generation;

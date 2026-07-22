@@ -2550,6 +2550,19 @@ method gpu::Runtime.is_valid
             "gpu/surface/win32/surface.c3 must contain exactly create_surface",
             implementation_failures,
         )
+        reordered_implementation = (
+            "module gpu::surface::win32;\n"
+            "import gpu::internal @public;\n"
+            "import gpu @public;\n"
+            "fn void create_surface() {}\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_surface_source(
+                Path("gpu/surface/win32/surface.c3"),
+                reordered_implementation,
+            ),
+            [],
+        )
 
     def test_rejects_internal_and_binding_types_in_all_public_metadata(self) -> None:
         document = valid_document()

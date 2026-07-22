@@ -85,7 +85,9 @@ jobs:
           c3c test shader_abi --path test/cpu
 
       - name: Generator unit tests
-        run: c3c test unit --path tools/gen_shader_abi
+        run: |
+          c3c test unit --path tools/gen_shader_abi
+          python3 -B -m unittest scripts.test_gen_abi
 
       - name: Benchmark, command, and shader policy contract tests
         run: |
@@ -299,7 +301,9 @@ jobs:
         run: cp "$HOME/tools/VulkanSDK/Lib/vulkan-1.lib" lib/vma.c3l/linked-libs/windows-x64/
 
       - name: Generator unit tests
-        run: c3c test unit --path tools/gen_shader_abi
+        run: |
+          c3c test unit --path tools/gen_shader_abi
+          python -B -m unittest scripts.test_gen_abi
 
       - name: Benchmark, command, and shader policy contract tests
         run: |

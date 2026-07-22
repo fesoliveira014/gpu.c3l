@@ -51,7 +51,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 1.1 Explicit runtime and borrowed adapters
 
-- [x] Add `Runtime`, `RuntimeDesc`, `Adapter`, `AdapterInfo`, and explicit create, enumerate, query, and destroy operations in `gpu/runtime.c3` and `gpu/adapter.c3`; move native discovery ownership from `gpu/internal/vk/instance.c3` into per-runtime state in `gpu/internal/vk/runtime.c3` and `gpu/internal/vk/adapter.c3`.
+- [x] Add `Runtime`, `RuntimeDesc`, `Adapter`, `AdapterInfo`, and explicit create, enumerate, query, and destroy operations in `gpu/gpu.c3i` and `gpu/gpu.c3`; move native discovery ownership from `gpu/internal/vk/instance.c3` into per-runtime state in `gpu/internal/vk/runtime.c3` and `gpu/internal/vk/adapter.c3`.
   - **Depends on:** Gate A.
   - **Contract:** imports remain inert; adapters are borrowed from a runtime; runtime destruction rejects live surfaces or devices; backend and driver versions are diagnostic only.
   - **Edges:** no adapter, repeated enumeration, stale adapter after runtime destruction, multiple runtimes, and transactional runtime creation failure.
@@ -59,7 +59,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 1.2 Immutable semantic device requests
 
-- [x] Add canonical `DeviceRequest`, strict request construction, semantic support queries, and transactional request validation in `gpu/device.c3`, `gpu/caps.c3`, `gpu/internal/vk/adapter.c3`, and `gpu/internal/vk/device.c3`.
+- [x] Add canonical `DeviceRequest`, strict request construction, semantic support queries, and transactional request validation in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/device_request.c3`, `gpu/internal/vk/adapter.c3`, and `gpu/internal/vk/device.c3`.
   - **Depends on:** 1.1.
   - **Contract:** support, requested capabilities, and enabled capabilities are separate; request contents become immutable at creation; unsupported requirements identify the unmet semantic requirement; no API-version selector is public.
   - **Edges:** strict-only, empty, unsupported, duplicate contribution, and failure after temporary native allocation.
@@ -67,7 +67,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 1.3 Runtime-owned platform surfaces
 
-- [x] Replace the root untyped platform-handle path with `gpu::surface::win32`, `gpu::surface::wayland`, and `gpu::surface::x11` constructors backed by shared `Surface` tokens in `gpu/surface/`, `gpu/swapchain.c3`, and `gpu/internal/vk/surface/`.
+- [x] Replace the root untyped platform-handle path with `gpu::surface::win32`, `gpu::surface::wayland`, and `gpu::surface::x11` constructors backed by shared `Surface` tokens in `gpu/surface/`, `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/surface.c3`, and `gpu/internal/vk/surface/`.
   - **Depends on:** 1.1 and 1.2.
   - **Contract:** a surface belongs to one runtime; presentation support is queried for an adapter and surface before device creation; importing any surface module is inert; SDL remains outside this repository.
   - **Edges:** wrong runtime, stale surface, unsupported presentation, invalid native handles, dormant surface, and runtime destruction with a live surface.
@@ -77,7 +77,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 2.1 Concurrent generational device registry
 
-- [x] Replace the process-wide active device with a generational slot registry in `gpu/device.c3`, `gpu/types.c3`, `gpu/internal/vk/device.c3`, and focused registry tests under `test/src/`.
+- [x] Replace the process-wide active device with a generational slot registry in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/device.c3`, `gpu/internal/vk/device.c3`, and focused registry tests under `test/src/`.
   - **Depends on:** 1.2.
   - **Contract:** multiple devices coexist; steady-state resolution is a slot and generation check; registry mutation is synchronized; most public operations use short-lived pins, while command tokens retain and borrow one pin.
   - **Edges:** stale generation, concurrent create/destroy, slot reuse, generation exhaustion, and operations racing a closing device.
@@ -101,7 +101,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 2.4 Explicit semantic queue handles
 
-- [x] Add queue-role/count requests, `Queue` handles, queue queries, and per-resource access domains in `gpu/queue.c3`, `gpu/device.c3`, `gpu/memory.c3`, `gpu/texture.c3`, `gpu/internal/vk/queue.c3`, and resource creation code.
+- [x] Add queue-role/count requests, `Queue` handles, queue queries, and per-resource access domains in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/queue.c3`, `gpu/internal/device.c3`, `gpu/internal/memory.c3`, `gpu/internal/texture.c3`, `gpu/internal/vk/queue.c3`, and resource creation code.
   - **Depends on:** 2.2 and 2.3.
   - **Contract:** public requests use semantic roles, never family indices; resources admitted to roles on distinct native families use private concurrent sharing; explicitly named resources reject unadmitted queues.
   - **Edges:** unavailable count, one queue serving several roles, same-family multi-role access, cross-family sharing, and GPU-pointer-only access as a documented caller precondition.
@@ -109,7 +109,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 2.5 Non-blocking retryable device destruction
 
-- [x] Implement the approved live/closing/device-destroy state machine in `gpu/device.c3` and `gpu/internal/vk/device.c3`, resolving issues #214 and the device portion of #200.
+- [x] Implement the approved live/closing/device-destroy state machine in `gpu/gpu.c3`, `gpu/internal/device.c3`, and `gpu/internal/vk/device.c3`, resolving issues #214 and the device portion of #200.
   - **Depends on:** 2.1–2.4.
   - **Contract:** live children return `RESOURCE_IN_USE`; incomplete queue work and active pins return retryable `DEVICE_BUSY`; destruction never waits; command tokens retain pins until submit or discard; failed attempts preserve state and generation.
   - **Edges:** new pin while closing, child creation between the live-child check and closing mark, active recording/executable token, completion racing destruction, device loss, and retry after every failure branch.
@@ -119,7 +119,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.1 Compact queue-owned completion points
 
-- [x] Add `CompletionPoint` and queue-owned monotonic submission sequences in `gpu/sync.c3`, `gpu/queue.c3`, `gpu/internal/vk/sync.c3`, and `gpu/internal/vk/queue.c3`.
+- [x] Add `CompletionPoint` and queue-owned monotonic submission sequences in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/sync.c3`, `gpu/internal/queue.c3`, `gpu/internal/vk/sync.c3`, and `gpu/internal/vk/queue.c3`.
   - **Depends on:** 2.4.
   - **Contract:** a point identifies one queue and sequence, fits within two machine words, allocates no public object, remains reusable until device destruction, and supports host poll and wait operations; timeout expiry faults retryable `WAIT_TIMEOUT` without invalidating or changing the point.
   - **Edges:** zero or reserved sequence, sequence exhaustion before native submission, stale queue/device, foreign device, already-complete points, and wait timeout expiry.
@@ -127,7 +127,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.2 Transactional submission and cross-queue waits
 
-- [x] Change submission in `gpu/queue.c3`, `gpu/command.c3`, `gpu/internal/vk/queue.c3`, and `gpu/internal/vk/sync.c3` to consume executable command tokens only after successful native submission and return one `CompletionPoint`.
+- [x] Change submission in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/queue.c3`, `gpu/internal/command.c3`, `gpu/internal/vk/queue.c3`, and `gpu/internal/vk/sync.c3` to consume executable command tokens only after successful native submission and return one `CompletionPoint`.
   - **Depends on:** 3.1.
   - **Contract:** cross-queue waits accept reusable completion points; same-queue order is inherent; successful submission publishes exactly one contiguous queue sequence; validation or retryable failure publishes no point and preserves retryable tokens; destruction readiness observes completed queue timelines without requiring `wait_queue_idle`.
   - **Edges:** empty submit, duplicate token, mixed queues/devices, stale wait point, wait on a later same-queue sequence, device loss, and partial native preparation failure.
@@ -135,7 +135,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.3 Remove public synchronization objects
 
-- [x] Remove public semaphore, caller-managed counter, and `wait_queue_idle` contracts from `gpu/sync.c3`, `gpu/queue.c3`, `gpu/gpu.c3i`, backend adapters, docs, and samples; retain native synchronization privately.
+- [x] Remove public semaphore, caller-managed counter, and `wait_queue_idle` contracts from `gpu/gpu.c3i`, `gpu/gpu.c3`, backend adapters, docs, and samples; retain native synchronization privately.
   - **Depends on:** 3.2.
   - **Contract:** completion points are the only public queue-progress primitive; removal is in place rather than wrapped by a compatibility layer.
   - **Edges:** presentation and teardown call sites still needing native binary synchronization; ensure device destruction remains non-blocking.
@@ -143,7 +143,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.4 Transient one-shot command lifecycle
 
-- [x] Use explicit exact-queue `CommandAllocator` ownership, `begin_commands(allocator)`, recording `CommandList`, successful end to an executable token, and consuming `discard_commands` in `gpu/command.c3`, `gpu/internal/vk/command.c3`, and `gpu/internal/vk/command_state.c3`.
+- [x] Use explicit exact-queue `CommandAllocator` ownership, `begin_commands(allocator)`, recording `CommandList`, successful end to an executable token, and consuming `discard_commands` in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/command.c3`, `gpu/internal/vk/command.c3`, and `gpu/internal/vk/command_state.c3`.
   - **Depends on:** 2.5 and 3.2.
   - **Contract:** recording and executable tokens retain device pins; allocator-owned native pools are backend-private and fixed-capacity; command calls use pinned state and take no global registry lock or warm allocation path.
   - **Edges:** abandon before end, double end/discard, validation failure leaving recording unchanged, worker-thread reuse, submit-once enforcement, and device loss.
@@ -151,7 +151,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 3.5 One-shot swapchain readiness
 
-- [x] Migrate acquisition, submission, and presentation in `gpu/swapchain.c3`, `gpu/queue.c3`, `gpu/internal/vk/swapchain.c3`, and `gpu/internal/vk/queue.c3` to one-shot readiness plus ordinary render completion points.
+- [x] Migrate acquisition, submission, and presentation in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/surface.c3`, `gpu/internal/queue.c3`, `gpu/internal/vk/swapchain.c3`, and `gpu/internal/vk/queue.c3` to one-shot readiness plus ordinary render completion points.
   - **Depends on:** 3.2–3.4 and 1.3.
   - **Contract:** acquire returns a borrowed texture and readiness token; submission consumes readiness; presentation consumes the acquired image and accepts a same-device completion point covering rendering; native bridge objects remain private.
   - **Edges:** unused or double-used readiness, wrong image or device, out-of-date swapchain, dormant surface, surface loss, and retryable present failure.
@@ -161,7 +161,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.1 Independent allocations and checked spans
 
-- [x] Add independent storage ownership with `GpuAllocation`, non-owning `GpuSpan`, memory classes, mapping, and address queries in `gpu/memory.c3` and `gpu/internal/vk/allocation.c3`.
+- [x] Add independent storage ownership with `GpuAllocation`, non-owning `GpuSpan`, memory classes, mapping, and address queries in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/memory.c3`, and `gpu/internal/vk/allocation.c3`.
   - **Depends on:** 2.3 and 2.4.
   - **Contract:** allocations own storage and release exactly once; spans cannot release parents; span slicing checks overflow and bounds; CPU mappings and GPU addresses exist only for supported memory classes.
   - **Edges:** zero length, end-boundary span, integer overflow, wrong device, unmapped memory, unavailable address, and releasing with live placements.
@@ -169,7 +169,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.2 Explicit mapped-memory visibility
 
-- [x] Add mapped-span flush and invalidate operations in `gpu/memory.c3` and `gpu/internal/vk/allocation.c3` with private non-coherent range alignment.
+- [x] Add mapped-span flush and invalidate operations in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/memory.c3`, and `gpu/internal/vk/allocation.c3` with private non-coherent range alignment.
   - **Depends on:** 4.1.
   - **Contract:** flush makes CPU writes visible to the GPU; invalidate makes completed GPU writes visible to the CPU; coherent memory is a semantic no-op.
   - **Edges:** unaligned ranges, zero length, overflow, unmapped spans, non-host-visible allocations, and calls before completion.
@@ -177,7 +177,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.3 Span/address data operations
 
-- [x] Migrate copies, fills, index data, indirect arguments, upload, and readback from `BufferHandle` to spans or addresses in `gpu/command.c3`, transfer helpers, shader ABI, tests, benchmarks, and samples.
+- [x] Migrate copies, fills, index data, indirect arguments, upload, and readback from `BufferHandle` to spans or addresses in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/command.c3`, transfer helpers, shader ABI, tests, benchmarks, and samples.
   - **Depends on:** 4.1, 4.2, and 3.4.
   - **Contract:** no generic buffer object remains in the strict public surface; operations validate ranges and admitted queue roles before recording mutation.
   - **Edges:** overlapping copy, alignment, indirect/count bounds, address-only lifetime responsibility, and cross-device spans.
@@ -185,7 +185,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.4 Texture requirements and placed creation
 
-- [x] Add pre-creation texture requirements and placed texture creation in `gpu/texture.c3`, `gpu/internal/vk/texture.c3`, and allocation placement tracking.
+- [x] Add pre-creation texture requirements and placed texture creation in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/texture.c3`, `gpu/internal/vk/texture.c3`, and allocation placement tracking.
   - **Depends on:** 4.1 and 2.4.
   - **Contract:** requirements precede allocation; placed creation validates compatibility, size, alignment, offset, queue access, and dedicated-only requirements before backend mutation; texture destruction never releases placement.
   - **Edges:** wrong memory class or type, overlapping live placement, out-of-range offset, alignment overflow, dedicated-required request, stale allocation, and failure after validation.
@@ -193,7 +193,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 4.5 Transactional dedicated textures
 
-- [x] Add dedicated texture creation returning separate `Texture` and `GpuAllocation` tokens in `gpu/texture.c3` and `gpu/internal/vk/texture.c3`.
+- [x] Add dedicated texture creation returning separate `Texture` and `GpuAllocation` tokens in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/texture.c3`, and `gpu/internal/vk/texture.c3`.
   - **Depends on:** 4.4.
   - **Contract:** native texture, compatible memory, and binding are one transaction; failure publishes neither token; callers destroy the texture and release the allocation separately.
   - **Edges:** allocation failure after native texture creation, binding failure, publication failure, dedicated-only requirements, and both valid destruction orders subject to placement rules.
@@ -219,7 +219,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.1 Strict sampler interning to shader indices
 
-- [x] Intern sampler descriptions directly to capability-gated strict shader indices in `gpu/texture.c3` and the corresponding Vulkan files.
+- [x] Intern sampler descriptions directly to capability-gated strict shader indices in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/texture.c3`, and the corresponding Vulkan files.
   - **Depends on:** 2.2 and 2.3.
   - **Contract:** `intern_sampler` returns a stable backend-neutral `SamplerIndex` only when strict capability is enabled; the index, heap entry, and native sampler live until device destruction; there is no separate public sampler identity or publication step.
   - **Edges:** duplicate descriptors, table and heap exhaustion, unsupported strict interning, native creation failure, and concurrent interning.
@@ -227,7 +227,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.2 Device-wide strict texture and sampler heaps
 
-- [x] Finalize device-wide view publication and raw shader-visible indices in `gpu/descriptor_heap.c3`, `gpu/texture.c3`, `gpu/internal/vk/descriptor_heap.c3`, and `gpu/internal/vk/texture.c3`.
+- [x] Finalize device-wide view publication and raw shader-visible indices in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/texture.c3`, `gpu/internal/vk/descriptor_heap.c3`, and `gpu/internal/vk/texture.c3`.
   - **Depends on:** 5.1 and 4.4.
   - **Contract:** heap implementation selection is private; index width is ABI-pinned; CPU generation metadata validates API operations but is not embedded in shader values; caller lifetime covers indices stored in GPU memory.
   - **Edges:** capacity exhaustion, stale view, index reuse after completion, unsupported view kind, and concurrent publish/release.
@@ -235,7 +235,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.3 Remove backend-shaped heap configuration
 
-- [x] Remove `DescriptorHeapMode` and descriptor-indexing or descriptor-buffer feature choices from `gpu/caps.c3`, `gpu/descriptor_heap.c3`, `gpu/gpu.c3i`, docs, and samples; select native facilities in `gpu/internal/vk/descriptor_heap.c3`.
+- [x] Remove `DescriptorHeapMode` and descriptor-indexing or descriptor-buffer feature choices from `gpu/gpu.c3i`, `gpu/gpu.c3`, docs, and samples; select native facilities in `gpu/internal/vk/descriptor_heap.c3`.
   - **Depends on:** 5.2.
   - **Contract:** callers request strict semantics and query semantic limits; backend strategy is diagnostic at most.
   - **Edges:** devices supporting several implementations, devices supporting none, differing capacities, and diagnostic reporting without behavior branching.
@@ -243,7 +243,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.4 Automatic shader-code identity
 
-- [x] Replace public shader-module handles with lightweight `ShaderCode` values and library-computed content identity in `gpu/pipeline.c3`, `gpu/shader_abi.c3`, `gpu/internal/vk/shader.c3`, and pipeline creation.
+- [x] Replace public shader-module handles with lightweight `ShaderCode` values and library-computed content identity in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/pipeline.c3`, `gpu/internal/shader_abi.c3`, `gpu/internal/vk/shader.c3`, and pipeline creation.
   - **Depends on:** 2.3.
   - **Contract:** `prepare_shader_code` validates borrowed IR and computes an opaque process-local digest; the IR remains immutable and alive while used; collisions compare length and bytes; one-off creation may prepare raw IR internally; no public `ShaderHandle` exists.
   - **Edges:** empty or invalid IR, identical bytes from different storage, caller mutation of borrowed bytes, hash collision handling, and cross-device prepared data.
@@ -251,7 +251,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.5 Explicit deterministic pipeline identity and batches
 
-- [x] Redesign graphics and compute pipeline creation in `gpu/pipeline.c3`, `gpu/internal/vk/pipeline_compute.c3`, `gpu/internal/vk/pipeline_graphics.c3`, and `gpu/internal/vk/pipeline_cache.c3` around explicit immutable state and batch deduplication.
+- [x] Redesign graphics and compute pipeline creation in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/pipeline.c3`, `gpu/internal/vk/pipeline_compute.c3`, `gpu/internal/vk/pipeline_graphics.c3`, and `gpu/internal/vk/pipeline_cache.c3` around explicit immutable state and batch deduplication.
   - **Depends on:** 5.4 and 5.3.
   - **Contract:** native compilation occurs during creation; shared shader IR deduplicates within a batch; depth/stencil and raster controls are dynamic; per-target format/blend/write-mask state and polygon mode remain graphics identity; compute uses one fixed `RootPush` layout.
   - **Edges:** partial batch failure, cache failure, duplicate pipeline descriptions, shared shader stages, unsupported state, and transactional publication.
@@ -259,7 +259,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.6 Bind pipelines separately from execution
 
-- [x] Add strict pipeline and depth/stencil state binding commands and remove pipeline handles from draw and dispatch argument records in `gpu/command.c3`, `gpu/pipeline.c3`, and Vulkan command code.
+- [x] Add strict pipeline and depth/stencil state binding commands and remove pipeline handles from draw and dispatch argument records in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/command.c3`, `gpu/internal/pipeline.c3`, and Vulkan command code.
   - **Depends on:** 5.5 and 3.4.
   - **Contract:** draw and dispatch contain root addresses plus execution arguments; active strict pipeline is command state; no native compilation or variant synthesis occurs during execution commands.
   - **Edges:** execute without pipeline, wrong pipeline kind, stale pipeline, missing required stage root, dynamic-state omission, and validation failure leaving command state unchanged.
@@ -267,7 +267,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 5.7 Root-pointer shader ABI and generated work
 
-- [x] Update `gpu/shader_abi.c3`, `scripts/gen_abi.py`, generated shader headers, shader tests, and strict samples for one root GPU address per participating stage and backend-neutral heap indices.
+- [x] Update `gpu/gpu.c3i`, `gpu/internal/shader_abi.c3`, `scripts/gen_abi.py`, generated shader headers, shader tests, and strict samples for one root GPU address per participating stage and backend-neutral heap indices.
   - **Depends on:** 4.3, 5.2, and 5.6.
   - **Contract:** address and index widths are pinned; direct and indirect work use addresses; optional GPU-generated work is a separately queried semantic capability and is never CPU-emulated.
   - **Edges:** missing stage root, alignment, indirect/count overflow, unsupported generated work, and shared root-record layouts.
@@ -277,7 +277,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.1 Global execution and memory barriers
 
-- [x] Replace resource/range-shaped generic barriers with global semantic stage and hazard barriers in `gpu/sync.c3`, `gpu/command.c3`, `gpu/internal/vk/sync.c3`, and tests.
+- [x] Replace resource/range-shaped generic barriers with global semantic stage and hazard barriers in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/sync.c3`, `gpu/internal/command.c3`, `gpu/internal/vk/sync.c3`, and tests.
   - **Depends on:** 3.4 and 4.3.
   - **Contract:** generic barriers contain no handles, addresses, ranges, layouts, or queue families; no barrier is inferred; cross-queue order still requires completion-point waits.
   - **Edges:** transfer, shader, indirect, descriptor, color, depth, host, and presentation hazards; empty and contradictory masks.
@@ -285,7 +285,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.2 Semantic texture transitions
 
-- [x] Replace public `TextureLayout` and backend-shaped transition fields with texture or view plus semantic previous and next uses in `gpu/texture.c3`, `gpu/sync.c3`, `gpu/internal/vk/sync.c3`, and render/transfer call sites.
+- [x] Replace public `TextureLayout` and backend-shaped transition fields with texture or view plus semantic previous and next uses in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/texture.c3`, `gpu/internal/sync.c3`, `gpu/internal/vk/sync.c3`, and render/transfer call sites.
   - **Depends on:** 6.1 and 4.4.
   - **Contract:** native layouts remain private; transitions are always explicit; debug tracking may validate expected use but cannot change release behavior.
   - **Edges:** first use, presentation, depth/stencil aspects, subresources/views, mismatched expected use, and queues outside the access domain.
@@ -293,7 +293,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.3 Dynamic render-pass commands
 
-- [x] Express render passes as begin and end commands with attachments, load/store operations, and clear values in `gpu/command.c3`, a new `gpu/render_pass.c3`, and `gpu/internal/vk/render_pass.c3`.
+- [x] Express render passes as begin and end commands with attachments, load/store operations, and clear values in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/command.c3`, `gpu/internal/render_pass.c3`, and `gpu/internal/vk/render_pass.c3`.
   - **Depends on:** 6.2 and 5.6.
   - **Contract:** no public render-pass or framebuffer objects; begin/end add no synchronization; Vulkan 1.3 uses an appropriate private implementation without exposing it.
   - **Edges:** attachment extent or sample mismatch, missing transitions, resolve/depth attachments, nested passes, and pipeline incompatibility detected before recording mutation.
@@ -301,7 +301,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.4 Address-based direct, indirect, and generated work
 
-- [x] Complete address-based draw, indexed draw, dispatch, indirect/count, and optional generated-work recording in `gpu/command.c3`, `gpu/internal/vk/command.c3`, and workload tests.
+- [x] Complete address-based draw, indexed draw, dispatch, indirect/count, and optional generated-work recording in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/command.c3`, `gpu/internal/vk/command.c3`, and workload tests.
   - **Depends on:** 5.7, 6.1, and 6.3.
   - **Contract:** execution arguments remain pipeline-free and buffer-object-free; generated work is exposed only when supported; no CPU-loop emulation.
   - **Edges:** alignment, count bounds, missing barriers, unsupported generated work, index format, and zero-work commands.
@@ -309,7 +309,7 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 6.5 Strict presentation integration
 
-- [x] Integrate swapchain textures with shared texture views, transitions, render-pass commands, semantic queue roles, readiness, and completion in `gpu/swapchain.c3` and Vulkan WSI code.
+- [x] Integrate swapchain textures with shared texture views, transitions, render-pass commands, semantic queue roles, readiness, and completion in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/surface.c3`, `gpu/internal/texture.c3`, `gpu/internal/sync.c3`, `gpu/internal/queue.c3`, and Vulkan WSI code.
   - **Depends on:** 3.5, 6.2, and 6.3.
   - **Contract:** swapchain images use the ordinary resource and synchronization model; public presentation exposes no native semaphore or layout; destruction and resize never hide queue-idle waits; resize and loss faults retain distinct retry contracts.
   - **Edges:** acquire without render, present without completion, completion that does not cover rendering, destruction or resize during use, dormant surface, and device or surface loss.

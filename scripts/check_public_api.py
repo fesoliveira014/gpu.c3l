@@ -1854,7 +1854,7 @@ def validate_surface_source(relative: Path, source: str) -> list[str]:
         failures.append(
             f"{relative.as_posix()} may not contain non-callable declarations"
         )
-    if imports != ("gpu @public", "gpu::internal @public"):
+    if sorted(imports) != ["gpu @public", "gpu::internal @public"]:
         failures.append(
             f"{relative.as_posix()} must import exactly gpu @public and "
             "gpu::internal @public"
