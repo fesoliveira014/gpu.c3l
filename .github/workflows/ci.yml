@@ -136,7 +136,7 @@ jobs:
 
       - name: Check API and backend boundaries
         run: |
-          python -m unittest scripts.test_check_public_api scripts.test_check_backend_dispatch scripts.test_check_swapchain_acquire_policy
+          python -m unittest scripts.test_check_public_api scripts.test_check_backend_dispatch scripts.test_check_retired_api scripts.test_check_swapchain_acquire_policy
           python scripts/check_public_api.py
           python scripts/check_backend_dispatch.py
           python scripts/check_swapchain_acquire_policy.py
