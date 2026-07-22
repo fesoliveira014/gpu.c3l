@@ -22,6 +22,10 @@ const char[*] REFLECT_VECTOR_SPIRV      = $embed("shaders/root_vector.comp.spv")
 const char[*] REFLECT_MATRIX_SPIRV      = $embed("shaders/root_matrix.comp.spv");
 const char[*] REFLECT_ARRAY_SPIRV       = $embed("shaders/root_array.comp.spv");
 const char[*] REFLECT_NESTED_SPIRV      = $embed("shaders/root_nested.comp.spv");
+const char[*] REFLECT_BOOL_SPIRV        = $embed("shaders/root_bool.comp.spv");
+const char[*] REFLECT_REF_SPIRV         = $embed("shaders/root_ref.comp.spv");
+const char[*] REFLECT_MEMBER_COUNT_SPIRV =
+    $embed("shaders/root_two_members.comp.spv");
 const char[*] REFLECT_WRONG_OFFSET_SPIRV =
     $embed("shaders/root_wrong_offset.comp.spv");
 const char[*] REFLECT_MULTIPLE_BLOCKS_SPIRV =
@@ -179,6 +183,74 @@ fn void? check_fixture_root_abi(
     vk::check_root_push_abi(reflect_module, entry_point, stage)!;
 }
 
+fn void assert_fixture_root_flag(
+    char[] spirv,
+    spvreflect::TypeFlags required,
+) {
+    ulong[spvreflect::SHADER_MODULE_SIZE / 8] module_storage;
+    spvreflect::ShaderModule* reflect_module =
+        (spvreflect::ShaderModule*)&module_storage;
+    assert(spvreflect::create_shader_module(
+        spirv.len,
+        spirv.ptr,
+        reflect_module,
+    ) == spvreflect::ReflectResult.RESULT_SUCCESS,
+        "the malformed root fixture must remain reflectable");
+    defer reflect_module.destroy();
+    uint count = 0;
+    assert(reflect_module.enumerate_entry_point_push_constant_blocks(
+        "main",
+        &count,
+        null,
+    ) == spvreflect::ReflectResult.RESULT_SUCCESS && count == 1,
+        "the malformed root fixture must contain one push block");
+    spvreflect::BlockVariable*[1] blocks;
+    assert(reflect_module.enumerate_entry_point_push_constant_blocks(
+        "main",
+        &count,
+        &blocks[0],
+    ) == spvreflect::ReflectResult.RESULT_SUCCESS,
+        "the malformed root fixture block must enumerate");
+    spvreflect::BlockVariable* member = blocks[0].member(0);
+    assert(member != null
+        && ((uint)member.type_flags() & (uint)required) != 0,
+        "the malformed root fixture must expose its required type flag");
+}
+
+fn void assert_fixture_root_block_shape(
+    char[] spirv,
+    uint expected_size,
+    uint expected_members,
+) {
+    ulong[spvreflect::SHADER_MODULE_SIZE / 8] module_storage;
+    spvreflect::ShaderModule* reflect_module =
+        (spvreflect::ShaderModule*)&module_storage;
+    assert(spvreflect::create_shader_module(
+        spirv.len,
+        spirv.ptr,
+        reflect_module,
+    ) == spvreflect::ReflectResult.RESULT_SUCCESS,
+        "the member-count fixture must remain reflectable");
+    defer reflect_module.destroy();
+    uint count = 0;
+    assert(reflect_module.enumerate_entry_point_push_constant_blocks(
+        "main",
+        &count,
+        null,
+    ) == spvreflect::ReflectResult.RESULT_SUCCESS && count == 1,
+        "the member-count fixture must contain one push block");
+    spvreflect::BlockVariable*[1] blocks;
+    assert(reflect_module.enumerate_entry_point_push_constant_blocks(
+        "main",
+        &count,
+        &blocks[0],
+    ) == spvreflect::ReflectResult.RESULT_SUCCESS,
+        "the member-count fixture block must enumerate");
+    assert(blocks[0].byte_size() == expected_size
+        && blocks[0].member_count() == expected_members,
+        "the member-count fixture must isolate the count mismatch");
+}
+
 fn void assert_reflected_shader_rejected(
     gpu::Device* device,
     char[] spirv,
@@ -293,6 +365,37 @@ fn void malformed_root_member_shapes_rejected_before_native_creation() @test {
         spirv:       REFLECT_NESTED_SPIRV[..],
         entry_point: "main",
         message:     "a nested root member faults SHADER_INVALID",
+    );
+    assert_fixture_root_flag(
+        REFLECT_BOOL_SPIRV[..],
+        spvreflect::TypeFlags.TYPE_FLAG_BOOL,
+    );
+    assert_shader_interface_rejected(
+        device:      &device,
+        spirv:       REFLECT_BOOL_SPIRV[..],
+        entry_point: "main",
+        message:     "a bool root member faults SHADER_INVALID",
+    );
+    assert_fixture_root_flag(
+        REFLECT_REF_SPIRV[..],
+        spvreflect::TypeFlags.TYPE_FLAG_REF,
+    );
+    assert_shader_interface_rejected(
+        device:      &device,
+        spirv:       REFLECT_REF_SPIRV[..],
+        entry_point: "main",
+        message:     "a buffer-reference root member faults SHADER_INVALID",
+    );
+    assert_fixture_root_block_shape(
+        REFLECT_MEMBER_COUNT_SPIRV[..],
+        8,
+        2,
+    );
+    assert_shader_interface_rejected(
+        device:      &device,
+        spirv:       REFLECT_MEMBER_COUNT_SPIRV[..],
+        entry_point: "main",
+        message:     "an exact-size two-member root faults SHADER_INVALID",
     );
     assert_shader_interface_rejected(
         device:      &device,

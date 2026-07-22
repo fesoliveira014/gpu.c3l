@@ -84,6 +84,10 @@ const RootAbiSpec ROOT_PUSH_ABI @private = {
         {},
     },
 };
+$assert ROOT_PUSH_ABI.block_size == RootPush::size;
+$assert ROOT_PUSH_ABI.member_count == RootPush::members.len;
+$assert ROOT_PUSH_ABI.members[0].offset == $reflect(RootPush.root_gpu).offset;
+$assert ROOT_PUSH_ABI.members[0].size == GpuAddress::size;
 
 const RootAbiSpec GRAPHICS_ROOT_PUSH_ABI @private = {
     .block_size   = 16,
@@ -105,3 +109,9 @@ const RootAbiSpec GRAPHICS_ROOT_PUSH_ABI @private = {
         },
     },
 };
+$assert GRAPHICS_ROOT_PUSH_ABI.block_size == GraphicsRootPush::size;
+$assert GRAPHICS_ROOT_PUSH_ABI.member_count == GraphicsRootPush::members.len;
+$assert GRAPHICS_ROOT_PUSH_ABI.members[0].offset == $reflect(GraphicsRootPush.vertex_root_gpu).offset;
+$assert GRAPHICS_ROOT_PUSH_ABI.members[0].size == GpuAddress::size;
+$assert GRAPHICS_ROOT_PUSH_ABI.members[1].offset == $reflect(GraphicsRootPush.fragment_root_gpu).offset;
+$assert GRAPHICS_ROOT_PUSH_ABI.members[1].size == GpuAddress::size;

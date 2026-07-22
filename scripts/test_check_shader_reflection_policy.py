@@ -94,6 +94,46 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
         )
         self.assertTrue(any("ROOT_PUSH_ABI @private" in error for error in errors))
 
+    def test_generated_metadata_in_comment_does_not_satisfy_contract(self) -> None:
+        errors = self.mutate(
+            "gpu/shader_abi.c3",
+            "struct RootAbiMemberSpec @private",
+            "struct RootAbiMemberSpec\n// struct RootAbiMemberSpec @private",
+        )
+        self.assertTrue(any("RootAbiMemberSpec @private" in error for error in errors))
+
+    def test_generated_metadata_in_string_does_not_satisfy_contract(self) -> None:
+        errors = self.mutate(
+            "gpu/shader_abi.c3",
+            "struct RootAbiSpec @private",
+            'struct RootAbiSpec\nconst String ROOT_ABI_POLICY = "struct RootAbiSpec @private";',
+        )
+        self.assertTrue(any("RootAbiSpec @private" in error for error in errors))
+
+    def test_emitter_marker_in_comment_does_not_satisfy_contract(self) -> None:
+        errors = self.mutate(
+            "tools/gen_shader_abi/src/emit_c3.c3",
+            "emit_root_abi_spec(decl, types, max_push_members, out);",
+            "// emit_root_abi_spec(decl, types, max_push_members, out);",
+        )
+        self.assertTrue(any("emit_root_abi_spec" in error for error in errors))
+
+    def test_shader_counter_in_comment_does_not_satisfy_contract(self) -> None:
+        errors = self.mutate(
+            "gpu/vk/shader.c3",
+            "state.shader_reflection_validations++;",
+            "// state.shader_reflection_validations++;",
+        )
+        self.assertTrue(any("reflection validation counter" in error for error in errors))
+
+    def test_shader_counter_in_string_does_not_satisfy_contract(self) -> None:
+        errors = self.mutate(
+            "gpu/vk/shader.c3",
+            "state.pipeline_shader_create_attempts++;",
+            'ZString policy_example = "state.pipeline_shader_create_attempts++;";',
+        )
+        self.assertTrue(any("shader-create attempt counter" in error for error in errors))
+
     def test_rejects_backend_foreign_redeclaration(self) -> None:
         errors = self.mutate(
             "gpu/vk/shader.c3",

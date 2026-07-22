@@ -100,6 +100,24 @@ fn void emit_root_abi_spec(
     }
     out.append("    },\n");
     out.append("};\n");
+    out.appendf("$assert %s_ABI.block_size == %s::size;\n", constant_name, decl.name);
+    out.appendf("$assert %s_ABI.member_count == %s::members.len;\n", constant_name, decl.name);
+    foreach (index, &field : decl.fields) {
+        TypeInfo info = types.entries.get(field.type_name)!!;
+        out.appendf(
+            "$assert %s_ABI.members[%d].offset == $reflect(%s.%s).offset;\n",
+            constant_name,
+            index,
+            decl.name,
+            field.name,
+        );
+        out.appendf(
+            "$assert %s_ABI.members[%d].size == %s::size;\n",
+            constant_name,
+            index,
+            info.c3_name,
+        );
+    }
 }
 
 fn usz c3_type_width(StructDecl* decl, TypeTable* types) {

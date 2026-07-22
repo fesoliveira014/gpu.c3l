@@ -106,17 +106,26 @@ def check(root: Path = ROOT) -> list[str]:
     except OSError as error:
         return [str(error)]
 
+    masked_generated = mask_non_code(generated)
+    masked_emitter = mask_non_code(emitter)
+
     for fragment in (
         "struct RootAbiMemberSpec @private",
         "struct RootAbiSpec @private",
         "const RootAbiSpec ROOT_PUSH_ABI @private",
         "const RootAbiSpec GRAPHICS_ROOT_PUSH_ABI @private",
+        "ROOT_PUSH_ABI.block_size == RootPush::size",
+        "ROOT_PUSH_ABI.member_count == RootPush::members.len",
+        "ROOT_PUSH_ABI.members[0].offset == $reflect(RootPush.root_gpu).offset",
+        "ROOT_PUSH_ABI.members[0].size == GpuAddress::size",
+        "GRAPHICS_ROOT_PUSH_ABI.block_size == GraphicsRootPush::size",
+        "GRAPHICS_ROOT_PUSH_ABI.member_count == GraphicsRootPush::members.len",
         ".scalar_width",
         ".scalar_signed",
         ".integer",
     ):
         require(
-            generated,
+            masked_generated,
             fragment,
             f"generated root reflection metadata missing: {fragment}",
             errors,
@@ -128,7 +137,7 @@ def check(root: Path = ROOT) -> list[str]:
         "types.entries.get(field.type_name)",
     ):
         require(
-            emitter,
+            masked_emitter,
             fragment,
             f"root reflection metadata is not schema-derived: {fragment}",
             errors,
@@ -195,13 +204,13 @@ def check(root: Path = ROOT) -> list[str]:
     if creation.count("public_fault:   gpu::SHADER_INVALID") != 4:
         errors.append("reflected shader failures must map to SHADER_INVALID")
     require(
-        shader,
+        masked_shader,
         "state.pipeline_shader_create_attempts++;",
         "native shader-create attempt counter missing",
         errors,
     )
     require(
-        shader,
+        masked_shader,
         "state.shader_reflection_validations++;",
         "reflection validation counter missing",
         errors,

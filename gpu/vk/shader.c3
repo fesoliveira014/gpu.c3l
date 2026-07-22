@@ -492,6 +492,8 @@ fn bool root_member_shape_matches(
         && member.member_count() == 0;
 }
 
+<* Fault SHADER_INVALID unless the selected entry declares no push block or
+   one exact schema-generated root block for its prepared shader stage. *>
 fn void? check_root_push_abi(
     spvreflect::ShaderModule* reflect_module,
     ZString entry_point,
@@ -510,29 +512,27 @@ fn void? check_root_push_abi(
     if (count == 0) return;
     if (count != 1) return gpu::SHADER_INVALID~;
 
-    @pool() {
-        spvreflect::BlockVariable*[1] blocks;
-        if (reflect_module.enumerate_entry_point_push_constant_blocks(
-            entry_point,
-            &count,
-            &blocks[0],
-        )
-            != spvreflect::ReflectResult.RESULT_SUCCESS) {
+    spvreflect::BlockVariable*[1] blocks;
+    if (reflect_module.enumerate_entry_point_push_constant_blocks(
+        entry_point,
+        &count,
+        &blocks[0],
+    )
+        != spvreflect::ReflectResult.RESULT_SUCCESS) {
+        return gpu::SHADER_INVALID~;
+    }
+    spvreflect::BlockVariable* block = blocks[0];
+    if (block == null
+        || block.byte_offset() != 0
+        || block.byte_size() != expected.block_size
+        || block.member_count() != expected.member_count) {
+        return gpu::SHADER_INVALID~;
+    }
+    for (uint i = 0; i < expected.member_count; i++) {
+        if (!root_member_shape_matches(block.member(i), &expected.members[i])) {
             return gpu::SHADER_INVALID~;
         }
-        spvreflect::BlockVariable* block = blocks[0];
-        if (block == null
-            || block.byte_offset() != 0
-            || block.byte_size() != expected.block_size
-            || block.member_count() != expected.member_count) {
-            return gpu::SHADER_INVALID~;
-        }
-        for (uint i = 0; i < expected.member_count; i++) {
-            if (!root_member_shape_matches(block.member(i), &expected.members[i])) {
-                return gpu::SHADER_INVALID~;
-            }
-        }
-    };
+    }
 }
 
 fn void? copy_entry_point(char* dst, ZString source) @private {
@@ -681,7 +681,7 @@ fn PipelineShaderModule? create_pipeline_shader_module(
         )~;
     }
     gpu::ShaderStage? reflected_stage_optional = gpu_stage_from_spv(entry.stage());
-    if (catch reflected_fault = reflected_stage_optional) {
+    if (catch reflected_stage_optional) {
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,

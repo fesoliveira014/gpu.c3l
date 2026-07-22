@@ -74,6 +74,21 @@ Vertex shader receives `vertex_root`. Fragment shader receives `fragment_root`.
 
 Do not pass raw pointer values through vertex outputs to fragment shaders. Some backends and validation paths treat cross-stage pointer passing poorly. Pass each stage's root pointer directly.
 
+Every vertex and fragment entry point that uses push constants declares the
+same complete 16-byte graphics block, even when that stage reads only one
+member:
+
+```glsl
+layout(push_constant) uniform Push {
+    uint64_t vertex_root_gpu;
+    uint64_t fragment_root_gpu;
+} pc;
+```
+
+The members are unsigned 64-bit integer scalars at offsets 0 and 8 in that
+order. A one-member vertex or fragment block is not a partial graphics ABI; it
+is rejected as `SHADER_INVALID` during pipeline preparation.
+
 ### Indirect multi-draw convention
 
 An indirect multi-draw shares one `vertex_root`/`fragment_root` pair across
