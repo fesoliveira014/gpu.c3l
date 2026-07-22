@@ -1,6 +1,7 @@
 module gpu::vk @private;
 
 import gpu @public;
+import std::hash::fnv64a;
 
 const uint HANDLE_GENERATION_MAX = 0xFF_FFFF;
 
@@ -30,11 +31,12 @@ struct SamplerKey {
     float            mip_lod_bias;
     float            min_lod;
     float            max_lod;
-    bool             anisotropy_enable;
+    uint             anisotropy_enable;
     float            max_anisotropy;
-    bool             compare_enable;
+    uint             compare_enable;
     gpu::CompareOp   compare;
 }
+$assert SamplerKey::size == 52;
 
 fn float canonical_sampler_float(float value) {
     return value == 0.0f ? 0.0f : value;
@@ -54,6 +56,10 @@ fn bool sampler_key_equal(SamplerKey* left, SamplerKey* right) {
         && left.max_anisotropy == right.max_anisotropy
         && left.compare_enable == right.compare_enable
         && left.compare == right.compare;
+}
+
+fn ulong hash_sampler_key(SamplerKey* key) {
+    return fnv64a::hash(((char*)key)[:SamplerKey::size]);
 }
 
 fn bool sampler_filter_is_valid(gpu::Filter filter) {
@@ -112,19 +118,19 @@ fn SamplerKey canonical_sampler_key(
             : desc.max_anisotropy;
     }
     return {
-        .min_filter         = desc.min_filter,
-        .mag_filter         = desc.mag_filter,
-        .mip_filter         = desc.mip_filter,
-        .address_u          = desc.address_u,
-        .address_v          = desc.address_v,
-        .address_w          = desc.address_w,
-        .mip_lod_bias       = canonical_sampler_float(desc.mip_lod_bias),
-        .min_lod            = canonical_sampler_float(desc.min_lod),
-        .max_lod            = canonical_sampler_float(desc.max_lod),
-        .anisotropy_enable  = desc.anisotropy_enable,
-        .max_anisotropy     = canonical_sampler_float(max_anisotropy),
-        .compare_enable     = desc.compare_enable,
-        .compare            = desc.compare_enable ? desc.compare : {},
+        .min_filter        = desc.min_filter,
+        .mag_filter        = desc.mag_filter,
+        .mip_filter        = desc.mip_filter,
+        .address_u         = desc.address_u,
+        .address_v         = desc.address_v,
+        .address_w         = desc.address_w,
+        .mip_lod_bias      = canonical_sampler_float(desc.mip_lod_bias),
+        .min_lod           = canonical_sampler_float(desc.min_lod),
+        .max_lod           = canonical_sampler_float(desc.max_lod),
+        .anisotropy_enable = desc.anisotropy_enable ? 1 : 0,
+        .max_anisotropy    = canonical_sampler_float(max_anisotropy),
+        .compare_enable    = desc.compare_enable ? 1 : 0,
+        .compare           = desc.compare_enable ? desc.compare : {},
     };
 }
 

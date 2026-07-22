@@ -126,6 +126,9 @@ struct VkDeviceState {
     GeneratedWorkSupport       generated_work;
     float                      max_sampler_anisotropy;
     vk::Result                 sampler_create_result @if(env::TESTING);
+    bool                       sampler_hash_override_enabled @if(env::TESTING);
+    ulong                      sampler_hash_override @if(env::TESTING);
+    ulong                      sampler_lookup_probes @if(env::TESTING || $feature(SAMPLER_INTERN_STATS));
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;

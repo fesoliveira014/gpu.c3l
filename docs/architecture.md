@@ -616,9 +616,12 @@ request texture and sampler capacities; descriptor objects, native features,
 dispatch, and pipeline state remain private. An unrequested group owns none of
 that state; current public request validation requires strict semantics.
 
-The backend keeps one append-only sampler table per strict-enabled device,
-deduplicates equal effective state, publishes the index in the same transaction,
-and destroys every native sampler during device teardown.
+The backend keeps one append-only sampler table per strict-enabled device.
+Canonical sampler keys are byte-hashed into fixed power-of-two buckets; a hash
+match still requires complete canonical equality. Interning holds the resource
+mutex and publishes the native sampler, descriptor, stable index, cell, and
+bucket link as one transaction. Device teardown destroys every native sampler
+and releases both slot and bucket storage.
 
 The backend prefers descriptor indexing when it satisfies the requested
 capacities and falls back to descriptor buffers when available. Callers cannot

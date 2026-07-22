@@ -455,10 +455,14 @@ Public indices map to descriptor entries. Neither path changes the public API
 or shader material records.
 
 Every strict-enabled device has an append-only sampler table keyed by normalized
-semantic state. Interning occurs under the resource mutex, creates at most one
-native sampler for an equal key, publishes its descriptor and index in the same
-transaction, and retains it until device teardown. Repeated interning returns
-the same index; a capacity or native-create fault consumes no table or heap slot.
+semantic state. Explicitly zero-initialized canonical keys are byte-hashed into
+fixed power-of-two buckets with `+1`-encoded links; candidates with an equal hash
+are compared by complete canonical equality. Interning occurs under the resource
+mutex, creates at most one native sampler for an equal key, and publishes its
+descriptor, stable index, cell, and bucket link in the same transaction. A
+capacity or native-create fault changes neither the table, index, nor descriptor
+high-water state. Device teardown destroys each published native sampler and
+releases slot and bucket storage.
 
 ### Descriptor slot policy
 

@@ -38,7 +38,7 @@ The suite covers:
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact one-visit-per-list duplicate-detection work |
 | `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
-| `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; exact texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
+| `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; exact sampler lookup probes at occupancy 8/64/1,024/65,536; exact texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
 | `upload_throughput_bench` | Explicit uploads at 4 KiB, 256 KiB, and 4 MiB across 1/2/4 workers |
 | `async_overlap_bench` | Serialized and independent graphics/compute submissions |
 
@@ -57,7 +57,9 @@ generated preprocess path, retired compute-layout caches, and dynamic raster
 fields in immutable pipeline keys. It walks the reachable Vulkan recording
 graph and rejects host allocation, native command-buffer allocation/free,
 image-view creation, and VMA allocation outside named cold seams. Its mutation
-tests run without a Vulkan ICD.
+tests run without a Vulkan ICD. The same gate requires hashed sampler
+bucket/link storage and rejects a whole-table scan in `vk_intern_sampler` or any
+renamed helper reachable from it.
 
 The lifecycle benchmark first establishes full retirement for each measured
 point, then resets completion-work counters before 100,000 repeated polls. The
@@ -71,6 +73,13 @@ work unit per texture, and the swapchain seam exactly one per wrapped image
 examined, at every level. These exact counters are blocking; `ns/destroy` and
 `ns/check` remain advisory because runner, driver, build, and profile identity
 are not fully pinned by that single observation.
+
+The same target builds synthetic sampler tables at occupancy 8, 64, 1,024, and
+65,536 with the production canonical hash, bucket, link, equality, and lookup
+helpers. Every tier requires a power-of-two bucket count at least twice the
+occupancy and between one and eight candidate probes for the selected hit.
+Elapsed lookup time is advisory; exact occupancy, shape, and probe work are the
+blocking evidence.
 
 The submit-batch benchmark submits real executable command lists in batches of
 1, 8, 32, 128, and 1,024. Its feature-gated counters require exactly one token

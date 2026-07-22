@@ -71,8 +71,8 @@ null-safe, exactly-once structured debug dispatch and userdata preservation
 invalid-backend callback delivery with callback-enabled/disabled fault parity
 borrowed field and explicit absent-fault representation
 synthetic allocation sharing plans and exact buffer create-info mode/indices
-sampler canonicalization, stable-index deduplication, table exhaustion, and
-concurrent convergence
+sampler canonicalization and byte hashing, forced collision equality,
+stable-index deduplication, table exhaustion, and concurrent convergence
 ```
 
 Pure CPU tests should be exhaustive where practical.
@@ -138,8 +138,9 @@ retention, in-flight destruction rejection, and allocation-free pass begin
 borrowed swapchain-view build/acquire/render guards and resize invalidation
 texture-view capacity, batch rollback, immediate index reuse, stale and
 cross-device release rejection, and concurrent publication/release
-sampler interning, stable indices, heap/table/native-create rollback, concurrent
-convergence, and device-owned teardown
+sampler hashed-bucket interning, collision-safe stable indices,
+heap/table/native-create rollback, index consistency, concurrent convergence,
+and device-owned teardown
 ```
 
 Allocation queue-family regressions pin aliased and distinct creation plans
@@ -464,6 +465,13 @@ image ownership work at descriptor high-water marks 16, 4,096, and 65,536. Its
 feature-gated counters are the blocking complexity evidence: destruction must
 charge one ownership decision per texture, and swapchain checks one per image
 examined. The accompanying elapsed times are advisory.
+
+The same benchmark reports sampler lookup occupancy 8, 64, 1,024, and 65,536
+through production hash/bucket/link/equality helpers. The runner requires a
+power-of-two bucket count at least twice occupancy and one through eight probes
+at every tier. Collision, rollback, bucket consistency, concurrent publication,
+and teardown are covered by Vulkan and CPU tests. The source contract rejects
+direct and helper-hidden whole-table scans reachable from `vk_intern_sampler`.
 
 The lifecycle output requires `cached_poll_queries=0` and
 `retirement_locks=0` across each 100,000-poll measured interval. Run

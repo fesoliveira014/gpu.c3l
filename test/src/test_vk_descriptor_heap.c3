@@ -1262,6 +1262,15 @@ fn void sampler_interning_is_stable() @test {
     assert(first_index == duplicate_index,
         "identical sampler descriptions return the stable sampler index");
 
+    gpu::SamplerDesc alias_desc = desc;
+    alias_desc.mip_lod_bias = -0.0f;
+    alias_desc.max_anisotropy = 1024.0f;
+    alias_desc.compare = gpu::CompareOp.GREATER;
+    alias_desc.debug_name = "canonical_alias";
+    gpu::SamplerIndex alias_index = gpu::intern_sampler(&device, &alias_desc)!!;
+    assert(alias_index == first_index,
+        "debug names, signed zero, and inactive fields preserve the index");
+
     gpu::SamplerDesc second_desc = desc;
     second_desc.mag_filter = gpu::Filter.LINEAR;
     gpu::SamplerIndex second_index = gpu::intern_sampler(&device, &second_desc)!!;
@@ -1280,6 +1289,78 @@ fn void sampler_interning_is_stable() @test {
     assert(state.samplers.count == 2
             && state.strict_heap.descriptors.sampler_next_new == 2,
         "failed interning preserves table and heap state");
+    assert(vk::sampler_table_index_consistent(&state.samplers),
+        "heap exhaustion preserves a consistent sampler index");
+
+    vk::SamplerCell[] full_slots = state.samplers.slots;
+    state.samplers.slots = full_slots[:state.samplers.count];
+    uint bucket_head_count = 0;
+    foreach (head : state.samplers.bucket_heads) {
+        if (head != 0) bucket_head_count++;
+    }
+    gpu::SamplerDesc fourth_desc = desc;
+    fourth_desc.address_v = gpu::AddressMode.REPEAT;
+    assert(@catch(gpu::intern_sampler(&device, &fourth_desc))
+        == gpu::SLOT_TABLE_FULL,
+        "slot-table exhaustion precedes descriptor-heap exhaustion");
+    state.samplers.slots = full_slots;
+    uint bucket_head_count_after = 0;
+    foreach (head : state.samplers.bucket_heads) {
+        if (head != 0) bucket_head_count_after++;
+    }
+    assert(bucket_head_count_after == bucket_head_count
+            && state.samplers.count == 2
+            && state.strict_heap.descriptors.sampler_next_new == 2
+            && vk::sampler_table_index_consistent(&state.samplers),
+        "slot-table exhaustion preserves the complete published index");
+}
+
+fn void sampler_hash_collisions_preserve_distinct_keys() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    vk::set_sampler_hash_override(state, true, 0x5a5a5a5a5a5a5a5a);
+
+    gpu::SamplerDesc first_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    gpu::SamplerDesc second_desc = first_desc;
+    second_desc.mag_filter = gpu::Filter.LINEAR;
+    vk::SamplerKey first_key = vk::canonical_sampler_key(
+        &first_desc,
+        state.max_sampler_anisotropy,
+    );
+    vk::SamplerKey second_key = vk::canonical_sampler_key(
+        &second_desc,
+        state.max_sampler_anisotropy,
+    );
+    assert(!vk::sampler_key_equal(&first_key, &second_key),
+        "the collision seam receives distinct canonical keys");
+
+    vk::reset_sampler_lookup_stats(state);
+    gpu::SamplerIndex first = gpu::intern_sampler(&device, &first_desc)!!;
+    gpu::SamplerIndex second = gpu::intern_sampler(&device, &second_desc)!!;
+    gpu::SamplerIndex duplicate = gpu::intern_sampler(&device, &first_desc)!!;
+    vk::SamplerLookupStats stats = vk::sampler_lookup_stats(state);
+
+    assert(first != second && duplicate == first,
+        "full key equality resolves forced hash collisions exactly");
+    assert(state.samplers.count == 2
+            && state.strict_heap.descriptors.sampler_next_new == 2,
+        "a collision publishes exactly two cells and descriptors");
+    assert(state.samplers.slots[0].native != null
+            && state.samplers.slots[1].native != null,
+        "both colliding identities own native samplers");
+    assert(state.samplers.slots[0].hash == state.samplers.slots[1].hash,
+        "the distinct identities occupy one forced-hash chain");
+    assert(stats.lookup_probes == 3,
+        "collision lookup visits each candidate exactly once");
+    assert(vk::sampler_table_index_consistent(&state.samplers),
+        "the forced-collision bucket index is structurally consistent");
+    vk::set_sampler_hash_override(state, false, 0);
 }
 
 fn void sampler_native_create_failure_is_transactional() @test {
@@ -1287,9 +1368,18 @@ fn void sampler_native_create_failure_is_transactional() @test {
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::SamplerDesc existing_desc = {};
+    gpu::SamplerIndex existing = gpu::intern_sampler(&device, &existing_desc)!!;
     uint table_count = state.samplers.count;
     uint heap_count = state.strict_heap.descriptors.sampler_next_new;
     gpu::SamplerDesc desc = { .mag_filter = gpu::Filter.LINEAR };
+    vk::SamplerKey key = vk::canonical_sampler_key(
+        &desc,
+        state.max_sampler_anisotropy,
+    );
+    ulong hash = vk::hash_sampler_key(&key);
+    uint bucket = vk::sampler_bucket(hash, (uint)state.samplers.bucket_heads.len);
+    uint bucket_head = state.samplers.bucket_heads[bucket];
 
     vk::set_sampler_create_result(
         &device,
@@ -1301,10 +1391,36 @@ fn void sampler_native_create_failure_is_transactional() @test {
     assert(state.samplers.count == table_count
             && state.strict_heap.descriptors.sampler_next_new == heap_count,
         "native sampler creation failure preserves both counts");
+    assert(state.samplers.bucket_heads[bucket] == bucket_head
+            && vk::sampler_table_index_consistent(&state.samplers),
+        "native sampler creation failure preserves the bucket index");
+    assert(gpu::intern_sampler(&device, &existing_desc)!! == existing,
+        "a pre-existing hashed hit survives native creation failure");
 
     gpu::SamplerIndex index = gpu::intern_sampler(&device, &desc)!!;
     assert(index.value == heap_count + 1,
         "a retry uses the unchanged next sampler index");
+}
+
+fn void sampler_table_teardown_releases_owned_storage() @test {
+    gpu::Device device = make_heap_test_device(8, 4);
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::device_backend_state(device);
+    gpu::SamplerDesc first_desc = {};
+    gpu::SamplerDesc second_desc = { .mag_filter = gpu::Filter.LINEAR };
+    (void)gpu::intern_sampler(&device, &first_desc)!!;
+    (void)gpu::intern_sampler(&device, &second_desc)!!;
+    assert(state.samplers.count == 2
+            && state.samplers.slots.ptr != null
+            && state.samplers.bucket_heads.ptr != null,
+        "live sampler cells own native and index storage");
+
+    vk::destroy_sampler_table(state);
+    assert(state.samplers.count == 0
+            && state.samplers.slots.ptr == null
+            && state.samplers.bucket_heads.ptr == null,
+        "sampler teardown destroys cells and releases both allocations");
+    destroy_test_device(&device)!!;
 }
 
 fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
