@@ -20,6 +20,7 @@ REQUIRED_PATHS = (
     "gpu/vk/pipeline_compute.c3",
     "gpu/vk/queue.c3",
     "gpu/vk/render_pass.c3",
+    "gpu/vk/sampler.c3",
     "gpu/vk/shader.c3",
     "gpu/vk/sync.c3",
     "gpu/vk/texture.c3",
@@ -50,6 +51,97 @@ class PerformanceContractTests(unittest.TestCase):
 
     def test_current_sources_satisfy_contract(self):
         self.assertEqual(check_performance_contract.check(), [])
+
+    def test_direct_sampler_table_scan_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sampler.c3",
+                "    ulong hash = sampler_key_hash(state, &key);",
+                (
+                    "    foreach (&cell : state.samplers.slots[:state.samplers.count]) {\n"
+                    "        if (sampler_key_equal(&cell.key, &key)) return cell.index;\n"
+                    "    }\n"
+                    "    ulong hash = sampler_key_hash(state, &key);"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "whole-table sampler scan" in error for error in errors
+            ))
+
+    def test_while_sampler_table_scan_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sampler.c3",
+                "    ulong hash = sampler_key_hash(state, &key);",
+                (
+                    "    uint scan_index;\n"
+                    "    while (scan_index < state.samplers.count) {\n"
+                    "        (void)state.samplers.slots[scan_index++];\n"
+                    "    }\n"
+                    "    ulong hash = sampler_key_hash(state, &key);"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "whole-table sampler scan" in error for error in errors
+            ))
+
+    def test_relocated_sampler_table_scan_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/texture.c3",
+                "fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {",
+                (
+                    "fn void find_sampler_cell(SamplerCell[] slots, uint count) {\n"
+                    "    foreach (&cell : slots[:count]) {}\n"
+                    "}\n\n"
+                    "fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {"
+                ),
+            )
+            self.mutate(
+                root,
+                "gpu/vk/sampler.c3",
+                (
+                    "    defer state.resource_mutex.unlock();\n\n"
+                    "    SamplerTable* table = &state.samplers;"
+                ),
+                (
+                    "    defer state.resource_mutex.unlock();\n\n"
+                    "    SamplerTable* table = &state.samplers;\n"
+                    "    find_sampler_cell(table.slots, table.count);"
+                ),
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "find_sampler_cell performs forbidden whole-table sampler scan"
+                in error for error in errors
+            ))
+
+    def test_sampler_hash_table_shape_is_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copied_tree(root)
+            self.mutate(
+                root,
+                "gpu/vk/sampler.c3",
+                "    uint[]        bucket_heads;",
+                "    uint[]        renamed_heads;",
+            )
+            errors = check_performance_contract.check(root)
+            self.assertTrue(any(
+                "SamplerTable must contain fixed slots" in error
+                for error in errors
+            ))
 
     def test_texture_barrier_duplicate_authoritative_call_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

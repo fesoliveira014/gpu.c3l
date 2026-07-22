@@ -19,6 +19,7 @@ const uint BENCH_MAX_WORKERS = 4;
 const uint BENCH_LIFECYCLE_ITERS = 64;
 const uint BENCH_SWAPCHAIN_CHECK_ITERS = 10_000;
 const uint[3] BENCH_DESCRIPTOR_HIGH_WATER = { 16, 4_096, 65_536 };
+const uint[4] BENCH_SAMPLER_OCCUPANCY = { 8, 64, 1_024, 65_536 };
 
 enum BenchPhase : int {
     TEXTURE_SINGLE,
@@ -215,6 +216,27 @@ fn void run_swapchain_ownership_high_water(
     );
 }
 
+fn void run_sampler_lookup_probe(
+    vk::VkDeviceState* state,
+    uint occupancy,
+) {
+    vk::SamplerLookupProbeResult result =
+        vk::probe_sampler_lookup(state, occupancy);
+    assert(result.occupancy == occupancy
+            && result.bucket_count >= occupancy * 2
+            && (result.bucket_count & (result.bucket_count - 1)) == 0
+            && result.probes >= 1
+            && result.probes <= 8,
+        "sampler lookup probe must report bounded indexed work");
+    io::printfn(
+        "sampler lookup occupancy=%d bucket_count=%d probes=%d elapsed_ns=%d",
+        result.occupancy,
+        result.bucket_count,
+        result.probes,
+        result.elapsed_ns,
+    );
+}
+
 fn void run_bench_suite(gpu::RuntimeDesc* desc, ZString label) {
     gpu::Device device = create_bench_device(desc)!!;
     defer destroy_bench_device(&device)!!;
@@ -226,6 +248,10 @@ fn void run_bench_suite(gpu::RuntimeDesc* desc, ZString label) {
     double batched_ns = run_phase(&device, BenchPhase.TEXTURE_BATCHED, textures[..]);
     run_phase(&device, BenchPhase.SAMPLER, textures[..]);
     io::printfn("%s: batch/single ratio (1 worker) = %.2fx", label, single_ns / batched_ns);
+
+    foreach (occupancy : BENCH_SAMPLER_OCCUPANCY) {
+        run_sampler_lookup_probe(state, occupancy);
+    }
 
     foreach (high_water : BENCH_DESCRIPTOR_HIGH_WATER) {
         run_texture_destroy_high_water(&device, state, high_water);

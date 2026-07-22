@@ -305,6 +305,13 @@ fn void concurrent_sampler_interning_converges() @test {
         "concurrent interning creates one native sampler cell");
     assert(state.strict_heap.descriptors.sampler_next_new == 1,
         "concurrent interning writes one strict heap entry");
+    assert(state.samplers.slots[0].native != null
+            && state.samplers.bucket_heads[vk::sampler_bucket(
+                state.samplers.slots[0].hash,
+                (uint)state.samplers.bucket_heads.len,
+            )] == 1
+            && vk::sampler_table_index_consistent(&state.samplers),
+        "concurrent interning publishes one linked native sampler cell");
 }
 
 struct PipelineRaceArgs {

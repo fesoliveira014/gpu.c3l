@@ -95,6 +95,18 @@ PIPELINE_CACHE_ENTRY_FIELDS = (
     "next_in_bucket",
     "used",
 )
+SAMPLER_CELL_FIELDS = (
+    "hash",
+    "key",
+    "native",
+    "index",
+    "next_in_bucket",
+)
+SAMPLER_TABLE_FIELDS = (
+    "slots",
+    "bucket_heads",
+    "count",
+)
 RECORDING_COLD_GROWTH_ALLOWLIST = frozenset((
     "ensure_command_reference_capacity",
 ))
@@ -362,6 +374,22 @@ def require_token_order(
         position = next_position
 
 
+def scans_slot_table(body: str) -> bool:
+    code = mask_c3_comments(body)
+    if not re.search(r"\b(?:for|foreach|while)\b", code):
+        return False
+    if re.search(r"\.slots\s*\[\s*:\s*[^\]]*\.count\s*\]", code):
+        return True
+    receivers = re.findall(
+        r"\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.slots\b",
+        code,
+    )
+    return any(
+        re.search(rf"\b{re.escape(receiver)}\.count\b", code)
+        for receiver in receivers
+    )
+
+
 def check(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     public_source = read(root, "gpu/command.c3")
@@ -377,9 +405,61 @@ def check(root: Path = ROOT) -> list[str]:
     pipeline_cache_source = read(root, "gpu/vk/pipeline_cache.c3")
     shader_source = read(root, "gpu/vk/shader.c3")
     pipeline_compute_source = read(root, "gpu/vk/pipeline_compute.c3")
+    sampler_source = read(root, "gpu/vk/sampler.c3")
     lifetime_source = read(root, "gpu/vk/lifetime.c3")
     command_bench = read(root, "test/src/command_record_bench.c3")
     lifecycle_bench = read(root, "test/src/lifecycle_bench.c3")
+
+    if struct_field_names(sampler_source, "SamplerCell") != SAMPLER_CELL_FIELDS:
+        errors.append(
+            "gpu/vk/sampler.c3:SamplerCell must contain the reviewed "
+            "hash/key/native/index/link fields"
+        )
+    if struct_field_names(sampler_source, "SamplerTable") != SAMPLER_TABLE_FIELDS:
+        errors.append(
+            "gpu/vk/sampler.c3:SamplerTable must contain fixed slots, "
+            "bucket heads, and count"
+        )
+    for token in (
+        "next_pow2(capacity * 2)",
+        "table.bucket_heads[bucket] = index + 1;",
+        "cell.hash == hash && sampler_key_equal(&cell.key, key)",
+        "ulong hash = sampler_key_hash(state, &key);",
+        "link_sampler_cell(table, cell_index);",
+    ):
+        if token not in sampler_source:
+            errors.append(
+                "gpu/vk/sampler.c3 is missing hashed sampler-index token "
+                f"{token}"
+            )
+
+    backend_functions = source_functions(root, "gpu/vk")
+    sampler_reachable = reachable_recording_functions(
+        backend_functions,
+        "vk_intern_sampler",
+    )
+    for relative, name in sorted(sampler_reachable):
+        body = next(
+            body
+            for candidate_relative, body in backend_functions[name]
+            if candidate_relative == relative
+        )
+        code = mask_c3_comments(body)
+        reviewed_bucket_lookup = (
+            relative == "gpu/vk/sampler.c3"
+            and name == "find_sampler_cell"
+        )
+        if (
+            not reviewed_bucket_lookup
+            and re.search(r"\b(?:for|foreach|while)\b", code)
+        ):
+            errors.append(
+                f"{relative}:{name} performs forbidden whole-table sampler scan"
+            )
+        if scans_slot_table(body):
+            errors.append(
+                f"{relative}:{name} traverses the published sampler prefix"
+            )
 
     poll_completion = function_body(sync_source, "vk_poll_completion_with_query")
     require_token_order(
@@ -532,7 +612,6 @@ def check(root: Path = ROOT) -> list[str]:
             PUBLIC_RECORDING_FORBIDDEN,
         )
 
-    backend_functions = source_functions(root, "gpu/vk")
     reachable = reachable_recording_functions(backend_functions, "vk_cmd_")
     for relative, name in sorted(reachable):
         body = mask_c3_comments(

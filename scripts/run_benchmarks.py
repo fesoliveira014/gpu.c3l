@@ -27,8 +27,8 @@ BENCHMARK_METHODS = {
     "allocation_bench": ("4000/phase", "ns/allocation, ns/free"),
     "resource_create_bench": ("300/worker; workers=1,2,4", "ns/op"),
     "descriptor_churn_bench": (
-        "320/worker; workers=1,2,4; ownership highwater=16,4096,65536",
-        "ns/descriptor, ns/op, ns/destroy, ns/check; exact work units",
+        "320/worker; workers=1,2,4; sampler occupancy=8,64,1024,65536; ownership highwater=16,4096,65536",
+        "ns/descriptor, ns/op, ns/destroy, ns/check; exact sampler probes and ownership work",
     ),
     "upload_throughput_bench": (
         "warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4",
@@ -137,6 +137,12 @@ PIPELINE_CACHE_RASTER_RECORDING = re.compile(
     re.MULTILINE,
 )
 PIPELINE_IDENTITY_SIZES = (1_024, 65_536, 1_048_576)
+SAMPLER_LOOKUP_OCCUPANCIES = (8, 64, 1_024, 65_536)
+SAMPLER_LOOKUP_EVIDENCE = re.compile(
+    r"^sampler lookup occupancy=(?P<occupancy>[0-9]+) "
+    r"bucket_count=(?P<bucket_count>[0-9]+) "
+    r"probes=(?P<probes>[0-9]+) elapsed_ns=(?P<elapsed_ns>[0-9]+)$"
+)
 
 REGRESSION_THRESHOLDS = {
     "allocation_bench": (
@@ -185,6 +191,44 @@ def require_regression_thresholds(output, target):
                 f"{value:g} > {maximum:g}"
             )
 
+
+def require_sampler_lookup_evidence(output):
+    lines = [
+        line for line in output.splitlines()
+        if line.startswith("sampler lookup ")
+    ]
+    if len(lines) != len(SAMPLER_LOOKUP_OCCUPANCIES):
+        raise ValueError(
+            "descriptor_churn_bench sampler lookup tiers are missing or duplicated"
+        )
+    for line, expected_occupancy in zip(lines, SAMPLER_LOOKUP_OCCUPANCIES):
+        match = SAMPLER_LOOKUP_EVIDENCE.fullmatch(line)
+        if match is None:
+            raise ValueError(
+                "descriptor_churn_bench sampler lookup evidence is malformed"
+            )
+        occupancy = int(match.group("occupancy"))
+        bucket_count = int(match.group("bucket_count"))
+        probes = int(match.group("probes"))
+        if occupancy != expected_occupancy:
+            raise ValueError(
+                "descriptor_churn_bench sampler lookup occupancy mismatch: "
+                f"{occupancy} != {expected_occupancy}"
+            )
+        if (
+            bucket_count < occupancy * 2
+            or bucket_count == 0
+            or bucket_count & (bucket_count - 1)
+        ):
+            raise ValueError(
+                "descriptor_churn_bench sampler bucket count must be a "
+                "power of two at least twice occupancy"
+            )
+        if not 1 <= probes <= 8:
+            raise ValueError(
+                "descriptor_churn_bench sampler lookup probes must be in [1, 8]"
+            )
+
 def require_measurement(output, target, enforce_thresholds=True):
     if target == "allocation_bench":
         for phase, pattern in ALLOCATION_PHASES:
@@ -207,6 +251,8 @@ def require_measurement(output, target, enforce_thresholds=True):
                 )
         if "submit batch leaks=0" not in output:
             raise ValueError(f"{target} reports live resources")
+    if target == "descriptor_churn_bench":
+        require_sampler_lookup_evidence(output)
     if target == "command_record_bench" and not COMMAND_RECORD_INVARIANTS.search(output):
         raise ValueError(f"{target} recording invariants are missing or nonzero")
     if target == "command_record_bench" and not COMMAND_RECORD_RESOLUTION.search(output):

@@ -91,6 +91,16 @@ SUBMIT_BATCH_OUTPUT = "\n".join(
         for size in (1, 8, 32, 128, 1024)
     ) + ("submit batch leaks=0",)
 )
+DESCRIPTOR_CHURN_OUTPUT = "\n".join(
+    (
+        "iterations=320/worker units=ns/descriptor,ns/op",
+        "phase sampler intern+publish hits workers=1: 120.0 ns/op, 1.00x scaling vs 1 thread",
+        "sampler lookup occupancy=8 bucket_count=16 probes=1 elapsed_ns=20",
+        "sampler lookup occupancy=64 bucket_count=128 probes=1 elapsed_ns=20",
+        "sampler lookup occupancy=1024 bucket_count=2048 probes=1 elapsed_ns=20",
+        "sampler lookup occupancy=65536 bucket_count=131072 probes=1 elapsed_ns=20",
+    )
+)
 
 
 
@@ -159,8 +169,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(
             runner.BENCHMARK_METHODS["descriptor_churn_bench"],
             (
-                "320/worker; workers=1,2,4; ownership highwater=16,4096,65536",
-                "ns/descriptor, ns/op, ns/destroy, ns/check; exact work units",
+                "320/worker; workers=1,2,4; sampler occupancy=8,64,1024,65536; ownership highwater=16,4096,65536",
+                "ns/descriptor, ns/op, ns/destroy, ns/check; exact sampler probes and ownership work",
             ),
         )
         self.assertEqual(runner.C3_BUILD_FLAGS, ("-O1",))
@@ -269,6 +279,62 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 ),
                 "submit_batch_bench",
             )
+
+    def test_descriptor_churn_requires_every_sampler_lookup_tier(self):
+        runner = load_runner()
+        runner.require_measurement(
+            DESCRIPTOR_CHURN_OUTPUT,
+            "descriptor_churn_bench",
+        )
+        missing = DESCRIPTOR_CHURN_OUTPUT.replace(
+            "sampler lookup occupancy=64 bucket_count=128 probes=1 elapsed_ns=20\n",
+            "",
+        )
+        with self.assertRaisesRegex(ValueError, "tiers"):
+            runner.require_measurement(missing, "descriptor_churn_bench")
+
+    def test_descriptor_churn_rejects_malformed_sampler_evidence(self):
+        runner = load_runner()
+        malformed = DESCRIPTOR_CHURN_OUTPUT.replace(
+            "probes=1 elapsed_ns=20",
+            "probe_count=1 elapsed_ns=20",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "malformed"):
+            runner.require_measurement(malformed, "descriptor_churn_bench")
+
+    def test_descriptor_churn_rejects_wrong_occupancy_or_bucket_count(self):
+        runner = load_runner()
+        mutations = (
+            (
+                DESCRIPTOR_CHURN_OUTPUT.replace("occupancy=1024", "occupancy=1023"),
+                "occupancy mismatch",
+            ),
+            (
+                DESCRIPTOR_CHURN_OUTPUT.replace("bucket_count=2048", "bucket_count=1024"),
+                "bucket count",
+            ),
+            (
+                DESCRIPTOR_CHURN_OUTPUT.replace("bucket_count=2048", "bucket_count=3072"),
+                "bucket count",
+            ),
+        )
+        for output, error in mutations:
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(ValueError, error):
+                    runner.require_measurement(output, "descriptor_churn_bench")
+
+    def test_descriptor_churn_rejects_zero_or_excessive_probes(self):
+        runner = load_runner()
+        for probes in (0, 9):
+            with self.subTest(probes=probes):
+                output = DESCRIPTOR_CHURN_OUTPUT.replace(
+                    "probes=1",
+                    f"probes={probes}",
+                    1,
+                )
+                with self.assertRaisesRegex(ValueError, "probes"):
+                    runner.require_measurement(output, "descriptor_churn_bench")
 
     def test_lifecycle_measurement_rejects_nonzero_invariants(self):
         runner = load_runner()
