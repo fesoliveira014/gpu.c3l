@@ -16,6 +16,8 @@ uint completion_counter_query_calls;
 ulong completion_counter_value;
 vk::Result completion_counter_result;
 uint same_queue_elision_submit_calls;
+uint draw_argument_wait_submit_calls;
+vk::PipelineStageFlags2 expected_draw_argument_wait_stages;
 
 struct SubmissionCheckpointGate {
     vk::SubmissionCheckpoint target;
@@ -403,6 +405,25 @@ fn vk::Result observe_same_queue_elision(
     assert(submits[0].wait_semaphore_info_count == 0,
         "the full submit path elides a same-queue timeline wait");
     same_queue_elision_submit_calls++;
+    return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
+}
+
+fn vk::Result observe_draw_argument_wait(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)fence;
+    assert(submit_count == 1,
+        "the draw-argument wait emits one native submit");
+    assert(submits[0].wait_semaphore_info_count == 1,
+        "the cross-queue dependency emits one native wait");
+    assert(submits[0].p_wait_semaphore_infos[0].stage_mask
+            == expected_draw_argument_wait_stages,
+        "the native wait uses the exact generated-work-aware consumer stages");
+    draw_argument_wait_submit_calls++;
     return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 }
 
@@ -815,6 +836,8 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::SubmitDesc empty_submit;
+    gpu::CompletionPoint prior = gpu::submit(graphics, &empty_submit)!!;
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, graphics.id)!!;
     ulong next_before = completion.next_sequence;
@@ -865,6 +888,26 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
         "invalid readiness stage reaches no native submit");
     assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
         "invalid readiness stage preserves the one-shot token");
+
+    gpu::CompletionWait[1] invalid_waits = {{
+        .point     = prior,
+        .consumers = (gpu::CompletionConsumerFlags)(1u << 1),
+    }};
+    gpu::SubmitDesc invalid_scope = {
+        .completion_waits = invalid_waits[..],
+        .readiness        = readiness,
+        .readiness_before = { .transfer },
+    };
+    assert(@catch(vk::vk_submit_with(
+        graphics,
+        &invalid_scope,
+        &accept_swapchain_submit,
+    )) == gpu::INVALID_ARGUMENT,
+        "an invalid completion scope faults before native submit");
+    assert(accepted_swapchain_submit_calls == 0,
+        "an invalid completion scope reaches no native submit");
+    assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
+        "an invalid completion scope preserves readiness");
 
     vk::vk_submit_with(graphics, &desc, &accept_swapchain_submit)!!;
     assert(accepted_swapchain_submit_calls == 1,
@@ -1241,6 +1284,75 @@ fn void completion_wait_infos_emit_every_exact_native_stage() @test {
     }
 }
 
+fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .backend                   = gpu::BackendKind.VULKAN,
+        .contract_validation       = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes  = true,
+        .enable_vulkan_validation  = true,
+        .application_name          = "gpu_draw_argument_wait_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1 },
+        .distinct = { .compute },
+    };
+    gpu::DeviceRequest request = gpu::request_queues(
+        gpu::strict_device_request(),
+        requirements,
+    )!!;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+            continue;
+        }
+        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        defer gpu::destroy_device(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::Queue compute = gpu::get_queue(
+            &device,
+            gpu::QueueKind.COMPUTE,
+        )!!;
+        gpu::Queue graphics = gpu::get_queue(
+            &device,
+            gpu::QueueKind.GRAPHICS,
+        )!!;
+        assert(compute.id != graphics.id,
+            "the requested compute and graphics identities are distinct");
+        gpu::SubmitDesc producer;
+        gpu::CompletionPoint produced = gpu::submit(compute, &producer)!!;
+        gpu::wait_completion(produced)!!;
+        gpu::CompletionWait[1] waits = {{
+            .point     = produced,
+            .consumers = { .draw_arguments },
+        }};
+        gpu::SubmitDesc consumer = { .completion_waits = waits[..] };
+        draw_argument_wait_submit_calls = 0;
+        expected_draw_argument_wait_stages = (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+        if (caps.generated_work) {
+            ulong command_preprocess = (ulong)
+                vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
+            expected_draw_argument_wait_stages = (vk::PipelineStageFlags2)(
+                (ulong)expected_draw_argument_wait_stages | command_preprocess
+            );
+        }
+
+        assert(@catch(vk::vk_submit_with(
+            graphics,
+            &consumer,
+            &observe_draw_argument_wait,
+        )) == gpu::OUT_OF_HOST_MEMORY,
+            "the observation seam preserves native failure rollback");
+        assert(draw_argument_wait_submit_calls == 1,
+            "the cross-queue draw-argument wait reaches the native seam");
+        return;
+    }
+}
+
 fn void invalid_completion_wait_stage_preserves_token() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
@@ -1272,12 +1384,31 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
     assert(lists[0].handle.is_valid(),
         "invalid wait stages preserve the executable token");
 
-    waits[0].before = { .all };
+    waits[0].consumers = (gpu::CompletionConsumerFlags)(1u << 1);
+    assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
+        "unknown completion consumer bits are rejected");
+    assert(lists[0].handle.is_valid(),
+        "unknown completion consumers preserve the executable token");
+
+    waits[0] = {
+        .point     = prior,
+        .before    = { .all },
+        .consumers = { .draw_arguments },
+    };
+    assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
+        "all cannot be combined with a completion consumer");
+    assert(lists[0].handle.is_valid(),
+        "contradictory completion scopes preserve the executable token");
+
+    waits[0] = {
+        .point     = prior,
+        .consumers = { .draw_arguments },
+    };
     gpu::CompletionPoint completion = gpu::submit(queue, &desc)!!;
     gpu::wait_completion(completion, 1_000_000_000)!!;
 }
 
-fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
+fn void queue_incompatible_completion_consumer_rejects_through_submit() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -1295,8 +1426,8 @@ fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
     defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::CompletionWait[1] waits = {{
-        .point  = prior,
-        .before = { .fragment_shader },
+        .point     = prior,
+        .consumers = { .draw_arguments },
     }};
     gpu::SubmitDesc desc = {
         .command_lists    = lists[..],
@@ -1313,14 +1444,13 @@ fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
     ulong submits_before = stats_of(&device).queue_submits;
 
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
-        "a real submit rejects stages unsupported by the target queue");
+        "a real submit rejects consumers unsupported by the target queue");
     assert(stats_of(&device).queue_submits == submits_before,
-        "queue-stage rejection reaches no native submit");
+        "queue-consumer rejection reaches no native submit");
     assert(lists[0].handle.is_valid(),
-        "queue-stage rejection preserves the executable token");
+        "queue-consumer rejection preserves the executable token");
 
     completion.queue_flags = selected_flags;
-    waits[0].before = { .all };
     gpu::CompletionPoint completed = gpu::submit(queue, &desc)!!;
     gpu::wait_completion(completed, 1_000_000_000)!!;
 }
@@ -1343,8 +1473,8 @@ fn void same_queue_wait_elides_through_full_submit_path() @test {
     defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::CompletionWait[1] waits = {{
-        .point  = prior,
-        .before = { .fragment_shader },
+        .point     = prior,
+        .consumers = { .draw_arguments },
     }};
     gpu::SubmitDesc desc = {
         .command_lists    = lists[..],

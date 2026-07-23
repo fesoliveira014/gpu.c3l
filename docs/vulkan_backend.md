@@ -826,8 +826,12 @@ two words. Reservation and publication allocate nothing.
 
 Every public `submit(queue, desc)` signals one sequence on the selected queue
 and returns its point. Empty batches are valid. Completion waits resolve to the
-owning private timeline and use the exact validated `CompletionWait.before`
-stage mask; waits owned by the target queue are validated and elided.
+owning private timeline and use the exact validated union of
+`CompletionWait.before` and its semantic consumers. `draw_arguments` lowers to
+`VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT`. When generated work is enabled, the
+same semantic also includes `VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_NV`
+because implicit preprocessing reads generated records before indirect execution.
+Waits owned by the target queue are validated and elided.
 The queue mutex covers sequence reservation and `vkQueueSubmit2`, satisfying
 Vulkan external synchronization. Near the timeline-value-difference limit, the
 backend queries completed progress and returns `DEVICE_BUSY` before reservation
@@ -845,6 +849,7 @@ SubmitDesc
 CompletionWait
     CompletionPoint point
     StageMask before
+    CompletionConsumerFlags consumers
 ```
 
 Host poll and wait reject unpublished sequences. Each selected queue owns an

@@ -801,6 +801,72 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
         "unknown submission wait stage bits are invalid");
 }
 
+fn void submit_wait_consumer_scopes_validate_and_map_exactly() @test {
+    vk::QueueFlags transfer_only =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.TRANSFER_BIT;
+    vk::QueueFlags compute_only =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.COMPUTE_BIT;
+    vk::QueueFlags graphics_only =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.GRAPHICS_BIT;
+    gpu::CompletionConsumerFlags draw_arguments = { .draw_arguments };
+    ulong indirect =
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+
+    assert((ulong)gpu::internal::vk::submit_wait_scope_to_vk(
+            stages:         {},
+            consumers:      draw_arguments,
+            flags:          graphics_only,
+            generated_work_enabled: false,
+        )!! == indirect,
+        "graphics queues accept draw-argument-only completion waits");
+    assert((ulong)gpu::internal::vk::submit_wait_scope_to_vk(
+            stages:         {},
+            consumers:      draw_arguments,
+            flags:          compute_only,
+            generated_work_enabled: false,
+        )!! == indirect,
+        "compute queues accept draw-argument-only completion waits");
+    ulong generated = indirect
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
+    assert((ulong)gpu::internal::vk::submit_wait_scope_to_vk(
+            stages:         {},
+            consumers:      draw_arguments,
+            flags:          graphics_only,
+            generated_work_enabled: true,
+        )!! == generated,
+        "generated work adds the command-preprocess completion-wait stage");
+    ulong mixed = indirect
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT;
+    assert((ulong)gpu::internal::vk::submit_wait_scope_to_vk(
+            stages:         { .vertex_shader },
+            consumers:      draw_arguments,
+            flags:          graphics_only,
+            generated_work_enabled: false,
+        )!! == mixed,
+        "ordinary and draw-argument consumers lower to their exact union");
+    assert(@catch(gpu::internal::vk::submit_wait_scope_to_vk(
+            stages:         {},
+            consumers:      draw_arguments,
+            flags:          transfer_only,
+            generated_work_enabled: false,
+        )) == gpu::INVALID_ARGUMENT,
+        "transfer-only queues reject draw-argument consumers");
+    assert(@catch(gpu::internal::vk::submit_wait_scope_to_vk(
+            stages:         { .all },
+            consumers:      draw_arguments,
+            flags:          graphics_only,
+            generated_work_enabled: false,
+        )) == gpu::INVALID_ARGUMENT,
+        "all cannot be combined with a special completion consumer");
+    assert(@catch(gpu::internal::vk::submit_wait_scope_to_vk(
+            stages:         {},
+            consumers:      (gpu::CompletionConsumerFlags)(1u << 1),
+            flags:          graphics_only,
+            generated_work_enabled: false,
+        )) == gpu::INVALID_ARGUMENT,
+        "unknown completion consumer bits are invalid");
+}
+
 fn void semantic_barrier_access_masks_map_exactly() @test {
     gpu::StageMask stages = {
         .host = true,

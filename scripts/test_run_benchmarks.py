@@ -338,6 +338,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "submit_batch_bench",
                 "pipeline_cache_bench",
                 "async_overlap_bench",
+                "completion_wait_scope_bench",
             ),
         )
 
@@ -393,6 +394,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
             (
                 "raster=200; duplicate=200000; batch=64x2000; identity=1024,65536,1048576",
                 "ns/create, ns/state; exact identity work",
+            ),
+        )
+        self.assertEqual(
+            runner.BENCHMARK_METHODS["completion_wait_scope_bench"],
+            (
+                "16 producer/indirect-consumer pairs per scope",
+                "ms; advisory all/draw_arguments ratio",
             ),
         )
         self.assertEqual(

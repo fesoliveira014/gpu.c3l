@@ -5,6 +5,7 @@ alias gpu::Vec4f
 alias gpu::Vec4u
 bitstruct gpu::Adapter
 bitstruct gpu::ColorWriteMask
+bitstruct gpu::CompletionConsumerFlags
 bitstruct gpu::DebugMessageCategory
 bitstruct gpu::Device
 bitstruct gpu::HazardFlags

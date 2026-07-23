@@ -1126,6 +1126,11 @@ bitstruct HazardFlags : uint {
     bool depth_stencil  : 2;
 }
 
+<* Special command consumers not represented by ordinary execution stages. *>
+bitstruct CompletionConsumerFlags : uint {
+    bool draw_arguments : 0;
+}
+
 <* Texture layout for explicit transitions. *>
 enum TextureLayout : int {
     UNDEFINED,
@@ -1151,11 +1156,11 @@ struct CompletionPoint {
     ulong  payload;
 }
 
-<* A published queue completion and the first destination stages that consume
-   its work. *>
+<* A published queue completion and its first destination consumers. *>
 struct CompletionWait {
-    CompletionPoint point;
-    StageMask       before;
+    CompletionPoint         point;
+    StageMask               before;
+    CompletionConsumerFlags consumers;
 }
 
 <* Global execution and memory dependency with no resource identity or range. *>

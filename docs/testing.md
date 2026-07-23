@@ -135,6 +135,8 @@ format feature queries agree with adapter-backed texture creation
 command list begin/end/submit
 completion-point signaling, retired-prefix publication, cached polls/waits,
 and deterministic publication/concurrent-retirement races
+exact ordinary/generated completion-wait stage lowering and distinct-family
+compute-producer to graphics generated-work execution when topology permits
 global semantic barrier hazard matrix submission
 copy upload -> readback
 root-pointer compute shader
@@ -323,8 +325,9 @@ acceptance and batch publication, rendezvous concurrent first polls, and prove
 the published-prefix cap, exact wait retirement, timeout preservation, and
 100,000 cached polls with zero native queries or retirement-lock acquisitions.
 Submission coverage also includes deterministic empty-work targeting,
-contiguous publication, exact completion/readiness destination masks, invalid
-and queue-unsupported stage rollback, same-queue validation and elision,
+contiguous publication, exact completion/readiness destination masks, indirect
+consumer-only and mixed-scope lowering, invalid and queue-unsupported scope
+rollback, same-queue validation and elision,
 distinct transfer/compute/graphics waits, foreign and later-sequence rejection,
 timeline-distance backpressure, sequence exhaustion, native failure rollback,
 device-loss discard, token consumption, and destruction readiness.
@@ -493,12 +496,13 @@ binding and requires the recorded layout snapshot to remain unchanged. A
 compile-time exact member-shape guard rejects adding or substituting a hidden
 slot pointer or index/generation back-reference without an explicit gate update.
 
-The benchmark runner builds twelve executable targets with `-O1`:
+The benchmark runner builds thirteen executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
 `upload_throughput_bench`, `command_wrapper_bench`,
 `command_path_baseline_bench`, `command_reference_bench`,
 `command_record_bench`, `lifecycle_bench`, `submit_batch_bench`,
-`pipeline_cache_bench`, and `async_overlap_bench`.
+`pipeline_cache_bench`, `async_overlap_bench`, and
+`completion_wait_scope_bench`.
 `command_wrapper_bench` routes through `test/cpu/project.json`; it links only
 the CPU project and libc, so it can run without a Vulkan loader, ICD, VMA, or
 native Vulkan library. `command_path_baseline_bench` routes through
