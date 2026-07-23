@@ -298,8 +298,8 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
     defer discard_test_executable(&graphics_executable)!!;
     gpu::ExecutableCommandList[1] graphics_lists = { graphics_executable };
     gpu::CompletionWait[1] waits = {{
-        .point  = compute_completion,
-        .before = { .all },
+        .point     = compute_completion,
+        .consumers = { .draw_arguments },
     }};
     gpu::SubmitDesc graphics_submit = {
         .command_lists    = graphics_lists[..],
@@ -433,7 +433,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
         device:       &device,
         size:         64,
         memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics },
+        access:       { .graphics, .compute },
         debug_name:   "indexed_scratch",
     )!!;
     defer free_owned_span(&device, &scratch_owned)!!;
@@ -479,7 +479,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
         device:       &device,
         size:         BuildRoot::size,
         memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics },
+        access:       { .compute },
         debug_name:   "indexed_build_root",
     )!!;
     defer free_owned_span(&device, &root_owned)!!;
@@ -495,31 +495,46 @@ fn void compute_generated_indexed_indirect_draw() @test {
     root.count_value      = 1;
     gpu::flush_mapped_span(&device, root_span)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    bind_test_compute_pipeline(&cmd, build_pipeline);
+    gpu::Queue producer_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::Queue consumer_queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator producer_allocator = gpu::create_command_allocator(
+        &device,
+        producer_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&producer_allocator)!!;
+    gpu::CommandAllocator consumer_allocator = gpu::create_command_allocator(
+        &device,
+        consumer_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&consumer_allocator)!!;
+    gpu::CommandList producer = gpu::begin_commands(&producer_allocator)!!;
+    defer discard_test_commands(&producer)!!;
+    bind_test_compute_pipeline(&producer, build_pipeline);
     gpu::cmd_dispatch(
-        commands: &cmd,
+        commands: &producer,
         root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
     )!!;
+    gpu::ExecutableCommandList producer_executable =
+        gpu::end_commands(&producer)!!;
+    defer discard_test_executable(&producer_executable)!!;
+    gpu::ExecutableCommandList[1] producer_lists = { producer_executable };
+    gpu::SubmitDesc producer_submit = { .command_lists = producer_lists[..] };
+    gpu::CompletionPoint producer_done = gpu::submit(
+        producer_queue,
+        &producer_submit,
+    )!!;
 
-    gpu::Barrier args_ready = {
-        .before = { .compute = true },
-        .after = { .compute = true },
-        .hazards = { .draw_arguments = true },
-    };
-    gpu::cmd_barrier(&cmd, &args_ready)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&consumer_allocator)!!;
+    defer discard_test_commands(&cmd)!!;
 
     // Read the GPU-written arguments through ordinary caller-owned memory.
-    gpu::Barrier args_to_copy = {
-        .before = { .compute = true },
-        .after = { .transfer = true },
-    };
-    gpu::cmd_barrier(&cmd, &args_to_copy)!!;
     gpu::BufferCopyDesc args_copy = {
         .src = args_span,
         .dst = args_readback.span,
@@ -554,10 +569,17 @@ fn void compute_generated_indexed_indirect_draw() @test {
 
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = submit_test_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
+    gpu::CompletionWait[1] waits = {{
+        .point     = producer_done,
+        .before    = { .transfer },
+        .consumers = { .draw_arguments },
+    }};
+    gpu::SubmitDesc submit = {
+        .command_lists    = lists[..],
+        .completion_waits = waits[..],
+    };
+    gpu::CompletionPoint completion = gpu::submit(
+        consumer_queue,
         &submit,
     )!!;
     gpu::wait_completion(completion)!!;

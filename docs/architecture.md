@@ -466,10 +466,10 @@ The pipeline cache fronts a serializable driver cache:
 ### Synchronization
 
 Each successful submission returns a reusable `CompletionPoint`. Cross-queue
-submission dependencies use stage-scoped `SubmitDesc.completion_waits`;
-same-queue order is implicit after point and stage validation. Swapchain
-readiness likewise names its first destination stages. Native timelines and
-swapchain semaphores remain backend-private.
+submission dependencies use consumer-scoped `SubmitDesc.completion_waits`:
+ordinary stages compose with a narrow draw-argument consumer. Same-queue order
+is implicit after point and scope validation. Swapchain readiness remains
+stage-scoped. Native timelines and swapchain semaphores remain backend-private.
 
 ### Swapchains
 

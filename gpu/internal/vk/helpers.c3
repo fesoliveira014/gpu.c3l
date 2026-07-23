@@ -488,6 +488,32 @@ fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
     return barrier_before_stages_to_vk(stages);
 }
 
+<* Validate and lower every first consumer of a completion wait. *>
+fn vk::PipelineStageFlags2? submit_wait_scope_to_vk(
+    gpu::StageMask stages,
+    gpu::CompletionConsumerFlags consumers,
+    vk::QueueFlags flags,
+) {
+    if (!gpu::internal::completion_wait_scope_valid(stages, consumers)
+        || !barrier_stage_mask_supported(stages, flags)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    bool graphics = queue_flags_include(flags, vk::QueueFlagBits.GRAPHICS_BIT);
+    bool compute = queue_flags_include(flags, vk::QueueFlagBits.COMPUTE_BIT);
+    if (consumers.draw_arguments && !graphics && !compute) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+
+    ulong mask;
+    if ((uint)stages != 0) {
+        mask = (ulong)barrier_before_stages_to_vk(stages);
+    }
+    if (consumers.draw_arguments) {
+        mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+    }
+    return (vk::PipelineStageFlags2)mask;
+}
+
 fn ZString barrier_queue_rejected_field(
     gpu::Barrier* barrier,
     vk::QueueFlags flags,

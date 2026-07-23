@@ -2109,8 +2109,9 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 gpu::internal::completion_point_queue_id(point),
                 sequence,
             )!;
-            vk::PipelineStageFlags2 stages = submit_wait_stages_to_vk(
+            vk::PipelineStageFlags2 stages = submit_wait_scope_to_vk(
                 wait.before,
+                wait.consumers,
                 target.queue_flags,
             )!;
             inputs.completion_waits[i] = {

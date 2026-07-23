@@ -989,6 +989,10 @@ CompletionPoint
 CompletionWait
     CompletionPoint point
     StageMask before
+    CompletionConsumerFlags consumers
+
+CompletionConsumerFlags
+    bool draw_arguments
 
 Queue
     Device device
@@ -1102,17 +1106,18 @@ buffer and scratch index returns to its originating allocator; reset happens on
 the next reuse after completion or discard.
 
 `SubmitDesc.completion_waits` accepts published points from the same device.
-Each `CompletionWait.before` names the first destination stages that consume
-the dependency. It must be nonempty, supported by the destination queue, and
-must not contain `host` or `present`; `all` is allowed only by itself. Unknown
-or unsupported masks fault `INVALID_ARGUMENT`. Cross-queue points become waits
-on their queue-owned timelines with the exact requested stage mask. Published
-points from the target queue are validated and then elided because queue order
-is inherent. Stale, unpublished, malformed, and foreign-device points fault
-`INVALID_HANDLE` before native submission and preserve every command token.
-Because the public wait mask has no draw-argument or command-preprocess bit,
-dependencies consumed as indirect or generated command arguments require
-`.all`; shader-stage bits begin too late to order those argument reads.
+Each `CompletionWait` names the first destination consumers of the dependency.
+`before` selects ordinary stages and `consumers.draw_arguments` selects indirect
+draw, indirect dispatch, indirect count, and implicitly preprocessed generated
+command records. At least one stage or consumer is required. `host` and
+`present` are invalid; `all` is allowed only by itself and cannot be combined
+with a consumer. Unknown or unsupported masks fault `INVALID_ARGUMENT`.
+Draw-argument consumers require a graphics- or compute-capable destination
+queue. Cross-queue points become waits on their queue-owned timelines with the
+exact requested union. Published points from the target queue are validated and
+then elided because queue order is inherent. Stale, unpublished, malformed, and
+foreign-device points fault `INVALID_HANDLE` before native submission and
+preserve every command token.
 If outstanding queue progress reaches the device's timeline-value-difference
 limit, submission faults retryable `DEVICE_BUSY` before reserving a sequence.
 
@@ -1537,6 +1542,9 @@ HazardFlags
     draw_arguments
     descriptors
     depth_stencil
+
+CompletionConsumerFlags
+    draw_arguments
 
 Barrier
     StageMask before

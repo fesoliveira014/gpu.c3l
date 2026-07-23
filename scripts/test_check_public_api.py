@@ -1325,6 +1325,16 @@ def valid_document() -> dict:
                     },
                     {"name": "ExecutableCommandList", "kind": "struct"},
                     {
+                        "name": "CompletionConsumerFlags",
+                        "kind": "bitstruct",
+                        "base_type": {"name": "uint"},
+                        "members": [{
+                            "name": "draw_arguments",
+                            "type": {"name": "bool"},
+                            "bit_range": [0, 0],
+                        }],
+                    },
+                    {
                         "name": "CompletionWait",
                         "kind": "struct",
                         "members": [
@@ -1335,6 +1345,12 @@ def valid_document() -> dict:
                             {
                                 "name": "before",
                                 "type": {"name": "StageMask"},
+                            },
+                            {
+                                "name": "consumers",
+                                "type": {
+                                    "name": "CompletionConsumerFlags",
+                                },
                             },
                         ],
                     },
@@ -1755,7 +1771,7 @@ method gpu::Runtime.is_valid
         submit_desc["members"][1]["type"]["name"] = "CompletionPoint[]"
         failures = check_public_api.validate_document(document)
         self.assertIn(
-            "CompletionWait must match the exact stage-scoped schema",
+            "CompletionWait must match the exact consumer-scoped schema",
             failures,
         )
         self.assertIn(
@@ -2249,7 +2265,11 @@ method gpu::Runtime.is_valid
                 )
 
     def test_rejects_global_barrier_flag_schema_drift(self) -> None:
-        for name in ("StageMask", "HazardFlags"):
+        for name in (
+            "StageMask",
+            "HazardFlags",
+            "CompletionConsumerFlags",
+        ):
             with self.subTest(name=name):
                 document = valid_document()
                 flags = next(

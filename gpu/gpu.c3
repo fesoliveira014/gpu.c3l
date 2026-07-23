@@ -1691,7 +1691,10 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     }
     foreach (wait : desc.completion_waits) {
         gpu::internal::validate_completion_point(&operation, &device, wait.point)!;
-        if (!gpu::internal::submit_wait_stage_mask_valid(wait.before)) {
+        if (!gpu::internal::completion_wait_scope_valid(
+            wait.before,
+            wait.consumers,
+        )) {
             return INVALID_ARGUMENT~;
         }
     }

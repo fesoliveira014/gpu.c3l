@@ -1216,6 +1216,7 @@ def validate_document(document: dict) -> list[str]:
         ("TextureBufferCopyDesc", "struct"),
         ("StageMask", "bitstruct"),
         ("HazardFlags", "bitstruct"),
+        ("CompletionConsumerFlags", "bitstruct"),
         ("Barrier", "struct"),
         ("TextureLayout", "enum"),
         ("TextureAccess", "bitstruct"),
@@ -1528,6 +1529,9 @@ def validate_document(document: dict) -> list[str]:
             "descriptors",
             "depth_stencil",
         ),
+        "CompletionConsumerFlags": (
+            "draw_arguments",
+        ),
         "TextureAccess": (
             "read",
             "write",
@@ -1574,8 +1578,9 @@ def validate_document(document: dict) -> list[str]:
     if member_schema(types.get("CompletionWait")) != (
         ("point", "CompletionPoint"),
         ("before", "StageMask"),
+        ("consumers", "CompletionConsumerFlags"),
     ):
-        failures.append("CompletionWait must match the exact stage-scoped schema")
+        failures.append("CompletionWait must match the exact consumer-scoped schema")
 
     submit_desc = types.get("SubmitDesc")
     submit_schema = member_schema(submit_desc)

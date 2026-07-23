@@ -110,6 +110,15 @@
       "type": "executable",
       "sources": [ "src/async_overlap_bench.c3", "src/overlap_abi.c3" ]
     },
+    // Advisory `.all` versus draw-argument completion-wait timing over a real
+    // cross-queue indirect dispatch. Exact stage-mask tests remain the gate.
+    "completion_wait_scope_bench": {
+      "type": "executable",
+      "sources": [
+        "src/completion_wait_scope_bench.c3",
+        "src/root_pointer_abi.c3"
+      ]
+    },
     "vk_device_request": {
       "type": "test",
       "sources": [ "src/test_vk_device_request.c3", "src/test_vk_dispatch.c3" ]

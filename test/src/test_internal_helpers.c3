@@ -472,3 +472,28 @@ fn void submit_wait_mask_shape_is_backend_independent() @test {
     assert(!gpu::internal::submit_wait_stage_mask_valid({ .all, .compute }));
     assert(!gpu::internal::submit_wait_stage_mask_valid((StageMask)(1u << 9)));
 }
+
+fn void completion_wait_scope_shape_is_backend_independent() @test {
+    CompletionConsumerFlags draw_arguments = { .draw_arguments };
+    assert(gpu::internal::completion_wait_scope_valid({}, draw_arguments));
+    assert(gpu::internal::completion_wait_scope_valid(
+        { .vertex_shader },
+        draw_arguments,
+    ));
+    assert(gpu::internal::completion_wait_scope_valid({ .all }, {}));
+    assert(!gpu::internal::completion_wait_scope_valid({}, {}));
+    assert(!gpu::internal::completion_wait_scope_valid(
+        { .all },
+        draw_arguments,
+    ));
+    assert(!gpu::internal::completion_wait_scope_valid({ .host }, {}));
+    assert(!gpu::internal::completion_wait_scope_valid({ .present }, {}));
+    assert(!gpu::internal::completion_wait_scope_valid(
+        (StageMask)(1u << 9),
+        {},
+    ));
+    assert(!gpu::internal::completion_wait_scope_valid(
+        {},
+        (CompletionConsumerFlags)(1u << 1),
+    ));
+}

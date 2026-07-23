@@ -154,6 +154,17 @@ queue); resources used by both queues declare `{ .graphics, .compute }` access.
 Single-queue devices run the same code serialized.
 Running example: `particle_sim`.
 
+When the compute submission writes indirect/count or implicitly preprocessed
+generated-command records, wait at their first real consumer instead of using
+`.all` or a later shader stage:
+
+```c3
+gpu::CompletionWait[1] indirect_waits = {{
+    .point     = sim_done,
+    .consumers = { .draw_arguments },
+}};
+```
+
 ## 8. Own command recording explicitly
 
 Goal: make command-pool ownership, concurrency, and reuse explicit.
