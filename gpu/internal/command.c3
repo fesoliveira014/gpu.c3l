@@ -8,7 +8,7 @@ const uint COMMAND_LEASE_OWNER_SHIFT @private = 64;
 $assert uint::size * 8 == COMMAND_LEASE_DEVICE_GENERATION_SHIFT;
 $assert COMMAND_LEASE_DEVICE_GENERATION_SHIFT + 24
     == COMMAND_LEASE_DEVICE_INDEX_SHIFT;
-$assert gpu::internal::MAX_DEVICES <= 1 << 6;
+$assert gpu::internal::MAX_DEVICES <= (1 << 6);
 $assert COMMAND_LEASE_DEVICE_INDEX_SHIFT + 6 <= COMMAND_LEASE_OWNER_SHIFT;
 $assert ulong::size * 8 == COMMAND_LEASE_OWNER_SHIFT;
 

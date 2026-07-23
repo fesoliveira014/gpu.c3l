@@ -112,8 +112,8 @@ fn CommandPathPolicy? command_path_policy() {
     return {
         .contract        = contract,
         .track_lifetimes = command_path_flag("GPU_C3L_BENCH_TRACKING")!,
-        .vulkan_layers    = command_path_flag("GPU_C3L_BENCH_LAYERS")!,
-        .contract_name    = contract_name,
+        .vulkan_layers   = command_path_flag("GPU_C3L_BENCH_LAYERS")!,
+        .contract_name   = contract_name,
     };
 }
 

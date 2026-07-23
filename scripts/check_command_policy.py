@@ -101,6 +101,13 @@ ENCODER_PROOF_PATTERNS = {
         r"\bencoder\.backend_command\s*(?:==|!=)\s*null"
     ),
 }
+FRONTEND_ENCODER_ROOTS = frozenset((
+    "command_encoder",
+    "recording_encoder",
+    "executable_encoder",
+    "command_operation",
+    "executable_command_operation",
+))
 TRUSTED_CAPABILITY_PATTERNS = {
     "encoder null check": re.compile(r"\bcommands\s*(?:==|!=)\s*null"),
     "command-record null check": re.compile(r"\brecord\s*(?:==|!=)\s*null"),
@@ -406,6 +413,7 @@ def check(root: Path = ROOT) -> list[str]:
                 )
 
     encoder_path = root / "gpu" / "internal" / "command.c3"
+    public_path = root / "gpu" / "gpu.c3"
     if encoder_path.exists():
         try:
             encoder_source = encoder_path.read_text(encoding="utf-8")
@@ -413,9 +421,34 @@ def check(root: Path = ROOT) -> list[str]:
                 "gpu/internal/command.c3",
                 encoder_source,
             )
+            public_functions = []
+            if public_path.exists():
+                public_functions = source_functions(
+                    "gpu/gpu.c3",
+                    public_path.read_text(encoding="utf-8"),
+                )
         except (OSError, ValueError) as error:
             errors.append(str(error))
             encoder_functions = []
+            public_functions = []
+        frontend_functions: dict[str, list[Function]] = {}
+        for function in encoder_functions + public_functions:
+            frontend_functions.setdefault(function.name, []).append(function)
+        frontend_roots = set(FRONTEND_ENCODER_ROOTS)
+        frontend_roots.update(
+            function.name for function in public_functions
+            if function.name.startswith("cmd_")
+        )
+        for function in sorted(
+            reachable_functions(frontend_functions, frontend_roots),
+            key=lambda item: (item.relative, item.line, item.name),
+        ):
+            for label, pattern in ENCODER_PROOF_PATTERNS.items():
+                if pattern.search(function.body):
+                    errors.append(
+                        "frontend command resolution performs " + label + " at "
+                        f"{function.relative}:{function.line}:{function.name}"
+                    )
         command_encoders = [
             function for function in encoder_functions
             if function.name == "command_encoder"
@@ -426,12 +459,6 @@ def check(root: Path = ROOT) -> list[str]:
             )
         else:
             encoder = command_encoders[0]
-            for label, pattern in ENCODER_PROOF_PATTERNS.items():
-                if pattern.search(encoder.body):
-                    errors.append(
-                        "command_encoder performs " + label + " at "
-                        f"{encoder.relative}:{encoder.line}"
-                    )
             proof_notes = (
                 "note_command_encoder_cell_computation(",
                 "note_command_encoder_lease_comparison(",

@@ -84,6 +84,17 @@ fn void command_encoder() {
     note_command_encoder_lease_comparison();
     if (encoder.lease != make_command_lease(device, handle)) return;
 }
+
+fn void recording_encoder() {
+    command_encoder();
+}
+
+fn void executable_encoder() {
+    command_encoder();
+}
+
+fn void command_operation() {}
+fn void executable_command_operation() {}
 """
 
 
@@ -155,7 +166,8 @@ class CommandPolicyCheckTests(unittest.TestCase):
             self.write_source(root, "gpu/internal/command.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
-                "command_encoder performs stored handle comparison" in error
+                "frontend command resolution performs stored handle comparison"
+                in error
                 for error in errors
             ))
 
@@ -173,9 +185,64 @@ class CommandPolicyCheckTests(unittest.TestCase):
             self.write_source(root, "gpu/internal/command.c3", source)
             errors = check_command_policy.check(root)
             self.assertTrue(any(
-                "command_encoder performs device-loss load" in error
+                "frontend command resolution performs device-loss load"
                 for error in errors
             ))
+
+    def test_rejects_device_loss_load_in_recording_encoder(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
+            source = ENCODER_PROOF_SOURCE.replace(
+                "fn void recording_encoder() {\n    command_encoder();\n}",
+                (
+                    "fn void recording_encoder() {\n"
+                    "    if (encoder.device_lost.load(AtomicOrdering.ACQUIRE)) return;\n"
+                    "    command_encoder();\n"
+                    "}"
+                ),
+            )
+            self.write_source(root, "gpu/internal/command.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "frontend command resolution performs device-loss load"
+                in error
+                and error.endswith(":recording_encoder")
+                for error in errors
+            ))
+
+    def test_rejects_missing_encoder_lease_note(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
+            source = ENCODER_PROOF_SOURCE.replace(
+                "    note_command_encoder_lease_comparison();\n",
+                "",
+            )
+            self.write_source(root, "gpu/internal/command.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertIn(
+                "command_encoder must record exactly one note_command_encoder_lease_comparison",
+                errors,
+            )
+
+    def test_rejects_duplicate_encoder_lease_note(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
+            source = ENCODER_PROOF_SOURCE.replace(
+                "    note_command_encoder_lease_comparison();\n",
+                (
+                    "    note_command_encoder_lease_comparison();\n"
+                    "    note_command_encoder_lease_comparison();\n"
+                ),
+            )
+            self.write_source(root, "gpu/internal/command.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertIn(
+                "command_encoder must record exactly one note_command_encoder_lease_comparison",
+                errors,
+            )
 
     def test_rejects_renamed_tracking_helper(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
