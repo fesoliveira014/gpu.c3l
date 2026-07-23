@@ -46,6 +46,10 @@ fn void full_render_graphics_state_is_explicit_and_representable() @test {
         (uint)int::max + 1,
         1,
     )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::full_render_graphics_state(
+        1,
+        (uint)int::max + 1,
+    )) == gpu::INVALID_ARGUMENT);
 }
 
 fn void render_pass_descriptor_accepts_zero_value_operations() @test {
