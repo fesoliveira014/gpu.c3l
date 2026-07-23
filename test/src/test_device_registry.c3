@@ -338,6 +338,15 @@ fn void? command_pin_set_raster_state(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn void? command_pin_set_graphics_state(
+    gpu::internal::CommandEncoderState* encoder,
+    gpu::GraphicsState* state,
+) {
+    (void)encoder;
+    (void)state;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn void? command_pin_dispatch(
     gpu::internal::CommandEncoderState* encoder,
     gpu::GpuAddress root,
@@ -352,9 +361,11 @@ fn void? command_pin_dispatch(
 fn void? command_pin_begin_render_pass(
     gpu::internal::CommandEncoderState* encoder,
     gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
 ) {
     (void)encoder;
     (void)desc;
+    (void)state;
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
@@ -598,6 +609,7 @@ gpu::internal::CommandOps command_pin_ops = {
     .bind_pipeline               = &command_pin_bind_pipeline,
     .set_depth_state             = &command_pin_set_depth_state,
     .set_raster_state            = &command_pin_set_raster_state,
+    .set_graphics_state          = &command_pin_set_graphics_state,
     .dispatch                    = &command_pin_dispatch,
     .begin_render_pass           = &command_pin_begin_render_pass,
     .set_viewport                = &command_pin_set_viewport,

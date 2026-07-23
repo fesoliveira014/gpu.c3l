@@ -580,19 +580,22 @@ pipeline cache lookup
 vk::Pipeline
 ```
 
-Dynamic rendering begins with fixed-count `vkCmdSetViewport` and
-`vkCmdSetScissor` calls covering the full pass, followed by the zero raster
-default. Under `FULL`, public overrides validate finite viewport values,
-selected-device viewport dimensions and coordinate bounds, independently
-bounded depth endpoints, and representable scissor endpoints before using
-those same Vulkan 1.3 core commands. Negative viewport height, device-bounded
-negative coordinates, reversed depth, off-pass overscan, and empty scissors
-are accepted. Zero viewport height remains a deliberate non-degenerate library
-invariant. Trusted entries retain only the mandatory safe-lowering and
-state-machine floor. Accepted trusted and checked values share one exact native
-lowering path. The command list carries the active pass extent only while
-`RECORDING_RENDER_PASS`; that extent does not constrain viewport or scissor
-overrides.
+Dynamic rendering begins with the caller's complete `GraphicsState`. The
+backend emits viewport, scissor, five raster commands, and three depth commands
+as one fixed ten-command packet. It does not compare against cached state or
+skip unchanged fields. `cmd_set_graphics_state` emits the same complete packet;
+the individual setters emit their corresponding subset later in the pass.
+
+Under `FULL`, state validation checks finite viewport values, selected-device
+viewport dimensions and coordinate bounds, independently bounded depth
+endpoints, and representable scissor endpoints before native recording.
+Negative viewport height, device-bounded negative coordinates, reversed depth,
+off-pass overscan, and empty scissors are accepted. Zero viewport height
+remains a deliberate non-degenerate library invariant. Trusted entries retain
+only the mandatory safe-lowering and state-machine floor. Accepted trusted and
+checked values share one exact native lowering path. The command list retains
+active render compatibility only while `RECORDING_RENDER_PASS`; it stores no
+pass extent for viewport or scissor validation.
 
 Topology, cull mode, front face, depth bias, viewport, scissor, and depth state
 are absent from `PipelineKey` and `PipelineSlot`. `PipelineKey` stores each
@@ -603,11 +606,11 @@ rebinding the same entry or an alias emits neither. `cmd_set_raster_state`
 emits the promoted Vulkan 1.3 topology,
 cull, front-face, depth-bias-enable, and depth-bias commands as one validated
 operation and requires an active render pass. `cmd_set_depth_state` emits the
-Vulkan 1.3 dynamic depth commands and marks depth state valid for the active
-pass. Draw and dispatch only validate
+Vulkan 1.3 dynamic depth commands. Draw and dispatch only validate
 active state, push roots, and execute; they never create a native pipeline.
-Raster, viewport, and scissor survive pipeline switches, while pass begin
-resets them to zero/full-pass defaults and requires depth state again.
+Dynamic state survives pipeline switches, while each pass begin installs its
+required packet. There is no depth-valid flag, draw-time initialization branch,
+or backend-generated default.
 Multi-viewport arrays are outside the portable contract.
 
 ### Pipeline cache
@@ -879,18 +882,25 @@ Use dynamic rendering.
 Render pass begin:
 
 ```text
+reject host-unsafe pass or graphics-state pointers before backend dispatch
 reject color counts above the library or selected-device limit
 validate every color source handle, usage, mip/layer range, and selected-mip extent
 require one sample count across color and depth sources
 validate each resolve as distinct, single-sample, same-format color attachment
 validate the depth handle, usage, and selected mip/layer extent
 preflight any bound pipeline against color formats, depth format, and samples
+validate and lower the complete graphics-state packet
 transition only if caller explicitly requested via barrier before begin
 create views and build attachment infos only after all targets validate
 use AVERAGE for normalized/float resolves and SAMPLE_ZERO for integer resolves
+track attachment references only after pass and state preparation succeeds
 vkCmdBeginRendering
+emit the fixed ten-command graphics-state packet
 publish active compatibility and retained references
 ```
+
+Any preparation failure leaves both command-list state and the native command
+buffer unchanged.
 
 Render pass end:
 

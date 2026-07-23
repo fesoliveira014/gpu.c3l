@@ -267,13 +267,12 @@ fn void prepare_render_commands(
 ) {
     *direct = gpu::begin_commands(allocator)!!;
     *library = gpu::begin_commands(allocator)!!;
-    gpu::cmd_begin_render_pass(direct, pass)!!;
-    gpu::cmd_begin_render_pass(library, pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(direct, pass, &graphics)!!;
+    gpu::cmd_begin_render_pass(library, pass, &graphics)!!;
     gpu::cmd_bind_pipeline(direct, pipeline)!!;
     gpu::cmd_bind_pipeline(library, pipeline)!!;
-    gpu::DepthState depth;
-    gpu::cmd_set_depth_state(direct, &depth)!!;
-    gpu::cmd_set_depth_state(library, &depth)!!;
 }
 
 fn OperationResult measure_dispatch(

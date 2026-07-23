@@ -294,6 +294,14 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "RetiredCommandBuffer",
 )
 
+RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
+    "depth_state_set",
+    "active_render_width",
+    "active_render_height",
+    "active_render_extent",
+    "active_extent",
+)
+
 RETIRED_SOURCE_PATTERNS = {
     r"struct\s+SubmitDesc\s*\{[^}]*\bwaits\b": "SubmitDesc.waits",
     r"struct\s+SubmitDesc\s*\{[^}]*\bsignals\b": "SubmitDesc.signals",
@@ -584,6 +592,16 @@ def validate_document(document: dict) -> list[str]:
                 ("depth_bias_constant", "float"),
                 ("depth_bias_slope", "float"),
                 ("depth_bias_clamp", "float"),
+            ),
+        ),
+        (
+            "GraphicsState",
+            "struct",
+            (
+                ("viewport", "Viewport"),
+                ("scissor", "ScissorRect"),
+                ("raster", "DynamicRasterState"),
+                ("depth", "DepthState"),
             ),
         ),
         (
@@ -886,7 +904,11 @@ def validate_document(document: dict) -> list[str]:
             member.get("type", {}).get("name")
             for member in begin_render_pass.get("members", [])
         )
-        if parameter_types != ("CommandList*", "RenderPassDesc*"):
+        if parameter_types != (
+            "CommandList*",
+            "RenderPassDesc*",
+            "GraphicsState*",
+        ):
             failures.append(
                 "cmd_begin_render_pass has the wrong parameters"
             )
@@ -1022,6 +1044,14 @@ def validate_document(document: dict) -> list[str]:
             ("CommandList*", "DynamicRasterState*"),
             "void?",
         ),
+        "cmd_set_graphics_state": (
+            ("CommandList*", "GraphicsState*"),
+            "void?",
+        ),
+        "full_render_graphics_state": (
+            ("uint", "uint"),
+            "GraphicsState?",
+        ),
         "cmd_dispatch": (
             ("CommandList*", "GpuAddress", "Vec3u"),
             "void?",
@@ -1150,6 +1180,8 @@ def validate_document(document: dict) -> list[str]:
         "cmd_bind_pipeline": ("commands", "pipeline"),
         "cmd_set_depth_state": ("commands", "depth"),
         "cmd_set_raster_state": ("commands", "raster"),
+        "cmd_set_graphics_state": ("commands", "state"),
+        "full_render_graphics_state": ("width", "height"),
         "cmd_dispatch": ("commands", "root", "groups"),
         "cmd_draw": (
             "commands",
@@ -1928,6 +1960,147 @@ def retired_warm_command_mechanism_errors(
             )
     return failures
 
+def callable_body(source: str, name: str) -> str | None:
+    masked = mask_non_code(source)
+    declaration = next(
+        (
+            match
+            for match in CALLABLE_DECLARATION.finditer(masked)
+            if match.group("name") == name
+        ),
+        None,
+    )
+    if declaration is None:
+        return None
+    opening = masked.find("{", declaration.end())
+    if opening < 0:
+        return None
+    depth = 0
+    for index in range(opening, len(masked)):
+        if masked[index] == "{":
+            depth += 1
+        elif masked[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return masked[opening:index + 1]
+    return None
+
+
+def validate_graphics_state_backend_sources(
+    render_pass_source: str,
+    command_state_source: str,
+) -> list[str]:
+    failures = []
+
+    packet = callable_body(render_pass_source, "emit_graphics_state")
+    packet_calls = (
+        "emit_viewport",
+        "emit_scissor",
+        "emit_raster_state",
+        "emit_depth_state",
+    )
+    if packet is None:
+        failures.append("missing emit_graphics_state implementation")
+    else:
+        positions = []
+        for call in packet_calls:
+            matches = tuple(re.finditer(rf"\b{call}\s*\(", packet))
+            if len(matches) != 1:
+                failures.append(
+                    "emit_graphics_state must emit viewport, scissor, raster, "
+                    "and depth exactly once in order"
+                )
+                break
+            positions.append(matches[0].start())
+        else:
+            if positions != sorted(positions):
+                failures.append(
+                    "emit_graphics_state must emit viewport, scissor, raster, "
+                    "and depth exactly once in order"
+                )
+
+    required_orders = {
+        "trusted_begin_render_pass": (
+            "lower_render_pass",
+            "lower_graphics_state",
+            "record_render_pass",
+        ),
+        "trusted_tracking_begin_render_pass": (
+            "lower_render_pass",
+            "lower_graphics_state",
+            "track_render_pass",
+            "record_render_pass",
+        ),
+        "checked_begin_render_pass": (
+            "checked_prepare_render_pass",
+            "checked_prepare_graphics_state",
+            "record_render_pass",
+        ),
+        "checked_tracking_begin_render_pass": (
+            "checked_prepare_render_pass",
+            "checked_prepare_graphics_state",
+            "track_render_pass",
+            "record_render_pass",
+        ),
+    }
+    for function, calls in required_orders.items():
+        body = callable_body(render_pass_source, function)
+        if body is None:
+            failures.append(f"missing {function} implementation")
+            continue
+        positions = []
+        for call in calls:
+            match = re.search(rf"\b{call}\s*\(", body)
+            if match is None:
+                failures.append(
+                    f"{function} must complete lowering, validation, and "
+                    "tracking before native render-pass recording"
+                )
+                break
+            positions.append(match.start())
+        else:
+            if positions != sorted(positions):
+                failures.append(
+                    f"{function} must complete lowering, validation, and "
+                    "tracking before native render-pass recording"
+                )
+
+    recording = callable_body(render_pass_source, "record_render_pass")
+    if recording is None:
+        failures.append("missing record_render_pass implementation")
+    else:
+        begin_calls = tuple(
+            re.finditer(r"\bvk::cmd_begin_rendering\s*\(", recording)
+        )
+        packet_emissions = tuple(
+            re.finditer(r"\bemit_graphics_state\s*\(", recording)
+        )
+        if (
+            len(begin_calls) != 1
+            or len(packet_emissions) != 1
+            or begin_calls[0].start() > packet_emissions[0].start()
+        ):
+            failures.append(
+                "record_render_pass must emit exactly one native begin "
+                "followed by exactly one complete graphics-state packet"
+            )
+
+    combined_state = mask_non_code(
+        command_state_source + "\n" + render_pass_source
+    )
+    for symbol in RETIRED_COMMAND_RENDER_STATE_SYMBOLS:
+        if re.search(rf"\b{symbol}\b", combined_state):
+            failures.append(f"retired command render state {symbol}")
+    return failures
+
+
+def scan_graphics_state_backend() -> list[str]:
+    backend = ROOT / "gpu" / "internal" / "vk"
+    return validate_graphics_state_backend_sources(
+        (backend / "render_pass.c3").read_text(encoding="utf-8"),
+        (backend / "command_state.c3").read_text(encoding="utf-8"),
+    )
+
 
 def validate_root_facade_source(relative: Path, source: str) -> list[str]:
     failures = validate_public_module_source(relative, source)
@@ -2325,6 +2498,7 @@ def main() -> int:
     failures.extend(scan_private_internal_modules())
     failures.extend(scan_private_backend_modules())
     failures.extend(retired_warm_command_mechanism_errors())
+    failures.extend(scan_graphics_state_backend())
     failures.extend(scan_retired_vulkan_namespace())
     if failures:
         print("public GPU API contract violations:", file=sys.stderr)

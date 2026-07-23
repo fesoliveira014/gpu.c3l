@@ -283,13 +283,16 @@ fn void depth_test_occludes_both_orders() @test {
             .clear = { .depth = 1.0f },
         };
         gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
-        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        gpu::GraphicsState graphics_state =
+            gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+        graphics_state.depth = tested;
+        gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
 
         gpu::GpuSpan first_verts = near_first ? near_verts : far_verts;
         gpu::GpuSpan first_color = near_first ? red : green;
         gpu::GpuSpan second_verts = near_first ? far_verts : near_verts;
         gpu::GpuSpan second_color = near_first ? green : red;
-        bind_test_graphics_pipeline(&cmd, pipeline, tested);
+        gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
         gpu::cmd_draw(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, first_verts),
@@ -297,7 +300,8 @@ fn void depth_test_occludes_both_orders() @test {
             vertex_count:   3,
             instance_count: 1,
         )!!;
-        bind_test_graphics_pipeline(&cmd, pipeline, tested);
+        gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
+        gpu::cmd_set_depth_state(&cmd, &tested)!!;
         gpu::cmd_draw(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, second_verts),
@@ -383,8 +387,11 @@ fn void depth_write_toggle_honored() @test {
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    bind_test_graphics_pipeline(&cmd, near_pipeline, no_write);
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+    graphics_state.depth = no_write;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_bind_pipeline(&cmd, near_pipeline)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, near_verts),
@@ -392,7 +399,8 @@ fn void depth_write_toggle_honored() @test {
         vertex_count:   3,
         instance_count: 1,
     )!!;
-    bind_test_graphics_pipeline(&cmd, far_pipeline, tested);
+    gpu::cmd_bind_pipeline(&cmd, far_pipeline)!!;
+    gpu::cmd_set_depth_state(&cmd, &tested)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, far_verts),
@@ -471,8 +479,11 @@ fn void depth_state_variants_share_entry() @test {
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    bind_test_graphics_pipeline(&cmd, test_on, tested);
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+    graphics_state.depth = tested;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_bind_pipeline(&cmd, test_on)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, near_verts),
@@ -480,7 +491,8 @@ fn void depth_state_variants_share_entry() @test {
         vertex_count:   3,
         instance_count: 1,
     )!!;
-    bind_test_graphics_pipeline(&cmd, test_off, untested);
+    gpu::cmd_bind_pipeline(&cmd, test_off)!!;
+    gpu::cmd_set_depth_state(&cmd, &untested)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, far_verts),
@@ -537,8 +549,11 @@ fn void depth_only_pass_renders_footprint() @test {
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    bind_test_graphics_pipeline(&cmd, pipeline, tested);
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+    graphics_state.depth = tested;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, near_verts),
@@ -635,8 +650,11 @@ fn void sampled_depth_matches_readback() @test {
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    bind_test_graphics_pipeline(&cmd, pipeline, tested);
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+    graphics_state.depth = tested;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, near_verts),
@@ -806,7 +824,13 @@ fn void depth_nonzero_mip_layer_isolated() @test {
         .width  = MIP_SIZE,
         .height = MIP_SIZE,
     };
-    gpu::cmd_begin_render_pass(&commands, &layer_pass)!!;
+    gpu::GraphicsState layer_graphics_state =
+        gpu::full_render_graphics_state(MIP_SIZE, MIP_SIZE)!!;
+    gpu::cmd_begin_render_pass(
+        &commands,
+        &layer_pass,
+        &layer_graphics_state,
+    )!!;
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::DepthTargetDesc mip_target = {
         .view     = other_mip,
@@ -819,7 +843,13 @@ fn void depth_nonzero_mip_layer_isolated() @test {
         .width  = DP_RT,
         .height = DP_RT,
     };
-    gpu::cmd_begin_render_pass(&commands, &mip_pass)!!;
+    gpu::GraphicsState mip_graphics_state =
+        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+    gpu::cmd_begin_render_pass(
+        &commands,
+        &mip_pass,
+        &mip_graphics_state,
+    )!!;
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::DepthTargetDesc selected_target = {
         .view     = target,
@@ -832,12 +862,19 @@ fn void depth_nonzero_mip_layer_isolated() @test {
         .width  = MIP_SIZE,
         .height = MIP_SIZE,
     };
-    gpu::cmd_begin_render_pass(&commands, &selected_pass)!!;
-    bind_test_graphics_pipeline(
+    gpu::GraphicsState selected_graphics_state =
+        gpu::full_render_graphics_state(MIP_SIZE, MIP_SIZE)!!;
+    selected_graphics_state.depth = {
+        .test_enable  = true,
+        .write_enable = true,
+        .compare      = gpu::CompareOp.LESS,
+    };
+    gpu::cmd_begin_render_pass(
         &commands,
-        pipeline,
-        { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS },
-    );
+        &selected_pass,
+        &selected_graphics_state,
+    )!!;
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     gpu::cmd_draw(
         commands:      &commands,
         vertex_root:   test_span_address(&device, vertices.span),
@@ -940,7 +977,13 @@ fn void depth_pass_validation_faults() @test {
         "attachment creation rejects a texture without attachment usage");
 
     gpu::RenderPassDesc empty_pass = { .width = DP_RT, .height = DP_RT };
-    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &empty_pass)) == gpu::INVALID_ARGUMENT,
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+    assert(@catch(gpu::cmd_begin_render_pass(
+        &cmd,
+        &empty_pass,
+        &graphics_state,
+    )) == gpu::INVALID_ARGUMENT,
         "a pass with no attachments faults INVALID_ARGUMENT");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
@@ -1033,8 +1076,11 @@ fn void compare_sampler_exact_results() @test {
         .clear = { .depth = 1.0f },
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    bind_test_graphics_pipeline(&cmd, pipeline, tested);
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+    graphics_state.depth = tested;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, near_verts),
@@ -1131,15 +1177,17 @@ fn void depth_bias_shifts_stored_depth() @test {
             .clear = { .depth = 1.0f },
         };
         gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
-        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        gpu::GraphicsState graphics_state =
+            gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+        graphics_state.depth = tested;
         if (i == 1) {
-            gpu::DynamicRasterState raster = {
+            graphics_state.raster = {
                 .depth_bias_enable   = true,
                 .depth_bias_constant = 4096.0f,
             };
-            gpu::cmd_set_raster_state(&cmd, &raster)!!;
         }
-        bind_test_graphics_pipeline(&cmd, pipeline, tested);
+        gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+        gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
         gpu::cmd_draw(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, verts),

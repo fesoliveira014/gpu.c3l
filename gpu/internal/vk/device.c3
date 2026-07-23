@@ -241,10 +241,15 @@ struct VkDeviceState {
     Atomic{ulong}              texture_barrier_native_assemblies @if(env::TESTING);
     Atomic{ulong}              texture_barrier_native_emissions @if(env::TESTING);
     bool                       dynamic_state_observation_enabled @if(env::TESTING);
+    ulong                      begin_rendering_emissions @if(env::TESTING);
     ulong                      viewport_emissions @if(env::TESTING);
     ulong                      scissor_emissions @if(env::TESTING);
+    ulong                      raster_state_emissions @if(env::TESTING);
+    ulong                      depth_state_emissions @if(env::TESTING);
     vk::Viewport               last_viewport @if(env::TESTING);
     vk::Rect2D                 last_scissor @if(env::TESTING);
+    gpu::DynamicRasterState    last_raster_state @if(env::TESTING);
+    gpu::DepthState            last_depth_state @if(env::TESTING);
     ulong                      texture_view_cell_lookups @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS));
     ulong                      texture_view_ownership_work_units @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS));
     Atomic{ulong}              completion_native_counter_queries @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
@@ -406,6 +411,7 @@ const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
     .bind_pipeline               = &trusted_bind_pipeline,
     .set_depth_state             = &trusted_set_depth_state,
     .set_raster_state            = &trusted_set_raster_state,
+    .set_graphics_state          = &trusted_set_graphics_state,
     .dispatch                    = &trusted_dispatch,
     .begin_render_pass           = &trusted_begin_render_pass,
     .set_viewport                = &trusted_set_viewport,
@@ -434,6 +440,7 @@ const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .bind_pipeline               = &trusted_tracking_bind_pipeline,
     .set_depth_state             = &trusted_set_depth_state,
     .set_raster_state            = &trusted_set_raster_state,
+    .set_graphics_state          = &trusted_set_graphics_state,
     .dispatch                    = &trusted_dispatch,
     .begin_render_pass           = &trusted_tracking_begin_render_pass,
     .set_viewport                = &trusted_set_viewport,
@@ -462,6 +469,7 @@ const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
     .bind_pipeline               = &checked_bind_pipeline,
     .set_depth_state             = &checked_set_depth_state,
     .set_raster_state            = &checked_set_raster_state,
+    .set_graphics_state          = &checked_set_graphics_state,
     .dispatch                    = &checked_dispatch,
     .begin_render_pass           = &checked_begin_render_pass,
     .set_viewport                = &checked_set_viewport,
@@ -490,6 +498,7 @@ const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .bind_pipeline               = &checked_tracking_bind_pipeline,
     .set_depth_state             = &checked_set_depth_state,
     .set_raster_state            = &checked_set_raster_state,
+    .set_graphics_state          = &checked_set_graphics_state,
     .dispatch                    = &checked_dispatch,
     .begin_render_pass           = &checked_tracking_begin_render_pass,
     .set_viewport                = &checked_set_viewport,
@@ -537,6 +546,7 @@ fn bool command_ops_are_complete(gpu::internal::CommandOps* ops) {
         && ops.bind_pipeline != null
         && ops.set_depth_state != null
         && ops.set_raster_state != null
+        && ops.set_graphics_state != null
         && ops.dispatch != null
         && ops.begin_render_pass != null
         && ops.set_viewport != null

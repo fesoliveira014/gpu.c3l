@@ -418,16 +418,17 @@ only after proving the range.
 
 Public operations use C3 optionals/faults. `faultdef` declares a flat list of globally-unique fault values (there is no braced/named fault group in C3 0.8.0); these live in `module gpu` and are referenced as `gpu::INVALID_HANDLE`, raised with the `~` suffix. `gpu/gpu.c3i` documents each fault at its definition; the table below maps them to the operations that raise them.
 
-Descriptor, configuration, barrier, viewport, scissor, and label pointers must
-be non-null unless the API explicitly documents null as a value (such as
-`TextureViewDesc* desc`). Null required input faults `INVALID_ARGUMENT` before a
-backend call. Null or stale owner-token pointers fault `INVALID_HANDLE`.
+Descriptor, configuration, barrier, graphics-state, viewport, scissor, and
+label pointers must be non-null unless the API explicitly documents null as a
+value (such as `TextureViewDesc* desc`). Null required input faults
+`INVALID_ARGUMENT` before a backend call. Null or stale owner-token pointers
+fault `INVALID_HANDLE`.
 
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime` | the selected backend is unavailable |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler`; generated-scratch reservation | null or malformed input, allocator capacity above a hard ceiling, capacity-product overflow, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `full_render_graphics_state`; `cmd_begin_render_pass`; `cmd_set_graphics_state`/`cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler`; generated-scratch reservation | null or malformed input, allocator capacity above a hard ceiling, capacity-product overflow, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, a borrowed swapchain attachment view was passed for destruction, or the requested generated-scratch key is not reserved |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
@@ -1166,6 +1167,7 @@ Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
 
 ```text
 cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) -> void?
+cmd_set_graphics_state(CommandList* commands, GraphicsState* state) -> void?
 cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
 cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
 cmd_dispatch(
@@ -1185,17 +1187,18 @@ dispatches use that snapshot without reading a pipeline cell, table, or cache.
 Tracked ownership prevents destruction until discard or command completion;
 without tracking, the caller must keep the pipeline live through completion.
 Dispatch requires an active compute pipeline. Graphics draws require an active
-graphics pipeline and explicit depth state for the current render pass. Root
-addresses, including zero, are pushed unchanged.
-`cmd_set_raster_state` and `cmd_set_depth_state` require an active render pass;
-outside one they fault `COMMAND_RECORDING_ERROR`. Raster validation is atomic:
-invalid enum values or non-finite enabled depth-bias factors return
-`INVALID_ARGUMENT` without emitting any native state.
-Pass begin emits a zero `DynamicRasterState` and resets the explicit depth-state
-requirement, while viewport and scissor receive their full-pass defaults.
-Execution with no required state returns
-`COMMAND_RECORDING_ERROR`; a wrong active pipeline kind returns
-`INVALID_ARGUMENT`.
+graphics pipeline and render pass. Root addresses, including zero, are pushed
+unchanged.
+
+Every render pass begins with a caller-provided complete `GraphicsState`.
+`cmd_set_graphics_state` replaces that complete state later in the pass.
+`cmd_set_raster_state`, `cmd_set_depth_state`, `cmd_set_viewport`, and
+`cmd_set_scissor` remain optional partial updates after begin. All setters
+require an active render pass; outside one they fault
+`COMMAND_RECORDING_ERROR`. State validation is atomic: invalid values return
+`INVALID_ARGUMENT` without emitting any native state. There is no hidden
+default state or draw-time depth-initialization requirement. A wrong active
+pipeline kind returns `INVALID_ARGUMENT`.
 
 Each group count may be zero and must not exceed the corresponding component
 of `DeviceCaps.max_compute_work_group_count`. An over-limit call faults
@@ -1252,7 +1255,19 @@ RenderPassDesc
     uint width
     uint height
 
-cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) -> void?
+GraphicsState
+    Viewport viewport
+    ScissorRect scissor
+    DynamicRasterState raster
+    DepthState depth
+
+full_render_graphics_state(uint width, uint height) -> GraphicsState?
+cmd_begin_render_pass(
+    CommandList* commands,
+    RenderPassDesc* desc,
+    GraphicsState* state,
+) -> void?
+cmd_set_graphics_state(CommandList* commands, GraphicsState* state) -> void?
 cmd_end_render_pass(CommandList* commands) -> void?
 ```
 
@@ -1277,10 +1292,17 @@ attachment view is published in a descriptor heap or can be destroyed while a
 command list holds an explicit reference. Zero, stale, foreign-device, and
 mismatched view handles fault before native recording.
 
-Render-pass begin initializes one viewport and one scissor to the full pass
-extent and initializes raster state to triangles, no culling,
-counter-clockwise front faces, and disabled depth bias. Callers may override
-these states for subsequent draws:
+Render-pass begin requires a non-null complete state packet. The backend first
+validates and lowers the pass and packet, then tracks attachment references.
+Only after all preparation succeeds does it begin native rendering, emit the
+fixed state packet, and publish the active pass. A rejected begin leaves the
+command list and native command buffer unchanged.
+
+The packet emits exactly ten dynamic-state commands in fixed order: viewport,
+scissor, five raster commands, and three depth commands. There is no state
+diffing or dirty-bit cache. `cmd_set_graphics_state` validates and emits the
+same complete ten-command replacement; the four partial setters below remain
+available for later changes:
 
 ```text
 Viewport
@@ -1300,24 +1322,25 @@ ScissorRect
 cmd_set_viewport(CommandList* commands, Viewport* viewport) -> void?
 cmd_set_scissor(CommandList* commands, ScissorRect* scissor) -> void?
 cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
+cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
 ```
 
-A conventional full-depth viewport must set `max_depth` explicitly because
-C3 aggregate literals zero omitted fields:
+A conventional starting packet can be constructed from the pass dimensions:
 
 ```c3
-gpu::Viewport viewport = {
-    .x         = 0.0f,
-    .y         = 0.0f,
-    .width     = 640.0f,
-    .height    = 480.0f,
-    .min_depth = 0.0f,
-    .max_depth = 1.0f,
-};
-gpu::cmd_set_viewport(&commands, &viewport)!!;
+gpu::GraphicsState state = gpu::full_render_graphics_state(
+    pass.width,
+    pass.height,
+)!!;
+gpu::cmd_begin_render_pass(&commands, &pass, &state)!!;
 ```
 
-All three setters are valid only inside a render pass. Every viewport field
+The helper faults `INVALID_ARGUMENT` before signed casts when either dimension
+is zero or exceeds `int::max`. It returns a full-area viewport and scissor, the
+conventional `[0, 1]` depth range, and zero raster/depth state. Zero depth state
+means disabled depth testing and writing and is valid for drawing.
+
+Every viewport field
 and computed axis endpoint must be finite. Width is positive, height is
 nonzero, width and absolute height fit the selected device's
 `maxViewportDimensions`, and both endpoints of each axis fit its
@@ -1333,10 +1356,16 @@ may extend beyond the render area and zero extent is a valid empty clip.
 Invalid values return `INVALID_ARGUMENT` before changing dynamic state; calls
 outside a pass return `COMMAND_RECORDING_ERROR`.
 
-Explicit viewport/scissor/raster state survives graphics pipeline and
-cache-alias handle switches. The next render-pass begin restores the full-pass
-and zero-raster defaults.
+Explicit dynamic state survives graphics pipeline and cache-alias handle
+switches. A later render-pass begin installs its supplied packet rather than
+restoring backend defaults.
 The current API intentionally exposes one viewport and one scissor only.
+
+This is a source-breaking experimental API. Migrate a two-argument pass begin
+by constructing a `GraphicsState`, folding the pass's initial viewport,
+scissor, raster, and depth setters into it, and passing it as the third
+argument. Keep only state changes that occur after begin as partial setter
+calls.
 
 Use `ClearColor.rgba` for normalized and floating-point attachments, and
 `ClearColor.uint_rgba` for unsigned-integer attachments. The inactive union

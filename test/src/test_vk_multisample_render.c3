@@ -167,17 +167,16 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .width  = DP_RT,
         .height = DP_RT,
     };
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::DepthState depth_state = {
         .test_enable  = true,
         .write_enable = true,
         .compare      = gpu::CompareOp.LESS,
     };
-    bind_test_graphics_pipeline(
-        &commands,
-        pipeline,
-        depth_state,
-    );
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+    graphics_state.depth = depth_state;
+    gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    test_span_address(

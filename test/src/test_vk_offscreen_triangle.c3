@@ -111,7 +111,9 @@ fn void offscreen_clear_works() @test {
         .clear = { .rgba = { 64.0f / 255.0f, 128.0f / 255.0f, 192.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::TextureBarrier to_src = {
@@ -199,14 +201,16 @@ fn void warm_render_pass_uses_precreated_attachment_without_allocation() @test {
         .width  = RT_SIZE,
         .height = RT_SIZE,
     };
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+    gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
 
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::internal::RecordingWorkCounters after =
         vk::command_recording_work_counters(state);
@@ -375,8 +379,10 @@ fn void offscreen_textured_triangle() @test {
         .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    bind_test_graphics_pipeline(&cmd, pipeline);
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    (gpu::GpuAddress)0,
@@ -553,29 +559,32 @@ fn void dynamic_viewport_scissor_pixels() @test {
             .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
-        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        gpu::GraphicsState graphics_state =
+            gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
         if (i == 0) {
-            gpu::Viewport viewport = {
+            graphics_state.viewport = {
                 .width = (float)RT_SIZE / 2.0f, .height = (float)RT_SIZE, .max_depth = 1.0f,
             };
-            gpu::cmd_set_viewport(&cmd, &viewport)!!;
-            gpu::Viewport rejected = viewport;
+        } else if (i == 1) {
+            graphics_state.scissor = {
+                .width = (int)RT_SIZE / 2, .height = (int)RT_SIZE,
+            };
+        }
+        gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+        if (i == 0) {
+            gpu::Viewport rejected = graphics_state.viewport;
             rejected.width =
                 (float)state.viewport_limits.max_width * 2.0f;
             assert(@catch(gpu::cmd_set_viewport(&cmd, &rejected)) == gpu::INVALID_ARGUMENT,
                 "a rejected viewport does not replace the valid viewport");
         } else if (i == 1) {
-            gpu::ScissorRect scissor = {
-                .width = (int)RT_SIZE / 2, .height = (int)RT_SIZE,
-            };
-            gpu::cmd_set_scissor(&cmd, &scissor)!!;
-            gpu::ScissorRect rejected = scissor;
+            gpu::ScissorRect rejected = graphics_state.scissor;
             rejected.x = int::max;
             rejected.width = 1;
             assert(@catch(gpu::cmd_set_scissor(&cmd, &rejected)) == gpu::INVALID_ARGUMENT,
                 "a rejected scissor does not replace the valid scissor");
         }
-        bind_test_graphics_pipeline(&cmd, pipeline);
+        gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
         gpu::cmd_draw(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, vertices),
@@ -680,7 +689,9 @@ fn void offscreen_render_to_mip() @test {
         .clear = { .rgba = { 40.0f / 255.0f, 80.0f / 255.0f, 120.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = MIP1, .height = MIP1 };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(MIP1, MIP1)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::TextureBarrier to_src = {
@@ -814,7 +825,9 @@ fn void dynamic_viewport_scissor_validation() @test {
         .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
 
     assert(@catch(gpu::cmd_set_viewport(&cmd, null)) == gpu::INVALID_ARGUMENT,
         "null viewport faults INVALID_ARGUMENT");
@@ -943,7 +956,9 @@ fn void render_pass_state_machine() @test {
         .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
 
     // Copies and barriers are illegal inside a pass.
     fault fill_fault = @catch(gpu::cmd_fill_buffer(

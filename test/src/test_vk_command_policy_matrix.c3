@@ -406,10 +406,13 @@ fn void observe_policy_matrix_render(
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     vk::CommandRecordingStats recording_before =
         begin_policy_matrix_observation(state);
-    gpu::cmd_begin_render_pass(&commands, pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&commands, pass, &graphics)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
 
     gpu::reset_command_resolution_stats();
+    gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     gpu::Viewport viewport = {
         .width     = 8.0f,
         .height    = 8.0f,
@@ -459,11 +462,11 @@ fn void observe_policy_matrix_render(
     CommandPolicyExpectation expectation = policy_matrix_expectation(
         contract:             contract,
         tracking:             tracking,
-        full_semantic_checks: 9,
+        full_semantic_checks: 10,
         tracking_calls:       4,
         unique_references:    4,
-        recording_commands:   8,
-        native_commands:      18,
+        recording_commands:   9,
+        native_commands:      28,
     );
     assert_command_policy_observation(
         &observation,
@@ -573,10 +576,10 @@ fn void observe_policy_matrix_generated_render(
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     vk::CommandRecordingStats recording_before =
         begin_policy_matrix_observation(state);
-    gpu::cmd_begin_render_pass(&commands, pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&commands, pass, &graphics)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
-    gpu::DepthState depth;
-    gpu::cmd_set_depth_state(&commands, &depth)!!;
 
     gpu::reset_command_resolution_stats();
     gpu::cmd_draw_generated(
@@ -604,7 +607,7 @@ fn void observe_policy_matrix_generated_render(
     CommandPolicyExpectation expectation = policy_matrix_expectation(
         contract:             contract,
         tracking:             tracking,
-        full_semantic_checks: 5,
+        full_semantic_checks: 4,
         tracking_calls:       2,
         unique_references:    2,
         recording_commands:   3,

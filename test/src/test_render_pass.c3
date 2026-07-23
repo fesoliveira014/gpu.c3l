@@ -19,6 +19,35 @@ fn gpu::RenderPassDesc valid_render_pass_desc(gpu::ColorTargetDesc[] colors) {
     };
 }
 
+fn void full_render_graphics_state_is_explicit_and_representable() @test {
+    gpu::GraphicsState state = gpu::full_render_graphics_state(320, 240)!!;
+    assert(state.viewport.x == 0.0f && state.viewport.y == 0.0f);
+    assert(state.viewport.width == 320.0f
+        && state.viewport.height == 240.0f);
+    assert(state.viewport.min_depth == 0.0f
+        && state.viewport.max_depth == 1.0f);
+    assert(state.scissor.x == 0 && state.scissor.y == 0);
+    assert(state.scissor.width == 320 && state.scissor.height == 240);
+    assert(state.raster.topology == gpu::PrimitiveTopology.TRIANGLES);
+    assert(state.raster.cull_mode == gpu::CullMode.NONE);
+    assert(state.raster.front_face == gpu::FrontFace.COUNTER_CLOCKWISE);
+    assert(!state.raster.depth_bias_enable);
+    assert(state.raster.depth_bias_constant == 0.0f);
+    assert(state.raster.depth_bias_slope == 0.0f);
+    assert(state.raster.depth_bias_clamp == 0.0f);
+    assert(!state.depth.test_enable && !state.depth.write_enable);
+    assert(state.depth.compare == gpu::CompareOp.NEVER);
+
+    assert(@catch(gpu::full_render_graphics_state(0, 1))
+        == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::full_render_graphics_state(1, 0))
+        == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::full_render_graphics_state(
+        (uint)int::max + 1,
+        1,
+    )) == gpu::INVALID_ARGUMENT);
+}
+
 fn void render_pass_descriptor_accepts_zero_value_operations() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = render_test_view(0) }};
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);

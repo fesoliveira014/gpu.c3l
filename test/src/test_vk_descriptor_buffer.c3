@@ -428,7 +428,9 @@ fn void descriptor_buffer_compute_to_graphics() @test {
         .clear    = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = TARGET_SIZE, .height = TARGET_SIZE };
-    gpu::cmd_begin_render_pass(&graphics_commands, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&graphics_commands, &pass, &graphics)!!;
     gpu::GpuAddress fragment_root_gpu = (gpu::GpuAddress)((ulong)test_span_address(&device, graphics_root_span) + VERTEX_BYTES);
     bind_test_graphics_pipeline(&graphics_commands, graphics_pipeline);
     gpu::cmd_draw(

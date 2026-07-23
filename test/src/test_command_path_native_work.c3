@@ -9,6 +9,9 @@ const char[*] COMMAND_PATH_WORK_VERT_SPIRV =
 const char[*] COMMAND_PATH_WORK_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
+const ulong COMMAND_PATH_BEGIN_PACKET_NATIVE_COMMANDS = 11;
+const uint COMMAND_PATH_DRAW_COUNT = 4;
+
 fn gpu::PipelineHandle command_path_work_compute_pipeline(
     gpu::Device* device,
 ) {
@@ -52,6 +55,14 @@ fn void require_native_work(ulong expected) {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.recording_commands == 1);
     assert(stats.native_commands == expected);
+}
+
+fn void require_render_work(ulong expected_commands, ulong expected_native) {
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.recording_commands == expected_commands);
+    assert(stats.native_commands == expected_native);
+    assert(stats.pipeline_table_lookups == 0);
+    assert(stats.pipeline_cache_lookups == 0);
 }
 
 fn void public_command_native_work_is_exact() @test {
@@ -151,9 +162,38 @@ fn void public_command_native_work_is_exact() @test {
         .width  = 8,
         .height = 8,
     };
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
     commands = gpu::begin_commands(&allocator)!!;
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
-    bind_test_graphics_pipeline(&commands, graphics);
+    gpu::cmd_bind_pipeline(&commands, graphics)!!;
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
+    require_render_work(1, COMMAND_PATH_BEGIN_PACKET_NATIVE_COMMANDS);
+    gpu::cmd_draw(
+        commands:       &commands,
+        vertex_root:    (gpu::GpuAddress)1,
+        fragment_root:  (gpu::GpuAddress)1,
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    require_render_work(
+        2,
+        COMMAND_PATH_BEGIN_PACKET_NATIVE_COMMANDS + 2,
+    );
+    for (uint i = 1; i < COMMAND_PATH_DRAW_COUNT; i++) {
+        gpu::cmd_draw(
+            commands:       &commands,
+            vertex_root:    (gpu::GpuAddress)1,
+            fragment_root:  (gpu::GpuAddress)1,
+            vertex_count:   3,
+            instance_count: 1,
+        )!!;
+    }
+    require_render_work(
+        1 + COMMAND_PATH_DRAW_COUNT,
+        COMMAND_PATH_BEGIN_PACKET_NATIVE_COMMANDS
+            + COMMAND_PATH_DRAW_COUNT * 2,
+    );
     gpu::Viewport viewport = {
         .width     = 8,
         .height    = 8,

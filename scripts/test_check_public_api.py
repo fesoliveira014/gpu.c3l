@@ -357,6 +357,19 @@ def valid_document() -> dict:
                         "void?",
                         ("commands", "CommandList*"),
                         ("desc", "RenderPassDesc*"),
+                        ("state", "GraphicsState*"),
+                    ),
+                    api_function(
+                        "cmd_set_graphics_state",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("state", "GraphicsState*"),
+                    ),
+                    api_function(
+                        "full_render_graphics_state",
+                        "GraphicsState?",
+                        ("width", "uint"),
+                        ("height", "uint"),
                     ),
                     api_function(
                         "cmd_end_render_pass",
@@ -570,6 +583,28 @@ def valid_document() -> dict:
                             {
                                 "name": "depth_bias_clamp",
                                 "type": {"name": "float"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "GraphicsState",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "viewport",
+                                "type": {"name": "Viewport"},
+                            },
+                            {
+                                "name": "scissor",
+                                "type": {"name": "ScissorRect"},
+                            },
+                            {
+                                "name": "raster",
+                                "type": {"name": "DynamicRasterState"},
+                            },
+                            {
+                                "name": "depth",
+                                "type": {"name": "DepthState"},
                             },
                         ],
                     },
@@ -2389,6 +2424,145 @@ method gpu::Runtime.is_valid
         self.assertIn(
             "cmd_begin_render_pass has the wrong parameters",
             check_public_api.validate_document(document),
+        )
+
+    def test_requires_complete_graphics_state_schema(self) -> None:
+        for member_name in ("viewport", "scissor", "raster", "depth"):
+            with self.subTest(member_name=member_name):
+                document = valid_document()
+                state = next(
+                    entry for entry in document["modules"]["gpu"]["types"]
+                    if entry["name"] == "GraphicsState"
+                )
+                state["members"] = [
+                    member for member in state["members"]
+                    if member["name"] != member_name
+                ]
+                self.assertIn(
+                    "GraphicsState must match the strict schema",
+                    check_public_api.validate_document(document),
+                )
+
+    def test_requires_explicit_graphics_state_function_signatures(self) -> None:
+        mutations = (
+            (
+                "retired two-argument begin",
+                "cmd_begin_render_pass",
+                lambda function: function["members"].pop(),
+                "cmd_begin_render_pass has the wrong parameters",
+            ),
+            (
+                "graphics state setter parameter",
+                "cmd_set_graphics_state",
+                lambda function: function["members"].pop(),
+                "cmd_set_graphics_state has the wrong parameters",
+            ),
+            (
+                "graphics state setter return",
+                "cmd_set_graphics_state",
+                lambda function: function["return_type"].update(
+                    {"name": "void"}
+                ),
+                "cmd_set_graphics_state has the wrong return type",
+            ),
+            (
+                "full render state dimensions",
+                "full_render_graphics_state",
+                lambda function: function["members"].pop(),
+                "full_render_graphics_state has the wrong parameters",
+            ),
+            (
+                "full render state optional return",
+                "full_render_graphics_state",
+                lambda function: function["return_type"].update(
+                    {"name": "GraphicsState"}
+                ),
+                "full_render_graphics_state has the wrong return type",
+            ),
+        )
+        for label, function_name, mutate, failure in mutations:
+            with self.subTest(label=label):
+                document = valid_document()
+                function = next(
+                    entry
+                    for entry in document["modules"]["gpu"]["functions"]
+                    if entry["name"] == function_name
+                )
+                mutate(function)
+                self.assertIn(
+                    failure,
+                    check_public_api.validate_document(document),
+                )
+
+    def test_guards_transactional_complete_graphics_state_emission(self) -> None:
+        backend = check_public_api.ROOT / "gpu" / "internal" / "vk"
+        render_pass = (backend / "render_pass.c3").read_text(encoding="utf-8")
+        command_state = (backend / "command_state.c3").read_text(
+            encoding="utf-8"
+        )
+        validate = check_public_api.validate_graphics_state_backend_sources
+
+        self.assertEqual(validate(render_pass, command_state), [])
+
+        missing_member = render_pass.replace(
+            "    emit_depth_state(commands, &state.depth);\n",
+            "",
+            1,
+        )
+        self.assertIn(
+            "emit_graphics_state must emit viewport, scissor, raster, "
+            "and depth exactly once in order",
+            validate(missing_member, command_state),
+        )
+
+        early_validation_emission = render_pass.replace(
+            (
+                "    LoweredGraphicsState graphics = "
+                "checked_prepare_graphics_state(\n"
+            ),
+            (
+                "    record_render_pass(commands, &pass, &graphics);\n"
+                "    LoweredGraphicsState graphics = "
+                "checked_prepare_graphics_state(\n"
+            ),
+            1,
+        )
+        self.assertIn(
+            "checked_begin_render_pass must complete lowering, validation, "
+            "and tracking before native render-pass recording",
+            validate(early_validation_emission, command_state),
+        )
+
+        early_tracking_emission = render_pass.replace(
+            (
+                "    track_render_pass(commands, &pass)!;\n"
+                "    record_render_pass(commands, &pass, &graphics);\n"
+            ),
+            (
+                "    record_render_pass(commands, &pass, &graphics);\n"
+                "    track_render_pass(commands, &pass)!;\n"
+            ),
+            1,
+        )
+        self.assertIn(
+            "trusted_tracking_begin_render_pass must complete lowering, "
+            "validation, and tracking before native render-pass recording",
+            validate(early_tracking_emission, command_state),
+        )
+
+        self.assertIn(
+            "retired command render state depth_state_set",
+            validate(
+                render_pass,
+                command_state + "\nbool depth_state_set;\n",
+            ),
+        )
+        self.assertIn(
+            "retired command render state active_render_width",
+            validate(
+                render_pass,
+                command_state + "\nuint active_render_width;\n",
+            ),
         )
 
     def test_rejects_dynamic_depth_in_graphics_pipeline_desc(self) -> None:

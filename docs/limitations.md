@@ -35,6 +35,12 @@ page doesn't explain it, that's a bug in this page — file an issue.
 - **Dynamic rendering only.** No `VkRenderPass`/framebuffer objects, no
   subpasses, no tile-based subpass dependencies. Render targets are
   described per pass begin (`RenderPassDesc`) and that is the whole model.
+- **Graphics state has no implicit default.** Every render-pass begin requires
+  one complete `GraphicsState` containing viewport, scissor, raster, and depth
+  state. `full_render_graphics_state` supplies a conventional full-area packet
+  when both dimensions fit a signed integer. The API is experimental and
+  source-breaking changes are expected: callers using an older two-argument
+  begin must pass the packet and fold their initial partial setters into it.
 - **Texture history is caller-owned.** `TextureBarrier.before` asserts the
   layout, stages, and access established by earlier ordering. The backend
   validates those semantics under `ContractValidation.FULL` and lowers the
@@ -104,7 +110,7 @@ exists (else the limit is compile-time).
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
 | Generated work items | Selected-device semantic limit reported by `DeviceCaps.max_generated_work_count`; zero when unsupported | — | — |
-| Dynamic viewport dimensions and coordinates | Selected-device `maxViewportDimensions` and `viewportBoundsRange`, consumed privately by checked command recording | — | `INVALID_ARGUMENT` |
+| Dynamic viewport dimensions and coordinates | Selected-device `maxViewportDimensions` and `viewportBoundsRange`, consumed privately when validating a complete graphics-state packet or viewport update | — | `INVALID_ARGUMENT` |
 | Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/internal/device.c3`) | — | `SLOT_TABLE_FULL` |
 | Live command allocators per device | 256 (`MAX_COMMAND_ALLOCATORS` in `gpu/internal/vk/command.c3`) | destroy quiescent allocators to recycle generational slots | `SLOT_TABLE_FULL` |
 | Command buffers per allocator | 8 default, 4096 max (`DEFAULT_COMMAND_ALLOCATOR_CAPACITY`, `MAX_COMMAND_ALLOCATOR_CAPACITY` in `gpu/gpu.c3i`) | `CommandAllocatorDesc.command_buffer_capacity` | `INVALID_ARGUMENT` above the maximum; `DEVICE_BUSY` while all configured units are live |
@@ -183,10 +189,13 @@ Anything the device can answer at runtime lives in `DeviceCaps` (filled at
 not reported.
 
 Viewport dimensions and coordinate bounds are an intentional exception: the
-backend consumes them privately to validate `cmd_set_viewport`, while callers
-can submit a value and receive `INVALID_ARGUMENT` without preflighting a public
-cap. They can be promoted into `DeviceCaps` later if a caller-side layout
-query becomes necessary.
+backend consumes them privately to validate pass-begin state,
+`cmd_set_graphics_state`, and `cmd_set_viewport`, while callers can submit a
+value and receive `INVALID_ARGUMENT` without preflighting a public cap.
+Negative viewport height, in-range negative coordinates, reversed depth,
+off-pass overscan, and empty scissors are supported; zero viewport height is
+rejected. These limits can be promoted into `DeviceCaps` later if a caller-side
+layout query becomes necessary.
 
 Surface support is queried separately. `supports_presentation(adapter,
 surface)` preflights device creation; `get_present_mode_support(device,

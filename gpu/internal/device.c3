@@ -108,8 +108,9 @@ alias GetPipelineCacheDataFn @private   = fn usz? (Device*, char[]);
 alias CmdBindPipelineFn @private             = fn void? (CommandEncoderState*, PipelineHandle);
 alias CmdSetDepthStateFn @private            = fn void? (CommandEncoderState*, DepthState*);
 alias CmdSetRasterStateFn @private           = fn void? (CommandEncoderState*, DynamicRasterState*);
+alias CmdSetGraphicsStateFn @private         = fn void? (CommandEncoderState*, GraphicsState*);
 alias CmdDispatchFn @private                 = fn void? (CommandEncoderState*, GpuAddress, Vec3u);
-alias CmdBeginRenderPassFn @private          = fn void? (CommandEncoderState*, RenderPassDesc*);
+alias CmdBeginRenderPassFn @private          = fn void? (CommandEncoderState*, RenderPassDesc*, GraphicsState*);
 alias CmdSetViewportFn @private              = fn void? (CommandEncoderState*, Viewport*);
 alias CmdSetScissorFn @private               = fn void? (CommandEncoderState*, ScissorRect*);
 alias CmdEndRenderPassFn @private            = fn void? (CommandEncoderState*);
@@ -254,6 +255,7 @@ struct CommandOps @private {
     CmdBindPipelineFn             bind_pipeline;
     CmdSetDepthStateFn            set_depth_state;
     CmdSetRasterStateFn           set_raster_state;
+    CmdSetGraphicsStateFn         set_graphics_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;

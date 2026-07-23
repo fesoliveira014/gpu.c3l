@@ -13,6 +13,8 @@ const char[*] PERFORMANCE_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
 const uint PERFORMANCE_PIPELINE_CHURN_COUNT = 16;
+const uint PERFORMANCE_DRAW_COUNT = 4;
+const ulong PERFORMANCE_BEGIN_PACKET_NATIVE_COMMANDS = 11;
 const usz BOUND_PIPELINE_SNAPSHOT_SIZE = 96;
 
 $assert vk::BoundPipeline::size == BOUND_PIPELINE_SNAPSHOT_SIZE;
@@ -314,6 +316,8 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         .width  = 8,
         .height = 8,
     };
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -331,7 +335,7 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         },
     };
     gpu::cmd_texture_barrier(&warmup, &transition)!!;
-    gpu::cmd_begin_render_pass(&warmup, &pass)!!;
+    gpu::cmd_begin_render_pass(&warmup, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&warmup, pipeline);
     gpu::cmd_draw(
         commands:       &warmup,
@@ -354,12 +358,15 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     );
     ulong pipelines_before = vk::pipeline_native_create_count(state);
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     gpu::reset_command_resolution_stats();
-    bind_test_graphics_pipeline(&commands, pipeline);
-    gpu::CommandResolutionStats after_bind =
+    gpu::cmd_begin_render_pass(&commands, &pass, &graphics)!!;
+    gpu::CommandResolutionStats after_begin =
         gpu::command_resolution_stats();
-    assert_warm_command_resolution(after_bind, 2, 1);
+    assert_warm_command_resolution(after_begin, 1);
+    assert(after_begin.native_commands
+            == PERFORMANCE_BEGIN_PACKET_NATIVE_COMMANDS,
+        "render-pass begin emits one native begin and one complete state packet");
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
@@ -367,16 +374,38 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         vertex_count:   3,
         instance_count: 1,
     )!!;
+    gpu::CommandResolutionStats after_first_draw =
+        gpu::command_resolution_stats();
+    assert_warm_command_resolution(after_first_draw, 2);
+    assert(after_first_draw.native_commands
+            == PERFORMANCE_BEGIN_PACKET_NATIVE_COMMANDS + 2,
+        "begin, state packet, and one draw emit exact native work");
+    assert(after_first_draw.pipeline_table_lookups
+            == after_begin.pipeline_table_lookups
+        && after_first_draw.pipeline_cache_lookups
+            == after_begin.pipeline_cache_lookups,
+        "draw performs no additional pipeline resolution");
+    for (uint i = 1; i < PERFORMANCE_DRAW_COUNT; i++) {
+        gpu::cmd_draw(
+            commands:       &commands,
+            vertex_root:    (gpu::GpuAddress)1,
+            fragment_root:  (gpu::GpuAddress)1,
+            vertex_count:   3,
+            instance_count: 1,
+        )!!;
+    }
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
-    assert_warm_command_resolution(resolution, 3, 1);
+    assert_warm_command_resolution(resolution, 1 + PERFORMANCE_DRAW_COUNT);
+    assert(resolution.native_commands
+            == PERFORMANCE_BEGIN_PACKET_NATIVE_COMMANDS
+                + PERFORMANCE_DRAW_COUNT * 2,
+        "begin, state packet, and N draws emit exact native work");
     assert(resolution.pipeline_table_lookups
-            == after_bind.pipeline_table_lookups
+            == after_begin.pipeline_table_lookups
         && resolution.pipeline_cache_lookups
-            == after_bind.pipeline_cache_lookups,
-        "draw performs no additional pipeline resolution");
-    assert(resolution.native_commands == after_bind.native_commands + 2,
-        "draw emits one root push and one native draw");
+            == after_begin.pipeline_cache_lookups,
+        "N draws perform no additional pipeline resolution");
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::internal::RecordingWorkCounters after =

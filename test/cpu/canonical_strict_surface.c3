@@ -216,6 +216,10 @@ fn void pin_commands_and_completion() {
         .width  = 1,
         .height = 1,
     };
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(1, 1) ?? {};
+    graphics_state.raster = raster;
+    graphics_state.depth = depth;
     gpu::SubmitDesc submit = {};
     gpu::CompletionPoint completion = {};
     gpu::GeneratedScratchDesc generated_scratch = {
@@ -269,7 +273,12 @@ fn void pin_commands_and_completion() {
         count_span:         span,
         max_dispatch_count: 1,
     );
-    (void)gpu::cmd_begin_render_pass(&commands, &render_pass);
+    (void)gpu::cmd_begin_render_pass(
+        &commands,
+        &render_pass,
+        &graphics_state,
+    );
+    (void)gpu::cmd_set_graphics_state(&commands, &graphics_state);
     (void)gpu::cmd_set_depth_state(&commands, &depth);
     (void)gpu::cmd_set_raster_state(&commands, &raster);
     (void)gpu::cmd_set_viewport(&commands, &viewport);

@@ -107,10 +107,11 @@ only after completion.
 Goal: compute culls, GPU decides the draw count.
 
 ```c3
-// compute writes DrawIndirectCommand[] + a count word, then bind and execute:
+// Compute writes DrawIndirectCommand[] + a count word.
+gpu::GraphicsState state =
+    gpu::full_render_graphics_state(pass.width, pass.height)!;
+gpu::cmd_begin_render_pass(&cmd, &pass, &state)!;
 gpu::cmd_bind_pipeline(&cmd, pipeline)!;
-gpu::DepthState depth_state = {};
-gpu::cmd_set_depth_state(&cmd, &depth_state)!;
 gpu::cmd_draw_indirect(
     commands:      &cmd,
     vertex_root:   vroot,
@@ -296,20 +297,21 @@ gpu::SamplerDesc shadow_sampler_desc = {
 };
 gpu::SamplerIndex shadow_sampler_index =
     gpu::intern_sampler(&device, &shadow_sampler_desc)!;
-// The shadow pipeline has no color targets and uses D32. Bias is pass state.
-gpu::cmd_bind_pipeline(&cmd, shadow_pipeline)!;
-gpu::DynamicRasterState raster = {
+// The shadow pass has no color targets and uses D32.
+gpu::GraphicsState state =
+    gpu::full_render_graphics_state(pass.width, pass.height)!;
+state.raster = {
     .depth_bias_enable   = true,
     .depth_bias_constant = 1.25f,
     .depth_bias_slope    = 1.75f,
 };
-gpu::cmd_set_raster_state(&cmd, &raster)!;
-gpu::DepthState depth_state = {
+state.depth = {
     .test_enable  = true,
     .write_enable = true,
     .compare      = gpu::CompareOp.LESS,
 };
-gpu::cmd_set_depth_state(&cmd, &depth_state)!;
+gpu::cmd_begin_render_pass(&cmd, &pass, &state)!;
+gpu::cmd_bind_pipeline(&cmd, shadow_pipeline)!;
 ```
 
 ```glsl

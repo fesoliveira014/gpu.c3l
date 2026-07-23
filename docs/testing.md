@@ -144,7 +144,7 @@ TextureView publication and raw TextureIndex sampling in compute
 offscreen render target clear/draw/readback
 dynamic viewport/scissor device-bound validation, exact native lowering,
 validation-clean negative-height and off-pass cases, clipping pixels, pass
-reset, and pipeline-alias persistence
+packet replacement, partial updates, and pipeline-alias persistence
 attachment-view capacity/generation/ownership, creation rollback, texture
 retention, in-flight destruction rejection, and allocation-free pass begin
 borrowed swapchain-view build/acquire/render guards and resize invalidation
@@ -380,10 +380,10 @@ Test names describe behavior, not roadmap or ticket labels.
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
 | Command allocators | exact device/queue binding; default, ceiling, and overflow validation; transactional pool/buffer/host rollback; recyclable generations; begin/reference/generated capacity faults; fixed per-scratch reference indices; epoch reuse; non-waiting destroy in recording/executable/in-flight states; device-child accounting; exact-family pools; and tracking-off zero reference/index storage. |
-| Commands | allocator-owned begin/end/submit, exact linear duplicate visits and epoch rollover, mixed-allocator same-queue retirement, timeline signal/wait, invalid state, completion-safe exact-allocator command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/raster/depth state, retired queue-based signatures, and zero warm allocation or execution-time pipeline creation. |
+| Commands | allocator-owned begin/end/submit, exact linear duplicate visits and epoch rollover, mixed-allocator same-queue retirement, timeline signal/wait, invalid state, completion-safe exact-allocator command-buffer reset/reuse, explicit generated-scratch capacity faults, mandatory complete pass-begin graphics state, complete and partial state updates, retired queue-based signatures, and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline, raster, and depth state; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; pass reset; and pipeline-alias persistence. |
+| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; required complete state at pass begin; transactional rejection without native or command-state mutation; exact ten-command complete packets; optional partial updates; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, per-target immutable identity, and singleton compute/generated-dispatch layouts. |
 | Threading | one explicit allocator per concurrent worker, same-allocator full-validation rejection, synchronized allocator migration and executable handoff, no device-wide recording lock, no temp-pool setup, historical worker churn, private command-buffer/generated-scratch reuse, parallel record, and identical submit. |
@@ -571,14 +571,17 @@ explicit allocator for the declared generated workload and exact public pipeline
 handle. Alias handles for one native pipeline require independent reservations. Each execute
 receives a distinct reserved address, and reuse occurs only after a list is
 discarded.
-The command target enables test-only resolution counters, resets them after
-begin/pipeline bind, reports measured native command count with every resolution
-count, and requires zero registry, retained-pin, lifecycle-vtable, command-table,
-pipeline-table/cache, and policy selections during warm recording. Across every
-validation/tracking policy it also requires exactly one encoder-cell computation
-and one packed-lease comparison per recorded call, with zero duplicate encoder
-field comparisons, device-loss atomic loads, and trusted-backend capability
-checks.
+The command target enables test-only resolution counters and measures complete
+recording sequences. Pass begin reports one native begin-rendering command
+followed by exactly ten dynamic-state commands. A complete
+`cmd_set_graphics_state` replacement reports exactly ten more, while additional
+draws add only their draw commands unless another setter is recorded. The
+target rejects hidden default or state-diff work and requires zero registry,
+retained-pin, lifecycle-vtable, command-table, pipeline-table/cache, and policy
+selections during warm recording. Across every validation/tracking policy it
+also requires exactly one encoder-cell computation and one packed-lease
+comparison per recorded call, with zero duplicate encoder field comparisons,
+device-loss atomic loads, and trusted-backend capability checks.
 These process-wide counters use relaxed atomics and are compared only across
 externally synchronized benchmark intervals. The native count covers every
 Vulkan command emitted by recording paths.
@@ -792,12 +795,18 @@ compare exact values
 Graphics:
 
 ```text
+construct a complete GraphicsState for the render area
+begin the pass with that packet
 clear to known color
 render primitive
 copy the render target to readback storage
 sample a small set of pixels
 compare with tolerance for floating formats
 ```
+
+Separate state tests replace the complete packet and exercise each optional
+partial setter. Invalid pass or state input must leave active-pass metadata,
+tracked references, and native command emission unchanged.
 
 ## 13. Leak verification
 
