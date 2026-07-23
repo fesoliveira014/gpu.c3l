@@ -56,6 +56,27 @@ struct CommandRecordingStats {
     ulong recording_allocations;
 }
 
+struct RecordingHostAllocatorSnapshot @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    ulong allocations;
+    ulong resizes;
+    ulong releases;
+}
+
+struct RecordingHostAllocator (std::core::mem::alloc::Allocator) @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    HostAllocator inner;
+    Atomic{ulong} allocations;
+    Atomic{ulong} resizes;
+    Atomic{ulong} releases;
+}
+
 struct PreparedBufferCopy {
     ResolvedSpan src;
     ResolvedSpan dst;
@@ -187,6 +208,49 @@ struct CommandAllocatorTable {
     uint                   next_new;
 }
 
+fn void*? RecordingHostAllocator.acquire(
+    &self,
+    sz size,
+    AllocInitType init_type,
+    sz alignment,
+) @dynamic @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    void* pointer = self.inner.acquire(size, init_type, alignment)!;
+    (void)self.allocations.add(1, AtomicOrdering.RELAXED);
+    return pointer;
+}
+
+fn void*? RecordingHostAllocator.resize(
+    &self,
+    void* old_pointer,
+    sz size,
+    sz alignment,
+) @dynamic @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    void* pointer = self.inner.resize(old_pointer, size, alignment)!;
+    (void)self.resizes.add(1, AtomicOrdering.RELAXED);
+    return pointer;
+}
+
+fn void RecordingHostAllocator.release(
+    &self,
+    void* old_pointer,
+    bool aligned,
+) @dynamic @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    self.inner.release(old_pointer, aligned);
+    (void)self.releases.add(1, AtomicOrdering.RELAXED);
+}
+
 fn gpu::CommandAllocatorHandle? CommandAllocatorTable.alloc(
     &self,
     CommandAllocatorSlot value,
@@ -250,6 +314,39 @@ fn void? CommandAllocatorTable.free(
     self.free_head = handle.index + 1;
 }
 
+fn void install_recording_host_allocator(
+    VkDeviceState* state,
+) @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    state.recording_host_allocator = {
+        .inner = state.host_allocator,
+    };
+    state.host_allocator = &state.recording_host_allocator;
+}
+
+fn RecordingHostAllocatorSnapshot recording_host_allocator_snapshot(
+    VkDeviceState* state,
+) @if(
+    env::TESTING
+    || $feature(COMMAND_RESOLUTION_STATS)
+    || $feature(COMMAND_RECORDING_WORK_STATS)
+) {
+    return {
+        .allocations = state.recording_host_allocator.allocations.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .resizes = state.recording_host_allocator.resizes.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .releases = state.recording_host_allocator.releases.load(
+            AtomicOrdering.RELAXED,
+        ),
+    };
+}
+
 fn void reset_root_push_observation() @if(env::TESTING) {
     last_compute_root.store(0, AtomicOrdering.RELAXED);
     last_compute_layout.store(0, AtomicOrdering.RELAXED);
@@ -270,17 +367,6 @@ fn RootPushObservation root_push_observation() @if(env::TESTING) {
             AtomicOrdering.RELAXED,
         ),
     };
-}
-
-fn void note_recording_host_allocation(VkDeviceState* state) {
-    $if env::TESTING
-            || $feature(COMMAND_RESOLUTION_STATS)
-            || $feature(COMMAND_RECORDING_WORK_STATS):
-        (void)state.recording_host_allocations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
 }
 
 fn void note_command_buffer_reset(VkDeviceState* state) {
@@ -507,9 +593,6 @@ fn void? initialize_command_allocator_slot_with_ops(
     );
     if (catch available) return gpu::OUT_OF_HOST_MEMORY~;
     slot.available = available;
-    note_recording_host_allocation(state);
-    note_recording_host_allocation(state);
-    note_recording_host_allocation(state);
 
     uint reference_capacity = state.validation_policy.track_lifetimes
         ? desc.max_resource_references_per_list
@@ -526,7 +609,6 @@ fn void? initialize_command_allocator_slot_with_ops(
             return gpu::OUT_OF_HOST_MEMORY~;
         }
         slot.reference_storage = reference_storage;
-        note_recording_host_allocation(state);
         CommandReferenceIndexCell[]? reference_index_storage =
             alloc::new_array_try(
                 state.host_allocator,
@@ -537,7 +619,6 @@ fn void? initialize_command_allocator_slot_with_ops(
             return gpu::OUT_OF_HOST_MEMORY~;
         }
         slot.reference_index_storage = reference_index_storage;
-        note_recording_host_allocation(state);
     }
     uint preprocess_capacity =
         desc.max_generated_preprocess_buffers_per_list;
@@ -560,8 +641,6 @@ fn void? initialize_command_allocator_slot_with_ops(
             return gpu::OUT_OF_HOST_MEMORY~;
         }
         slot.reservations = reservations;
-        note_recording_host_allocation(state);
-        note_recording_host_allocation(state);
     }
     for (uint i = 0; i < capacity; i++) {
         if (reference_capacity > 0) {
@@ -950,7 +1029,6 @@ fn void? vk_reserve_generated_scratch(
             return gpu::OUT_OF_HOST_MEMORY~;
         }
         reserved = reserved_result;
-        note_recording_host_allocation(state);
     }
     defer catch free_reserved_generated_preprocess_buffers(state, reserved);
     for (uint i = 0; i < desc.preprocess_buffer_count; i++) {
@@ -3057,10 +3135,10 @@ fn gpu::internal::RecordingWorkCounters command_recording_work_counters(
     || $feature(COMMAND_RESOLUTION_STATS)
     || $feature(COMMAND_RECORDING_WORK_STATS)
 ) {
+    RecordingHostAllocatorSnapshot allocator =
+        recording_host_allocator_snapshot(state);
     gpu::internal::RecordingWorkCounters counters = {
-        .host_allocations = state.recording_host_allocations.load(
-            AtomicOrdering.RELAXED,
-        ),
+        .host_allocations = allocator.allocations + allocator.resizes,
         .command_pool_creations = state.recording_command_pool_creations.load(
             AtomicOrdering.RELAXED,
         ),
@@ -3107,7 +3185,12 @@ fn void reset_command_recording_work_counters(
     || $feature(COMMAND_RESOLUTION_STATS)
     || $feature(COMMAND_RECORDING_WORK_STATS)
 ) {
-    state.recording_host_allocations.store(0, AtomicOrdering.RELAXED);
+    state.recording_host_allocator.allocations.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
+    state.recording_host_allocator.resizes.store(0, AtomicOrdering.RELAXED);
+    state.recording_host_allocator.releases.store(0, AtomicOrdering.RELAXED);
     state.recording_command_pool_creations.store(0, AtomicOrdering.RELAXED);
     state.recording_command_buffer_allocations.store(
         0,

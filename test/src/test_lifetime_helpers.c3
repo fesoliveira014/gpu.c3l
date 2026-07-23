@@ -2,10 +2,26 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
+import gpu::internal::vk @public;
+import std::core::mem;
+import std::core::mem::alloc;
+
+alias ConfinedThreadAllocatorFn @if(env::TESTING) = fn void? (void*);
 
 struct OwnedSpan {
     gpu::GpuAllocation allocation;
     gpu::GpuSpan       span;
+}
+
+fn void? observe_confined_thread_allocator(
+    vk::RecordingHostAllocator* allocator,
+    ConfinedThreadAllocatorFn callback,
+    void* user_data,
+) @if(env::TESTING) {
+    Allocator previous = mem;
+    mem = allocator;
+    defer mem = previous;
+    callback(user_data)!;
 }
 
 fn gpu::Device? create_test_device(
