@@ -134,6 +134,8 @@ format feature queries agree with adapter-backed texture creation
 command list begin/end/submit
 completion-point signaling, retired-prefix publication, cached polls/waits,
 and deterministic publication/concurrent-retirement races
+exact ordinary/generated completion-wait stage lowering and distinct-family
+compute-producer to graphics generated-work execution when topology permits
 global semantic barrier hazard matrix submission
 copy upload -> readback
 root-pointer compute shader

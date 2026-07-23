@@ -1157,8 +1157,8 @@ struct CompletionPoint {
 
 <* A published queue completion and its first destination consumers. *>
 struct CompletionWait {
-    CompletionPoint        point;
-    StageMask              before;
+    CompletionPoint         point;
+    StageMask               before;
     CompletionConsumerFlags consumers;
 }
 

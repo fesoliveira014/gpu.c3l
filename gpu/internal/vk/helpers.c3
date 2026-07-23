@@ -493,6 +493,7 @@ fn vk::PipelineStageFlags2? submit_wait_scope_to_vk(
     gpu::StageMask stages,
     gpu::CompletionConsumerFlags consumers,
     vk::QueueFlags flags,
+    bool generated_work_enabled,
 ) {
     if (!gpu::internal::completion_wait_scope_valid(stages, consumers)
         || !barrier_stage_mask_supported(stages, flags)) {
@@ -510,6 +511,9 @@ fn vk::PipelineStageFlags2? submit_wait_scope_to_vk(
     }
     if (consumers.draw_arguments) {
         mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+        if (generated_work_enabled) {
+            mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
+        }
     }
     return (vk::PipelineStageFlags2)mask;
 }

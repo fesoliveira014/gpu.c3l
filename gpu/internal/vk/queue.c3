@@ -2110,9 +2110,10 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 sequence,
             )!;
             vk::PipelineStageFlags2 stages = submit_wait_scope_to_vk(
-                wait.before,
-                wait.consumers,
-                target.queue_flags,
+                stages:         wait.before,
+                consumers:      wait.consumers,
+                flags:          target.queue_flags,
+                generated_work_enabled: state.generated_work.enabled,
             )!;
             inputs.completion_waits[i] = {
                 .source   = source,

@@ -47,7 +47,8 @@ page doesn't explain it, that's a bug in this page — file an issue.
   sharing, while aliased roles stay exclusive. Barriers and queue ordering remain
   explicit. Completion waits require at least one destination-queue-supported
   device stage or command consumer; `draw_arguments` is supported only on
-  graphics or compute queues. Swapchain readiness remains stage-only. Host and
+  graphics or compute queues and includes implicit command preprocessing when
+  generated work is enabled. Swapchain readiness remains stage-only. Host and
   presentation stages are not valid wait destinations. Exclusive cross-family
   ownership transfers are unsupported.
 - **Wireframe polygon rasterization is optional.** `DeviceCaps.line_polygon_mode`

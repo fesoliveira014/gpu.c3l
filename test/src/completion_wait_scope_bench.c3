@@ -438,15 +438,15 @@ fn int main() {
             &device,
             independent_output.span,
         )!!.ptr;
-        assert(all_output_values[0] == 2.0f
-                && all_output_values[WAIT_SCOPE_ITEMS - 1] == 2.0f,
-            ".all preserves indirect dispatch output");
-        assert(narrow_output_values[0] == 2.0f
-                && narrow_output_values[WAIT_SCOPE_ITEMS - 1] == 2.0f,
-            "draw_arguments preserves indirect dispatch output");
-        assert(independent_output_values[0] == 2.0f
-                && independent_output_values[WAIT_SCOPE_ITEMS - 1] == 2.0f,
-            "independent work completes before both waits return");
+        if (all_output_values[0] != 2.0f
+            || all_output_values[WAIT_SCOPE_ITEMS - 1] != 2.0f
+            || narrow_output_values[0] != 2.0f
+            || narrow_output_values[WAIT_SCOPE_ITEMS - 1] != 2.0f
+            || independent_output_values[0] != 2.0f
+            || independent_output_values[WAIT_SCOPE_ITEMS - 1] != 2.0f) {
+            io::eprintfn("completion wait scope output mismatch");
+            return 1;
+        }
         io::printfn(
             "status=advisory groups=%d all=%.6f ms draw_arguments=%.6f ms ratio=%.6f",
             WAIT_SCOPE_GROUPS,

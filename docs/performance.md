@@ -356,8 +356,9 @@ for collecting debug cost with a matching layer.
   choose the earliest real consumer in `CompletionWait.before` and
   `CompletionWait.consumers`; an unnecessarily broad `.all` mask can reduce
   available overlap. Use `consumers.draw_arguments` for GPU-produced indirect,
-  count, and implicitly preprocessed generated-command input. Narrower waits
-  permit overlap but do not guarantee it.
+  count, and implicitly preprocessed generated-command input. The Vulkan backend
+  includes command-preprocess scope automatically when generated work is enabled.
+  Narrower waits permit overlap but do not guarantee it.
 
 `completion_wait_scope_bench` compares `.all` with
 `consumers.draw_arguments` over a real compute-producer to indirect-dispatch

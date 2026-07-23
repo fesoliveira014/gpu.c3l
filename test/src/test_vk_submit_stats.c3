@@ -17,6 +17,7 @@ ulong completion_counter_value;
 vk::Result completion_counter_result;
 uint same_queue_elision_submit_calls;
 uint draw_argument_wait_submit_calls;
+vk::PipelineStageFlags2 expected_draw_argument_wait_stages;
 
 struct SubmissionCheckpointGate {
     vk::SubmissionCheckpoint target;
@@ -420,8 +421,8 @@ fn vk::Result observe_draw_argument_wait(
     assert(submits[0].wait_semaphore_info_count == 1,
         "the cross-queue dependency emits one native wait");
     assert(submits[0].p_wait_semaphore_infos[0].stage_mask
-            == vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
-        "the native wait uses exactly the indirect consumer stage");
+            == expected_draw_argument_wait_stages,
+        "the native wait uses the exact generated-work-aware consumer stages");
     draw_argument_wait_submit_calls++;
     return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 }
@@ -1310,6 +1311,7 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
         }
         gpu::Device device = gpu::create_device(&adapter, &request)!!;
         defer gpu::destroy_device(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
         gpu::Queue compute = gpu::get_queue(
             &device,
             gpu::QueueKind.COMPUTE,
@@ -1329,6 +1331,15 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
         }};
         gpu::SubmitDesc consumer = { .completion_waits = waits[..] };
         draw_argument_wait_submit_calls = 0;
+        expected_draw_argument_wait_stages = (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+        if (caps.generated_work) {
+            ulong command_preprocess = (ulong)
+                vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
+            expected_draw_argument_wait_stages = (vk::PipelineStageFlags2)(
+                (ulong)expected_draw_argument_wait_stages | command_preprocess
+            );
+        }
 
         assert(@catch(vk::vk_submit_with(
             graphics,

@@ -385,6 +385,12 @@ fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
 fn void compute_generated_indexed_indirect_draw() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
+    if (!distinct_graphics_compute_families(
+            &device,
+            "compute-generated indexed indirect draw",
+        )) {
+        return;
+    }
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_ind_target(&device);
@@ -479,7 +485,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
         device:       &device,
         size:         BuildRoot::size,
         memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .compute },
+        access:       { .graphics, .compute },
         debug_name:   "indexed_build_root",
     )!!;
     defer free_owned_span(&device, &root_owned)!!;
@@ -613,6 +619,10 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         );
         return;
     }
+    bool cross_family_generated_wait = distinct_graphics_compute_families(
+        &device,
+        "cross-family generated-work completion wait",
+    );
 
     IndDrawCtx draw = make_ind_draw_ctx(&device);
     defer destroy_ind_draw_ctx(&device, &draw);
@@ -659,7 +669,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         device:       &device,
         size:         gpu::GeneratedDrawRecord::size,
         memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics },
+        access:       { .graphics, .compute },
         debug_name:   "generated_draw_records",
     )!!;
     defer free_owned_span(&device, &draw_records)!!;
@@ -667,7 +677,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         device:       &device,
         size:         gpu::GeneratedDrawIndexedRecord::size,
         memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics },
+        access:       { .graphics, .compute },
         debug_name:   "generated_indexed_records",
     )!!;
     defer free_owned_span(&device, &indexed_records)!!;
@@ -675,7 +685,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         device:       &device,
         size:         gpu::GeneratedDispatchRecord::size,
         memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics },
+        access:       { .graphics, .compute },
         debug_name:   "generated_dispatch_records",
     )!!;
     defer free_owned_span(&device, &dispatch_records)!!;
@@ -683,7 +693,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         device:       &device,
         size:         4,
         memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics },
+        access:       { .graphics, .compute },
         debug_name:   "generated_work_count",
     )!!;
     defer free_owned_span(&device, &count)!!;
@@ -830,7 +840,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         device:       &device,
         size:         GeneratedWorkBuildRoot::size,
         memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics },
+        access:       { .graphics, .compute },
         debug_name:   "generated_work_build_root",
     )!!;
     defer free_owned_span(&device, &build_root)!!;
@@ -872,6 +882,13 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
+    gpu::Queue producer_queue = queue;
+    if (cross_family_generated_wait) {
+        producer_queue = gpu::get_queue(
+            &device,
+            gpu::QueueKind.COMPUTE,
+        )!!;
+    }
     gpu::GeneratedScratchDesc dispatch_scratch = {
         .pipeline                = dispatch_pipeline,
         .kind                    = gpu::GeneratedWorkKind.DISPATCH,
@@ -931,22 +948,57 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         "each reservation queries its declared maximum sequence count");
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    bind_test_compute_pipeline(&commands, build_pipeline);
-    gpu::cmd_dispatch(
-        commands: &commands,
-        root:     test_span_address(&device, build_root.span),
-        groups:   { 1, 1, 1 },
-    )!!;
-    gpu::Barrier generated_ready = {
-        .before  = { .compute = true },
-        .after   = {
-            .compute = true,
-            .vertex_shader = true,
-            .fragment_shader = true,
-        },
-        .hazards = { .draw_arguments = true },
-    };
-    gpu::cmd_barrier(&commands, &generated_ready)!!;
+    gpu::CompletionPoint generated_records_ready;
+    gpu::CommandAllocator producer_allocator;
+    gpu::ExecutableCommandList producer_executable;
+    bool producer_resources_created;
+    defer {
+        if (producer_resources_created) {
+            discard_test_executable(&producer_executable)!!;
+            gpu::destroy_command_allocator(&producer_allocator)!!;
+        }
+    }
+    if (cross_family_generated_wait) {
+        producer_allocator = gpu::create_command_allocator(
+            &device,
+            producer_queue,
+        )!!;
+        producer_resources_created = true;
+        gpu::CommandList producer = gpu::begin_commands(&producer_allocator)!!;
+        defer discard_test_commands(&producer)!!;
+        bind_test_compute_pipeline(&producer, build_pipeline);
+        gpu::cmd_dispatch(
+            commands: &producer,
+            root:     test_span_address(&device, build_root.span),
+            groups:   { 1, 1, 1 },
+        )!!;
+        producer_executable = gpu::end_commands(&producer)!!;
+        gpu::ExecutableCommandList[1] producer_lists = { producer_executable };
+        gpu::SubmitDesc producer_submit = {
+            .command_lists = producer_lists[..],
+        };
+        generated_records_ready = gpu::submit(
+            producer_queue,
+            &producer_submit,
+        )!!;
+    } else {
+        bind_test_compute_pipeline(&commands, build_pipeline);
+        gpu::cmd_dispatch(
+            commands: &commands,
+            root:     test_span_address(&device, build_root.span),
+            groups:   { 1, 1, 1 },
+        )!!;
+        gpu::Barrier generated_ready = {
+            .before  = { .compute = true },
+            .after   = {
+                .compute = true,
+                .vertex_shader = true,
+                .fragment_shader = true,
+            },
+            .hazards = { .draw_arguments = true },
+        };
+        gpu::cmd_barrier(&commands, &generated_ready)!!;
+    }
 
     bind_test_compute_pipeline(&commands, dispatch_pipeline);
     gpu::cmd_dispatch_generated(
@@ -1263,6 +1315,14 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionWait[1] waits;
+    if (cross_family_generated_wait) {
+        waits[0] = {
+            .point     = generated_records_ready,
+            .consumers = { .draw_arguments },
+        };
+        submit.completion_waits = waits[..];
+    }
     gpu::CompletionPoint completion = submit_test_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
