@@ -369,6 +369,7 @@ fn void rollback_command_references(
     CommandRecord* record,
     uint checkpoint,
 ) {
+    if (record.scratch.reference_count == checkpoint) return;
     while (record.scratch.reference_count > checkpoint) {
         record.scratch.reference_count--;
         release_tracked_command_reference(

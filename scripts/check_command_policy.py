@@ -408,6 +408,34 @@ def check(root: Path = ROOT) -> list[str]:
                     f"{function.relative}:{function.line}:{function.name}"
                 )
 
+    clear_functions = functions.get("clear_command_scratch_references", ())
+    if len(clear_functions) != 1:
+        errors.append(
+            "expected exactly one clear_command_scratch_references declaration"
+        )
+    for function in clear_functions:
+        release = re.search(
+            r"\brelease_tracked_command_references\s*\(\s*state\s*,"
+            r"\s*scratch\.references\s*,\s*scratch\.reference_count\s*,?\s*\)",
+            function.body,
+        )
+        reset = re.search(
+            r"\breset_command_reference_index\s*\(",
+            function.body,
+        )
+        count_clear = re.search(
+            r"\bscratch\.reference_count\s*=\s*0\s*;",
+            function.body,
+        )
+        if (release is None or count_clear is None or reset is None
+                or count_clear.start() < release.end()
+                or reset.start() < count_clear.end()):
+            errors.append(
+                "command scratch clear must release its reference list before "
+                "resetting the reference index at "
+                f"{function.relative}:{function.line}:{function.name}"
+            )
+
     for function_name, retain_pattern in POST_RETAIN_PUBLICATION_MARKERS.items():
         for function in functions.get(function_name, ()):
             retained = retain_pattern.search(function.body)
