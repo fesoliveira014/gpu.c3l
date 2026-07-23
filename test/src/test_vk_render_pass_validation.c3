@@ -658,7 +658,7 @@ fn void viewport_rejections_preserve_previous_native_state() @test {
         .max_depth = 1.0f,
     };
     gpu::cmd_set_viewport(&fixture.commands, &accepted)!!;
-    gpu::Viewport[17] rejected = {
+    gpu::Viewport[18] rejected = {
         { .width = 0.0f, .height = 1.0f, .max_depth = 1.0f },
         { .width = 1.0f, .height = 0.0f, .max_depth = 1.0f },
         { .width = 1.0f, .height = -0.0f, .max_depth = 1.0f },
@@ -675,6 +675,7 @@ fn void viewport_rejections_preserve_previous_native_state() @test {
         { .width = 1.0f, .height = -float::inf, .max_depth = 1.0f },
         { .width = 1.0f, .height = 1.0f, .min_depth = float::nan, .max_depth = 1.0f },
         { .width = 1.0f, .height = 1.0f, .max_depth = float::inf },
+        { .width = 1.0f, .height = 1.0f, .min_depth = -0.1f, .max_depth = 1.0f },
         { .width = 1.0f, .height = 1.0f, .max_depth = 1.1f },
     };
     foreach (&viewport : rejected) {
@@ -872,4 +873,45 @@ fn void all_policies_lower_dynamic_state_identically() @test {
         &checked_observation.scissor,
         &scissor,
     ), "trusted, boundary, and checked scissor lowering is identical");
+}
+
+fn void trusted_dynamic_state_bypasses_checked_device_bounds() @test {
+    DynamicStateFixture trusted = make_dynamic_state_fixture(
+        gpu::ContractValidation.TRUSTED,
+    );
+    defer destroy_dynamic_state_fixture(&trusted);
+    DynamicStateFixture checked = make_dynamic_state_fixture(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&checked);
+    checked.state.viewport_limits = {
+        .max_width  = 1,
+        .max_height = 1,
+        .min_bound  = 0.0f,
+        .max_bound  = 1.0f,
+    };
+
+    gpu::Viewport over_limit = {
+        .width     = 2.0f,
+        .height    = 1.0f,
+        .max_depth = 1.0f,
+    };
+    gpu::cmd_set_viewport(&trusted.commands, &over_limit)!!;
+    assert(@catch(gpu::cmd_set_viewport(
+        &checked.commands,
+        &over_limit,
+    )) == gpu::INVALID_ARGUMENT,
+        "FULL rejects a device-over-limit viewport");
+
+    vk::DynamicStateObservation trusted_observation =
+        vk::dynamic_state_observation(trusted.state);
+    vk::DynamicStateObservation checked_observation =
+        vk::dynamic_state_observation(checked.state);
+    assert(trusted_observation.viewport_emissions == 1
+        && checked_observation.viewport_emissions == 0,
+        "TRUSTED forwards while FULL rejects before emission");
+    assert(native_viewport_matches(
+        &trusted_observation.viewport,
+        &over_limit,
+    ), "TRUSTED preserves the over-limit native viewport");
 }
