@@ -539,10 +539,7 @@ fn void record_render_pass(
         }
     $endif
     emit_graphics_state(commands, graphics);
-    record.active_render_width = pass.width;
-    record.active_render_height = pass.height;
     record.active_render = pass.compatibility;
-    record.depth_state_set = true;
     record.state = CommandState.RECORDING_RENDER_PASS;
 }
 
@@ -1182,10 +1179,7 @@ fn void? vk_cmd_end_render_pass(gpu::internal::CommandEncoderState* commands) @p
         && record.bound_pipeline.kind == PipelineKind.GRAPHICS) {
         record.bound_pipeline = {};
     }
-    record.active_render_width = 0;
-    record.active_render_height = 0;
     record.active_render = {};
-    record.depth_state_set = false;
     record.state = CommandState.RECORDING;
 }
 
@@ -1201,7 +1195,6 @@ fn void? vk_cmd_set_depth_state(
         return gpu::INVALID_ARGUMENT~;
     }
     emit_depth_state(commands, depth);
-    record.depth_state_set = true;
 }
 
 fn void? trusted_set_depth_state(
@@ -1214,7 +1207,6 @@ fn void? trusted_set_depth_state(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     emit_depth_state(commands, depth);
-    record.depth_state_set = true;
 }
 
 fn void? checked_set_depth_state(
@@ -1283,7 +1275,6 @@ fn BoundPipeline*? validate_graphics_execution_state(
         expected_kind: PipelineKind.GRAPHICS,
         operation:     operation,
     )!;
-    if (!record.depth_state_set) return gpu::COMMAND_RECORDING_ERROR~;
     return pipeline;
 }
 
@@ -1315,7 +1306,6 @@ fn void push_graphics_roots(
 }
 
 fn BoundPipeline? graphics_pipeline_snapshot(CommandRecord* record) {
-    if (!record.depth_state_set) return gpu::COMMAND_RECORDING_ERROR~;
     return bound_pipeline_snapshot(record);
 }
 
@@ -2307,7 +2297,6 @@ fn BoundPipeline*? validate_generated_graphics_execution_state(
         expected_kind: PipelineKind.GRAPHICS,
         operation:     operation,
     )!;
-    if (!record.depth_state_set) return gpu::COMMAND_RECORDING_ERROR~;
     return pipeline;
 }
 
