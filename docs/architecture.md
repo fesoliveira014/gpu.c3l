@@ -619,8 +619,10 @@ dereferencing it.
 ### Graphics
 
 ```text
-cmd_begin_render_pass(command_list, render_pass_desc)
+full_render_graphics_state(width, height)
+cmd_begin_render_pass(command_list, render_pass_desc, graphics_state)
 cmd_bind_pipeline(command_list, pipeline)
+cmd_set_graphics_state(command_list, graphics_state)
 cmd_set_raster_state(command_list, raster_state)
 cmd_set_depth_state(command_list, depth_state)
 cmd_set_viewport(command_list, viewport)
@@ -630,15 +632,21 @@ cmd_draw_indexed(command_list, vertex_root, fragment_root, index_span, index_cou
 cmd_end_render_pass(command_list)
 ```
 
-Pass begin records full-pass viewport/scissor defaults and the zero raster
-default: triangles, no culling, counter-clockwise front faces, and disabled
-depth bias. It requires a fresh depth-state command before drawing. Raster,
-viewport, and scissor state persist across pipeline binds until another setter
-or the next pass begin. Their setters, including `cmd_set_raster_state`, require
-an active render pass. They remain outside pipeline keys, so handle aliasing
-cannot overwrite caller-selected command state. Draws require an active
-graphics pipeline, push both roots unchanged, and perform no native pipeline
-creation.
+Pass begin takes one complete `GraphicsState` packet containing viewport,
+scissor, raster, and depth state. Pass and state preparation is transactional:
+validation, lowering, and attachment tracking complete before native rendering
+begins or active-pass state is published. A successful begin emits a fixed
+ten-command packet: viewport, scissor, five raster commands, and three depth
+commands. The backend does not synthesize defaults or maintain a
+`depth_state_set` flag.
+
+`cmd_set_graphics_state` replaces the complete packet in the same fixed order.
+The raster, depth, viewport, and scissor setters remain optional partial updates
+inside an active pass. State persists across pipeline binds until another
+setter or pass begin supplies it. Dynamic state remains outside pipeline keys,
+so handle aliasing cannot overwrite caller-selected command state. Draws
+require an active graphics pipeline, push both roots unchanged, and perform no
+native pipeline creation.
 
 Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex input is allowed for simple paths, but it is not the preferred data model.
 

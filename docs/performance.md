@@ -160,7 +160,7 @@ subsystem snapshots:
 |---|---|
 | Cold allocator creation | Host allocations, exactly one exact-family command-pool create, one complete native command-buffer allocation call, and configured buffer count |
 | Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and pre-bind `CommandResolutionStats` |
-| Warm render pass | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, and native command emission |
+| Warm begin + state packet + draw | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, exactly ten dynamic-state commands per complete packet, and native draw emission |
 | Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
@@ -175,6 +175,12 @@ identity comparisons, device-loss loads, and trusted-backend capability
 comparisons are explicit structural prohibitions checked against the warm
 frontend and trusted backend sources; they are not represented as runtime
 counter evidence.
+
+Pass begin accounts for one native begin-rendering command followed by exactly
+ten dynamic-state commands. A complete `cmd_set_graphics_state` replacement
+accounts for exactly ten more; additional draws scale only with their draw
+commands unless the caller records another setter. Warm evidence rejects hidden
+defaults, state diffing, and dirty-bit work.
 
 Warm command-buffer reset is expected reuse evidence. Warm host allocation is
 prohibited in every policy mode; tracking modes retain into fixed reference
@@ -347,9 +353,10 @@ for collecting debug cost with a matching layer.
 
 - Reuse caller-owned upload and destination allocations only after their
   covering completion point completes.
-- Cache pipelines; command-time topology, cull, front-face, and depth-bias
-  permutations should reuse one immutable pipeline and change state with
-  `cmd_set_raster_state`.
+- Cache pipelines; put the initial topology, cull, front-face, depth-bias,
+  viewport, scissor, and depth state in the pass-begin packet. Later
+  permutations should reuse one immutable pipeline and change state with the
+  complete or partial setters.
 - Create one allocator per concurrently recording worker and exact queue before
   timing. Allocator creation is cold setup; `DEVICE_BUSY` means its fixed command
   buffer count is already live, while `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`
