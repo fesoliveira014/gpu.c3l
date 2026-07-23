@@ -506,7 +506,8 @@ is allowed; allocator creation occurs before the measured interval, and
 host/VMA allocation, command-buffer allocation/free, command-pool creation,
 image-view creation, and pipeline/shader creation are required to remain zero. Resolution
 snapshots begin before pipeline binding: binding the opaque pipeline handle
-performs exactly one pipeline-table and one pipeline-cache lookup, while
+performs exactly one pipeline-table and one pipeline-cache lookup and records
+one `pipeline_bind_commands` increment for the selected bind point, while
 registry, retained-pin, lifecycle-vtable, command-table, and policy work remain
 zero. Dispatch and draw add no further resolution and each emits exactly one
 root push plus its native execution command. The dispatch test also replaces

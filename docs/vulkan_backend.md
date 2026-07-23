@@ -601,8 +601,9 @@ Topology, cull mode, front face, depth bias, viewport, scissor, and depth state
 are absent from `PipelineKey` and `PipelineSlot`. `PipelineKey` stores each
 color target's format, blend equation, and write mask, plus depth format,
 sample count, polygon mode, and shader identity. Explicit pipeline binding
-emits the native pipeline and heap binds when the active cache entry changes;
-rebinding the same entry or an alias emits neither. `cmd_set_raster_state`
+emits the native pipeline and heap binds when the selected bind point's cache
+entry changes; graphics and compute selections are independent, and rebinding
+the same entry or an alias emits neither. `cmd_set_raster_state`
 emits the promoted Vulkan 1.3 topology,
 cull, front-face, depth-bias-enable, and depth-bias commands as one validated
 operation and requires an active render pass. `cmd_set_depth_state` emits the
@@ -684,8 +685,8 @@ bounded encoder cell and one lease comparison, then uses those cached pointers;
 trusted backend entries do not repeat capability null checks. Only lifecycle
 operations continue through the device vtable and report device loss. The record identifies the
 originating allocator and fixed buffer/scratch index, and owns the exact public
-queue, lifecycle state, bound-pipeline
-snapshot, and pending texture transitions.
+queue, lifecycle state, logical and bind-point native pipeline snapshots, and
+pending texture transitions.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
 

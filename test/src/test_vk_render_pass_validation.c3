@@ -586,18 +586,20 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     assert(@catch(gpu::cmd_bind_pipeline(&in_pass, draw.graphics))
         == gpu::INVALID_ARGUMENT,
         "binding rejects a pipeline incompatible with the active render pass");
-    assert(in_pass_record.bound_pipeline.handle == gpu::PIPELINE_HANDLE_INVALID,
+    assert(in_pass_record.logical_pipeline.handle == gpu::PIPELINE_HANDLE_INVALID,
         "in-pass incompatibility leaves the active pipeline unchanged");
     assert(in_pass_record.scratch.reference_count == in_pass_references,
         "in-pass incompatibility retains no pipeline reference");
     gpu::cmd_end_render_pass(&in_pass)!!;
 }
 
-fn void end_render_pass_scopes_graphics_binding_to_pass() @test {
+fn void preserves_graphics_binding_across_render_passes() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
     gpu::TextureHandle first = make_render_validation_target(
         &device,
         gpu::Format.RGBA8_UNORM,
@@ -605,7 +607,7 @@ fn void end_render_pass_scopes_graphics_binding_to_pass() @test {
     defer gpu::destroy_texture(&device, first)!!;
     gpu::TextureHandle second = make_render_validation_target(
         &device,
-        gpu::Format.BGRA8_UNORM,
+        gpu::Format.RGBA8_UNORM,
     );
     defer gpu::destroy_texture(&device, second)!!;
     gpu::AttachmentViewHandle first_view = create_test_attachment_view(
@@ -644,13 +646,21 @@ fn void end_render_pass_scopes_graphics_binding_to_pass() @test {
     record_val_target_to_attach(&commands, first);
     record_val_target_to_attach(&commands, second);
     gpu::cmd_begin_render_pass(&commands, &first_pass, &graphics_state)!!;
+    gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    assert(record.bound_pipeline.handle == gpu::PIPELINE_HANDLE_INVALID,
-        "ending a render pass releases the graphics pipeline binding");
+    assert(record.logical_pipeline.handle == draw.graphics,
+        "ending a render pass preserves the logical graphics binding");
+    assert(record.native_graphics_pipeline.pipeline != null,
+        "ending a render pass preserves the native graphics binding");
+    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
     gpu::cmd_begin_render_pass(&commands, &second_pass, &graphics_state)!!;
+    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_end_render_pass(&commands)!!;
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 2,
+        "graphics and compute bind points retain independent native bindings");
 }
 
 fn void pipeline_sample_mismatch_rejects_before_mutation() @test {

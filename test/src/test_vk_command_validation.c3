@@ -1043,6 +1043,8 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     defer destroy_test_device(&device)!!;
     ValComputeCtx compute = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &compute);
+    ValComputeCtx compute_alias = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute_alias);
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
     gpu::TextureHandle target = make_val_target(&device);
@@ -1078,6 +1080,8 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     assert(missing_pipeline == gpu::COMMAND_RECORDING_ERROR,
         "dispatch without an active pipeline faults command state");
 
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     fault wrong_compute_kind = @catch(gpu::cmd_dispatch(
         commands: &commands,
@@ -1088,6 +1092,10 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         "dispatch rejects an active graphics pipeline");
 
     gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
+    gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
+    gpu::CommandResolutionStats bind_stats = gpu::command_resolution_stats();
+    assert(bind_stats.pipeline_bind_commands == 2,
+        "repeated binds and aliases emit once per selected bind point");
     gpu::reset_command_resolution_stats();
     gpu::internal::vk::reset_root_push_observation();
     gpu::cmd_dispatch(

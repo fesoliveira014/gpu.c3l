@@ -2181,7 +2181,7 @@ fn ResolvedSpan? validate_and_lower_indirect_span(
 }
 
 fn BoundPipeline? bound_pipeline_snapshot(CommandRecord* record) {
-    BoundPipeline pipeline = record.bound_pipeline;
+    BoundPipeline pipeline = record.logical_pipeline;
     if (!pipeline.handle.is_valid() || pipeline.pipeline == null
         || pipeline.layout == null) {
         return gpu::INVALID_RESOURCE_STATE~;
@@ -2195,7 +2195,7 @@ fn BoundPipeline*? active_bound_pipeline(
     PipelineKind expected_kind,
     ZString operation,
 ) @private {
-    BoundPipeline* pipeline = &record.bound_pipeline;
+    BoundPipeline* pipeline = &record.logical_pipeline;
     if (!pipeline.handle.is_valid()) return gpu::COMMAND_RECORDING_ERROR~;
     if (pipeline.kind != expected_kind) {
         ZString invariant = expected_kind == PipelineKind.COMPUTE
@@ -2241,7 +2241,7 @@ fn void? validate_active_pipeline_render_compatibility(
     CommandRecord* record,
     RenderCompatibility* render,
 ) @private {
-    BoundPipeline* pipeline = &record.bound_pipeline;
+    BoundPipeline* pipeline = &record.logical_pipeline;
     if (!pipeline.handle.is_valid()) return;
     return validate_pipeline_render_compatibility(pipeline, render);
 }
@@ -2328,13 +2328,18 @@ fn void? record_bound_pipeline(
 ) {
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
-    if (bound.handle == record.bound_pipeline.handle) return;
-    if (bound.cache_entry != record.bound_pipeline.cache_entry
-        || !record.bound_pipeline.handle.is_valid()) {
+    NativePipelineBinding* native = bound.kind == PipelineKind.COMPUTE
+        ? &record.native_compute_pipeline
+        : &record.native_graphics_pipeline;
+    bool native_match = native.pipeline != null
+        && native.kind == bound.kind
+        && native.cache_entry == bound.cache_entry;
+    if (!native_match) {
         vk::PipelineBindPoint bind_point = bound.kind == PipelineKind.COMPUTE
             ? vk::PipelineBindPoint.COMPUTE
             : vk::PipelineBindPoint.GRAPHICS;
         vk::cmd_bind_pipeline(record.command_buffer, bind_point, bound.pipeline);
+        gpu::internal::note_command_pipeline_bind();
         gpu::internal::note_command_native_call();
         bind_descriptor_heap(
             state:      state,
@@ -2342,8 +2347,16 @@ fn void? record_bound_pipeline(
             layout:     bound.layout,
             bind_point: bind_point,
         )!;
+        *native = {
+            .pipeline                  = bound.pipeline,
+            .layout                    = bound.layout,
+            .generated_dispatch_layout = bound.generated_dispatch_layout,
+            .cache_entry               = bound.cache_entry,
+            .kind                      = bound.kind,
+            .render                    = bound.render,
+        };
     }
-    record.bound_pipeline = *bound;
+    record.logical_pipeline = *bound;
 }
 
 fn void? trusted_bind_pipeline(

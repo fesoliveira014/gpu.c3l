@@ -55,12 +55,14 @@ fn void require_native_work(ulong expected) {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.recording_commands == 1);
     assert(stats.native_commands == expected);
+    assert(stats.pipeline_bind_commands == 0);
 }
 
 fn void require_render_work(ulong expected_commands, ulong expected_native) {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.recording_commands == expected_commands);
     assert(stats.native_commands == expected_native);
+    assert(stats.pipeline_bind_commands == 0);
     assert(stats.pipeline_table_lookups == 0);
     assert(stats.pipeline_cache_lookups == 0);
 }
