@@ -20,6 +20,14 @@ struct PreparedRenderPass {
     uint                      color_count;
     bool                      has_depth;
 }
+
+struct LoweredGraphicsState {
+    vk::Viewport            viewport;
+    vk::Rect2D              scissor;
+    gpu::DynamicRasterState raster;
+    gpu::DepthState         depth;
+}
+
 struct PreparedIndexedDraw {
     BoundPipeline   pipeline;
     ResolvedSpan    index;
@@ -95,10 +103,15 @@ struct DynamicStateRejection {
 }
 
 struct DynamicStateObservation @if(env::TESTING) {
-    ulong        viewport_emissions;
-    ulong        scissor_emissions;
-    vk::Viewport viewport;
-    vk::Rect2D   scissor;
+    ulong                   begin_rendering_emissions;
+    ulong                   viewport_emissions;
+    ulong                   scissor_emissions;
+    ulong                   raster_state_emissions;
+    ulong                   depth_state_emissions;
+    vk::Viewport            viewport;
+    vk::Rect2D              scissor;
+    gpu::DynamicRasterState raster;
+    gpu::DepthState         depth;
 }
 
 fn vk::AttachmentLoadOp load_op_to_vk(gpu::LoadOp op) @private {
@@ -146,9 +159,17 @@ fn vk::ClearColorValue clear_color_to_vk(
 }
 
 fn void emit_raster_state(
-    CommandRecord* record,
+    gpu::internal::CommandEncoderState* commands,
     gpu::DynamicRasterState* raster,
 ) @private {
+    CommandRecord* record = encoder_command(commands);
+    $if env::TESTING:
+        VkDeviceState* state = encoder_device_state(commands);
+        if (state.dynamic_state_observation_enabled) {
+            state.raster_state_emissions++;
+            state.last_raster_state = *raster;
+        }
+    $endif
     vk::cmd_set_primitive_topology(
         record.command_buffer,
         topology_to_vk(raster.topology),
@@ -182,6 +203,35 @@ fn void emit_raster_state(
         depth_bias_constant_factor: depth_bias_constant,
         depth_bias_clamp:           depth_bias_clamp,
         depth_bias_slope_factor:    depth_bias_slope,
+    );
+    gpu::internal::note_command_native_call();
+}
+
+fn void emit_depth_state(
+    gpu::internal::CommandEncoderState* commands,
+    gpu::DepthState* depth,
+) @private {
+    CommandRecord* record = encoder_command(commands);
+    $if env::TESTING:
+        VkDeviceState* state = encoder_device_state(commands);
+        if (state.dynamic_state_observation_enabled) {
+            state.depth_state_emissions++;
+            state.last_depth_state = *depth;
+        }
+    $endif
+    vk::cmd_set_depth_test_enable(
+        record.command_buffer,
+        depth.test_enable ? vk::TRUE : vk::FALSE,
+    );
+    gpu::internal::note_command_native_call();
+    vk::cmd_set_depth_write_enable(
+        record.command_buffer,
+        depth.write_enable ? vk::TRUE : vk::FALSE,
+    );
+    gpu::internal::note_command_native_call();
+    vk::cmd_set_depth_compare_op(
+        record.command_buffer,
+        compare_op_to_vk(depth.compare),
     );
     gpu::internal::note_command_native_call();
 }
@@ -463,6 +513,7 @@ fn void? track_render_pass(
 fn void record_render_pass(
     gpu::internal::CommandEncoderState* commands,
     PreparedRenderPass* pass,
+    LoweredGraphicsState* graphics,
 ) {
     CommandRecord* record = encoder_command(commands);
     vk::CommandBuffer cb = record.command_buffer;
@@ -481,46 +532,37 @@ fn void record_render_pass(
     }
     vk::cmd_begin_rendering(cb, &rendering);
     gpu::internal::note_command_native_call();
-    record.active_render = pass.compatibility;
-
-    vk::Viewport viewport = {
-        .x         = 0.0,
-        .y         = 0.0,
-        .width     = (float)pass.width,
-        .height    = (float)pass.height,
-        .min_depth = 0.0,
-        .max_depth = 1.0,
-    };
-    vk::cmd_set_viewport(cb, 0, 1, &viewport);
-    gpu::internal::note_command_native_call();
-    vk::Rect2D scissor = {
-        .offset = { .x = 0, .y = 0 },
-        .extent = { .width = pass.width, .height = pass.height },
-    };
-    vk::cmd_set_scissor(cb, 0, 1, &scissor);
-    gpu::internal::note_command_native_call();
-    gpu::DynamicRasterState raster;
-    emit_raster_state(record, &raster);
-
+    $if env::TESTING:
+        VkDeviceState* state = encoder_device_state(commands);
+        if (state.dynamic_state_observation_enabled) {
+            state.begin_rendering_emissions++;
+        }
+    $endif
+    emit_graphics_state(commands, graphics);
     record.active_render_width = pass.width;
     record.active_render_height = pass.height;
-    record.depth_state_set = false;
+    record.active_render = pass.compatibility;
+    record.depth_state_set = true;
     record.state = CommandState.RECORDING_RENDER_PASS;
 }
 
 fn void? trusted_begin_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
 ) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
-    record_render_pass(commands, &pass);
+    LoweredGraphicsState graphics = lower_graphics_state(state)!;
+    record_render_pass(commands, &pass, &graphics);
 }
 
 fn void? trusted_tracking_begin_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
 ) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
+    LoweredGraphicsState graphics = lower_graphics_state(state)!;
     CommandRecord* record = encoder_command(commands);
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
@@ -529,27 +571,39 @@ fn void? trusted_tracking_begin_render_pass(
         checkpoint,
     );
     track_render_pass(commands, &pass)!;
-    record_render_pass(commands, &pass);
+    record_render_pass(commands, &pass, &graphics);
 }
 
 fn void? checked_begin_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
 ) {
     PreparedRenderPass pass = checked_prepare_render_pass(
         commands,
         desc,
     )!;
-    record_render_pass(commands, &pass);
+    LoweredGraphicsState graphics = checked_prepare_graphics_state(
+        device:    encoder_device_state(commands),
+        operation: "cmd_begin_render_pass",
+        state:     state,
+    )!;
+    record_render_pass(commands, &pass, &graphics);
 }
 
 fn void? checked_tracking_begin_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
 ) {
     PreparedRenderPass pass = checked_prepare_render_pass(
         commands,
         desc,
+    )!;
+    LoweredGraphicsState graphics = checked_prepare_graphics_state(
+        device:    encoder_device_state(commands),
+        operation: "cmd_begin_render_pass",
+        state:     state,
     )!;
     CommandRecord* record = encoder_command(commands);
     uint checkpoint = record.scratch.reference_count;
@@ -559,7 +613,7 @@ fn void? checked_tracking_begin_render_pass(
         checkpoint,
     );
     track_render_pass(commands, &pass)!;
-    record_render_pass(commands, &pass);
+    record_render_pass(commands, &pass, &graphics);
 }
 
 fn fault report_dynamic_state_rejection(
@@ -597,12 +651,13 @@ fn void? reject_dynamic_state(
 
 fn void? validate_viewport(
     VkDeviceState* state,
+    ZString operation,
     gpu::Viewport* viewport,
 ) @private {
     if (viewport == null) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport",
             invariant: "viewport must not be null",
         );
@@ -610,7 +665,7 @@ fn void? validate_viewport(
     if (!math::is_finite(viewport.x)) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.x",
             invariant: "coordinate must be finite",
         );
@@ -618,7 +673,7 @@ fn void? validate_viewport(
     if (!math::is_finite(viewport.y)) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.y",
             invariant: "coordinate must be finite",
         );
@@ -626,7 +681,7 @@ fn void? validate_viewport(
     if (!math::is_finite(viewport.width)) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.width",
             invariant: "dimension must be finite",
         );
@@ -634,7 +689,7 @@ fn void? validate_viewport(
     if (!math::is_finite(viewport.height)) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.height",
             invariant: "dimension must be finite",
         );
@@ -642,7 +697,7 @@ fn void? validate_viewport(
     if (!math::is_finite(viewport.min_depth)) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.min_depth",
             invariant: "depth endpoint must be finite and in [0, 1]",
         );
@@ -650,7 +705,7 @@ fn void? validate_viewport(
     if (!math::is_finite(viewport.max_depth)) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.max_depth",
             invariant: "depth endpoint must be finite and in [0, 1]",
         );
@@ -658,7 +713,7 @@ fn void? validate_viewport(
     if (viewport.width <= 0.0f) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.width",
             invariant: "width must be positive",
         );
@@ -666,7 +721,7 @@ fn void? validate_viewport(
     if (viewport.height == 0.0f) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.height",
             invariant: "height must be nonzero by library policy",
         );
@@ -674,7 +729,7 @@ fn void? validate_viewport(
     if (viewport.width > (float)state.viewport_limits.max_width) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.width",
             invariant: "width must not exceed the selected device maximum",
         );
@@ -683,7 +738,7 @@ fn void? validate_viewport(
         || viewport.height < -(float)state.viewport_limits.max_height) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.height",
             invariant: "absolute height must not exceed the selected device maximum",
         );
@@ -694,7 +749,7 @@ fn void? validate_viewport(
     if (!math::is_finite(right)) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.x + Viewport.width",
             invariant: "computed endpoint must be finite",
         );
@@ -702,7 +757,7 @@ fn void? validate_viewport(
     if (!math::is_finite(end_y)) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.y + Viewport.height",
             invariant: "computed endpoint must be finite",
         );
@@ -711,7 +766,7 @@ fn void? validate_viewport(
         || viewport.x > state.viewport_limits.max_bound) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.x",
             invariant: "coordinate must fit the selected device viewport bounds",
         );
@@ -720,7 +775,7 @@ fn void? validate_viewport(
         || right > state.viewport_limits.max_bound) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.x + Viewport.width",
             invariant: "endpoint must fit the selected device viewport bounds",
         );
@@ -729,7 +784,7 @@ fn void? validate_viewport(
         || viewport.y > state.viewport_limits.max_bound) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.y",
             invariant: "coordinate must fit the selected device viewport bounds",
         );
@@ -738,7 +793,7 @@ fn void? validate_viewport(
         || end_y > state.viewport_limits.max_bound) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.y + Viewport.height",
             invariant: "endpoint must fit the selected device viewport bounds",
         );
@@ -746,7 +801,7 @@ fn void? validate_viewport(
     if (viewport.min_depth < 0.0f || viewport.min_depth > 1.0f) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.min_depth",
             invariant: "depth endpoint must be in [0, 1]",
         );
@@ -754,19 +809,15 @@ fn void? validate_viewport(
     if (viewport.max_depth < 0.0f || viewport.max_depth > 1.0f) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_viewport",
+            operation: operation,
             field:     "Viewport.max_depth",
             invariant: "depth endpoint must be in [0, 1]",
         );
     }
 }
 
-fn void emit_viewport(
-    gpu::internal::CommandEncoderState* commands,
-    gpu::Viewport* viewport,
-) @private {
-    CommandRecord* record = encoder_command(commands);
-    vk::Viewport native = {
+fn vk::Viewport lower_viewport(gpu::Viewport* viewport) @private {
+    return {
         .x         = viewport.x,
         .y         = viewport.y,
         .width     = viewport.width,
@@ -774,14 +825,21 @@ fn void emit_viewport(
         .min_depth = viewport.min_depth,
         .max_depth = viewport.max_depth,
     };
+}
+
+fn void emit_viewport(
+    gpu::internal::CommandEncoderState* commands,
+    vk::Viewport* viewport,
+) @private {
+    CommandRecord* record = encoder_command(commands);
     $if env::TESTING:
         VkDeviceState* state = encoder_device_state(commands);
         if (state.dynamic_state_observation_enabled) {
             state.viewport_emissions++;
-            state.last_viewport = native;
+            state.last_viewport = *viewport;
         }
     $endif
-    vk::cmd_set_viewport(record.command_buffer, 0, 1, &native);
+    vk::cmd_set_viewport(record.command_buffer, 0, 1, viewport);
     gpu::internal::note_command_native_call();
 }
 
@@ -794,7 +852,8 @@ fn void? trusted_set_viewport(
     if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    emit_viewport(commands, viewport);
+    vk::Viewport native = lower_viewport(viewport);
+    emit_viewport(commands, &native);
 }
 
 fn void? checked_set_viewport(
@@ -808,18 +867,20 @@ fn void? checked_set_viewport(
     if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    validate_viewport(state, viewport)!;
-    emit_viewport(commands, viewport);
+    validate_viewport(state, "cmd_set_viewport", viewport)!;
+    vk::Viewport native = lower_viewport(viewport);
+    emit_viewport(commands, &native);
 }
 
 fn void? validate_scissor(
     VkDeviceState* state,
+    ZString operation,
     gpu::ScissorRect* scissor,
 ) @private {
     if (scissor == null) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_scissor",
+            operation: operation,
             field:     "ScissorRect",
             invariant: "scissor must not be null",
         );
@@ -835,7 +896,7 @@ fn void? validate_scissor(
                     : "ScissorRect.height";
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_scissor",
+            operation: operation,
             field:     field,
             invariant: "scissor fields must be nonnegative",
         );
@@ -845,7 +906,7 @@ fn void? validate_scissor(
     if (right > int::max) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_scissor",
+            operation: operation,
             field:     "ScissorRect.x + ScissorRect.width",
             invariant: "endpoint must fit signed native coordinate range",
         );
@@ -853,51 +914,233 @@ fn void? validate_scissor(
     if (bottom > int::max) {
         return reject_dynamic_state(
             state:     state,
-            operation: "cmd_set_scissor",
+            operation: operation,
             field:     "ScissorRect.y + ScissorRect.height",
             invariant: "endpoint must fit signed native coordinate range",
         );
     }
 }
 
+fn vk::Rect2D lower_scissor(gpu::ScissorRect* scissor) @private {
+    return {
+        .offset = { .x = scissor.x, .y = scissor.y },
+        .extent = {
+            .width  = (uint)scissor.width,
+            .height = (uint)scissor.height,
+        },
+    };
+}
+
+fn void? validate_raster_state(
+    VkDeviceState* state,
+    ZString operation,
+    gpu::DynamicRasterState* raster,
+) @private {
+    if (raster == null) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     "GraphicsState.raster",
+            invariant: "raster state must not be null",
+        );
+    }
+    if (!primitive_topology_valid(raster.topology)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     "GraphicsState.raster.topology",
+            invariant: "topology must be defined",
+        );
+    }
+    if (!cull_mode_valid(raster.cull_mode)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     "GraphicsState.raster.cull_mode",
+            invariant: "cull mode must be defined",
+        );
+    }
+    if (!front_face_valid(raster.front_face)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     "GraphicsState.raster.front_face",
+            invariant: "front face must be defined",
+        );
+    }
+    if (raster.depth_bias_enable
+        && !math::is_finite(raster.depth_bias_constant)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     "GraphicsState.raster.depth_bias_constant",
+            invariant: "enabled depth bias value must be finite",
+        );
+    }
+    if (raster.depth_bias_enable
+        && !math::is_finite(raster.depth_bias_slope)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     "GraphicsState.raster.depth_bias_slope",
+            invariant: "enabled depth bias value must be finite",
+        );
+    }
+    if (raster.depth_bias_enable
+        && !math::is_finite(raster.depth_bias_clamp)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     "GraphicsState.raster.depth_bias_clamp",
+            invariant: "enabled depth bias value must be finite",
+        );
+    }
+}
+
+fn void? validate_depth_state(
+    VkDeviceState* state,
+    ZString operation,
+    gpu::DepthState* depth,
+) @private {
+    if (depth == null) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     "GraphicsState.depth",
+            invariant: "depth state must not be null",
+        );
+    }
+    if (!compare_op_valid(depth.compare)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     "GraphicsState.depth.compare",
+            invariant: "compare operation must be defined",
+        );
+    }
+}
+
+fn LoweredGraphicsState? lower_graphics_state(
+    gpu::GraphicsState* state,
+) @private {
+    if (state == null) return gpu::INVALID_ARGUMENT~;
+    return {
+        .viewport = lower_viewport(&state.viewport),
+        .scissor  = lower_scissor(&state.scissor),
+        .raster   = state.raster,
+        .depth    = state.depth,
+    };
+}
+
+fn LoweredGraphicsState? checked_prepare_graphics_state(
+    VkDeviceState* device,
+    ZString operation,
+    gpu::GraphicsState* state,
+) @private {
+    if (state == null) {
+        DynamicStateRejection rejection = {
+            .field     = "GraphicsState",
+            .invariant = "graphics state must not be null",
+        };
+        return report_dynamic_state_rejection(
+            device,
+            operation,
+            rejection,
+        )~;
+    }
+    validate_viewport(device, operation, &state.viewport)!;
+    validate_scissor(device, operation, &state.scissor)!;
+    validate_raster_state(device, operation, &state.raster)!;
+    validate_depth_state(device, operation, &state.depth)!;
+    return lower_graphics_state(state);
+}
+
 fn void emit_scissor(
     gpu::internal::CommandEncoderState* commands,
-    gpu::ScissorRect* scissor,
+    vk::Rect2D* scissor,
 ) @private {
     CommandRecord* record = encoder_command(commands);
-    vk::Rect2D native = {
-        .offset = { .x = scissor.x, .y = scissor.y },
-        .extent = { .width = (uint)scissor.width, .height = (uint)scissor.height },
-    };
     $if env::TESTING:
         VkDeviceState* state = encoder_device_state(commands);
         if (state.dynamic_state_observation_enabled) {
             state.scissor_emissions++;
-            state.last_scissor = native;
+            state.last_scissor = *scissor;
         }
     $endif
-    vk::cmd_set_scissor(record.command_buffer, 0, 1, &native);
+    vk::cmd_set_scissor(record.command_buffer, 0, 1, scissor);
     gpu::internal::note_command_native_call();
+}
+
+fn void emit_graphics_state(
+    gpu::internal::CommandEncoderState* commands,
+    LoweredGraphicsState* state,
+) @private {
+    emit_viewport(commands, &state.viewport);
+    emit_scissor(commands, &state.scissor);
+    emit_raster_state(commands, &state.raster);
+    emit_depth_state(commands, &state.depth);
+}
+
+fn void? trusted_set_graphics_state(
+    gpu::internal::CommandEncoderState* commands,
+    gpu::GraphicsState* state,
+) {
+    if (state == null) return gpu::INVALID_ARGUMENT~;
+    CommandRecord* record = encoder_command(commands);
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    LoweredGraphicsState graphics = lower_graphics_state(state)!;
+    emit_graphics_state(commands, &graphics);
+}
+
+fn void? checked_set_graphics_state(
+    gpu::internal::CommandEncoderState* commands,
+    gpu::GraphicsState* state,
+) {
+    if (commands == null) return gpu::INVALID_ARGUMENT~;
+    VkDeviceState* device = encoder_device_state(commands);
+    note_command_semantic_check(device);
+    CommandRecord* record = encoder_command(commands);
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    LoweredGraphicsState graphics = checked_prepare_graphics_state(
+        device,
+        "cmd_set_graphics_state",
+        state,
+    )!;
+    emit_graphics_state(commands, &graphics);
 }
 
 fn void reset_dynamic_state_observation(
     VkDeviceState* state,
 ) @if(env::TESTING) {
     state.dynamic_state_observation_enabled = true;
+    state.begin_rendering_emissions = 0;
     state.viewport_emissions = 0;
     state.scissor_emissions = 0;
+    state.raster_state_emissions = 0;
+    state.depth_state_emissions = 0;
     state.last_viewport = {};
     state.last_scissor = {};
+    state.last_raster_state = {};
+    state.last_depth_state = {};
 }
 
 fn DynamicStateObservation dynamic_state_observation(
     VkDeviceState* state,
 ) @if(env::TESTING) {
     return {
-        .viewport_emissions = state.viewport_emissions,
-        .scissor_emissions  = state.scissor_emissions,
-        .viewport           = state.last_viewport,
-        .scissor            = state.last_scissor,
+        .begin_rendering_emissions = state.begin_rendering_emissions,
+        .viewport_emissions        = state.viewport_emissions,
+        .scissor_emissions         = state.scissor_emissions,
+        .raster_state_emissions    = state.raster_state_emissions,
+        .depth_state_emissions     = state.depth_state_emissions,
+        .viewport                  = state.last_viewport,
+        .scissor                   = state.last_scissor,
+        .raster                    = state.last_raster_state,
+        .depth                     = state.last_depth_state,
     };
 }
 
@@ -910,7 +1153,8 @@ fn void? trusted_set_scissor(
     if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    emit_scissor(commands, scissor);
+    vk::Rect2D native = lower_scissor(scissor);
+    emit_scissor(commands, &native);
 }
 
 fn void? checked_set_scissor(
@@ -924,8 +1168,9 @@ fn void? checked_set_scissor(
     if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    validate_scissor(state, scissor)!;
-    emit_scissor(commands, scissor);
+    validate_scissor(state, "cmd_set_scissor", scissor)!;
+    vk::Rect2D native = lower_scissor(scissor);
+    emit_scissor(commands, &native);
 }
 
 fn void? vk_cmd_end_render_pass(gpu::internal::CommandEncoderState* commands) @private {
@@ -955,21 +1200,7 @@ fn void? vk_cmd_set_depth_state(
     if (depth == null || !compare_op_valid(depth.compare)) {
         return gpu::INVALID_ARGUMENT~;
     }
-    vk::cmd_set_depth_test_enable(
-        record.command_buffer,
-        depth.test_enable ? vk::TRUE : vk::FALSE,
-    );
-    gpu::internal::note_command_native_call();
-    vk::cmd_set_depth_write_enable(
-        record.command_buffer,
-        depth.write_enable ? vk::TRUE : vk::FALSE,
-    );
-    gpu::internal::note_command_native_call();
-    vk::cmd_set_depth_compare_op(
-        record.command_buffer,
-        compare_op_to_vk(depth.compare),
-    );
-    gpu::internal::note_command_native_call();
+    emit_depth_state(commands, depth);
     record.depth_state_set = true;
 }
 
@@ -982,21 +1213,7 @@ fn void? trusted_set_depth_state(
     if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    vk::cmd_set_depth_test_enable(
-        record.command_buffer,
-        depth.test_enable ? vk::TRUE : vk::FALSE,
-    );
-    gpu::internal::note_command_native_call();
-    vk::cmd_set_depth_write_enable(
-        record.command_buffer,
-        depth.write_enable ? vk::TRUE : vk::FALSE,
-    );
-    gpu::internal::note_command_native_call();
-    vk::cmd_set_depth_compare_op(
-        record.command_buffer,
-        compare_op_to_vk(depth.compare),
-    );
-    gpu::internal::note_command_native_call();
+    emit_depth_state(commands, depth);
     record.depth_state_set = true;
 }
 
@@ -1029,7 +1246,7 @@ fn void? vk_cmd_set_raster_state(
             || !math::is_finite(raster.depth_bias_clamp))) {
         return gpu::INVALID_ARGUMENT~;
     }
-    emit_raster_state(record, raster);
+    emit_raster_state(commands, raster);
 }
 
 fn void? trusted_set_raster_state(
@@ -1041,7 +1258,7 @@ fn void? trusted_set_raster_state(
     if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    emit_raster_state(record, raster);
+    emit_raster_state(commands, raster);
 }
 
 fn void? checked_set_raster_state(
