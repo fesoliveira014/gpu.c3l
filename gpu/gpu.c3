@@ -330,9 +330,6 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
     gpu::internal::command_policy_selections.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_encoder_cell_computations.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_encoder_lease_comparisons.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_encoder_field_comparisons.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_device_lost_loads.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_trusted_backend_capability_checks.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_recording_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_native_commands.store(0, AtomicOrdering.RELAXED);
 }
@@ -367,15 +364,6 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
             AtomicOrdering.RELAXED,
         ),
         .encoder_lease_comparisons = gpu::internal::command_encoder_lease_comparisons.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .encoder_field_comparisons = gpu::internal::command_encoder_field_comparisons.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .device_lost_loads = gpu::internal::command_device_lost_loads.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .trusted_backend_capability_checks = gpu::internal::command_trusted_backend_capability_checks.load(
             AtomicOrdering.RELAXED,
         ),
         .recording_commands = gpu::internal::command_recording_commands.load(

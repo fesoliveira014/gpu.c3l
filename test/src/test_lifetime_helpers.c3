@@ -2,10 +2,26 @@ module gpu_test;
 
 import gpu::internal @public;
 import gpu @public;
+import gpu::internal::vk @public;
+import std::core::mem;
+import std::core::mem::alloc;
+
+alias ConfinedThreadAllocatorFn @if(env::TESTING) = fn void? (void*);
 
 struct OwnedSpan {
     gpu::GpuAllocation allocation;
     gpu::GpuSpan       span;
+}
+
+fn void? observe_confined_thread_allocator(
+    vk::RecordingHostAllocator* allocator,
+    ConfinedThreadAllocatorFn callback,
+    void* user_data,
+) @if(env::TESTING) {
+    Allocator previous = mem;
+    mem = allocator;
+    defer mem = previous;
+    callback(user_data)!;
 }
 
 fn gpu::Device? create_test_device(
@@ -346,12 +362,6 @@ fn void assert_warm_command_resolution(
         "warm commands select exactly one encoder cell per call");
     assert(stats.encoder_lease_comparisons == expected_commands,
         "warm commands compare exactly one encoder lease per call");
-    assert(stats.encoder_field_comparisons == 0,
-        "warm commands perform no duplicate encoder field comparisons");
-    assert(stats.device_lost_loads == 0,
-        "warm commands perform no device-loss atomic loads");
-    assert(stats.trusted_backend_capability_checks == 0,
-        "trusted backend calls repeat no encoder capability checks");
     assert(stats.recording_commands == expected_commands,
         "the command counter observes each warm recording call");
 }

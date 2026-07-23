@@ -1417,7 +1417,232 @@ def valid_document() -> dict:
     }
 
 
+WARM_COMMAND_FRONTEND = """
+module gpu::internal @private;
+
+fn void command_encoder() {
+    note_command_encoder_cell_computation();
+    note_command_encoder_lease_comparison();
+}
+
+fn void recording_encoder() {
+    command_encoder();
+}
+"""
+
+WARM_COMMAND_PUBLIC = """
+module gpu;
+
+fn void cmd_copy_buffer() {
+    recording_encoder();
+}
+"""
+
+WARM_COMMAND_BACKEND = """
+module gpu::internal::vk @private;
+
+fn void trusted_copy() {
+    lower_copy();
+}
+
+fn void lower_copy() {
+    emit_copy();
+}
+
+fn void checked_copy() {
+    if (commands == null) return;
+}
+
+fn void checked_validate_copy() {
+    if (record == null) return;
+}
+"""
+
+
 class PublicApiCheckTests(unittest.TestCase):
+    def warm_command_errors(
+        self,
+        frontend: str = WARM_COMMAND_FRONTEND,
+        public: str = WARM_COMMAND_PUBLIC,
+        backend: str = WARM_COMMAND_BACKEND,
+        relocated: str | None = None,
+    ) -> list[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = {
+                "gpu/internal/command.c3": frontend,
+                "gpu/gpu.c3": public,
+                "gpu/internal/vk/command.c3": backend,
+            }
+            if relocated is not None:
+                sources["gpu/internal/vk/relocated.c3"] = relocated
+            for relative, source in sources.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+            return (
+                check_public_api.retired_warm_command_mechanism_errors(root)
+            )
+
+    def test_current_sources_have_no_retired_warm_command_mechanism(self) -> None:
+        self.assertEqual(
+            check_public_api.retired_warm_command_mechanism_errors(),
+            [],
+        )
+
+    def test_rejects_retired_frontend_encoder_work(self) -> None:
+        mutations = {
+            "stored encoder device comparison": (
+                "    if (encoder.device != device) return;\n"
+            ),
+            "stored encoder handle comparison": (
+                "    if (encoder.handle != handle) return;\n"
+            ),
+            "device-loss load": (
+                "    if (slot.lost\n"
+                "            .load(AtomicOrdering.ACQUIRE)) return;\n"
+            ),
+            "encoder operation-table null comparison": (
+                "    if (null == encoder.ops) return;\n"
+            ),
+            "encoder backend-state null comparison": (
+                "    if (encoder.backend_state != null) return;\n"
+            ),
+            "encoder backend-command null comparison": (
+                "    if (null != encoder.backend_command) return;\n"
+            ),
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(label=label):
+                frontend = WARM_COMMAND_FRONTEND.replace(
+                    "    note_command_encoder_cell_computation();\n",
+                    mutation
+                    + "    note_command_encoder_cell_computation();\n",
+                )
+                failures = self.warm_command_errors(frontend=frontend)
+                self.assertTrue(
+                    any(label in failure for failure in failures),
+                    failures,
+                )
+
+    def test_rejects_public_command_device_loss_load(self) -> None:
+        public = WARM_COMMAND_PUBLIC.replace(
+            "    recording_encoder();\n",
+            (
+                "    if (device_lost.load(AtomicOrdering.ACQUIRE)) return;\n"
+                "    recording_encoder();\n"
+            ),
+        )
+        failures = self.warm_command_errors(public=public)
+        self.assertTrue(
+            any("device-loss load" in failure for failure in failures),
+            failures,
+        )
+
+    def test_rejects_trusted_capability_comparisons_after_refactors(self) -> None:
+        mutations = {
+            "direct trusted check": WARM_COMMAND_BACKEND.replace(
+                "    lower_copy();\n",
+                "    if (null == commands) return;\n    lower_copy();\n",
+                1,
+            ),
+            "trusted validation helper call": WARM_COMMAND_BACKEND.replace(
+                "    lower_copy();\n",
+                "    checked_validate_copy();\n",
+                1,
+            ),
+            "extracted helper check": WARM_COMMAND_BACKEND.replace(
+                "    emit_copy();\n",
+                "    if (record != null) return;\n    emit_copy();\n",
+            ),
+            "renamed capability receiver": WARM_COMMAND_BACKEND.replace(
+                "    emit_copy();\n",
+                "    if (token.backend_state == null) return;\n    emit_copy();\n",
+            ),
+        }
+        for label, backend in mutations.items():
+            with self.subTest(label=label):
+                self.assertTrue(self.warm_command_errors(backend=backend))
+
+        relocated = """
+module gpu::internal::vk @private;
+
+fn void relocated_copy() {
+    if (record == null) return;
+}
+"""
+        failures = self.warm_command_errors(relocated=relocated)
+        self.assertTrue(
+            any("relocated.c3" in failure for failure in failures),
+            failures,
+        )
+
+        wrapped = WARM_COMMAND_BACKEND.replace(
+            "    lower_copy();\n",
+            "    validate_outer();\n",
+            1,
+        ) + """
+fn void validate_outer() {
+    validate_inner();
+}
+
+fn void validate_inner() {
+    if (commands == null) return;
+}
+"""
+        self.assertTrue(self.warm_command_errors(backend=wrapped))
+
+    def test_allows_checked_capability_comparisons(self) -> None:
+        self.assertEqual(self.warm_command_errors(), [])
+
+    def test_requires_exact_command_encoder_proof_notes(self) -> None:
+        notes = (
+            "note_command_encoder_cell_computation();",
+            "note_command_encoder_lease_comparison();",
+        )
+        for note in notes:
+            for replacement in ("", f"{note}\n    {note}"):
+                with self.subTest(note=note, replacement=replacement):
+                    frontend = WARM_COMMAND_FRONTEND.replace(
+                        note,
+                        replacement,
+                    )
+                    failures = self.warm_command_errors(
+                        frontend=frontend,
+                    )
+                    self.assertTrue(
+                        any(
+                            note.removesuffix("();") in failure
+                            for failure in failures
+                        ),
+                        failures,
+                    )
+
+    def test_ignores_retired_warm_patterns_in_comments_and_strings(self) -> None:
+        frontend = WARM_COMMAND_FRONTEND.replace(
+            "    note_command_encoder_cell_computation();\n",
+            (
+                '    io::printn("encoder.device slot.lost.load(");\n'
+                "    // encoder.handle != handle\n"
+                "    note_command_encoder_cell_computation();\n"
+            ),
+        )
+        backend = WARM_COMMAND_BACKEND.replace(
+            "    emit_copy();\n",
+            (
+                '    io::printn("commands == null record == null");\n'
+                "    // token.backend_command != null\n"
+                "    emit_copy();\n"
+            ),
+        )
+        self.assertEqual(
+            self.warm_command_errors(
+                frontend=frontend,
+                backend=backend,
+            ),
+            [],
+        )
+
     def test_canonical_fixture_requires_every_public_root_function(self) -> None:
         document = {
             "modules": {

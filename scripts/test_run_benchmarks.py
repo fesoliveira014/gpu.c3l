@@ -45,8 +45,7 @@ COMMAND_OUTPUT = "\n".join(
             "device_registry=0 "
             "retained_pins=0 lifecycle_vtable=0 command_table=0 "
             "pipeline_table=0 pipeline_cache=0 policy=0 "
-            "encoder_cells=305000 encoder_leases=305000 "
-            "encoder_fields=0 device_lost=0 backend_caps=0"
+            "encoder_cells=305000 encoder_leases=305000"
         ),
         (
             "validation policy=trusted tracking=false layers=false "
@@ -929,9 +928,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "pipeline_table",
             "pipeline_cache",
             "policy",
-            "encoder_fields",
-            "device_lost",
-            "backend_caps",
         ):
             with self.subTest(field=field):
                 output = COMMAND_OUTPUT.replace(f"{field}=0", f"{field}=1")

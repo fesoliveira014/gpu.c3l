@@ -679,6 +679,64 @@ fn void empty_and_populated_fixed_reference_storage_release_exactly() @test {
         "fixed populated storage decrements its retained counter exactly once");
 }
 
+fn void command_reference_clear_releases_list_and_resets_index() @test {
+    vk::VkDeviceState state;
+    Atomic{uint}[2] tracked;
+    vk::CommandResourceReference[2] references;
+    vk::CommandReferenceIndexCell[4] cells;
+    foreach (i, &counter : tracked) {
+        counter.store(1, AtomicOrdering.RELAXED);
+        references[i] = {
+            .owner                      = 19,
+            .index                      = (uint)i,
+            .generation                 = 1,
+            .tracked_command_references = counter,
+        };
+    }
+    vk::CommandScratch scratch = {
+        .references      = references[..],
+        .reference_index = {
+            .cells = cells[..],
+            .epoch = 3,
+        },
+        .reference_count = 2,
+    };
+    for (uint i = 0; i < scratch.reference_count; i++) {
+        vk::CommandReferenceProbe insertion = vk::probe_command_reference(
+            &state,
+            &scratch,
+            &scratch.references[i],
+        )!!;
+        vk::publish_command_reference(
+            state:           &state,
+            scratch:         &scratch,
+            reference:       &scratch.references[i],
+            probe:           &insertion,
+            reference_index: i,
+        );
+    }
+    vk::reset_command_policy_counters(&state);
+    vk::reset_command_reference_work_counters(&state);
+
+    vk::clear_command_scratch_references(&state, &scratch);
+
+    vk::CommandPolicyCounters policy = vk::command_policy_counters(&state);
+    vk::CommandReferenceWorkCounters work =
+        vk::command_reference_work_counters(&state);
+    bool prior_epoch_only = true;
+    foreach (&cell : cells) {
+        prior_epoch_only &= cell.epoch != scratch.reference_index.epoch;
+    }
+    assert(tracked[0].load(AtomicOrdering.RELAXED) == 0
+        && tracked[1].load(AtomicOrdering.RELAXED) == 0
+        && scratch.reference_count == 0
+        && scratch.reference_index.epoch == 4
+        && prior_epoch_only,
+        "clear releases the recorded list and publishes an empty new epoch");
+    assert(policy.reference_releases == 2 && work.releases == 2,
+        "clear reports one release for every recorded reference");
+}
+
 fn void submission_transfer_accepts_empty_and_populated_reference_storage() @test {
     vk::VkDeviceState state = {
         .host_allocator = &allocators::LIBC_ALLOCATOR,
@@ -861,46 +919,102 @@ fn void command_reference_index_uses_full_identity_and_exact_probes() @test {
     assert(duplicate.found && duplicate.reference_index == 0,
         "an exact resource identity resolves to its reference slot");
 
-    vk::CommandResourceReference collision = first;
+    vk::CommandResourceReference owner_collision = first;
     do {
-        collision.generation++;
-    } while ((vk::command_reference_hash(&collision)
-            ^ (vk::command_reference_hash(&collision) >> 32))
+        owner_collision.owner++;
+    } while ((vk::command_reference_hash(&owner_collision)
+            ^ (vk::command_reference_hash(&owner_collision) >> 32))
         % cells.len != (vk::command_reference_hash(&first)
             ^ (vk::command_reference_hash(&first) >> 32))
         % cells.len);
-    vk::CommandReferenceProbe distinct = vk::probe_command_reference(
+    vk::CommandResourceReference index_collision = first;
+    do {
+        index_collision.index++;
+    } while ((vk::command_reference_hash(&index_collision)
+            ^ (vk::command_reference_hash(&index_collision) >> 32))
+        % cells.len != (vk::command_reference_hash(&first)
+            ^ (vk::command_reference_hash(&first) >> 32))
+        % cells.len);
+    vk::CommandResourceReference generation_collision = first;
+    do {
+        generation_collision.generation++;
+    } while ((vk::command_reference_hash(&generation_collision)
+            ^ (vk::command_reference_hash(&generation_collision) >> 32))
+        % cells.len != (vk::command_reference_hash(&first)
+            ^ (vk::command_reference_hash(&first) >> 32))
+        % cells.len);
+    vk::CommandReferenceProbe owner_insertion = vk::probe_command_reference(
         &state,
         &scratch,
-        &collision,
+        &owner_collision,
     )!!;
     vk::publish_command_reference(
         state:           &state,
         scratch:         &scratch,
-        reference:       &collision,
-        probe:           &distinct,
+        reference:       &owner_collision,
+        probe:           &owner_insertion,
         reference_index: 1,
+    );
+    vk::CommandReferenceProbe index_insertion = vk::probe_command_reference(
+        &state,
+        &scratch,
+        &index_collision,
+    )!!;
+    vk::publish_command_reference(
+        state:           &state,
+        scratch:         &scratch,
+        reference:       &index_collision,
+        probe:           &index_insertion,
+        reference_index: 2,
+    );
+    vk::CommandReferenceProbe generation_insertion =
+        vk::probe_command_reference(
+            &state,
+            &scratch,
+            &generation_collision,
+        )!!;
+    vk::publish_command_reference(
+        state:           &state,
+        scratch:         &scratch,
+        reference:       &generation_collision,
+        probe:           &generation_insertion,
+        reference_index: 3,
     );
     vk::CommandReferenceProbe first_again = vk::probe_command_reference(
         &state,
         &scratch,
         &first,
     )!!;
-    vk::CommandReferenceProbe collision_again = vk::probe_command_reference(
+    vk::CommandReferenceProbe owner_again = vk::probe_command_reference(
         &state,
         &scratch,
-        &collision,
+        &owner_collision,
+    )!!;
+    vk::CommandReferenceProbe index_again = vk::probe_command_reference(
+        &state,
+        &scratch,
+        &index_collision,
+    )!!;
+    vk::CommandReferenceProbe generation_again = vk::probe_command_reference(
+        &state,
+        &scratch,
+        &generation_collision,
     )!!;
     vk::CommandReferenceWorkCounters counters =
         vk::command_reference_work_counters(&state);
-    assert(!distinct.found
+    assert(!owner_insertion.found
+        && !index_insertion.found
+        && !generation_insertion.found
         && first_again.found && first_again.reference_index == 0
-        && collision_again.found && collision_again.reference_index == 1,
-        "colliding generations publish and resolve as distinct identities");
-    assert(counters.lookups == 5
-        && counters.probes == 7
-        && counters.equality_checks == 5
-        && counters.index_publications == 2,
+        && owner_again.found && owner_again.reference_index == 1
+        && index_again.found && index_again.reference_index == 2
+        && generation_again.found
+            && generation_again.reference_index == 3,
+        "colliding owner, index, and generation values remain distinct identities");
+    assert(counters.lookups == 9
+        && counters.probes == 21
+        && counters.equality_checks == 17
+        && counters.index_publications == 4,
         "reference-index counters expose exact lookup, probe, equality, and publication work");
 }
 
@@ -997,6 +1111,84 @@ fn void command_reference_duplicate_avoids_mutex_and_retain_work() @test {
         && counters.retains == 1,
         "completion retirement resets the index epoch before scratch reuse");
     gpu::discard_commands(&commands)!!;
+}
+
+fn void texture_reference_publishes_after_retain_and_deduplicates() @test {
+    vk::VkDeviceState state;
+    vk::TextureCell[1] texture_cells = {{
+        .generation = 1,
+        .used       = true,
+    }};
+    state.textures = {
+        .slots = texture_cells[..],
+        .owner = 73,
+    };
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
+    vk::CommandResourceReference[2] references;
+    vk::CommandReferenceIndexCell[4] cells;
+    vk::CommandScratch scratch = {
+        .references      = references[..],
+        .reference_index = {
+            .cells = cells[..],
+            .epoch = 1,
+        },
+    };
+    vk::CommandRecord record = { .scratch = &scratch };
+    gpu::TextureHandle valid = {
+        .owner      = state.textures.owner,
+        .index      = 0,
+        .generation = 1,
+    };
+    gpu::TextureHandle stale = valid;
+    stale.generation++;
+    vk::reset_command_policy_counters(&state);
+    vk::reset_command_reference_work_counters(&state);
+
+    fault retain_fault = @catch(vk::resolve_tracked_texture_command_reference(
+        &state,
+        &record,
+        stale,
+    ));
+    assert(retain_fault == gpu::INVALID_HANDLE
+        && scratch.reference_count == 0
+        && texture_cells[0].value.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == 0,
+        "a failed texture retain leaves reference storage unchanged");
+
+    (void)vk::resolve_tracked_texture_command_reference(
+        &state,
+        &record,
+        valid,
+    )!!;
+    (void)vk::resolve_tracked_texture_command_reference(
+        &state,
+        &record,
+        valid,
+    )!!;
+    vk::CommandPolicyCounters policy = vk::command_policy_counters(&state);
+    vk::CommandReferenceWorkCounters work =
+        vk::command_reference_work_counters(&state);
+    assert(scratch.reference_count == 1
+        && texture_cells[0].value.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == 1,
+        "a successful texture retain publishes exactly one reference");
+    assert(policy.tracking_calls == 3
+        && policy.reference_increments == 1
+        && work.lookups == 3
+        && work.duplicate_hits == 1
+        && work.resource_mutex_acquisitions == 2
+        && work.retains == 1
+        && work.index_publications == 1,
+        "failed and duplicate texture paths cannot publish or retain extra references");
+
+    vk::clear_command_scratch_references(&state, &scratch);
+    assert(texture_cells[0].value.tracked_command_references.load(
+        AtomicOrdering.RELAXED,
+    ) == 0,
+        "texture reference cleanup releases the successful retain");
 }
 
 fn void command_reference_rollback_releases_suffix_and_rebuilds_epoch() @test {

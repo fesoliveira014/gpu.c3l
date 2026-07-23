@@ -266,7 +266,7 @@ fn void? validate_render_pass_desc_fields(
     }
 }
 
-fn PreparedRenderPass? validate_and_lower_render_pass(
+fn PreparedRenderPass? checked_prepare_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
@@ -524,7 +524,7 @@ fn void? checked_begin_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
-    PreparedRenderPass pass = validate_and_lower_render_pass(
+    PreparedRenderPass pass = checked_prepare_render_pass(
         commands,
         desc,
     )!;
@@ -535,7 +535,7 @@ fn void? checked_tracking_begin_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
-    PreparedRenderPass pass = validate_and_lower_render_pass(
+    PreparedRenderPass pass = checked_prepare_render_pass(
         commands,
         desc,
     )!;
@@ -955,7 +955,7 @@ fn PreparedIndexedDraw? lower_indexed_draw(
     };
 }
 
-fn PreparedIndexedDraw? validate_and_lower_indexed_draw(
+fn PreparedIndexedDraw? checked_prepare_indexed_draw(
     gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1087,7 +1087,7 @@ fn void? checked_draw_indexed(
     uint instance_count,
     gpu::IndexType index_type,
 ) {
-    PreparedIndexedDraw draw = validate_and_lower_indexed_draw(
+    PreparedIndexedDraw draw = checked_prepare_indexed_draw(
         commands:       commands,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
@@ -1108,7 +1108,7 @@ fn void? checked_tracking_draw_indexed(
     uint instance_count,
     gpu::IndexType index_type,
 ) {
-    PreparedIndexedDraw draw = validate_and_lower_indexed_draw(
+    PreparedIndexedDraw draw = checked_prepare_indexed_draw(
         commands:       commands,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
@@ -1148,7 +1148,7 @@ fn PreparedIndirectDraw? lower_indirect_draw(
     };
 }
 
-fn PreparedIndirectDraw? validate_and_lower_indirect_draw(
+fn PreparedIndirectDraw? checked_prepare_indirect_draw(
     gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1261,7 +1261,7 @@ fn void? checked_draw_indirect(
     gpu::GpuSpan args,
     uint draw_count,
 ) {
-    PreparedIndirectDraw draw = validate_and_lower_indirect_draw(
+    PreparedIndirectDraw draw = checked_prepare_indirect_draw(
         commands:       commands,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
@@ -1278,7 +1278,7 @@ fn void? checked_tracking_draw_indirect(
     gpu::GpuSpan args,
     uint draw_count,
 ) {
-    PreparedIndirectDraw draw = validate_and_lower_indirect_draw(
+    PreparedIndirectDraw draw = checked_prepare_indirect_draw(
         commands:       commands,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
@@ -1342,7 +1342,7 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
     };
 }
 
-fn PreparedIndexedIndirectDraw? validate_and_lower_indexed_indirect_draw(
+fn PreparedIndexedIndirectDraw? checked_prepare_indexed_indirect_draw(
     gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1502,7 +1502,7 @@ fn void? checked_draw_indexed_indirect(
     gpu::IndexType index_type,
 ) {
     PreparedIndexedIndirectDraw draw =
-        validate_and_lower_indexed_indirect_draw(
+        checked_prepare_indexed_indirect_draw(
             commands:       commands,
             vertex_root:    vertex_root,
             fragment_root:  fragment_root,
@@ -1524,7 +1524,7 @@ fn void? checked_tracking_draw_indexed_indirect(
     gpu::IndexType index_type,
 ) {
     PreparedIndexedIndirectDraw draw =
-        validate_and_lower_indexed_indirect_draw(
+        checked_prepare_indexed_indirect_draw(
             commands:       commands,
             vertex_root:    vertex_root,
             fragment_root:  fragment_root,
@@ -1592,7 +1592,7 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
     };
 }
 
-fn PreparedIndexedIndirectCountDraw? validate_and_lower_indexed_indirect_count_draw(
+fn PreparedIndexedIndirectCountDraw? checked_prepare_indexed_indirect_count_draw(
     gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1778,7 +1778,7 @@ fn void? checked_draw_indexed_indirect_count(
     gpu::IndexType index_type,
 ) {
     PreparedIndexedIndirectCountDraw draw =
-        validate_and_lower_indexed_indirect_count_draw(
+        checked_prepare_indexed_indirect_count_draw(
             commands:       commands,
             vertex_root:    vertex_root,
             fragment_root:  fragment_root,
@@ -1802,7 +1802,7 @@ fn void? checked_tracking_draw_indexed_indirect_count(
     gpu::IndexType index_type,
 ) {
     PreparedIndexedIndirectCountDraw draw =
-        validate_and_lower_indexed_indirect_count_draw(
+        checked_prepare_indexed_indirect_count_draw(
             commands:       commands,
             vertex_root:    vertex_root,
             fragment_root:  fragment_root,
@@ -1878,7 +1878,7 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     return draw;
 }
 
-fn PreparedGeneratedDraw? validate_and_lower_generated_draw(
+fn PreparedGeneratedDraw? checked_prepare_generated_draw(
     gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2011,7 +2011,7 @@ fn void? checked_draw_generated(
     gpu::GpuSpan count_span,
     uint max_draw_count,
 ) {
-    PreparedGeneratedDraw draw = validate_and_lower_generated_draw(
+    PreparedGeneratedDraw draw = checked_prepare_generated_draw(
         commands:       commands,
         records:        records,
         count_span:     count_span,
@@ -2026,7 +2026,7 @@ fn void? checked_tracking_draw_generated(
     gpu::GpuSpan count_span,
     uint max_draw_count,
 ) {
-    PreparedGeneratedDraw draw = validate_and_lower_generated_draw(
+    PreparedGeneratedDraw draw = checked_prepare_generated_draw(
         commands:       commands,
         records:        records,
         count_span:     count_span,
@@ -2090,7 +2090,7 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     return draw;
 }
 
-fn PreparedGeneratedIndexedDraw? validate_and_lower_generated_indexed_draw(
+fn PreparedGeneratedIndexedDraw? checked_prepare_generated_indexed_draw(
     gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2256,7 +2256,7 @@ fn void? checked_draw_indexed_generated(
     gpu::IndexType index_type,
 ) {
     PreparedGeneratedIndexedDraw draw =
-        validate_and_lower_generated_indexed_draw(
+        checked_prepare_generated_indexed_draw(
             commands:       commands,
             records:        records,
             count_span:     count_span,
@@ -2276,7 +2276,7 @@ fn void? checked_tracking_draw_indexed_generated(
     gpu::IndexType index_type,
 ) {
     PreparedGeneratedIndexedDraw draw =
-        validate_and_lower_generated_indexed_draw(
+        checked_prepare_generated_indexed_draw(
             commands:       commands,
             records:        records,
             count_span:     count_span,

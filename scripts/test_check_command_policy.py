@@ -7,124 +7,40 @@ from pathlib import Path
 from scripts import check_command_policy
 
 
-TABLE_SOURCE = """
-module gpu::internal::vk;
-
-const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
-    .copy = &trusted_copy,
-};
-
-const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
-    .copy = &trusted_tracking_copy,
-};
-
-const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
-    .copy = &checked_copy,
-};
-
-const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
-    .copy = &checked_tracking_copy,
-};
-
-fn void trusted_copy() {
-    lower_copy();
-}
-
-fn void trusted_tracking_copy() {
-    lower_copy();
-    retain_copy();
-}
-
-fn void checked_copy() {
-    validate_copy();
-}
-
-fn void checked_tracking_copy() {
-    validate_copy();
-    retain_copy();
-}
-
-fn void lower_copy() {}
-fn void validate_copy() {}
-
-fn void retain_copy() {
-    track_command_reference();
-    rollback_command_references();
-}
-
-fn void track_command_reference() {
-    ensure_command_reference_capacity();
-    retain_tracked_command_reference();
-    publish_command_reference();
-}
-
-fn void resolve_tracked_texture_command_reference() {
-    tracked_command_references.add();
-    publish_command_reference();
-}
-
-fn bool indexed_resource_reference_matches() {
-    return cell.owner == reference.owner
-        && cell.index == reference.index
-        && cell.generation == reference.generation;
-}
-
-fn void ensure_command_reference_capacity() {
-    note_command_reference_allocation();
-}
-
-fn void note_command_reference_allocation() {}
-fn void clear_command_scratch_references() {
-    release_tracked_command_references(
-        state,
-        scratch.references,
-        scratch.reference_count,
-    );
-    scratch.reference_count = 0;
-    reset_command_reference_index();
-}
-fn void rollback_command_references() {
-    reset_command_reference_index();
-    for (uint i = 0; i < reference_count; i++) publish_command_reference();
-}
-fn void retain_tracked_command_reference() {}
-fn void release_tracked_command_references() {}
-fn void publish_command_reference() {}
-fn void reset_command_reference_index() {}
-
-fn void vk_create_command_allocator() {}
-fn void vk_destroy_command_allocator() {}
-fn void vk_reserve_generated_scratch() {}
-fn void vk_release_generated_scratch() {}
-fn void vk_begin_commands() {}
-fn void vk_end_commands() {}
-fn void vk_discard_commands() {}
-fn void vk_submit() {}
-fn void retire_observed_completion_and_drain_with_query() {}
-fn void drain_completed_submitted_commands() {}
-"""
-
-ENCODER_PROOF_SOURCE = """
+STRUCT_SOURCE = """
 module gpu::internal;
 
-fn void command_encoder() {
-    note_command_encoder_cell_computation();
-    if (opaque != encoder) return;
-    note_command_encoder_lease_comparison();
-    if (encoder.lease != make_command_lease(device, handle)) return;
+struct CommandOps @private {
+    CopyFn copy;
+    DrawFn draw;
 }
-
-fn void recording_encoder() {
-    command_encoder();
-}
-
-fn void executable_encoder() {
-    command_encoder();
-}
-
-fn void command_operation() {}
-fn void executable_command_operation() {}
 """
+
+TABLE_NAMES = (
+    "TRUSTED_COMMAND_OPS",
+    "TRUSTED_TRACKING_COMMAND_OPS",
+    "CHECKED_COMMAND_OPS",
+    "CHECKED_TRACKING_COMMAND_OPS",
+)
+
+
+def table_source(
+    name: str,
+    copy: str = "&copy_command",
+    draw: str = "&draw_command",
+) -> str:
+    return f"""
+const gpu::internal::CommandOps {name} @private = {{
+    .copy = {copy},
+    .draw = {draw},
+}};
+"""
+
+
+def all_tables_source() -> str:
+    return "module gpu::internal::vk;\n" + "".join(
+        table_source(name) for name in TABLE_NAMES
+    )
 
 
 class CommandPolicyCheckTests(unittest.TestCase):
@@ -138,604 +54,273 @@ class CommandPolicyCheckTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
 
+    def write_fixture(
+        self,
+        root: Path,
+        tables: str | None = None,
+        helpers: str = "",
+    ) -> None:
+        self.write_source(root, "gpu/internal/device.c3", STRUCT_SOURCE)
+        self.write_source(
+            root,
+            "gpu/internal/vk/device.c3",
+            (all_tables_source() if tables is None else tables) + helpers,
+        )
+
     def test_current_sources_satisfy_contract(self) -> None:
         self.assertEqual(check_command_policy.check(), [])
 
-    def test_accepts_policy_free_tables_with_tracking_isolated(self) -> None:
+    def test_accepts_complete_direct_tables(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
+            self.write_fixture(root)
             self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_direct_policy_read(self) -> None:
+    def test_rejects_missing_table(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void trusted_copy() {\n    lower_copy();\n}",
-                (
-                    "fn void trusted_copy() {\n"
-                    "    if (state.validation_policy.contract) lower_copy();\n"
-                    "}"
-                ),
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any("reads validation_policy" in error for error in errors))
-
-    def test_rejects_trusted_encoder_capability_check(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void trusted_copy() {\n    lower_copy();\n}",
-                (
-                    "fn void trusted_copy() {\n"
-                    "    if (commands == null) return;\n"
-                    "    lower_copy();\n"
-                    "}"
-                ),
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "trusted command path reaches encoder null check" in error
-                for error in errors
-            ))
-
-    def test_rejects_duplicate_frontend_encoder_work(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
-            source = ENCODER_PROOF_SOURCE.replace(
-                "    if (opaque != encoder) return;\n",
-                (
-                    "    if (opaque != encoder) return;\n"
-                    "    if (encoder.handle != handle) return;\n"
-                ),
-            )
-            self.write_source(root, "gpu/internal/command.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "frontend command resolution performs stored handle comparison"
-                in error
-                for error in errors
-            ))
-
-    def test_rejects_frontend_device_loss_load(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
-            source = ENCODER_PROOF_SOURCE.replace(
-                "    note_command_encoder_lease_comparison();\n",
-                (
-                    "    if (encoder.device_lost.load(AtomicOrdering.ACQUIRE)) return;\n"
-                    "    note_command_encoder_lease_comparison();\n"
-                ),
-            )
-            self.write_source(root, "gpu/internal/command.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "frontend command resolution performs device-loss load"
-                for error in errors
-            ))
-
-    def test_rejects_device_loss_load_in_recording_encoder(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
-            source = ENCODER_PROOF_SOURCE.replace(
-                "fn void recording_encoder() {\n    command_encoder();\n}",
-                (
-                    "fn void recording_encoder() {\n"
-                    "    if (encoder.device_lost.load(AtomicOrdering.ACQUIRE)) return;\n"
-                    "    command_encoder();\n"
-                    "}"
-                ),
-            )
-            self.write_source(root, "gpu/internal/command.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "frontend command resolution performs device-loss load"
-                in error
-                and error.endswith(":recording_encoder")
-                for error in errors
-            ))
-
-    def test_rejects_missing_encoder_lease_note(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
-            source = ENCODER_PROOF_SOURCE.replace(
-                "    note_command_encoder_lease_comparison();\n",
+            source = all_tables_source().replace(
+                table_source("CHECKED_TRACKING_COMMAND_OPS"),
                 "",
             )
-            self.write_source(root, "gpu/internal/command.c3", source)
-            errors = check_command_policy.check(root)
+            self.write_fixture(root, source)
             self.assertIn(
-                "command_encoder must record exactly one note_command_encoder_lease_comparison",
-                errors,
+                "missing command policy tables: CHECKED_TRACKING_COMMAND_OPS",
+                check_command_policy.check(root),
             )
 
-    def test_rejects_duplicate_encoder_lease_note(self) -> None:
+    def test_rejects_unexpected_table(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            self.write_source(root, "gpu/internal/vk/device.c3", TABLE_SOURCE)
-            source = ENCODER_PROOF_SOURCE.replace(
-                "    note_command_encoder_lease_comparison();\n",
-                (
-                    "    note_command_encoder_lease_comparison();\n"
-                    "    note_command_encoder_lease_comparison();\n"
-                ),
-            )
-            self.write_source(root, "gpu/internal/command.c3", source)
-            errors = check_command_policy.check(root)
+            source = all_tables_source() + table_source("EXPERIMENTAL_COMMAND_OPS")
+            self.write_fixture(root, source)
             self.assertIn(
-                "command_encoder must record exactly one note_command_encoder_lease_comparison",
-                errors,
+                "unexpected command policy tables: EXPERIMENTAL_COMMAND_OPS",
+                check_command_policy.check(root),
             )
 
-    def test_rejects_renamed_tracking_helper(self) -> None:
+    def test_rejects_duplicate_table_across_backend_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    lower_copy();\n}\n\nfn void trusted_tracking_copy",
-                (
-                    "    lower_copy();\n"
-                    "    quiet_retention();\n"
-                    "}\n\n"
-                    "fn void quiet_retention() {\n"
-                    "    track_command_reference();\n"
-                    "}\n\n"
-                    "fn void trusted_tracking_copy"
-                ),
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "TRUSTED_COMMAND_OPS reaches tracking work" in error
-                for error in errors
-            ))
-
-    def test_rejects_cross_file_policy_read(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    lower_copy();\n}\n\nfn void trusted_tracking_copy",
-                "    cross_file_helper();\n}\n\nfn void trusted_tracking_copy",
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            self.write_fixture(root)
             self.write_source(
                 root,
-                "gpu/internal/vk/nested/helper.c3",
-                "fn void cross_file_helper() { (void)state.vulkan_layers; }\n",
+                "gpu/internal/vk/nested/duplicate.c3",
+                table_source("TRUSTED_COMMAND_OPS"),
             )
-            errors = check_command_policy.check(root)
-            self.assertTrue(any("reads vulkan_layers" in error for error in errors))
-
-    def test_rejects_policy_read_in_any_overload(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    lower_copy();\n}\n\nfn void trusted_tracking_copy",
-                "    overloaded_helper();\n}\n\nfn void trusted_tracking_copy",
-            )
-            source += """
-fn void overloaded_helper() {}
-fn void overloaded_helper(uint value) {
-    (void)value;
-    (void)state.debug_names;
-}
-"""
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any("reads debug_names" in error for error in errors))
-
-    def test_rejects_superseded_command_function(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE + "\nfn void vk_cmd_copy_buffer() {}\n"
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "superseded command functions remain declared: vk_cmd_copy_buffer"
-                in error
-                for error in errors
-            ))
-
-    def test_rejects_uninventoried_command_table(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE + """
-const gpu::internal::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
-    .copy = &trusted_copy,
-};
-"""
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            self.assertEqual(
+            self.assertIn(
+                "duplicate command policy tables: TRUSTED_COMMAND_OPS",
                 check_command_policy.check(root),
-                ["unexpected command policy table: EXPERIMENTAL_COMMAND_OPS"],
             )
 
-    def test_rejects_direct_temporary_pool_use(self) -> None:
+    def test_rejects_duplicate_field(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_begin_commands() {}",
-                "fn void vk_begin_commands() { @pool() {} }",
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "command path reaches temporary pool" in error
-                for error in errors
-            ))
-
-    def test_ignores_ambient_markers_in_comments_and_strings(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_begin_commands() {}",
+            source = all_tables_source().replace(
+                "    .copy = &copy_command,\n",
                 (
-                    "fn void vk_begin_commands() {\n"
-                    "    io::print(\"@pool() tlocal RecordingContextTable\");\n"
-                    "    // mem::talloc_array must remain retired.\n"
-                    "}"
+                    "    .copy = &copy_command,\n"
+                    "    .copy = &other_copy_command,\n"
                 ),
+                1,
             )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            self.write_fixture(root, source)
+            self.assertIn(
+                "TRUSTED_COMMAND_OPS has duplicate fields: copy",
+                check_command_policy.check(root),
+            )
+
+    def test_rejects_duplicate_command_ops_field(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            struct_source = STRUCT_SOURCE.replace(
+                "    CopyFn copy;\n",
+                "    CopyFn copy;\n    OtherCopyFn copy;\n",
+            )
+            self.write_source(root, "gpu/internal/device.c3", struct_source)
+            self.write_source(
+                root,
+                "gpu/internal/vk/device.c3",
+                all_tables_source(),
+            )
+            self.assertIn(
+                "CommandOps has duplicate fields: copy",
+                check_command_policy.check(root),
+            )
+
+    def test_reads_field_name_before_trailing_attribute(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            struct_source = STRUCT_SOURCE.replace(
+                "    CopyFn copy;\n",
+                "    CopyFn copy @deprecated;\n",
+            )
+            self.write_source(root, "gpu/internal/device.c3", struct_source)
+            self.write_source(
+                root,
+                "gpu/internal/vk/device.c3",
+                all_tables_source(),
+            )
             self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_reachable_thread_local_state(self) -> None:
+    def test_rejects_missing_field(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_begin_commands() {}",
-                (
-                    "fn void vk_begin_commands() { hidden_tls(); }\n"
-                    "fn void hidden_tls() { tlocal int command_cache; }"
-                ),
+            source = all_tables_source().replace(
+                "    .draw = &draw_command,\n",
+                "",
+                1,
             )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "command path reaches thread-local state" in error
-                for error in errors
-            ))
+            self.write_fixture(root, source)
+            self.assertIn(
+                "TRUSTED_COMMAND_OPS is missing CommandOps fields: draw",
+                check_command_policy.check(root),
+            )
 
-    def test_rejects_renamed_warm_allocation_helper(self) -> None:
+    def test_rejects_extra_field(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_begin_commands() {}",
+            source = all_tables_source().replace(
+                "    .draw = &draw_command,\n",
                 (
-                    "fn void vk_begin_commands() { hidden_growth(); }\n"
-                    "fn void hidden_growth() { mem::new_array(uint, 1); }"
+                    "    .draw = &draw_command,\n"
+                    "    .dispatch = &dispatch_command,\n"
                 ),
+                1,
             )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "warm command path reaches host allocation" in error
-                for error in errors
-            ))
+            self.write_fixture(root, source)
+            self.assertIn(
+                "TRUSTED_COMMAND_OPS has unknown CommandOps fields: dispatch",
+                check_command_policy.check(root),
+            )
 
-    def test_rejects_capacity_sized_submit_stack_storage(self) -> None:
+    def test_rejects_non_direct_function_references(self) -> None:
+        initializers = (
+            "copy_command",
+            "copy_command()",
+            "(&copy_command)",
+            "&commands::copy_command",
+            "select_copy_command()",
+            "use_fast_copy ? &copy_command : &other_copy_command",
+        )
+        for initializer in initializers:
+            with self.subTest(initializer=initializer):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = all_tables_source().replace(
+                        "    .copy = &copy_command,\n",
+                        f"    .copy = {initializer},\n",
+                        1,
+                    )
+                    self.write_fixture(root, source)
+                    self.assertIn(
+                        "TRUSTED_COMMAND_OPS.copy must be initialized with "
+                        "a direct &function_name reference",
+                        check_command_policy.check(root),
+                    )
+
+    def test_accepts_helper_rename(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_submit() {}",
-                (
-                    "fn void vk_submit() { submit_with_scratch(); }\n"
-                    "fn void submit_with_scratch() {\n"
-                    "    ulong[MAX_SUBMIT_COMMAND_LISTS] records;\n"
-                    "}"
-                ),
+            source = all_tables_source().replace(
+                "&copy_command",
+                "&renamed_copy_command",
             )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "warm command path reaches capacity-sized stack storage" in error
-                for error in errors
-            ))
+            self.write_fixture(
+                root,
+                source,
+                "\nfn void renamed_copy_command() {}\n",
+            )
+            self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_cross_file_fallible_host_allocation_helper(self) -> None:
+    def test_accepts_helper_extraction(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_begin_commands() {}",
-                "fn void vk_begin_commands() { cross_file_growth(); }",
+            self.write_fixture(
+                root,
+                helpers="""
+fn void copy_command() {
+    extracted_copy_helper();
+}
+fn void extracted_copy_helper() {}
+""",
             )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            self.assertEqual(check_command_policy.check(root), [])
+
+    def test_accepts_helper_inlining(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                helpers="\nfn void copy_command() { native_copy(); }\n",
+            )
+            self.assertEqual(check_command_policy.check(root), [])
+
+    def test_accepts_helper_relocation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root)
             self.write_source(
                 root,
-                "gpu/internal/vk/nested/helper.c3",
-                "fn void cross_file_growth() { alloc::new_array_try(a, uint, 1); }\n",
+                "gpu/internal/vk/commands/copy.c3",
+                "fn void copy_command() {}\n",
             )
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "warm command path reaches host allocation" in error
-                for error in errors
-            ))
+            self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_reachable_vma_allocator_method(self) -> None:
+    def test_accepts_definition_reordering(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_begin_commands() {}",
-                (
-                    "fn void vk_begin_commands() { hidden_vma_growth(); }\n"
-                    "fn void hidden_vma_growth() {\n"
-                    "    state.allocator.create_buffer_with_alignment();\n"
-                    "}"
-                ),
+            source = (
+                "module gpu::internal::vk;\n"
+                "fn void copy_command() {}\n"
+                + "".join(reversed([
+                    table_source(name) for name in TABLE_NAMES
+                ]))
+                + "fn void draw_command() {}\n"
             )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "warm command path reaches VMA allocation" in error
-                for error in errors
-            ))
+            self.write_fixture(root, source)
+            self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_reachable_cold_native_allocator_helper(self) -> None:
+    def test_accepts_expression_bodied_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_begin_commands() {}",
-                "fn void vk_begin_commands() { allocate_command_buffers_real(); }",
-            )
-            source += "\nfn void allocate_command_buffers_real() { ops.allocate(); }\n"
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "warm command path reaches cold allocation helper" in error
-                for error in errors
-            ))
-
-    def test_rejects_cross_file_ambient_context_helper(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_submit() {}",
-                "fn void vk_submit() { cross_file_context(); }",
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            self.write_source(
+            self.write_fixture(
                 root,
-                "gpu/internal/vk/nested/helper.c3",
-                (
-                    "fn void cross_file_context() {\n"
-                    "    RecordingContextTable contexts;\n"
-                    "}\n"
-                ),
+                helpers="\nfn void copy_command() => native_copy();\n",
             )
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "command path reaches recording context" in error
-                for error in errors
-            ))
+            self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_allocation_in_any_reachable_overload(self) -> None:
+    def test_ignores_retired_patterns_in_comments_and_strings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void vk_end_commands() {}",
-                (
-                    "fn void vk_end_commands() { overloaded_finish(); }\n"
-                    "fn void overloaded_finish() {}\n"
-                    "fn void overloaded_finish(uint count) {\n"
-                    "    vk::allocate_command_buffers(device, info, buffers);\n"
-                    "}"
-                ),
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "warm command path reaches native command allocation" in error
-                for error in errors
-            ))
-
-    def test_rejects_accumulated_reference_count_loop(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "fn void track_command_reference() {\n"
-                "    ensure_command_reference_capacity();\n"
-                "    retain_tracked_command_reference();\n"
-                "    publish_command_reference();\n"
-                "}",
-                (
-                    "fn void track_command_reference() {\n"
-                    "    for (uint i = 0; i < scratch.reference_count; i++) {\n"
-                    "        inspect(scratch.references[i]);\n"
-                    "    }\n"
-                    "}"
-                ),
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "reference index hot path contains reference-count loop"
-                in error
-                for error in errors
-            ))
-
-    def test_rejects_accumulated_reference_slice_loop(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE + """
-fn void preflight_command_references() {
-    foreach (&reference : scratch.references[:scratch.reference_count]) {
-        inspect(reference);
-    }
+            self.write_fixture(
+                root,
+                helpers=r'''
+fn void copy_command() {
+    io::printn("@pool() tlocal mem::new_array vk::allocate_command_buffers");
+    io::printn("const gpu::internal::CommandOps STRING_TABLE = {");
+    // validation_policy track_command_reference scratch.reference_count
+    // const gpu::internal::CommandOps COMMENT_TABLE = {
+    /* vk_cmd_copy_buffer RecordingContextTable */
 }
-"""
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "reference index hot path contains reference-slice loop"
-                in error
-                for error in errors
-            ))
+''',
+            )
+            self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_accumulated_scan_in_reachable_helper(self) -> None:
+    def test_accepts_reuse_of_former_internal_helper_name(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    ensure_command_reference_capacity();",
-                "    scan_reference_helper();\n"
-                "    ensure_command_reference_capacity();",
-                1,
-            ) + """
-fn void scan_reference_helper() {
-    for (uint i = 0; i < scratch.reference_count; i++) inspect(i);
-}
-"""
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "reference index hot path contains reference-count loop"
-                in error
-                and error.endswith(":scan_reference_helper")
-                for error in errors
-            ))
-
-    def test_rejects_reference_publication_before_retain(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    retain_tracked_command_reference();\n"
-                "    publish_command_reference();",
-                "    publish_command_reference();\n"
-                "    retain_tracked_command_reference();",
+            source = all_tables_source().replace(
+                "&copy_command",
+                "&vk_cmd_copy_buffer",
                 1,
             )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "reference index publication is not after retain"
-                in error
-                for error in errors
-            ))
-
-    def test_rejects_publication_hidden_in_pre_retain_helper(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    retain_tracked_command_reference();",
-                "    publish_early();\n"
-                "    retain_tracked_command_reference();",
-                1,
-            ) + "\nfn void publish_early() { publish_command_reference(); }\n"
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "reference index publication has unauthorized caller"
-                in error
-                and error.endswith(":publish_early")
-                for error in errors
-            ))
-
-    def test_rejects_hash_only_reference_equality(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    return cell.owner == reference.owner\n"
-                "        && cell.index == reference.index\n"
-                "        && cell.generation == reference.generation;",
-                "    return cell.hash == reference.hash;",
+            self.write_fixture(
+                root,
+                tables=source,
+                helpers="\nfn void vk_cmd_copy_buffer() {}\n",
             )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "reference index equality omits exact owner"
-                in error
-                for error in errors
-            ))
-
-    def test_rejects_reference_clear_with_wrong_release_list(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "        scratch.references,\n"
-                "        scratch.reference_count,",
-                "        scratch.reference_index.cells,\n"
-                "        scratch.reference_count,",
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "command scratch clear must release its reference list"
-                in error
-                for error in errors
-            ))
-
-    def test_rejects_reference_clear_reset_before_release(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    release_tracked_command_references(\n"
-                "        state,\n"
-                "        scratch.references,\n"
-                "        scratch.reference_count,\n"
-                "    );\n"
-                "    scratch.reference_count = 0;\n"
-                "    reset_command_reference_index();",
-                "    reset_command_reference_index();\n"
-                "    release_tracked_command_references(\n"
-                "        state,\n"
-                "        scratch.references,\n"
-                "        scratch.reference_count,\n"
-                "    );\n"
-                "    scratch.reference_count = 0;",
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "command scratch clear must release its reference list"
-                in error
-                for error in errors
-            ))
-
-    def test_rejects_reference_clear_count_before_release(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    release_tracked_command_references(\n"
-                "        state,\n"
-                "        scratch.references,\n"
-                "        scratch.reference_count,\n"
-                "    );\n"
-                "    scratch.reference_count = 0;",
-                "    scratch.reference_count = 0;\n"
-                "    release_tracked_command_references(\n"
-                "        state,\n"
-                "        scratch.references,\n"
-                "        scratch.reference_count,\n"
-                "    );",
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "command scratch clear must release its reference list"
-                in error
-                for error in errors
-            ))
-
-    def test_rejects_unsafe_rollback_cell_deletion(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = TABLE_SOURCE.replace(
-                "    reset_command_reference_index();\n"
-                "    for (uint i = 0; i < reference_count; i++) "
-                "publish_command_reference();",
-                "    reference_index.cells[index].epoch = 0;",
-            )
-            self.write_source(root, "gpu/internal/vk/device.c3", source)
-            errors = check_command_policy.check(root)
-            self.assertTrue(any(
-                "reference rollback must reset and rebuild"
-                in error
-                for error in errors
-            ))
+            self.assertEqual(check_command_policy.check(root), [])
 
 
 if __name__ == "__main__":

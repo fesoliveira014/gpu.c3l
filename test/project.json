@@ -165,6 +165,10 @@
       "type": "test",
       "sources": [ "src/test_vk_performance_invariants.c3", "src/test_command_path_native_work.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
     },
+    "vk_allocator_observation": {
+      "type": "test",
+      "sources": [ "src/test_vk_allocator_observation.c3" ]
+    },
     "vk_swapchain": {
       "type": "test",
       "sources": [ "src/test_vk_swapchain.c3", "src/test_vk_wsi_diagnostics.c3" ]
@@ -200,7 +204,7 @@
     },
     "vk_validation_policy": {
       "type": "test",
-      "sources": [ "src/test_vk_validation_policy.c3" ]
+      "sources": [ "src/test_vk_validation_policy.c3", "src/test_vk_command_policy_matrix.c3" ]
     }
   }
 }

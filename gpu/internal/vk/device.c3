@@ -212,7 +212,7 @@ struct VkDeviceState {
     Atomic{ulong}              generated_recording_allocations;
     ulong                      command_buffers_allocated;
     ulong                      command_buffers_freed;
-    Atomic{ulong}              recording_host_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
+    RecordingHostAllocator     recording_host_allocator @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
     Atomic{ulong}              recording_command_pool_creations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
     Atomic{ulong}              recording_command_buffer_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
     Atomic{ulong}              recording_command_buffer_frees @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
@@ -928,6 +928,11 @@ fn gpu::Device? create_vk_device_from_runtime(
         if (probe != null) probe.rollback_count++;
     }
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
+    $if env::TESTING
+            || $feature(COMMAND_RESOLUTION_STATS)
+            || $feature(COMMAND_RECORDING_WORK_STATS):
+        install_recording_host_allocator(state);
+    $endif
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
     state.debug_names = desc.enable_debug_names;

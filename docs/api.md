@@ -1211,10 +1211,12 @@ Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
 `command_resolution_stats`. The process-wide relaxed counters measure
 live-encoder entry-point attempts, every emitted Vulkan command, and forbidden
 resolution paths. The encoder counters additionally require one cell
-computation and one lease comparison per warm call, with zero duplicate field
-comparisons, device-loss loads, or trusted-backend capability checks. Reset and
-compare them only across an externally synchronized
-recording interval; they are absent from ordinary production builds.
+computation and one lease comparison per warm call. A narrow structural guard
+rejects reintroduced duplicate encoder identity comparisons, device-loss loads,
+and trusted-backend capability comparisons; those prohibitions are not inferred
+from runtime counters. Reset and compare the counters only across an externally
+synchronized recording interval; they are absent from ordinary production
+builds.
 
 ### Render pass
 

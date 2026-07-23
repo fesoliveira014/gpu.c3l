@@ -120,11 +120,11 @@ fn void? CommandTable.free(&self, gpu::CommandListHandle handle) {
     self.free_head = idx + 1;
 }
 
-fn CommandRecord*? resolve_command(gpu::CommandList* commands) {
-    if (commands == null || !commands.handle.is_valid()) return gpu::INVALID_HANDLE~;
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(&commands.device);
+fn CommandRecord*? resolve_command(gpu::CommandList* token) {
+    if (token == null || !token.handle.is_valid()) return gpu::INVALID_HANDLE~;
+    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(&token.device);
     if (state == null) return gpu::INVALID_HANDLE~;
-    return state.commands.get(commands.handle);
+    return state.commands.get(token.handle);
 }
 
 fn VkDeviceState* encoder_device_state(gpu::internal::CommandEncoderState* encoder) {

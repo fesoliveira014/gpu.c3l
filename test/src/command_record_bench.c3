@@ -88,9 +88,6 @@ fn void accumulate_resolution_stats(
     total.command_policy_selections += sample.command_policy_selections;
     total.encoder_cell_computations += sample.encoder_cell_computations;
     total.encoder_lease_comparisons += sample.encoder_lease_comparisons;
-    total.encoder_field_comparisons += sample.encoder_field_comparisons;
-    total.device_lost_loads += sample.device_lost_loads;
-    total.trusted_backend_capability_checks += sample.trusted_backend_capability_checks;
     total.recording_commands += sample.recording_commands;
     total.native_commands += sample.native_commands;
 }
@@ -449,12 +446,6 @@ fn int main() {
         "warm recording selects exactly one encoder cell per call");
     assert(resolution.encoder_lease_comparisons == expected_recording_commands,
         "warm recording compares exactly one encoder lease per call");
-    assert(resolution.encoder_field_comparisons == 0,
-        "warm recording performs no duplicate encoder field comparisons");
-    assert(resolution.device_lost_loads == 0,
-        "warm recording performs no device-loss atomic loads");
-    assert(resolution.trusted_backend_capability_checks == 0,
-        "trusted backend recording repeats no capability checks");
     assert(resolution.recording_commands == expected_recording_commands,
         "resolution evidence counts every measured recording call");
     assert(resolution.native_commands >= resolution.recording_commands,
@@ -517,7 +508,7 @@ fn int main() {
         preprocess_allocations,
     );
     io::printfn(
-        "resolution: recording_commands=%d native_commands=%d device_registry=%d retained_pins=%d lifecycle_vtable=%d command_table=%d pipeline_table=%d pipeline_cache=%d policy=%d encoder_cells=%d encoder_leases=%d encoder_fields=%d device_lost=%d backend_caps=%d",
+        "resolution: recording_commands=%d native_commands=%d device_registry=%d retained_pins=%d lifecycle_vtable=%d command_table=%d pipeline_table=%d pipeline_cache=%d policy=%d encoder_cells=%d encoder_leases=%d",
         resolution.recording_commands,
         resolution.native_commands,
         resolution.device_registry_resolutions,
@@ -529,9 +520,6 @@ fn int main() {
         resolution.command_policy_selections,
         resolution.encoder_cell_computations,
         resolution.encoder_lease_comparisons,
-        resolution.encoder_field_comparisons,
-        resolution.device_lost_loads,
-        resolution.trusted_backend_capability_checks,
     );
     io::printfn(
         "validation policy=%s tracking=%s layers=%s semantic_checks=%d tracking_calls=%d reference_allocations=%d reference_increments=%d reference_releases=%d",

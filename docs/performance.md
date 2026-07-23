@@ -1,8 +1,9 @@
 # Performance
 
-Benchmarks are advisory measurements with hard structural guards. Compare
-numbers only when the compiler, optimization level, adapter, driver, contract
-policy, lifetime-tracking and Vulkan-layer state, and queue topology match.
+Benchmarks report advisory timings alongside blocking deterministic allocation,
+work, state, fault, and native-emission observations. Compare numbers only when
+the compiler, optimization level, adapter, driver, contract policy,
+lifetime-tracking and Vulkan-layer state, and queue topology match.
 
 ## Run
 
@@ -93,11 +94,11 @@ not obscure library work:
 
 The paired operation timers include only warmed command recording. Handles,
 native objects, command lists, and other shared prerequisites are resolved or
-created before timing. Structural snapshots around every operation loop must
-show zero host or pool allocation, command-buffer allocation/reset, image-view
-or VMA allocation, shader-module or native-pipeline creation, and device-registry
-lock acquisition. Lifecycle cases allow only the exact command-list
-allocation/reset work required by their contract and reject unrelated work.
+created before timing. Deterministic work snapshots around every operation loop
+must show zero host or pool allocation, command-buffer allocation/reset,
+image-view or VMA allocation, shader-module or native-pipeline creation, and
+device-registry lock acquisition. Lifecycle cases allow only the exact work
+permitted by their contract and reject unrelated work.
 
 Run the CPU floor without Vulkan dependencies:
 
@@ -118,8 +119,14 @@ VK_DRIVER_FILES=/path/to/icd.json ./test/build/command_path_baseline_bench
 Both targets emit exact machine-readable records. The runner rejects missing,
 duplicated, malformed, out-of-range, or internally inconsistent operation,
 work, equivalence, and lifecycle records. Minimum/median/maximum times and
-direct/public ratios remain advisory; structural and semantic failures are
-blocking.
+direct/public ratios remain advisory; schema, deterministic work/state, and
+semantic failures are blocking.
+
+Direct command-table shape is the only static command-policy authority.
+Allocation, policy selection, tracking, reference publication/release ordering,
+and performance are established by allocator operations, exact work/state
+counters, native emissions/faults, and ownership transitions; wall time blocks
+only when runner, driver, and comparison profile are pinned.
 
 ## Evidence and regression gates
 
@@ -129,7 +136,7 @@ The suite covers:
 |---|---|
 | `allocation_bench` | Explicit `CPU_WRITE` allocation and free |
 | `command_wrapper_bench` | ICD-free direct no-op and public-wrapper floor for five command classes, with exact volatile observation |
-| `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero hidden structural work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
+| `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero forbidden work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
 | `command_reference_bench` | Exact unique, repeated, mixed, forced-collision, 4,095-capacity, and 4,096-reference probe/retain/release work with advisory per-reference timing |
 | `command_record_bench` | Barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
@@ -163,10 +170,11 @@ subsystem snapshots:
 | Sampler buckets | Exact collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
 Warm `CommandResolutionStats` require exactly one encoder-cell computation and
-one packed-lease comparison per recorded public command. Duplicate encoder-field
-comparisons, device-loss loads, and trusted-backend capability checks must stay
-at zero in every validation/tracking policy; this is structural evidence, not a
-wall-clock threshold.
+one packed-lease comparison per recorded public command. Duplicate encoder
+identity comparisons, device-loss loads, and trusted-backend capability
+comparisons are explicit structural prohibitions checked against the warm
+frontend and trusted backend sources; they are not represented as runtime
+counter evidence.
 
 Warm command-buffer reset is expected reuse evidence. Warm host allocation is
 prohibited in every policy mode; tracking modes retain into fixed reference
