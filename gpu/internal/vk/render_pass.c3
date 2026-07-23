@@ -94,6 +94,13 @@ struct DynamicStateRejection {
     ZString invariant;
 }
 
+struct DynamicStateObservation @if(env::TESTING) {
+    ulong        viewport_emissions;
+    ulong        scissor_emissions;
+    vk::Viewport viewport;
+    vk::Rect2D   scissor;
+}
+
 fn vk::AttachmentLoadOp load_op_to_vk(gpu::LoadOp op) @private {
     switch (op) {
         case gpu::LoadOp.LOAD:      return vk::AttachmentLoadOp.LOAD;
@@ -767,6 +774,13 @@ fn void emit_viewport(
         .min_depth = viewport.min_depth,
         .max_depth = viewport.max_depth,
     };
+    $if env::TESTING:
+        VkDeviceState* state = encoder_device_state(commands);
+        if (state.dynamic_state_observation_enabled) {
+            state.viewport_emissions++;
+            state.last_viewport = native;
+        }
+    $endif
     vk::cmd_set_viewport(record.command_buffer, 0, 1, &native);
     gpu::internal::note_command_native_call();
 }
@@ -855,8 +869,36 @@ fn void emit_scissor(
         .offset = { .x = scissor.x, .y = scissor.y },
         .extent = { .width = (uint)scissor.width, .height = (uint)scissor.height },
     };
+    $if env::TESTING:
+        VkDeviceState* state = encoder_device_state(commands);
+        if (state.dynamic_state_observation_enabled) {
+            state.scissor_emissions++;
+            state.last_scissor = native;
+        }
+    $endif
     vk::cmd_set_scissor(record.command_buffer, 0, 1, &native);
     gpu::internal::note_command_native_call();
+}
+
+fn void reset_dynamic_state_observation(
+    VkDeviceState* state,
+) @if(env::TESTING) {
+    state.dynamic_state_observation_enabled = true;
+    state.viewport_emissions = 0;
+    state.scissor_emissions = 0;
+    state.last_viewport = {};
+    state.last_scissor = {};
+}
+
+fn DynamicStateObservation dynamic_state_observation(
+    VkDeviceState* state,
+) @if(env::TESTING) {
+    return {
+        .viewport_emissions = state.viewport_emissions,
+        .scissor_emissions  = state.scissor_emissions,
+        .viewport           = state.last_viewport,
+        .scissor            = state.last_scissor,
+    };
 }
 
 fn void? trusted_set_scissor(

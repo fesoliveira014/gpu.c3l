@@ -5,6 +5,94 @@ import gpu @public;
 import gpu::internal::vk @public;
 import vk;
 
+struct DynamicStateFixture {
+    gpu::Device               device;
+    gpu::TextureHandle        target;
+    gpu::AttachmentViewHandle view;
+    gpu::CommandAllocator     allocator;
+    gpu::CommandList          commands;
+    vk::VkDeviceState*        state;
+}
+
+fn DynamicStateFixture make_dynamic_state_fixture(
+    gpu::ContractValidation contract,
+    gpu::DebugMessageCallback callback = null,
+    void* user_data = null,
+) {
+    gpu::RuntimeDesc runtime_desc = {
+        .backend                  = gpu::BackendKind.VULKAN,
+        .contract_validation      = contract,
+        .track_resource_lifetimes = true,
+        .application_name         = "gpu_dynamic_state_contract_test",
+        .debug_callback           = callback,
+        .debug_user_data          = user_data,
+    };
+    DynamicStateFixture fixture;
+    fixture.device = create_test_device(&runtime_desc)!!;
+    fixture.target = make_render_validation_target(
+        &fixture.device,
+        gpu::Format.RGBA8_UNORM,
+    );
+    fixture.view = create_test_attachment_view(
+        &fixture.device,
+        fixture.target,
+    )!!;
+    gpu::Queue queue = gpu::get_queue(
+        &fixture.device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    fixture.allocator = gpu::create_command_allocator(
+        &fixture.device,
+        queue,
+    )!!;
+    fixture.commands = gpu::begin_commands(&fixture.allocator)!!;
+    record_val_target_to_attach(&fixture.commands, fixture.target);
+    gpu::ColorTargetDesc[1] colors = {{ .view = fixture.view }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::cmd_begin_render_pass(&fixture.commands, &pass)!!;
+    fixture.state = (vk::VkDeviceState*)
+        gpu::internal::device_backend_state(fixture.device);
+    vk::reset_dynamic_state_observation(fixture.state);
+    return fixture;
+}
+
+fn void destroy_dynamic_state_fixture(
+    DynamicStateFixture* fixture,
+) {
+    gpu::cmd_end_render_pass(&fixture.commands)!!;
+    discard_test_commands(&fixture.commands)!!;
+    gpu::destroy_command_allocator(&fixture.allocator)!!;
+    destroy_test_attachment_view(&fixture.device, &fixture.view)!!;
+    gpu::destroy_texture(&fixture.device, fixture.target)!!;
+    destroy_test_device(&fixture.device)!!;
+}
+
+fn bool native_viewport_matches(
+    vk::Viewport* native,
+    gpu::Viewport* expected,
+) {
+    return native.x == expected.x
+        && native.y == expected.y
+        && native.width == expected.width
+        && native.height == expected.height
+        && native.min_depth == expected.min_depth
+        && native.max_depth == expected.max_depth;
+}
+
+fn bool native_scissor_matches(
+    vk::Rect2D* native,
+    gpu::ScissorRect* expected,
+) {
+    return native.offset.x == expected.x
+        && native.offset.y == expected.y
+        && native.extent.width == (uint)expected.width
+        && native.extent.height == (uint)expected.height;
+}
+
 fn gpu::TextureHandle make_render_validation_target(
     gpu::Device* device,
     gpu::Format format,
@@ -505,4 +593,283 @@ fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
         "pipeline sample mismatch records no native render pass");
     assert(record.scratch.reference_count == references_before,
         "pipeline sample mismatch retains no attachment references");
+}
+
+fn void viewport_device_bounds_accept_native_shapes_exactly() @test {
+    DynamicStateFixture fixture = make_dynamic_state_fixture(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+    fixture.state.viewport_limits = {
+        .max_width  = 100,
+        .max_height = 80,
+        .min_bound  = -50.0f,
+        .max_bound  = 100.0f,
+    };
+
+    gpu::Viewport inside = {
+        .width     = (float)VAL_RT,
+        .height    = (float)VAL_RT,
+        .max_depth = 1.0f,
+    };
+    gpu::cmd_set_viewport(&fixture.commands, &inside)!!;
+    gpu::Viewport device_edges = {
+        .y         = 80.0f,
+        .width     = 100.0f,
+        .height    = -80.0f,
+        .min_depth = 1.0f,
+        .max_depth = 0.0f,
+    };
+    gpu::cmd_set_viewport(&fixture.commands, &device_edges)!!;
+    gpu::Viewport negative_origin = {
+        .x         = -50.0f,
+        .y         = -50.0f,
+        .width     = 10.0f,
+        .height    = 10.0f,
+        .max_depth = 1.0f,
+    };
+    gpu::cmd_set_viewport(&fixture.commands, &negative_origin)!!;
+
+    vk::DynamicStateObservation observation =
+        vk::dynamic_state_observation(fixture.state);
+    assert(observation.viewport_emissions == 3,
+        "inside, negative-height overscan, and negative-origin viewports emit");
+    assert(native_viewport_matches(
+        &observation.viewport,
+        &negative_origin,
+    ), "the final native viewport preserves every accepted field");
+}
+
+fn void viewport_rejections_preserve_previous_native_state() @test {
+    DynamicStateFixture fixture = make_dynamic_state_fixture(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+    fixture.state.viewport_limits = {
+        .max_width  = 100,
+        .max_height = 80,
+        .min_bound  = -50.0f,
+        .max_bound  = 100.0f,
+    };
+
+    gpu::Viewport accepted = {
+        .width     = 16.0f,
+        .height    = 16.0f,
+        .max_depth = 1.0f,
+    };
+    gpu::cmd_set_viewport(&fixture.commands, &accepted)!!;
+    gpu::Viewport[17] rejected = {
+        { .width = 0.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = 0.0f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = -0.0f, .max_depth = 1.0f },
+        { .width = 101.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = 81.0f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = -81.0f, .max_depth = 1.0f },
+        { .x = -51.0f, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .x = 100.0f, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .y = -51.0f, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .y = 100.0f, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .x = float::nan, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .y = float::inf, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
+        { .width = float::nan, .height = 1.0f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = -float::inf, .max_depth = 1.0f },
+        { .width = 1.0f, .height = 1.0f, .min_depth = float::nan, .max_depth = 1.0f },
+        { .width = 1.0f, .height = 1.0f, .max_depth = float::inf },
+        { .width = 1.0f, .height = 1.0f, .max_depth = 1.1f },
+    };
+    foreach (&viewport : rejected) {
+        assert(@catch(gpu::cmd_set_viewport(
+            &fixture.commands,
+            viewport,
+        )) == gpu::INVALID_ARGUMENT, "invalid viewport faults before emission");
+    }
+
+    vk::DynamicStateObservation observation =
+        vk::dynamic_state_observation(fixture.state);
+    assert(observation.viewport_emissions == 1,
+        "rejected viewports add no native emission");
+    assert(native_viewport_matches(&observation.viewport, &accepted),
+        "rejected viewports preserve the previous native state");
+}
+
+fn void scissor_representation_accepts_overscan_and_empty_clip() @test {
+    DynamicStateFixture fixture = make_dynamic_state_fixture(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+
+    gpu::ScissorRect overscan = {
+        .x      = (int)VAL_RT,
+        .y      = (int)VAL_RT,
+        .width  = 32,
+        .height = 32,
+    };
+    gpu::cmd_set_scissor(&fixture.commands, &overscan)!!;
+    gpu::ScissorRect empty = {
+        .x = int::max,
+        .y = int::max,
+    };
+    gpu::cmd_set_scissor(&fixture.commands, &empty)!!;
+    vk::DynamicStateObservation accepted =
+        vk::dynamic_state_observation(fixture.state);
+    assert(accepted.scissor_emissions == 2,
+        "off-pass and zero-extent scissors emit");
+    assert(native_scissor_matches(&accepted.scissor, &empty),
+        "empty scissor preserves exact native offset and extent");
+
+    gpu::ScissorRect[6] rejected = {
+        { .x = -1, .width = 1, .height = 1 },
+        { .y = -1, .width = 1, .height = 1 },
+        { .width = -1, .height = 1 },
+        { .width = 1, .height = -1 },
+        { .x = int::max, .width = 1 },
+        { .y = int::max, .height = 1 },
+    };
+    foreach (&scissor : rejected) {
+        assert(@catch(gpu::cmd_set_scissor(
+            &fixture.commands,
+            scissor,
+        )) == gpu::INVALID_ARGUMENT, "invalid scissor faults before emission");
+    }
+    vk::DynamicStateObservation after =
+        vk::dynamic_state_observation(fixture.state);
+    assert(after.scissor_emissions == accepted.scissor_emissions,
+        "rejected scissors add no native emission");
+    assert(native_scissor_matches(&after.scissor, &empty),
+        "rejected scissors preserve the previous native state");
+}
+
+fn void dynamic_state_diagnostics_name_exact_rejected_fields() @test {
+    SyncDiagnosticCapture capture = {};
+    DynamicStateFixture fixture = make_dynamic_state_fixture(
+        contract:  gpu::ContractValidation.FULL,
+        callback:  &capture_sync_diagnostic,
+        user_data: &capture,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+    fixture.state.viewport_limits = {
+        .max_width  = 100,
+        .max_height = 80,
+        .min_bound  = -50.0f,
+        .max_bound  = 100.0f,
+    };
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_set_viewport",
+        debug_name:     null,
+        rejected_field: "Viewport.width",
+        invariant:      "width must not exceed the selected device maximum",
+    );
+    gpu::Viewport viewport = {
+        .width     = 101.0f,
+        .height    = 1.0f,
+        .max_depth = 1.0f,
+    };
+    assert(@catch(gpu::cmd_set_viewport(
+        &fixture.commands,
+        &viewport,
+    )) == gpu::INVALID_ARGUMENT, "over-limit viewport keeps INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+    );
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_set_scissor",
+        debug_name:     null,
+        rejected_field: "ScissorRect.x + ScissorRect.width",
+        invariant:      "endpoint must fit signed native coordinate range",
+    );
+    gpu::ScissorRect scissor = {
+        .x     = int::max,
+        .width = 1,
+    };
+    assert(@catch(gpu::cmd_set_scissor(
+        &fixture.commands,
+        &scissor,
+    )) == gpu::INVALID_ARGUMENT, "overflowing scissor keeps INVALID_ARGUMENT");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+    );
+}
+
+fn void all_policies_lower_dynamic_state_identically() @test {
+    DynamicStateFixture trusted = make_dynamic_state_fixture(
+        gpu::ContractValidation.TRUSTED,
+    );
+    defer destroy_dynamic_state_fixture(&trusted);
+    DynamicStateFixture boundaries = make_dynamic_state_fixture(
+        gpu::ContractValidation.OBJECT_BOUNDARIES,
+    );
+    defer destroy_dynamic_state_fixture(&boundaries);
+    DynamicStateFixture checked = make_dynamic_state_fixture(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&checked);
+
+    gpu::Viewport viewport = {
+        .x         = -1.0f,
+        .y         = (float)VAL_RT,
+        .width     = (float)VAL_RT + 2.0f,
+        .height    = -(float)VAL_RT,
+        .min_depth = 1.0f,
+        .max_depth = 0.0f,
+    };
+    gpu::ScissorRect scissor = {
+        .x      = (int)VAL_RT,
+        .y      = (int)VAL_RT,
+        .width  = 1,
+        .height = 1,
+    };
+    gpu::cmd_set_viewport(&trusted.commands, &viewport)!!;
+    gpu::cmd_set_scissor(&trusted.commands, &scissor)!!;
+    gpu::cmd_set_viewport(&boundaries.commands, &viewport)!!;
+    gpu::cmd_set_scissor(&boundaries.commands, &scissor)!!;
+    gpu::cmd_set_viewport(&checked.commands, &viewport)!!;
+    gpu::cmd_set_scissor(&checked.commands, &scissor)!!;
+
+    vk::DynamicStateObservation trusted_observation =
+        vk::dynamic_state_observation(trusted.state);
+    vk::DynamicStateObservation boundaries_observation =
+        vk::dynamic_state_observation(boundaries.state);
+    vk::DynamicStateObservation checked_observation =
+        vk::dynamic_state_observation(checked.state);
+    assert(trusted_observation.viewport_emissions == 1
+        && boundaries_observation.viewport_emissions == 1
+        && checked_observation.viewport_emissions == 1
+        && trusted_observation.scissor_emissions == 1
+        && boundaries_observation.scissor_emissions == 1
+        && checked_observation.scissor_emissions == 1,
+        "each policy emits each accepted dynamic state exactly once");
+    assert(native_viewport_matches(
+        &trusted_observation.viewport,
+        &viewport,
+    ) && native_viewport_matches(
+        &boundaries_observation.viewport,
+        &viewport,
+    ) && native_viewport_matches(
+        &checked_observation.viewport,
+        &viewport,
+    ), "trusted, boundary, and checked viewport lowering is identical");
+    assert(native_scissor_matches(
+        &trusted_observation.scissor,
+        &scissor,
+    ) && native_scissor_matches(
+        &boundaries_observation.scissor,
+        &scissor,
+    ) && native_scissor_matches(
+        &checked_observation.scissor,
+        &scissor,
+    ), "trusted, boundary, and checked scissor lowering is identical");
 }

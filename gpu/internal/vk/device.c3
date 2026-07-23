@@ -240,6 +240,11 @@ struct VkDeviceState {
     Atomic{ulong}              texture_barrier_state_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_native_assemblies @if(env::TESTING);
     Atomic{ulong}              texture_barrier_native_emissions @if(env::TESTING);
+    bool                       dynamic_state_observation_enabled @if(env::TESTING);
+    ulong                      viewport_emissions @if(env::TESTING);
+    ulong                      scissor_emissions @if(env::TESTING);
+    vk::Viewport               last_viewport @if(env::TESTING);
+    vk::Rect2D                 last_scissor @if(env::TESTING);
     ulong                      texture_view_cell_lookups @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS));
     ulong                      texture_view_ownership_work_units @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS));
     Atomic{ulong}              completion_native_counter_queries @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
