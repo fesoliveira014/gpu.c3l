@@ -89,6 +89,11 @@ struct PreparedGeneratedIndexedDraw {
     gpu::IndexType                 index_type;
 }
 
+struct DynamicStateRejection {
+    ZString field;
+    ZString invariant;
+}
+
 fn vk::AttachmentLoadOp load_op_to_vk(gpu::LoadOp op) @private {
     switch (op) {
         case gpu::LoadOp.LOAD:      return vk::AttachmentLoadOp.LOAD;
@@ -550,35 +555,211 @@ fn void? checked_tracking_begin_render_pass(
     record_render_pass(commands, &pass);
 }
 
-fn void? vk_cmd_set_viewport(gpu::internal::CommandEncoderState* commands, gpu::Viewport* viewport) @private {
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    if (viewport == null) return gpu::INVALID_ARGUMENT~;
-    if (!math::is_finite(viewport.x)
-        || !math::is_finite(viewport.y)
-        || !math::is_finite(viewport.width)
-        || !math::is_finite(viewport.height)
-        || !math::is_finite(viewport.min_depth)
-        || !math::is_finite(viewport.max_depth)) {
-        return gpu::INVALID_ARGUMENT~;
+fn fault report_dynamic_state_rejection(
+    VkDeviceState* state,
+    ZString operation,
+    DynamicStateRejection rejection,
+) @private {
+    return report_contract_failure(
+        state:               state,
+        operation:           operation,
+        public_fault:        gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+        debug_name:          null,
+        rejected_field:      rejection.field,
+        invariant:           rejection.invariant,
+        backend_text:        null,
+    );
+}
+
+fn void? reject_dynamic_state(
+    VkDeviceState* state,
+    ZString operation,
+    ZString field,
+    ZString invariant,
+) @private {
+    DynamicStateRejection rejection = {
+        .field     = field,
+        .invariant = invariant,
+    };
+    return report_dynamic_state_rejection(state, operation, rejection)~;
+}
+
+fn void? validate_viewport(
+    VkDeviceState* state,
+    gpu::Viewport* viewport,
+) @private {
+    if (viewport == null) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport",
+            invariant: "viewport must not be null",
+        );
     }
-    if (viewport.x < 0.0f || viewport.y < 0.0f
-        || viewport.width <= 0.0f || viewport.height <= 0.0f) {
-        return gpu::INVALID_ARGUMENT~;
+    if (!math::is_finite(viewport.x)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.x",
+            invariant: "coordinate must be finite",
+        );
     }
-    float right = viewport.x + viewport.width;
-    float bottom = viewport.y + viewport.height;
-    if (!math::is_finite(right) || !math::is_finite(bottom)
-        || right > (float)record.active_render_width
-        || bottom > (float)record.active_render_height) {
-        return gpu::INVALID_ARGUMENT~;
+    if (!math::is_finite(viewport.y)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.y",
+            invariant: "coordinate must be finite",
+        );
     }
-    if (viewport.min_depth < 0.0f || viewport.min_depth > 1.0f
-        || viewport.max_depth < 0.0f || viewport.max_depth > 1.0f) {
-        return gpu::INVALID_ARGUMENT~;
+    if (!math::is_finite(viewport.width)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.width",
+            invariant: "dimension must be finite",
+        );
+    }
+    if (!math::is_finite(viewport.height)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.height",
+            invariant: "dimension must be finite",
+        );
+    }
+    if (!math::is_finite(viewport.min_depth)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.min_depth",
+            invariant: "depth endpoint must be finite and in [0, 1]",
+        );
+    }
+    if (!math::is_finite(viewport.max_depth)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.max_depth",
+            invariant: "depth endpoint must be finite and in [0, 1]",
+        );
+    }
+    if (viewport.width <= 0.0f) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.width",
+            invariant: "width must be positive",
+        );
+    }
+    if (viewport.height == 0.0f) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.height",
+            invariant: "height must be nonzero by library policy",
+        );
+    }
+    if (viewport.width > (float)state.viewport_limits.max_width) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.width",
+            invariant: "width must not exceed the selected device maximum",
+        );
+    }
+    if (viewport.height > (float)state.viewport_limits.max_height
+        || viewport.height < -(float)state.viewport_limits.max_height) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.height",
+            invariant: "absolute height must not exceed the selected device maximum",
+        );
     }
 
-    vk::Viewport vk_viewport = {
+    float right = viewport.x + viewport.width;
+    float end_y = viewport.y + viewport.height;
+    if (!math::is_finite(right)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.x + Viewport.width",
+            invariant: "computed endpoint must be finite",
+        );
+    }
+    if (!math::is_finite(end_y)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.y + Viewport.height",
+            invariant: "computed endpoint must be finite",
+        );
+    }
+    if (viewport.x < state.viewport_limits.min_bound
+        || viewport.x > state.viewport_limits.max_bound) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.x",
+            invariant: "coordinate must fit the selected device viewport bounds",
+        );
+    }
+    if (right < state.viewport_limits.min_bound
+        || right > state.viewport_limits.max_bound) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.x + Viewport.width",
+            invariant: "endpoint must fit the selected device viewport bounds",
+        );
+    }
+    if (viewport.y < state.viewport_limits.min_bound
+        || viewport.y > state.viewport_limits.max_bound) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.y",
+            invariant: "coordinate must fit the selected device viewport bounds",
+        );
+    }
+    if (end_y < state.viewport_limits.min_bound
+        || end_y > state.viewport_limits.max_bound) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.y + Viewport.height",
+            invariant: "endpoint must fit the selected device viewport bounds",
+        );
+    }
+    if (viewport.min_depth < 0.0f || viewport.min_depth > 1.0f) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.min_depth",
+            invariant: "depth endpoint must be in [0, 1]",
+        );
+    }
+    if (viewport.max_depth < 0.0f || viewport.max_depth > 1.0f) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_viewport",
+            field:     "Viewport.max_depth",
+            invariant: "depth endpoint must be in [0, 1]",
+        );
+    }
+}
+
+fn void emit_viewport(
+    gpu::internal::CommandEncoderState* commands,
+    gpu::Viewport* viewport,
+) @private {
+    CommandRecord* record = encoder_command(commands);
+    vk::Viewport native = {
         .x         = viewport.x,
         .y         = viewport.y,
         .width     = viewport.width,
@@ -586,7 +767,7 @@ fn void? vk_cmd_set_viewport(gpu::internal::CommandEncoderState* commands, gpu::
         .min_depth = viewport.min_depth,
         .max_depth = viewport.max_depth,
     };
-    vk::cmd_set_viewport(record.command_buffer, 0, 1, &vk_viewport);
+    vk::cmd_set_viewport(record.command_buffer, 0, 1, &native);
     gpu::internal::note_command_native_call();
 }
 
@@ -599,16 +780,7 @@ fn void? trusted_set_viewport(
     if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    vk::Viewport vk_viewport = {
-        .x         = viewport.x,
-        .y         = viewport.y,
-        .width     = viewport.width,
-        .height    = viewport.height,
-        .min_depth = viewport.min_depth,
-        .max_depth = viewport.max_depth,
-    };
-    vk::cmd_set_viewport(record.command_buffer, 0, 1, &vk_viewport);
-    gpu::internal::note_command_native_call();
+    emit_viewport(commands, viewport);
 }
 
 fn void? checked_set_viewport(
@@ -616,30 +788,74 @@ fn void? checked_set_viewport(
     gpu::Viewport* viewport,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
-    note_command_semantic_check(encoder_device_state(commands));
-    return vk_cmd_set_viewport(commands, viewport);
+    VkDeviceState* state = encoder_device_state(commands);
+    note_command_semantic_check(state);
+    CommandRecord* record = encoder_command(commands);
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    validate_viewport(state, viewport)!;
+    emit_viewport(commands, viewport);
 }
 
-fn void? vk_cmd_set_scissor(gpu::internal::CommandEncoderState* commands, gpu::ScissorRect* scissor) @private {
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
-    if (scissor == null) return gpu::INVALID_ARGUMENT~;
-    if (scissor.x < 0 || scissor.y < 0 || scissor.width < 0 || scissor.height < 0) {
-        return gpu::INVALID_ARGUMENT~;
+fn void? validate_scissor(
+    VkDeviceState* state,
+    gpu::ScissorRect* scissor,
+) @private {
+    if (scissor == null) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_scissor",
+            field:     "ScissorRect",
+            invariant: "scissor must not be null",
+        );
+    }
+    if (scissor.x < 0 || scissor.y < 0
+        || scissor.width < 0 || scissor.height < 0) {
+        ZString field = scissor.x < 0
+            ? "ScissorRect.x"
+            : scissor.y < 0
+                ? "ScissorRect.y"
+                : scissor.width < 0
+                    ? "ScissorRect.width"
+                    : "ScissorRect.height";
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_scissor",
+            field:     field,
+            invariant: "scissor fields must be nonnegative",
+        );
     }
     long right = (long)scissor.x + (long)scissor.width;
     long bottom = (long)scissor.y + (long)scissor.height;
-    if (right > int::max || bottom > int::max
-        || (ulong)right > (ulong)record.active_render_width
-        || (ulong)bottom > (ulong)record.active_render_height) {
-        return gpu::INVALID_ARGUMENT~;
+    if (right > int::max) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_scissor",
+            field:     "ScissorRect.x + ScissorRect.width",
+            invariant: "endpoint must fit signed native coordinate range",
+        );
     }
+    if (bottom > int::max) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: "cmd_set_scissor",
+            field:     "ScissorRect.y + ScissorRect.height",
+            invariant: "endpoint must fit signed native coordinate range",
+        );
+    }
+}
 
-    vk::Rect2D vk_scissor = {
+fn void emit_scissor(
+    gpu::internal::CommandEncoderState* commands,
+    gpu::ScissorRect* scissor,
+) @private {
+    CommandRecord* record = encoder_command(commands);
+    vk::Rect2D native = {
         .offset = { .x = scissor.x, .y = scissor.y },
         .extent = { .width = (uint)scissor.width, .height = (uint)scissor.height },
     };
-    vk::cmd_set_scissor(record.command_buffer, 0, 1, &vk_scissor);
+    vk::cmd_set_scissor(record.command_buffer, 0, 1, &native);
     gpu::internal::note_command_native_call();
 }
 
@@ -652,15 +868,7 @@ fn void? trusted_set_scissor(
     if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    vk::Rect2D vk_scissor = {
-        .offset = { .x = scissor.x, .y = scissor.y },
-        .extent = {
-            .width  = (uint)scissor.width,
-            .height = (uint)scissor.height,
-        },
-    };
-    vk::cmd_set_scissor(record.command_buffer, 0, 1, &vk_scissor);
-    gpu::internal::note_command_native_call();
+    emit_scissor(commands, scissor);
 }
 
 fn void? checked_set_scissor(
@@ -668,8 +876,14 @@ fn void? checked_set_scissor(
     gpu::ScissorRect* scissor,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
-    note_command_semantic_check(encoder_device_state(commands));
-    return vk_cmd_set_scissor(commands, scissor);
+    VkDeviceState* state = encoder_device_state(commands);
+    note_command_semantic_check(state);
+    CommandRecord* record = encoder_command(commands);
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    validate_scissor(state, scissor)!;
+    emit_scissor(commands, scissor);
 }
 
 fn void? vk_cmd_end_render_pass(gpu::internal::CommandEncoderState* commands) @private {
