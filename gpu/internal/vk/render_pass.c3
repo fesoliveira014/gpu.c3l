@@ -502,8 +502,6 @@ fn void record_render_pass(
     gpu::DynamicRasterState raster;
     emit_raster_state(record, &raster);
 
-    record.active_render_width = pass.width;
-    record.active_render_height = pass.height;
     record.depth_state_set = false;
     record.state = CommandState.RECORDING_RENDER_PASS;
 }
@@ -599,14 +597,6 @@ fn void? validate_viewport(
     VkDeviceState* state,
     gpu::Viewport* viewport,
 ) @private {
-    if (viewport == null) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: "cmd_set_viewport",
-            field:     "Viewport",
-            invariant: "viewport must not be null",
-        );
-    }
     if (!math::is_finite(viewport.x)) {
         return reject_dynamic_state(
             state:     state,
@@ -816,14 +806,6 @@ fn void? validate_scissor(
     VkDeviceState* state,
     gpu::ScissorRect* scissor,
 ) @private {
-    if (scissor == null) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: "cmd_set_scissor",
-            field:     "ScissorRect",
-            invariant: "scissor must not be null",
-        );
-    }
     if (scissor.x < 0 || scissor.y < 0
         || scissor.width < 0 || scissor.height < 0) {
         ZString field = scissor.x < 0
@@ -937,8 +919,6 @@ fn void? vk_cmd_end_render_pass(gpu::internal::CommandEncoderState* commands) @p
         && record.bound_pipeline.kind == PipelineKind.GRAPHICS) {
         record.bound_pipeline = {};
     }
-    record.active_render_width = 0;
-    record.active_render_height = 0;
     record.active_render = {};
     record.depth_state_set = false;
     record.state = CommandState.RECORDING;
