@@ -268,8 +268,17 @@ rollback. Tracking-index coverage additionally pins exact owner/index/generation
 identity under forced collisions, publish-after-retain ordering, duplicate hits
 without another mutex/retain, suffix rollback rebuild, scratch epoch reuse and
 rollover, and expected linear probe work through the 4,096-reference ceiling.
-The source graph checker prevents policy branches and cross-policy
-calls from re-entering warm command paths:
+`scripts/check_command_policy.py` is a direct table-shape gate only. It requires
+exactly the four immutable command tables, every current `CommandOps` field
+exactly once in each table, and a direct `&function_name` initializer for every
+entry. C3 compilation verifies that each function exists and matches the field
+type.
+
+The checker does not parse function bodies, build call graphs, inventory private
+helpers, or infer allocation, policy, tracking, reference ordering, or
+performance. The grouped six-mode C3 matrix, allocator-level host observations,
+exact work/resolution/reference/native-emission counters, faults, and
+ownership/state transitions are the blocking authority for those behaviors:
 
 ```sh
 python -B -m unittest scripts.test_check_command_policy
@@ -447,10 +456,14 @@ The blocking headless matrix is shared by Linux and Windows:
 vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
 vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
 vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading vk_performance
+vk_allocator_observation
 vk_queue vk_debug upload_bench_observation vk_device_request vk_validation_policy
 ```
 
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.
+`vk_allocator_observation` installs the test-only recording allocator at the
+thread allocator seam and proves command recording reports real acquire/resize
+activity without source-graph inference.
 `vk_depth` covers validation-clean offscreen color/depth rendering, including a
 supported multisample source, average color resolve, explicit attachment
 transitions, exact nonzero mip/layer isolation, depth testing, and pixel readback.
@@ -521,17 +534,17 @@ c3c build command_reference_bench --path test -O1
 
 The CPU target reports five alternating direct/public wrapper pairs with exact
 per-repetition observation. The Vulkan target reports five equivalent native
-operation pairs, zero forbidden structural-work deltas for warmed recording,
+operation pairs, zero forbidden work deltas for warmed recording,
 non-zero dispatch and buffer-copy readback equivalence, and full
 begin-bind-record-end-submit-wait lifecycle cases for 0, 1, 16, and 256
 commands under the same four validation/tracking modes as the command-recording
 benchmark. Lifecycle timing ends only after successful completion wait; its
-structural gate permits only the exact command-list allocation/reset work and
-rejects unrelated allocation, creation, and registry-lock work. All elapsed
-times and ratios are advisory, while schema, work, and equivalence failures are
-blocking.
+deterministic work gate permits only the exact command-list allocation/reset
+work and rejects unrelated allocation, creation, and registry-lock work. All
+elapsed times and ratios are advisory, while schema, work, and equivalence
+failures are blocking.
 The command-reference target uses fixed in-process buffer slots and command
-scratch, so it needs no ICD. It gates the exact structural work for unique,
+scratch, so it needs no ICD. It gates the exact reference-index work for unique,
 repeated, mixed, forced-collision, near-capacity, and maximum-capacity
 lifetime-reference indexing; only `ns/reference` is advisory.
 The submit-batch target submits real batches of 1, 8, 32, 128, and 1,024
@@ -697,7 +710,7 @@ CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
 
 ```text
 linux (blocking): documentation/source-list, API/retired-API/backend-boundary,
-    command-path no-ambient-state/no-temp reachability, generator and ABI drift
+    direct command-table shape, generator and ABI drift
     gates; benchmark executable builds and schema tests (no benchmark
     execution); deterministic behavioral performance targets; shader build;
     full lavapipe sweep; and a c3c docgen API reference artifact
@@ -835,7 +848,7 @@ Before first release:
 ```text
 pure CPU tests pass
 headless Vulkan tests pass validation-clean
-validation-policy matrix and command-policy source checks pass
+validation-policy matrix and structural command-table checks pass
 root-pointer compute sample works
 bindless texture compute sample works
 offscreen graphics sample readback matches expected output
