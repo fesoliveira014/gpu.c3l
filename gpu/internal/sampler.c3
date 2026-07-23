@@ -3,11 +3,11 @@ module gpu::internal @private;
 import gpu;
 import std::math;
 
-fn bool sampler_filter_is_valid(Filter filter) @private {
+fn bool sampler_filter_is_valid(Filter filter) @local {
     return filter == Filter.NEAREST || filter == Filter.LINEAR;
 }
 
-fn bool sampler_address_mode_is_valid(AddressMode mode) @private {
+fn bool sampler_address_mode_is_valid(AddressMode mode) @local {
     switch (mode) {
         case AddressMode.REPEAT:
         case AddressMode.MIRRORED_REPEAT:
@@ -19,7 +19,7 @@ fn bool sampler_address_mode_is_valid(AddressMode mode) @private {
     }
 }
 
-fn bool sampler_compare_op_is_valid(CompareOp op) @private {
+fn bool sampler_compare_op_is_valid(CompareOp op) @local {
     switch (op) {
         case CompareOp.NEVER:
         case CompareOp.LESS:
@@ -35,7 +35,7 @@ fn bool sampler_compare_op_is_valid(CompareOp op) @private {
     }
 }
 
-fn ZString sampler_desc_invalid_enum_field(SamplerDesc* desc) @private {
+fn ZString sampler_desc_invalid_enum_field(SamplerDesc* desc) @local {
     if (!sampler_filter_is_valid(desc.min_filter)) return "SamplerDesc.min_filter";
     if (!sampler_filter_is_valid(desc.mag_filter)) return "SamplerDesc.mag_filter";
     if (!sampler_filter_is_valid(desc.mip_filter)) return "SamplerDesc.mip_filter";
