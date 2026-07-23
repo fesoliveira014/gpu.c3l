@@ -139,6 +139,13 @@ struct VkStrictHeapState {
     DescriptorHeapState     descriptors;
 }
 
+struct ViewportLimits {
+    uint  max_width;
+    uint  max_height;
+    float min_bound;
+    float max_bound;
+}
+
 struct VkDeviceState {
     gpu::Device                 owner;
     ulong                       resource_owner;
@@ -164,6 +171,7 @@ struct VkDeviceState {
     uint                       compute_completion_id;
     uint                       transfer_completion_id;
     gpu::DeviceCaps            caps;
+    ViewportLimits             viewport_limits;
     ulong                      max_timeline_semaphore_value_difference;
     usz                        non_coherent_atom_size;
     DeviceValidationPolicy     validation_policy;
@@ -1228,6 +1236,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         v13:                     &features13,
         physical_device:         state.physical_device,
         inputs:                  &caps_inputs,
+        viewport_limits:         &state.viewport_limits,
         max_timeline_difference: &state.max_timeline_semaphore_value_difference,
         non_coherent_atom_size:  &state.non_coherent_atom_size,
     );
@@ -1969,6 +1978,7 @@ fn gpu::DeviceCaps build_caps(
     vk::PhysicalDeviceVulkan13Features* v13,
     vk::PhysicalDevice physical_device,
     CapsInputs* inputs,
+    ViewportLimits* viewport_limits,
     ulong* max_timeline_difference,
     usz* non_coherent_atom_size,
 ) @private {
@@ -1978,6 +1988,12 @@ fn gpu::DeviceCaps build_caps(
         vk::physical_device_properties2().set_next(&timeline_props);
     vk::get_physical_device_properties2(physical_device, &props2);
     vk::PhysicalDeviceProperties props = props2.properties;
+    *viewport_limits = {
+        .max_width  = props.limits.max_viewport_dimensions[0],
+        .max_height = props.limits.max_viewport_dimensions[1],
+        .min_bound  = props.limits.viewport_bounds_range[0],
+        .max_bound  = props.limits.viewport_bounds_range[1],
+    };
     *max_timeline_difference =
         timeline_props.max_timeline_semaphore_value_difference;
     *non_coherent_atom_size = (usz)props.limits.non_coherent_atom_size;
