@@ -17,13 +17,36 @@ const char[*] DYNAMIC_RECT_FRAG_SPIRV = $embed("shaders/depth.frag.spv");
 const uint RT_SIZE = 32;
 const usz RT_BYTES = RT_SIZE * RT_SIZE * 4;
 
-fn gpu::Device make_offscreen_test_device() {
+struct VulkanValidationCapture {
+    uint errors;
+}
+
+fn void capture_vulkan_validation_error(
+    gpu::DebugMessage* message,
+    void* user_data,
+) {
+    if (message.category.backend
+        && message.category.validation
+        && message.severity == gpu::DebugMessageSeverity.ERROR) {
+        VulkanValidationCapture* capture =
+            (VulkanValidationCapture*)user_data;
+        capture.errors++;
+    }
+}
+
+fn gpu::Device make_offscreen_test_device(
+    VulkanValidationCapture* capture = null,
+) {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
+        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
-        .application_name  = "gpu_offscreen_test",
+        .application_name         = "gpu_offscreen_test",
+        .debug_callback           = capture == null
+            ? null
+            : &capture_vulkan_validation_error,
+        .debug_user_data          = capture,
     };
     return create_test_device(&desc)!!;
 }
@@ -509,6 +532,8 @@ fn void dynamic_viewport_scissor_pixels() @test {
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
             .texture = targets[i],
@@ -535,7 +560,8 @@ fn void dynamic_viewport_scissor_pixels() @test {
             };
             gpu::cmd_set_viewport(&cmd, &viewport)!!;
             gpu::Viewport rejected = viewport;
-            rejected.width = (float)RT_SIZE + 1.0f;
+            rejected.width =
+                (float)state.viewport_limits.max_width * 2.0f;
             assert(@catch(gpu::cmd_set_viewport(&cmd, &rejected)) == gpu::INVALID_ARGUMENT,
                 "a rejected viewport does not replace the valid viewport");
         } else if (i == 1) {
@@ -544,7 +570,8 @@ fn void dynamic_viewport_scissor_pixels() @test {
             };
             gpu::cmd_set_scissor(&cmd, &scissor)!!;
             gpu::ScissorRect rejected = scissor;
-            rejected.x = (int)RT_SIZE;
+            rejected.x = int::max;
+            rejected.width = 1;
             assert(@catch(gpu::cmd_set_scissor(&cmd, &rejected)) == gpu::INVALID_ARGUMENT,
                 "a rejected scissor does not replace the valid scissor");
         }
@@ -740,7 +767,10 @@ fn void graphics_pipeline_depth_format_validation() @test {
 }
 
 fn void dynamic_viewport_scissor_validation() @test {
-    gpu::Device device = make_offscreen_test_device();
+    VulkanValidationCapture validation_capture = {};
+    gpu::Device device = make_offscreen_test_device(
+        &validation_capture,
+    );
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
@@ -791,18 +821,15 @@ fn void dynamic_viewport_scissor_validation() @test {
     assert(@catch(gpu::cmd_set_scissor(&cmd, null)) == gpu::INVALID_ARGUMENT,
         "null scissor faults INVALID_ARGUMENT");
 
-    gpu::Viewport[13] invalid_viewports = {
+    gpu::Viewport[10] invalid_viewports = {
         { .x = float::nan, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
         { .y = float::inf, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
         { .width = float::nan, .height = 1.0f, .max_depth = 1.0f },
         { .width = 1.0f, .height = -float::inf, .max_depth = 1.0f },
         { .width = 1.0f, .height = 1.0f, .min_depth = float::nan, .max_depth = 1.0f },
         { .width = 1.0f, .height = 1.0f, .max_depth = float::inf },
-        { .x = -1.0f, .width = 1.0f, .height = 1.0f, .max_depth = 1.0f },
         { .width = 0.0f, .height = 1.0f, .max_depth = 1.0f },
-        { .width = 1.0f, .height = -1.0f, .max_depth = 1.0f },
-        { .x = (float)RT_SIZE - 1.0f, .width = 2.0f, .height = 1.0f, .max_depth = 1.0f },
-        { .y = (float)RT_SIZE - 1.0f, .width = 1.0f, .height = 2.0f, .max_depth = 1.0f },
+        { .width = 1.0f, .height = 0.0f, .max_depth = 1.0f },
         { .width = 1.0f, .height = 1.0f, .min_depth = -0.1f, .max_depth = 1.0f },
         { .width = 1.0f, .height = 1.0f, .max_depth = 1.1f },
     };
@@ -811,18 +838,30 @@ fn void dynamic_viewport_scissor_validation() @test {
             "invalid viewport faults INVALID_ARGUMENT");
     }
 
+    validation_capture.errors = 0;
     gpu::Viewport reversed_depth = full_viewport;
     reversed_depth.min_depth = 1.0f;
     reversed_depth.max_depth = 0.0f;
     gpu::cmd_set_viewport(&cmd, &reversed_depth)!!;
 
-    gpu::ScissorRect[8] invalid_scissors = {
+    gpu::Viewport negative_height = full_viewport;
+    negative_height.y = (float)RT_SIZE;
+    negative_height.height = -(float)RT_SIZE;
+    gpu::cmd_set_viewport(&cmd, &negative_height)!!;
+
+    gpu::Viewport negative_origin = full_viewport;
+    negative_origin.x = -1.0f;
+    gpu::cmd_set_viewport(&cmd, &negative_origin)!!;
+
+    gpu::Viewport overscan = full_viewport;
+    overscan.width = (float)RT_SIZE + 1.0f;
+    gpu::cmd_set_viewport(&cmd, &overscan)!!;
+
+    gpu::ScissorRect[6] invalid_scissors = {
         { .x = -1, .width = 1, .height = 1 },
         { .y = -1, .width = 1, .height = 1 },
         { .width = -1, .height = 1 },
         { .width = 1, .height = -1 },
-        { .x = (int)RT_SIZE - 1, .width = 2, .height = 1 },
-        { .y = (int)RT_SIZE - 1, .width = 1, .height = 2 },
         { .x = int::max, .width = 1, .height = 1 },
         { .y = int::max, .width = 1, .height = 1 },
     };
@@ -833,6 +872,15 @@ fn void dynamic_viewport_scissor_validation() @test {
 
     gpu::ScissorRect empty_scissor = {};
     gpu::cmd_set_scissor(&cmd, &empty_scissor)!!;
+    gpu::ScissorRect off_pass_scissor = {
+        .x      = (int)RT_SIZE,
+        .y      = (int)RT_SIZE,
+        .width  = 1,
+        .height = 1,
+    };
+    gpu::cmd_set_scissor(&cmd, &off_pass_scissor)!!;
+    assert(validation_capture.errors == 0,
+        "newly accepted dynamic states emit no Vulkan validation error");
 
     gpu::cmd_end_render_pass(&cmd)!!;
     assert(@catch(gpu::cmd_set_viewport(&cmd, &full_viewport)) == gpu::COMMAND_RECORDING_ERROR,

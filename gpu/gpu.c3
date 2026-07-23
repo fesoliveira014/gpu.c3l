@@ -1323,16 +1323,18 @@ fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster)
     return encoder.ops.set_raster_state(encoder, raster);
 }
 
-<* Set one pass-bounded dynamic viewport for subsequent draws. Requires an
-   active render pass; malformed values fault INVALID_ARGUMENT. *>
+<* Set one dynamic viewport for subsequent draws. Requires an active render
+   pass. Device-unrepresentable or non-finite values and zero height fault
+   INVALID_ARGUMENT; negative height and off-pass overscan are valid. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
     gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_viewport(encoder, viewport);
 }
 
-<* Set one pass-bounded dynamic scissor for subsequent draws. Requires an
-   active render pass; malformed values fault INVALID_ARGUMENT. *>
+<* Set one dynamic scissor for subsequent draws. Requires an active render
+   pass. Negative or signed-overflowing fields fault INVALID_ARGUMENT;
+   off-pass overscan and zero extent are valid. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
     gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;

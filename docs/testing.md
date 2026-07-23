@@ -142,7 +142,9 @@ copy upload -> readback
 root-pointer compute shader
 TextureView publication and raw TextureIndex sampling in compute
 offscreen render target clear/draw/readback
-dynamic viewport/scissor validation, clipping pixels, pass reset, and pipeline-alias persistence
+dynamic viewport/scissor device-bound validation, exact native lowering,
+validation-clean negative-height and off-pass cases, clipping pixels, pass
+reset, and pipeline-alias persistence
 attachment-view capacity/generation/ownership, creation rollback, texture
 retention, in-flight destruction rejection, and allocation-free pass begin
 borrowed swapchain-view build/acquire/render guards and resize invalidation
@@ -381,7 +383,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Commands | allocator-owned begin/end/submit, exact linear duplicate visits and epoch rollover, mixed-allocator same-queue retirement, timeline signal/wait, invalid state, completion-safe exact-allocator command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/raster/depth state, retired queue-based signatures, and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline, raster, and depth state; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster/viewport/scissor validation, clipping, pass reset, and pipeline-alias persistence. |
+| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; explicit pipeline, raster, and depth state; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; pass reset; and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, per-target immutable identity, and singleton compute/generated-dispatch layouts. |
 | Threading | one explicit allocator per concurrent worker, same-allocator full-validation rejection, synchronized allocator migration and executable handoff, no device-wide recording lock, no temp-pool setup, historical worker churn, private command-buffer/generated-scratch reuse, parallel record, and identical submit. |
