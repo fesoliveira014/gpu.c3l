@@ -558,7 +558,9 @@ fn void compute_generated_indexed_indirect_draw() @test {
         .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     gpu::cmd_draw_indexed_indirect(
         commands:      &cmd,
@@ -1019,7 +1021,9 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .width  = IND_RT,
         .height = IND_RT,
     };
-    gpu::cmd_begin_render_pass(&commands, &null_pass)!!;
+    gpu::GraphicsState null_graphics =
+        gpu::full_render_graphics_state(null_pass.width, null_pass.height)!!;
+    gpu::cmd_begin_render_pass(&commands, &null_pass, &null_graphics)!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
     gpu::cmd_draw_generated(
         commands:      &commands,
@@ -1130,7 +1134,9 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .width  = IND_RT,
         .height = IND_RT,
     };
-    gpu::cmd_begin_render_pass(&commands, &plain_pass)!!;
+    gpu::GraphicsState plain_graphics =
+        gpu::full_render_graphics_state(plain_pass.width, plain_pass.height)!!;
+    gpu::cmd_begin_render_pass(&commands, &plain_pass, &plain_graphics)!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
     gpu::internal::RecordingWorkCounters draw_work_before =
         vk::command_recording_work_counters(state);
@@ -1220,7 +1226,13 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .width  = IND_RT,
         .height = IND_RT,
     };
-    gpu::cmd_begin_render_pass(&commands, &indexed_pass)!!;
+    gpu::GraphicsState indexed_graphics =
+        gpu::full_render_graphics_state(indexed_pass.width, indexed_pass.height)!!;
+    gpu::cmd_begin_render_pass(
+        &commands,
+        &indexed_pass,
+        &indexed_graphics,
+    )!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
     gpu::internal::RecordingWorkCounters indexed_work_before =
         vk::command_recording_work_counters(state);
@@ -1438,7 +1450,9 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
         .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     gpu::cmd_draw_indirect(
         commands:      &cmd,
@@ -1721,7 +1735,9 @@ fn void count_buffer_limits_draws() @test {
             .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
-        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        gpu::GraphicsState graphics =
+            gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
         bind_test_graphics_pipeline(&cmd, ctx.pipeline);
         gpu::cmd_draw_indexed_indirect_count(
             commands:       &cmd,
@@ -1777,7 +1793,9 @@ fn void discard_consumes_active_render_pass_recording() @test {
         .width  = IND_RT,
         .height = IND_RT,
     };
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&commands, &pass, &graphics)!!;
 
     gpu::discard_commands(&commands)!!;
     assert(!commands.handle.is_valid(),
@@ -1850,7 +1868,9 @@ fn void indirect_argument_validation() @test {
         .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
 
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     fault no_usage = @catch(gpu::cmd_draw_indirect(

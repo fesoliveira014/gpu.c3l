@@ -1306,7 +1306,9 @@ fn void recorded_attachment_view_destruction_is_retryable() @test {
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&commands, &pass, &graphics)!!;
 
     assert(@catch(gpu::destroy_attachment_view(&device, view))
         == gpu::RESOURCE_IN_USE,

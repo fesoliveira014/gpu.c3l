@@ -769,7 +769,9 @@ fn void labels_record_validation_clean() @test {
         .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = 8, .height = 8 };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
     gpu::cmd_begin_label(&cmd, "main_pass", { 0.2f, 0.8f, 0.2f, 1.0f })!!;
     gpu::cmd_begin_label(&cmd, "nested")!!;
     gpu::cmd_end_label(&cmd)!!;

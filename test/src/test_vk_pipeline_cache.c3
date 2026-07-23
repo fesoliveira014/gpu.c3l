@@ -454,7 +454,9 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
         .width  = CACHE_RT_SIZE,
         .height = CACHE_RT_SIZE,
     };
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&commands, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&commands, pipeline);
     gpu::GpuAddress root = test_span_address(&device, vertices.span);
     gpu::cmd_draw(
@@ -1217,32 +1219,29 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
             .clear = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
-        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        gpu::GraphicsState graphics =
+            gpu::full_render_graphics_state(pass.width, pass.height)!!;
         if (i == 0) {
-            gpu::DynamicRasterState raster = { .cull_mode = gpu::CullMode.BACK };
-            gpu::cmd_set_raster_state(&cmd, &raster)!!;
+            graphics.raster.cull_mode = gpu::CullMode.BACK;
         }
         if (i == 1) {
-            gpu::DynamicRasterState raster = {
+            graphics.raster = {
                 .cull_mode  = gpu::CullMode.BACK,
                 .front_face = gpu::FrontFace.CLOCKWISE,
             };
-            gpu::cmd_set_raster_state(&cmd, &raster)!!;
-            gpu::Viewport viewport = {
+            graphics.viewport = {
                 .width = (float)CACHE_RT_SIZE / 2.0f, .height = (float)CACHE_RT_SIZE, .max_depth = 1.0f,
             };
-            gpu::ScissorRect scissor = {
+            graphics.scissor = {
                 .width = (int)CACHE_RT_SIZE / 2, .height = (int)CACHE_RT_SIZE,
             };
-            gpu::cmd_set_viewport(&cmd, &viewport)!!;
-            gpu::cmd_set_scissor(&cmd, &scissor)!!;
         }
         if (i == 3) {
-            gpu::DynamicRasterState raster = {
+            graphics.raster = {
                 .topology = gpu::PrimitiveTopology.LINES,
             };
-            gpu::cmd_set_raster_state(&cmd, &raster)!!;
         }
+        gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
         bind_test_graphics_pipeline(&cmd, pipeline);
         gpu::cmd_draw(
             commands:       &cmd,
@@ -1390,7 +1389,9 @@ fn void alias_survives_peer_destroy() @test {
         .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&cmd, survivor);
     gpu::cmd_draw(
         commands:       &cmd,

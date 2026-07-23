@@ -97,10 +97,10 @@ fn gpu::ExecutableCommandList record_graphics(gpu::CommandAllocator* allocator, 
         .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
-    gpu::DepthState depth = {};
-    gpu::cmd_set_depth_state(&cmd, &depth)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    vertex_root,

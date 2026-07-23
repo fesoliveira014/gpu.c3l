@@ -432,7 +432,9 @@ fn void storage_write_then_fragment_sample() @test {
         .width  = STORAGE_GRAPHICS_TARGET_SIZE,
         .height = STORAGE_GRAPHICS_TARGET_SIZE,
     };
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::cmd_begin_render_pass(&commands, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&commands, graphics_pipeline);
     gpu::cmd_draw(
         commands:       &commands,

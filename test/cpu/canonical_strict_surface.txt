@@ -130,6 +130,7 @@ function gpu::cmd_end_label
 function gpu::cmd_end_render_pass
 function gpu::cmd_fill_buffer
 function gpu::cmd_set_depth_state
+function gpu::cmd_set_graphics_state
 function gpu::cmd_set_raster_state
 function gpu::cmd_set_scissor
 function gpu::cmd_set_viewport
@@ -163,6 +164,7 @@ function gpu::end_commands
 function gpu::enumerate_adapters
 function gpu::flush_mapped_span
 function gpu::free_allocation
+function gpu::full_render_graphics_state
 function gpu::full_validation_runtime_desc
 function gpu::get_adapter_diagnostics
 function gpu::get_adapter_info
@@ -283,6 +285,7 @@ struct gpu::GpuAllocation
 struct gpu::GpuSpan
 struct gpu::GraphicsPipelineDesc
 struct gpu::GraphicsRootPush
+struct gpu::GraphicsState
 struct gpu::MemoryHeapBudget
 struct gpu::MemoryStats
 struct gpu::PipelineHandle

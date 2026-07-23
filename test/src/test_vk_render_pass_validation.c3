@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 import vk;
+import std::core::mem;
 
 struct DynamicStateFixture {
     gpu::Device               device;
@@ -14,7 +15,7 @@ struct DynamicStateFixture {
     vk::VkDeviceState*        state;
 }
 
-fn DynamicStateFixture make_dynamic_state_fixture(
+fn DynamicStateFixture make_dynamic_state_fixture_before_pass(
     gpu::ContractValidation contract,
     gpu::DebugMessageCallback callback = null,
     void* user_data = null,
@@ -47,15 +48,35 @@ fn DynamicStateFixture make_dynamic_state_fixture(
     )!!;
     fixture.commands = gpu::begin_commands(&fixture.allocator)!!;
     record_val_target_to_attach(&fixture.commands, fixture.target);
+    fixture.state = (vk::VkDeviceState*)
+        gpu::internal::device_backend_state(fixture.device);
+    vk::reset_dynamic_state_observation(fixture.state);
+    return fixture;
+}
+
+fn DynamicStateFixture make_dynamic_state_fixture(
+    gpu::ContractValidation contract,
+    gpu::DebugMessageCallback callback = null,
+    void* user_data = null,
+) {
+    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
+        contract,
+        callback,
+        user_data,
+    );
     gpu::ColorTargetDesc[1] colors = {{ .view = fixture.view }};
     gpu::RenderPassDesc pass = {
         .colors = colors[..],
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    gpu::cmd_begin_render_pass(&fixture.commands, &pass)!!;
-    fixture.state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(fixture.device);
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+    gpu::cmd_begin_render_pass(
+        &fixture.commands,
+        &pass,
+        &graphics_state,
+    )!!;
     vk::reset_dynamic_state_observation(fixture.state);
     return fixture;
 }
@@ -63,7 +84,10 @@ fn DynamicStateFixture make_dynamic_state_fixture(
 fn void destroy_dynamic_state_fixture(
     DynamicStateFixture* fixture,
 ) {
-    gpu::cmd_end_render_pass(&fixture.commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&fixture.commands)!!;
+    if (record.state == vk::CommandState.RECORDING_RENDER_PASS) {
+        gpu::cmd_end_render_pass(&fixture.commands)!!;
+    }
     discard_test_commands(&fixture.commands)!!;
     gpu::destroy_command_allocator(&fixture.allocator)!!;
     destroy_test_attachment_view(&fixture.device, &fixture.view)!!;
@@ -91,6 +115,57 @@ fn bool native_scissor_matches(
         && native.offset.y == expected.y
         && native.extent.width == (uint)expected.width
         && native.extent.height == (uint)expected.height;
+}
+
+fn bool raster_state_matches(
+    gpu::DynamicRasterState* actual,
+    gpu::DynamicRasterState* expected,
+) {
+    return actual.topology == expected.topology
+        && actual.cull_mode == expected.cull_mode
+        && actual.front_face == expected.front_face
+        && actual.depth_bias_enable == expected.depth_bias_enable
+        && actual.depth_bias_constant == expected.depth_bias_constant
+        && actual.depth_bias_slope == expected.depth_bias_slope
+        && actual.depth_bias_clamp == expected.depth_bias_clamp;
+}
+
+fn bool depth_state_matches(
+    gpu::DepthState* actual,
+    gpu::DepthState* expected,
+) {
+    return actual.test_enable == expected.test_enable
+        && actual.write_enable == expected.write_enable
+        && actual.compare == expected.compare;
+}
+
+fn bool observation_matches_graphics_state(
+    vk::DynamicStateObservation* observation,
+    gpu::GraphicsState* expected,
+) {
+    return native_viewport_matches(
+        &observation.viewport,
+        &expected.viewport,
+    ) && native_scissor_matches(
+        &observation.scissor,
+        &expected.scissor,
+    ) && raster_state_matches(
+        &observation.raster,
+        &expected.raster,
+    ) && depth_state_matches(
+        &observation.depth,
+        &expected.depth,
+    );
+}
+
+fn bool observation_has_no_emissions(
+    vk::DynamicStateObservation* observation,
+) {
+    return observation.begin_rendering_emissions == 0
+        && observation.viewport_emissions == 0
+        && observation.scissor_emissions == 0
+        && observation.raster_state_emissions == 0
+        && observation.depth_state_emissions == 0;
 }
 
 fn gpu::TextureHandle make_render_validation_target(
@@ -346,8 +421,14 @@ fn void render_pass_rejects_mixed_samples_before_mutation() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
 
-    assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
+    assert(@catch(gpu::cmd_begin_render_pass(
+        &commands,
+        &pass,
+        &graphics_state,
+    ))
         == gpu::INVALID_ARGUMENT,
         "all render attachments must use the same sample count");
     assert(record.state == vk::CommandState.RECORDING,
@@ -400,8 +481,14 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
 
-    assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
+    assert(@catch(gpu::cmd_begin_render_pass(
+        &commands,
+        &pass,
+        &graphics_state,
+    ))
         == gpu::INVALID_ARGUMENT,
         "a single-sample color attachment cannot have a resolve target");
     assert(record.state == vk::CommandState.RECORDING,
@@ -419,7 +506,11 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
     );
     source_slot.sample_count = gpu::SampleCount.FOUR;
     resolve_slot.format = gpu::Format.BGRA8_UNORM;
-    assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
+    assert(@catch(gpu::cmd_begin_render_pass(
+        &commands,
+        &pass,
+        &graphics_state,
+    ))
         == gpu::INVALID_ARGUMENT,
         "resolve source and destination formats must match");
     assert(record.scratch.reference_count == references_before,
@@ -427,7 +518,11 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
 
     resolve_slot.format = gpu::Format.RGBA8_UNORM;
     resolve_slot.sample_count = gpu::SampleCount.TWO;
-    assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
+    assert(@catch(gpu::cmd_begin_render_pass(
+        &commands,
+        &pass,
+        &graphics_state,
+    ))
         == gpu::INVALID_ARGUMENT,
         "resolve destinations must be single-sampled");
     assert(record.scratch.reference_count == references_before,
@@ -455,6 +550,8 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
@@ -468,7 +565,11 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     gpu::cmd_bind_pipeline(&prebound, draw.graphics)!!;
     vk::CommandRecord* prebound_record = vk::resolve_command(&prebound)!!;
     uint prebound_references = prebound_record.scratch.reference_count;
-    assert(@catch(gpu::cmd_begin_render_pass(&prebound, &pass))
+    assert(@catch(gpu::cmd_begin_render_pass(
+        &prebound,
+        &pass,
+        &graphics_state,
+    ))
         == gpu::INVALID_ARGUMENT,
         "begin rejects a prebound pipeline with incompatible color formats");
     assert(prebound_record.state == vk::CommandState.RECORDING,
@@ -479,7 +580,7 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     gpu::CommandList in_pass = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&in_pass)!!;
     record_val_target_to_attach(&in_pass, target);
-    gpu::cmd_begin_render_pass(&in_pass, &pass)!!;
+    gpu::cmd_begin_render_pass(&in_pass, &pass, &graphics_state)!!;
     vk::CommandRecord* in_pass_record = vk::resolve_command(&in_pass)!!;
     uint in_pass_references = in_pass_record.scratch.reference_count;
     assert(@catch(gpu::cmd_bind_pipeline(&in_pass, draw.graphics))
@@ -529,6 +630,8 @@ fn void end_render_pass_scopes_graphics_binding_to_pass() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
@@ -540,13 +643,13 @@ fn void end_render_pass_scopes_graphics_binding_to_pass() @test {
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, first);
     record_val_target_to_attach(&commands, second);
-    gpu::cmd_begin_render_pass(&commands, &first_pass)!!;
+    gpu::cmd_begin_render_pass(&commands, &first_pass, &graphics_state)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     assert(record.bound_pipeline.handle == gpu::PIPELINE_HANDLE_INVALID,
         "ending a render pass releases the graphics pipeline binding");
-    gpu::cmd_begin_render_pass(&commands, &second_pass)!!;
+    gpu::cmd_begin_render_pass(&commands, &second_pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&commands)!!;
 }
 
@@ -573,6 +676,8 @@ fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -586,13 +691,242 @@ fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
 
-    assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
+    assert(@catch(gpu::cmd_begin_render_pass(
+        &commands,
+        &pass,
+        &graphics_state,
+    ))
         == gpu::INVALID_ARGUMENT,
         "pipeline and render attachments must use the same sample count");
     assert(record.state == vk::CommandState.RECORDING,
         "pipeline sample mismatch records no native render pass");
     assert(record.scratch.reference_count == references_before,
         "pipeline sample mismatch retains no attachment references");
+}
+
+fn void graphics_state_packet_emission_is_exact() @test {
+    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+    gpu::ColorTargetDesc[1] colors = {{ .view = fixture.view }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::GraphicsState graphics = {
+        .viewport = {
+            .y         = (float)VAL_RT,
+            .width     = (float)VAL_RT,
+            .height    = -(float)VAL_RT,
+            .min_depth = 1.0f,
+            .max_depth = 0.0f,
+        },
+        .scissor = {
+            .x      = 1,
+            .y      = 2,
+            .width  = (int)VAL_RT - 1,
+            .height = (int)VAL_RT - 2,
+        },
+        .raster = {
+            .topology            = gpu::PrimitiveTopology.LINES,
+            .cull_mode           = gpu::CullMode.BACK,
+            .front_face          = gpu::FrontFace.CLOCKWISE,
+            .depth_bias_enable   = true,
+            .depth_bias_constant = 1.25f,
+            .depth_bias_slope    = 0.5f,
+            .depth_bias_clamp    = 0.125f,
+        },
+        .depth = {
+            .compare = gpu::CompareOp.ALWAYS,
+        },
+    };
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_begin_render_pass(
+        &fixture.commands,
+        &pass,
+        &graphics,
+    )!!;
+    gpu::CommandResolutionStats begin_stats =
+        gpu::command_resolution_stats();
+    vk::DynamicStateObservation begin_observation =
+        vk::dynamic_state_observation(fixture.state);
+    assert(begin_stats.recording_commands == 1,
+        "pass begin crosses one public recording boundary");
+    assert(begin_stats.native_commands == 11,
+        "pass begin emits rendering plus one ten-command state packet");
+    assert(begin_observation.begin_rendering_emissions == 1
+        && begin_observation.viewport_emissions == 1
+        && begin_observation.scissor_emissions == 1
+        && begin_observation.raster_state_emissions == 1
+        && begin_observation.depth_state_emissions == 1,
+        "pass begin emits each supplied state group exactly once");
+    assert(observation_matches_graphics_state(
+        &begin_observation,
+        &graphics,
+    ), "pass begin preserves every supplied graphics-state value");
+
+    gpu::GraphicsState replacement =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+    vk::reset_dynamic_state_observation(fixture.state);
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_set_graphics_state(
+        &fixture.commands,
+        &replacement,
+    )!!;
+    gpu::CommandResolutionStats replacement_stats =
+        gpu::command_resolution_stats();
+    vk::DynamicStateObservation replacement_observation =
+        vk::dynamic_state_observation(fixture.state);
+    assert(replacement_stats.recording_commands == 1,
+        "complete replacement crosses one public recording boundary");
+    assert(replacement_stats.native_commands == 10,
+        "complete replacement emits exactly one state packet");
+    assert(replacement_observation.begin_rendering_emissions == 0
+        && replacement_observation.viewport_emissions == 1
+        && replacement_observation.scissor_emissions == 1
+        && replacement_observation.raster_state_emissions == 1
+        && replacement_observation.depth_state_emissions == 1,
+        "complete replacement emits no hidden render-pass command");
+    assert(observation_matches_graphics_state(
+        &replacement_observation,
+        &replacement,
+    ), "complete replacement preserves every supplied value");
+
+    vk::reset_dynamic_state_observation(fixture.state);
+    gpu::cmd_set_viewport(&fixture.commands, &graphics.viewport)!!;
+    vk::DynamicStateObservation partial =
+        vk::dynamic_state_observation(fixture.state);
+    assert(partial.viewport_emissions == 1
+        && partial.scissor_emissions == 0
+        && partial.raster_state_emissions == 0
+        && partial.depth_state_emissions == 0,
+        "a partial setter updates only its documented subset");
+
+    gpu::cmd_end_render_pass(&fixture.commands)!!;
+    vk::reset_dynamic_state_observation(fixture.state);
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_begin_render_pass(
+        &fixture.commands,
+        &pass,
+        &graphics,
+    )!!;
+    vk::DynamicStateObservation restart =
+        vk::dynamic_state_observation(fixture.state);
+    assert(restart.begin_rendering_emissions == 1
+        && restart.viewport_emissions == 1
+        && restart.scissor_emissions == 1
+        && restart.raster_state_emissions == 1
+        && restart.depth_state_emissions == 1,
+        "a restarted pass emits a new explicit initial packet");
+}
+
+fn void invalid_graphics_state_packet_is_transactional() @test {
+    SyncDiagnosticCapture capture = {};
+    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
+        contract:  gpu::ContractValidation.FULL,
+        callback:  &capture_sync_diagnostic,
+        user_data: &capture,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+    gpu::ColorTargetDesc[1] colors = {{ .view = fixture.view }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::GraphicsState graphics =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+    int invalid_compare = 99;
+    mem::copy(
+        &graphics.depth.compare,
+        &invalid_compare,
+        int::size,
+    );
+    vk::CommandRecord* record = vk::resolve_command(&fixture.commands)!!;
+    uint references_before = record.scratch.reference_count;
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_begin_render_pass",
+        debug_name:     null,
+        rejected_field: "GraphicsState.depth.compare",
+        invariant:      "compare operation must be defined",
+    );
+    vk::reset_dynamic_state_observation(fixture.state);
+    gpu::reset_command_resolution_stats();
+    assert(@catch(gpu::cmd_begin_render_pass(
+        &fixture.commands,
+        &pass,
+        &graphics,
+    )) == gpu::INVALID_ARGUMENT,
+        "a late-invalid packet faults before pass begin");
+    gpu::CommandResolutionStats begin_stats =
+        gpu::command_resolution_stats();
+    vk::DynamicStateObservation begin_observation =
+        vk::dynamic_state_observation(fixture.state);
+    assert(begin_stats.native_commands == 0,
+        "invalid initial state emits no native command");
+    assert(observation_has_no_emissions(&begin_observation),
+        "invalid initial state emits no partial packet");
+    assert(record.state == vk::CommandState.RECORDING,
+        "invalid initial state leaves the command outside a pass");
+    assert(record.scratch.reference_count == references_before,
+        "invalid initial state retains no attachment reference");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+    );
+
+    graphics.depth.compare = gpu::CompareOp.LESS;
+    gpu::cmd_begin_render_pass(
+        &fixture.commands,
+        &pass,
+        &graphics,
+    )!!;
+    mem::copy(
+        &graphics.depth.compare,
+        &invalid_compare,
+        int::size,
+    );
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_set_graphics_state",
+        debug_name:     null,
+        rejected_field: "GraphicsState.depth.compare",
+        invariant:      "compare operation must be defined",
+    );
+    vk::reset_dynamic_state_observation(fixture.state);
+    gpu::reset_command_resolution_stats();
+    assert(@catch(gpu::cmd_set_graphics_state(
+        &fixture.commands,
+        &graphics,
+    )) == gpu::INVALID_ARGUMENT,
+        "a late-invalid replacement faults before emission");
+    gpu::CommandResolutionStats replacement_stats =
+        gpu::command_resolution_stats();
+    vk::DynamicStateObservation replacement_observation =
+        vk::dynamic_state_observation(fixture.state);
+    assert(replacement_stats.native_commands == 0,
+        "invalid replacement emits no native command");
+    assert(observation_has_no_emissions(&replacement_observation),
+        "invalid replacement emits no partial state");
+    assert(record.state == vk::CommandState.RECORDING_RENDER_PASS,
+        "invalid replacement preserves the active pass");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+    );
 }
 
 fn void viewport_device_bounds_accept_native_shapes_exactly() @test {
@@ -805,39 +1139,76 @@ fn void dynamic_state_diagnostics_name_exact_rejected_fields() @test {
 }
 
 fn void all_policies_lower_dynamic_state_identically() @test {
-    DynamicStateFixture trusted = make_dynamic_state_fixture(
+    DynamicStateFixture trusted = make_dynamic_state_fixture_before_pass(
         gpu::ContractValidation.TRUSTED,
     );
     defer destroy_dynamic_state_fixture(&trusted);
-    DynamicStateFixture boundaries = make_dynamic_state_fixture(
+    DynamicStateFixture boundaries = make_dynamic_state_fixture_before_pass(
         gpu::ContractValidation.OBJECT_BOUNDARIES,
     );
     defer destroy_dynamic_state_fixture(&boundaries);
-    DynamicStateFixture checked = make_dynamic_state_fixture(
+    DynamicStateFixture checked = make_dynamic_state_fixture_before_pass(
         gpu::ContractValidation.FULL,
     );
     defer destroy_dynamic_state_fixture(&checked);
 
-    gpu::Viewport viewport = {
-        .x         = -1.0f,
-        .y         = (float)VAL_RT,
-        .width     = (float)VAL_RT + 2.0f,
-        .height    = -(float)VAL_RT,
-        .min_depth = 1.0f,
-        .max_depth = 0.0f,
+    gpu::ColorTargetDesc[1] trusted_colors = {{ .view = trusted.view }};
+    gpu::ColorTargetDesc[1] boundary_colors = {{ .view = boundaries.view }};
+    gpu::ColorTargetDesc[1] checked_colors = {{ .view = checked.view }};
+    gpu::RenderPassDesc trusted_pass = {
+        .colors = trusted_colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
     };
-    gpu::ScissorRect scissor = {
-        .x      = (int)VAL_RT,
-        .y      = (int)VAL_RT,
-        .width  = 1,
-        .height = 1,
+    gpu::RenderPassDesc boundary_pass = {
+        .colors = boundary_colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
     };
-    gpu::cmd_set_viewport(&trusted.commands, &viewport)!!;
-    gpu::cmd_set_scissor(&trusted.commands, &scissor)!!;
-    gpu::cmd_set_viewport(&boundaries.commands, &viewport)!!;
-    gpu::cmd_set_scissor(&boundaries.commands, &scissor)!!;
-    gpu::cmd_set_viewport(&checked.commands, &viewport)!!;
-    gpu::cmd_set_scissor(&checked.commands, &scissor)!!;
+    gpu::RenderPassDesc checked_pass = {
+        .colors = checked_colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::GraphicsState graphics = {
+        .viewport = {
+            .x         = -1.0f,
+            .y         = (float)VAL_RT,
+            .width     = (float)VAL_RT + 2.0f,
+            .height    = -(float)VAL_RT,
+            .min_depth = 1.0f,
+            .max_depth = 0.0f,
+        },
+        .scissor = {
+            .x      = (int)VAL_RT,
+            .y      = (int)VAL_RT,
+            .width  = 1,
+            .height = 1,
+        },
+        .raster = {
+            .topology   = gpu::PrimitiveTopology.POINTS,
+            .cull_mode  = gpu::CullMode.FRONT,
+            .front_face = gpu::FrontFace.CLOCKWISE,
+        },
+        .depth = {
+            .compare = gpu::CompareOp.GREATER_EQUAL,
+        },
+    };
+    gpu::cmd_begin_render_pass(
+        &trusted.commands,
+        &trusted_pass,
+        &graphics,
+    )!!;
+    gpu::cmd_begin_render_pass(
+        &boundaries.commands,
+        &boundary_pass,
+        &graphics,
+    )!!;
+    gpu::cmd_begin_render_pass(
+        &checked.commands,
+        &checked_pass,
+        &graphics,
+    )!!;
 
     vk::DynamicStateObservation trusted_observation =
         vk::dynamic_state_observation(trusted.state);
@@ -845,31 +1216,31 @@ fn void all_policies_lower_dynamic_state_identically() @test {
         vk::dynamic_state_observation(boundaries.state);
     vk::DynamicStateObservation checked_observation =
         vk::dynamic_state_observation(checked.state);
+    assert(trusted_observation.begin_rendering_emissions == 1
+        && boundaries_observation.begin_rendering_emissions == 1
+        && checked_observation.begin_rendering_emissions == 1,
+        "each policy begins rendering exactly once");
     assert(trusted_observation.viewport_emissions == 1
-        && boundaries_observation.viewport_emissions == 1
-        && checked_observation.viewport_emissions == 1
         && trusted_observation.scissor_emissions == 1
+        && trusted_observation.raster_state_emissions == 1
+        && trusted_observation.depth_state_emissions == 1
+        && boundaries_observation.viewport_emissions == 1
         && boundaries_observation.scissor_emissions == 1
-        && checked_observation.scissor_emissions == 1,
-        "each policy emits each accepted dynamic state exactly once");
-    assert(native_viewport_matches(
-        &trusted_observation.viewport,
-        &viewport,
-    ) && native_viewport_matches(
-        &boundaries_observation.viewport,
-        &viewport,
-    ) && native_viewport_matches(
-        &checked_observation.viewport,
-        &viewport,
-    ), "trusted, boundary, and checked viewport lowering is identical");
-    assert(native_scissor_matches(
-        &trusted_observation.scissor,
-        &scissor,
-    ) && native_scissor_matches(
-        &boundaries_observation.scissor,
-        &scissor,
-    ) && native_scissor_matches(
-        &checked_observation.scissor,
-        &scissor,
-    ), "trusted, boundary, and checked scissor lowering is identical");
+        && boundaries_observation.raster_state_emissions == 1
+        && boundaries_observation.depth_state_emissions == 1
+        && checked_observation.viewport_emissions == 1
+        && checked_observation.scissor_emissions == 1
+        && checked_observation.raster_state_emissions == 1
+        && checked_observation.depth_state_emissions == 1,
+        "each policy emits one complete packet");
+    assert(observation_matches_graphics_state(
+        &trusted_observation,
+        &graphics,
+    ) && observation_matches_graphics_state(
+        &boundaries_observation,
+        &graphics,
+    ) && observation_matches_graphics_state(
+        &checked_observation,
+        &graphics,
+    ), "trusted, boundary, and checked packet lowering is identical");
 }
