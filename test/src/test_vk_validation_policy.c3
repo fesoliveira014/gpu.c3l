@@ -1061,6 +1061,57 @@ fn void command_reference_rollback_releases_suffix_and_rebuilds_epoch() @test {
         "the retained prefix is queryable after rollback rebuild");
 }
 
+fn void command_reference_noop_rollback_preserves_epoch_and_index() @test {
+    vk::VkDeviceState state;
+    vk::CommandResourceReference[1] references;
+    references[0] = {
+        .owner      = 37,
+        .index      = 11,
+        .generation = 3,
+    };
+    vk::CommandReferenceIndexCell[4] cells;
+    vk::CommandScratch scratch = {
+        .references      = references[..],
+        .reference_index = {
+            .cells = cells[..],
+            .epoch = 9,
+        },
+        .reference_count = 1,
+    };
+    vk::CommandReferenceProbe insertion = vk::probe_command_reference(
+        &state,
+        &scratch,
+        &scratch.references[0],
+    )!!;
+    vk::publish_command_reference(
+        state:           &state,
+        scratch:         &scratch,
+        reference:       &scratch.references[0],
+        probe:           &insertion,
+        reference_index: 0,
+    );
+    vk::CommandRecord record = { .scratch = &scratch };
+    vk::reset_command_reference_work_counters(&state);
+
+    vk::rollback_command_references(&state, &record, 1);
+    vk::CommandReferenceWorkCounters counters =
+        vk::command_reference_work_counters(&state);
+    assert(scratch.reference_count == 1 && scratch.reference_index.epoch == 9,
+        "a no-op rollback preserves the retained prefix and current epoch");
+    assert(counters.releases == 0
+        && counters.lookups == 0
+        && counters.index_publications == 0
+        && counters.rollback_rebuild_publications == 0,
+        "a no-op rollback performs no release, reset, or rebuild work");
+    vk::CommandReferenceProbe retained = vk::probe_command_reference(
+        &state,
+        &scratch,
+        &scratch.references[0],
+    )!!;
+    assert(retained.found && retained.reference_index == 0,
+        "the retained prefix remains queryable after a no-op rollback");
+}
+
 fn void command_reference_retain_failure_rolls_back_without_publication() @test {
     vk::VkDeviceState state;
     vk::BufferCell[2] buffer_cells;

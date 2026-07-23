@@ -74,11 +74,21 @@ fn void ensure_command_reference_capacity() {
 }
 
 fn void note_command_reference_allocation() {}
+fn void clear_command_scratch_references() {
+    release_tracked_command_references(
+        state,
+        scratch.references,
+        scratch.reference_count,
+    );
+    scratch.reference_count = 0;
+    reset_command_reference_index();
+}
 fn void rollback_command_references() {
     reset_command_reference_index();
     for (uint i = 0; i < reference_count; i++) publish_command_reference();
 }
 fn void retain_tracked_command_reference() {}
+fn void release_tracked_command_references() {}
 fn void publish_command_reference() {}
 fn void reset_command_reference_index() {}
 
@@ -637,6 +647,75 @@ fn void scan_reference_helper() {
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "reference index equality omits exact owner"
+                in error
+                for error in errors
+            ))
+
+    def test_rejects_reference_clear_with_wrong_release_list(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE.replace(
+                "        scratch.references,\n"
+                "        scratch.reference_count,",
+                "        scratch.reference_index.cells,\n"
+                "        scratch.reference_count,",
+            )
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "command scratch clear must release its reference list"
+                in error
+                for error in errors
+            ))
+
+    def test_rejects_reference_clear_reset_before_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE.replace(
+                "    release_tracked_command_references(\n"
+                "        state,\n"
+                "        scratch.references,\n"
+                "        scratch.reference_count,\n"
+                "    );\n"
+                "    scratch.reference_count = 0;\n"
+                "    reset_command_reference_index();",
+                "    reset_command_reference_index();\n"
+                "    release_tracked_command_references(\n"
+                "        state,\n"
+                "        scratch.references,\n"
+                "        scratch.reference_count,\n"
+                "    );\n"
+                "    scratch.reference_count = 0;",
+            )
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "command scratch clear must release its reference list"
+                in error
+                for error in errors
+            ))
+
+    def test_rejects_reference_clear_count_before_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE.replace(
+                "    release_tracked_command_references(\n"
+                "        state,\n"
+                "        scratch.references,\n"
+                "        scratch.reference_count,\n"
+                "    );\n"
+                "    scratch.reference_count = 0;",
+                "    scratch.reference_count = 0;\n"
+                "    release_tracked_command_references(\n"
+                "        state,\n"
+                "        scratch.references,\n"
+                "        scratch.reference_count,\n"
+                "    );",
+            )
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "command scratch clear must release its reference list"
                 in error
                 for error in errors
             ))
