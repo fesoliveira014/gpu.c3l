@@ -536,6 +536,13 @@ destroying every referenced owner. GPU addresses and shader indices are opaque
 to the command stream under either setting, so their lifetime always remains a
 caller precondition.
 
+Tracking-enabled allocators pair each fixed sequential reference list with a
+fixed open-addressed exact-identity index. Ordinary duplicate lookup does not
+scan the accumulated list: the hash selects a probe sequence and
+owner/index/generation equality establishes identity. The list remains the
+release-order authority, while an epoch makes returned scratch entries stale
+without clearing the index on ordinary reuse.
+
 ## 7. Work and storage lifetime model
 
 The root module does not define application work boundaries or storage rotation.

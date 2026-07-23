@@ -68,6 +68,12 @@
       "features": [ "SUBMIT_DUPLICATE_STATS" ],
       "sources": [ "src/submit_batch_bench.c3" ]
     },
+    // Advisory fixed reference-index scaling with exact structural work.
+    "command_reference_bench": {
+      "type": "executable",
+      "features": [ "VALIDATION_POLICY_STATS", "COMMAND_RECORDING_WORK_STATS" ],
+      "sources": [ "src/command_reference_bench.c3" ]
+    },
     // Advisory resource and shader-code operation timing across worker counts 1/2/4;
     // executable so it never gates CI. Needs an ICD — pin lavapipe via
     // VK_DRIVER_FILES.

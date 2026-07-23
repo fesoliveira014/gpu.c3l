@@ -252,6 +252,16 @@ fn void command_allocator_table_retires_exhausted_generations() @test {
         "a retired allocator slot is never reused");
 }
 
+fn void command_reference_index_capacity_is_power_of_two_and_overflow_safe() @test {
+    assert(gpu::internal::vk::command_reference_index_capacity(0)!! == 0
+        && gpu::internal::vk::command_reference_index_capacity(1)!! == 2
+        && gpu::internal::vk::command_reference_index_capacity(3)!! == 8,
+        "the reference index keeps at least half of its cells empty");
+    assert(@catch(gpu::internal::vk::command_reference_index_capacity(uint::max))
+        == gpu::INVALID_ARGUMENT,
+        "reference index capacity rejects unrepresentable powers of two");
+}
+
 fn void command_allocator_host_allocation_failure_is_transactional() @test {
     gpu::internal::vk::VkDeviceState state = {
         .host_allocator = &allocators::NULL_ALLOCATOR,
@@ -272,6 +282,7 @@ fn void command_allocator_host_allocation_failure_is_transactional() @test {
     assert(slot.command_buffers.ptr == null
         && slot.scratch.ptr == null
         && slot.reference_storage.ptr == null
+        && slot.reference_index_storage.ptr == null
         && slot.preprocess_index_storage.ptr == null
         && slot.available.ptr == null
         && slot.reservations.ptr == null
@@ -362,7 +373,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
     };
     gpu::Queue queue = { .id = 0 };
 
-    for (uint fail_on = 1; fail_on <= 6; fail_on++) {
+    for (uint fail_on = 1; fail_on <= 7; fail_on++) {
         FailOnNAllocator fail_allocator = { .fail_on = fail_on };
         gpu::internal::vk::VkDeviceState state = {
             .host_allocator = &fail_allocator,
@@ -397,6 +408,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         assert(slot.command_buffers.ptr == null
             && slot.scratch.ptr == null
             && slot.reference_storage.ptr == null
+            && slot.reference_index_storage.ptr == null
             && slot.preprocess_index_storage.ptr == null
             && slot.available.ptr == null
             && slot.reservations.ptr == null
@@ -404,7 +416,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
             "host rollback leaves no owned allocator state");
     }
 
-    FailOnNAllocator success_allocator = { .fail_on = 7 };
+    FailOnNAllocator success_allocator = { .fail_on = 8 };
     gpu::internal::vk::VkDeviceState state = {
         .host_allocator = &success_allocator,
         .queue_completions = completions[..],
@@ -425,13 +437,13 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         slot:  &slot,
         ops:   &ops,
     )!!;
-    assert(success_allocator.attempts == 6
-        && success_allocator.acquires == 6
+    assert(success_allocator.attempts == 7
+        && success_allocator.acquires == 7
         && success_allocator.releases == 0
-        && success_allocator.outstanding == 6,
+        && success_allocator.outstanding == 7,
         "successful creation performs the exact fixed host allocation set");
     gpu::internal::vk::destroy_command_allocator_slot_with_ops(&state, &slot, &ops);
-    assert(success_allocator.releases == 6
+    assert(success_allocator.releases == 7
         && success_allocator.outstanding == 0
         && probe.pool_creates == 1 && probe.pool_destroys == 1
         && probe.buffer_allocations == 1,
@@ -472,7 +484,9 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
         && slot.scratch.len == slot.command_buffers.len
         && slot.available_count == slot.command_buffers.len,
         "zero capacities eagerly create the documented fixed buffer set");
-    assert(slot.reference_storage.len == 0,
+    assert(slot.reference_storage.len == 0
+        && slot.reference_index_storage.len == 0
+        && slot.scratch[0].reference_index.cells.len == 0,
         "tracking-off allocators retain no resource-reference storage");
     assert(slot.preprocess_index_storage.len
             == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
@@ -911,10 +925,17 @@ fn void tracking_allocator_wires_non_overlapping_reference_slices() @test {
     )!!;
 
     assert(slot.reference_storage.len == 6
+        && slot.reference_index_storage.len == 16
         && slot.scratch[0].references.len == 3
-        && slot.scratch[1].references.len == 3,
-        "tracking storage scales as buffers times references per list");
+        && slot.scratch[1].references.len == 3
+        && slot.scratch[0].reference_index.cells.len == 8
+        && slot.scratch[1].reference_index.cells.len == 8,
+        "tracking storage scales as buffers times references and index cells");
     assert(slot.scratch[0].references.ptr == slot.reference_storage.ptr
-        && slot.scratch[1].references.ptr == &slot.reference_storage[3],
-        "each command buffer receives one stable non-overlapping slice");
+        && slot.scratch[1].references.ptr == &slot.reference_storage[3]
+        && slot.scratch[0].reference_index.cells.ptr
+            == slot.reference_index_storage.ptr
+        && slot.scratch[1].reference_index.cells.ptr
+            == &slot.reference_index_storage[8],
+        "each command buffer receives stable non-overlapping reference storage");
 }

@@ -128,6 +128,7 @@ The suite covers:
 | `allocation_bench` | Explicit `CPU_WRITE` allocation and free |
 | `command_wrapper_bench` | ICD-free direct no-op and public-wrapper floor for five command classes, with exact volatile observation |
 | `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero hidden structural work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
+| `command_reference_bench` | Exact unique, repeated, mixed, forced-collision, 4,095-capacity, and 4,096-reference probe/retain/release work with advisory per-reference timing |
 | `command_record_bench` | Barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact one-visit-per-list duplicate-detection work |
@@ -244,6 +245,22 @@ modes retain the pipeline through discard or completion; later direct, indirect,
 generated, and render-pass commands read only the cached native snapshot and
 kind/render metadata. Exact bind-time counters followed by a reset after
 pipeline-table/cache churn require zero post-bind resolution during dispatch.
+
+### Lifetime-reference index
+
+Tracking-enabled command scratch uses a fixed open-addressed index beside the
+sequential release list. Ordinary lookup/insertion is expected constant-time,
+compares the complete owner/index/generation identity after every hash hit, and
+allocates no recording memory. N unique references therefore require N lookups,
+N retains, N publications, and expected O(N) total probes rather than repeated
+scans of the accumulated list. Duplicate hits acquire no resource mutex and add
+no retain. Forced-collision timing is advisory; bounded probes, exact identity,
+and balanced retain/release counters are blocking evidence.
+`command_reference_bench` exercises unique sets of 1/8/64/256/1,024/4,096,
+100,000 duplicate hits, a 2,048-unique/2,048-duplicate mix, a 64-entry forced
+collision chain, and a two-reference preflight at 4,095 retained entries. Its
+schema requires zero warm host allocation and exact publication, mutex,
+retain, release, duplicate, probe, and equality work.
 
 An advisory llvmpipe run on 2026-07-21 (Mesa 25.0.7, LLVM 15.0.7) requested
 200 dynamic raster states for one immutable graphics descriptor:

@@ -107,6 +107,7 @@ fn void release_tracked_command_reference(
     if (reference.tracked_command_references != null) {
         reference.tracked_command_references.sub(1, AtomicOrdering.RELAXED);
         note_command_reference_release(state);
+        note_command_reference_work_release(state);
         return;
     }
     if (reference.owner == state.buffers.owner) {
@@ -119,6 +120,7 @@ fn void release_tracked_command_reference(
             AtomicOrdering.RELAXED,
         );
         note_command_reference_release(state);
+        note_command_reference_work_release(state);
     } else if (reference.owner == state.allocations.owner) {
         gpu::GpuAllocation allocation = {
             .owner = reference.owner, .index = reference.index,
@@ -129,6 +131,7 @@ fn void release_tracked_command_reference(
             AtomicOrdering.RELAXED,
         );
         note_command_reference_release(state);
+        note_command_reference_work_release(state);
     } else if (reference.owner == state.textures.owner) {
         gpu::TextureHandle texture = {
             .owner = reference.owner, .index = reference.index,
@@ -139,6 +142,7 @@ fn void release_tracked_command_reference(
             AtomicOrdering.RELAXED,
         );
         note_command_reference_release(state);
+        note_command_reference_work_release(state);
     } else if (reference.owner == state.attachment_views.owner) {
         gpu::AttachmentViewHandle view = {
             .owner = reference.owner, .index = reference.index,
@@ -149,6 +153,7 @@ fn void release_tracked_command_reference(
             AtomicOrdering.RELAXED,
         );
         note_command_reference_release(state);
+        note_command_reference_work_release(state);
     } else if (reference.owner == state.pipelines.owner) {
         gpu::PipelineHandle pipeline = {
             .owner = reference.owner, .index = reference.index,
@@ -159,6 +164,7 @@ fn void release_tracked_command_reference(
             AtomicOrdering.RELAXED,
         );
         note_command_reference_release(state);
+        note_command_reference_work_release(state);
     }
 }
 
@@ -241,11 +247,7 @@ fn void release_submitted_command_batch(
     slot.mutex.lock()!!;
     defer slot.mutex.unlock();
     CommandScratch* scratch = &slot.scratch[batch.allocator_buffer];
-    release_tracked_command_references(
-        state,
-        scratch.references,
-        scratch.reference_count,
-    );
+    clear_command_scratch_references(state, scratch);
     recycle_generated_preprocess_indices_locked(
         state,
         slot,

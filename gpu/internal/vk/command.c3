@@ -120,8 +120,29 @@ struct CommandRecordingOps @private {
     EndCommandBufferFn   end;
 }
 
+struct CommandReferenceKey {
+    ulong owner;
+    uint  index;
+    uint  generation;
+}
+$assert CommandReferenceKey::size == 16;
+
+struct CommandReferenceIndexCell {
+    ulong owner;
+    uint  index;
+    uint  generation;
+    uint  reference_index;
+    uint  epoch;
+}
+
+struct CommandReferenceIndex {
+    CommandReferenceIndexCell[] cells;
+    uint                        epoch;
+}
+
 struct CommandScratch {
     CommandResourceReference[] references;
+    CommandReferenceIndex      reference_index;
     uint                       reference_count;
     uint[]                     generated_preprocess_indices;
     uint                       generated_preprocess_count;
@@ -134,6 +155,7 @@ struct CommandAllocatorSlot {
     vk::CommandBuffer[]          command_buffers;
     CommandScratch[]             scratch;
     CommandResourceReference[]   reference_storage;
+    CommandReferenceIndexCell[]  reference_index_storage;
     uint[]                       preprocess_index_storage;
     uint[]                       available;
     uint                         available_count;
@@ -412,6 +434,9 @@ fn void destroy_command_allocator_slot_with_ops(
     if (slot.reference_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.reference_storage.ptr);
     }
+    if (slot.reference_index_storage.ptr != null) {
+        alloc::free(state.host_allocator, slot.reference_index_storage.ptr);
+    }
     if (slot.preprocess_index_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.preprocess_index_storage.ptr);
     }
@@ -431,6 +456,18 @@ fn void destroy_command_allocator_slot(
 fn uint allocator_reservation_capacity(gpu::CommandAllocatorDesc* desc) {
     return desc.command_buffer_capacity
         * desc.max_generated_preprocess_buffers_per_list;
+}
+
+fn uint? command_reference_index_capacity(uint reference_capacity) {
+    if (reference_capacity == 0) return 0;
+    if ((usz)reference_capacity > usz::max / 2) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    usz doubled = (usz)reference_capacity * 2;
+    if (doubled > uint::max) return gpu::INVALID_ARGUMENT~;
+    uint capacity = next_pow2((uint)doubled);
+    if ((usz)capacity < doubled) return gpu::INVALID_ARGUMENT~;
+    return capacity;
 }
 
 fn void? initialize_command_allocator_slot_with_ops(
@@ -477,6 +514,8 @@ fn void? initialize_command_allocator_slot_with_ops(
     uint reference_capacity = state.validation_policy.track_lifetimes
         ? desc.max_resource_references_per_list
         : 0;
+    uint reference_index_capacity =
+        command_reference_index_capacity(reference_capacity)!;
     if (reference_capacity > 0) {
         CommandResourceReference[]? reference_storage = alloc::new_array_try(
             state.host_allocator,
@@ -487,6 +526,17 @@ fn void? initialize_command_allocator_slot_with_ops(
             return gpu::OUT_OF_HOST_MEMORY~;
         }
         slot.reference_storage = reference_storage;
+        note_recording_host_allocation(state);
+        CommandReferenceIndexCell[]? reference_index_storage =
+            alloc::new_array_try(
+                state.host_allocator,
+                CommandReferenceIndexCell,
+                (usz)capacity * (usz)reference_index_capacity,
+            );
+        if (catch reference_index_storage) {
+            return gpu::OUT_OF_HOST_MEMORY~;
+        }
+        slot.reference_index_storage = reference_index_storage;
         note_recording_host_allocation(state);
     }
     uint preprocess_capacity =
@@ -519,6 +569,11 @@ fn void? initialize_command_allocator_slot_with_ops(
             slot.scratch[i].references = slot.reference_storage[
                 start:reference_capacity
             ];
+            usz index_start = (usz)i * (usz)reference_index_capacity;
+            slot.scratch[i].reference_index.cells =
+                slot.reference_index_storage[
+                    index_start:reference_index_capacity
+                ];
         }
         if (preprocess_capacity > 0) {
             usz start = (usz)i * (usz)preprocess_capacity;
@@ -1222,11 +1277,7 @@ fn void? vk_discard_commands(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     if (encoder != null) gpu::internal::invalidate_command_encoder(encoder);
-    release_tracked_command_references(
-        state,
-        record.scratch.references,
-        record.scratch.reference_count,
-    );
+    clear_command_scratch_references(state, record.scratch);
     recycle_generated_preprocess_indices_locked(
         state,
         slot,
@@ -1387,7 +1438,7 @@ fn void? track_buffer_copy_references(
             .generation = copy.dst_span.generation,
         },
     };
-    preflight_command_references(record, references[..])!;
+    preflight_command_references(state, record, references[..])!;
     track_span_command_reference(state, record, &copy.src_span)!;
     track_span_command_reference(state, record, &copy.dst_span)!;
 }
@@ -1842,7 +1893,7 @@ fn void? track_buffer_texture_copy_references(
             .generation = copy.texture_handle.generation,
         },
     };
-    preflight_command_references(record, references[..])!;
+    preflight_command_references(state, record, references[..])!;
     track_span_command_reference(state, record, &copy.buffer_span)!;
     track_texture_command_reference(state, record, copy.texture_handle)!;
 }
@@ -2754,7 +2805,7 @@ fn void? track_generated_dispatch(
             .generation = dispatch.count_span.generation,
         },
     };
-    preflight_command_references(record, references[..])!;
+    preflight_command_references(state, record, references[..])!;
     track_span_command_reference(state, record, &dispatch.records_span)!;
     track_span_command_reference(state, record, &dispatch.count_span)!;
 }
