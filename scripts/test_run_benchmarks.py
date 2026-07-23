@@ -96,6 +96,20 @@ COMMAND_POLICY_OUTPUTS = (
     FULL_COMMAND_OUTPUT,
     FULL_LAYERS_COMMAND_OUTPUT,
 )
+COMMAND_REFERENCE_OUTPUT = "\n".join((
+    "iterations=unique:1,8,64,256,1024,4096;mixed:4096;near_capacity:4095;repeated:100000;collisions:64 units=ns/reference",
+    "reference_index unique=1 lookups=1 probes=1 equality=0 publications=1 mutex=1 retains=1 releases=1 host_allocations=0 probes_per_reference=1.000 equality_per_reference=0.000 ns/reference=50.000",
+    "reference_index unique=8 lookups=8 probes=13 equality=5 publications=8 mutex=8 retains=8 releases=8 host_allocations=0 probes_per_reference=1.625 equality_per_reference=0.625 ns/reference=50.000",
+    "reference_index unique=64 lookups=64 probes=90 equality=26 publications=64 mutex=64 retains=64 releases=64 host_allocations=0 probes_per_reference=1.406 equality_per_reference=0.406 ns/reference=50.000",
+    "reference_index unique=256 lookups=256 probes=327 equality=71 publications=256 mutex=256 retains=256 releases=256 host_allocations=0 probes_per_reference=1.277 equality_per_reference=0.277 ns/reference=50.000",
+    "reference_index unique=1024 lookups=1024 probes=1746 equality=722 publications=1024 mutex=1024 retains=1024 releases=1024 host_allocations=0 probes_per_reference=1.705 equality_per_reference=0.705 ns/reference=50.000",
+    "reference_index unique=4096 lookups=4096 probes=6041 equality=1945 publications=4096 mutex=4096 retains=4096 releases=4096 host_allocations=0 probes_per_reference=1.475 equality_per_reference=0.475 ns/reference=50.000",
+    "reference_index repeated=100000 lookups=100001 probes=100001 equality=100000 duplicates=100000 publications=1 mutex=1 retains=1 releases=1 host_allocations=0 ns/reference=25.000",
+    "reference_index mixed=4096 unique=2048 lookups=4096 probes=6170 equality=4122 duplicates=2048 publications=2048 mutex=2048 retains=2048 releases=2048 host_allocations=0 probes_per_reference=1.506 equality_per_reference=1.006 ns/reference=40.000",
+    "reference_index collisions=64 lookups=64 probes=2080 equality=2016 publications=64 mutex=64 retains=64 releases=64 host_allocations=0 probes_per_reference=32.500 equality_per_reference=31.500 ns/reference=220.000",
+    "reference_index near_capacity=4095 additional=2 capacity_fault=true lookups=4097 probes=6042 equality=1945 publications=4095 mutex=4095 retains=4095 releases=4095 host_allocations=0 probes_per_reference=1.475 equality_per_reference=0.475 ns/reference=50.000",
+    "reference_index_check status=pass",
+))
 PIPELINE_OUTPUT = "\n".join(
     (
         "iterations=raster=200;duplicate=200000;batch=64x2000 "
@@ -318,6 +332,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "upload_throughput_bench",
                 "command_wrapper_bench",
                 "command_path_baseline_bench",
+                "command_reference_bench",
                 "command_record_bench",
                 "lifecycle_bench",
                 "submit_batch_bench",
@@ -349,6 +364,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         self.assertIn(
             ("command_path_baseline_bench", "test"),
+            runner.benchmark_build_targets(),
+        )
+        self.assertIn(
+            ("command_reference_bench", "test"),
             runner.benchmark_build_targets(),
         )
         self.assertIn(
@@ -443,6 +462,33 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "mode mismatch"):
             runner.require_command_path_policy_matrix(swapped)
+
+    def test_command_reference_measurement_accepts_exact_schema(self):
+        runner = load_runner()
+        runner.require_measurement(
+            COMMAND_REFERENCE_OUTPUT,
+            "command_reference_bench",
+        )
+
+    def test_command_reference_measurement_rejects_structural_mutations(self):
+        runner = load_runner()
+        mutations = (
+            ("host_allocations=0", "host_allocations=1", "allocation"),
+            ("retains=4096", "retains=4095", "retains"),
+            ("releases=2048", "releases=2047", "releases"),
+            ("duplicates=100000", "duplicates=99999", "duplicates"),
+            ("probes=2080", "probes=2079", "equality"),
+            ("capacity_fault=true", "capacity_fault=false", "capacity"),
+            ("status=pass", "status=fail", "structural check"),
+        )
+        for old, new, error in mutations:
+            with self.subTest(error=error):
+                output = COMMAND_REFERENCE_OUTPUT.replace(old, new, 1)
+                with self.assertRaisesRegex(ValueError, error):
+                    runner.require_measurement(
+                        output,
+                        "command_reference_bench",
+                    )
 
     def test_command_path_vulkan_measurement_rejects_schema_mutations(self):
         runner = load_runner()

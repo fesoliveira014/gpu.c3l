@@ -412,7 +412,11 @@ fn void? track_render_pass(
             .generation = pass.depth_handle.generation,
         };
     }
-    preflight_command_references(record, references[:reference_count])!;
+    preflight_command_references(
+        state,
+        record,
+        references[:reference_count],
+    )!;
     for (uint i = 0; i < pass.color_count; i++) {
         gpu::AttachmentViewHandle color = pass.color_handles[i];
         track_command_reference(
@@ -1407,7 +1411,7 @@ fn void? track_indexed_indirect_draw(
             .generation = draw.index_span.generation,
         },
     };
-    preflight_command_references(record, references[..])!;
+    preflight_command_references(state, record, references[..])!;
     track_span_command_reference(state, record, &draw.args_span)!;
     track_span_command_reference(state, record, &draw.index_span)!;
 }
@@ -1673,7 +1677,7 @@ fn void? track_indexed_indirect_count_draw(
             .generation = draw.index_span.generation,
         },
     };
-    preflight_command_references(record, references[..])!;
+    preflight_command_references(state, record, references[..])!;
     track_span_command_reference(state, record, &draw.args_span)!;
     track_span_command_reference(state, record, &draw.count_span)!;
     track_span_command_reference(state, record, &draw.index_span)!;
@@ -1939,7 +1943,7 @@ fn void? track_generated_draw(
             .generation = draw.count_span.generation,
         },
     };
-    preflight_command_references(record, references[..])!;
+    preflight_command_references(state, record, references[..])!;
     track_span_command_reference(state, record, &draw.records_span)!;
     track_span_command_reference(state, record, &draw.count_span)!;
 }
@@ -2169,7 +2173,7 @@ fn void? track_generated_indexed_draw(
             .generation = draw.index_span.generation,
         },
     };
-    preflight_command_references(record, references[..])!;
+    preflight_command_references(state, record, references[..])!;
     track_span_command_reference(state, record, &draw.records_span)!;
     track_span_command_reference(state, record, &draw.count_span)!;
     track_span_command_reference(state, record, &draw.index_span)!;

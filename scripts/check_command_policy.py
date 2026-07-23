@@ -85,6 +85,33 @@ WARM_STACK_PATTERNS = {
         r"MAX_SUBMIT_COMPLETION_WAITS)[^\]\r\n]*\]"
     ),
 }
+REFERENCE_INDEX_HOT_FUNCTIONS = frozenset((
+    "preflight_command_references",
+    "track_command_reference",
+    "resolve_tracked_texture_command_reference",
+))
+ACCUMULATED_REFERENCE_SCAN_PATTERNS = {
+    "reference-count loop": re.compile(
+        r"\bfor\s*\([^)]*\breference_count\b"
+    ),
+    "reference-slice loop": re.compile(
+        r"\bforeach\s*\([^)]*\breferences\s*\["
+    ),
+}
+REFERENCE_IDENTITY_FIELDS = ("owner", "index", "generation")
+POST_RETAIN_PUBLICATION_MARKERS = {
+    "track_command_reference": re.compile(
+        r"\bretain_tracked_command_reference\s*\("
+    ),
+    "resolve_tracked_texture_command_reference": re.compile(
+        r"\btracked_command_references\.add\s*\("
+    ),
+}
+REFERENCE_PUBLICATION_CALLERS = frozenset((
+    "track_command_reference",
+    "resolve_tracked_texture_command_reference",
+    "rollback_command_references",
+))
 ENCODER_PROOF_PATTERNS = {
     "stored device comparison": re.compile(r"\bencoder\.device\b"),
     "stored handle comparison": re.compile(r"\bencoder\.handle\b"),
@@ -358,6 +385,84 @@ def check(root: Path = ROOT) -> list[str]:
             "superseded command functions remain declared: "
             + ", ".join(superseded)
         )
+
+    for function in sorted(
+        reachable_functions(functions, set(REFERENCE_INDEX_HOT_FUNCTIONS)),
+        key=lambda item: (item.relative, item.line, item.name),
+    ):
+        for label, pattern in ACCUMULATED_REFERENCE_SCAN_PATTERNS.items():
+            if pattern.search(function.body):
+                errors.append(
+                    "reference index hot path contains " + label + " at "
+                    f"{function.relative}:{function.line}:{function.name}"
+                )
+
+    for function in functions.get("indexed_resource_reference_matches", ()):
+        for field in REFERENCE_IDENTITY_FIELDS:
+            exact_comparison = re.compile(
+                rf"\bcell\.{field}\s*==\s*reference\.{field}\b"
+            )
+            if exact_comparison.search(function.body) is None:
+                errors.append(
+                    "reference index equality omits exact " + field + " at "
+                    f"{function.relative}:{function.line}:{function.name}"
+                )
+
+    for function_name, retain_pattern in POST_RETAIN_PUBLICATION_MARKERS.items():
+        for function in functions.get(function_name, ()):
+            retained = retain_pattern.search(function.body)
+            published = re.search(
+                r"\bpublish_command_reference\s*\(",
+                function.body,
+            )
+            if (retained is None or published is None
+                    or published.start() < retained.end()):
+                errors.append(
+                    "reference index publication is not after retain at "
+                    f"{function.relative}:{function.line}:{function.name}"
+                )
+
+    for declarations in functions.values():
+        for function in declarations:
+            if (function.name in REFERENCE_PUBLICATION_CALLERS):
+                continue
+            if re.search(
+                r"\bpublish_command_reference\s*\(",
+                function.body,
+            ) is not None:
+                errors.append(
+                    "reference index publication has unauthorized caller at "
+                    f"{function.relative}:{function.line}:{function.name}"
+                )
+
+    rollback_functions = sorted(
+        reachable_functions(functions, {"rollback_command_references"}),
+        key=lambda item: (item.relative, item.line, item.name),
+    )
+    for function in functions.get("rollback_command_references", ()):
+        reset = re.search(
+            r"\breset_command_reference_index\s*\(",
+            function.body,
+        )
+        rebuilt = re.search(
+            r"\bpublish_command_reference\s*\(",
+            function.body,
+        )
+        if (reset is None or rebuilt is None or rebuilt.start() < reset.end()
+                ):
+            errors.append(
+                "reference rollback must reset and rebuild the retained prefix at "
+                f"{function.relative}:{function.line}:{function.name}"
+            )
+    for function in rollback_functions:
+        if re.search(
+            r"\breference_index\.cells\s*\[[^]]+\]\s*\.epoch\s*=",
+            function.body,
+        ) is not None:
+            errors.append(
+                "reference rollback reaches unsafe cell deletion at "
+                f"{function.relative}:{function.line}:{function.name}"
+            )
 
     expected_fields = set(tables["TRUSTED_COMMAND_OPS"])
     if not expected_fields:

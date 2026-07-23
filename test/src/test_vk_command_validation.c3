@@ -85,8 +85,13 @@ fn gpu::Device make_val_device() {
 
 fn void reference_capacity_preflight_counts_unique_identities() @test {
     vk::CommandResourceReference[1] storage;
+    vk::CommandReferenceIndexCell[2] cells;
     vk::CommandScratch scratch = {
-        .references = storage[..],
+        .references      = storage[..],
+        .reference_index = {
+            .cells = cells[..],
+            .epoch = 1,
+        },
     };
     vk::CommandRecord record = {
         .scratch = &scratch,
@@ -104,17 +109,37 @@ fn void reference_capacity_preflight_counts_unique_identities() @test {
     vk::CommandResourceReference[2] duplicates = { first, first };
     vk::CommandResourceReference[2] distinct = { first, second };
 
-    vk::preflight_command_references(&record, duplicates[..])!!;
-    assert(@catch(vk::preflight_command_references(&record, distinct[..]))
+    vk::preflight_command_references(null, &record, duplicates[..])!!;
+    assert(@catch(vk::preflight_command_references(
+        null,
+        &record,
+        distinct[..],
+    ))
         == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "preflight counts identities independently of queue topology");
 
     storage[0] = first;
     scratch.reference_count = 1;
+    vk::CommandReferenceProbe insertion = vk::probe_command_reference(
+        null,
+        &scratch,
+        &first,
+    )!!;
+    vk::publish_command_reference(
+        state:           null,
+        scratch:         &scratch,
+        reference:       &first,
+        probe:           &insertion,
+        reference_index: 0,
+    );
     vk::CommandResourceReference[1] existing = { first };
-    vk::preflight_command_references(&record, existing[..])!!;
+    vk::preflight_command_references(null, &record, existing[..])!!;
     vk::CommandResourceReference[1] additional = { second };
-    assert(@catch(vk::preflight_command_references(&record, additional[..]))
+    assert(@catch(vk::preflight_command_references(
+        null,
+        &record,
+        additional[..],
+    ))
         == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "preflight excludes existing identities and counts new identities");
 }

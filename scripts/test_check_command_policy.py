@@ -54,6 +54,19 @@ fn void retain_copy() {
 
 fn void track_command_reference() {
     ensure_command_reference_capacity();
+    retain_tracked_command_reference();
+    publish_command_reference();
+}
+
+fn void resolve_tracked_texture_command_reference() {
+    tracked_command_references.add();
+    publish_command_reference();
+}
+
+fn bool indexed_resource_reference_matches() {
+    return cell.owner == reference.owner
+        && cell.index == reference.index
+        && cell.generation == reference.generation;
 }
 
 fn void ensure_command_reference_capacity() {
@@ -61,7 +74,13 @@ fn void ensure_command_reference_capacity() {
 }
 
 fn void note_command_reference_allocation() {}
-fn void rollback_command_references() {}
+fn void rollback_command_references() {
+    reset_command_reference_index();
+    for (uint i = 0; i < reference_count; i++) publish_command_reference();
+}
+fn void retain_tracked_command_reference() {}
+fn void publish_command_reference() {}
+fn void reset_command_reference_index() {}
 
 fn void vk_create_command_allocator() {}
 fn void vk_destroy_command_allocator() {}
@@ -501,6 +520,141 @@ const gpu::internal::CommandOps EXPERIMENTAL_COMMAND_OPS @private = {
             errors = check_command_policy.check(root)
             self.assertTrue(any(
                 "warm command path reaches native command allocation" in error
+                for error in errors
+            ))
+
+    def test_rejects_accumulated_reference_count_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE.replace(
+                "fn void track_command_reference() {\n"
+                "    ensure_command_reference_capacity();\n"
+                "    retain_tracked_command_reference();\n"
+                "    publish_command_reference();\n"
+                "}",
+                (
+                    "fn void track_command_reference() {\n"
+                    "    for (uint i = 0; i < scratch.reference_count; i++) {\n"
+                    "        inspect(scratch.references[i]);\n"
+                    "    }\n"
+                    "}"
+                ),
+            )
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "reference index hot path contains reference-count loop"
+                in error
+                for error in errors
+            ))
+
+    def test_rejects_accumulated_reference_slice_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE + """
+fn void preflight_command_references() {
+    foreach (&reference : scratch.references[:scratch.reference_count]) {
+        inspect(reference);
+    }
+}
+"""
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "reference index hot path contains reference-slice loop"
+                in error
+                for error in errors
+            ))
+
+    def test_rejects_accumulated_scan_in_reachable_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE.replace(
+                "    ensure_command_reference_capacity();",
+                "    scan_reference_helper();\n"
+                "    ensure_command_reference_capacity();",
+                1,
+            ) + """
+fn void scan_reference_helper() {
+    for (uint i = 0; i < scratch.reference_count; i++) inspect(i);
+}
+"""
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "reference index hot path contains reference-count loop"
+                in error
+                and error.endswith(":scan_reference_helper")
+                for error in errors
+            ))
+
+    def test_rejects_reference_publication_before_retain(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE.replace(
+                "    retain_tracked_command_reference();\n"
+                "    publish_command_reference();",
+                "    publish_command_reference();\n"
+                "    retain_tracked_command_reference();",
+                1,
+            )
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "reference index publication is not after retain"
+                in error
+                for error in errors
+            ))
+
+    def test_rejects_publication_hidden_in_pre_retain_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE.replace(
+                "    retain_tracked_command_reference();",
+                "    publish_early();\n"
+                "    retain_tracked_command_reference();",
+                1,
+            ) + "\nfn void publish_early() { publish_command_reference(); }\n"
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "reference index publication has unauthorized caller"
+                in error
+                and error.endswith(":publish_early")
+                for error in errors
+            ))
+
+    def test_rejects_hash_only_reference_equality(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE.replace(
+                "    return cell.owner == reference.owner\n"
+                "        && cell.index == reference.index\n"
+                "        && cell.generation == reference.generation;",
+                "    return cell.hash == reference.hash;",
+            )
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "reference index equality omits exact owner"
+                in error
+                for error in errors
+            ))
+
+    def test_rejects_unsafe_rollback_cell_deletion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = TABLE_SOURCE.replace(
+                "    reset_command_reference_index();\n"
+                "    for (uint i = 0; i < reference_count; i++) "
+                "publish_command_reference();",
+                "    reference_index.cells[index].epoch = 0;",
+            )
+            self.write_source(root, "gpu/internal/vk/device.c3", source)
+            errors = check_command_policy.check(root)
+            self.assertTrue(any(
+                "reference rollback must reset and rebuild"
+                in error
                 for error in errors
             ))
 

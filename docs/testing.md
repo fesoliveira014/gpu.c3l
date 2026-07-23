@@ -261,7 +261,11 @@ It covers the complete runtime matrix, exact table selection, zero tracking
 storage when disabled, exact retain/release behavior when enabled, early
 destruction, recording/executable/submitted/device-loss cleanup, callback and
 layer independence, teardown predicates, mandatory safety, and partial-create
-rollback. The source graph checker prevents policy branches and cross-policy
+rollback. Tracking-index coverage additionally pins exact owner/index/generation
+identity under forced collisions, publish-after-retain ordering, duplicate hits
+without another mutex/retain, suffix rollback rebuild, scratch epoch reuse and
+rollover, and expected linear probe work through the 4,096-reference ceiling.
+The source graph checker prevents policy branches and cross-policy
 calls from re-entering warm command paths:
 
 ```sh
@@ -358,7 +362,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
-| Command allocators | exact device/queue binding; default, ceiling, and overflow validation; transactional pool/buffer/host rollback; recyclable generations; begin/reference/generated capacity faults; non-waiting destroy in recording/executable/in-flight states; device-child accounting; exact-family pools; and tracking-off zero reference storage. |
+| Command allocators | exact device/queue binding; default, ceiling, and overflow validation; transactional pool/buffer/host rollback; recyclable generations; begin/reference/generated capacity faults; fixed per-scratch reference indices; epoch reuse; non-waiting destroy in recording/executable/in-flight states; device-child accounting; exact-family pools; and tracking-off zero reference/index storage. |
 | Commands | allocator-owned begin/end/submit, exact linear duplicate visits and epoch rollover, mixed-allocator same-queue retirement, timeline signal/wait, invalid state, completion-safe exact-allocator command-buffer reset/reuse, explicit generated-scratch capacity faults, explicit pipeline/raster/depth state, retired queue-based signatures, and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
@@ -487,11 +491,12 @@ binding and requires the recorded layout snapshot to remain unchanged. A
 compile-time exact member-shape guard rejects adding or substituting a hidden
 slot pointer or index/generation back-reference without an explicit gate update.
 
-The benchmark runner builds eleven executable targets with `-O1`:
+The benchmark runner builds twelve executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
 `upload_throughput_bench`, `command_wrapper_bench`,
-`command_path_baseline_bench`, `command_record_bench`, `lifecycle_bench`,
-`submit_batch_bench`, `pipeline_cache_bench`, and `async_overlap_bench`.
+`command_path_baseline_bench`, `command_reference_bench`,
+`command_record_bench`, `lifecycle_bench`, `submit_batch_bench`,
+`pipeline_cache_bench`, and `async_overlap_bench`.
 `command_wrapper_bench` routes through `test/cpu/project.json`; it links only
 the CPU project and libc, so it can run without a Vulkan loader, ICD, VMA, or
 native Vulkan library. `command_path_baseline_bench` routes through
@@ -504,6 +509,8 @@ c3c build command_wrapper_bench --path test/cpu -O1
 python3 scripts/build_shaders.py
 c3c build command_path_baseline_bench --path test -O1
 VK_DRIVER_FILES=/path/to/icd.json ./test/build/command_path_baseline_bench
+c3c build command_reference_bench --path test -O1
+./test/build/command_reference_bench
 ```
 
 The CPU target reports five alternating direct/public wrapper pairs with exact
@@ -517,6 +524,10 @@ structural gate permits only the exact command-list allocation/reset work and
 rejects unrelated allocation, creation, and registry-lock work. All elapsed
 times and ratios are advisory, while schema, work, and equivalence failures are
 blocking.
+The command-reference target uses fixed in-process buffer slots and command
+scratch, so it needs no ICD. It gates the exact structural work for unique,
+repeated, mixed, forced-collision, near-capacity, and maximum-capacity
+lifetime-reference indexing; only `ns/reference` is advisory.
 The submit-batch target submits real batches of 1, 8, 32, 128, and 1,024
 executable lists and requires exactly one duplicate-detection record visit per
 list with no rollover work. Its elapsed times are advisory. The pipeline-cache

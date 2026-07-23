@@ -69,6 +69,32 @@ struct CommandPolicyAtomicCounters @if(env::TESTING || $feature(VALIDATION_POLIC
     Atomic{ulong} reference_releases;
 }
 
+struct CommandReferenceWorkCounters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
+    ulong lookups;
+    ulong probes;
+    ulong equality_checks;
+    ulong index_publications;
+    ulong duplicate_hits;
+    ulong resource_mutex_acquisitions;
+    ulong retains;
+    ulong releases;
+    ulong rollback_rebuild_publications;
+    ulong rollover_cells_cleared;
+}
+
+struct CommandReferenceWorkAtomicCounters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
+    Atomic{ulong} lookups;
+    Atomic{ulong} probes;
+    Atomic{ulong} equality_checks;
+    Atomic{ulong} index_publications;
+    Atomic{ulong} duplicate_hits;
+    Atomic{ulong} resource_mutex_acquisitions;
+    Atomic{ulong} retains;
+    Atomic{ulong} releases;
+    Atomic{ulong} rollback_rebuild_publications;
+    Atomic{ulong} rollover_cells_cleared;
+}
+
 struct VkDeviceConfig {
     DeviceValidationPolicy    validation_policy;
     bool                      enable_debug_names;
@@ -197,6 +223,8 @@ struct VkDeviceState {
     Atomic{ulong}              generated_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_indexed_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     CommandPolicyAtomicCounters command_policy_counters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS));
+    CommandReferenceWorkAtomicCounters command_reference_work_counters
+        @if(env::TESTING || $feature(VALIDATION_POLICY_STATS));
     Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
     Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);
@@ -558,6 +586,111 @@ fn void note_command_reference_release(VkDeviceState* state) @private {
     $endif
 }
 
+fn void note_command_reference_lookup(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.lookups.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_probe(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.probes.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_equality_check(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.equality_checks.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_publication(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.index_publications.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_duplicate(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.duplicate_hits.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_mutex_acquisition(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.resource_mutex_acquisitions.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_retain(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.retains.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_work_release(VkDeviceState* state) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.releases.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_rollback_rebuild_publication(
+    VkDeviceState* state,
+) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.rollback_rebuild_publications.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_command_reference_rollover_clear(
+    VkDeviceState* state,
+    usz count,
+) @private {
+    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
+        if (state == null) return;
+        (void)state.command_reference_work_counters.rollover_cells_cleared.add(
+            count,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
 fn void reset_command_policy_counters(
     VkDeviceState* state,
 ) @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
@@ -585,6 +718,67 @@ fn CommandPolicyCounters command_policy_counters(
             AtomicOrdering.RELAXED,
         ),
         .reference_releases = state.command_policy_counters.reference_releases.load(
+            AtomicOrdering.RELAXED,
+        ),
+    };
+}
+
+fn void reset_command_reference_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
+    state.command_reference_work_counters.lookups.store(0, AtomicOrdering.RELAXED);
+    state.command_reference_work_counters.probes.store(0, AtomicOrdering.RELAXED);
+    state.command_reference_work_counters.equality_checks.store(0, AtomicOrdering.RELAXED);
+    state.command_reference_work_counters.index_publications.store(0, AtomicOrdering.RELAXED);
+    state.command_reference_work_counters.duplicate_hits.store(0, AtomicOrdering.RELAXED);
+    state.command_reference_work_counters.resource_mutex_acquisitions.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
+    state.command_reference_work_counters.retains.store(0, AtomicOrdering.RELAXED);
+    state.command_reference_work_counters.releases.store(0, AtomicOrdering.RELAXED);
+    state.command_reference_work_counters.rollback_rebuild_publications.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
+    state.command_reference_work_counters.rollover_cells_cleared.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
+}
+
+fn CommandReferenceWorkCounters command_reference_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
+    return {
+        .lookups = state.command_reference_work_counters.lookups.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .probes = state.command_reference_work_counters.probes.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .equality_checks = state.command_reference_work_counters.equality_checks.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .index_publications = state.command_reference_work_counters.index_publications.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .duplicate_hits = state.command_reference_work_counters.duplicate_hits.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .resource_mutex_acquisitions =
+            state.command_reference_work_counters
+                .resource_mutex_acquisitions.load(AtomicOrdering.RELAXED),
+        .retains = state.command_reference_work_counters.retains.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .releases = state.command_reference_work_counters.releases.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .rollback_rebuild_publications =
+            state.command_reference_work_counters
+                .rollback_rebuild_publications.load(AtomicOrdering.RELAXED),
+        .rollover_cells_cleared = state.command_reference_work_counters.rollover_cells_cleared.load(
             AtomicOrdering.RELAXED,
         ),
     };
