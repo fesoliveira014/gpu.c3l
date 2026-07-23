@@ -388,7 +388,7 @@ def validate_generated_backend_privacy(document: dict) -> list[str]:
             for entry in contents:
                 if not isinstance(entry, dict):
                     continue
-                if entry.get("visibility") == "private":
+                if entry.get("visibility") in ("private", "local"):
                     continue
                 identity = entry.get("uid") or (
                     f"{module_name}::{entry.get('name', '<anonymous>')}"

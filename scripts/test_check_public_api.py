@@ -1507,23 +1507,33 @@ method gpu::Runtime.is_valid
     def test_accepts_distinct_platform_handle_modules(self) -> None:
         self.assertEqual(check_public_api.validate_document(valid_document()), [])
 
-    def test_rejects_generated_public_backend_declaration(self) -> None:
+    def test_accepts_local_but_rejects_public_backend_declaration(self) -> None:
         document = valid_document()
         document["modules"]["gpu::internal::vk"] = {
-            "functions": [{
-                "name": "create_native_device",
-                "uid": "gpu::internal::vk::create_native_device",
-                "visibility": "public",
-            }],
+            "functions": [
+                {
+                    "name": "create_native_device",
+                    "uid": "gpu::internal::vk::create_native_device",
+                    "visibility": "public",
+                },
+                {
+                    "name": "sampler_filter_is_valid",
+                    "uid": "gpu::internal::vk::sampler_filter_is_valid",
+                    "visibility": "local",
+                },
+            ],
             "types": [{
                 "name": "PrivateState",
                 "uid": "gpu::internal::vk::PrivateState",
                 "visibility": "private",
             }],
         }
-        self.assertIn(
-            "generated gpu::internal::vk::create_native_device must remain private",
-            check_public_api.validate_document(document),
+        self.assertEqual(
+            check_public_api.validate_generated_backend_privacy(document),
+            [
+                "generated gpu::internal::vk::create_native_device "
+                "must remain private"
+            ],
         )
 
     def test_rejects_generated_public_nested_backend_declaration(self) -> None:
