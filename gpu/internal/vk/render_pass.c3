@@ -651,14 +651,6 @@ fn void? validate_viewport(
     ZString operation,
     gpu::Viewport* viewport,
 ) @private {
-    if (viewport == null) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport",
-            invariant: "viewport must not be null",
-        );
-    }
     if (!math::is_finite(viewport.x)) {
         return reject_dynamic_state(
             state:     state,
@@ -874,14 +866,6 @@ fn void? validate_scissor(
     ZString operation,
     gpu::ScissorRect* scissor,
 ) @private {
-    if (scissor == null) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "ScissorRect",
-            invariant: "scissor must not be null",
-        );
-    }
     if (scissor.x < 0 || scissor.y < 0
         || scissor.width < 0 || scissor.height < 0) {
         ZString field = scissor.x < 0
