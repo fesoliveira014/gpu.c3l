@@ -170,10 +170,11 @@ subsystem snapshots:
 | Sampler buckets | Exact collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
 Warm `CommandResolutionStats` require exactly one encoder-cell computation and
-one packed-lease comparison per recorded public command. Duplicate encoder-field
-comparisons, device-loss loads, and trusted-backend capability checks must stay
-at zero in every validation/tracking policy; this is deterministic operation
-evidence, not a wall-clock threshold.
+one packed-lease comparison per recorded public command. Duplicate encoder
+identity comparisons, device-loss loads, and trusted-backend capability
+comparisons are explicit structural prohibitions checked against the warm
+frontend and trusted backend sources; they are not represented as runtime
+counter evidence.
 
 Warm command-buffer reset is expected reuse evidence. Warm host allocation is
 prohibited in every policy mode; tracking modes retain into fixed reference

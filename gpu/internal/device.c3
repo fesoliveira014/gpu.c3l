@@ -390,9 +390,6 @@ Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING || $featu
 Atomic{ulong} command_policy_selections @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_encoder_cell_computations @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_encoder_lease_comparisons @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_encoder_field_comparisons @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_device_lost_loads @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_trusted_backend_capability_checks @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_recording_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_native_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 

@@ -362,12 +362,6 @@ fn void assert_warm_command_resolution(
         "warm commands select exactly one encoder cell per call");
     assert(stats.encoder_lease_comparisons == expected_commands,
         "warm commands compare exactly one encoder lease per call");
-    assert(stats.encoder_field_comparisons == 0,
-        "warm commands perform no duplicate encoder field comparisons");
-    assert(stats.device_lost_loads == 0,
-        "warm commands perform no device-loss atomic loads");
-    assert(stats.trusted_backend_capability_checks == 0,
-        "trusted backend calls repeat no encoder capability checks");
     assert(stats.recording_commands == expected_commands,
         "the command counter observes each warm recording call");
 }

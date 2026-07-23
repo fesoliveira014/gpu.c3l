@@ -148,6 +148,21 @@ class CommandPolicyCheckTests(unittest.TestCase):
                 check_command_policy.check(root),
             )
 
+    def test_reads_field_name_before_trailing_attribute(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            struct_source = STRUCT_SOURCE.replace(
+                "    CopyFn copy;\n",
+                "    CopyFn copy @deprecated;\n",
+            )
+            self.write_source(root, "gpu/internal/device.c3", struct_source)
+            self.write_source(
+                root,
+                "gpu/internal/vk/device.c3",
+                all_tables_source(),
+            )
+            self.assertEqual(check_command_policy.check(root), [])
+
     def test_rejects_missing_field(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

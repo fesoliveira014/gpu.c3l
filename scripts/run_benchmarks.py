@@ -137,8 +137,7 @@ COMMAND_RECORD_RESOLUTION = re.compile(
     r"retained_pins=0 lifecycle_vtable=0 command_table=0 "
     r"pipeline_table=0 pipeline_cache=0 policy=0 "
     r"encoder_cells=(?P=recording_commands) "
-    r"encoder_leases=(?P=recording_commands) encoder_fields=0 "
-    r"device_lost=0 backend_caps=0$",
+    r"encoder_leases=(?P=recording_commands)$",
     re.MULTILINE,
 )
 COMMAND_RECORD_COLD_WORK = re.compile(

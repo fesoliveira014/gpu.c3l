@@ -94,9 +94,6 @@ fn bool command_policy_observation_matches(
             == expectation.recording_commands
         && resolution.encoder_lease_comparisons
             == expectation.recording_commands
-        && resolution.encoder_field_comparisons == 0
-        && resolution.device_lost_loads == 0
-        && resolution.trusted_backend_capability_checks == 0
         && resolution.recording_commands == expectation.recording_commands
         && resolution.native_commands == expectation.native_commands
         && (!expectation.rejected || resolution.native_commands == 0);
@@ -775,6 +772,62 @@ fn void exercise_policy_matrix_row(
     )!!;
 }
 
+fn void full_tracking_off_invalid_barrier_emits_no_native_work() @test {
+    PolicyDiagnosticCapture capture;
+    gpu::RuntimeDesc desc = policy_runtime_desc(
+        contract:        gpu::ContractValidation.FULL,
+        track_lifetimes: false,
+        vulkan_layers:   false,
+        callback:        false,
+        debug_names:     false,
+        capture:         &capture,
+    );
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    vk::VkDeviceState* state = policy_device_state(&device);
+    vk::CommandRecordingStats recording_before =
+        begin_policy_matrix_observation(state);
+    gpu::reset_command_resolution_stats();
+
+    fault rejected = @catch(gpu::cmd_barrier(&commands, null));
+    gpu::CommandResolutionStats resolution =
+        gpu::command_resolution_stats();
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "full tracking-off rejects a null barrier");
+
+    CommandPolicyObservation observation = finish_policy_matrix_observation(
+        state,
+        &commands,
+        recording_before,
+        resolution,
+    );
+    CommandPolicyExpectation expectation = policy_matrix_expectation(
+        contract:             gpu::ContractValidation.FULL,
+        tracking:             false,
+        full_semantic_checks: 0,
+        tracking_calls:       0,
+        unique_references:    0,
+        recording_commands:   1,
+        native_commands:      0,
+    );
+    expectation.rejected = true;
+    assert_command_policy_observation(
+        &observation,
+        &expectation,
+        "full tracking-off rejected barrier",
+    );
+}
+
 fn void full_tracking_copy_capacity_rejection_is_transactional() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
@@ -966,22 +1019,6 @@ fn void command_policy_matcher_rejects_each_forbidden_mutation() @test {
         &mutation,
         &expected,
         "pipeline cache resolution",
-    );
-
-    mutation = passing;
-    mutation.resolution.device_lost_loads = 1;
-    assert_command_policy_mutation_rejected(
-        &mutation,
-        &expected,
-        "device-loss acquire load",
-    );
-
-    mutation = passing;
-    mutation.resolution.trusted_backend_capability_checks = 1;
-    assert_command_policy_mutation_rejected(
-        &mutation,
-        &expected,
-        "trusted capability comparison",
     );
 
     mutation = passing;

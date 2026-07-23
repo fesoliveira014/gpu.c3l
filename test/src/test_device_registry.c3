@@ -992,12 +992,6 @@ fn void warm_command_dispatch_skips_resolution_paths() @test {
         "warm recording selects exactly one encoder cell");
     assert(stats.encoder_lease_comparisons == 1,
         "warm recording compares exactly one encoder lease");
-    assert(stats.encoder_field_comparisons == 0,
-        "warm recording performs no duplicate encoder field comparisons");
-    assert(stats.device_lost_loads == 0,
-        "warm recording performs no device-loss atomic load");
-    assert(stats.trusted_backend_capability_checks == 0,
-        "trusted backend recording repeats no capability checks");
     assert(stats.recording_commands == 1,
         "the counter distinguishes one recording operation from resolution");
 

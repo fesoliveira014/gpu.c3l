@@ -24,6 +24,10 @@ TABLE_FIELD = re.compile(rf"\s*\.({IDENTIFIER})\s*=")
 DIRECT_TABLE_ENTRY = re.compile(
     rf"\s*\.({IDENTIFIER})\s*=\s*&({IDENTIFIER})\s*\Z",
 )
+COMMAND_OPS_FIELD = re.compile(
+    rf"\b({IDENTIFIER})\s*"
+    rf"(?:@{IDENTIFIER}(?:\s*\([^)]*\))?\s*)*\Z"
+)
 
 
 @dataclass(frozen=True)
@@ -149,10 +153,10 @@ def command_ops_fields(root: Path) -> tuple[str, ...]:
     end = matching_delimiter(source, start, "{", "}")
     fields = []
     for declaration in top_level_segments(source[start + 1:end], ";"):
-        identifiers = re.findall(IDENTIFIER, declaration)
-        if not identifiers:
+        field = COMMAND_OPS_FIELD.search(declaration)
+        if field is None:
             raise ValueError("CommandOps contains an unrecognized field declaration")
-        fields.append(identifiers[-1])
+        fields.append(field.group(1))
     if not fields:
         raise ValueError("CommandOps has no fields")
     return tuple(fields)
@@ -292,11 +296,11 @@ def check(root: Path = ROOT) -> list[str]:
 def main() -> int:
     errors = check()
     if errors:
-        print("command policy source contract failed:", file=sys.stderr)
+        print("command-table shape contract failed:", file=sys.stderr)
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print("command policy source contract checks passed")
+    print("command-table shape contract checks passed")
     return 0
 
 

@@ -324,6 +324,7 @@ fn void install_recording_host_allocator(
     state.recording_host_allocator = {
         .inner = state.host_allocator,
     };
+    // VkDeviceState stays address-stable while this interior pointer is installed.
     state.host_allocator = &state.recording_host_allocator;
 }
 
@@ -2506,7 +2507,7 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
     };
 }
 
-fn PreparedDispatchIndirect? validate_and_lower_dispatch_indirect(
+fn PreparedDispatchIndirect? checked_prepare_dispatch_indirect(
     gpu::internal::CommandEncoderState* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
@@ -2597,7 +2598,7 @@ fn void? checked_dispatch_indirect(
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
-    PreparedDispatchIndirect dispatch = validate_and_lower_dispatch_indirect(
+    PreparedDispatchIndirect dispatch = checked_prepare_dispatch_indirect(
         commands,
         root,
         args,
@@ -2610,7 +2611,7 @@ fn void? checked_tracking_dispatch_indirect(
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
-    PreparedDispatchIndirect dispatch = validate_and_lower_dispatch_indirect(
+    PreparedDispatchIndirect dispatch = checked_prepare_dispatch_indirect(
         commands,
         root,
         args,
@@ -2815,7 +2816,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
     return dispatch;
 }
 
-fn PreparedGeneratedDispatch? validate_and_lower_generated_dispatch(
+fn PreparedGeneratedDispatch? checked_prepare_generated_dispatch(
     gpu::internal::CommandEncoderState* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2954,7 +2955,7 @@ fn void? checked_dispatch_generated(
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
 ) {
-    PreparedGeneratedDispatch dispatch = validate_and_lower_generated_dispatch(
+    PreparedGeneratedDispatch dispatch = checked_prepare_generated_dispatch(
         commands:           commands,
         records:            records,
         count_span:         count_span,
@@ -2969,7 +2970,7 @@ fn void? checked_tracking_dispatch_generated(
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
 ) {
-    PreparedGeneratedDispatch dispatch = validate_and_lower_generated_dispatch(
+    PreparedGeneratedDispatch dispatch = checked_prepare_generated_dispatch(
         commands:           commands,
         records:            records,
         count_span:         count_span,

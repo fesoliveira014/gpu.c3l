@@ -241,11 +241,13 @@ is:
 | `FULL` | on | on | nonzero | nonzero |
 
 Additional tests cover all six contract/tracking combinations and both layer,
-callback, and debug-name values. `OBJECT_BOUNDARIES` must reject stale and
-foreign public identities without entering detailed command checking. `FULL`
-must return the same library fault and structured diagnostic with Vulkan layers
-off or on. Callback- or name-only trusted configurations must not request the
-Khronos layer or enable command checks/tracking.
+callback, and debug-name values. `OBJECT_BOUNDARIES` intentionally shares the
+trusted command tables, so those two matrix rows exercise the same recording
+behavior while public-boundary checks remain distinct. `OBJECT_BOUNDARIES` must
+reject stale and foreign public identities without entering detailed command
+checking. `FULL` must return the same library fault and structured diagnostic
+with Vulkan layers off or on. Callback- or name-only trusted configurations
+must not request the Khronos layer or enable command checks/tracking.
 
 Every mode must preserve the mandatory safety floor: null/slice/range and
 overflow protection needed before host access, command-state/internal-table
@@ -473,7 +475,9 @@ capability: a compute producer writes draw, indexed-draw, dispatch, and count
 records; all three generated commands then verify observable output and safe
 zero-root execution. The reservation query seam proves each maximum-count
 reservation performs one native requirements query and smaller generated
-recordings perform none. `vk_command` also injects a zero-byte preprocess
+recordings perform none. The six-mode policy matrix uses portable zero-count
+generated calls; nonzero emission magnitude remains the responsibility of this
+`vk_indirect` workload. `vk_command` also injects a zero-byte preprocess
 requirement and proves the command still consumes explicit reservation capacity.
 Command
 validation separately covers unsupported capability, count bounds, alignment,
