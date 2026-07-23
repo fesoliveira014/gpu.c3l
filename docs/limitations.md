@@ -104,6 +104,7 @@ exists (else the limit is compile-time).
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
 | Generated work items | Selected-device semantic limit reported by `DeviceCaps.max_generated_work_count`; zero when unsupported | — | — |
+| Dynamic viewport dimensions and coordinates | Selected-device `maxViewportDimensions` and `viewportBoundsRange`, consumed privately by checked command recording | — | `INVALID_ARGUMENT` |
 | Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/internal/device.c3`) | — | `SLOT_TABLE_FULL` |
 | Live command allocators per device | 256 (`MAX_COMMAND_ALLOCATORS` in `gpu/internal/vk/command.c3`) | destroy quiescent allocators to recycle generational slots | `SLOT_TABLE_FULL` |
 | Command buffers per allocator | 8 default, 4096 max (`DEFAULT_COMMAND_ALLOCATOR_CAPACITY`, `MAX_COMMAND_ALLOCATOR_CAPACITY` in `gpu/gpu.c3i`) | `CommandAllocatorDesc.command_buffer_capacity` | `INVALID_ARGUMENT` above the maximum; `DEVICE_BUSY` while all configured units are live |
@@ -180,6 +181,12 @@ Anything the device can answer at runtime lives in `DeviceCaps` (filled at
 `max_generated_work_count`), and semantic feature booleans such as
 `draw_indirect_count` and `generated_work`. Native implementation choices are
 not reported.
+
+Viewport dimensions and coordinate bounds are an intentional exception: the
+backend consumes them privately to validate `cmd_set_viewport`, while callers
+can submit a value and receive `INVALID_ARGUMENT` without preflighting a public
+cap. They can be promoted into `DeviceCaps` later if a caller-side layout
+query becomes necessary.
 
 Surface support is queried separately. `supports_presentation(adapter,
 surface)` preflights device creation; `get_present_mode_support(device,

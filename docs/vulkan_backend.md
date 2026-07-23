@@ -583,11 +583,16 @@ vk::Pipeline
 Dynamic rendering begins with fixed-count `vkCmdSetViewport` and
 `vkCmdSetScissor` calls covering the full pass, followed by the zero raster
 default. Under `FULL`, public overrides validate finite viewport values,
-nonnegative/positive extents as appropriate, representable scissor endpoints,
-depth endpoints in `[0, 1]`, and rectangles bounded by the active pass before
-using those same Vulkan 1.3 core commands. Trusted entries retain only the
-mandatory safe-lowering and state-machine floor. The command list carries the
-active pass extent only while `RECORDING_RENDER_PASS`.
+selected-device viewport dimensions and coordinate bounds, independently
+bounded depth endpoints, and representable scissor endpoints before using
+those same Vulkan 1.3 core commands. Negative viewport height, device-bounded
+negative coordinates, reversed depth, off-pass overscan, and empty scissors
+are accepted. Zero viewport height remains a deliberate non-degenerate library
+invariant. Trusted entries retain only the mandatory safe-lowering and
+state-machine floor. Accepted trusted and checked values share one exact native
+lowering path. The command list carries the active pass extent only while
+`RECORDING_RENDER_PASS`; that extent does not constrain viewport or scissor
+overrides.
 
 Topology, cull mode, front face, depth bias, viewport, scissor, and depth state
 are absent from `PipelineKey` and `PipelineSlot`. `PipelineKey` stores each
@@ -603,8 +608,7 @@ pass. Draw and dispatch only validate
 active state, push roots, and execute; they never create a native pipeline.
 Raster, viewport, and scissor survive pipeline switches, while pass begin
 resets them to zero/full-pass defaults and requires depth state again.
-Multi-viewport arrays, negative-height viewport flips, and off-pass overscan
-are outside the portable contract.
+Multi-viewport arrays are outside the portable contract.
 
 ### Pipeline cache
 

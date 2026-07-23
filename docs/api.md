@@ -1317,19 +1317,26 @@ gpu::Viewport viewport = {
 gpu::cmd_set_viewport(&commands, &viewport)!!;
 ```
 
-All three setters are valid only inside a render pass. Viewports require
-finite, nonnegative origins, positive extents, pass-local endpoints, and depth
-endpoints in `[0, 1]`; reversed depth ranges are valid. Scissors use signed
-inputs so negative origins/extents fault, while zero extent is a valid empty
-clip. Scissor endpoints must not overflow and both rectangles stay within the
-active pass. Invalid values return `INVALID_ARGUMENT` before changing dynamic
-state; calls outside a pass return `COMMAND_RECORDING_ERROR`.
+All three setters are valid only inside a render pass. Every viewport field
+and computed axis endpoint must be finite. Width is positive, height is
+nonzero, width and absolute height fit the selected device's
+`maxViewportDimensions`, and both endpoints of each axis fit its
+`viewportBoundsRange`. Height may be negative for a Y flip, coordinates may be
+negative within those bounds, and the rectangle may extend beyond the active
+render area. Both depth endpoints are independently in `[0, 1]`; reversed
+depth ranges are valid. Rejecting zero height is a deliberate non-degenerate
+library invariant, not a Vulkan 1.3 validity requirement.
+
+Scissors use signed inputs, so negative origins or extents fault. Each widened
+offset-plus-extent must fit `int::max` before native lowering. The rectangle
+may extend beyond the render area and zero extent is a valid empty clip.
+Invalid values return `INVALID_ARGUMENT` before changing dynamic state; calls
+outside a pass return `COMMAND_RECORDING_ERROR`.
 
 Explicit viewport/scissor/raster state survives graphics pipeline and
 cache-alias handle switches. The next render-pass begin restores the full-pass
 and zero-raster defaults.
-The current API intentionally exposes one rectangle only and does not support
-negative-height viewport flips or off-pass overscan.
+The current API intentionally exposes one viewport and one scissor only.
 
 Use `ClearColor.rgba` for normalized and floating-point attachments, and
 `ClearColor.uint_rgba` for unsigned-integer attachments. The inactive union

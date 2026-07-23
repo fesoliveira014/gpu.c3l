@@ -911,9 +911,12 @@ struct Vec3u {
     uint z;
 }
 
-<* One pass-bounded dynamic viewport. All fields must be finite; width and
-   height are positive, while both depth endpoints are in [0, 1]. Set
-   max_depth to 1.0f for the conventional full depth range. *>
+<* One render-pass dynamic viewport. All fields must be finite. Width is
+   positive; height is nonzero and may be negative for a Y flip. Coordinates,
+   dimensions, and endpoints must fit the selected device's viewport limits,
+   but the viewport may extend outside the render area. Both depth endpoints
+   are independently in [0, 1], in either order. Set max_depth to 1.0f for the
+   conventional full depth range. *>
 struct Viewport {
     float x;
     float y;
@@ -923,7 +926,10 @@ struct Viewport {
     float max_depth;
 }
 
-<* One pass-bounded dynamic scissor. Zero extent is a valid empty clip. *>
+<* One render-pass dynamic scissor. Fields are nonnegative and each offset
+   plus extent must fit a signed integer. The rectangle may extend outside the
+   render area; Vulkan clips it to the render target. Zero extent is a valid
+   empty clip. *>
 struct ScissorRect {
     int x;
     int y;
