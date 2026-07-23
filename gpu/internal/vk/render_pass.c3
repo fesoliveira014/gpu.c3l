@@ -178,13 +178,13 @@ fn PreparedRenderPass? lower_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
 ) {
-    if (commands == null || desc == null
+    if (desc == null
         || desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
         || (desc.colors.len > 0 && desc.colors.ptr == null)) {
         return gpu::INVALID_ARGUMENT~;
     }
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -594,9 +594,9 @@ fn void? trusted_set_viewport(
     gpu::internal::CommandEncoderState* commands,
     gpu::Viewport* viewport,
 ) {
-    if (commands == null || viewport == null) return gpu::INVALID_ARGUMENT~;
+    if (viewport == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     vk::Viewport vk_viewport = {
@@ -647,9 +647,9 @@ fn void? trusted_set_scissor(
     gpu::internal::CommandEncoderState* commands,
     gpu::ScissorRect* scissor,
 ) {
-    if (commands == null || scissor == null) return gpu::INVALID_ARGUMENT~;
+    if (scissor == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     vk::Rect2D vk_scissor = {
@@ -721,9 +721,9 @@ fn void? trusted_set_depth_state(
     gpu::internal::CommandEncoderState* commands,
     gpu::DepthState* depth,
 ) {
-    if (commands == null || depth == null) return gpu::INVALID_ARGUMENT~;
+    if (depth == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     vk::cmd_set_depth_test_enable(
@@ -780,9 +780,9 @@ fn void? trusted_set_raster_state(
     gpu::internal::CommandEncoderState* commands,
     gpu::DynamicRasterState* raster,
 ) {
-    if (commands == null || raster == null) return gpu::INVALID_ARGUMENT~;
+    if (raster == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     emit_raster_state(record, raster);
@@ -873,9 +873,8 @@ fn void? trusted_draw(
     uint vertex_count,
     uint instance_count,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     BoundPipeline pipeline = graphics_pipeline_snapshot(record)!;
@@ -929,9 +928,8 @@ fn PreparedIndexedDraw? lower_indexed_draw(
     uint instance_count,
     gpu::IndexType index_type,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -1130,9 +1128,8 @@ fn PreparedIndirectDraw? lower_indirect_draw(
     gpu::GpuSpan args,
     uint draw_count,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -1317,9 +1314,8 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -1560,9 +1556,8 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -1853,9 +1848,8 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     gpu::GpuSpan count_span,
     uint max_draw_count,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -2058,9 +2052,8 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
 ) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (record.state != CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);

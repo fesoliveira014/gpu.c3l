@@ -1082,6 +1082,9 @@ owning device and handle. The token layout, including that pointer, is part of
 the public ABI. Begin publishes the encoder only after backend and retained-pin
 setup succeeds; end transfers the same encoder to the executable token. A failed
 end, discard, or submit leaves the token and encoder phase retryable.
+Each warm recording call selects one bounded encoder cell and compares one
+packed lease for the device and command identity. Device loss is reported at
+end, submit, and other lifecycle boundaries rather than by every `cmd_*` call.
 
 `discard_commands` consumes unfinished recording. Use
 `discard_executable_commands` for an ended token that will not be submitted.
@@ -1185,7 +1188,10 @@ Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
 `CommandResolutionStats`, `reset_command_resolution_stats`, and
 `command_resolution_stats`. The process-wide relaxed counters measure
 live-encoder entry-point attempts, every emitted Vulkan command, and forbidden
-resolution paths. Reset and compare them only across an externally synchronized
+resolution paths. The encoder counters additionally require one cell
+computation and one lease comparison per warm call, with zero duplicate field
+comparisons, device-loss loads, or trusted-backend capability checks. Reset and
+compare them only across an externally synchronized
 recording interval; they are absent from ordinary production builds.
 
 ### Render pass

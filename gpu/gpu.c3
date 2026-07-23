@@ -328,6 +328,11 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
     gpu::internal::command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_policy_selections.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_encoder_cell_computations.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_encoder_lease_comparisons.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_encoder_field_comparisons.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_device_lost_loads.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_trusted_backend_capability_checks.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_recording_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_native_commands.store(0, AtomicOrdering.RELAXED);
 }
@@ -356,6 +361,21 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
             AtomicOrdering.RELAXED,
         ),
         .command_policy_selections = gpu::internal::command_policy_selections.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .encoder_cell_computations = gpu::internal::command_encoder_cell_computations.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .encoder_lease_comparisons = gpu::internal::command_encoder_lease_comparisons.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .encoder_field_comparisons = gpu::internal::command_encoder_field_comparisons.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .device_lost_loads = gpu::internal::command_device_lost_loads.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .trusted_backend_capability_checks = gpu::internal::command_trusted_backend_capability_checks.load(
             AtomicOrdering.RELAXED,
         ),
         .recording_commands = gpu::internal::command_recording_commands.load(
@@ -1183,7 +1203,7 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
 fn void? discard_commands(CommandList* commands) {
     gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(
         commands,
-        allow_lost: true,
+        count_command: false,
     )!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         commands,
@@ -1209,10 +1229,8 @@ fn void? discard_commands(CommandList* commands) {
 
 <* Consume an executable token without submitting it. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::executable_encoder(
-        commands,
-        allow_lost: true,
-    )!;
+    gpu::internal::CommandEncoderState* encoder =
+        gpu::internal::executable_encoder(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::executable_command_operation(
         commands,
         allow_lost: true,

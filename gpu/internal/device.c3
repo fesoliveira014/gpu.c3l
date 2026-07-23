@@ -6,6 +6,8 @@ import std::atomic::types;
 import std::thread;
 import std::core::mem;
 
+typedef CommandLease = uint128;
+
 // Backend dispatch functions. Lifecycle entries take validated public tokens;
 // recording entries take the encoder resolved at begin.
 alias CheckDeviceDestroyFn @private  = fn void? (void*);
@@ -232,12 +234,10 @@ struct CommandBackendContext @private {
 }
 
 struct CommandEncoderState @private {
-    Device              device;
-    CommandListHandle   handle;
+    CommandLease        lease;
     CommandOps*         ops;
     void*               backend_state;
     void*               backend_command;
-    Atomic{bool}*       device_lost;
     CommandEncoderPhase phase;
 }
 $assert CommandEncoderState::size <= ulong::size * 8;
@@ -388,6 +388,11 @@ Atomic{ulong} command_table_lookups @private @if(env::TESTING || $feature(COMMAN
 Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_policy_selections @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_encoder_cell_computations @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_encoder_lease_comparisons @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_encoder_field_comparisons @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_device_lost_loads @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_trusted_backend_capability_checks @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_recording_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_native_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 
@@ -445,6 +450,18 @@ fn void note_command_pipeline_cache_lookup() @private {
 fn void note_command_policy_selection() @private {
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         (void)command_policy_selections.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_encoder_cell_computation() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_encoder_cell_computations.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_encoder_lease_comparison() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_encoder_lease_comparisons.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 

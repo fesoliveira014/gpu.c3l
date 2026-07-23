@@ -358,8 +358,6 @@ fn uint report_resource_leaks(VkDeviceState* state) {
 }
 
 fn void? vk_cmd_begin_label(gpu::internal::CommandEncoderState* commands, ZString label, float[4] color) @private {
-    if (commands == null || commands.backend_state == null
-        || commands.backend_command == null) return gpu::COMMAND_RECORDING_ERROR~;
     if (label == null) return gpu::INVALID_ARGUMENT~;
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
@@ -374,8 +372,6 @@ fn void? vk_cmd_begin_label(gpu::internal::CommandEncoderState* commands, ZStrin
 }
 
 fn void? vk_cmd_end_label(gpu::internal::CommandEncoderState* commands) @private {
-    if (commands == null || commands.backend_state == null
-        || commands.backend_command == null) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = encoder_device_state(commands);
     CommandRecord* record = encoder_command(commands);
     if (record.state != CommandState.RECORDING

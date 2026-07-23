@@ -796,9 +796,9 @@ fn void? trusted_barrier(
     gpu::internal::CommandEncoderState* commands,
     gpu::Barrier* barrier,
 ) {
-    if (commands == null || barrier == null) return gpu::INVALID_ARGUMENT~;
+    if (barrier == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
@@ -828,9 +828,9 @@ fn LoweredTextureBarrier? lower_texture_barrier_trusted(
     gpu::internal::CommandEncoderState* commands,
     gpu::TextureBarrier* barrier,
 ) {
-    if (commands == null || barrier == null) return gpu::INVALID_ARGUMENT~;
+    if (barrier == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    if (record.state != CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = encoder_device_state(commands);
