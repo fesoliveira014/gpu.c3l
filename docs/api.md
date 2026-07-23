@@ -759,9 +759,14 @@ return the same `SamplerIndex`; `debug_name` is not part of identity. LOD values
 be finite, the absolute `mip_lod_bias` must not exceed
 `DeviceCaps.max_sampler_lod_bias`, and `min_lod` must not exceed `max_lod`.
 Undefined filter, address, or enabled comparison enum values fault
-`INVALID_ARGUMENT`. Anisotropy requires the reported device capability. Sampler
-indices and their native objects live until device destruction and have no
-individual destroy operation. Repeated interning is idempotent.
+`INVALID_ARGUMENT`. Enabled anisotropy requires a finite `max_anisotropy` in the
+inclusive range `[1, DeviceCaps.max_sampler_anisotropy]`. A value above
+`DeviceCaps.max_sampler_anisotropy` faults `INVALID_ARGUMENT` and is not implicitly
+clamped. A valid anisotropy request on a device that reports zero
+support faults `UNSUPPORTED_FEATURE`. When anisotropy or comparison is disabled,
+its associated value is ignored and canonicalized to zero; signed zero also has
+one identity. Sampler indices and their native objects live until device
+destruction and have no individual destroy operation. Repeated interning is idempotent.
 `DESCRIPTOR_HEAP_FULL` consumes no table or heap entry; a device without strict
 capability returns `UNSUPPORTED_FEATURE` before backend mutation.
 
@@ -779,6 +784,18 @@ gpu::TextureDesc texture_desc = {
     .access = { .graphics },
 };
 gpu::SamplerIndex index = gpu::intern_sampler(device, &sampler_desc)!!;
+```
+
+Earlier releases implicitly clamped an enabled `max_anisotropy` to the device
+limit. Query `DeviceCaps` and clamp explicitly when that behavior is desired:
+
+```c3
+gpu::DeviceCaps caps = gpu::get_device_caps(device)!!;
+float requested_anisotropy = 16.0f;
+sampler_desc.anisotropy_enable = caps.max_sampler_anisotropy > 0.0f;
+sampler_desc.max_anisotropy = requested_anisotropy > caps.max_sampler_anisotropy
+    ? caps.max_sampler_anisotropy
+    : requested_anisotropy;
 ```
 
 No placeholder texture-shape or view-format fields are required.

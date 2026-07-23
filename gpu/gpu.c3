@@ -787,12 +787,15 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
 }
 
 <* Intern and publish an immutable device-lifetime sampler index. Identical
-   semantic descriptions return the same value; debug_name is not semantic. *>
+   semantic descriptions return the same value; debug_name is not semantic.
+   Active anisotropy must be within the exact range reported by DeviceCaps;
+   values above the maximum are rejected rather than clamped. *>
 fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
+    gpu::internal::validate_sampler_desc(&operation, desc)!;
     return operation.vtable.intern_sampler(device, desc);
 }
 

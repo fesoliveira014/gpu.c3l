@@ -473,8 +473,12 @@ or shader material records.
 Every strict-enabled device has an append-only sampler table keyed by normalized
 semantic state. Explicitly zero-initialized canonical keys are byte-hashed into
 fixed power-of-two buckets with `+1`-encoded links; candidates with an equal hash
-are compared by complete canonical equality. Interning occurs under the resource
-mutex, creates at most one native sampler for an equal key, and publishes its
+are compared by complete canonical equality. Before backend dispatch, the public
+frontend validates that enabled anisotropy is finite and within the inclusive
+reported range; an over-limit request is rejected rather than clamped. The
+accepted value is copied exactly through the canonical key into
+`VkSamplerCreateInfo.maxAnisotropy`. Under the resource mutex, interning creates
+at most one native sampler for an equal key and publishes its
 descriptor, stable index, cell, and bucket link in the same transaction. A
 capacity or native-create fault changes neither the table, index, nor descriptor
 high-water state. Device teardown destroys each published native sampler and

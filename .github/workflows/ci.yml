@@ -89,11 +89,12 @@ jobs:
           c3c test unit --path tools/gen_shader_abi
           python3 -B -m unittest scripts.test_gen_abi
 
-      - name: Benchmark, command, and shader policy contract tests
+      - name: Benchmark, command, shader, and sampler policy contract tests
         run: |
-          python3 -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy scripts.test_check_shader_reflection_policy
+          python3 -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy scripts.test_check_shader_reflection_policy scripts.test_check_sampler_policy
           python3 -B scripts/check_command_policy.py
           python3 -B scripts/check_shader_reflection_policy.py
+          python3 -B scripts/check_sampler_policy.py
 
       - name: ABI drift gate
         run: python3 scripts/gen_abi.py --check
@@ -305,11 +306,12 @@ jobs:
           c3c test unit --path tools/gen_shader_abi
           python -B -m unittest scripts.test_gen_abi
 
-      - name: Benchmark, command, and shader policy contract tests
+      - name: Benchmark, command, shader, and sampler policy contract tests
         run: |
-          python -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy scripts.test_check_shader_reflection_policy
+          python -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy scripts.test_check_shader_reflection_policy scripts.test_check_sampler_policy
           python -B scripts/check_command_policy.py
           python -B scripts/check_shader_reflection_policy.py
+          python -B scripts/check_sampler_policy.py
 
       - name: ABI drift gate
         run: C3C="$(cygpath -w "$(command -v c3c)")" python scripts/gen_abi.py --check

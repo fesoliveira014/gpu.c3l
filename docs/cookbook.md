@@ -255,7 +255,25 @@ recording returns `GENERATED_SCRATCH_EXHAUSTED`.
 Release the pipeline/kind reservation, then destroy the allocator after its last
 completion. Running example: `gpu_driven_draw_sdl`.
 
-## 9. Shadow mapping with compare samplers
+## 9. Requesting portable anisotropy
+
+Query the selected device and clamp explicitly. `intern_sampler` rejects values
+above the reported maximum instead of silently changing the request.
+
+```c3
+gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+float preferred = 16.0f;
+gpu::SamplerDesc sampler_desc = {
+    ...,
+    .anisotropy_enable = caps.max_sampler_anisotropy > 0.0f,
+    .max_anisotropy = preferred > caps.max_sampler_anisotropy
+        ? caps.max_sampler_anisotropy
+        : preferred,
+};
+gpu::SamplerIndex sampler_index = gpu::intern_sampler(&device, &sampler_desc)!!;
+```
+
+## 10. Shadow mapping with compare samplers
 
 Goal: depth-only pass, then hardware PCF.
 
@@ -290,7 +308,7 @@ float lit = sample_shadow_2d(root.shadow_map, root.shadow_sampler,
 
 Running example: `shadow_mapping` (3×3 PCF).
 
-## 10. Multiple render targets
+## 11. Multiple render targets
 
 Goal: G-buffer in one pass.
 
@@ -323,7 +341,7 @@ point finishes, destroy every attachment view before destroying its texture.
 Running example: `deferred_shading` (plus the linear→display lessons:
 Reinhard + gamma encode when the swapchain is UNORM).
 
-## 11. Persist the pipeline cache
+## 12. Persist the pipeline cache
 
 Goal: skip shader compiles on the next run.
 
@@ -343,7 +361,7 @@ Blob usefulness is driver-dependent (lavapipe: header only); identical
 descriptors on one device always dedup in-library regardless.
 Running example: `pipeline_cache_timing`.
 
-## 12. Query swapchain runtime state
+## 13. Query swapchain runtime state
 
 Goal: build against the selected format and transition acquired images from
 their reported prior state.
@@ -401,7 +419,7 @@ has empty stages/access; Vulkan lowering keeps the fixed
 color-attachment-output/no-access presentation scope.
 Running example: `present_mode_explorer`.
 
-## 13. Choose a memory class
+## 14. Choose a memory class
 
 | Class | For | Pattern |
 |---|---|---|
@@ -411,7 +429,7 @@ Running example: `present_mode_explorer`.
 
 See `docs/memory.md` for lifetime and visibility rules.
 
-## 14. Allocate generic GPU data
+## 15. Allocate generic GPU data
 
 Goal: own an addressable range without exposing backend memory objects.
 
@@ -446,7 +464,7 @@ global barrier with `before.transfer` and `after.host`, wait or poll
 completion, invalidate the `CPU_READ` span, then read its mapping. Running
 example: `memory_report`.
 
-## 15. Retire transient data by completion
+## 16. Retire transient data by completion
 
 Goal: keep caller-owned root data valid until the GPU has finished using it.
 

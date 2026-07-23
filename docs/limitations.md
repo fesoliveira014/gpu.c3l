@@ -158,6 +158,7 @@ Two sizing rules that bite:
 
 | Symptom | Cause | Workaround | Notes |
 |---|---|---|---|
+| `intern_sampler` faults `INVALID_ARGUMENT` for enabled anisotropy | requested `max_anisotropy` is outside the inclusive range `[1, DeviceCaps.max_sampler_anisotropy]` | query the cap and clamp explicitly before interning | over-limit values are never implicitly clamped |
 | Segfault on any image/sampler access, lavapipe + descriptor-buffer heap | Mesa 25.0.7 lavapipe descriptor-buffer bug | no caller action; automatic selection uses descriptor indexing when it satisfies the request | retest on Mesa upgrade |
 | `UNSUPPORTED_FEATURE` at runtime create with Vulkan validation on | `vulkan-validationlayers` not installed | install it, or leave `enable_vulkan_validation = false`; `ContractValidation.FULL` still works without layers | — |
 | Windows: driver not found in elevated shells despite `VK_DRIVER_FILES` | elevated processes ignore loader env vars | register the ICD under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` (CI does this for mesa-dist-win) | elevated shells only |

@@ -976,6 +976,10 @@ def valid_document() -> dict:
                                 "name": "max_sampler_lod_bias",
                                 "type": {"name": "float"},
                             },
+                            {
+                                "name": "max_sampler_anisotropy",
+                                "type": {"name": "float"},
+                            },
                         ],
                     },
                     {
@@ -3134,7 +3138,7 @@ method gpu::Runtime.is_valid
             check_public_api.validate_document(document),
         )
 
-    def test_requires_sampler_lod_bias_capability(self) -> None:
+    def test_requires_sampler_capabilities(self) -> None:
         document = valid_document()
         caps = next(
             entry for entry in document["modules"]["gpu"]["types"]
@@ -3143,6 +3147,10 @@ method gpu::Runtime.is_valid
         caps["members"].clear()
         self.assertIn(
             "DeviceCaps.max_sampler_lod_bias must be a float",
+            check_public_api.validate_document(document),
+        )
+        self.assertIn(
+            "DeviceCaps.max_sampler_anisotropy must be a float",
             check_public_api.validate_document(document),
         )
 

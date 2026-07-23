@@ -687,6 +687,11 @@ dispatch, and pipeline state remain private. An unrequested group owns none of
 that state; current public request validation requires strict semantics.
 
 The backend keeps one append-only sampler table per strict-enabled device.
+The public frontend validates sampler semantics before backend dispatch. Enabled
+anisotropy is accepted only in the inclusive range `[1,
+DeviceCaps.max_sampler_anisotropy]`; accepted values are preserved exactly in
+the canonical key, while inactive anisotropy and comparison values normalize to
+zero. Invalid requests cannot reach lookup, native creation, or publication.
 Canonical sampler keys are byte-hashed into fixed power-of-two buckets; a hash
 match still requires complete canonical equality. Interning holds the resource
 mutex and publishes the native sampler, descriptor, stable index, cell, and

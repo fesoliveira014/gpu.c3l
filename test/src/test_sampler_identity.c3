@@ -118,6 +118,102 @@ fn void sampler_interning_pins_public_contract() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
+fn void sampler_anisotropy_contract_is_exact_and_transactional() @test {
+    Runtime runtime = sampler_test_runtime();
+    Device device = sampler_test_device(&runtime);
+    DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    assert(caps.max_sampler_anisotropy == 16.0f,
+        "the strict stub exposes its exact anisotropy capability");
+
+    SamplerDesc exact = sampler_test_desc();
+    exact.anisotropy_enable = true;
+    exact.max_anisotropy = caps.max_sampler_anisotropy;
+    SamplerIndex exact_index = gpu::intern_sampler(&device, &exact)!!;
+    uint attempts_after_exact =
+        gpu::internal::vk::stub_sampler_intern_attempt_count(&device);
+    uint creates_after_exact =
+        gpu::internal::vk::stub_sampler_native_create_count(&device);
+
+    float preferred = 64.0f;
+    SamplerDesc explicitly_clamped = exact;
+    explicitly_clamped.max_anisotropy = preferred > caps.max_sampler_anisotropy
+        ? caps.max_sampler_anisotropy
+        : preferred;
+    assert(gpu::intern_sampler(&device, &explicitly_clamped)!! == exact_index,
+        "caller-clamped anisotropy aliases the exact device maximum");
+    assert(gpu::internal::vk::stub_sampler_native_create_count(&device)
+            == creates_after_exact,
+        "an explicitly clamped alias creates no second native sampler");
+
+    SamplerDesc accepted = exact;
+    accepted.max_anisotropy = 8.0f;
+    SamplerIndex accepted_index = gpu::intern_sampler(&device, &accepted)!!;
+    assert(accepted_index != exact_index,
+        "distinct accepted anisotropy values keep distinct identities");
+
+    SamplerDesc inactive = sampler_test_desc();
+    inactive.max_anisotropy = float::nan;
+    *(int*)&inactive.compare = int::max;
+    SamplerIndex inactive_index = gpu::intern_sampler(&device, &inactive)!!;
+    SamplerDesc inactive_alias = inactive;
+    inactive_alias.max_anisotropy = float::inf;
+    inactive_alias.compare = CompareOp.ALWAYS;
+    assert(gpu::intern_sampler(&device, &inactive_alias)!! == inactive_index,
+        "inactive anisotropy and comparison values are ignored by the public operation");
+
+    uint attempts_before_invalid =
+        gpu::internal::vk::stub_sampler_intern_attempt_count(&device);
+    uint creates_before_invalid =
+        gpu::internal::vk::stub_sampler_native_create_count(&device);
+
+    float[3] below_minimum = { 0.0f, -1.0f, 0.5f };
+    foreach (value : below_minimum) {
+        SamplerDesc invalid = exact;
+        invalid.max_anisotropy = value;
+        assert(@catch(gpu::intern_sampler(&device, &invalid))
+                == gpu::INVALID_ARGUMENT,
+            "active anisotropy below one faults INVALID_ARGUMENT");
+    }
+    float[3] non_finite = { float::nan, float::inf, -float::inf };
+    foreach (value : non_finite) {
+        SamplerDesc invalid = exact;
+        invalid.max_anisotropy = value;
+        assert(@catch(gpu::intern_sampler(&device, &invalid))
+                == gpu::INVALID_ARGUMENT,
+            "active non-finite anisotropy faults INVALID_ARGUMENT");
+    }
+    SamplerDesc over_limit = exact;
+    over_limit.max_anisotropy = caps.max_sampler_anisotropy + 1.0f;
+    assert(@catch(gpu::intern_sampler(&device, &over_limit))
+            == gpu::INVALID_ARGUMENT,
+        "active anisotropy above the device maximum is rejected");
+    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device)
+            == attempts_before_invalid
+        && gpu::internal::vk::stub_sampler_native_create_count(&device)
+            == creates_before_invalid,
+        "invalid anisotropy stops before backend lookup or native creation");
+    assert(gpu::intern_sampler(&device, &exact)!! == exact_index,
+        "an existing exact identity remains retrievable after rejection");
+    assert(attempts_after_exact == 1,
+        "the first accepted anisotropy request reaches the backend once");
+
+    gpu::destroy_device(&device)!!;
+    gpu::destroy_runtime(&runtime)!!;
+
+    Device unsupported =
+        gpu::internal::vk::stub_create_anisotropy_disabled_device()!!;
+    SamplerDesc unsupported_desc = sampler_test_desc();
+    unsupported_desc.anisotropy_enable = true;
+    unsupported_desc.max_anisotropy = 1.0f;
+    assert(@catch(gpu::intern_sampler(&unsupported, &unsupported_desc))
+            == gpu::UNSUPPORTED_FEATURE,
+        "a valid anisotropy request faults when the device lacks support");
+    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&unsupported)
+            == 0,
+        "unsupported anisotropy stops before backend dispatch");
+    gpu::destroy_device(&unsupported)!!;
+}
+
 fn void concurrent_identical_sampler_interning_is_deduplicated() @test {
     Runtime runtime = sampler_test_runtime();
     Device device = sampler_test_device(&runtime);
@@ -162,18 +258,18 @@ fn void concurrent_identical_sampler_interning_is_deduplicated() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void sampler_keys_normalize_inactive_and_effective_fields() @test {
+fn void sampler_keys_normalize_inactive_and_accepted_fields() @test {
     SamplerDesc base = sampler_test_desc();
-    base.max_anisotropy = 99.0f;
-    base.compare = CompareOp.GREATER;
+    base.max_anisotropy = float::nan;
+    *(int*)&base.compare = int::max;
     SamplerDesc inactive = base;
-    inactive.max_anisotropy = 1.0f;
+    inactive.max_anisotropy = float::inf;
     inactive.compare = CompareOp.ALWAYS;
     inactive.mip_lod_bias = -0.0f;
-    gpu::internal::vk::SamplerKey base_key = gpu::internal::vk::canonical_sampler_key(&base, 8.0f);
+    gpu::internal::vk::SamplerKey base_key =
+        gpu::internal::vk::canonical_sampler_key(&base);
     gpu::internal::vk::SamplerKey inactive_key = gpu::internal::vk::canonical_sampler_key(
         &inactive,
-        8.0f,
     );
     assert(gpu::internal::vk::sampler_key_equal(&base_key, &inactive_key),
         "disabled anisotropy, compare, and signed zero normalize");
@@ -183,25 +279,28 @@ fn void sampler_keys_normalize_inactive_and_effective_fields() @test {
     assert(base_key.anisotropy_enable == 0 && base_key.compare_enable == 0,
         "disabled sampler flags use canonical zero words");
 
-    SamplerDesc clamped_a = base;
-    clamped_a.anisotropy_enable = true;
-    clamped_a.max_anisotropy = 16.0f;
-    SamplerDesc clamped_b = clamped_a;
-    clamped_b.max_anisotropy = 32.0f;
-    gpu::internal::vk::SamplerKey clamped_a_key = gpu::internal::vk::canonical_sampler_key(
-        &clamped_a,
-        8.0f,
-    );
-    gpu::internal::vk::SamplerKey clamped_b_key = gpu::internal::vk::canonical_sampler_key(
-        &clamped_b,
-        8.0f,
-    );
-    assert(gpu::internal::vk::sampler_key_equal(&clamped_a_key, &clamped_b_key),
-        "requests with the same effective anisotropy share a key");
-    assert(gpu::internal::vk::hash_sampler_key(&clamped_a_key)
-            == gpu::internal::vk::hash_sampler_key(&clamped_b_key),
-        "clamped anisotropy aliases have identical byte hashes");
-    assert(clamped_a_key.anisotropy_enable == 1,
+    SamplerDesc accepted_a = sampler_test_desc();
+    accepted_a.anisotropy_enable = true;
+    accepted_a.max_anisotropy = 4.0f;
+    SamplerDesc accepted_b = accepted_a;
+    accepted_b.max_anisotropy = 8.0f;
+    gpu::internal::vk::SamplerKey accepted_a_key =
+        gpu::internal::vk::canonical_sampler_key(
+            &accepted_a,
+        );
+    gpu::internal::vk::SamplerKey accepted_b_key =
+        gpu::internal::vk::canonical_sampler_key(
+            &accepted_b,
+        );
+    assert(!gpu::internal::vk::sampler_key_equal(
+            &accepted_a_key,
+            &accepted_b_key,
+        ),
+        "distinct accepted anisotropy values keep distinct keys");
+    assert(accepted_a_key.max_anisotropy == 4.0f
+            && accepted_b_key.max_anisotropy == 8.0f,
+        "canonical keys preserve accepted anisotropy exactly");
+    assert(accepted_a_key.anisotropy_enable == 1,
         "enabled sampler flags use canonical one words");
 }
 

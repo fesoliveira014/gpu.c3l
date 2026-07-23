@@ -62,61 +62,7 @@ fn ulong hash_sampler_key(SamplerKey* key) {
     return fnv64a::hash(((char*)key)[:SamplerKey::size]);
 }
 
-fn bool sampler_filter_is_valid(gpu::Filter filter) {
-    return filter == gpu::Filter.NEAREST || filter == gpu::Filter.LINEAR;
-}
-
-fn bool sampler_address_mode_is_valid(gpu::AddressMode mode) {
-    switch (mode) {
-        case gpu::AddressMode.REPEAT:
-        case gpu::AddressMode.MIRRORED_REPEAT:
-        case gpu::AddressMode.CLAMP_TO_EDGE:
-        case gpu::AddressMode.CLAMP_TO_BORDER:
-            return true;
-        default:
-            return false;
-    }
-}
-
-fn bool sampler_compare_op_is_valid(gpu::CompareOp op) {
-    switch (op) {
-        case gpu::CompareOp.NEVER:
-        case gpu::CompareOp.LESS:
-        case gpu::CompareOp.EQUAL:
-        case gpu::CompareOp.LESS_EQUAL:
-        case gpu::CompareOp.GREATER:
-        case gpu::CompareOp.NOT_EQUAL:
-        case gpu::CompareOp.GREATER_EQUAL:
-        case gpu::CompareOp.ALWAYS:
-            return true;
-        default:
-            return false;
-    }
-}
-
-fn ZString sampler_desc_invalid_enum_field(gpu::SamplerDesc* desc) {
-    if (!sampler_filter_is_valid(desc.min_filter)) return "SamplerDesc.min_filter";
-    if (!sampler_filter_is_valid(desc.mag_filter)) return "SamplerDesc.mag_filter";
-    if (!sampler_filter_is_valid(desc.mip_filter)) return "SamplerDesc.mip_filter";
-    if (!sampler_address_mode_is_valid(desc.address_u)) return "SamplerDesc.address_u";
-    if (!sampler_address_mode_is_valid(desc.address_v)) return "SamplerDesc.address_v";
-    if (!sampler_address_mode_is_valid(desc.address_w)) return "SamplerDesc.address_w";
-    if (desc.compare_enable && !sampler_compare_op_is_valid(desc.compare)) {
-        return "SamplerDesc.compare";
-    }
-    return null;
-}
-
-fn SamplerKey canonical_sampler_key(
-    gpu::SamplerDesc* desc,
-    float device_max_anisotropy,
-) {
-    float max_anisotropy;
-    if (desc.anisotropy_enable) {
-        max_anisotropy = desc.max_anisotropy > device_max_anisotropy
-            ? device_max_anisotropy
-            : desc.max_anisotropy;
-    }
+fn SamplerKey canonical_sampler_key(gpu::SamplerDesc* desc) {
     return {
         .min_filter        = desc.min_filter,
         .mag_filter        = desc.mag_filter,
@@ -128,7 +74,9 @@ fn SamplerKey canonical_sampler_key(
         .min_lod           = canonical_sampler_float(desc.min_lod),
         .max_lod           = canonical_sampler_float(desc.max_lod),
         .anisotropy_enable = desc.anisotropy_enable ? 1 : 0,
-        .max_anisotropy    = canonical_sampler_float(max_anisotropy),
+        .max_anisotropy    = desc.anisotropy_enable
+            ? canonical_sampler_float(desc.max_anisotropy)
+            : 0.0f,
         .compare_enable    = desc.compare_enable ? 1 : 0,
         .compare           = desc.compare_enable ? desc.compare : {},
     };

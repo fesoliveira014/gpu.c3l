@@ -292,7 +292,10 @@ Destroying the ownership token immediately releases the index for reuse. No live
 On a device with the strict capability, `intern_sampler` validates and interns a
 semantic sampler description directly into the sampler heap. Identical semantic
 descriptions return the same stable fixed-width `SamplerIndex`; debug names do
-not participate in identity. The index, heap entry, and native sampler live
+not participate in identity. Enabled anisotropy is accepted only in the inclusive
+range `[1, DeviceCaps.max_sampler_anisotropy]`; over-limit values fault
+`INVALID_ARGUMENT` rather than being clamped. Inactive anisotropy and comparison
+values normalize to zero. The index, heap entry, and native sampler live
 until device destruction. Compatibility-only devices create no strict sampler
 heap and reject interning before backend mutation. There is no separate public
 sampler identity or publication step.
