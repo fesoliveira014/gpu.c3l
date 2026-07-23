@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 import re
 import sys
@@ -8,190 +9,35 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TABLES = {
-    "TRUSTED_COMMAND_OPS": False,
-    "TRUSTED_TRACKING_COMMAND_OPS": True,
-    "CHECKED_COMMAND_OPS": False,
-    "CHECKED_TRACKING_COMMAND_OPS": True,
-}
-# TABLES enumerates every command-policy table; POLICY_FIELDS covers backend
-# policy reads; SUPERSEDED_COMMAND_FUNCTIONS records removed dispatch roots.
-# Update the matching inventory whenever any of those sets changes.
-POLICY_FIELDS = (
-    "validation_policy",
-    "track_lifetimes",
-    "vulkan_layers",
-    "debug_callback",
-    "debug_names",
-)
-# Delivery reads are not policy selection; keep each exception narrow and named.
-POLICY_FIELD_ALLOWED_READS = frozenset((
-    ("report_contract_failure", "debug_callback"),
-))
-TRACKING_FUNCTIONS = frozenset((
-    "track_command_reference",
-    "resolve_tracked_texture_command_reference",
-    "ensure_command_reference_capacity",
-    "rollback_command_references",
-    "note_command_reference_allocation",
-))
-TRACKING_CALLS = tuple(f"{name}(" for name in TRACKING_FUNCTIONS)
-CORE_COMMAND_ROOTS = frozenset((
-    "vk_create_command_allocator",
-    "vk_destroy_command_allocator",
-    "vk_reserve_generated_scratch",
-    "vk_release_generated_scratch",
-    "vk_begin_commands",
-    "vk_end_commands",
-    "vk_discard_commands",
-    "vk_submit",
-    "retire_observed_completion_and_drain_with_query",
-    "drain_completed_submitted_commands",
-))
-ALLOCATION_FREE_ROOTS = frozenset((
-    "vk_begin_commands",
-    "vk_end_commands",
-    "vk_discard_commands",
-    "vk_submit",
-    "retire_observed_completion_and_drain_with_query",
-    "drain_completed_submitted_commands",
-))
-AMBIENT_COMMAND_PATTERNS = {
-    "temporary pool": re.compile(r"@pool\s*\(|\bmem::talloc[A-Za-z0-9_]*\s*\("),
-    "thread-local state": re.compile(r"\btlocal\b"),
-    "recording context": re.compile(
-        r"\b(?:ThreadRecordingContext|thread_recording_contexts|"
-        r"RecordingContextTable|RecordingContextState|"
-        r"RecordingContextHandle|MAX_RECORDING_CONTEXTS|"
-        r"MAX_THREAD_DEVICE_CONTEXTS)\b"
-    ),
-}
-WARM_ALLOCATION_PATTERNS = {
-    "host allocation": re.compile(
-        r"\b(?:mem|alloc)::(?:new[A-Za-z0-9_]*|realloc|"
-        r"resize[A-Za-z0-9_]*|alloc)\s*\("
-    ),
-    "native command allocation": re.compile(
-        r"\bvk::(?:allocate_command_buffers|create_command_pool)\s*\("
-    ),
-    "VMA allocation": re.compile(
-        r"(?:\bvma::|\ballocator\.)"
-        r"(?:allocate_memory|create_buffer(?:_with_alignment)?|create_image)\s*\("
-    ),
-}
-WARM_STACK_PATTERNS = {
-    "capacity-sized stack storage": re.compile(
-        r"\[[^\]\r\n]*(?:MAX_SUBMIT_COMMAND_LISTS|"
-        r"MAX_SUBMIT_COMPLETION_WAITS)[^\]\r\n]*\]"
-    ),
-}
-REFERENCE_INDEX_HOT_FUNCTIONS = frozenset((
-    "preflight_command_references",
-    "track_command_reference",
-    "resolve_tracked_texture_command_reference",
-))
-ACCUMULATED_REFERENCE_SCAN_PATTERNS = {
-    "reference-count loop": re.compile(
-        r"\bfor\s*\([^)]*\breference_count\b"
-    ),
-    "reference-slice loop": re.compile(
-        r"\bforeach\s*\([^)]*\breferences\s*\["
-    ),
-}
-REFERENCE_IDENTITY_FIELDS = ("owner", "index", "generation")
-POST_RETAIN_PUBLICATION_MARKERS = {
-    "track_command_reference": re.compile(
-        r"\bretain_tracked_command_reference\s*\("
-    ),
-    "resolve_tracked_texture_command_reference": re.compile(
-        r"\btracked_command_references\.add\s*\("
-    ),
-}
-REFERENCE_PUBLICATION_CALLERS = frozenset((
-    "track_command_reference",
-    "resolve_tracked_texture_command_reference",
-    "rollback_command_references",
-))
-ENCODER_PROOF_PATTERNS = {
-    "stored device comparison": re.compile(r"\bencoder\.device\b"),
-    "stored handle comparison": re.compile(r"\bencoder\.handle\b"),
-    "device-loss load": re.compile(
-        r"\b(?:device_lost|lost)\b[^;{}]*\bload\s*\("
-    ),
-    "operation-table null check": re.compile(
-        r"\bencoder\.ops\s*(?:==|!=)\s*null"
-    ),
-    "backend-state null check": re.compile(
-        r"\bencoder\.backend_state\s*(?:==|!=)\s*null"
-    ),
-    "backend-command null check": re.compile(
-        r"\bencoder\.backend_command\s*(?:==|!=)\s*null"
-    ),
-}
-FRONTEND_ENCODER_ROOTS = frozenset((
-    "command_encoder",
-    "recording_encoder",
-    "executable_encoder",
-    "command_operation",
-    "executable_command_operation",
-))
-TRUSTED_CAPABILITY_PATTERNS = {
-    "encoder null check": re.compile(r"\bcommands\s*(?:==|!=)\s*null"),
-    "command-record null check": re.compile(r"\brecord\s*(?:==|!=)\s*null"),
-    "backend-state null check": re.compile(
-        r"\bcommands\.backend_state\s*(?:==|!=)\s*null"
-    ),
-    "backend-command null check": re.compile(
-        r"\bcommands\.backend_command\s*(?:==|!=)\s*null"
-    ),
-}
-COLD_ALLOCATION_FUNCTIONS = frozenset((
-    "allocate_command_buffers_real",
-    "allocate_generated_preprocess_buffer",
-    "create_command_pool_real",
-    "initialize_command_allocator_slot",
-    "initialize_command_allocator_slot_with_ops",
-))
-SUPERSEDED_COMMAND_FUNCTIONS = frozenset((
-    "bind_pipeline_state",
-    "resolve_generated_work_records",
-    "resolve_index_span",
-    "resolve_indirect_span",
-    "validate_span_recording_access",
-    "validate_texture_recording_access",
-    "vk_cmd_begin_render_pass",
-    "vk_cmd_bind_pipeline",
-    "vk_cmd_copy_buffer",
-    "vk_cmd_copy_buffer_to_texture",
-    "vk_cmd_copy_texture_to_buffer",
-    "vk_cmd_draw",
-    "vk_cmd_draw_generated",
-    "vk_cmd_draw_indexed",
-    "vk_cmd_draw_indexed_generated",
-    "vk_cmd_draw_indexed_indirect",
-    "vk_cmd_draw_indexed_indirect_count",
-    "vk_cmd_draw_indirect",
-    "vk_cmd_fill_buffer",
-    "vk_cmd_texture_barrier",
-))
-FUNCTION_DECLARATION = re.compile(
-    r"(?m)^fn\s+[^\r\n(]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*\(",
-)
+EXPECTED_TABLES = frozenset({
+    "TRUSTED_COMMAND_OPS",
+    "TRUSTED_TRACKING_COMMAND_OPS",
+    "CHECKED_COMMAND_OPS",
+    "CHECKED_TRACKING_COMMAND_OPS",
+})
+IDENTIFIER = r"[A-Za-z_][A-Za-z0-9_]*"
+COMMAND_OPS_DECLARATION = re.compile(r"\bstruct\s+CommandOps\b[^{;]*\{")
 TABLE_DECLARATION = re.compile(
-    r"(?m)^const\s+gpu::internal::CommandOps\s+([A-Za-z_][A-Za-z0-9_]*)\b[^=]*=\s*\{",
+    rf"\bconst\s+gpu::internal::CommandOps\s+({IDENTIFIER})\b[^=;{{]*=\s*\{{",
 )
-TABLE_ENTRY = re.compile(
-    r"\.([A-Za-z_][A-Za-z0-9_]*)\s*=\s*&([A-Za-z_][A-Za-z0-9_]*)\s*,",
+TABLE_FIELD = re.compile(rf"\s*\.({IDENTIFIER})\s*=")
+DIRECT_TABLE_ENTRY = re.compile(
+    rf"\s*\.({IDENTIFIER})\s*=\s*&({IDENTIFIER})\s*\Z",
 )
-CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 
 @dataclass(frozen=True)
-class Function:
+class TableEntry:
+    field: str | None
+    target: str | None
+    direct: bool
+
+
+@dataclass(frozen=True)
+class CommandTable:
     relative: str
     name: str
-    line: int
-    body: str
+    entries: tuple[TableEntry, ...]
 
 
 def mask_non_code(source: str) -> str:
@@ -272,384 +118,175 @@ def matching_delimiter(source: str, start: int, opening: str, closing: str) -> i
     raise ValueError(f"unterminated {opening}{closing} block")
 
 
-def expression_end(source: str, start: int) -> int:
+def top_level_segments(source: str, delimiter: str) -> list[str]:
     depths = {"(": 0, "[": 0, "{": 0}
     pairs = {")": "(", "]": "[", "}": "{"}
-    for index in range(start, len(source)):
-        char = source[index]
+    segments = []
+    start = 0
+    for index, char in enumerate(source):
         if char in depths:
             depths[char] += 1
         elif char in pairs:
             depths[pairs[char]] -= 1
-        elif char == ";" and all(depth == 0 for depth in depths.values()):
-            return index
-    raise ValueError("unterminated expression-bodied function")
+        elif char == delimiter and all(depth == 0 for depth in depths.values()):
+            segments.append(source[start:index])
+            start = index + 1
+    if source[start:].strip():
+        segments.append(source[start:])
+    return segments
 
 
-def source_functions(relative: str, source: str) -> list[Function]:
-    masked = mask_non_code(source)
-    declarations = list(FUNCTION_DECLARATION.finditer(masked))
-    functions = []
-    for declaration_index, declaration in enumerate(declarations):
-        parameter_start = masked.find("(", declaration.start())
-        parameter_end = matching_delimiter(masked, parameter_start, "(", ")")
-        limit = (
-            declarations[declaration_index + 1].start()
-            if declaration_index + 1 < len(declarations)
-            else len(masked)
+def command_ops_fields(root: Path) -> tuple[str, ...]:
+    path = root / "gpu" / "internal" / "device.c3"
+    source = mask_non_code(path.read_text(encoding="utf-8"))
+    declarations = list(COMMAND_OPS_DECLARATION.finditer(source))
+    if len(declarations) != 1:
+        raise ValueError(
+            "expected exactly one CommandOps struct in gpu/internal/device.c3"
         )
-        brace = masked.find("{", parameter_end, limit)
-        arrow = masked.find("=>", parameter_end, limit)
-        if arrow >= 0 and (brace < 0 or arrow < brace):
-            end = expression_end(masked, arrow + 2)
-            body = masked[arrow:end + 1]
-        elif brace >= 0:
-            end = matching_delimiter(masked, brace, "{", "}")
-            body = masked[brace:end + 1]
-        else:
-            raise ValueError(
-                f"{relative}:{declaration.group(1)} has no function body"
-            )
-        functions.append(Function(
-            relative=relative,
-            name=declaration.group(1),
-            line=source.count("\n", 0, declaration.start()) + 1,
-            body=body,
-        ))
-    return functions
+
+    start = source.find("{", declarations[0].start())
+    end = matching_delimiter(source, start, "{", "}")
+    fields = []
+    for declaration in top_level_segments(source[start + 1:end], ";"):
+        identifiers = re.findall(IDENTIFIER, declaration)
+        if not identifiers:
+            raise ValueError("CommandOps contains an unrecognized field declaration")
+        fields.append(identifiers[-1])
+    if not fields:
+        raise ValueError("CommandOps has no fields")
+    return tuple(fields)
 
 
-def load_functions(root: Path) -> dict[str, list[Function]]:
-    functions: dict[str, list[Function]] = {}
-    backend = root / "gpu" / "internal" / "vk"
-    for path in sorted(backend.rglob("*.c3"), key=lambda item: item.as_posix()):
-        relative = path.relative_to(root).as_posix()
-        source = path.read_text(encoding="utf-8")
-        for function in source_functions(relative, source):
-            functions.setdefault(function.name, []).append(function)
-    return functions
-
-
-def command_tables(root: Path) -> dict[str, dict[str, str]]:
-    path = root / "gpu" / "internal" / "vk" / "device.c3"
-    source = path.read_text(encoding="utf-8")
-    masked = mask_non_code(source)
-    tables: dict[str, dict[str, str]] = {}
-    for declaration in TABLE_DECLARATION.finditer(masked):
-        name = declaration.group(1)
-        if name not in TABLES:
-            raise ValueError(f"unexpected command policy table: {name}")
-        start = masked.find("{", declaration.start())
-        end = matching_delimiter(masked, start, "{", "}")
-        tables[name] = dict(TABLE_ENTRY.findall(masked[start:end + 1]))
-    return tables
-
-
-def reachable_functions(
-    functions: dict[str, list[Function]],
-    roots: set[str],
-) -> set[Function]:
-    pending = list(roots)
-    visited_names = set()
-    reachable = set()
-    candidates = set(functions)
-    while pending:
-        name = pending.pop()
-        if name in visited_names:
+def table_entries(body: str) -> tuple[TableEntry, ...]:
+    entries = []
+    for expression in top_level_segments(body, ","):
+        direct = DIRECT_TABLE_ENTRY.fullmatch(expression)
+        if direct is not None:
+            entries.append(TableEntry(
+                field=direct.group(1),
+                target=direct.group(2),
+                direct=True,
+            ))
             continue
-        visited_names.add(name)
-        for function in functions.get(name, ()):
-            reachable.add(function)
-            for called in set(CALL.findall(function.body)) & candidates:
-                if called not in visited_names:
-                    pending.append(called)
-    return reachable
+        field = TABLE_FIELD.match(expression)
+        entries.append(TableEntry(
+            field=field.group(1) if field is not None else None,
+            target=None,
+            direct=False,
+        ))
+    return tuple(entries)
 
 
-def check(root: Path = ROOT) -> list[str]:
+def command_tables(root: Path) -> tuple[CommandTable, ...]:
+    backend = root / "gpu" / "internal" / "vk"
+    tables = []
+    for path in sorted(backend.rglob("*.c3"), key=lambda item: item.as_posix()):
+        source = mask_non_code(path.read_text(encoding="utf-8"))
+        relative = path.relative_to(root).as_posix()
+        for declaration in TABLE_DECLARATION.finditer(source):
+            start = source.find("{", declaration.start())
+            end = matching_delimiter(source, start, "{", "}")
+            tables.append(CommandTable(
+                relative=relative,
+                name=declaration.group(1),
+                entries=table_entries(source[start + 1:end]),
+            ))
+    return tuple(tables)
+
+
+def structural_table_errors(
+    fields: tuple[str, ...],
+    tables: tuple[CommandTable, ...],
+) -> list[str]:
     errors = []
-    try:
-        functions = load_functions(root)
-        tables = command_tables(root)
-    except (OSError, ValueError) as error:
-        return [str(error)]
-
-    missing = sorted(set(TABLES) - set(tables))
-    if missing:
-        errors.append(f"missing command policy tables: {', '.join(missing)}")
-        return errors
-
-    superseded = sorted(SUPERSEDED_COMMAND_FUNCTIONS & set(functions))
-    if superseded:
-        errors.append(
-            "superseded command functions remain declared: "
-            + ", ".join(superseded)
-        )
-
-    for function in sorted(
-        reachable_functions(functions, set(REFERENCE_INDEX_HOT_FUNCTIONS)),
-        key=lambda item: (item.relative, item.line, item.name),
-    ):
-        for label, pattern in ACCUMULATED_REFERENCE_SCAN_PATTERNS.items():
-            if pattern.search(function.body):
-                errors.append(
-                    "reference index hot path contains " + label + " at "
-                    f"{function.relative}:{function.line}:{function.name}"
-                )
-
-    for function in functions.get("indexed_resource_reference_matches", ()):
-        for field in REFERENCE_IDENTITY_FIELDS:
-            exact_comparison = re.compile(
-                rf"\bcell\.{field}\s*==\s*reference\.{field}\b"
-            )
-            if exact_comparison.search(function.body) is None:
-                errors.append(
-                    "reference index equality omits exact " + field + " at "
-                    f"{function.relative}:{function.line}:{function.name}"
-                )
-
-    clear_functions = functions.get("clear_command_scratch_references", ())
-    if len(clear_functions) != 1:
-        errors.append(
-            "expected exactly one clear_command_scratch_references declaration"
-        )
-    for function in clear_functions:
-        release = re.search(
-            r"\brelease_tracked_command_references\s*\(\s*state\s*,"
-            r"\s*scratch\.references\s*,\s*scratch\.reference_count\s*,?\s*\)",
-            function.body,
-        )
-        reset = re.search(
-            r"\breset_command_reference_index\s*\(",
-            function.body,
-        )
-        count_clear = re.search(
-            r"\bscratch\.reference_count\s*=\s*0\s*;",
-            function.body,
-        )
-        if (release is None or count_clear is None or reset is None
-                or count_clear.start() < release.end()
-                or reset.start() < count_clear.end()):
-            errors.append(
-                "command scratch clear must release its reference list before "
-                "resetting the reference index at "
-                f"{function.relative}:{function.line}:{function.name}"
-            )
-
-    for function_name, retain_pattern in POST_RETAIN_PUBLICATION_MARKERS.items():
-        for function in functions.get(function_name, ()):
-            retained = retain_pattern.search(function.body)
-            published = re.search(
-                r"\bpublish_command_reference\s*\(",
-                function.body,
-            )
-            if (retained is None or published is None
-                    or published.start() < retained.end()):
-                errors.append(
-                    "reference index publication is not after retain at "
-                    f"{function.relative}:{function.line}:{function.name}"
-                )
-
-    for declarations in functions.values():
-        for function in declarations:
-            if (function.name in REFERENCE_PUBLICATION_CALLERS):
-                continue
-            if re.search(
-                r"\bpublish_command_reference\s*\(",
-                function.body,
-            ) is not None:
-                errors.append(
-                    "reference index publication has unauthorized caller at "
-                    f"{function.relative}:{function.line}:{function.name}"
-                )
-
-    rollback_functions = sorted(
-        reachable_functions(functions, {"rollback_command_references"}),
-        key=lambda item: (item.relative, item.line, item.name),
+    field_counts = Counter(fields)
+    duplicate_command_fields = sorted(
+        field for field, count in field_counts.items() if count > 1
     )
-    for function in functions.get("rollback_command_references", ()):
-        reset = re.search(
-            r"\breset_command_reference_index\s*\(",
-            function.body,
-        )
-        rebuilt = re.search(
-            r"\bpublish_command_reference\s*\(",
-            function.body,
-        )
-        if (reset is None or rebuilt is None or rebuilt.start() < reset.end()
-                ):
-            errors.append(
-                "reference rollback must reset and rebuild the retained prefix at "
-                f"{function.relative}:{function.line}:{function.name}"
-            )
-    for function in rollback_functions:
-        if re.search(
-            r"\breference_index\.cells\s*\[[^]]+\]\s*\.epoch\s*=",
-            function.body,
-        ) is not None:
-            errors.append(
-                "reference rollback reaches unsafe cell deletion at "
-                f"{function.relative}:{function.line}:{function.name}"
-            )
-
-    expected_fields = set(tables["TRUSTED_COMMAND_OPS"])
-    if not expected_fields:
-        errors.append("TRUSTED_COMMAND_OPS has no command entries")
-        return errors
-    for table_name, entries in sorted(tables.items()):
-        fields = set(entries)
-        if fields != expected_fields:
-            errors.append(
-                f"{table_name} command fields differ from TRUSTED_COMMAND_OPS"
-            )
-        for field, entry in sorted(entries.items()):
-            if entry not in functions:
-                errors.append(
-                    f"{table_name}.{field} references missing function {entry}"
-                )
-
-    for table_name, tracking in TABLES.items():
-        roots = set(tables[table_name].values())
-        for function in sorted(
-            reachable_functions(functions, roots),
-            key=lambda item: (item.relative, item.line, item.name),
-        ):
-            for field in POLICY_FIELDS:
-                if (function.name, field) in POLICY_FIELD_ALLOWED_READS:
-                    continue
-                if re.search(rf"\b{re.escape(field)}\b", function.body):
-                    errors.append(
-                        f"{table_name} reaches {function.relative}:{function.line}:"
-                        f"{function.name}, which reads {field}"
-                    )
-            if tracking:
-                continue
-            if function.name in TRACKING_FUNCTIONS or any(
-                call in function.body for call in TRACKING_CALLS
-            ):
-                errors.append(
-                    f"{table_name} reaches tracking work at "
-                    f"{function.relative}:{function.line}:{function.name}"
-                )
-
-    trusted_roots = set(tables["TRUSTED_COMMAND_OPS"].values())
-    trusted_roots.update(tables["TRUSTED_TRACKING_COMMAND_OPS"].values())
-    for function in sorted(
-        reachable_functions(functions, trusted_roots),
-        key=lambda item: (item.relative, item.line, item.name),
-    ):
-        for label, pattern in TRUSTED_CAPABILITY_PATTERNS.items():
-            if pattern.search(function.body):
-                errors.append(
-                    "trusted command path reaches " + label + " at "
-                    f"{function.relative}:{function.line}:{function.name}"
-                )
-
-    encoder_path = root / "gpu" / "internal" / "command.c3"
-    public_path = root / "gpu" / "gpu.c3"
-    if encoder_path.exists():
-        try:
-            encoder_source = encoder_path.read_text(encoding="utf-8")
-            encoder_functions = source_functions(
-                "gpu/internal/command.c3",
-                encoder_source,
-            )
-            public_functions = []
-            if public_path.exists():
-                public_functions = source_functions(
-                    "gpu/gpu.c3",
-                    public_path.read_text(encoding="utf-8"),
-                )
-        except (OSError, ValueError) as error:
-            errors.append(str(error))
-            encoder_functions = []
-            public_functions = []
-        frontend_functions: dict[str, list[Function]] = {}
-        for function in encoder_functions + public_functions:
-            frontend_functions.setdefault(function.name, []).append(function)
-        frontend_roots = set(FRONTEND_ENCODER_ROOTS)
-        frontend_roots.update(
-            function.name for function in public_functions
-            if function.name.startswith("cmd_")
-        )
-        for function in sorted(
-            reachable_functions(frontend_functions, frontend_roots),
-            key=lambda item: (item.relative, item.line, item.name),
-        ):
-            for label, pattern in ENCODER_PROOF_PATTERNS.items():
-                if pattern.search(function.body):
-                    errors.append(
-                        "frontend command resolution performs " + label + " at "
-                        f"{function.relative}:{function.line}:{function.name}"
-                    )
-        command_encoders = [
-            function for function in encoder_functions
-            if function.name == "command_encoder"
-        ]
-        if len(command_encoders) != 1:
-            errors.append(
-                "command_encoder proof root is missing or duplicated"
-            )
-        else:
-            encoder = command_encoders[0]
-            proof_notes = (
-                "note_command_encoder_cell_computation(",
-                "note_command_encoder_lease_comparison(",
-            )
-            for note in proof_notes:
-                if encoder.body.count(note) != 1:
-                    errors.append(
-                        "command_encoder must record exactly one "
-                        + note.removesuffix("(")
-                    )
-
-    missing_roots = sorted(CORE_COMMAND_ROOTS - set(functions))
-    if missing_roots:
+    if duplicate_command_fields:
         errors.append(
-            "missing command-path roots: " + ", ".join(missing_roots)
+            "CommandOps has duplicate fields: "
+            + ", ".join(duplicate_command_fields)
         )
-        return errors
+    expected_fields = set(fields)
+    table_counts = Counter(table.name for table in tables)
 
-    command_roots = set(CORE_COMMAND_ROOTS)
-    for entries in tables.values():
-        command_roots.update(entries.values())
-    for function in sorted(
-        reachable_functions(functions, command_roots),
-        key=lambda item: (item.relative, item.line, item.name),
-    ):
-        for label, pattern in AMBIENT_COMMAND_PATTERNS.items():
-            if pattern.search(function.body):
-                errors.append(
-                    "command path reaches " + label + " at "
-                    f"{function.relative}:{function.line}:{function.name}"
-                )
+    missing_tables = sorted(EXPECTED_TABLES - table_counts.keys())
+    if missing_tables:
+        errors.append(
+            "missing command policy tables: " + ", ".join(missing_tables)
+        )
+    unexpected_tables = sorted(table_counts.keys() - EXPECTED_TABLES)
+    if unexpected_tables:
+        errors.append(
+            "unexpected command policy tables: " + ", ".join(unexpected_tables)
+        )
+    duplicate_tables = sorted(
+        name for name, count in table_counts.items()
+        if name in EXPECTED_TABLES and count > 1
+    )
+    if duplicate_tables:
+        errors.append(
+            "duplicate command policy tables: " + ", ".join(duplicate_tables)
+        )
 
-    allocation_free_roots = set(ALLOCATION_FREE_ROOTS)
-    for entries in tables.values():
-        allocation_free_roots.update(entries.values())
-    for function in sorted(
-        reachable_functions(functions, allocation_free_roots),
-        key=lambda item: (item.relative, item.line, item.name),
-    ):
-        if function.name in COLD_ALLOCATION_FUNCTIONS:
+    for table in tables:
+        if table.name not in EXPECTED_TABLES:
+            continue
+        malformed = [
+            entry for entry in table.entries
+            if entry.field is None
+        ]
+        if malformed:
             errors.append(
-                "warm command path reaches cold allocation helper at "
-                f"{function.relative}:{function.line}:{function.name}"
+                f"{table.name} has an unrecognized table entry in {table.relative}"
             )
-        for label, pattern in WARM_ALLOCATION_PATTERNS.items():
-            if pattern.search(function.body):
+
+        entry_fields = [
+            entry.field for entry in table.entries
+            if entry.field is not None
+        ]
+        counts = Counter(entry_fields)
+        duplicate_fields = sorted(
+            field for field, count in counts.items() if count > 1
+        )
+        if duplicate_fields:
+            errors.append(
+                f"{table.name} has duplicate fields: "
+                + ", ".join(duplicate_fields)
+            )
+
+        missing_fields = [field for field in fields if field not in counts]
+        if missing_fields:
+            errors.append(
+                f"{table.name} is missing CommandOps fields: "
+                + ", ".join(missing_fields)
+            )
+        extra_fields = sorted(counts.keys() - expected_fields)
+        if extra_fields:
+            errors.append(
+                f"{table.name} has unknown CommandOps fields: "
+                + ", ".join(extra_fields)
+            )
+
+        for entry in table.entries:
+            if entry.field is not None and not entry.direct:
                 errors.append(
-                    "warm command path reaches " + label + " at "
-                    f"{function.relative}:{function.line}:{function.name}"
-                )
-        for label, pattern in WARM_STACK_PATTERNS.items():
-            if pattern.search(function.body):
-                errors.append(
-                    "warm command path reaches " + label + " at "
-                    f"{function.relative}:{function.line}:{function.name}"
+                    f"{table.name}.{entry.field} must be initialized with "
+                    "a direct &function_name reference"
                 )
 
     return errors
+
+
+def check(root: Path = ROOT) -> list[str]:
+    try:
+        fields = command_ops_fields(root)
+        tables = command_tables(root)
+    except (OSError, ValueError) as error:
+        return [str(error)]
+    return structural_table_errors(fields, tables)
 
 
 def main() -> int:
