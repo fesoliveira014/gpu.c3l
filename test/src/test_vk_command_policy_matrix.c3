@@ -412,6 +412,7 @@ fn void observe_policy_matrix_render(
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
 
     gpu::reset_command_resolution_stats();
+    gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     gpu::Viewport viewport = {
         .width     = 8.0f,
         .height    = 8.0f,
@@ -461,11 +462,11 @@ fn void observe_policy_matrix_render(
     CommandPolicyExpectation expectation = policy_matrix_expectation(
         contract:             contract,
         tracking:             tracking,
-        full_semantic_checks: 9,
+        full_semantic_checks: 10,
         tracking_calls:       4,
         unique_references:    4,
-        recording_commands:   8,
-        native_commands:      18,
+        recording_commands:   9,
+        native_commands:      28,
     );
     assert_command_policy_observation(
         &observation,
