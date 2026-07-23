@@ -31,6 +31,10 @@ fn bool render_pass_desc_host_safe(RenderPassDesc* desc) @private {
         && (desc.colors.len == 0 || desc.colors.ptr != null);
 }
 
+fn bool graphics_state_host_safe(GraphicsState* state) @private {
+    return state != null;
+}
+
 fn bool render_pass_desc_valid(RenderPassDesc* desc) @private {
     if (!render_pass_desc_host_safe(desc)
         || desc.width == 0

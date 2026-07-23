@@ -1509,12 +1509,50 @@ fn void? destroy_attachment_view(
     gpu::internal::release_device_children(&operation);
 }
 
-<* Begin a pass without adding synchronization. Viewport and scissor default to
-   the full render area. *>
-fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
+<* Construct full-area viewport/scissor with zero raster and depth state.
+   Dimensions must be in [1, int::max]. *>
+fn GraphicsState? full_render_graphics_state(uint width, uint height) {
+    if (width == 0 || height == 0
+        || width > (uint)int::max || height > (uint)int::max) {
+        return INVALID_ARGUMENT~;
+    }
+    return {
+        .viewport = {
+            .width     = (float)width,
+            .height    = (float)height,
+            .max_depth = 1.0f,
+        },
+        .scissor = {
+            .width  = (int)width,
+            .height = (int)height,
+        },
+        .raster = {},
+        .depth  = {},
+    };
+}
+
+<* Begin a pass with complete dynamic graphics state and no synchronization. *>
+fn void? cmd_begin_render_pass(
+    CommandList* commands,
+    RenderPassDesc* desc,
+    GraphicsState* state,
+) {
     gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
-    return encoder.ops.begin_render_pass(encoder, desc);
+    if (!gpu::internal::render_pass_desc_host_safe(desc)
+        || !gpu::internal::graphics_state_host_safe(state)) {
+        return INVALID_ARGUMENT~;
+    }
+    return encoder.ops.begin_render_pass(encoder, desc, state);
+}
+
+<* Replace the complete dynamic graphics state in an active render pass. *>
+fn void? cmd_set_graphics_state(
+    CommandList* commands,
+    GraphicsState* state,
+) {
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
+    return encoder.ops.set_graphics_state(encoder, state);
 }
 
 <* End the active render pass without adding synchronization. *>

@@ -937,6 +937,14 @@ struct ScissorRect {
     int height;
 }
 
+<* Complete dynamic state required when beginning a render pass. *>
+struct GraphicsState {
+    Viewport           viewport;
+    ScissorRect        scissor;
+    DynamicRasterState raster;
+    DepthState         depth;
+}
+
 // Shader-writable indirect argument layouts; GLSL definitions are generated
 // in include/shaders/generated/shader_abi.glsl.
 struct DrawIndirectCommand {
