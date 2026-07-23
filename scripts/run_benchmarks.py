@@ -122,10 +122,13 @@ COMMAND_RECORD_INVARIANTS = re.compile(
     re.MULTILINE,
 )
 COMMAND_RECORD_RESOLUTION = re.compile(
-    r"^resolution: recording_commands=[1-9][0-9]* "
+    r"^resolution: recording_commands=(?P<recording_commands>[1-9][0-9]*) "
     r"native_commands=[1-9][0-9]* device_registry=0 "
     r"retained_pins=0 lifecycle_vtable=0 command_table=0 "
-    r"pipeline_table=0 pipeline_cache=0 policy=0$",
+    r"pipeline_table=0 pipeline_cache=0 policy=0 "
+    r"encoder_cells=(?P=recording_commands) "
+    r"encoder_leases=(?P=recording_commands) encoder_fields=0 "
+    r"device_lost=0 backend_caps=0$",
     re.MULTILINE,
 )
 COMMAND_RECORD_COLD_WORK = re.compile(
@@ -198,7 +201,8 @@ COMMAND_WRAPPER_CHECK = re.compile(
     r"status=pass$"
 )
 COMMAND_PATH_VK_POLICY = re.compile(
-    r"^command_path_vk_policy validation=trusted tracking=false layers=false "
+    r"^command_path_vk_policy validation=(?P<policy>trusted|object_boundaries|full) "
+    r"tracking=(?P<tracking>true|false) layers=(?P<layers>true|false) "
     r"resolution_stats=false recording_work_stats=true$"
 )
 COMMAND_PATH_VK_OPERATION = re.compile(
@@ -359,7 +363,7 @@ def require_command_wrapper_evidence(output):
         raise ValueError("command_wrapper_bench observation mismatch")
 
 
-def require_command_path_vulkan_evidence(output):
+def require_command_path_vulkan_evidence(output, expected=None):
     lines = output.splitlines()
     operation_count = len(COMMAND_PATH_OPERATIONS)
     lifecycle_count = len(COMMAND_PATH_LIFECYCLE_CASES)
@@ -368,8 +372,19 @@ def require_command_path_vulkan_evidence(output):
         raise ValueError(
             "command_path_baseline_bench record count is missing or duplicated"
         )
-    if COMMAND_PATH_VK_POLICY.fullmatch(lines[0]) is None:
+    policy_match = COMMAND_PATH_VK_POLICY.fullmatch(lines[0])
+    if policy_match is None:
         raise ValueError("command_path_baseline_bench policy record is malformed")
+    actual = (
+        policy_match.group("policy"),
+        policy_match.group("tracking") == "true",
+        policy_match.group("layers") == "true",
+    )
+    if expected is not None and actual != expected:
+        raise ValueError(
+            "command_path_baseline_bench policy mode mismatch: "
+            f"{actual} != {expected}"
+        )
 
     operation_lines = lines[1:1 + operation_count]
     work_lines = lines[1 + operation_count:1 + operation_count * 2]
@@ -558,6 +573,16 @@ def require_command_path_vulkan_evidence(output):
             raise ValueError(
                 "command_path_baseline_bench lifecycle registry-lock count mismatch"
             )
+    return actual
+
+
+def require_command_path_policy_matrix(outputs):
+    if len(outputs) != len(COMMAND_POLICY_MODES):
+        raise ValueError(
+            "command_path_baseline_bench four-mode policy matrix is incomplete"
+        )
+    for output, expected in zip(outputs, COMMAND_POLICY_MODES):
+        require_command_path_vulkan_evidence(output, expected)
 
 
 def evaluate_regression_thresholds(output, target, enforce=False):
@@ -925,6 +950,33 @@ def main():
                 )
                 lines.append(report_section(title, annotated))
             require_command_policy_matrix(command_outputs)
+            continue
+        if target == "command_path_baseline_bench":
+            command_path_outputs = []
+            for policy, tracking, layers in COMMAND_POLICY_MODES:
+                command_env = env.copy()
+                command_env["GPU_C3L_BENCH_CONTRACT"] = policy
+                command_env["GPU_C3L_BENCH_TRACKING"] = str(tracking).lower()
+                command_env["GPU_C3L_BENCH_LAYERS"] = str(layers).lower()
+                output = run(
+                    (str(executable(root, target)),),
+                    root,
+                    command_env,
+                )
+                command_path_outputs.append(output)
+                timing_advisories.extend(require_measurement(
+                    output,
+                    target,
+                    enforce_thresholds=False,
+                    evaluate_thresholds=False,
+                ))
+                annotated = f"iterations={iterations}\nunits={units}\n{output}"
+                title = (
+                    f"{target} [{policy} tracking={str(tracking).lower()} "
+                    f"layers={str(layers).lower()}]"
+                )
+                lines.append(report_section(title, annotated))
+            require_command_path_policy_matrix(command_path_outputs)
             continue
         output = run((str(executable(root, target)),), root, env)
         timing_advisories.extend(require_measurement(

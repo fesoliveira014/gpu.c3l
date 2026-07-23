@@ -511,7 +511,8 @@ per-repetition observation. The Vulkan target reports five equivalent native
 operation pairs, zero forbidden structural-work deltas for warmed recording,
 non-zero dispatch and buffer-copy readback equivalence, and full
 begin-bind-record-end-submit-wait lifecycle cases for 0, 1, 16, and 256
-commands. Lifecycle timing ends only after successful completion wait; its
+commands under the same four validation/tracking modes as the command-recording
+benchmark. Lifecycle timing ends only after successful completion wait; its
 structural gate permits only the exact command-list allocation/reset work and
 rejects unrelated allocation, creation, and registry-lock work. All elapsed
 times and ratios are advisory, while schema, work, and equivalence failures are
@@ -537,7 +538,11 @@ discarded.
 The command target enables test-only resolution counters, resets them after
 begin/pipeline bind, reports measured native command count with every resolution
 count, and requires zero registry, retained-pin, lifecycle-vtable, command-table,
-pipeline-table/cache, and policy selections during warm recording.
+pipeline-table/cache, and policy selections during warm recording. Across every
+validation/tracking policy it also requires exactly one encoder-cell computation
+and one packed-lease comparison per recorded call, with zero duplicate encoder
+field comparisons, device-loss atomic loads, and trusted-backend capability
+checks.
 These process-wide counters use relaxed atomics and are compared only across
 externally synchronized benchmark intervals. The native count covers every
 Vulkan command emitted by recording paths.

@@ -245,8 +245,11 @@ fn void command_generation_exhaustion_retires_slot() @test {
     state.commands.slots[final_generation_executable.handle.index].generation =
         vk::HANDLE_GENERATION_MAX - 1;
     final_generation_executable.handle.generation = vk::HANDLE_GENERATION_MAX - 1;
-    ((gpu::internal::CommandEncoderState*)final_generation_executable.encoder).handle =
-        final_generation_executable.handle;
+    ((gpu::internal::CommandEncoderState*)final_generation_executable.encoder).lease =
+        gpu::internal::make_command_lease(
+            final_generation_executable.device,
+            final_generation_executable.handle,
+        );
     gpu::internal::device_slots[device.index].command_leases[
         final_generation_executable.handle.index
     ].store(

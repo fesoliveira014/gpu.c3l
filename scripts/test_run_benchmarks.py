@@ -44,7 +44,9 @@ COMMAND_OUTPUT = "\n".join(
             "resolution: recording_commands=305000 native_commands=405000 "
             "device_registry=0 "
             "retained_pins=0 lifecycle_vtable=0 command_table=0 "
-            "pipeline_table=0 pipeline_cache=0 policy=0"
+            "pipeline_table=0 pipeline_cache=0 policy=0 "
+            "encoder_cells=305000 encoder_leases=305000 "
+            "encoder_fields=0 device_lost=0 backend_caps=0"
         ),
         (
             "validation policy=trusted tracking=false layers=false "
@@ -188,6 +190,20 @@ COMMAND_PATH_VK_OUTPUT = "\n".join(
             f"command_path_vk_lifecycle_work commands={commands} samples=5 host_allocations=0 command_pool_creations=0 command_buffer_allocations=0 command_buffer_frees=0 command_buffer_resets=5 image_view_creations=0 vma_allocations=0 registry_lock_acquisitions=0 shader_module_creations=0 pipeline_creations=0 status=pass"
             for commands in (0, 1, 16, 256)
         ),
+    )
+)
+COMMAND_PATH_VK_OUTPUTS = tuple(
+    COMMAND_PATH_VK_OUTPUT.replace(
+        "validation=trusted tracking=false layers=false",
+        f"validation={policy} tracking={str(tracking).lower()} "
+        f"layers={str(layers).lower()}",
+        1,
+    )
+    for policy, tracking, layers in (
+        ("trusted", False, False),
+        ("object_boundaries", False, False),
+        ("full", True, False),
+        ("full", True, True),
     )
 )
 
@@ -409,10 +425,24 @@ class BenchmarkRunnerTests(unittest.TestCase):
 
     def test_command_path_vulkan_measurement_accepts_exact_schema(self):
         runner = load_runner()
-        runner.require_measurement(
-            COMMAND_PATH_VK_OUTPUT,
-            "command_path_baseline_bench",
+        for output in COMMAND_PATH_VK_OUTPUTS:
+            runner.require_measurement(
+                output,
+                "command_path_baseline_bench",
+            )
+
+    def test_command_path_vulkan_policy_matrix_requires_every_mode(self):
+        runner = load_runner()
+        runner.require_command_path_policy_matrix(COMMAND_PATH_VK_OUTPUTS)
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            runner.require_command_path_policy_matrix(COMMAND_PATH_VK_OUTPUTS[:-1])
+        swapped = (
+            COMMAND_PATH_VK_OUTPUTS[1],
+            COMMAND_PATH_VK_OUTPUTS[0],
+            *COMMAND_PATH_VK_OUTPUTS[2:],
         )
+        with self.assertRaisesRegex(ValueError, "mode mismatch"):
+            runner.require_command_path_policy_matrix(swapped)
 
     def test_command_path_vulkan_measurement_rejects_schema_mutations(self):
         runner = load_runner()
@@ -425,7 +455,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
             (
                 COMMAND_PATH_VK_OUTPUT.replace(
                     "validation=trusted",
-                    "validation=full",
+                    "validation=unknown",
                     1,
                 ),
                 "policy",
@@ -845,9 +875,23 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "pipeline_table",
             "pipeline_cache",
             "policy",
+            "encoder_fields",
+            "device_lost",
+            "backend_caps",
         ):
             with self.subTest(field=field):
                 output = COMMAND_OUTPUT.replace(f"{field}=0", f"{field}=1")
+                with self.assertRaisesRegex(ValueError, "resolution evidence"):
+                    runner.require_measurement(output, "command_record_bench")
+
+    def test_command_measurement_requires_one_cell_and_lease_per_call(self):
+        runner = load_runner()
+        for field in ("encoder_cells", "encoder_leases"):
+            with self.subTest(field=field):
+                output = COMMAND_OUTPUT.replace(
+                    f"{field}=305000",
+                    f"{field}=304999",
+                )
                 with self.assertRaisesRegex(ValueError, "resolution evidence"):
                     runner.require_measurement(output, "command_record_bench")
 

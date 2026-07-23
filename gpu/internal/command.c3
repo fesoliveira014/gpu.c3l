@@ -2,6 +2,28 @@ module gpu::internal @private;
 
 import gpu;
 
+const uint COMMAND_LEASE_DEVICE_GENERATION_SHIFT @private = 32;
+const uint COMMAND_LEASE_DEVICE_INDEX_SHIFT @private = 56;
+const uint COMMAND_LEASE_OWNER_SHIFT @private = 64;
+$assert uint::size * 8 == COMMAND_LEASE_DEVICE_GENERATION_SHIFT;
+$assert COMMAND_LEASE_DEVICE_GENERATION_SHIFT + 24
+    == COMMAND_LEASE_DEVICE_INDEX_SHIFT;
+$assert gpu::internal::MAX_DEVICES <= (1 << 6);
+$assert COMMAND_LEASE_DEVICE_INDEX_SHIFT + 6 <= COMMAND_LEASE_OWNER_SHIFT;
+$assert ulong::size * 8 == COMMAND_LEASE_OWNER_SHIFT;
+
+fn gpu::internal::CommandLease make_command_lease(
+    Device device,
+    CommandListHandle handle,
+) @private {
+    return (gpu::internal::CommandLease)(
+        ((uint128)handle.owner << COMMAND_LEASE_OWNER_SHIFT)
+        | ((uint128)device.index << COMMAND_LEASE_DEVICE_INDEX_SHIFT)
+        | ((uint128)device.generation << COMMAND_LEASE_DEVICE_GENERATION_SHIFT)
+        | (uint128)handle.generation
+    );
+}
+
 fn void? validate_dispatch_groups(Vec3u groups, Vec3u limit) @private {
     if (groups.x > limit.x || groups.y > limit.y || groups.z > limit.z) {
         return gpu::INVALID_ARGUMENT~;
@@ -33,7 +55,6 @@ fn gpu::internal::CommandEncoderState*? command_encoder(
     CommandListHandle handle,
     void* opaque,
     gpu::internal::CommandEncoderPhase phase,
-    bool allow_lost = false,
 ) @private {
     if (opaque == null || !device.is_valid() || device.reserved != 0) {
         return gpu::INVALID_HANDLE~;
@@ -42,14 +63,14 @@ fn gpu::internal::CommandEncoderState*? command_encoder(
         || !handle.is_valid()) {
         return gpu::INVALID_HANDLE~;
     }
-    gpu::internal::CommandEncoderState* encoder = (gpu::internal::CommandEncoderState*)opaque;
-    if (encoder != &gpu::internal::device_slots[device.index].command_encoders[handle.index]) {
+    gpu::internal::note_command_encoder_cell_computation();
+    gpu::internal::CommandEncoderState* encoder =
+        &gpu::internal::device_slots[device.index].command_encoders[handle.index];
+    if (opaque != encoder) {
         return gpu::INVALID_HANDLE~;
     }
-    if (encoder.device != device || encoder.handle != handle
-        || encoder.ops == null
-        || encoder.backend_state == null || encoder.backend_command == null
-        || encoder.device_lost == null) {
+    gpu::internal::note_command_encoder_lease_comparison();
+    if (encoder.lease != make_command_lease(device, handle)) {
         return gpu::INVALID_HANDLE~;
     }
     if (encoder.phase != phase) {
@@ -61,16 +82,12 @@ fn gpu::internal::CommandEncoderState*? command_encoder(
         }
         return gpu::INVALID_HANDLE~;
     }
-    if (!allow_lost
-        && encoder.device_lost.load(AtomicOrdering.ACQUIRE)) {
-        return gpu::DEVICE_LOST~;
-    }
     return encoder;
 }
 
 fn gpu::internal::CommandEncoderState*? recording_encoder(
     CommandList* commands,
-    bool allow_lost = false,
+    bool count_command = true,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
     gpu::internal::CommandEncoderState* encoder = command_encoder(
@@ -78,15 +95,13 @@ fn gpu::internal::CommandEncoderState*? recording_encoder(
         handle:     commands.handle,
         opaque:     commands.encoder,
         phase:      gpu::internal::CommandEncoderPhase.RECORDING,
-        allow_lost: allow_lost,
     )!;
-    if (!allow_lost) gpu::internal::note_command_recording_call();
+    if (count_command) gpu::internal::note_command_recording_call();
     return encoder;
 }
 
 fn gpu::internal::CommandEncoderState*? executable_encoder(
     ExecutableCommandList* commands,
-    bool allow_lost = false,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
     return command_encoder(
@@ -94,7 +109,6 @@ fn gpu::internal::CommandEncoderState*? executable_encoder(
         handle:     commands.handle,
         opaque:     commands.encoder,
         phase:      gpu::internal::CommandEncoderPhase.EXECUTABLE,
-        allow_lost: allow_lost,
     );
 }
 
@@ -113,12 +127,10 @@ fn gpu::internal::CommandEncoderState*? publish_command_encoder(
         &operation.slot.command_encoders[commands.handle.index];
     if (encoder.phase != gpu::internal::CommandEncoderPhase.INACTIVE) return gpu::BACKEND_ERROR~;
     *encoder = {
-        .device          = commands.device,
-        .handle          = commands.handle,
+        .lease           = make_command_lease(commands.device, commands.handle),
         .ops             = operation.data.command_ops,
         .backend_state   = backend.state,
         .backend_command = backend.command,
-        .device_lost     = &operation.slot.lost,
         .phase           = gpu::internal::CommandEncoderPhase.RECORDING,
     };
     gpu::internal::note_command_policy_selection();

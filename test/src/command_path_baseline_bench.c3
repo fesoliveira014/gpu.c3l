@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 import std::io;
+import std::os::env;
 import std::time;
 
 const char[*] COMMAND_PATH_COMP_SPIRV =
@@ -26,6 +27,13 @@ const ulong COMMAND_PATH_SINGLE_NATIVE_CALL = 1;
 struct BenchSpan {
     gpu::GpuAllocation allocation;
     gpu::GpuSpan       span;
+}
+
+struct CommandPathPolicy {
+    gpu::ContractValidation contract;
+    bool                    track_lifetimes;
+    bool                    vulkan_layers;
+    ZString                 contract_name;
 }
 
 struct ComputeRoot {
@@ -71,6 +79,42 @@ struct EquivalenceResult {
     uint expected;
     uint direct;
     uint library;
+}
+
+fn bool? command_path_flag(ZString variable) {
+    if (try value = env::tget_var(variable.str_view())) {
+        if (value == "true") return true;
+        if (value == "false") return false;
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return false;
+}
+
+fn CommandPathPolicy? command_path_policy() {
+    String contract_value = "trusted";
+    if (try value = env::tget_var("GPU_C3L_BENCH_CONTRACT")) {
+        contract_value = value;
+    }
+    gpu::ContractValidation contract;
+    ZString contract_name;
+    if (contract_value == "trusted") {
+        contract = gpu::ContractValidation.TRUSTED;
+        contract_name = "trusted";
+    } else if (contract_value == "object_boundaries") {
+        contract = gpu::ContractValidation.OBJECT_BOUNDARIES;
+        contract_name = "object_boundaries";
+    } else if (contract_value == "full") {
+        contract = gpu::ContractValidation.FULL;
+        contract_name = "full";
+    } else {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return {
+        .contract        = contract,
+        .track_lifetimes = command_path_flag("GPU_C3L_BENCH_TRACKING")!,
+        .vulkan_layers   = command_path_flag("GPU_C3L_BENCH_LAYERS")!,
+        .contract_name   = contract_name,
+    };
 }
 
 fn BenchSpan? allocate_bench_span(
@@ -1177,11 +1221,12 @@ fn void print_lifecycle_work(
 }
 
 fn int main() {
+    CommandPathPolicy policy = command_path_policy()!!;
     gpu::RuntimeDesc runtime_desc = {
         .backend                  = gpu::BackendKind.VULKAN,
-        .contract_validation      = gpu::ContractValidation.TRUSTED,
-        .track_resource_lifetimes = false,
-        .enable_vulkan_validation = false,
+        .contract_validation      = policy.contract,
+        .track_resource_lifetimes = policy.track_lifetimes,
+        .enable_vulkan_validation = policy.vulkan_layers,
         .application_name         = "gpu_command_path_baseline",
     };
     gpu::Device device =
@@ -1189,10 +1234,9 @@ fn int main() {
     defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    assert(state.validation_policy.contract
-        == gpu::ContractValidation.TRUSTED);
-    assert(!state.validation_policy.track_lifetimes);
-    assert(!state.validation_policy.vulkan_layers);
+    assert(state.validation_policy.contract == policy.contract);
+    assert(state.validation_policy.track_lifetimes == policy.track_lifetimes);
+    assert(state.validation_policy.vulkan_layers == policy.vulkan_layers);
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocatorDesc allocator_desc = {
@@ -1349,7 +1393,10 @@ fn int main() {
     }
 
     io::printfn(
-        "command_path_vk_policy validation=trusted tracking=false layers=false resolution_stats=false recording_work_stats=true",
+        "command_path_vk_policy validation=%s tracking=%s layers=%s resolution_stats=false recording_work_stats=true",
+        policy.contract_name,
+        policy.track_lifetimes ? "true" : "false",
+        policy.vulkan_layers ? "true" : "false",
     );
     print_operation("dispatch", COMMAND_PATH_DISPATCH_NATIVE_CALLS, &dispatch);
     print_operation("draw", COMMAND_PATH_DRAW_NATIVE_CALLS, &draw);
