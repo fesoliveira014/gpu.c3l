@@ -4,7 +4,6 @@ import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::core::mem;
-import std::math;
 
 const uint SAMPLER_CELL_NONE = uint::max;
 
@@ -209,151 +208,6 @@ fn void set_sampler_hash_override(
     state.sampler_hash_override = hash;
 }
 
-fn SamplerKey? sampler_key_from_desc(
-    VkDeviceState* state,
-    gpu::SamplerDesc* desc,
-) @private {
-    ZString invalid_enum_field = sampler_desc_invalid_enum_field(desc);
-    if (invalid_enum_field != null) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "intern_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      invalid_enum_field,
-            invariant:           "must name a defined enum value",
-            backend_text:        null,
-        )~;
-    }
-    if (!math::is_finite(desc.mip_lod_bias)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "intern_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.mip_lod_bias",
-            invariant:           "must be finite",
-            backend_text:        null,
-        )~;
-    }
-    if (desc.mip_lod_bias < -state.caps.max_sampler_lod_bias
-        || desc.mip_lod_bias > state.caps.max_sampler_lod_bias) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "intern_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.mip_lod_bias",
-            invariant:           "absolute value must not exceed DeviceCaps.max_sampler_lod_bias",
-            backend_text:        null,
-        )~;
-    }
-    if (!math::is_finite(desc.min_lod)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "intern_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.min_lod",
-            invariant:           "must be finite",
-            backend_text:        null,
-        )~;
-    }
-    if (!math::is_finite(desc.max_lod)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "intern_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.max_lod",
-            invariant:           "must be finite",
-            backend_text:        null,
-        )~;
-    }
-    if (desc.min_lod > desc.max_lod) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "intern_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.min_lod",
-            invariant:           "must not exceed SamplerDesc.max_lod",
-            backend_text:        null,
-        )~;
-    }
-    if (desc.anisotropy_enable && !math::is_finite(desc.max_anisotropy)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "intern_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.max_anisotropy",
-            invariant:           "must be finite when anisotropy is enabled",
-            backend_text:        null,
-        )~;
-    }
-    if (desc.anisotropy_enable && state.max_sampler_anisotropy <= 0) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "intern_sampler",
-            public_fault:        gpu::UNSUPPORTED_FEATURE,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.anisotropy_enable",
-            invariant:           "device must support sampler anisotropy",
-            backend_text:        null,
-        )~;
-    }
-    if (desc.anisotropy_enable && desc.max_anisotropy < 1.0f) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "intern_sampler",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.SAMPLER,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "SamplerDesc.max_anisotropy",
-            invariant:           "must be at least 1.0 when anisotropy is enabled",
-            backend_text:        null,
-        )~;
-    }
-
-    return canonical_sampler_key(desc, state.max_sampler_anisotropy);
-}
-
 fn vk::Filter sampler_filter_to_vk(gpu::Filter filter) @private {
     return filter == gpu::Filter.LINEAR ? vk::Filter.LINEAR : vk::Filter.NEAREST;
 }
@@ -409,12 +263,18 @@ fn void set_sampler_create_result(
     state.sampler_create_result = result;
 }
 
+fn float sampler_last_create_max_anisotropy(
+    VkDeviceState* state,
+) @if(env::TESTING) {
+    return state.sampler_last_create_max_anisotropy;
+}
+
 fn gpu::SamplerIndex? vk_intern_sampler(
     gpu::Device* device,
     gpu::SamplerDesc* desc,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    SamplerKey key = sampler_key_from_desc(state, desc)!;
+    SamplerKey key = canonical_sampler_key(desc);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
 
@@ -465,6 +325,7 @@ fn gpu::SamplerIndex? vk_intern_sampler(
     vk::Sampler native;
     vk::Result create_result;
     $if env::TESTING:
+        state.sampler_last_create_max_anisotropy = sampler_info.max_anisotropy;
         create_result = state.sampler_create_result;
         if (create_result == vk::Result.SUCCESS) {
             create_result = vk::create_sampler(

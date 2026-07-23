@@ -18,6 +18,7 @@
     "../../gpu/internal/debug.c3",
     "../../gpu/internal/shader_abi.c3",
     "../../gpu/internal/memory.c3",
+    "../../gpu/internal/sampler.c3",
     "../../gpu/internal/texture.c3",
     "../../gpu/internal/pipeline.c3",
     "../../gpu/internal/command.c3",

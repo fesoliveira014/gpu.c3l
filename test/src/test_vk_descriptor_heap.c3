@@ -1365,19 +1365,15 @@ fn void sampler_hash_collisions_preserve_distinct_keys() @test {
     missing_desc.address_u = gpu::AddressMode.REPEAT;
     vk::SamplerKey first_key = vk::canonical_sampler_key(
         &first_desc,
-        state.max_sampler_anisotropy,
     );
     vk::SamplerKey second_key = vk::canonical_sampler_key(
         &second_desc,
-        state.max_sampler_anisotropy,
     );
     vk::SamplerKey third_key = vk::canonical_sampler_key(
         &third_desc,
-        state.max_sampler_anisotropy,
     );
     vk::SamplerKey missing_key = vk::canonical_sampler_key(
         &missing_desc,
-        state.max_sampler_anisotropy,
     );
     assert(!vk::sampler_key_equal(&first_key, &second_key)
             && !vk::sampler_key_equal(&first_key, &third_key)
@@ -1453,7 +1449,6 @@ fn void sampler_native_create_failure_is_transactional() @test {
     gpu::SamplerDesc desc = { .mag_filter = gpu::Filter.LINEAR };
     vk::SamplerKey key = vk::canonical_sampler_key(
         &desc,
-        state.max_sampler_anisotropy,
     );
     ulong hash = vk::hash_sampler_key(&key);
     uint bucket = vk::sampler_bucket(hash, (uint)state.samplers.bucket_heads.len);
@@ -1512,6 +1507,37 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
     assert(caps.max_sampler_lod_bias == properties.limits.max_sampler_lod_bias,
         "caps expose the selected device mip bias limit");
+
+    if (caps.max_sampler_anisotropy > 0.0f) {
+        gpu::SamplerDesc exact_anisotropy = {
+            .anisotropy_enable = true,
+            .max_anisotropy = caps.max_sampler_anisotropy,
+        };
+        gpu::intern_sampler(&device, &exact_anisotropy)!!;
+        assert(vk::sampler_last_create_max_anisotropy(state)
+                == caps.max_sampler_anisotropy,
+            "native sampler creation receives the exact accepted anisotropy value");
+
+        uint sampler_count = state.samplers.count;
+        uint sampler_heap_count = state.strict_heap.descriptors.sampler_next_new;
+        vk::reset_sampler_lookup_stats(state);
+        ulong sampler_lookup_probes =
+            vk::sampler_lookup_stats(state).lookup_probes;
+        gpu::SamplerDesc over_anisotropy = exact_anisotropy;
+        over_anisotropy.max_anisotropy = caps.max_sampler_anisotropy + 1.0f;
+        assert(@catch(gpu::intern_sampler(&device, &over_anisotropy))
+                == gpu::INVALID_ARGUMENT,
+            "over-limit anisotropy is rejected before Vulkan sampler interning");
+        assert(state.samplers.count == sampler_count
+                && state.strict_heap.descriptors.sampler_next_new
+                    == sampler_heap_count
+                && vk::sampler_lookup_stats(state).lookup_probes
+                    == sampler_lookup_probes
+                && vk::sampler_last_create_max_anisotropy(state)
+                    == caps.max_sampler_anisotropy,
+            "over-limit anisotropy preserves lookup, table, heap, and native-create state");
+    }
+
     float bias_limit = caps.max_sampler_lod_bias;
     gpu::SamplerDesc positive_limit = { .mip_lod_bias = bias_limit };
     gpu::SamplerDesc negative_limit = { .mip_lod_bias = -bias_limit };
@@ -2037,8 +2063,9 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         "invalid sampler enum reports exact context");
 
     gpu::SamplerDesc invalid_anisotropy = { .anisotropy_enable = true, .max_anisotropy = 0.5f };
-    float supported_anisotropy = state.max_sampler_anisotropy;
-    if (supported_anisotropy <= 0) state.max_sampler_anisotropy = 16.0f;
+    gpu::internal::DeviceSlot* device_slot =
+        &gpu::internal::device_slots[device.index];
+    float supported_anisotropy = device_slot.data.caps.max_sampler_anisotropy;
     expect_descriptor_diagnostic(
         capture:             &capture,
         expected_fault:      gpu::INVALID_ARGUMENT,
@@ -2054,7 +2081,29 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
     assert(anisotropy == gpu::INVALID_ARGUMENT && capture.calls == 7 && capture.matched,
         "invalid sampler anisotropy reports exact context");
 
-    state.max_sampler_anisotropy = 0;
+    if (supported_anisotropy <= 0.0f) {
+        device_slot.data.caps.max_sampler_anisotropy = 16.0f;
+    }
+    gpu::SamplerDesc over_limit_anisotropy = {
+        .anisotropy_enable = true,
+        .max_anisotropy = device_slot.data.caps.max_sampler_anisotropy + 1.0f,
+    };
+    expect_descriptor_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        expected_kind:       gpu::DebugResourceKind.SAMPLER,
+        expected_identity:   false,
+        expected_index:      0,
+        expected_generation: 0,
+        expected_operation:  "intern_sampler",
+        expected_field:      "SamplerDesc.max_anisotropy",
+        expected_invariant:  "must not exceed DeviceCaps.max_sampler_anisotropy",
+    );
+    fault over_limit = @catch(gpu::intern_sampler(&device, &over_limit_anisotropy));
+    assert(over_limit == gpu::INVALID_ARGUMENT && capture.calls == 8 && capture.matched,
+        "over-limit sampler anisotropy reports exact context");
+
+    device_slot.data.caps.max_sampler_anisotropy = 0;
     gpu::SamplerDesc unsupported_anisotropy = { .anisotropy_enable = true, .max_anisotropy = 1.0f };
     expect_descriptor_diagnostic(
         capture:             &capture,
@@ -2068,9 +2117,9 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_invariant:  "device must support sampler anisotropy",
     );
     fault unsupported = @catch(gpu::intern_sampler(&device, &unsupported_anisotropy));
-    assert(unsupported == gpu::UNSUPPORTED_FEATURE && capture.calls == 8 && capture.matched,
+    assert(unsupported == gpu::UNSUPPORTED_FEATURE && capture.calls == 9 && capture.matched,
         "unsupported sampler anisotropy reports exact context");
-    state.max_sampler_anisotropy = supported_anisotropy;
+    device_slot.data.caps.max_sampler_anisotropy = supported_anisotropy;
     state.debug_callback = null;
 }
 

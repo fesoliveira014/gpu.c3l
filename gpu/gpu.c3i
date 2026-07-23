@@ -703,12 +703,13 @@ struct SamplerDesc {
     float       mip_lod_bias;
     float       min_lod;
     float       max_lod;
-    // Requires caps.max_sampler_anisotropy > 0 and max_anisotropy >= 1.
+    // Requires caps.max_sampler_anisotropy > 0.
     bool        anisotropy_enable;
-    // Must be >= 1 when anisotropy_enable is set (INVALID_ARGUMENT
-    // otherwise); upper-bounded by caps.max_sampler_anisotropy.
+    // Ignored when anisotropy_enable is false. When enabled, must be finite
+    // and >= 1; above caps.max_sampler_anisotropy faults INVALID_ARGUMENT.
     float       max_anisotropy;
-    // With `compare`, enables depth-compare (shadow) sampling.
+    // With `compare`, enables depth-compare (shadow) sampling. The compare
+    // value is ignored when compare_enable is false.
     bool        compare_enable;
     CompareOp   compare;
     ZString     debug_name;

@@ -540,9 +540,15 @@ fn void anisotropic_sampler_caps_honest() @test {
         .anisotropy_enable = true,
         .max_anisotropy    = 1024.0f,
     };
-    if (gpu::get_device_caps(&device)!!.max_sampler_anisotropy > 0) {
-        // Creation succeeds (max_anisotropy clamps to the device limit).
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    if (caps.max_sampler_anisotropy > 0) {
+        aniso.max_anisotropy = caps.max_sampler_anisotropy;
         gpu::SamplerIndex smp = gpu::intern_sampler(&device, &aniso)!!;
+
+        aniso.max_anisotropy = caps.max_sampler_anisotropy + 1.0f;
+        fault over_limit = @catch(gpu::intern_sampler(&device, &aniso));
+        assert(over_limit == gpu::INVALID_ARGUMENT,
+            "anisotropy above the reported limit faults INVALID_ARGUMENT");
     } else {
         fault err = @catch(gpu::intern_sampler(&device, &aniso));
         assert(err == gpu::UNSUPPORTED_FEATURE, "expected UNSUPPORTED_FEATURE, got %s", err);
@@ -559,7 +565,8 @@ fn void anisotropy_range_validated() @test {
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-    if (gpu::get_device_caps(&device)!!.max_sampler_anisotropy <= 0) return;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    if (caps.max_sampler_anisotropy <= 0) return;
 
     float[3] bad = { 0.0f, -1.0f, 0.5f };
     foreach (value : bad) {
@@ -573,11 +580,31 @@ fn void anisotropy_range_validated() @test {
         assert(f == gpu::INVALID_ARGUMENT, "max_anisotropy < 1 faults INVALID_ARGUMENT");
     }
 
-    gpu::SamplerDesc huge = {
+    float[3] non_finite = { float::nan, float::inf, -float::inf };
+    foreach (value : non_finite) {
+        gpu::SamplerDesc desc = {
+            .min_filter        = gpu::Filter.LINEAR,
+            .mag_filter        = gpu::Filter.LINEAR,
+            .anisotropy_enable = true,
+            .max_anisotropy    = value,
+        };
+        fault f = @catch(gpu::intern_sampler(&device, &desc));
+        assert(f == gpu::INVALID_ARGUMENT,
+            "non-finite max_anisotropy faults INVALID_ARGUMENT");
+    }
+
+    gpu::SamplerDesc exact = {
         .min_filter        = gpu::Filter.LINEAR,
         .mag_filter        = gpu::Filter.LINEAR,
         .anisotropy_enable = true,
-        .max_anisotropy    = 1.0e6f,
+        .max_anisotropy    = caps.max_sampler_anisotropy,
     };
-    gpu::SamplerIndex clamped = gpu::intern_sampler(&device, &huge)!!;
+    assert(gpu::intern_sampler(&device, &exact)!!.is_valid(),
+        "the exact anisotropy limit is accepted");
+
+    gpu::SamplerDesc over_limit = exact;
+    over_limit.max_anisotropy = caps.max_sampler_anisotropy + 1.0f;
+    fault over_limit_fault = @catch(gpu::intern_sampler(&device, &over_limit));
+    assert(over_limit_fault == gpu::INVALID_ARGUMENT,
+        "max_anisotropy above the reported limit faults INVALID_ARGUMENT");
 }

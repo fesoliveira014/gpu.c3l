@@ -78,8 +78,9 @@ null-safe, exactly-once structured debug dispatch and userdata preservation
 invalid-backend callback delivery with callback-enabled/disabled fault parity
 borrowed field and explicit absent-fault representation
 synthetic allocation sharing plans and exact buffer create-info mode/indices
-sampler canonicalization and byte hashing, forced collision equality,
-stable-index deduplication, table exhaustion, and concurrent convergence
+sampler exact anisotropy boundaries, inactive-field canonicalization and byte
+hashing, forced collision equality, stable-index deduplication, pre-dispatch
+transactionality, table exhaustion, and concurrent convergence
 ```
 
 Pure CPU tests should be exhaustive where practical.
@@ -145,9 +146,9 @@ retention, in-flight destruction rejection, and allocation-free pass begin
 borrowed swapchain-view build/acquire/render guards and resize invalidation
 texture-view capacity, batch rollback, immediate index reuse, stale and
 cross-device release rejection, and concurrent publication/release
-sampler hashed-bucket interning, collision-safe stable indices,
-heap/table/native-create rollback, index consistency, concurrent convergence,
-and device-owned teardown
+sampler exact-cap acceptance and over-cap rejection, exact native lowering,
+hashed-bucket interning, collision-safe stable indices, heap/table/native-create
+rollback, index consistency, concurrent convergence, and device-owned teardown
 ```
 
 Allocation queue-family regressions pin aliased and distinct creation plans
@@ -411,11 +412,12 @@ c3c build texture_view_operations --path test/cpu
 c3c build command_wrapper_bench --path test/cpu -O1
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
-python -m unittest scripts.test_check_docs scripts.test_check_public_api scripts.test_check_backend_dispatch scripts.test_check_retired_api scripts.test_check_swapchain_acquire_policy
+python -m unittest scripts.test_check_docs scripts.test_check_public_api scripts.test_check_backend_dispatch scripts.test_check_retired_api scripts.test_check_swapchain_acquire_policy scripts.test_check_sampler_policy
 python scripts/check_docs.py
 python scripts/check_public_api.py
 python scripts/check_backend_dispatch.py
 python scripts/check_swapchain_acquire_policy.py
+python scripts/check_sampler_policy.py
 python scripts/check_retired_api.py
 python -B -m unittest scripts.test_run_benchmarks
 ```

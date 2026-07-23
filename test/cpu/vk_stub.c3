@@ -8,6 +8,7 @@ import std::thread;
 
 const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
+const float STUB_SAMPLER_ANISOTROPY_LIMIT @private = 16.0f;
 
 struct StubRuntimeState {
     gpu::Runtime runtime;
@@ -73,15 +74,10 @@ fn gpu::SamplerIndex? intern_stub_sampler(
 ) {
     StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
-    if (sampler_desc_invalid_enum_field(desc) != null) return gpu::INVALID_ARGUMENT~;
-    if (desc.mip_lod_bias < -STUB_SAMPLER_LOD_BIAS_LIMIT
-        || desc.mip_lod_bias > STUB_SAMPLER_LOD_BIAS_LIMIT) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     state.sampler_intern_attempts++;
-    SamplerKey key = canonical_sampler_key(desc, 16.0f);
+    SamplerKey key = canonical_sampler_key(desc);
     for (uint i = 0; i < state.sampler_count; i++) {
         if (sampler_key_equal(&state.samplers[i].key, &key)) {
             return state.samplers[i].index;
@@ -527,6 +523,22 @@ fn gpu::Device? stub_create_strict_disabled_device() {
     );
 }
 
+fn gpu::Device? stub_create_anisotropy_disabled_device() {
+    StubDeviceState* state = mem::new(StubDeviceState);
+    defer catch mem::free(state);
+    state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
+    return gpu::internal::register_device(
+        backend: gpu::BackendKind.VULKAN,
+        caps: {
+            .strict_enabled       = true,
+            .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
+        },
+        vtable:         &STUB_DEVICE_VTABLE,
+        backend_state:  state,
+        resource_owner: state.resource_owner,
+    );
+}
+
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
     gpu::DeviceRequest* request,
@@ -556,6 +568,7 @@ fn gpu::Device? create_vk_device(
         .strict_enabled       = true,
         .presentation_enabled = presentation_surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
+        .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
     };
     return gpu::internal::register_device(
         backend:              gpu::BackendKind.VULKAN,
