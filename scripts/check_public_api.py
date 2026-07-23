@@ -582,6 +582,15 @@ def validate_document(document: dict) -> list[str]:
             ),
         ),
         (
+            "DepthState",
+            "struct",
+            (
+                ("test_enable", "bool"),
+                ("write_enable", "bool"),
+                ("compare", "CompareOp"),
+            ),
+        ),
+        (
             "DynamicRasterState",
             "struct",
             (
@@ -592,6 +601,28 @@ def validate_document(document: dict) -> list[str]:
                 ("depth_bias_constant", "float"),
                 ("depth_bias_slope", "float"),
                 ("depth_bias_clamp", "float"),
+            ),
+        ),
+        (
+            "Viewport",
+            "struct",
+            (
+                ("x", "float"),
+                ("y", "float"),
+                ("width", "float"),
+                ("height", "float"),
+                ("min_depth", "float"),
+                ("max_depth", "float"),
+            ),
+        ),
+        (
+            "ScissorRect",
+            "struct",
+            (
+                ("x", "int"),
+                ("y", "int"),
+                ("width", "int"),
+                ("height", "int"),
             ),
         ),
         (
@@ -900,14 +931,21 @@ def validate_document(document: dict) -> list[str]:
     if begin_render_pass is None:
         failures.append("missing cmd_begin_render_pass")
     else:
+        parameter_names = tuple(
+            member.get("name")
+            for member in begin_render_pass.get("members", [])
+        )
         parameter_types = tuple(
             member.get("type", {}).get("name")
             for member in begin_render_pass.get("members", [])
         )
-        if parameter_types != (
-            "CommandList*",
-            "RenderPassDesc*",
-            "GraphicsState*",
+        if (
+            parameter_names != ("commands", "desc", "state")
+            or parameter_types != (
+                "CommandList*",
+                "RenderPassDesc*",
+                "GraphicsState*",
+            )
         ):
             failures.append(
                 "cmd_begin_render_pass has the wrong parameters"

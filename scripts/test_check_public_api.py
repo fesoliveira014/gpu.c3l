@@ -553,6 +553,24 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "DepthState",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "test_enable",
+                                "type": {"name": "bool"},
+                            },
+                            {
+                                "name": "write_enable",
+                                "type": {"name": "bool"},
+                            },
+                            {
+                                "name": "compare",
+                                "type": {"name": "CompareOp"},
+                            },
+                        ],
+                    },
+                    {
                         "name": "DynamicRasterState",
                         "kind": "struct",
                         "members": [
@@ -583,6 +601,46 @@ def valid_document() -> dict:
                             {
                                 "name": "depth_bias_clamp",
                                 "type": {"name": "float"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "Viewport",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "x", "type": {"name": "float"}},
+                            {"name": "y", "type": {"name": "float"}},
+                            {
+                                "name": "width",
+                                "type": {"name": "float"},
+                            },
+                            {
+                                "name": "height",
+                                "type": {"name": "float"},
+                            },
+                            {
+                                "name": "min_depth",
+                                "type": {"name": "float"},
+                            },
+                            {
+                                "name": "max_depth",
+                                "type": {"name": "float"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "ScissorRect",
+                        "kind": "struct",
+                        "members": [
+                            {"name": "x", "type": {"name": "int"}},
+                            {"name": "y", "type": {"name": "int"}},
+                            {
+                                "name": "width",
+                                "type": {"name": "int"},
+                            },
+                            {
+                                "name": "height",
+                                "type": {"name": "int"},
                             },
                         ],
                     },
@@ -2425,6 +2483,38 @@ method gpu::Runtime.is_valid
             "cmd_begin_render_pass has the wrong parameters",
             check_public_api.validate_document(document),
         )
+
+        document = valid_document()
+        begin = next(
+            entry for entry in document["modules"]["gpu"]["functions"]
+            if entry["name"] == "cmd_begin_render_pass"
+        )
+        begin["members"][2]["name"] = "initial_state"
+        self.assertIn(
+            "cmd_begin_render_pass has the wrong parameters",
+            check_public_api.validate_document(document),
+        )
+
+    def test_requires_graphics_state_member_schemas(self) -> None:
+        for type_name in ("Viewport", "ScissorRect", "DepthState"):
+            for mutation in ("order", "type"):
+                with self.subTest(type_name=type_name, mutation=mutation):
+                    document = valid_document()
+                    definition = next(
+                        entry
+                        for entry in document["modules"]["gpu"]["types"]
+                        if entry["name"] == type_name
+                    )
+                    if mutation == "order":
+                        definition["members"][0:2] = reversed(
+                            definition["members"][0:2]
+                        )
+                    else:
+                        definition["members"][0]["type"]["name"] = "uint"
+                    self.assertIn(
+                        f"{type_name} must match the strict schema",
+                        check_public_api.validate_document(document),
+                    )
 
     def test_requires_complete_graphics_state_schema(self) -> None:
         for member_name in ("viewport", "scissor", "raster", "depth"):

@@ -1220,13 +1220,18 @@ fn void dynamic_raster_state_validation_is_atomic_and_pass_scoped() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::DynamicRasterState raster = {};
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
 
     gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_raster_state(&commands, &raster))
             == gpu::COMMAND_RECORDING_ERROR,
         "raster state requires an active render pass");
+    assert(@catch(gpu::cmd_set_graphics_state(&commands, &graphics_state))
+            == gpu::COMMAND_RECORDING_ERROR,
+        "graphics state requires an active render pass");
     assert(gpu::command_resolution_stats().native_commands == 0,
-        "out-of-pass raster validation emits no native command");
+        "out-of-pass dynamic state validation emits no native command");
 
     record_val_target_to_attach(&commands, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -1239,8 +1244,6 @@ fn void dynamic_raster_state_validation_is_atomic_and_pass_scoped() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
     gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
 
     gpu::PrimitiveTopology[3] topologies = {
@@ -1274,8 +1277,11 @@ fn void dynamic_raster_state_validation_is_atomic_and_pass_scoped() @test {
     assert(@catch(gpu::cmd_set_raster_state(&commands, null))
             == gpu::INVALID_ARGUMENT,
         "null raster state faults INVALID_ARGUMENT");
+    assert(@catch(gpu::cmd_set_graphics_state(&commands, null))
+            == gpu::INVALID_ARGUMENT,
+        "null graphics state faults INVALID_ARGUMENT");
     assert(gpu::command_resolution_stats().native_commands == 0,
-        "null raster state emits no native command");
+        "null dynamic state emits no native command");
 
     raster = {
         .topology            = gpu::PrimitiveTopology.LINES,
