@@ -21,6 +21,11 @@ enum PipelineKind : int {
     GRAPHICS,
 }
 
+enum GraphicsColorProfile : int {
+    IMMUTABLE,
+    DYNAMIC,
+}
+
 struct BlendKey {
     int src_color;
     int dst_color;
@@ -51,7 +56,7 @@ struct PipelineKey {
     int   sample_count;
     int   polygon_mode;
     int   kind;
-    uint  reserved;
+    int   color_profile;
 }
 $assert PipelineKey::size == 320;
 
@@ -188,6 +193,7 @@ fn PipelineKey build_graphics_key(
         .fragment_shader = fragment_shader,
     };
     key.kind                   = (int)PipelineKind.GRAPHICS;
+    key.color_profile          = (int)GraphicsColorProfile.IMMUTABLE;
     key.polygon_mode           = (int)desc.polygon_mode;
     key.depth_format           = (int)desc.depth_format;
     key.sample_count           = (int)desc.sample_count;
@@ -207,6 +213,27 @@ fn PipelineKey build_graphics_key(
                 .alpha_op  = (int)target.blend.alpha_op,
             };
         }
+    }
+    return key;
+}
+
+fn PipelineKey build_dynamic_graphics_key(
+    gpu::DynamicGraphicsPipelineDesc* desc,
+    ShaderId vertex_shader,
+    ShaderId fragment_shader,
+) @private {
+    PipelineKey key = {
+        .vertex_shader   = vertex_shader,
+        .fragment_shader = fragment_shader,
+        .kind            = (int)PipelineKind.GRAPHICS,
+        .color_profile   = (int)GraphicsColorProfile.DYNAMIC,
+        .polygon_mode    = (int)desc.polygon_mode,
+        .depth_format    = (int)desc.depth_format,
+        .sample_count    = (int)desc.sample_count,
+        .color_target_count = (uint)desc.colors.len,
+    };
+    foreach (i, &target : desc.colors) {
+        key.color_targets[i].format = (int)target.format;
     }
     return key;
 }

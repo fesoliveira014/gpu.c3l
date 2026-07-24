@@ -430,8 +430,12 @@ fn void graphics_pipeline_key_zeroes_unobservable_and_unused_target_state() @tes
         "disabled blend bytes are absent from canonical identity");
     assert(vk::hash_key(&first_key) == vk::hash_key(&second_key),
         "canonical aliases have equal key hashes");
-    assert(first_key.reserved == 0 && second_key.reserved == 0,
-        "explicit key tail padding stays zero");
+    assert(
+        first_key.color_profile == (int)vk::GraphicsColorProfile.IMMUTABLE
+            && second_key.color_profile
+                == (int)vk::GraphicsColorProfile.IMMUTABLE,
+        "existing descriptors retain the immutable profile"
+    );
 
     for (uint i = 1; i < gpu::MAX_COLOR_ATTACHMENTS; i++) {
         vk::ColorTargetKey* unused = &first_key.color_targets[i];
@@ -447,6 +451,84 @@ fn void graphics_pipeline_key_zeroes_unobservable_and_unused_target_state() @tes
                 && unused.blend.alpha_op == 0,
             "unused target blend fields are zero");
     }
+}
+
+fn void dynamic_color_pipeline_key_is_format_only_and_profiled() @test {
+    gpu::ColorTargetFormat[1] formats = {{
+        .format = gpu::Format.RGBA8_UNORM,
+    }};
+    gpu::DynamicGraphicsPipelineDesc first = {
+        .colors     = formats[..],
+        .debug_name = "first",
+    };
+    gpu::DynamicGraphicsPipelineDesc same_desc = first;
+    same_desc.debug_name = "alias";
+
+    vk::PipelineKey first_key = vk::build_dynamic_graphics_key(
+        &first,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    vk::PipelineKey alias_key = vk::build_dynamic_graphics_key(
+        &same_desc,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    assert(vk::key_equals(&first_key, &alias_key));
+    assert(vk::hash_key(&first_key) == vk::hash_key(&alias_key));
+    assert(
+        first_key.color_profile == (int)vk::GraphicsColorProfile.DYNAMIC
+    );
+    assert(first_key.color_targets[0].format == (int)gpu::Format.RGBA8_UNORM);
+    assert(first_key.color_targets[0].blend_enable == 0);
+    assert((uint)first_key.color_targets[0].write_mask == 0);
+
+    gpu::ColorTargetState[1] immutable_colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc immutable = {
+        .colors = immutable_colors[..],
+    };
+    vk::PipelineKey immutable_key = vk::build_graphics_key(
+        &immutable,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    assert(
+        !vk::key_equals(&first_key, &immutable_key),
+        "dynamic and immutable profiles never alias"
+    );
+
+    gpu::DynamicGraphicsPipelineDesc changed = first;
+    changed.sample_count = gpu::SampleCount.FOUR;
+    vk::PipelineKey sample_key = vk::build_dynamic_graphics_key(
+        &changed,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    assert(!vk::key_equals(&first_key, &sample_key));
+
+    changed = first;
+    changed.polygon_mode = gpu::PolygonMode.LINE;
+    vk::PipelineKey polygon_key = vk::build_dynamic_graphics_key(
+        &changed,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    assert(!vk::key_equals(&first_key, &polygon_key));
+
+    gpu::ColorTargetFormat[1] alternate_formats = {{
+        .format = gpu::Format.BGRA8_UNORM,
+    }};
+    changed = first;
+    changed.colors = alternate_formats[..];
+    vk::PipelineKey format_key = vk::build_dynamic_graphics_key(
+        &changed,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    assert(!vk::key_equals(&first_key, &format_key));
 }
 
 fn void render_pass_rejects_mixed_samples_before_mutation() @test {
