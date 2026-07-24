@@ -80,6 +80,10 @@ def main() -> int:
                     disassembly.encode("utf-8"),
                 ).hexdigest(),
                 "spirv_validation": "pass",
+                "runtime_evidence": fixture.get(
+                    "runtime_evidence",
+                    "covered by the canonical or rejection reflection suite",
+                ),
             }
         )
 

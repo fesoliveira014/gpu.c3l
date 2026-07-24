@@ -79,14 +79,16 @@
       "source": "root_signed.comp.glsl",
       "output": "root_signed.comp.spv",
       "expected": "reject",
-      "isolates": "signedness semantic policy"
+      "isolates": "signedness semantic policy",
+      "runtime_evidence": "vk_root_pointer signed_root_runtime_evidence passes distinctive nonzero address bits and zero under the test-only audit seam; production remains rejected"
     },
     {
       "id": "direct-reference-root",
       "source": "root_ref.comp.glsl",
       "output": "root_ref.comp.spv",
       "expected": "reject",
-      "isolates": "evidence-gated physical buffer reference"
+      "isolates": "evidence-gated physical buffer reference",
+      "runtime_evidence": "vk_root_pointer direct_reference_root_runtime_evidence passes nonzero root dereference/readback and zero under the test-only audit seam; production remains rejected"
     },
     {
       "id": "nested-root",

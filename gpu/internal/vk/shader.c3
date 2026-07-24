@@ -482,6 +482,7 @@ enum RootAbiMismatch : int {
 fn RootAbiMismatch root_member_mismatch(
     spvreflect::BlockVariable* member,
     gpu::internal::RootAbiMemberSpec* expected,
+    bool allow_alternate,
 ) @private {
     if (member == null) return RootAbiMismatch.MEMBER_MISSING;
     if (member.byte_offset() != expected.offset) {
@@ -491,6 +492,26 @@ fn RootAbiMismatch root_member_mismatch(
         return RootAbiMismatch.MEMBER_SIZE;
     }
     spvreflect::TypeFlags flags = member.type_flags();
+    bool reference = has_type_flag(
+        flags,
+        spvreflect::TypeFlags.TYPE_FLAG_REF,
+    );
+    if (allow_alternate && reference) {
+        bool incompatible_reference_shape = has_type_flag(
+            flags,
+            spvreflect::TypeFlags.TYPE_FLAG_VECTOR,
+        )
+            || has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_MATRIX)
+            || has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_ARRAY)
+            || has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_BOOL)
+            || member.vector_component_count() != 0
+            || member.matrix_column_count() != 0
+            || member.matrix_row_count() != 0
+            || member.array_dimension_count() != 0;
+        return incompatible_reference_shape
+            ? RootAbiMismatch.MEMBER_AGGREGATE
+            : RootAbiMismatch.NONE;
+    }
     bool aggregate = has_type_flag(
         flags,
         spvreflect::TypeFlags.TYPE_FLAG_VECTOR,
@@ -509,7 +530,8 @@ fn RootAbiMismatch root_member_mismatch(
     if (member.scalar_width() != expected.scalar_width) {
         return RootAbiMismatch.MEMBER_WIDTH;
     }
-    if (member.scalar_is_signed() != expected.scalar_signed) {
+    if (!allow_alternate
+        && member.scalar_is_signed() != expected.scalar_signed) {
         return RootAbiMismatch.MEMBER_SIGNEDNESS;
     }
     bool integer = has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_INT);
@@ -528,7 +550,11 @@ fn bool root_member_shape_matches(
     spvreflect::BlockVariable* member,
     gpu::internal::RootAbiMemberSpec* expected,
 ) @private {
-    return root_member_mismatch(member, expected) == RootAbiMismatch.NONE;
+    return root_member_mismatch(
+        member,
+        expected,
+        false,
+    ) == RootAbiMismatch.NONE;
 }
 
 fn ZString root_abi_mismatch_invariant(
@@ -570,6 +596,7 @@ fn RootAbiMismatch root_push_abi_mismatch(
     spvreflect::ShaderModule* reflect_module,
     ZString entry_point,
     gpu::ShaderStage stage,
+    bool allow_alternate = false,
 ) {
     gpu::internal::RootAbiSpec expected = root_abi_for_stage(stage);
     uint count = 0;
@@ -604,7 +631,11 @@ fn RootAbiMismatch root_push_abi_mismatch(
     }
     for (uint i = 0; i < expected.member_count; i++) {
         RootAbiMismatch mismatch =
-            root_member_mismatch(block.member(i), &expected.members[i]);
+            root_member_mismatch(
+                block.member(i),
+                &expected.members[i],
+                allow_alternate,
+            );
         if (mismatch != RootAbiMismatch.NONE) return mismatch;
     }
     return RootAbiMismatch.NONE;
@@ -621,7 +652,15 @@ fn void? check_root_push_abi(
         reflect_module,
         entry_point,
         stage,
+        false,
     ) != RootAbiMismatch.NONE) return gpu::SHADER_INVALID~;
+}
+
+fn void set_root_abi_evidence_enabled(
+    VkDeviceState* state,
+    bool enabled,
+) @if(env::TESTING) {
+    state.root_abi_evidence_enabled = enabled;
 }
 
 fn void? copy_entry_point(char* dst, ZString source) @private {
@@ -805,10 +844,15 @@ fn PipelineShaderModule? create_pipeline_shader_module(
             invariant:      "selected-entry descriptor bindings must match the gpu heap convention",
         )~;
     }
+    bool allow_alternate_root = false;
+    $if env::TESTING:
+        allow_alternate_root = state.root_abi_evidence_enabled;
+    $endif
     RootAbiMismatch root_mismatch = root_push_abi_mismatch(
         reflect_module,
         selected_entry_point,
         code.stage,
+        allow_alternate_root,
     );
     if (root_mismatch != RootAbiMismatch.NONE) {
         return report_shader_contract_failure(
