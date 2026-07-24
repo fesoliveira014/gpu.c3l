@@ -1213,10 +1213,12 @@ Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
 `CommandResolutionStats`, `reset_command_resolution_stats`, and
 `command_resolution_stats`. The process-wide relaxed counters measure
 live-encoder entry-point attempts, every emitted Vulkan command, and forbidden
-resolution paths. The encoder counters additionally require one cell
-computation and one lease comparison per warm call. A narrow structural guard
-rejects reintroduced duplicate encoder identity comparisons, device-loss loads,
-and trusted-backend capability comparisons; those prohibitions are not inferred
+resolution paths. Exact native-operation fields distinguish pipeline binds,
+descriptor-set binds, descriptor-buffer binds, and descriptor-buffer offset
+commands. The encoder counters additionally require one cell computation and
+one lease comparison per warm call. A narrow structural guard rejects
+reintroduced duplicate encoder identity comparisons, device-loss loads, and
+trusted-backend capability comparisons; those prohibitions are not inferred
 from runtime counters. Reset and compare the counters only across an externally
 synchronized recording interval; they are absent from ordinary production
 builds.

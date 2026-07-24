@@ -470,6 +470,19 @@ internal heap remain scoped to their owning `Device`.
 Public indices map to descriptor entries. Neither path changes the public API
 or shader material records.
 
+Strict heap binding is command-record state rather than pipeline state. The
+indexing path emits one set-0 bind for each used strict bind point. The
+descriptor-buffer path emits one global buffer bind per command record and one
+offset command for each used strict bind point. Switching compatible strict
+pipelines does not repeat heap setup. Command-buffer reuse clears the cache, and
+private full/per-bind-point invalidation operations are reserved for future
+incompatible descriptor domains.
+
+Publishing texture views or samplers does not invalidate this binding state.
+Indexing updates retain their update-after-bind rules; descriptor-buffer writes
+and reads retain the caller-authored `HazardFlags.descriptors` synchronization
+contract.
+
 Every strict-enabled device has an append-only sampler table keyed by normalized
 semantic state. Explicitly zero-initialized canonical keys are byte-hashed into
 fixed power-of-two buckets with `+1`-encoded links; candidates with an equal hash

@@ -203,6 +203,7 @@ struct VkDeviceState {
     PipelineCacheTable         pipeline_cache;
     vk::PipelineLayout         graphics_layout;
     vk::PipelineLayout         compute_layout;
+    vk::DescriptorSetLayout    strict_pipeline_set_layout;
     vk::IndirectCommandsLayoutEXT generated_draw_layout;
     vk::IndirectCommandsLayoutEXT generated_indexed_draw_layout;
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout;

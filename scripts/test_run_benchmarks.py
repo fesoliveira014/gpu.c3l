@@ -42,6 +42,8 @@ COMMAND_OUTPUT = "\n".join(
         ),
         (
             "resolution: recording_commands=305000 native_commands=405000 "
+            "pipeline_binds=0 descriptor_set_binds=0 "
+            "descriptor_buffer_binds=0 descriptor_buffer_offsets=0 "
             "device_registry=0 "
             "retained_pins=0 lifecycle_vtable=0 command_table=0 "
             "pipeline_table=0 pipeline_cache=0 policy=0 "
@@ -921,6 +923,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_command_measurement_requires_zero_resolution_evidence(self):
         runner = load_runner()
         for field in (
+            "pipeline_binds",
+            "descriptor_set_binds",
+            "descriptor_buffer_binds",
+            "descriptor_buffer_offsets",
             "device_registry",
             "retained_pins",
             "lifecycle_vtable",

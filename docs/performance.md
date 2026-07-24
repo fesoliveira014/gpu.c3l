@@ -166,6 +166,7 @@ subsystem snapshots:
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
 | Submission ownership | Submitted-batch references, caller tokens, retained-reference counts, and ordered retirement state |
 | Bound pipeline snapshot | Exact bind-time table/cache lookups, per-bind-point `pipeline_bind_commands`, zero post-bind resolution under cache churn, and unchanged layout use after backing-slot mutation |
+| Strict descriptor heap | Exact `strict_heap_set_bind_commands`, `strict_heap_buffer_bind_commands`, and `strict_heap_offset_commands`: one set or offset per used bind point and one descriptor-buffer bind per command record |
 | Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and zero post-intern shader work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Exact collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
@@ -174,7 +175,9 @@ one packed-lease comparison per recorded public command. Duplicate encoder
 identity comparisons, device-loss loads, and trusted-backend capability
 comparisons are explicit structural prohibitions checked against the warm
 frontend and trusted backend sources; they are not represented as runtime
-counter evidence.
+counter evidence. Pipeline and descriptor-heap counters measure native
+emission, not public bind attempts, so compatible pipeline switches can increase
+pipeline binds without increasing heap binds.
 
 Pass begin accounts for one native begin-rendering command followed by exactly
 ten dynamic-state commands. A complete `cmd_set_graphics_state` replacement

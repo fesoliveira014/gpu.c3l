@@ -134,14 +134,48 @@ fn void descriptor_buffer_create_info_uses_only_graphics_and_compute_families() 
 
 fn void disabled_descriptor_heap_bind_returns_unsupported_feature() @test {
     gpu::internal::vk::VkDeviceState state = {};
+    gpu::internal::vk::CommandRecord record = {};
     fault bind_fault = @catch(gpu::internal::vk::bind_descriptor_heap(
         state:      &state,
-        cb:         (vk::CommandBuffer)null,
+        record:     &record,
         layout:     (vk::PipelineLayout)null,
         bind_point: vk::PipelineBindPoint.COMPUTE,
     ));
 
     assert(bind_fault == gpu::UNSUPPORTED_FEATURE, "disabled descriptor heaps cannot be bound");
+}
+
+fn void strict_heap_binding_invalidation_is_scoped() @test {
+    gpu::internal::vk::CommandRecord record = {
+        .strict_heap_binding = {
+            .descriptor_buffer_bound = true,
+            .graphics_offsets_set    = true,
+            .compute_offsets_set     = true,
+            .graphics_set_bound      = true,
+            .compute_set_bound       = true,
+        },
+    };
+
+    gpu::internal::vk::invalidate_strict_heap_bind_point(
+        &record,
+        vk::PipelineBindPoint.GRAPHICS,
+    );
+    assert(record.strict_heap_binding.descriptor_buffer_bound,
+        "bind-point invalidation preserves the global buffer binding");
+    assert(!record.strict_heap_binding.graphics_offsets_set
+        && !record.strict_heap_binding.graphics_set_bound,
+        "graphics invalidation clears only graphics state");
+    assert(record.strict_heap_binding.compute_offsets_set
+        && record.strict_heap_binding.compute_set_bound,
+        "graphics invalidation preserves compute state");
+
+    gpu::internal::vk::invalidate_strict_heap_binding(&record);
+    assert(!record.strict_heap_binding.descriptor_buffer_bound
+        && !record.strict_heap_binding.graphics_offsets_set
+        && !record.strict_heap_binding.compute_offsets_set
+        && !record.strict_heap_binding.graphics_set_bound
+        && !record.strict_heap_binding.compute_set_bound,
+        "full invalidation clears every strict heap binding");
 }
 
 fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
@@ -153,6 +187,11 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
         .logical_pipeline = {
             .handle      = cached,
             .cache_entry = 19,
+        },
+        .strict_heap_binding = {
+            .descriptor_buffer_bound = true,
+            .compute_offsets_set     = true,
+            .graphics_set_bound      = true,
         },
     };
     gpu::internal::CommandEncoderState encoder = {
@@ -167,6 +206,10 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
         "rejected binding preserves the active pipeline");
     assert(record.logical_pipeline.cache_entry == 19,
         "rejected binding preserves the active pipeline entry");
+    assert(record.strict_heap_binding.descriptor_buffer_bound
+        && record.strict_heap_binding.compute_offsets_set
+        && record.strict_heap_binding.graphics_set_bound,
+        "rejected binding preserves strict heap state");
 }
 
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
@@ -204,6 +247,19 @@ fn gpu::TextureHandle make_heap_view_texture(gpu::Device* device) {
         .usage        = { .sampled, .storage },
     };
     return gpu::create_texture(device, &desc)!!;
+}
+
+fn void strict_pipeline_layouts_share_heap_set_zero() @test {
+    gpu::Device device = make_heap_test_device(1, 1);
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+
+    assert(state.graphics_layout != null && state.compute_layout != null,
+        "strict devices create both shared pipeline layouts");
+    assert(state.strict_pipeline_set_layout
+            == state.strict_heap.descriptors.set_layout,
+        "strict graphics and compute layouts share the heap set-zero layout");
 }
 
 fn void sampler_lookup_scale_empty_bucket_miss_has_zero_work() @test {

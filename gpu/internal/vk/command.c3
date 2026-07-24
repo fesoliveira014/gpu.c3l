@@ -2331,22 +2331,16 @@ fn void? record_bound_pipeline(
     NativePipelineBinding* native = bound.kind == PipelineKind.COMPUTE
         ? &record.native_compute_pipeline
         : &record.native_graphics_pipeline;
+    vk::PipelineBindPoint bind_point = bound.kind == PipelineKind.COMPUTE
+        ? vk::PipelineBindPoint.COMPUTE
+        : vk::PipelineBindPoint.GRAPHICS;
     bool native_match = native.pipeline != null
         && native.kind == bound.kind
         && native.cache_entry == bound.cache_entry;
     if (!native_match) {
-        vk::PipelineBindPoint bind_point = bound.kind == PipelineKind.COMPUTE
-            ? vk::PipelineBindPoint.COMPUTE
-            : vk::PipelineBindPoint.GRAPHICS;
         vk::cmd_bind_pipeline(record.command_buffer, bind_point, bound.pipeline);
         gpu::internal::note_command_pipeline_bind();
         gpu::internal::note_command_native_call();
-        bind_descriptor_heap(
-            state:      state,
-            cb:         record.command_buffer,
-            layout:     bound.layout,
-            bind_point: bind_point,
-        )!;
         *native = {
             .pipeline                  = bound.pipeline,
             .layout                    = bound.layout,
@@ -2356,6 +2350,12 @@ fn void? record_bound_pipeline(
             .render                    = bound.render,
         };
     }
+    bind_descriptor_heap(
+        state:      state,
+        record:     record,
+        layout:     bound.layout,
+        bind_point: bind_point,
+    )!;
     record.logical_pipeline = *bound;
 }
 

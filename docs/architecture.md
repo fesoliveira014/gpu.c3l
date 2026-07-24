@@ -607,6 +607,15 @@ reference-state, fault, and native-emission observations are the authority for
 warm policy and tracking behavior. Timing is blocking only for an explicitly
 pinned runner, driver, and comparison profile.
 
+The strict descriptor heap is device-global and bound lazily on the first
+strict pipeline selection in a command record. Descriptor indexing binds set 0
+once per used graphics or compute bind point. Descriptor-buffer mode binds its
+stable buffer address once per command record and sets one offset per used bind
+point. Ordinary strict pipeline changes, descriptor publication, draws,
+dispatches, and descriptor hazard barriers do not replay that setup. Fresh
+command records start with empty binding state after native command-buffer
+reset.
+
 ### Compute
 
 ```text
@@ -723,7 +732,9 @@ and releases both slot and bucket storage.
 The backend prefers descriptor indexing when it satisfies the requested
 capacities and falls back to descriptor buffers when available. Callers cannot
 select or branch on the native implementation; shader material records are
-identical on either path.
+identical on either path. Descriptor updates remain independent from
+command-buffer binding state and continue to use the explicit descriptor hazard
+contract.
 
 ## 10. Swapchain model
 

@@ -43,6 +43,14 @@ struct NativePipelineBinding {
     RenderCompatibility            render;
 }
 
+struct StrictHeapCommandBinding {
+    bool descriptor_buffer_bound;
+    bool graphics_offsets_set;
+    bool compute_offsets_set;
+    bool graphics_set_bound;
+    bool compute_set_bound;
+}
+
 struct CommandRecord {
     vk::CommandBuffer            command_buffer;
     gpu::CommandAllocatorHandle  allocator;
@@ -54,6 +62,7 @@ struct CommandRecord {
     BoundPipeline                logical_pipeline;
     NativePipelineBinding        native_graphics_pipeline;
     NativePipelineBinding        native_compute_pipeline;
+    StrictHeapCommandBinding     strict_heap_binding;
     CommandScratch*              scratch;
 }
 

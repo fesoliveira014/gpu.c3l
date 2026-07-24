@@ -14,6 +14,23 @@ const char[*] DB_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");
 const char[*] DB_VERT_SPIRV   = $embed("shaders/offscreen.vert.spv");
 const char[*] DB_FRAG_SPIRV   = $embed("shaders/offscreen.frag.spv");
 
+struct DescriptorBufferValidationCapture {
+    uint errors;
+}
+
+fn void capture_descriptor_buffer_validation_error(
+    gpu::DebugMessage* message,
+    void* user_data,
+) {
+    if (message.category.backend
+        && message.category.validation
+        && message.severity == gpu::DebugMessageSeverity.ERROR) {
+        DescriptorBufferValidationCapture* capture =
+            (DescriptorBufferValidationCapture*)user_data;
+        capture.errors++;
+    }
+}
+
 fn bool db_e2e_enabled() {
     if (try value = env::tget_var("GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E")) {
         return value == "1";
@@ -100,6 +117,46 @@ fn gpu::Device? create_descriptor_buffer_test_device(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn gpu::PipelineHandle create_descriptor_buffer_binding_compute_pipeline(
+    gpu::Device* device,
+    char[] spirv,
+) {
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = spirv,
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc pipeline_desc = {
+        .shader = gpu::prepare_shader_code(&shader_desc)!!,
+    };
+    return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
+}
+
+fn gpu::PipelineHandle create_descriptor_buffer_binding_graphics_pipeline(
+    gpu::Device* device,
+) {
+    gpu::ShaderDesc vertex_desc = {
+        .stage       = gpu::ShaderStage.VERTEX,
+        .spirv       = DB_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderDesc fragment_desc = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = DB_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ColorTargetState[1] colors = {{
+        .format     = gpu::Format.RGBA8_UNORM,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc pipeline_desc = {
+        .vertex_shader   = gpu::prepare_shader_code(&vertex_desc)!!,
+        .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
+        .colors          = colors[..],
+    };
+    return gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
+}
+
 fn void descriptor_buffer_device_and_heap() @test {
     gpu::RuntimeDesc desc = {
         .backend               = gpu::BackendKind.VULKAN,
@@ -157,6 +214,150 @@ fn void descriptor_buffer_device_and_heap() @test {
 
     gpu::SamplerDesc sampler_desc = {};
     gpu::SamplerIndex sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+}
+
+fn void descriptor_buffer_binding_is_cached_per_command_and_bind_point() @test {
+    DescriptorBufferValidationCapture capture = {};
+    gpu::RuntimeDesc desc = {
+        .backend                  = gpu::BackendKind.VULKAN,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_descriptor_buffer_binding_cache",
+        .debug_callback           = &capture_descriptor_buffer_validation_error,
+        .debug_user_data          = &capture,
+    };
+    gpu::internal::vk::DeviceCreationProbe probe = {
+        .descriptor_buffer_override = true,
+    };
+    gpu::Device? maybe_device =
+        create_descriptor_buffer_test_device(&desc, &probe);
+    if (catch err = maybe_device) {
+        assert(
+            descriptor_buffer_creation_is_unavailable(&probe, err),
+            "descriptor-buffer binding device creation failed unexpectedly: %s",
+            err
+        );
+        io::eprintfn(
+            "descriptor_buffer_binding_is_cached_per_command_and_bind_point: descriptor-buffer capability unavailable, skipping",
+        );
+        return;
+    }
+    gpu::Device device = maybe_device;
+    defer destroy_test_device(&device)!!;
+    gpu::PipelineHandle first_compute =
+        create_descriptor_buffer_binding_compute_pipeline(
+            &device,
+            DB_WRITE_SPIRV[..],
+        );
+    defer gpu::destroy_pipeline(&device, first_compute)!!;
+    gpu::PipelineHandle compute_alias =
+        create_descriptor_buffer_binding_compute_pipeline(
+            &device,
+            DB_WRITE_SPIRV[..],
+        );
+    defer gpu::destroy_pipeline(&device, compute_alias)!!;
+    gpu::PipelineHandle second_compute =
+        create_descriptor_buffer_binding_compute_pipeline(
+            &device,
+            DB_SAMPLE_SPIRV[..],
+        );
+    defer gpu::destroy_pipeline(&device, second_compute)!!;
+    gpu::PipelineHandle graphics =
+        create_descriptor_buffer_binding_graphics_pipeline(&device);
+    defer gpu::destroy_pipeline(&device, graphics)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+
+    capture.errors = 0;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, first_compute)!!;
+    gpu::cmd_bind_pipeline(&commands, graphics)!!;
+    gpu::cmd_bind_pipeline(&commands, second_compute)!!;
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 3,
+        "distinct compute and graphics pipelines emit native pipeline binds");
+    assert(stats.strict_heap_set_bind_commands == 0,
+        "descriptor-buffer mode emits no descriptor-set binds");
+    assert(stats.strict_heap_buffer_bind_commands == 1,
+        "one command record binds the global descriptor buffer once");
+    assert(stats.strict_heap_offset_commands == 2,
+        "one command record sets one offset per used bind point");
+
+    gpu::SamplerDesc sampler_desc = {};
+    (void)gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, second_compute)!!;
+    stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 0
+        && stats.strict_heap_set_bind_commands == 0
+        && stats.strict_heap_buffer_bind_commands == 0
+        && stats.strict_heap_offset_commands == 0,
+        "descriptor-buffer publication preserves cached heap binding");
+
+    gpu::Barrier descriptor_hazard = {
+        .before  = { .compute = true },
+        .after   = { .compute = true },
+        .hazards = { .descriptors = true },
+    };
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_barrier(&commands, &descriptor_hazard)!!;
+    gpu::cmd_bind_pipeline(&commands, second_compute)!!;
+    stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 0
+        && stats.strict_heap_set_bind_commands == 0
+        && stats.strict_heap_buffer_bind_commands == 0
+        && stats.strict_heap_offset_commands == 0,
+        "a descriptor hazard barrier preserves cached buffer binding");
+
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::invalidate_strict_heap_binding(record);
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, second_compute)!!;
+    stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 0
+        && stats.strict_heap_set_bind_commands == 0
+        && stats.strict_heap_buffer_bind_commands == 1
+        && stats.strict_heap_offset_commands == 1,
+        "full invalidation restores the buffer and active bind-point offset");
+    discard_test_commands(&commands)!!;
+
+    commands = gpu::begin_commands(&allocator)!!;
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, first_compute)!!;
+    gpu::cmd_bind_pipeline(&commands, graphics)!!;
+    stats = gpu::command_resolution_stats();
+    assert(stats.strict_heap_buffer_bind_commands == 1
+        && stats.strict_heap_offset_commands == 2,
+        "a reused command buffer starts with fresh descriptor binding state");
+    discard_test_commands(&commands)!!;
+
+    uint[3] switch_counts = { 16, 256, 4096 };
+    foreach (switch_count : switch_counts) {
+        commands = gpu::begin_commands(&allocator)!!;
+        gpu::reset_command_resolution_stats();
+        for (uint i = 0; i < switch_count; i++) {
+            gpu::PipelineHandle selected = i % 3 == 0
+                ? first_compute
+                : i % 3 == 1
+                    ? compute_alias
+                    : second_compute;
+            gpu::cmd_bind_pipeline(&commands, selected)!!;
+        }
+        stats = gpu::command_resolution_stats();
+        assert(stats.strict_heap_set_bind_commands == 0
+            && stats.strict_heap_buffer_bind_commands == 1
+            && stats.strict_heap_offset_commands == 1,
+            "scaled distinct and alias switches bind the strict buffer once");
+        discard_test_commands(&commands)!!;
+    }
+    assert(capture.errors == 0,
+        "descriptor-buffer binding cache records no Vulkan validation errors");
 }
 
 fn void descriptor_buffer_compute_to_graphics() @test {

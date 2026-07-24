@@ -771,6 +771,8 @@ fn void preserves_graphics_binding_across_render_passes() @test {
 fn void distinct_graphics_cache_entries_emit_distinct_binds() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::internal::device_backend_state(device);
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
     gpu::PipelineHandle alternate = review_distinct_graphics_pipeline(
@@ -793,6 +795,7 @@ fn void distinct_graphics_cache_entries_emit_distinct_binds() @test {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.pipeline_bind_commands == 2,
         "distinct graphics cache entries emit two native binds");
+    assert_strict_heap_bind_work(state, stats, 1);
 }
 
 fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
@@ -939,6 +942,8 @@ fn void graphics_alias_updates_logical_handle_without_rebinding() @test {
 fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::internal::device_backend_state(device);
     ValComputeCtx compute = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &compute);
     ValDrawCtx draw = make_val_draw_ctx(&device);
@@ -962,6 +967,7 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.pipeline_bind_commands == 2,
         "command-buffer reuse resets both native pipeline caches");
+    assert_strict_heap_bind_work(state, stats, 2);
 }
 
 fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
