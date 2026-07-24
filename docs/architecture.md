@@ -147,12 +147,14 @@ destroy_runtime(Runtime*)          -> void?
 full_validation_runtime_desc()     -> RuntimeDesc
 ```
 
-Runtime policy has independent axes. `ContractValidation.TRUSTED` is the zero
-value. Every level rejects stale/foreign identities at public resource
-resolve/destroy boundaries as mandatory safety; `OBJECT_BOUNDARIES` adds
-structured diagnostics for those failures at covered public resource and
-command-lifecycle boundaries. `FULL` selects detailed command semantic checks
-on top of the sole bounded command-token representation.
+Runtime policy has independent axes. A zero-initialized `RuntimeDesc` selects
+`ContractValidation.TRUSTED`, lifetime tracking off, and Vulkan validation
+layers off. Every contract level retains the always-checked bounded-identity,
+authoritative-phase, host-safety, safe-lowering, lifecycle, cold-path, and
+runtime-result floor. `OBJECT_BOUNDARIES` uses the same trusted command tables
+as `TRUSTED` and adds structured reporting only at explicitly routed public
+boundaries plus teardown leak scans. `FULL` selects checked command tables with
+detailed semantic diagnostics.
 `track_resource_lifetimes` independently selects command reference retention,
 and `enable_vulkan_validation` independently requests the Khronos layer.
 Debug names request best-effort native naming, while a callback only selects
@@ -289,9 +291,9 @@ A command list is a transient token for one device-table command record paired
 with one originating allocator native buffer/scratch unit. Its fixed public
 payload carries a `Device` plus a compact owner/slot/generation command
 identity. Resolution validates the device, allocator, identity, and
-authoritative phase before obtaining the record. `ContractValidation.FULL`
-therefore diagnoses fabricated, stale, foreign, wrong-phase, duplicate, and
-consumed values deterministically.
+authoritative phase before obtaining the record under every policy. Fabricated,
+stale, foreign, wrong-phase, duplicate, and consumed values are therefore
+rejected deterministically before unsafe access or native mutation.
 
 Every preallocated command cell owns one address-stable authoritative
 `CommandRecord`. It contains the selected immutable `CommandOps`, backend state
@@ -623,7 +625,8 @@ owned by allocators, not workers or frame boundaries; see `docs/threading.md`.
 Vulkan device creation selects one immutable command table from contract depth
 and tracking: trusted/no-tracking, trusted/tracking, checked/no-tracking, or
 checked/tracking. `OBJECT_BOUNDARIES` uses the trusted command entries because
-its additional work belongs at public boundaries. The authoritative record
+it adds reporting only at explicitly routed public boundaries and teardown leak
+scans, not a command-semantic middle tier. The authoritative record
 stores the chosen pointer once; repeated `cmd_*` calls do not inspect contract,
 tracking, layer, callback, naming policy, or separate command-capability fields.
 All four tables retain mandatory host
@@ -664,10 +667,11 @@ cmd_bind_pipeline(command_list, pipeline)
 cmd_dispatch(command_list, root_gpu, groups)
 ```
 
-Binding selects the active compute pipeline and descriptor heap. Dispatch
-requires that active kind, pushes the root address unchanged, and executes
-without native pipeline creation. Zero is valid when the shader avoids
-dereferencing it.
+Binding selects the active compute pipeline and descriptor heap. A valid
+dispatch uses that active kind, pushes the root address unchanged, and executes
+without native pipeline creation. Zero is valid under every validation policy;
+the shader branches before dereference unless the application relies on
+defined robustness behavior.
 
 ### Graphics
 
@@ -705,6 +709,11 @@ cannot overwrite caller-selected command state. Draws require an active
 graphics pipeline, push both roots unchanged, and perform no native pipeline
 creation.
 
+Direct, indirect, and generated compute and graphics work share that ABI rule:
+every root argument or generated-record root field is forwarded unchanged,
+including zero, independent of contract policy. Shader control flow owns zero
+dereference safety.
+
 Vertex data can be shader-loaded through GPU addresses. Fixed-function vertex input is allowed for simple paths, but it is not the preferred data model.
 
 ### Transfer
@@ -740,9 +749,11 @@ storage helpers construct common states without recording work. Cross-queue
 dependencies use completion waits.
 
 The caller owns texture history. `before` asserts the state established by
-earlier ordering; the backend validates and lowers it but never consults or
-updates a shared layout table. Each accepted barrier resolves its texture and
-range once, lowers its two states once, and emits one native barrier.
+earlier ordering; the backend never consults or updates a shared layout table.
+Identity, range, and safe-lowering checks remain active under every policy,
+while `FULL` adds semantic layout, stage, access, usage, queue, and presentation
+diagnostics. Each accepted barrier resolves its texture and range once, lowers
+its two states once, and emits one native barrier.
 
 Render pass boundaries do not imply shader-read or transfer-read readiness.
 

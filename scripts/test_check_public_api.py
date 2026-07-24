@@ -1516,7 +1516,35 @@ def valid_document() -> dict:
     }
 
 
+def semantic_document() -> dict:
+    root_docs = {"text": "Roots may be zero and are forwarded unchanged."}
+    root = {"name": "root", "type": {"name": "GpuAddress"}}
+    gpu = {
+        "functions": [
+            {"name": "cmd_dispatch", "members": [root], "docs": dict(root_docs)},
+            {"name": "cmd_draw_generated", "docs": dict(root_docs)},
+        ],
+        "types": [{"name": "GeneratedDrawRecord", "members": [root]}],
+    }
+    return {"modules": {"gpu": gpu}}
+
+
 class PublicApiCheckTests(unittest.TestCase):
+    def test_rejects_root_documentation_mutations(self) -> None:
+        cases = (
+            ("cmd_draw_generated", "A nonzero root is forwarded unchanged.", "nonzero"),
+            ("cmd_dispatch", "The root is forwarded unchanged.", "zero roots"),
+            ("cmd_dispatch", "Zero is valid; the root is not forwarded unchanged.", "forwarded unchanged"),
+        )
+        for name, docs, expected in cases:
+            with self.subTest(name=name, docs=docs):
+                document = semantic_document()
+                functions = document["modules"]["gpu"]["functions"]
+                function = next(entry for entry in functions if entry["name"] == name)
+                function["docs"]["text"] = docs
+                failures = check_public_api.validate_generated_semantic_contracts(document)
+                self.assertTrue(any(expected in failure for failure in failures))
+
     def test_rejects_retired_command_render_state_symbols(self) -> None:
         self.assertEqual(
             check_public_api.retired_command_render_state_errors(

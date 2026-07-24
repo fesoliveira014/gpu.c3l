@@ -147,24 +147,42 @@ destroy_runtime(Runtime*)         -> void?
 full_validation_runtime_desc()    -> RuntimeDesc
 ```
 
-Validation controls are independent:
+### Validation contract
+
+Public contracts use four cause categories:
+
+| Category | Meaning |
+|---|---|
+| **Preconditions** | Facts valid callers guarantee under every policy. |
+| **Always checked** | The mandatory bounded-identity, authoritative-phase, host-safety, safe-lowering, integrity, cold-path, lifecycle, and runtime-result floor. Violations return deterministic documented faults under every policy. |
+| **FULL diagnostics** | Detailed semantic misuse diagnosed by the checked command tables only when `contract_validation = FULL`. |
+| **Runtime failures** | Capacity, allocation, timeout, device/surface loss, unsupported capability, and backend failures that valid callers may encounter under every policy. |
+
+A precondition can also be always checked: the first category states the
+caller's obligation, while the others state library behavior. Callable
+comments use these exact headings and omit categories that add no
+operation-specific information.
+
+Runtime controls are independent:
 
 | Control | Zero/default | Effect |
 |---|---|---|
-| `contract_validation` | `TRUSTED` | Selects library contract diagnostics. Every level rejects stale/foreign identities at public resource resolve/destroy boundaries as mandatory safety. `OBJECT_BOUNDARIES` adds structured stale/foreign diagnostics at covered public create, query, destroy, command-lifecycle, and submit boundaries. `FULL` also enables detailed command argument, usage, layout, queue, pipeline-kind, render-compatibility, and state diagnostics. |
+| `contract_validation` | `TRUSTED` | Selects library contract behavior. `TRUSTED` uses trusted command recording with the always-checked floor. `OBJECT_BOUNDARIES` uses those same trusted command-operation tables and adds structured reporting only at explicitly routed public boundaries plus teardown leak scans. `FULL` selects checked command operations with detailed argument, usage, layout, queue, pipeline-kind, render-compatibility, and state diagnostics. |
 | `track_resource_lifetimes` | `false` | When true, command records retain explicitly named resources and early destruction returns `RESOURCE_IN_USE`. When false, recording allocates and updates no reference storage; the caller proves completion before destruction. |
 | `enable_vulkan_validation` | `false` | Requests `VK_LAYER_KHRONOS_validation`. It does not select library checks or lifetime tracking. |
 | `enable_debug_names` | `false` | Requests best-effort native object naming through debug utils. It enables no checks, tracking, or layers. |
 | `debug_callback` | null | Selects structured delivery for diagnostics already produced by the contract policy or Vulkan. It does not enable checks, tracking, layers, or names. |
 
-Every contract level retains the mandatory safety floor: host pointer and slice
-validity before reads, integer-overflow and backing-range protection required
-for safe lowering, command state transitions and internal table safety, public
+A zero-initialized `RuntimeDesc` therefore selects `TRUSTED`, lifetime tracking
+off, Vulkan validation layers off, debug names off, and no callback. Every
+contract level retains the always-checked floor: host pointer and slice safety
+before reads, integer-overflow and backing-range protection needed for safe
+lowering, authoritative command phase and internal table integrity, public
 device ownership, Vulkan result/device-loss handling, and transactional
 creation rollback. Command-token resolution always validates bounded owner,
 slot, generation, device, allocator, and authoritative phase before unsafe
-access. Under `TRUSTED`, misuse outside that floor is a caller contract
-violation and detailed command diagnostics are not promised.
+access. Semantic misuse outside that floor remains a caller precondition under
+`TRUSTED` and `OBJECT_BOUNDARIES`; neither promises `FULL` command diagnostics.
 
 Use the helper for the former all-enabled development configuration:
 
@@ -401,9 +419,11 @@ GpuSpan
 The identity fields are opaque. Consumers may copy a complete span only while
 its owning allocation remains live. Do not construct or mutate the identity.
 Mapping, address, access, bounds, and native backing remain device-owned and are
-recovered when a public operation resolves the span. A zero `GpuAddress` is a
-valid root value. Whether a shader may dereference it is application-defined
-and depends on the device's robustness behavior.
+recovered when a public operation resolves the span. Direct, indirect, and
+generated compute and graphics commands forward every `GpuAddress` unchanged,
+independent of validation policy. Zero is valid. A shader using zero as an
+absent or sentinel root must branch before dereferencing it unless the
+application deliberately relies on defined device robustness behavior.
 
 `GpuSpan` slicing is explicit:
 
@@ -423,33 +443,37 @@ Public operations use C3 optionals/faults. `faultdef` declares a flat list of gl
 
 Descriptor, configuration, barrier, graphics-state, viewport, scissor, and
 label pointers must be non-null unless the API explicitly documents null as a
-value (such as `TextureViewDesc* desc`). Null required input faults
-`INVALID_ARGUMENT` before a backend call. Null or stale owner-token pointers
-fault `INVALID_HANDLE`.
+value (such as `TextureViewDesc* desc`). Required host-pointer safety is always
+checked before a read. Null or stale owner-token pointers fault
+`INVALID_HANDLE`.
 
-| Fault | Fired by | Typical cause |
-|---|---|---|
-| `UNSUPPORTED_BACKEND` | `create_runtime` | the selected backend is unavailable |
-| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `full_render_graphics_state`; `cmd_begin_render_pass`/`cmd_begin_render_pass_with_state`; `cmd_set_graphics_state`/`cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler`; generated-scratch reservation | null or malformed input, allocator capacity above a hard ceiling, capacity-product overflow, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
-| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or bounded command token |
-| `INVALID_RESOURCE_STATE` | swapchain lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, a borrowed swapchain attachment view was passed for destruction, or the requested generated-scratch key is not reserved |
-| `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
-| `OUT_OF_DEVICE_MEMORY` | allocator, allocation, and texture creates; mapped visibility | backend device-memory exhaustion |
-| `DEVICE_LOST` | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
-| `DEVICE_BUSY` | public device operations; `begin_commands`; `submit`; `destroy_device` | the operation observed a closing device or exhausted bounded pin acquisition, every command buffer in the selected allocator is recording/executable/in flight, submission reached the native timeline-value-difference limit, or destruction found an active operation or incomplete queue work; retry with the unchanged token |
-| `RESOURCE_IN_USE` | resource or swapchain destruction/resize, `free_allocation`, allocator destruction, generated-scratch reservation/release, `destroy_device`, `destroy_runtime`, `destroy_surface` | an allocator still owns recording, executable, or incomplete submitted work; the allocator is not quiescent for reservation mutation; another command, texture view, generated-scratch reservation, or unfinished presentation still references a resource; a placed or dedicated texture depends on an allocation; a device has a live child; a runtime has a live surface or device; or a surface has a live swapchain |
-| `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` | generated-scratch reservation; generated command recording; tracked command recording | the allocator's fixed reference slice, generated-index slice, reservation table, or preprocess-byte budget cannot represent the request; recreate a quiescent allocator with a larger capacity |
-| `SLOT_TABLE_FULL` | runtime, device, allocator, allocation, and resource creates; `intern_sampler`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
-| `GENERATED_SCRATCH_EXHAUSTED` | generated draw/dispatch recording | the originating allocator has no free reserved preprocess slot for the pipeline, generated-work kind, command count, or concurrent retained-list demand |
-| `DESCRIPTOR_HEAP_FULL` | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `intern_sampler` | Vulkan descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count; overflowing texture batches and sampler interning leave existing entries untouched |
-| `PIPELINE_CREATE_FAILED` | pipeline creates | driver rejected the state combination, shader, or compilation |
-| `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V, a missing or stage-mismatched selected entry point, a selected-entry descriptor convention violation, a non-exact root push-constant block, or backend shader-module rejection |
-| `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
-| `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
-| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, execution without a bound pipeline, draw without required per-pass depth state, duplicate bounded command token in one submit batch, or bounded token that is already being submitted |
-| `WAIT_TIMEOUT` | `wait_completion`, `acquire_next_image`, `present` | bounded wait, transient image unavailability, or a private present fence not yet reusable; retry with the unchanged value |
-| `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
+The category column classifies each documented **cause**, not the whole fault
+value. In particular, `INVALID_ARGUMENT` and `COMMAND_RECORDING_ERROR` have
+both always-checked and `FULL`-only causes.
+
+| Fault | Cause category | Fired by | Typical cause |
+|---|---|---|---|
+| `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the selected backend is unavailable |
+| `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `full_render_graphics_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
+| `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or bounded command token |
+| `INVALID_RESOURCE_STATE` | Always checked lifecycle/safe snapshot / Runtime failures | command execution; surface and swapchain creation/lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an authoritative lifecycle transition is invalid, trusted-table command execution has no usable bound-pipeline snapshot, a borrowed view was passed for destruction, a generated-scratch key is not reserved, or Vulkan reports that the native window is already in use |
+| `OUT_OF_HOST_MEMORY` | Runtime failures | creates; mapped visibility | driver or backend cache host-allocation failure |
+| `OUT_OF_DEVICE_MEMORY` | Runtime failures | allocator, allocation, and texture creates; mapped visibility | backend device-memory exhaustion |
+| `DEVICE_LOST` | Runtime failures | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
+| `DEVICE_BUSY` | Runtime failures / Always checked lifecycle | public device operations; `begin_commands`; `submit`; `destroy_device` | closing state, bounded pin or allocator-unit contention, timeline headroom, active operations, or incomplete queue work; retry with the unchanged token |
+| `RESOURCE_IN_USE` | Always checked lifecycle | resource or swapchain destruction/resize, `free_allocation`, allocator destruction, generated-scratch reservation/release, `destroy_device`, `destroy_runtime`, `destroy_surface` | a detected live owner, dependent, command reference, acquisition, presentation, child, or non-quiescent allocator prevents immediate mutation or destruction |
+| `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` | Runtime failures | generated-scratch reservation; generated command recording; tracked command recording | fixed reference, generated-index, reservation-table, or preprocess-byte storage cannot represent valid requested work |
+| `SLOT_TABLE_FULL` | Runtime failures | runtime, device, allocator, allocation, and resource creates; `intern_sampler`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
+| `GENERATED_SCRATCH_EXHAUSTED` | Runtime failures | generated draw/dispatch recording | no matching reserved preprocess slot is free for valid retained work |
+| `DESCRIPTOR_HEAP_FULL` | Runtime failures | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `intern_sampler` | descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count |
+| `PIPELINE_CREATE_FAILED` | Runtime failures | pipeline creates | the driver rejected the state combination, shader, or compilation |
+| `SHADER_INVALID` | Always checked cold path / Runtime failures | `prepare_shader_code`, pipeline creates | malformed or ABI-incompatible SPIR-V, or backend shader-module rejection |
+| `SURFACE_LOST` | Runtime failures | surface creation/query/enumeration, swapchain create/resize, acquire, present | the native window or surface was destroyed or became unavailable |
+| `SWAPCHAIN_OUT_OF_DATE` | Runtime failures | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | the swapchain no longer matches the surface |
+| `COMMAND_RECORDING_ERROR` | Always checked / FULL diagnostics | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | always checked for authoritative command/pass phase, duplicate claims, an already-submitting token, and prerequisites needed for safe recording; `FULL` additionally diagnoses a missing logical bind, detailed pipeline/pass compatibility, and complete graphics state |
+| `WAIT_TIMEOUT` | Runtime failures | `wait_completion`, `acquire_next_image`, `present` | bounded wait, transient image unavailability, or a private present fence not yet reusable |
+| `BACKEND_ERROR` | Runtime failures | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
 Backend-local Vulkan/VMA faults should not leak unless they carry useful public meaning. Map them to public faults and report backend details through the configured diagnostic path. `DEVICE_LOST` is reserved for an explicit native device-loss result; an unmapped native result becomes `BACKEND_ERROR`.
 
@@ -1176,10 +1200,11 @@ unavailable role index.
 `get_queue_info` faults `INVALID_HANDLE` for zero, stale, foreign-device, or
 malformed tokens and returns the stable device-local ID and supported roles.
 Backend family indices and native handles remain private. Resource descriptions
-require a non-empty subset of the selected roles. A queue may use a resource when
-at least one of its roles appears in the resource's `access` set. A `GpuSpan` also rejects empty,
-unknown, or wider-than-backing access metadata. These checks run before command
-or command mutation.
+require a non-empty subset of the selected roles. A queue may use a resource
+when at least one of its roles appears in the resource's `access` set. A valid
+`GpuSpan` does not carry empty, unknown, or wider-than-backing access metadata.
+Cold-path resource creation validates these facts under every policy; `FULL`
+also diagnoses their violation during command recording before native mutation.
 
 Allocations reached only through root GPU pointers remain a caller contract:
 every reachable allocation must admit the recording role because nested pointers
@@ -1206,24 +1231,30 @@ cmd_dispatch(
 
 Pipeline binding selects the active compute or graphics pipeline without
 compiling or synthesizing a variant. A failed bind preserves the previous active
-pipeline. A successful bind generation-checks the public handle, retains the
+pipeline. The live identity, owner, and bind snapshot needed for safe later
+use are always checked. A successful bind retains the
 pipeline when `track_resource_lifetimes` is enabled, and caches its native
 pipeline/layout, kind, render compatibility, cache-entry identity,
 generated-work layout, and public diagnostic identity. Later draws and
 dispatches use that snapshot without reading a pipeline cell, table, or cache.
 Tracked ownership prevents destruction until discard or command completion;
 without tracking, the caller must keep the pipeline live through completion.
-Dispatch requires an active compute pipeline. Graphics draws require an active
-graphics pipeline and render pass. Root addresses, including zero, are pushed
-unchanged.
+Execution without a usable bound-pipeline snapshot faults under every policy.
+`FULL` additionally diagnoses a compute/graphics pipeline-kind mismatch. Valid
+graphics draws also require an active render pass; its phase is always checked.
+Direct compute and graphics roots are pushed unchanged; zero is valid under
+every policy. A shader must branch before dereferencing a zero root unless the
+application deliberately relies on defined robustness behavior.
 
 Graphics state belongs to a graphics-capable command buffer, not to one render
 pass. `cmd_set_graphics_state` records a complete packet before or during a pass;
 `cmd_set_raster_state`, `cmd_set_depth_state`, `cmd_set_viewport`, and
 `cmd_set_scissor` record optional partial updates in either phase. A minimal
 pass begin leaves that state unchanged. The convenience begin records a
-complete packet after beginning the pass. State validation is atomic: invalid
-values return `INVALID_ARGUMENT` without emitting native state.
+complete packet after beginning the pass. Host-safe descriptor access and
+lowering prerequisites are always checked. Under `FULL`, semantic state
+validation is atomic: invalid values return `INVALID_ARGUMENT` without emitting
+native state.
 
 Under `ContractValidation.FULL`, regular and generated graphics draws return
 `COMMAND_RECORDING_ERROR` until one complete packet has succeeded in the
@@ -1233,9 +1264,10 @@ Trusted command entries retain this requirement as a caller contract without a
 warm validation branch. A wrong active pipeline kind returns
 `INVALID_ARGUMENT`.
 
-Each group count may be zero and must not exceed the corresponding component
-of `DeviceCaps.max_compute_work_group_count`. An over-limit call faults
-`INVALID_ARGUMENT` before a backend command is recorded.
+Each group count may be zero and is a caller precondition not to exceed the
+corresponding `DeviceCaps.max_compute_work_group_count` component. `FULL`
+diagnoses an over-limit call with `INVALID_ARGUMENT` before recording;
+`TRUSTED` and `OBJECT_BOUNDARIES` do not promise that semantic diagnostic.
 
 Warm recording dispatches through the immutable operation table stored in the
 authoritative record. There is currently one checked policy. Policy selection
@@ -1334,20 +1366,25 @@ attachment view is published in a descriptor heap or can be destroyed while a
 command list holds an explicit reference. Zero, stale, foreign-device, and
 mismatched view handles fault before native recording.
 
-Minimal render-pass begin validates and lowers the pass, tracks attachment
+Minimal render-pass begin always checks the host-safe descriptor shape, bounded
+attachment identities/ranges, authoritative phase, and other safe-lowering
+requirements. `FULL` additionally validates attachment usage, queue access,
+formats, dimensions, and compatibility. An accepted call tracks attachment
 references, emits one native begin-rendering command, and publishes the active
 pass. It neither requires nor emits a `GraphicsState` packet.
 
-`cmd_begin_render_pass_with_state` validates and lowers both descriptions
-before tracking or native mutation. It then begins rendering and emits the
-complete packet. A rejected convenience call leaves command-list state,
-tracked references, and the native command buffer unchanged.
+`cmd_begin_render_pass_with_state` applies the same always-checked preparation
+to both inputs; `FULL` adds the complete semantic pass and graphics-state
+diagnostics before tracking or native mutation. It then begins rendering and
+emits the complete packet. A rejected convenience call leaves command-list
+state, tracked references, and the native command buffer unchanged.
 
 A complete packet emits exactly ten dynamic-state commands in fixed order:
 viewport, scissor, five raster commands, and three depth commands. There is no
-state diffing or dirty-bit cache. `cmd_set_graphics_state` validates and emits
-the same complete replacement before or during a pass on a graphics-capable
-command list; the four partial setters below remain available in both phases:
+state diffing or dirty-bit cache. `cmd_set_graphics_state` safely lowers and
+emits the same complete replacement before or during a pass; `FULL` diagnoses
+invalid values and a non-graphics queue. The four partial setters remain
+available in both phases:
 
 ```text
 Viewport
@@ -1395,11 +1432,12 @@ render area. Both depth endpoints are independently in `[0, 1]`; reversed
 depth ranges are valid. Rejecting zero height is a deliberate non-degenerate
 library invariant, not a Vulkan 1.3 validity requirement.
 
-Scissors use signed inputs, so negative origins or extents fault. Each widened
-offset-plus-extent must fit `int::max` before native lowering. The rectangle
-may extend beyond the render area and zero extent is a valid empty clip.
-Invalid values return `INVALID_ARGUMENT` before changing dynamic state; calls
-outside command recording return `COMMAND_RECORDING_ERROR`.
+Scissors use signed inputs, so valid callers provide nonnegative origins and
+extents. Each widened offset-plus-extent fits `int::max` before native
+lowering. The rectangle may extend beyond the render area and zero extent is a
+valid empty clip. `FULL` diagnoses invalid viewport, scissor, raster, and depth
+values with `INVALID_ARGUMENT` before changing dynamic state. Authoritative
+recording/pass phase is always checked and faults `COMMAND_RECORDING_ERROR`.
 
 Explicit dynamic state survives graphics pipeline and cache-alias handle
 switches and render-pass boundaries. Minimal begin preserves it without
@@ -1433,9 +1471,10 @@ need `color_attach` usage and explicit transitions to
 a `COLOR_ATTACHMENT` state. Normalized and floating-point formats average
 samples; integer formats select sample zero. Depth resolve is not exposed.
 
-A bound graphics pipeline must exactly match the pass color count and formats,
-depth format, and sample count. Compatibility is checked before render-pass
-begin or pipeline bind changes native recording state or retained references.
+A valid bound graphics pipeline exactly matches the pass color count and
+formats, depth format, and sample count. `FULL` diagnoses compatibility misuse
+before the affected checked bind or pass begin emits native work; trusted
+command recording treats it as a caller precondition.
 Graphics and compute bindings are tracked independently by bind point. Ending
 a render pass clears active attachment compatibility but does not release the
 logical or native graphics binding; a compatible later pass can reuse it without
@@ -1523,6 +1562,13 @@ created device supports all three commands. Unsupported devices fault
 `UNSUPPORTED_FEATURE`; the shared-root indirect commands remain the portable
 execution path and the library never emulates generated work with a CPU loop.
 
+Root semantics are uniform across this entire operation family. The root
+arguments to direct and indirect commands and every root field loaded from a
+generated record are forwarded unchanged. Zero is valid for compute, vertex,
+and fragment roots under `TRUSTED`, `OBJECT_BOUNDARIES`, and `FULL`. Shaders
+using an optional zero root must branch before dereference unless the
+application intentionally relies on defined robustness behavior.
+
 Generated commands require an explicit cold reservation on their originating
 command allocator. Reservations cannot be borrowed by another allocator, even
 when it is bound to the same queue.
@@ -1557,19 +1603,22 @@ preprocess requirement still consumes one explicit reservation slot per
 retained generated command; zero storage does not bypass caller-selected
 capacity.
 
-Generated record spans are 8-byte aligned and must hold the declared maximum
-count. The count span is a 4-byte-aligned GPU-readable `uint`. Both spans must
-come from live allocations admitted to the recording queue. The GPU-written
-count may be zero and must not exceed either the command maximum or
-`DeviceCaps.max_generated_work_count`. A zero command maximum records no
-native work. Generated indexed draws accept only `IndexType.U16` or
-`IndexType.U32`; GPU-written index bounds remain subject to device robustness.
+Generated record spans are caller-preconditioned to be 8-byte aligned and hold
+the declared maximum count. The count span is a 4-byte-aligned GPU-readable
+`uint`; both spans come from live allocations admitted to the recording queue.
+The GPU-written count may be zero and must not exceed either the command maximum
+or `DeviceCaps.max_generated_work_count`. A zero command maximum records no
+native work. Generated indexed draws use `IndexType.U16` or `IndexType.U32`;
+GPU-written index bounds remain subject to device robustness. The always-checked
+path retains identity, bounded-range, overflow, reservation-capacity, and other
+safe-lowering checks. `FULL` additionally diagnoses command semantic usage,
+queue, count, pipeline, and state misuse.
 The active pipeline supplies execution state and is not an API argument.
 Root-reachable allocations and resources are caller-owned, are not tracked from
 GPU-written addresses, and must remain live until the covering completion point
 finishes.
 
-Argument spans must support indirect-command reads, be 4-byte aligned, and
+Valid argument spans support indirect-command reads, are 4-byte aligned, and
 contain `draw_count` (or `max_draw_count`) times the tight argument size. One
 vertex/fragment root pair applies to every draw in a
 multi-draw; per-draw variation indexes a table through `gl_DrawID` (see
@@ -1577,8 +1626,9 @@ multi-draw; per-draw variation indexes a table through `gl_DrawID` (see
 zero and must not exceed `DeviceCaps.max_draw_indirect_count`. In the count
 variant, `max_draw_count` may exceed that limit, but the argument span must
 hold `max_draw_count` entries; execution uses the smaller of `max_draw_count`
-and the GPU-written count. Argument byte calculations are checked for
-overflow; violations fault `INVALID_ARGUMENT` before recording.
+and the GPU-written count. Identity, backing bounds, and argument-byte overflow
+needed for safe lowering are always checked. `FULL` diagnoses indirect usage,
+queue, count, and index-type precondition violations.
 
 Each GPU-written `DispatchIndirectCommand` component must not exceed the
 corresponding `DeviceCaps.max_compute_work_group_count` component. Ordering
@@ -1605,10 +1655,13 @@ cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) -
 cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) -> void?
 ```
 
-Copy spans must be nonzero, equal in size, and non-overlapping.
+Valid copy spans are nonzero, equal in size, non-overlapping, and have the
+required usage and queue access.
 `cmd_fill_buffer` fills the exact destination span; its byte offset and
-size must be 4-byte aligned. There is no zero-size shorthand. Callers provide
-the surrounding barriers.
+size are 4-byte aligned. There is no zero-size shorthand. Bounded identity,
+backing range, overflow, and alignment required for safe lowering are always
+checked; `FULL` adds usage, queue, format, extent, and subresource diagnostics.
+Callers provide the surrounding barriers.
 
 ### Direct readback
 
@@ -1659,10 +1712,11 @@ cmd_barrier(CommandList* commands, Barrier* barrier) -> void?
 ```
 
 `Barrier` is a global execution and memory dependency. It has no resource
-handle, address, range, layout, or queue-family field. Each stage mask must be
-nonempty; `all` and `present` are each exclusive. Unknown mask bits, special
-hazards combined with presentation, and stages or hazards unsupported by the
-recording queue fault `INVALID_ARGUMENT`.
+handle, address, range, layout, or queue-family field. As preconditions, each
+stage mask is nonempty; `all` and `present` are each exclusive; bits are known;
+and hazards and stages are consistent with the recording queue. `FULL`
+diagnoses those semantic violations with `INVALID_ARGUMENT`. Required pointer
+and authoritative phase checks remain active under every policy.
 
 Normal host, transfer, shader, color-output, and depth-output access scopes are
 derived from the stage masks. `draw_arguments`, `descriptors`, and
@@ -1727,21 +1781,25 @@ The semantic matrix is exact:
 | `DEPTH_ATTACHMENT` | depth output, or exclusive `all` | read, write, or both | `depth_attach`; depth format; graphics queue |
 | `PRESENT` | empty | empty | swapchain-owned non-depth texture; graphics queue |
 
-Unknown bits and layouts fault `INVALID_ARGUMENT`. Texture states cannot name
-the global-only `host` or `present` stage bits. Same-state transitions remain
-valid explicit memory dependencies. Sampled depth/stencil textures lower to the
-appropriate read-only depth/stencil layout.
+Known bits, legal layouts, and stage/access consistency are caller
+preconditions. Texture states cannot name the global-only `host` or `present`
+stage bits. `FULL` diagnoses those semantic violations with
+`INVALID_ARGUMENT`; `TRUSTED` and `OBJECT_BOUNDARIES` do not promise that
+diagnostic. Same-state transitions remain valid explicit memory dependencies.
+Sampled depth/stencil textures lower to the appropriate read-only depth/stencil
+layout.
 
 A zero `view` selects the full texture. Zero mip or layer counts select the
-remaining range from their respective base. Format reinterpretation and
-out-of-range subresources fault `INVALID_ARGUMENT`.
+remaining range from their respective base. Bounded subresource range is always
+checked for safe lowering. `FULL` additionally diagnoses invalid format
+reinterpretation.
 
-Recording resolves the texture handle once, validates recording access,
-normalizes the range once, validates and lowers both states once, assembles one
-native barrier, and emits it once. Validation covers queue access, semantic
-values, stage support, immutable texture usage and format, presentation
-ownership, and the selected subresource range. Rejection emits nothing and
-rolls back any retained command reference.
+Recording resolves the texture handle once, normalizes the range once, lowers
+both states once, assembles one native barrier, and emits it once. Live
+identity, bounded subresource range, and safe native lowering remain
+always-checked. `FULL` additionally validates queue access, semantic values,
+stage support, immutable texture usage and format, and presentation ownership.
+Rejection before emission rolls back any retained command reference.
 
 The backend does not infer, track, compare, or repair prior state. A wrong
 `before` declaration is a caller synchronization error; applications own their
@@ -1815,8 +1873,10 @@ Stored public debug names remain available in every policy;
 
 `TRUSTED` still reports backend/device failures and callback-requested teardown
 leaks, but does not promise detailed misuse diagnostics. `OBJECT_BOUNDARIES`
-reports covered stale/foreign public identities. `FULL` reports detailed
-rejected fields and invariants for command misuse.
+uses the same trusted command-operation tables and adds structured reporting
+only at explicitly routed public boundaries plus teardown leak scans. `FULL`
+uses checked command operations and reports detailed rejected fields and
+invariants for command misuse.
 These library diagnostics do not require Vulkan validation layers. Backend failures preserve the public
 fault and report the public operation name, such as `submit` or
 `wait_completion`.

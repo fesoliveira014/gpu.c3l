@@ -57,10 +57,12 @@ output = pointer_from_address(root.output)
 output[i] = transform(input[i])
 ```
 
-Commands push root values unchanged. Zero is a valid root for direct, indirect,
-and generated work, but shaders must branch before dereferencing it unless the
-application deliberately relies on the device's robustness behavior. The
-library does not define what a zero-address dereference returns.
+Direct, indirect, and generated compute and graphics commands push every root
+value unchanged. Zero is a valid root under `ContractValidation.TRUSTED`,
+`OBJECT_BOUNDARIES`, and `FULL`; validation policy does not reinterpret it.
+Shaders must branch before dereferencing zero unless the application
+deliberately relies on defined device robustness behavior. The library does
+not define what a zero-address dereference returns.
 
 ## 4. Graphics ABI
 

@@ -107,66 +107,67 @@ const CommandAllocatorHandle COMMAND_ALLOCATOR_HANDLE_INVALID = {};
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
 
-// Public fault set. `faultdef` declares a flat list of globally-unique values
-// in module gpu, referenced as `gpu::<NAME>` and raised with the `~` suffix.
-// Each entry notes when it fires; docs/api.md carries the full fault table.
+// Public fault set. Categories describe causes, not whole fault values: one
+// value can report an always-checked cause, a FULL diagnostic, or a runtime
+// failure. docs/api.md carries the complete cause classification.
 faultdef
-    // No backend for the requested BackendKind, no Vulkan 1.3 driver, or
-    // instance/device creation failed outright.
+    // Runtime failure: the requested backend or Vulkan 1.3 driver is absent,
+    // or backend creation failed.
     UNSUPPORTED_BACKEND,
-    // A valid requested capability is unavailable: validation layers not
-    // installed, presentation unsupported, missing feature, or no adapter
-    // can provide an exact semantic capacity.
+    // Runtime failure: a valid capability, layer, presentation path, feature,
+    // or exact semantic capacity is unavailable.
     UNSUPPORTED_FEATURE,
-    // A descriptor or parameter is malformed: zero sizes, out-of-range
-    // values, undersized output buffers, mismatched spans.
+    // Always checked for required host-safety, safe-lowering, and cold-path
+    // configuration causes; FULL also uses it for semantic diagnostics.
     INVALID_ARGUMENT,
-    // A handle is stale (generation mismatch after destroy) or was never
-    // live; also raised for zero, consumed, or stale device tokens.
+    // Always checked: a bounded public identity is zero, stale, consumed,
+    // foreign, malformed, or was never live.
     INVALID_HANDLE,
-    // A stateful token or resource lifecycle is incompatible with the
-    // requested operation.
+    // Always checked lifecycle/safe-snapshot cause, or runtime backend result:
+    // a transition is incompatible with authoritative state, command execution
+    // lacks a usable pipeline snapshot, or native surface ownership conflicts.
     INVALID_RESOURCE_STATE,
-    // Host-side allocation failure reported by the driver.
+    // Runtime failure: host allocation failed.
     OUT_OF_HOST_MEMORY,
-    // Device memory exhausted (VMA/driver allocation failure).
+    // Runtime failure: device memory is exhausted.
     OUT_OF_DEVICE_MEMORY,
-    // The driver reported VK_ERROR_DEVICE_LOST. The affected device rejects
-    // later operations; peer devices remain usable.
+    // Runtime failure: the driver reported device loss. The affected device
+    // rejects later operations; peer devices remain usable.
     DEVICE_LOST,
-    // A device operation encountered closing state or sustained pin
-    // contention. Destruction may also return this fault. Safe to retry.
+    // Runtime/lifecycle failure: closing state, bounded contention, or
+    // incomplete work prevented progress. Safe to retry.
     DEVICE_BUSY,
-    // Destruction found a live owner: a device child, runtime dependent,
-    // surface swapchain, or texture descriptor. Release the owner first.
+    // Always checked lifecycle floor: destruction or mutation found a live
+    // owner or dependent. Release it first.
     RESOURCE_IN_USE,
-    // A handle table hit its configured resource capacity.
+    // Runtime failure: a bounded public table reached capacity.
     SLOT_TABLE_FULL,
-    // Explicitly reserved recording storage cannot satisfy the requested work.
+    // Runtime failure: reserved generated-work storage cannot satisfy a valid
+    // recording request.
     GENERATED_SCRATCH_EXHAUSTED,
-    // Fixed command allocator bookkeeping cannot represent requested work.
+    // Runtime failure: fixed command-allocator bookkeeping cannot represent
+    // valid requested work.
     COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
-    // No free descriptor slot: capacity is too small for live descriptors.
+    // Runtime failure: no shader-visible descriptor slot is free.
     DESCRIPTOR_HEAP_FULL,
-    // The driver rejected pipeline creation (invalid state combination or
-    // internal compile failure).
+    // Runtime failure: the driver rejected pipeline creation.
     PIPELINE_CREATE_FAILED,
-    // SPIR-V rejected at shader-module creation.
+    // Always-checked cold-path validation or runtime backend rejection of
+    // SPIR-V.
     SHADER_INVALID,
-    // The presentation surface disappeared (window destroyed mid-frame).
+    // Runtime failure: the presentation surface disappeared.
     SURFACE_LOST,
-    // The swapchain no longer matches the surface (resize, occlusion);
-    // recreate via resize_swapchain and retry.
+    // Runtime failure: the swapchain no longer matches the surface; resize
+    // and retry.
     SWAPCHAIN_OUT_OF_DATE,
-    // A cmd_* call outside its required recording state (not recording,
-    // wrong pass phase, or list already ended).
+    // Always checked for authoritative command phase and submit claims; FULL
+    // also uses it for detailed command-state diagnostics.
     COMMAND_RECORDING_ERROR,
-    // A bounded host wait elapsed before its target, or image acquisition
-    // reported transient unavailability. The operation is safe to retry
-    // without changing the resource being waited on.
+    // Runtime failure: a bounded wait elapsed or presentation progress is
+    // transiently unavailable. Safe to retry with the unchanged value.
     WAIT_TIMEOUT,
-    // The backend returned an unclassified or internal failure. Inspect
-    // native diagnostics; this does not imply that the device was lost.
+    // Runtime failure: an unclassified backend/internal operation failed.
+    // This does not imply device loss.
     BACKEND_ERROR;
 
 // BEGIN GENERATED SHADER ABI - do not edit.
@@ -349,10 +350,20 @@ struct DebugMessage {
     int                  validation_id_number;
 }
 
-<* Public contract checking applied by the library. *>
+<* Selects library contract behavior; this is independent of lifetime tracking
+   and Vulkan validation layers.
+   Preconditions: valid callers satisfy operation contracts under every policy.
+   Always checked: bounded identity, authoritative phase, host safety,
+   safe lowering, lifecycle integrity, cold paths, and runtime results.
+   FULL diagnostics: detailed command semantic misuse.
+   Runtime failures: valid callers may receive documented faults in every policy. *>
 enum ContractValidation : int {
+    // Trusted command recording with the mandatory always-checked floor.
     TRUSTED,
+    // The TRUSTED command tables plus structured reporting only at explicitly
+    // routed public boundaries and teardown leak scans.
     OBJECT_BOUNDARIES,
+    // Checked command tables with detailed semantic diagnostics.
     FULL,
 }
 
@@ -364,7 +375,9 @@ bitstruct Runtime : ulong {
 
 const Runtime RUNTIME_INVALID = {};
 
-<* Runtime discovery configuration; zero-initialized fields select defaults. *>
+<* Runtime discovery configuration. A zero-initialized value selects TRUSTED,
+   lifetime tracking off, and Vulkan validation layers off; each axis is
+   independent. *>
 struct RuntimeDesc {
     BackendKind           backend;
     ContractValidation   contract_validation;

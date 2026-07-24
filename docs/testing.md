@@ -246,21 +246,29 @@ uses the sole bounded command-token representation:
 Additional tests cover all six contract/tracking combinations and both layer,
 callback, and debug-name values. `OBJECT_BOUNDARIES` intentionally shares the
 trusted command tables, so those two matrix rows exercise the same recording
-behavior while public-boundary checks remain distinct. `OBJECT_BOUNDARIES` must
-reject stale and foreign public identities without entering detailed command
-checking. `FULL` must return the same library fault and structured diagnostic
-with Vulkan layers off or on. Callback- or name-only trusted configurations
-must not request the Khronos layer or enable command checks/tracking.
+behavior. Its additional structured reporting is tested only at explicitly
+routed public boundaries plus teardown leak scans; it is not a
+command-semantic middle tier. `FULL` must return the same library fault and
+structured diagnostic with Vulkan layers off or on. Callback- or name-only
+trusted configurations must not request the Khronos layer or enable command
+checks/tracking.
 
-Every mode must preserve the mandatory safety floor: null/slice/range and
-overflow protection needed before host access, command-state/internal-table
-integrity, public device ownership, Vulkan result/device-loss handling, and
-transactional creation rollback. Tests for trusted mode distinguish these
-requirements from semantic misuse that is intentionally a caller contract. The
-`FULL` suite additionally proves arbitrary command-token bits cannot be treated
-as an address before owner, bounds, and generation validation. Every policy
+The contract assertions use the same four categories as `docs/api.md`:
+preconditions, always-checked behavior, `FULL` diagnostics, and runtime
+failures. Every mode must preserve the always-checked floor: null/slice/range
+and overflow protection needed before host access or safe lowering,
+authoritative command phase and internal-table integrity, public device
+ownership, lifecycle/cold-path checks, Vulkan result/device-loss handling, and
+transactional creation rollback. Trusted-mode cases distinguish that floor
+from semantic misuse that is intentionally a caller precondition. Every policy
 rejects fabricated, stale, consumed, foreign-owner, and wrong-phase identities
 through the common bounded resolver before native mutation.
+
+Zero-root execution evidence covers direct compute, direct graphics, indirect
+work, and generated draw, indexed-draw, and dispatch records. Each family
+asserts unchanged forwarding for zero and nonzero values. The policy matrix
+also proves that `TRUSTED`, `OBJECT_BOUNDARIES`, and `FULL` do not classify zero
+itself as misuse; shader fixtures branch before any zero dereference.
 
 Run the dedicated matrix on a pinned headless ICD:
 
