@@ -273,7 +273,8 @@ fn void pin_commands_and_completion() {
         count_span:         span,
         max_dispatch_count: 1,
     );
-    (void)gpu::cmd_begin_render_pass(
+    (void)gpu::cmd_begin_render_pass(&commands, &render_pass);
+    (void)gpu::cmd_begin_render_pass_with_state(
         &commands,
         &render_pass,
         &graphics_state,

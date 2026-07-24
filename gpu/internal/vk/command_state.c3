@@ -59,6 +59,7 @@ struct CommandRecord {
     CommandState                 state;
     ulong                        submit_visit_epoch;
     RenderCompatibility          active_render;
+    bool                         graphics_state_initialized;
     BoundPipeline                logical_pipeline;
     NativePipelineBinding        native_graphics_pipeline;
     NativePipelineBinding        native_compute_pipeline;

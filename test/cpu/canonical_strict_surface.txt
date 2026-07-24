@@ -112,6 +112,7 @@ function gpu::build_memory_report
 function gpu::cmd_barrier
 function gpu::cmd_begin_label
 function gpu::cmd_begin_render_pass
+function gpu::cmd_begin_render_pass_with_state
 function gpu::cmd_bind_pipeline
 function gpu::cmd_copy_buffer
 function gpu::cmd_copy_buffer_to_texture

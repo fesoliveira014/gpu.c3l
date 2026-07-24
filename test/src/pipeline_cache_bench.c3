@@ -122,7 +122,7 @@ fn double record_raster_matrix(
     };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass(&commands, &pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     std::time::Clock start = std::time::clock::now();
     foreach (&raster : rasters) gpu::cmd_set_raster_state(&commands, raster)!!;

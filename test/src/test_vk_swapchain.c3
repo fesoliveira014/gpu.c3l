@@ -1390,7 +1390,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass(&commands, &pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::TextureBarrier to_present = {
         .texture = old_texture,

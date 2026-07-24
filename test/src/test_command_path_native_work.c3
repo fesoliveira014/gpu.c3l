@@ -9,7 +9,8 @@ const char[*] COMMAND_PATH_WORK_VERT_SPIRV =
 const char[*] COMMAND_PATH_WORK_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
-const ulong COMMAND_PATH_BEGIN_PACKET_NATIVE_COMMANDS = 11;
+const ulong COMMAND_PATH_BEGIN_NATIVE_COMMANDS = 1;
+const ulong COMMAND_PATH_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
 const uint COMMAND_PATH_DRAW_COUNT = 4;
 
 fn gpu::PipelineHandle command_path_work_compute_pipeline(
@@ -175,8 +176,14 @@ fn void public_command_native_work_is_exact() @test {
     commands = gpu::begin_commands(&allocator)!!;
     gpu::cmd_bind_pipeline(&commands, graphics)!!;
     gpu::reset_command_resolution_stats();
-    gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
-    require_render_work(1, COMMAND_PATH_BEGIN_PACKET_NATIVE_COMMANDS);
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
+    require_render_work(
+        1,
+        COMMAND_PATH_GRAPHICS_STATE_NATIVE_COMMANDS,
+    );
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    require_render_work(1, COMMAND_PATH_BEGIN_NATIVE_COMMANDS);
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
@@ -186,7 +193,7 @@ fn void public_command_native_work_is_exact() @test {
     )!!;
     require_render_work(
         2,
-        COMMAND_PATH_BEGIN_PACKET_NATIVE_COMMANDS + 2,
+        COMMAND_PATH_BEGIN_NATIVE_COMMANDS + 2,
     );
     for (uint i = 1; i < COMMAND_PATH_DRAW_COUNT; i++) {
         gpu::cmd_draw(
@@ -199,7 +206,7 @@ fn void public_command_native_work_is_exact() @test {
     }
     require_render_work(
         1 + COMMAND_PATH_DRAW_COUNT,
-        COMMAND_PATH_BEGIN_PACKET_NATIVE_COMMANDS
+        COMMAND_PATH_BEGIN_NATIVE_COMMANDS
             + COMMAND_PATH_DRAW_COUNT * 2,
     );
     gpu::Viewport viewport = {

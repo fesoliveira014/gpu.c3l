@@ -121,7 +121,7 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(1, 1)!!;
     assert(
-        @catch(gpu::cmd_begin_render_pass(
+        @catch(gpu::cmd_begin_render_pass_with_state(
             &commands,
             (gpu::RenderPassDesc*)null,
             &graphics,
@@ -131,7 +131,7 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
     );
     gpu::RenderPassDesc pass = { .width = 1, .height = 1 };
     assert(
-        @catch(gpu::cmd_begin_render_pass(
+        @catch(gpu::cmd_begin_render_pass_with_state(
             &commands,
             &pass,
             (gpu::GraphicsState*)null,

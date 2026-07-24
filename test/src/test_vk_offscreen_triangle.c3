@@ -113,7 +113,7 @@ fn void offscreen_clear_works() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::TextureBarrier to_src = {
@@ -203,14 +203,14 @@ fn void warm_render_pass_uses_precreated_attachment_without_allocation() @test {
     };
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
 
-    gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::internal::RecordingWorkCounters after =
         vk::command_recording_work_counters(state);
@@ -381,7 +381,7 @@ fn void offscreen_textured_triangle() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
     gpu::cmd_draw(
         commands:       &cmd,
@@ -480,10 +480,10 @@ fn void dynamic_viewport_scissor_pixels() @test {
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::TextureHandle[3] targets;
+    gpu::TextureHandle[4] targets;
     for (uint i = 0; i < targets.len; i++) targets[i] = make_render_target(&device);
     defer for (uint i = 0; i < targets.len; i++) gpu::destroy_texture(&device, targets[i])!!;
-    gpu::AttachmentViewHandle[3] target_views;
+    gpu::AttachmentViewHandle[4] target_views;
     for (uint i = 0; i < target_views.len; i++) {
         target_views[i] = create_test_attachment_view(
             &device,
@@ -565,19 +565,35 @@ fn void dynamic_viewport_scissor_pixels() @test {
             graphics_state.viewport = {
                 .width = (float)RT_SIZE / 2.0f, .height = (float)RT_SIZE, .max_depth = 1.0f,
             };
-        } else if (i == 1) {
-            graphics_state.scissor = {
-                .width = (int)RT_SIZE / 2, .height = (int)RT_SIZE,
-            };
         }
-        gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+        if (i == 0) {
+            gpu::cmd_begin_render_pass_with_state(
+                &cmd,
+                &pass,
+                &graphics_state,
+            )!!;
+        } else {
+            if (i == 2) {
+                gpu::ScissorRect half_scissor =
+                    graphics_state.scissor;
+                half_scissor.width = RT_SIZE / 2;
+                gpu::cmd_set_viewport(
+                    &cmd,
+                    &graphics_state.viewport,
+                )!!;
+                gpu::cmd_set_scissor(&cmd, &half_scissor)!!;
+            } else if (i == 3) {
+                gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
+            }
+            gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+        }
         if (i == 0) {
             gpu::Viewport rejected = graphics_state.viewport;
             rejected.width =
                 (float)state.viewport_limits.max_width * 2.0f;
             assert(@catch(gpu::cmd_set_viewport(&cmd, &rejected)) == gpu::INVALID_ARGUMENT,
                 "a rejected viewport does not replace the valid viewport");
-        } else if (i == 1) {
+        } else if (i == 2) {
             gpu::ScissorRect rejected = graphics_state.scissor;
             rejected.x = int::max;
             rejected.width = 1;
@@ -632,16 +648,29 @@ fn void dynamic_viewport_scissor_pixels() @test {
     gpu::wait_completion(completion)!!;
     gpu::invalidate_mapped_span(&device, readback.span)!!;
 
-    for (uint i = 0; i < 2; i++) {
-        char* pixels = (char*)test_span_mapping(&device, readback_all).ptr + RT_BYTES * i;
-        usz left_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE / 4) * 4 + 1;
-        usz right_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE * 3 / 4) * 4 + 1;
-        assert(pixels[left_green] != 0, "the clipped draw covers the left half");
-        assert(pixels[right_green] == 0, "the clipped draw leaves the right half clear");
-    }
-    char* reset_pixels = (char*)test_span_mapping(&device, readback_all).ptr + RT_BYTES * 2;
-    usz reset_right_green = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE * 3 / 4) * 4 + 1;
-    assert(reset_pixels[reset_right_green] != 0, "the next pass restores full viewport and scissor defaults");
+    usz left_green =
+        ((RT_SIZE / 2) * RT_SIZE + RT_SIZE / 4) * 4 + 1;
+    usz right_green =
+        ((RT_SIZE / 2) * RT_SIZE + RT_SIZE * 3 / 4) * 4 + 1;
+    char* viewport_pixels =
+        (char*)test_span_mapping(&device, readback_all).ptr;
+    assert(viewport_pixels[left_green] != 0,
+        "the half viewport covers the left half");
+    assert(viewport_pixels[right_green] == 0,
+        "the half viewport leaves the right half clear");
+    char* persisted_pixels = viewport_pixels + RT_BYTES;
+    assert(persisted_pixels[left_green] != 0,
+        "the persisted viewport covers the left half");
+    assert(persisted_pixels[right_green] == 0,
+        "the persisted viewport leaves the right half clear");
+    char* scissor_pixels = viewport_pixels + RT_BYTES * 2;
+    assert(scissor_pixels[left_green] != 0,
+        "the half scissor covers the left half");
+    assert(scissor_pixels[right_green] == 0,
+        "the half scissor leaves the right half clear");
+    char* reset_pixels = viewport_pixels + RT_BYTES * 3;
+    assert(reset_pixels[right_green] != 0,
+        "an explicit complete replacement restores full raster coverage");
 }
 
 fn void offscreen_render_to_mip() @test {
@@ -691,7 +720,7 @@ fn void offscreen_render_to_mip() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = MIP1, .height = MIP1 };
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(MIP1, MIP1)!!;
-    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::TextureBarrier to_src = {
@@ -806,10 +835,8 @@ fn void dynamic_viewport_scissor_validation() @test {
         .width  = (int)RT_SIZE,
         .height = (int)RT_SIZE,
     };
-    assert(@catch(gpu::cmd_set_viewport(&cmd, &full_viewport)) == gpu::COMMAND_RECORDING_ERROR,
-        "viewport outside a render pass faults COMMAND_RECORDING_ERROR");
-    assert(@catch(gpu::cmd_set_scissor(&cmd, &full_scissor)) == gpu::COMMAND_RECORDING_ERROR,
-        "scissor outside a render pass faults COMMAND_RECORDING_ERROR");
+    gpu::cmd_set_viewport(&cmd, &full_viewport)!!;
+    gpu::cmd_set_scissor(&cmd, &full_scissor)!!;
 
     gpu::TextureBarrier to_attach = {
         .texture = target,
@@ -827,7 +854,7 @@ fn void dynamic_viewport_scissor_validation() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
 
     assert(@catch(gpu::cmd_set_viewport(&cmd, null)) == gpu::INVALID_ARGUMENT,
         "null viewport faults INVALID_ARGUMENT");
@@ -896,10 +923,8 @@ fn void dynamic_viewport_scissor_validation() @test {
         "newly accepted dynamic states emit no Vulkan validation error");
 
     gpu::cmd_end_render_pass(&cmd)!!;
-    assert(@catch(gpu::cmd_set_viewport(&cmd, &full_viewport)) == gpu::COMMAND_RECORDING_ERROR,
-        "viewport after a render pass faults COMMAND_RECORDING_ERROR");
-    assert(@catch(gpu::cmd_set_scissor(&cmd, &full_scissor)) == gpu::COMMAND_RECORDING_ERROR,
-        "scissor after a render pass faults COMMAND_RECORDING_ERROR");
+    gpu::cmd_set_viewport(&cmd, &full_viewport)!!;
+    gpu::cmd_set_scissor(&cmd, &full_scissor)!!;
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -958,7 +983,7 @@ fn void render_pass_state_machine() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
 
     // Copies and barriers are illegal inside a pass.
     fault fill_fault = @catch(gpu::cmd_fill_buffer(

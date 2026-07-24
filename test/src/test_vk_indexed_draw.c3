@@ -87,7 +87,7 @@ fn void u16v_draw(
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = U16V_RT, .height = U16V_RT };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&cmd, pipeline);
     gpu::cmd_draw_indexed(
         commands:       &cmd,

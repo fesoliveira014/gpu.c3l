@@ -361,6 +361,15 @@ fn void? command_pin_dispatch(
 fn void? command_pin_begin_render_pass(
     gpu::internal::CommandEncoderState* encoder,
     gpu::RenderPassDesc* desc,
+) {
+    (void)encoder;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? command_pin_begin_render_pass_with_state(
+    gpu::internal::CommandEncoderState* encoder,
+    gpu::RenderPassDesc* desc,
     gpu::GraphicsState* state,
 ) {
     (void)encoder;
@@ -612,6 +621,7 @@ gpu::internal::CommandOps command_pin_ops = {
     .set_graphics_state          = &command_pin_set_graphics_state,
     .dispatch                    = &command_pin_dispatch,
     .begin_render_pass           = &command_pin_begin_render_pass,
+    .begin_render_pass_with_state = &command_pin_begin_render_pass_with_state,
     .set_viewport                = &command_pin_set_viewport,
     .set_scissor                 = &command_pin_set_scissor,
     .end_render_pass             = &command_pin_end_render_pass,

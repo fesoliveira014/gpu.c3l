@@ -408,7 +408,7 @@ fn void observe_policy_matrix_render(
         begin_policy_matrix_observation(state);
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass(&commands, pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, pass, &graphics)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
 
     gpu::reset_command_resolution_stats();
@@ -578,7 +578,7 @@ fn void observe_policy_matrix_generated_render(
         begin_policy_matrix_observation(state);
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass(&commands, pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, pass, &graphics)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
 
     gpu::reset_command_resolution_stats();

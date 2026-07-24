@@ -631,7 +631,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = TARGET_SIZE, .height = TARGET_SIZE };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass(&graphics_commands, &pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&graphics_commands, &pass, &graphics)!!;
     gpu::GpuAddress fragment_root_gpu = (gpu::GpuAddress)((ulong)test_span_address(&device, graphics_root_span) + VERTEX_BYTES);
     bind_test_graphics_pipeline(&graphics_commands, graphics_pipeline);
     gpu::cmd_draw(

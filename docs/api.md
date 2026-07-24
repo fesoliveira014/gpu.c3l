@@ -428,7 +428,7 @@ fault `INVALID_HANDLE`.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime` | the selected backend is unavailable |
 | `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `full_render_graphics_state`; `cmd_begin_render_pass`; `cmd_set_graphics_state`/`cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler`; generated-scratch reservation | null or malformed input, allocator capacity above a hard ceiling, capacity-product overflow, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
+| `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `full_render_graphics_state`; `cmd_begin_render_pass`/`cmd_begin_render_pass_with_state`; `cmd_set_graphics_state`/`cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler`; generated-scratch reservation | null or malformed input, allocator capacity above a hard ceiling, capacity-product overflow, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
 | `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, a borrowed swapchain attachment view was passed for destruction, or the requested generated-scratch key is not reserved |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
@@ -1190,15 +1190,21 @@ Dispatch requires an active compute pipeline. Graphics draws require an active
 graphics pipeline and render pass. Root addresses, including zero, are pushed
 unchanged.
 
-Every render pass begins with a caller-provided complete `GraphicsState`.
-`cmd_set_graphics_state` replaces that complete state later in the pass.
+Graphics state belongs to a graphics-capable command buffer, not to one render
+pass. `cmd_set_graphics_state` records a complete packet before or during a pass;
 `cmd_set_raster_state`, `cmd_set_depth_state`, `cmd_set_viewport`, and
-`cmd_set_scissor` remain optional partial updates after begin. All setters
-require an active render pass; outside one they fault
-`COMMAND_RECORDING_ERROR`. State validation is atomic: invalid values return
-`INVALID_ARGUMENT` without emitting any native state. There is no hidden
-default state or draw-time depth-initialization requirement. A wrong active
-pipeline kind returns `INVALID_ARGUMENT`.
+`cmd_set_scissor` record optional partial updates in either phase. A minimal
+pass begin leaves that state unchanged. The convenience begin records a
+complete packet after beginning the pass. State validation is atomic: invalid
+values return `INVALID_ARGUMENT` without emitting native state.
+
+Under `ContractValidation.FULL`, regular and generated graphics draws return
+`COMMAND_RECORDING_ERROR` until one complete packet has succeeded in the
+current command-buffer recording. Partial setters do not establish that
+initialization, pass boundaries do not clear it, and command-buffer reset does.
+Trusted command entries retain this requirement as a caller contract without a
+warm validation branch. A wrong active pipeline kind returns
+`INVALID_ARGUMENT`.
 
 Each group count may be zero and must not exceed the corresponding component
 of `DeviceCaps.max_compute_work_group_count`. An over-limit call faults
@@ -1267,6 +1273,10 @@ full_render_graphics_state(uint width, uint height) -> GraphicsState?
 cmd_begin_render_pass(
     CommandList* commands,
     RenderPassDesc* desc,
+) -> void?
+cmd_begin_render_pass_with_state(
+    CommandList* commands,
+    RenderPassDesc* desc,
     GraphicsState* state,
 ) -> void?
 cmd_set_graphics_state(CommandList* commands, GraphicsState* state) -> void?
@@ -1294,17 +1304,20 @@ attachment view is published in a descriptor heap or can be destroyed while a
 command list holds an explicit reference. Zero, stale, foreign-device, and
 mismatched view handles fault before native recording.
 
-Render-pass begin requires a non-null complete state packet. The backend first
-validates and lowers the pass and packet, then tracks attachment references.
-Only after all preparation succeeds does it begin native rendering, emit the
-fixed state packet, and publish the active pass. A rejected begin leaves the
-command list and native command buffer unchanged.
+Minimal render-pass begin validates and lowers the pass, tracks attachment
+references, emits one native begin-rendering command, and publishes the active
+pass. It neither requires nor emits a `GraphicsState` packet.
 
-The packet emits exactly ten dynamic-state commands in fixed order: viewport,
-scissor, five raster commands, and three depth commands. There is no state
-diffing or dirty-bit cache. `cmd_set_graphics_state` validates and emits the
-same complete ten-command replacement; the four partial setters below remain
-available for later changes:
+`cmd_begin_render_pass_with_state` validates and lowers both descriptions
+before tracking or native mutation. It then begins rendering and emits the
+complete packet. A rejected convenience call leaves command-list state,
+tracked references, and the native command buffer unchanged.
+
+A complete packet emits exactly ten dynamic-state commands in fixed order:
+viewport, scissor, five raster commands, and three depth commands. There is no
+state diffing or dirty-bit cache. `cmd_set_graphics_state` validates and emits
+the same complete replacement before or during a pass on a graphics-capable
+command list; the four partial setters below remain available in both phases:
 
 ```text
 Viewport
@@ -1334,7 +1347,7 @@ gpu::GraphicsState state = gpu::full_render_graphics_state(
     pass.width,
     pass.height,
 )!!;
-gpu::cmd_begin_render_pass(&commands, &pass, &state)!!;
+gpu::cmd_begin_render_pass_with_state(&commands, &pass, &state)!!;
 ```
 
 The helper faults `INVALID_ARGUMENT` before signed casts when either dimension
@@ -1356,18 +1369,19 @@ Scissors use signed inputs, so negative origins or extents fault. Each widened
 offset-plus-extent must fit `int::max` before native lowering. The rectangle
 may extend beyond the render area and zero extent is a valid empty clip.
 Invalid values return `INVALID_ARGUMENT` before changing dynamic state; calls
-outside a pass return `COMMAND_RECORDING_ERROR`.
+outside command recording return `COMMAND_RECORDING_ERROR`.
 
 Explicit dynamic state survives graphics pipeline and cache-alias handle
-switches. A later render-pass begin installs its supplied packet rather than
-restoring backend defaults.
+switches and render-pass boundaries. Minimal begin preserves it without
+re-emission; convenience begin and explicit setters replace it.
 The current API intentionally exposes one viewport and one scissor only.
 
-This is a source-breaking experimental API. Migrate a two-argument pass begin
-by constructing a `GraphicsState`, folding the pass's initial viewport,
-scissor, raster, and depth setters into it, and passing it as the third
-argument. Keep only state changes that occur after begin as partial setter
-calls.
+This is a source-breaking experimental API. Migrate an old three-argument
+`cmd_begin_render_pass(commands, desc, state)` call to
+`cmd_begin_render_pass_with_state(commands, desc, state)`. Use the new
+two-argument `cmd_begin_render_pass(commands, desc)` when graphics state was
+already recorded on that command buffer. Initial partial setters may instead be
+folded into one complete packet recorded before the first pass.
 
 Use `ClearColor.rgba` for normalized and floating-point attachments, and
 `ClearColor.uint_rgba` for unsigned-integer attachments. The inactive union

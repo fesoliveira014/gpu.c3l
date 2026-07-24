@@ -35,12 +35,13 @@ page doesn't explain it, that's a bug in this page — file an issue.
 - **Dynamic rendering only.** No `VkRenderPass`/framebuffer objects, no
   subpasses, no tile-based subpass dependencies. Render targets are
   described per pass begin (`RenderPassDesc`) and that is the whole model.
-- **Graphics state has no implicit default.** Every render-pass begin requires
-  one complete `GraphicsState` containing viewport, scissor, raster, and depth
-  state. `full_render_graphics_state` supplies a conventional full-area packet
-  when both dimensions fit a signed integer. The API is experimental and
-  source-breaking changes are expected: callers using an older two-argument
-  begin must pass the packet and fold their initial partial setters into it.
+- **Graphics state has no implicit default.** It belongs to the command buffer
+  and survives render-pass boundaries. Minimal begin does not change or replay
+  it. Record a complete `GraphicsState` before or during the first pass, or use
+  `cmd_begin_render_pass_with_state`; under `FULL`, regular and generated draws
+  reject a recording that has only partial updates. `full_render_graphics_state`
+  supplies a conventional full-area packet. Migrate an old three-argument
+  `cmd_begin_render_pass` call to the named convenience.
 - **Texture history is caller-owned.** `TextureBarrier.before` asserts the
   layout, stages, and access established by earlier ordering. The backend
   validates those semantics under `ContractValidation.FULL` and lowers the
@@ -189,7 +190,7 @@ Anything the device can answer at runtime lives in `DeviceCaps` (filled at
 not reported.
 
 Viewport dimensions and coordinate bounds are an intentional exception: the
-backend consumes them privately to validate pass-begin state,
+backend consumes them privately to validate convenience-begin state,
 `cmd_set_graphics_state`, and `cmd_set_viewport`, while callers can submit a
 value and receive `INVALID_ARGUMENT` without preflighting a public cap.
 Negative viewport height, in-range negative coordinates, reversed depth,

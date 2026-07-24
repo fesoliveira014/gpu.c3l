@@ -102,6 +102,7 @@ FIXTURES = {
     "retired_pipeline_color_formats": "color_formats",
     "retired_compute_push_constant": "push_constant_size",
     "retired_raster_state": "RasterState",
+    "retired_cmd_begin_render_pass_state": "state",
     "retired_begin_commands_queue": "queue",
     "retired_reserve_generated_scratch_queue": "queue",
     "retired_release_generated_scratch_queue": "queue",
@@ -161,6 +162,10 @@ RETIRED_ALLOCATOR_SIGNATURES = {
     "retired_begin_commands_queue",
     "retired_reserve_generated_scratch_queue",
     "retired_release_generated_scratch_queue",
+}
+
+RETIRED_RENDER_PASS_SIGNATURES = {
+    "retired_cmd_begin_render_pass_state",
 }
 
 LIVE_SCAN_ROOTS = (
@@ -421,6 +426,18 @@ def has_expected_diagnostic(
         return (
             message == (
                 "It is not possible to cast 'Queue' to 'CommandAllocator*'."
+            )
+            and diagnostic_points_to_retired_member(
+                target,
+                retired_symbol,
+                diagnostic,
+            )
+        )
+    if target in RETIRED_RENDER_PASS_SIGNATURES:
+        return (
+            message == (
+                "This argument would exceed the number of parameters, "
+                "did you add too many arguments?"
             )
             and diagnostic_points_to_retired_member(
                 target,
