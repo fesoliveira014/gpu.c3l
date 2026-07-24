@@ -360,6 +360,28 @@ fn ulong pipeline_native_create_count(VkDeviceState* state) {
     return state.pipelines_created;
 }
 
+struct GraphicsPipelineNativeObservation {
+    uint dynamic_state_count;
+    uint color_target_count;
+    bool dynamic_color_states;
+    bool canonical_color_attachments;
+}
+
+fn GraphicsPipelineNativeObservation graphics_pipeline_native_observation(
+    VkDeviceState* state,
+) @if(env::TESTING) {
+    return {
+        .dynamic_state_count         =
+            state.pipeline_native_dynamic_state_count,
+        .color_target_count          =
+            state.pipeline_native_color_target_count,
+        .dynamic_color_states        =
+            state.pipeline_native_dynamic_color_states,
+        .canonical_color_attachments =
+            state.pipeline_native_canonical_color_attachments,
+    };
+}
+
 <* Deterministic partial-batch rollback probe. *>
 fn void set_pipeline_creation_failure(VkDeviceState* state, usz index) {
     state.pipeline_creation_failure_enabled = true;

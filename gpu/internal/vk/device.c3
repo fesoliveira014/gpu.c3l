@@ -292,6 +292,10 @@ struct VkDeviceState {
     ulong                      pipeline_key_probes @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
     vk::Result                 pipeline_shader_create_result @if(env::TESTING);
     vk::Result                 pipeline_native_create_result @if(env::TESTING);
+    uint                       pipeline_native_dynamic_state_count @if(env::TESTING);
+    uint                       pipeline_native_color_target_count @if(env::TESTING);
+    bool                       pipeline_native_dynamic_color_states @if(env::TESTING);
+    bool                       pipeline_native_canonical_color_attachments @if(env::TESTING);
     bool                       pipeline_cache_insert_failure @if(env::TESTING);
     ShaderId                   pipeline_prepare_poison_id @if(env::TESTING);
     bool                       pipeline_prepare_poison_enabled @if(env::TESTING);

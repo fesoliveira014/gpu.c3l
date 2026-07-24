@@ -2246,3 +2246,95 @@ fn void empty_pipeline_batches_succeed_without_native_work() @test {
     assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
         "empty batches create no native pipelines");
 }
+
+fn void dynamic_color_pipeline_declares_exact_native_state() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = cache_test_state(&device);
+    state.caps.dynamic_color_state = true;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::ColorTargetFormat[2] colors = {
+        { .format = gpu::Format.RGBA8_UNORM },
+        { .format = gpu::Format.BGRA8_UNORM },
+    };
+    gpu::DynamicGraphicsPipelineDesc desc = {
+        .vertex_shader   = shaders.vert,
+        .fragment_shader = shaders.frag,
+        .colors          = colors[..],
+    };
+    vk::set_pipeline_native_create_result(
+        state,
+        vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
+    );
+    fault create_fault = @catch(vk::vk_create_dynamic_graphics_pipeline(
+        &device,
+        &desc,
+    ));
+    vk::set_pipeline_native_create_result(state, vk::Result.SUCCESS);
+
+    assert(create_fault == gpu::OUT_OF_DEVICE_MEMORY,
+        "the injected native failure reaches dynamic pipeline creation");
+    vk::GraphicsPipelineNativeObservation observation =
+        vk::graphics_pipeline_native_observation(state);
+    assert(observation.dynamic_state_count == 13,
+        "dynamic color pipelines declare the ten base and three color states");
+    assert(observation.color_target_count == colors.len,
+        "dynamic color pipelines preserve the format target count");
+    assert(observation.dynamic_color_states,
+        "dynamic color pipelines declare the complete EDS3 color subset");
+    assert(observation.canonical_color_attachments,
+        "ignored static color attachments use one canonical opaque state");
+    assert(cache_entry_count(&device) == 0,
+        "failed native dynamic creation publishes no pipeline cache entry");
+    assert(vk::shader_store_live_count(state) == 0,
+        "failed native dynamic creation releases prepared shader identities");
+}
+
+fn void dynamic_color_batch_prevalidates_transactionally() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = cache_test_state(&device);
+    state.caps.dynamic_color_state = true;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::ColorTargetFormat[1] valid_colors = {
+        { .format = gpu::Format.RGBA8_UNORM },
+    };
+    gpu::ColorTargetFormat[1] invalid_colors = {
+        { .format = gpu::Format.D32_FLOAT },
+    };
+    gpu::DynamicGraphicsPipelineDesc[2] descs = {
+        {
+            .vertex_shader   = shaders.vert,
+            .fragment_shader = shaders.frag,
+            .colors          = valid_colors[..],
+        },
+        {
+            .vertex_shader   = shaders.vert,
+            .fragment_shader = shaders.frag,
+            .colors          = invalid_colors[..],
+        },
+    };
+    gpu::PipelineHandle[2] outputs = {
+        { .owner = 21, .index = 22, .generation = 23 },
+        { .owner = 24, .index = 25, .generation = 26 },
+    };
+    gpu::PipelineHandle[2] before = outputs;
+    ulong native_before = vk::pipeline_native_create_count(state);
+
+    fault create_fault = @catch(vk::vk_create_dynamic_graphics_pipelines(
+        &device,
+        descs[..],
+        outputs[..],
+    ));
+
+    assert(create_fault == gpu::INVALID_ARGUMENT,
+        "an invalid dynamic target faults before batch mutation");
+    assert(outputs[0] == before[0] && outputs[1] == before[1],
+        "dynamic batch validation preserves every caller output");
+    assert(vk::pipeline_native_create_count(state) == native_before,
+        "dynamic batch validation performs no native pipeline creation");
+    assert(cache_entry_count(&device) == 0,
+        "dynamic batch validation publishes no cache entry");
+    assert(vk::shader_store_live_count(state) == 0,
+        "dynamic batch validation retains no shader identity");
+}
