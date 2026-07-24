@@ -72,6 +72,8 @@ caller-owned allocation and completion lifetime contracts
 MemoryClass policy table completeness
 Format translation table completeness through pure tables if separated
 global barrier stage/hazard/queue validation and exact Vulkan scope mapping
+resource-agnostic texture-sync request composition, duplicate/malformed
+rejection, support routing, and supported-but-unrequested classic selection
 shader ABI scalar widths plus generated-work record sizes, offsets, and strides
 TextureView owner/generation validation and descriptor-heap free-list reuse
 null-safe, exactly-once structured debug dispatch and userdata preservation
@@ -215,6 +217,17 @@ native assembly, and emission, plus exactly two state validations/lowerings.
 Post-retain failures must emit nothing, preserve reference counts, and report
 the exact nested `TextureBarrier` field. No test assumes backend-tracked layout
 history.
+
+Resource-agnostic synchronization coverage runs both classic and selected
+policy modes. It pins ordinary barrier layouts, sampled/storage descriptors,
+color/resolve/depth attachments, both buffer-image copy directions,
+`UNDEFINED` and `PRESENT` exceptions, and invalid-input rollback before native
+emission. The end-to-end selected path must emit one global memory barrier and
+zero image barriers for an initialized ordinary dependency while matching the
+classic explicit-image-barrier output. A live run may report N/A only after
+proving the extension or feature absent; advertised support makes creation,
+selected-cap publication, validation-clean execution, and output equivalence
+mandatory.
 
 Windowed tests may be manual at first. Automated windowed tests can be added only when CI/window-system support is stable.
 

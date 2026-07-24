@@ -214,6 +214,12 @@ get_device_backend(Device*)    -> BackendKind?
 get_device_caps(Device*)       -> DeviceCaps?
 ```
 
+Device requests compose strict semantics with independent queue, presentation,
+and resource-agnostic texture-synchronization contributions. The last is
+selected only when explicitly requested and fully enabled; its result is
+published as `DeviceCaps.resource_agnostic_texture_sync`. Unrequested devices
+retain classic native texture layouts.
+
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
 Most public device operations pin the slot before reading backend state.
@@ -509,6 +515,9 @@ submission dependencies use consumer-scoped `SubmitDesc.completion_waits`:
 ordinary stages compose with a narrow draw-argument consumer. Same-queue order
 is implicit after point and scope validation. Swapchain readiness remains
 stage-scoped. Native timelines and swapchain semaphores remain backend-private.
+On a selected resource-agnostic device, an initialized ordinary texture may use
+the resource-free global barrier because its native representation remains
+`GENERAL`; initialization and WSI transitions remain image-specific.
 
 ### Swapchains
 
@@ -754,6 +763,15 @@ Identity, range, and safe-lowering checks remain active under every policy,
 while `FULL` adds semantic layout, stage, access, usage, queue, and presentation
 diagnostics. Each accepted barrier resolves its texture and range once, lowers
 its two states once, and emits one native barrier.
+
+Selected resource-agnostic devices keep every initialized ordinary non-WSI
+layout in one native `GENERAL` representation. Texture barriers, sampled and
+storage descriptors, rendering and resolve attachments, and buffer-image
+copies share that private layout policy. This permits an ordinary
+whole-resource dependency to use `Barrier` after explicit initialization
+without hidden texture iteration or state tracking. `UNDEFINED`, `PRESENT`,
+subresource precision, feedback loops, and video layouts are not folded into
+that contract.
 
 Presentation barriers separate external WSI ordering from queue-side access.
 Leaving `PRESENT` uses no source access and anchors the layout transition to

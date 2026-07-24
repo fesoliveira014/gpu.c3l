@@ -283,6 +283,13 @@ destroying a swapchain. Non-default native subresource views are destroyed
 exactly once with their public child; pass recording never creates or caches
 them.
 
+Resource-agnostic texture synchronization changes only the selected device's
+native ordinary image representation. It does not change allocation ownership,
+mapping visibility, command retention, or completion-based lifetime. A global
+barrier may order an already-initialized ordinary whole texture on a selected
+device, but initialization, presentation, and subresource-specific dependencies
+still use explicit texture barriers.
+
 ## 10. Caller-owned transient data
 
 Roots, constants, transfer payloads, and other short-lived GPU data use ordinary
