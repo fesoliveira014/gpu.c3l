@@ -342,7 +342,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "command_path_baseline_bench",
                 "command_reference_bench",
                 "command_record_bench",
-                "command_record_fast_bench",
                 "lifecycle_bench",
                 "submit_batch_bench",
                 "pipeline_cache_bench",
@@ -956,6 +955,24 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 output = COMMAND_OUTPUT.replace(f"{field}=0", f"{field}=1")
                 with self.assertRaisesRegex(ValueError, "recording invariants"):
                     runner.require_measurement(output, "command_record_bench")
+
+    def test_command_measurement_requires_bounded_representation(self):
+        runner = load_runner()
+        output = COMMAND_OUTPUT.replace(
+            "representation=bounded",
+            "representation=" + "direct",
+        )
+        with self.assertRaisesRegex(ValueError, "token/storage record"):
+            runner.require_measurement(output, "command_record_bench")
+
+    def test_command_measurement_requires_one_bounded_lookup_per_command(self):
+        runner = load_runner()
+        output = COMMAND_OUTPUT.replace(
+            "command_table=300320",
+            "command_table=0",
+        )
+        with self.assertRaisesRegex(ValueError, "command-table work"):
+            runner.require_measurement(output, "command_record_bench")
 
     def test_command_measurement_rejects_forbidden_resolution_work(self):
         runner = load_runner()

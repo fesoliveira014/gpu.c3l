@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -66,6 +67,73 @@ class MatrixCheckTests(unittest.TestCase):
             )
             previous = os.environ.get("HEADLESS_TEST_TARGETS")
             os.environ["HEADLESS_TEST_TARGETS"] = "vk_a"
+            try:
+                with redirect_stderr(io.StringIO()):
+                    self.assertEqual(1, checker.main(root))
+            finally:
+                if previous is None:
+                    os.environ.pop("HEADLESS_TEST_TARGETS", None)
+                else:
+                    os.environ["HEADLESS_TEST_TARGETS"] = previous
+
+    def test_main_accepts_exact_ordered_matrix(self):
+        checker = self.load_checker()
+        expected = list(checker.EXPECTED_HEADLESS_TARGETS)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test").mkdir()
+            (root / "docs").mkdir()
+            targets = {
+                name: {"type": "test"}
+                for name in expected
+            }
+            (root / "test" / "project.json").write_text(
+                json.dumps({"targets": targets}),
+                encoding="utf-8",
+            )
+            (root / "docs" / "testing.md").write_text(
+                "The blocking headless matrix is shared by Linux and Windows:\n\n"
+                "```text\n"
+                + " ".join(expected)
+                + "\n```\n",
+                encoding="utf-8",
+            )
+            previous = os.environ.get("HEADLESS_TEST_TARGETS")
+            os.environ["HEADLESS_TEST_TARGETS"] = " ".join(expected)
+            try:
+                self.assertEqual(0, checker.main(root))
+            finally:
+                if previous is None:
+                    os.environ.pop("HEADLESS_TEST_TARGETS", None)
+                else:
+                    os.environ["HEADLESS_TEST_TARGETS"] = previous
+
+    def test_main_rejects_retired_direct_token_target(self):
+        checker = self.load_checker()
+        expected = list(checker.EXPECTED_HEADLESS_TARGETS)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test").mkdir()
+            (root / "docs").mkdir()
+            targets = {
+                name: {"type": "test"}
+                for name in expected
+            }
+            (root / "test" / "project.json").write_text(
+                json.dumps({"targets": targets}),
+                encoding="utf-8",
+            )
+            (root / "docs" / "testing.md").write_text(
+                "The blocking headless matrix is shared by Linux and Windows:\n\n"
+                "```text\n"
+                + " ".join(expected)
+                + "\n```\n",
+                encoding="utf-8",
+            )
+            configured = expected.copy()
+            configured.insert(5, "vk_command_tokens_" + "fast")
+            previous = os.environ.get("HEADLESS_TEST_TARGETS")
+            os.environ["HEADLESS_TEST_TARGETS"] = " ".join(configured)
             try:
                 with redirect_stderr(io.StringIO()):
                     self.assertEqual(1, checker.main(root))

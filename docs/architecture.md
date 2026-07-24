@@ -152,10 +152,7 @@ value. Every level rejects stale/foreign identities at public resource
 resolve/destroy boundaries as mandatory safety; `OBJECT_BOUNDARIES` adds
 structured diagnostics for those failures at covered public resource and
 command-lifecycle boundaries. `FULL` selects detailed command semantic checks
-and requires the default bounded command-token representation. Token
-representation is a separate compile-time axis: `DIRECT_COMMAND_TOKENS` selects
-the one-pointer FAST representation and rejects `FULL` before backend
-initialization.
+on top of the sole bounded command-token representation.
 `track_resource_lifetimes` independently selects command reference retention,
 and `enable_vulkan_validation` independently requests the Khronos layer.
 Debug names request best-effort native naming, while a callback only selects
@@ -289,32 +286,21 @@ live allocator never waits and returns `RESOURCE_IN_USE` until all its command
 units are discarded or completion-retired.
 
 A command list is a transient token for one device-table command record paired
-with one originating allocator native buffer/scratch unit. The public payload
-is selected at compile time:
-
-- the default bounded representation carries a `Device` plus a compact
-  generation-checked command identity;
-- a build with `DIRECT_COMMAND_TOKENS` carries exactly one opaque pointer to the
-  stable record.
-
-The public `DIRECT_COMMAND_TOKENS` constant reports which representation was
-built. The two layouts are alternatives; no token carries both identities.
-Bounded resolution validates indices, owners, and generations before obtaining
-a backend pointer, so `ContractValidation.FULL` can diagnose fabricated, stale,
-foreign, wrong-phase, duplicate, and consumed values deterministically. Direct
-resolution trusts the token's provenance and reaches the record without an
-encoder-cell computation, packed-lease reconstruction, command-table lookup,
-device-registry pin, or validation-policy branch. A direct-token build therefore
-rejects `ContractValidation.FULL` before backend initialization.
+with one originating allocator native buffer/scratch unit. Its fixed public
+payload carries a `Device` plus a compact owner/slot/generation command
+identity. Resolution validates the device, allocator, identity, and
+authoritative phase before obtaining the record. `ContractValidation.FULL`
+therefore diagnoses fabricated, stale, foreign, wrong-phase, duplicate, and
+consumed values deterministically.
 
 Every preallocated command cell owns one address-stable authoritative
 `CommandRecord`. It contains the selected immutable `CommandOps`, backend state
 and backend-command pointers, retained device/backend ownership, bounded
-identity when present, and the sole lifecycle state. Its linked backend record
+identity, and the sole lifecycle state. Its linked backend record
 contains the originating allocator and buffer identity, fixed reference and
-generated-work scratch, and native command state. Copies of either public token
-representation alias the authoritative record; they do not copy or fork its
-state. Device loss is reported by lifecycle operations; explicit discard
+generated-work scratch, and native command state. Copies of a public token
+alias the authoritative record; they do not copy or fork its state. Device loss
+is reported by lifecycle operations; explicit discard
 remains available so a lost device can release retained command state.
 
 State transitions:
@@ -625,15 +611,13 @@ tracking, layer, callback, naming policy, or separate command-capability fields.
 All four tables retain mandatory host
 pointer/slice/range safety, overflow protection, internal state integrity,
 public ownership, Vulkan result handling, and rollback. Detailed command misuse
-outside that floor is a caller contract violation unless `FULL` is selected in
-the bounded-token build. Direct-token provenance, one-shot use, correct phase,
-and alias confinement remain caller preconditions.
+outside that floor is a caller contract violation unless `FULL` is selected.
+One-shot use and alias confinement remain caller preconditions, while bounded
+identity and authoritative-phase resolution reject stale or consumed aliases
+before native mutation.
 
-The representation change is based on the private-proof outcome rules
-introduced by #438, which allow removed work to be observed as zero. It does not
-remove the record-owned runtime `CommandOps` dispatch or change fallible
-`cmd_*` signatures; direct build-time command dispatch and the final public
-FAST/CHECKED surface remain the separate #440 boundary.
+The bounded recording path retains the record-owned runtime `CommandOps`
+dispatch and fallible `cmd_*` signatures.
 
 Static command-policy checking verifies complete operation coverage for each
 literal runtime `CommandOps` table that exists. It does not require a fixed

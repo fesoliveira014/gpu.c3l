@@ -139,13 +139,8 @@ fn void verify_commands_per_list(gpu::CommandAllocator* allocator) {
         assert(resolution.encoder_cell_computations == 0
             && resolution.encoder_lease_comparisons == 0,
             "commands-per-list evidence observes no retired frontend proof");
-        $if $feature(DIRECT_COMMAND_TOKENS):
-            assert(resolution.command_table_lookups == 0,
-                "direct commands-per-list evidence performs no table lookup");
-        $else
-            assert(resolution.command_table_lookups == count,
-                "bounded commands-per-list evidence resolves once per call");
-        $endif
+        assert(resolution.command_table_lookups == count,
+            "bounded commands-per-list evidence resolves once per call");
         gpu::ExecutableCommandList executable =
             gpu::end_commands(&commands)!!;
         gpu::discard_executable_commands(&executable)!!;
@@ -468,14 +463,8 @@ fn int main() {
         "warm recording does not borrow retained pins");
     assert(resolution.lifecycle_vtable_dispatches == 0,
         "warm recording does not load the lifecycle vtable");
-    $if $feature(DIRECT_COMMAND_TOKENS):
-        assert(resolution.command_table_lookups == 0,
-            "direct warm recording does not resolve the command table");
-    $else
-        assert(resolution.command_table_lookups
-                == expected_recording_commands,
-            "bounded warm recording resolves one command record per call");
-    $endif
+    assert(resolution.command_table_lookups == expected_recording_commands,
+        "bounded warm recording resolves one command record per call");
     assert(resolution.pipeline_table_lookups == 0,
         "warm recording does not resolve the pipeline table after bind");
     assert(resolution.pipeline_cache_lookups == 0,
@@ -524,8 +513,7 @@ fn int main() {
 
     io::printfn("expectation_version=%d", BENCHMARK_EXPECTATION_VERSION);
     io::printfn(
-        "command_tokens: representation=%s recording_token_bytes=%d executable_token_bytes=%d record_bytes=%d cell_bytes=%d fixed_storage_bytes=%d commands_per_list=1,16,256,4096",
-        gpu::DIRECT_COMMAND_TOKENS ? "direct" : "bounded",
+        "command_tokens: representation=bounded recording_token_bytes=%d executable_token_bytes=%d record_bytes=%d cell_bytes=%d fixed_storage_bytes=%d commands_per_list=1,16,256,4096",
         gpu::CommandList::size,
         gpu::ExecutableCommandList::size,
         gpu::internal::CommandRecord::size,

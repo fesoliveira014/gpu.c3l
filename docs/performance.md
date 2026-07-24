@@ -16,8 +16,7 @@ python -B scripts/run_benchmarks.py
 The runner builds every target once with C3 `-O1`, uses trusted/no-tracking/no-
 layer defaults for release evidence, validates output schemas and zero-work
 fields, records hand-maintained `expectation_version=2`, and writes
-`test/build/benchmark-report.md`. Command recording is built in both public
-token representations. The default bounded `command_record_bench` executable
+`test/build/benchmark-report.md`. The bounded `command_record_bench` executable
 and fixed workload run in this required order:
 
 | Mode | Contract | Tracking | Vulkan layers |
@@ -28,15 +27,12 @@ and fixed workload run in this required order:
 | 4 | `FULL` | on | on |
 
 Only mode 1 participates in release timing thresholds. All four elapsed times
-remain advisory. `command_record_fast_bench` is compiled with
-`DIRECT_COMMAND_TOKENS` and runs only trusted/no-tracking/no-layer because a
-direct-token build cannot provide `FULL` token diagnostics. Whenever the runner
-is executed locally or on a self-hosted machine, exact work-counter violations
-hard-fail the run. Hosted CI builds the benchmark targets and unit-tests their
-schemas but does not execute this live runner; its blocking equivalents are
-`vk_validation_policy` for the bounded matrix and `vk_command_tokens_fast` for
-the direct representation. To collect the former all-enabled debug
-configuration for the other benchmark devices in a separate report, run:
+remain advisory. Whenever the runner is executed locally or on a self-hosted
+machine, exact work-counter violations hard-fail the run. Hosted CI builds the
+benchmark targets and unit-tests their schemas but does not execute this live
+runner; its blocking equivalent is `vk_validation_policy`. To collect the
+former all-enabled debug configuration for the other benchmark devices in a
+separate report, run:
 
 ```sh
 python -B scripts/run_benchmarks.py --validation \
@@ -50,12 +46,10 @@ are rejected. Do not compare those timings with the release baseline. The
 validation layer must recognize every enabled Vulkan extension; otherwise its
 diagnostics invalidate the timing run. `command_record_bench` always uses its
 four explicit modes, even during this separate report.
-`command_record_fast_bench` always uses its single trusted direct-token mode.
 `command_path_baseline_bench` likewise keeps its fixed trusted, tracking-off,
 layers-off policy so its native/public comparison stays on the release contract.
 
-For the bounded command-only matrix, build once and set all three required
-variables:
+For the command-only matrix, build once and set all three required variables:
 
 ```sh
 c3c build command_record_bench --path test -O1
@@ -65,28 +59,23 @@ GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_TRACKING=true GPU_C3L_BENCH_LAYERS=fal
 GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_TRACKING=true GPU_C3L_BENCH_LAYERS=true ./test/build/command_record_bench
 ```
 
-For the one-pointer FAST representation:
-
-```sh
-c3c build command_record_fast_bench --path test -O1
-GPU_C3L_BENCH_CONTRACT=trusted GPU_C3L_BENCH_TRACKING=false GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_fast_bench
-```
-
 The executables reject missing or malformed policy variables. Each output has
 one exact `validation policy=...` line reporting semantic checks, tracking
 calls, reference allocations/increments/releases, and layer selection. Trusted
 and object-boundary modes require every policy-work counter to be zero. Both
 full modes require semantic and tracking work, releases must equal increments,
 and allocations cannot exceed increments. Every warm interval must report zero
-device registry, command-table, pipeline-table/cache, and policy reselection.
+device-registry, pipeline-table/cache, and policy-reselection work, with exactly
+one command-table lookup per accepted recording command.
 Each target creates its explicit queue-bound allocator before warmup and outside
 every measured interval. Its cold counters report allocator host allocation,
 one pool creation, and one complete native command-buffer allocation separately
 from warm recording. All four policy modes require zero warm host/native/VMA
 allocation; tracking modes use the reference slab allocated at allocator create.
-Both targets report recording/executable token size, authoritative-record and
-cell size, total fixed command storage, and command-list workloads of 1, 16,
-256, and 4,096 commands. The FAST token sizes must equal one pointer.
+The target reports the bounded recording/executable token size,
+authoritative-record and cell size, total fixed command storage, and
+command-list workloads of 1, 16, 256, and 4,096 commands. Every accepted
+recording command performs exactly one command-table lookup.
 
 ### Command-path baselines
 
@@ -156,8 +145,7 @@ The suite covers:
 | `command_wrapper_bench` | ICD-free direct no-op and public-wrapper floor for five command classes, with exact volatile observation |
 | `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero forbidden work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
 | `command_reference_bench` | Exact public lookup/publication/retain/release outcomes plus upper-bounded private probe, equality, and mutex work for unique, repeated, mixed, forced-collision, and capacity scenarios |
-| `command_record_bench` | Bounded-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording across the validation/tracking matrix |
-| `command_record_fast_bench` | One-pointer FAST token/storage evidence; 1/16/256/4,096 command lists; exact native output; zero removed proof, lookup, pin, and warm-allocation work |
+| `command_record_bench` | Bounded-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording across the validation/tracking matrix; 1/16/256/4,096 command lists; exact native output; one lookup per accepted command and zero forbidden warm work |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact one-visit-per-list duplicate-detection work |
 | `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
@@ -184,8 +172,8 @@ Blocking records use three outcome classes:
 | Minimal native lowering | Exact Vulkan emission count for the named scenario |
 
 Private probes, identity comparisons, and mutex decisions use documented upper
-bounds that include zero. Removed FAST encoder/lease/frontend-phase proof work
-is exact zero. Timings and unpinned generated assembly are advisory.
+bounds that include zero. Retired encoder/lease/frontend-phase proof work is
+exact zero. Timings and unpinned generated assembly are advisory.
 
 | Invariant | Required observation |
 |---|---|
@@ -201,12 +189,11 @@ is exact zero. Timings and unpinned generated assembly are advisory.
 | Shader identity | Owned clone/free balance, zero post-intern shader work, and bounded intern/compact-key work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Bounded collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
-In the bounded build, warm `CommandResolutionStats` permit one bounded
-command-table resolution and authoritative phase check per recorded public
-command. The FAST build requires zero encoder-cell computations, packed-lease
-comparisons, frontend phase transitions, command-table lookups, registry/pin
-operations, and warm allocation. Both representations require exact native
-emission and GPU output. Pipeline and descriptor-heap counters measure native
+Warm `CommandResolutionStats` require one bounded command-table resolution and
+authoritative phase check per recorded public command, with zero encoder-cell
+computations, packed-lease comparisons, frontend phase transitions,
+registry/pin operations, and warm allocation. The benchmark requires exact
+native emission and GPU output. Pipeline and descriptor-heap counters measure native
 emission, not public bind attempts, so compatible pipeline switches can increase
 pipeline binds without increasing heap binds.
 
@@ -223,7 +210,7 @@ prohibited in every policy mode; tracking modes retain into fixed reference
 storage allocated with the command allocator. VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
 and registry, retained-pin, lifecycle-vtable, command-table, and policy work
-remain prohibited in FAST warm recording; bounded command-token lookup is
+remain prohibited in warm recording; bounded command-token lookup is
 reported separately and limited to one per public recording call. Binding an opaque pipeline handle performs exactly one
 pipeline-table and one pipeline-cache lookup; dispatch and draw perform no
 additional resolution and each emits exactly one root push plus its native
@@ -274,12 +261,11 @@ raw records. Observed output is never copied back into expectations
 automatically; increases require a reason that the additional native work is
 necessary.
 
-The FAST zero-proof gates depend on #438's outcome taxonomy, which permits a
-removed private mechanism to report zero rather than requiring one observation.
-They cover token resolution and authoritative record lifetime only. Runtime
-`CommandOps` indirect dispatch and fallible recording signatures remain
-intentional here; #440 owns their later build-time specialization and any final
-FAST/CHECKED public artifact split.
+The bounded recording gates require one command-table lookup per accepted
+recording command and exact zero for retired frontend proof work, registry
+resolution, retained pins, lifecycle dispatch, policy reselection, and warm
+allocation. Runtime `CommandOps` indirect dispatch and fallible recording
+signatures remain intentional.
 
 Representative dispatch, draw, barrier, viewport, and buffer-copy assembly can
 be reported locally:

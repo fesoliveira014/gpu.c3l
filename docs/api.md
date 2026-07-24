@@ -151,7 +151,7 @@ Validation controls are independent:
 
 | Control | Zero/default | Effect |
 |---|---|---|
-| `contract_validation` | `TRUSTED` | Selects library contract diagnostics. Every level rejects stale/foreign identities at public resource resolve/destroy boundaries as mandatory safety. `OBJECT_BOUNDARIES` adds structured stale/foreign diagnostics at covered public create, query, destroy, command-lifecycle, and submit boundaries. `FULL` also enables detailed command argument, usage, layout, queue, pipeline-kind, render-compatibility, and state diagnostics, and therefore requires the default bounded command-token build. |
+| `contract_validation` | `TRUSTED` | Selects library contract diagnostics. Every level rejects stale/foreign identities at public resource resolve/destroy boundaries as mandatory safety. `OBJECT_BOUNDARIES` adds structured stale/foreign diagnostics at covered public create, query, destroy, command-lifecycle, and submit boundaries. `FULL` also enables detailed command argument, usage, layout, queue, pipeline-kind, render-compatibility, and state diagnostics. |
 | `track_resource_lifetimes` | `false` | When true, command records retain explicitly named resources and early destruction returns `RESOURCE_IN_USE`. When false, recording allocates and updates no reference storage; the caller proves completion before destruction. |
 | `enable_vulkan_validation` | `false` | Requests `VK_LAYER_KHRONOS_validation`. It does not select library checks or lifetime tracking. |
 | `enable_debug_names` | `false` | Requests best-effort native object naming through debug utils. It enables no checks, tracking, or layers. |
@@ -161,11 +161,10 @@ Every contract level retains the mandatory safety floor: host pointer and slice
 validity before reads, integer-overflow and backing-range protection required
 for safe lowering, command state transitions and internal table safety, public
 device ownership, Vulkan result/device-loss handling, and transactional
-creation rollback. Under `TRUSTED`, misuse outside that floor is a caller
-contract violation and detailed command diagnostics are not promised. In a
-`DIRECT_COMMAND_TOKENS` build, command-token provenance, phase, one-shot use, and
-alias confinement are caller preconditions; arbitrary or stale pointer values
-cannot be diagnosed safely.
+creation rollback. Command-token resolution always validates bounded owner,
+slot, generation, device, allocator, and authoritative phase before unsafe
+access. Under `TRUSTED`, misuse outside that floor is a caller contract
+violation and detailed command diagnostics are not promised.
 
 Use the helper for the former all-enabled development configuration:
 
@@ -174,11 +173,9 @@ gpu::RuntimeDesc runtime_desc = gpu::full_validation_runtime_desc();
 runtime_desc.application_name = "my_app";
 ```
 
-`FULL` does not require Vulkan SDK layers. In the default bounded-token build,
-set `contract_validation = FULL` and leave `enable_vulkan_validation = false`
-when detailed library diagnostics are needed on a machine without the Khronos
-layer. A `DIRECT_COMMAND_TOKENS` build rejects `FULL` before backend
-initialization. For migration only, a former
+`FULL` does not require Vulkan SDK layers. Set `contract_validation = FULL` and
+leave `enable_vulkan_validation = false` when detailed library diagnostics are
+needed on a machine without the Khronos layer. For migration only, a former
 `enable_validation = true` initializer maps to `FULL`, lifetime tracking on,
 and Vulkan validation on (or the helper); `false` or omission maps to
 `TRUSTED`, tracking off, and Vulkan validation off. The retired field is not
@@ -381,9 +378,8 @@ shader values without owner or generation metadata. Do not persist, serialize,
 reconstruct, or pass either category across device or process lifetimes. Compare
 `Queue` values as wholes and use `get_queue_info` for inspection; do not
 construct or mutate queue fields. `CommandList` embeds a copy of its owning
-`Device` token only in the bounded representation; the direct representation
-stores only the authoritative-record pointer and does not borrow caller variable
-storage.
+`Device` token plus a compact `CommandListHandle`; it does not borrow caller
+variable storage.
 
 ### Allocations, spans, and GPU addresses
 
@@ -434,9 +430,9 @@ fault `INVALID_HANDLE`.
 | Fault | Fired by | Typical cause |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | `create_runtime` | the selected backend is unavailable |
-| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler` | validation layers not installed; `ContractValidation.FULL` requested from a `DIRECT_COMMAND_TOKENS` build; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_FEATURE` | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler` | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; `get_span_mapping`; `get_span_address`; `flush_mapped_span`; `invalidate_mapped_span`; `get_queue`; `submit`; `present`; `cmd_copy_buffer`/`cmd_fill_buffer`/buffer↔texture copies; draw/dispatch and barrier commands; `full_render_graphics_state`; `cmd_begin_render_pass`/`cmd_begin_render_pass_with_state`; `cmd_set_graphics_state`/`cmd_set_raster_state`/`cmd_set_depth_state`/`cmd_set_viewport`/`cmd_set_scissor`; `prepare_shader_code`; pipeline creates; `texture_transition`/`texture_view_transition`; `create_texture_views`; `intern_sampler`; generated-scratch reservation | null or malformed input, allocator capacity above a hard ceiling, capacity-product overflow, heap capacity above the library hard ceiling, zero allocation/span size, non-power-of-two alignment, unavailable mapping/address capability, range outside its immediate parent, offset overflow, `out_views.len != descs.len`, invalid queue access, missing resource usage, malformed command state data, or an out-of-range value |
-| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or bounded command token; direct-token misuse has no deterministic diagnostic guarantee |
+| `INVALID_HANDLE` | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, or foreign runtime, adapter, device, queue, completion point, allocation, span, resource, or bounded command token |
 | `INVALID_RESOURCE_STATE` | swapchain lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an acquired swapchain image is pending during resize or destruction, a readiness/acquisition state transition is invalid, a borrowed swapchain attachment view was passed for destruction, or the requested generated-scratch key is not reserved |
 | `OUT_OF_HOST_MEMORY` | creates; mapped visibility | driver or backend cache host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | allocator, allocation, and texture creates; mapped visibility | backend device-memory exhaustion |
@@ -451,7 +447,7 @@ fault `INVALID_HANDLE`.
 | `SHADER_INVALID` | `prepare_shader_code`, pipeline creates | malformed SPIR-V, a missing or stage-mismatched selected entry point, a selected-entry descriptor convention violation, a non-exact root push-constant block, or backend shader-module rejection |
 | `SURFACE_LOST` | surface creation/query/enumeration, swapchain create/resize, acquire, present | native window or surface was destroyed or became unavailable; destroy the swapchain and create a new one from fresh native handles |
 | `SWAPCHAIN_OUT_OF_DATE` | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | swapchain no longer matches the surface; `resize_swapchain` and retry |
-| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, execution without a bound pipeline, draw without required per-pass depth state, duplicate bounded command token in one submit batch, or bounded token that is already being submitted; corresponding direct-token alias misuse is outside the contract |
+| `COMMAND_RECORDING_ERROR` | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | call outside its required recording state, execution without a bound pipeline, draw without required per-pass depth state, duplicate bounded command token in one submit batch, or bounded token that is already being submitted |
 | `WAIT_TIMEOUT` | `wait_completion`, `acquire_next_image`, `present` | bounded wait, transient image unavailability, or a private present fence not yet reusable; retry with the unchanged value |
 | `BACKEND_ERROR` | any Vulkan-backed operation | unclassified or internal native failure; inspect backend diagnostics; does not imply device loss |
 
@@ -1055,9 +1051,6 @@ SubmitDesc
     CompletionWait[] completion_waits
     SwapchainReadiness readiness
     StageMask readiness_before
-
-DIRECT_COMMAND_TOKENS
-    bool compile-time representation indicator
 ```
 
 `CompletionPoint` is a reusable queue-progress value. It fits in two machine
@@ -1078,9 +1071,9 @@ buffer live until ordered completion retirement.
 
 `CommandList.is_valid` and `ExecutableCommandList.is_valid` test only whether a
 value differs from its invalid zero/token sentinel. They do not validate live
-provenance or phase. In particular, a copied direct-token alias may still return
-true after another alias consumes or retires the record; such use remains
-outside the direct-token contract.
+provenance or phase. Each operation resolves the bounded identity against its
+authoritative record and rejects stale, foreign, consumed, or wrong-phase use
+before native mutation.
 
 `CommandAllocator` is a caller-owned child of one exact selected queue. Create
 one before recording and destroy it before its device. Creation allocates one
@@ -1118,19 +1111,11 @@ discarded or retired, destruction releases idle generated reservations and all
 native/host allocator storage, consumes the value, and releases its device
 child. Even an empty live allocator prevents `destroy_device`.
 
-The compile-time command-token representation is part of the public ABI:
-
-- the default bounded representation contains a `Device` and compact
-  generation-checked command identity; it resolves only through checked table
-  bounds and never dereferences an address supplied by the caller;
-- defining `DIRECT_COMMAND_TOKENS` makes each recording and executable token
-  exactly one opaque pointer to its stable authoritative command record.
-
-The public `DIRECT_COMMAND_TOKENS` constant lets source inspect the selected
-layout. A direct-token build is the FAST representation and rejects
-`ContractValidation.FULL` before backend initialization. Use the default bounded
-representation when deterministic fabricated, stale, foreign, wrong-phase,
-duplicate, or consumed-token diagnostics are required.
+The command-token representation is a fixed public ABI. Recording and
+executable values contain a `Device` plus a compact owner/slot/generation
+`CommandListHandle`. Each use resolves that identity through bounded tables and
+validates the authoritative phase before obtaining the address-stable command
+record. Caller-supplied bits are never treated as a backend address.
 
 Begin initializes the fixed record while inactive and publishes `RECORDING`
 last. End transfers the same record to the executable phase. Failed begin
@@ -1139,13 +1124,11 @@ every claimed record to executable and preserves all input tokens. Discard
 invalidates the record before releasing its references, reservations, allocator
 unit, and retained ownership.
 
-Direct-token callers must preserve provenance, use each token one-shot in the
-correct phase, and confine all aliases to one thread at a time. Fabricated,
-stale, consumed, wrong-phase, or concurrently used direct aliases are invalid
-application use and have no deterministic fault guarantee. These preconditions
-also mean a copied direct token must not be used after the original is ended,
-discarded, submitted, or completion-retired. Device loss is reported at
-lifecycle boundaries rather than by every `cmd_*` call.
+Command tokens are one-shot. A copied alias must not be used after another
+alias is ended, discarded, submitted, or completion-retired; deterministic
+bounded resolution rejects that consumed identity before native mutation.
+Device loss is reported at lifecycle boundaries rather than by every `cmd_*`
+call.
 
 `discard_commands` consumes unfinished recording. Use
 `discard_executable_commands` for an ended token that will not be submitted.
@@ -1159,9 +1142,9 @@ invalidates the record, then releases tracked references, generated
 reservations, the exact allocator unit, and retained ownership before publishing
 the retired queue prefix. Failure publishes no point, restores every claimed
 record to `EXECUTABLE`, and preserves the tokens for retry or discard. An empty
-batch signals the selected queue. In the bounded representation, duplicate or non-executable tokens fault
-`COMMAND_RECORDING_ERROR`; equivalent direct aliases are caller misuse. A token
-for another queue faults `INVALID_ARGUMENT`. Discard consumes an unsubmitted token.
+batch signals the selected queue. Duplicate or non-executable tokens fault
+`COMMAND_RECORDING_ERROR`; a token for another queue faults `INVALID_ARGUMENT`.
+Discard consumes an unsubmitted token.
 One batch may mix executable tokens from different allocators only when every
 allocator is bound to the exact target queue. Each completed native command
 buffer and scratch index returns to its originating allocator; reset happens on
@@ -1257,9 +1240,8 @@ of `DeviceCaps.max_compute_work_group_count`. An over-limit call faults
 Warm recording dispatches through the immutable operation table stored in the
 authoritative record. There is currently one checked policy. Policy selection
 happens at device or record setup; a warm `cmd_*` call never branches on policy
-or reloads lifecycle dispatch. This representation seam does not remove
-`CommandOps` indirection or change the fallible public signatures; #440 owns
-those later FAST-artifact changes.
+or reloads lifecycle dispatch. The bounded representation retains
+`CommandOps` indirection and the fallible public signatures.
 
 Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
 `CommandResolutionStats`, `reset_command_resolution_stats`, and
@@ -1267,10 +1249,10 @@ Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
 live command entry-point attempts, every emitted Vulkan command, and forbidden
 resolution paths. Exact native-operation fields distinguish pipeline binds,
 descriptor-set binds, descriptor-buffer binds, and descriptor-buffer offset
-commands. FAST gates require zero encoder-cell computations, packed-lease
-comparisons, frontend phase transitions, command-table lookups, registry/pin
-operations, and warm allocation. Bounded builds permit one safe token
-resolution and authoritative phase check. A narrow structural guard rejects
+commands. Gates require exactly one bounded token resolution and authoritative
+phase check per accepted command, with zero encoder-cell computations,
+packed-lease comparisons, frontend phase transitions, registry/pin operations,
+and warm allocation. A narrow structural guard rejects
 reintroduced duplicate identity comparisons, device-loss loads, and
 trusted-backend capability comparisons; those prohibitions are not inferred
 from runtime counters. Reset and compare the counters only across an externally
@@ -1834,7 +1816,7 @@ Stored public debug names remain available in every policy;
 `TRUSTED` still reports backend/device failures and callback-requested teardown
 leaks, but does not promise detailed misuse diagnostics. `OBJECT_BOUNDARIES`
 reports covered stale/foreign public identities. `FULL` reports detailed
-rejected fields and invariants for command misuse in the bounded-token build.
+rejected fields and invariants for command misuse.
 These library diagnostics do not require Vulkan validation layers. Backend failures preserve the public
 fault and report the public operation name, such as `submit` or
 `wait_completion`.

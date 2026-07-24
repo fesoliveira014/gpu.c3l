@@ -4,8 +4,8 @@ Every public entry point belongs to one of three tiers. Anything not sanctioned
 here is misuse; results and validation verdicts are undefined. The library's
 own state remains memory-safe except when concurrent use of the same Tier C
 token races its consumption or retirement: aliases refer to one authoritative
-record, and direct-token builds deliberately add no synchronization that would
-make concurrent aliases valid.
+record, and the library deliberately adds no synchronization that would make
+concurrent aliases valid.
 
 ## Tiers
 
@@ -55,15 +55,15 @@ make concurrent aliases valid.
 Most public device operations take a short-lived atomic pin. `begin_commands`
 transfers its pin to one stable device-table command record paired with the
 originating allocator unit and publishes `RECORDING` last. Recording calls
-reach that record through either the default bounded token or the compile-time
-`DIRECT_COMMAND_TOKENS` pointer; they do not borrow another registry pin or load
-device-loss state. End, submit, and other lifecycle boundaries report loss,
-while discard remains available. Successful end transfers the same record and
-retained ownership to the executable phase. Executable discard releases that
-ownership immediately. Successful submission consumes the public token but
-keeps the record and its ownership live through ordered completion retirement.
-Pin acquisition may return `DEVICE_BUSY`; failed destruction restores the live
-state and preserves the token and generation.
+resolve the bounded device plus owner/slot/generation identity and authoritative
+phase before obtaining that record; they do not borrow another registry pin or
+load device-loss state. End, submit, and other lifecycle boundaries report
+loss, while discard remains available. Successful end transfers the same
+record and retained ownership to the executable phase. Executable discard
+releases that ownership immediately. Successful submission consumes the public
+token but keeps the record and its ownership live through ordered completion
+retirement. Pin acquisition may return `DEVICE_BUSY`; failed destruction
+restores the live state and preserves the token and generation.
 
 `create_command_allocator` allocates one exact-queue command pool, every native
 command buffer, fixed per-list scratch, and recycling metadata before returning.
@@ -78,8 +78,8 @@ mutex is acquired only when a new exact identity must be retained. Duplicate
 hits require neither that mutex nor another retain. Tracking-off scratch owns no
 reference list or index.
 
-The first live recording sets the allocator's owner thread. Under `FULL` in the
-bounded-token build, a different thread attempting to begin through that allocator receives
+The first live recording sets the allocator's owner thread. Under `FULL`, a
+different thread attempting to begin through that allocator receives
 `RESOURCE_IN_USE` before its pool is touched. The owner clears after the last
 recording ends or is discarded; application synchronization can then hand the
 allocator to another worker. Executable tokens no longer hold recording
@@ -166,17 +166,15 @@ ownership transfers.
   only through your synchronization. That hand-off is the happens-before edge.
 - Command records live at stable addresses in the fixed device command table
   and are paired with fixed allocator-owned native buffer/scratch units.
-  The default token carries only bounded device, owner, slot, and generation
-  identity; resolution validates every bound before obtaining the record. A
-  `DIRECT_COMMAND_TOKENS` token carries exactly one opaque pointer to that
-  record. Publication, recording-to-executable transfer, submission, discard,
-  and retirement mutate the record's sole state under Tier C confinement.
-  Passing a live token through caller synchronization is the required hand-off
-  and makes the initialized record visible. Copies remain one-shot aliases and
-  must neither be used concurrently nor used after another alias consumes or
-  retires the record. Fabricated or stale direct pointers are outside the
-  contract; use the bounded representation with `FULL` when deterministic
-  misuse diagnostics are required.
+  The token carries bounded device, owner, slot, and generation identity;
+  resolution validates every bound and the authoritative phase before
+  obtaining the record. Publication, recording-to-executable transfer,
+  submission, discard, and retirement mutate the record's sole state under
+  Tier C confinement. Passing a live token through caller synchronization is
+  the required hand-off and makes the initialized record visible. Copies remain
+  one-shot aliases and must neither be used concurrently nor used after another
+  alias consumes or retires the record; bounded resolution rejects fabricated,
+  stale, and consumed identities before native mutation.
 - Allocator slots and all fixed scratch live in a nonmoving generational table.
   The allocator mutex publishes returned buffer indices and recording-owner
   changes. Application synchronization is the happens-before edge for allocator

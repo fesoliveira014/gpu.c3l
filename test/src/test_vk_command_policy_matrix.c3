@@ -57,9 +57,7 @@ fn bool command_policy_observation_matches(
     vk::CommandRecordingStats recording_before = observation.recording_before;
     vk::CommandRecordingStats recording_after = observation.recording_after;
     gpu::CommandResolutionStats resolution = observation.resolution;
-    ulong command_table_lookups = gpu::DIRECT_COMMAND_TOKENS
-        ? 0
-        : expectation.recording_commands;
+    ulong command_table_lookups = expectation.recording_commands;
     return policy.semantic_checks == expectation.semantic_checks
         && policy.tracking_calls == expectation.tracking_calls
         && policy.reference_allocations == expectation.reference_allocations
@@ -948,9 +946,7 @@ fn void command_policy_matcher_rejects_each_forbidden_mutation() @test {
     private_budget.recording_commands = 1;
     CommandPolicyObservation lower_private_work = passing;
     lower_private_work.resolution.recording_commands = 1;
-    if (!gpu::DIRECT_COMMAND_TOKENS) {
-        lower_private_work.resolution.command_table_lookups = 1;
-    }
+    lower_private_work.resolution.command_table_lookups = 1;
     assert(command_policy_observation_matches(
         &lower_private_work,
         &private_budget,

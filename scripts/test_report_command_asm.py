@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import io
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts import report_command_asm
 
 
+SCRIPT = Path(report_command_asm.__file__)
 ASM = """
 .type gpu.cmd_dispatch,@function
 gpu.cmd_dispatch:
@@ -105,6 +111,60 @@ gpu.cmd_dispatch:
                 "C3 Compiler Version: 0.8.0\n"
             ),
             "0.8.0",
+        )
+
+    def test_cli_has_no_direct_token_switch(self) -> None:
+        result = subprocess.run(
+            (sys.executable, "-B", str(SCRIPT), "--help"),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotIn("--direct-command-" + "tokens", result.stdout)
+
+    def test_emit_builds_only_the_bounded_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            asm_dir = root / "asm"
+            with patch.object(report_command_asm.subprocess, "run") as run:
+                report_command_asm.emit_assembly(
+                    root,
+                    asm_dir,
+                    "linux-x64",
+                )
+        command = run.call_args.args[0]
+        self.assertEqual(
+            command,
+            (
+                "c3c",
+                "build",
+                "command_path_baseline_bench",
+                "--path",
+                "test",
+                "-O1",
+                "--emit-asm",
+                "--asm-out",
+                str(asm_dir),
+                "--target",
+                "linux-x64",
+            ),
+        )
+        self.assertNotIn("DIRECT_COMMAND_" + "TOKENS", command)
+
+    def test_advisory_report_identifies_bounded_representation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            argv = [
+                str(SCRIPT),
+                "--asm-dir",
+                directory,
+            ]
+            output = io.StringIO()
+            with patch.object(sys, "argv", argv), redirect_stdout(output):
+                self.assertEqual(report_command_asm.main(), 0)
+        self.assertIn(
+            "asm_expectation version=1 mode=advisory "
+            "representation=bounded",
+            output.getvalue(),
         )
 
     def test_unpinned_missing_symbols_and_unknown_forms_are_advisory(self) -> None:

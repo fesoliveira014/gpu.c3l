@@ -69,17 +69,11 @@ fn gpu::internal::CommandRecord*? recording_command(
     bool allow_lost = true,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
-    gpu::internal::CommandRecord* record;
-    $if $feature(DIRECT_COMMAND_TOKENS):
-        if (commands.record == null) return gpu::INVALID_HANDLE~;
-        record = (gpu::internal::CommandRecord*)commands.record;
-    $else
-        record = bounded_command_record(
-            commands.device,
-            commands.handle,
-            allow_lost,
-        )!;
-    $endif
+    gpu::internal::CommandRecord* record = bounded_command_record(
+        commands.device,
+        commands.handle,
+        allow_lost,
+    )!;
     if (record.state != gpu::internal::CommandState.RECORDING
         && record.state
             != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
@@ -94,17 +88,11 @@ fn gpu::internal::CommandRecord*? executable_command(
     bool allow_lost = false,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
-    gpu::internal::CommandRecord* record;
-    $if $feature(DIRECT_COMMAND_TOKENS):
-        if (commands.record == null) return gpu::INVALID_HANDLE~;
-        record = (gpu::internal::CommandRecord*)commands.record;
-    $else
-        record = bounded_command_record(
-            commands.device,
-            commands.handle,
-            allow_lost,
-        )!;
-    $endif
+    gpu::internal::CommandRecord* record = bounded_command_record(
+        commands.device,
+        commands.handle,
+        allow_lost,
+    )!;
     if (record.state != gpu::internal::CommandState.EXECUTABLE) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
@@ -115,24 +103,16 @@ fn void publish_command_list(
     gpu::internal::CommandRecord* record,
     CommandList* commands,
 ) @private {
-    $if $feature(DIRECT_COMMAND_TOKENS):
-        commands.record = record;
-    $else
-        commands.device = record.device;
-        commands.handle = record.identity;
-    $endif
+    commands.device = record.device;
+    commands.handle = record.identity;
 }
 
 fn void publish_executable_command_list(
     gpu::internal::CommandRecord* record,
     ExecutableCommandList* commands,
 ) @private {
-    $if $feature(DIRECT_COMMAND_TOKENS):
-        commands.record = record;
-    $else
-        commands.device = record.device;
-        commands.handle = record.identity;
-    $endif
+    commands.device = record.device;
+    commands.handle = record.identity;
 }
 
 fn gpu::internal::DeviceOperation? command_operation(
