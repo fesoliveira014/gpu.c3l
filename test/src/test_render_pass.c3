@@ -52,6 +52,46 @@ fn void full_render_graphics_state_is_explicit_and_representable() @test {
     )) == gpu::INVALID_ARGUMENT);
 }
 
+fn void common_color_states_are_exact_and_caller_owned() @test {
+    gpu::ColorWriteMask alpha_only = { .alpha };
+    gpu::ColorTargetBlendState disabled =
+        gpu::color_blend_disabled(alpha_only);
+    assert(!disabled.blend.enable);
+    assert(disabled.write_mask.alpha && (uint)disabled.write_mask == 8);
+
+    gpu::ColorTargetBlendState alpha = gpu::alpha_blend();
+    assert(alpha.blend.enable);
+    assert(alpha.blend.src_color == gpu::BlendFactor.SRC_ALPHA);
+    assert(alpha.blend.dst_color == gpu::BlendFactor.ONE_MINUS_SRC_ALPHA);
+    assert(alpha.blend.src_alpha == gpu::BlendFactor.ONE);
+    assert(alpha.blend.dst_alpha == gpu::BlendFactor.ONE_MINUS_SRC_ALPHA);
+    assert((uint)alpha.write_mask == (uint)gpu::COLOR_WRITE_ALL);
+
+    gpu::ColorTargetBlendState premultiplied =
+        gpu::premultiplied_alpha_blend();
+    assert(premultiplied.blend.src_color == gpu::BlendFactor.ONE);
+    assert(
+        premultiplied.blend.dst_color
+            == gpu::BlendFactor.ONE_MINUS_SRC_ALPHA
+    );
+
+    gpu::ColorTargetBlendState additive = gpu::additive_blend();
+    assert(additive.blend.src_color == gpu::BlendFactor.ONE);
+    assert(additive.blend.dst_color == gpu::BlendFactor.ONE);
+    assert(additive.blend.src_alpha == gpu::BlendFactor.ONE);
+    assert(additive.blend.dst_alpha == gpu::BlendFactor.ONE);
+
+    gpu::ColorTargetBlendState[3] targets;
+    gpu::ColorState packet =
+        gpu::uniform_color_state(targets[..], additive);
+    assert(packet.targets.ptr == targets[..].ptr && packet.targets.len == 3);
+    foreach (&target : targets) {
+        assert(target.blend.src_color == gpu::BlendFactor.ONE);
+        assert(target.blend.dst_color == gpu::BlendFactor.ONE);
+        assert((uint)target.write_mask == (uint)gpu::COLOR_WRITE_ALL);
+    }
+}
+
 fn void render_pass_descriptor_accepts_zero_value_operations() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = render_test_view(0) }};
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);

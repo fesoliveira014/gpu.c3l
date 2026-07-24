@@ -534,6 +534,21 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     };
 }
 
+fn gpu::PipelineHandle? vk_create_dynamic_graphics_pipeline(
+    gpu::Device* device,
+    gpu::DynamicGraphicsPipelineDesc* desc,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_create_dynamic_graphics_pipelines(
+    gpu::Device* device,
+    gpu::DynamicGraphicsPipelineDesc[] descs,
+    gpu::PipelineHandle[] out_pipelines,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn gpu::PipelineHandle? vk_create_graphics_pipeline(
     gpu::Device* device,
     gpu::GraphicsPipelineDesc* desc,

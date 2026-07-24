@@ -99,8 +99,12 @@ alias CreateTextureViewsFn @private      = fn void? (Device*, TextureViewCreateD
 alias InternSamplerFn @private            = fn SamplerIndex? (Device*, SamplerDesc*);
 alias CreateComputePipelineFn @private  = fn PipelineHandle? (Device*, ComputePipelineDesc*);
 alias CreateGraphicsPipelineFn @private = fn PipelineHandle? (Device*, GraphicsPipelineDesc*);
+alias CreateDynamicGraphicsPipelineFn @private =
+    fn PipelineHandle? (Device*, DynamicGraphicsPipelineDesc*);
 alias CreateComputePipelinesFn @private = fn void? (Device*, ComputePipelineDesc[], PipelineHandle[]);
 alias CreateGraphicsPipelinesFn @private = fn void? (Device*, GraphicsPipelineDesc[], PipelineHandle[]);
+alias CreateDynamicGraphicsPipelinesFn @private =
+    fn void? (Device*, DynamicGraphicsPipelineDesc[], PipelineHandle[]);
 alias DestroyPipelineFn @private        = fn void? (Device*, PipelineHandle);
 alias GetPipelineCacheSizeFn @private   = fn usz? (Device*);
 alias GetPipelineCacheDataFn @private   = fn usz? (Device*, char[]);
@@ -313,8 +317,10 @@ struct BackendVTable @private {
     InternSamplerFn           intern_sampler;
     CreateComputePipelineFn   create_compute_pipeline;
     CreateGraphicsPipelineFn  create_graphics_pipeline;
+    CreateDynamicGraphicsPipelineFn create_dynamic_graphics_pipeline;
     CreateComputePipelinesFn  create_compute_pipelines;
     CreateGraphicsPipelinesFn create_graphics_pipelines;
+    CreateDynamicGraphicsPipelinesFn create_dynamic_graphics_pipelines;
     DestroyPipelineFn         destroy_pipeline;
     GetPipelineCacheSizeFn    get_pipeline_cache_size;
     GetPipelineCacheDataFn    get_pipeline_cache_data;

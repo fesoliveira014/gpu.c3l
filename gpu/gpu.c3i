@@ -880,6 +880,22 @@ struct ColorTargetState {
     ColorWriteMask write_mask;
 }
 
+<* Immutable format compatibility for one dynamic-color target. *>
+struct ColorTargetFormat {
+    Format format;
+}
+
+<* Command-time blend equation and write mask for one color target. *>
+struct ColorTargetBlendState {
+    BlendState     blend;
+    ColorWriteMask write_mask;
+}
+
+<* Borrowed complete color state for a selected dynamic graphics pipeline. *>
+struct ColorState {
+    ColorTargetBlendState[] targets;
+}
+
 <* Pass-bounded raster state; zero means triangles, no culling,
    counter-clockwise front faces, and disabled depth bias. *>
 struct DynamicRasterState {
@@ -908,6 +924,18 @@ struct GraphicsPipelineDesc {
     SampleCount        sample_count;
     PolygonMode        polygon_mode;
     ZString            debug_name;
+}
+
+<* Inputs to a format-only dynamic-color graphics pipeline. The layout is
+   fixed: the global heap set plus a 16-byte vertex/fragment root push range. *>
+struct DynamicGraphicsPipelineDesc {
+    ShaderCode          vertex_shader;
+    ShaderCode          fragment_shader;
+    ColorTargetFormat[] colors;
+    Format              depth_format;
+    SampleCount         sample_count;
+    PolygonMode         polygon_mode;
+    ZString             debug_name;
 }
 
 const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
