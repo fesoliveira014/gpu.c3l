@@ -201,6 +201,11 @@ distinct-role constraints, graphics minimum, and presentation topology without
 enabling state. Surface formats and present modes remain swapchain-creation
 concerns.
 
+Resource-agnostic texture synchronization is a separate request. Adapter state
+caches both `VK_KHR_unified_image_layouts` extension presence and
+`unifiedImageLayouts` feature support. Support remains private and does not
+change an unrequested device.
+
 ## 6. Logical device creation
 
 Logical device creation builds a Vulkan feature chain.
@@ -223,6 +228,13 @@ depthBiasClamp
 the backend has already required the independently queried
 `dynamicPrimitiveTopologyUnrestricted` property; command dispatch remains
 Vulkan 1.3 core.
+
+When resource-agnostic texture synchronization is requested, creation rechecks
+native extension and feature support, appends `VK_KHR_unified_image_layouts`,
+and chains exactly one `VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR` with
+`unifiedImageLayouts = VK_TRUE`. `unifiedImageLayoutsVideo` remains false.
+Failure publishes neither a device nor the selected capability. Vulkan 1.4 core
+is not requested.
 
 `maintenance4` is always enabled. The strict request adds its heap features:
 
@@ -802,6 +814,12 @@ recording. Trusted entries retain safe lowering and command-state checks but
 treat detailed stage/hazard/queue misuse as a caller contract. Cross-queue
 ordering remains a submission completion-wait concern.
 
+On a device with selected resource-agnostic texture synchronization, one global
+barrier can express an ordinary whole-resource texture dependency after
+explicit initialization because every such use remains in `GENERAL`. It emits
+one `VkMemoryBarrier2` and no `VkImageMemoryBarrier2`; the backend performs no
+texture lookup, iteration, or hidden state inference for that barrier.
+
 The backend must not insert hidden barriers for user-visible resource
 transitions except for unavoidable swapchain acquire/present transitions
 inside WSI helpers.
@@ -818,6 +836,15 @@ Full texture-state validation uses one layout-specific matrix:
 | `COLOR_ATTACHMENT` | color output or exclusive `all` | read, write, or both | color attachment, selected color access |
 | `DEPTH_ATTACHMENT` | depth output or exclusive `all` | read, write, or both | depth/stencil attachment, selected depth access |
 | `PRESENT` | empty | empty | present source; side-aware native stage, no access |
+
+The classic path retains its transfer, sampled/depth-read, storage, and
+attachment layouts. With the selected capability, transfer source/destination,
+sampled, storage, color attachment, and depth attachment all use
+`VK_IMAGE_LAYOUT_GENERAL`. `UNDEFINED` remains
+`VK_IMAGE_LAYOUT_UNDEFINED`, and `PRESENT` remains
+`VK_IMAGE_LAYOUT_PRESENT_SRC_KHR`. Texture barriers, both descriptor heap
+implementations, dynamic-rendering color/resolve/depth attachments, and both
+buffer-image copy directions call the same private policy.
 
 The layout also enforces immutable texture usage, format class, WSI ownership,
 and a compatible recording queue. `host` and `present` stage bits are invalid
@@ -1076,6 +1103,8 @@ addressable spans produce valid GPU addresses
 root-pointer compute works
 texture heap decodes generation-free TextureIndex values
 barriers use synchronization2
+requested unified image layouts are enabled transactionally and remain request-only
+all ordinary native texture-layout consumers share one selected-device policy
 offscreen dynamic rendering works
 SDL3 swapchain sample presents and resizes
 live resource leaks are reported

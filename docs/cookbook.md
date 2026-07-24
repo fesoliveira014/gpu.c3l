@@ -62,6 +62,27 @@ gpu::cmd_texture_barrier(&cmd, &to_sample)!;
 Running example: `textured_cube` (single texture), `pbr_materials`
 (several), `bindless_stress` (8192, batched).
 
+### Use one global dependency for an ordinary texture
+
+Opt in while composing the device request:
+
+```c3
+gpu::DeviceRequest request =
+    gpu::request_resource_agnostic_texture_sync(gpu::strict_device_request())!;
+```
+
+Query support before creation and confirm
+`get_device_caps(&device).resource_agnostic_texture_sync`. After an explicit
+`UNDEFINED` initialization, ordinary transfer, shader, and attachment uses
+share one native representation. A whole-resource storage-write to sampled-read
+dependency may then use `cmd_barrier` with the producer and consumer stages
+instead of a layout-changing texture barrier.
+
+Keep explicit texture barriers for initialization/discard, presentation,
+subresource-specific dependencies, or resource precision. The capability does
+not track prior state, insert barriers, or cover feedback-loop and video
+layouts. An unrequested device keeps the classic path.
+
 ## 3. Sample through the bindless heap
 
 Goal: shader picks its texture by an integer you stored anywhere.

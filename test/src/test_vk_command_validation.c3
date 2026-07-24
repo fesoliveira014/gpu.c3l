@@ -83,6 +83,21 @@ fn gpu::Device make_val_device() {
     return create_test_device(&desc)!!;
 }
 
+fn void texture_copy_layouts_follow_the_selected_texture_policy() @test {
+    vk::TextureSlot texture = {
+        .format = gpu::Format.RGBA8_UNORM,
+    };
+
+    assert(vk::texture_copy_layout(&texture, true, false)
+        == vk::ImageLayout.TRANSFER_DST_OPTIMAL);
+    assert(vk::texture_copy_layout(&texture, false, false)
+        == vk::ImageLayout.TRANSFER_SRC_OPTIMAL);
+    assert(vk::texture_copy_layout(&texture, true, true)
+        == vk::ImageLayout.GENERAL);
+    assert(vk::texture_copy_layout(&texture, false, true)
+        == vk::ImageLayout.GENERAL);
+}
+
 fn void reference_capacity_preflight_counts_unique_identities() @test {
     vk::CommandResourceReference[1] storage;
     vk::CommandReferenceIndexCell[2] cells;
@@ -2213,8 +2228,11 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     );
 
     gpu::BufferTextureCopyDesc up = { .src = escaped, .texture = texture, .width = 4, .height = 4 };
+    gpu::reset_command_resolution_stats();
     fault beyond = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &up));
     assert(beyond == gpu::INVALID_ARGUMENT, "buffer-to-texture copy span beyond the backing buffer faults INVALID_ARGUMENT");
+    assert(gpu::command_resolution_stats().native_commands == 0,
+        "invalid buffer-to-texture copy emits no native command");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -2261,8 +2279,11 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     );
 
     gpu::TextureBufferCopyDesc down = { .texture = texture, .dst = escaped, .width = 4, .height = 4 };
+    gpu::reset_command_resolution_stats();
     fault beyond = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &down));
     assert(beyond == gpu::INVALID_ARGUMENT, "texture-to-buffer copy span beyond the backing buffer faults INVALID_ARGUMENT");
+    assert(gpu::command_resolution_stats().native_commands == 0,
+        "invalid texture-to-buffer copy emits no native command");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 

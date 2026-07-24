@@ -7,10 +7,16 @@ import std::core::mem;
 
 const uint API_VERSION_1_2 @private = (1u << 22) | (2u << 12);
 
+struct ResourceAgnosticTextureSyncSupport {
+    bool extension;
+    bool unified_image_layouts;
+}
+
 struct VkAdapterState {
     vk::PhysicalDevice                 physical_device;
     vk::PhysicalDeviceProperties       properties;
     vk::PhysicalDeviceDriverProperties driver_properties;
+    ResourceAgnosticTextureSyncSupport  resource_agnostic_texture_sync;
     gpu::AdapterInfo                   info;
     gpu::AdapterDiagnostics            diagnostics;
 }
@@ -97,6 +103,33 @@ fn bool strict_adapter_supported(
     return false;
 }
 
+fn bool resource_agnostic_texture_sync_supported(
+    ResourceAgnosticTextureSyncSupport support,
+) {
+    return support.extension && support.unified_image_layouts;
+}
+
+fn ResourceAgnosticTextureSyncSupport
+query_resource_agnostic_texture_sync_support(
+    vk::PhysicalDevice physical_device,
+) {
+    ResourceAgnosticTextureSyncSupport support = {
+        .extension = device_supports_extension(
+            physical_device,
+            RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION,
+        ),
+    };
+    if (!support.extension) return support;
+
+    vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR features =
+        vk::physical_device_unified_image_layouts_features_khr();
+    vk::PhysicalDeviceFeatures2 features2 =
+        vk::physical_device_features2().set_next(&features);
+    vk::get_physical_device_features2(physical_device, &features2);
+    support.unified_image_layouts = features.unified_image_layouts != 0;
+    return support;
+}
+
 fn void initialize_adapter(
     VkAdapterState* adapter,
     vk::PhysicalDevice physical_device,
@@ -149,6 +182,8 @@ fn void initialize_adapter(
             : "",
         .driver_version  = adapter.properties.driver_version,
     };
+    adapter.resource_agnostic_texture_sync =
+        query_resource_agnostic_texture_sync_support(physical_device);
 }
 
 fn void? enumerate_vk_adapters(VkRuntimeState* state) {
@@ -190,4 +225,15 @@ fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
     VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || index >= state.adapters.len) return gpu::INVALID_HANDLE~;
     return state.adapters[index].diagnostics;
+}
+
+fn bool? vk_supports_resource_agnostic_texture_sync(
+    void* backend_state,
+    uint index,
+) {
+    VkRuntimeState* state = (VkRuntimeState*)backend_state;
+    if (state == null || index >= state.adapters.len) return gpu::INVALID_HANDLE~;
+    return resource_agnostic_texture_sync_supported(
+        state.adapters[index].resource_agnostic_texture_sync,
+    );
 }

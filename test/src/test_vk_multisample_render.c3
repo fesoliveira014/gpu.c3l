@@ -1,6 +1,9 @@
 module gpu_test;
 
+import gpu::internal @public;
+import gpu::internal::vk @public;
 import gpu @public;
+import vk;
 
 fn gpu::SampleCount common_render_sample_count(
     gpu::TextureSampleCountSupport color,
@@ -38,6 +41,70 @@ fn gpu::TextureHandle make_multisample_target(
         .debug_name   = debug_name,
     };
     return gpu::create_texture(device, &desc)!!;
+}
+
+fn void rendering_attachment_layouts_follow_selected_policy() @test {
+    gpu::Device device = make_depth_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle color = make_multisample_target(
+        device:       &device,
+        format:       gpu::Format.RGBA8_UNORM,
+        usage:        { .color_attach },
+        sample_count: gpu::SampleCount.ONE,
+        debug_name:   "layout_policy_color",
+    );
+    defer gpu::destroy_texture(&device, color)!!;
+    gpu::AttachmentViewHandle color_view =
+        create_test_attachment_view(&device, color)!!;
+    defer destroy_test_attachment_view(&device, &color_view)!!;
+    gpu::TextureHandle depth = make_multisample_target(
+        device:       &device,
+        format:       gpu::Format.D32_FLOAT,
+        usage:        { .depth_attach },
+        sample_count: gpu::SampleCount.ONE,
+        debug_name:   "layout_policy_depth",
+    );
+    defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewHandle depth_view =
+        create_test_attachment_view(&device, depth)!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::ColorTargetDesc[1] colors = {{ .view = color_view }};
+    gpu::DepthTargetDesc depth_target = { .view = depth_view };
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .depth  = &depth_target,
+        .width  = DP_RT,
+        .height = DP_RT,
+    };
+    gpu::internal::vk::VkDeviceState* backend =
+        (gpu::internal::vk::VkDeviceState*)
+            gpu::internal::device_backend_state(device);
+    gpu::internal::CommandRecord* record =
+        gpu::internal::recording_command(&commands, false)!!;
+
+    gpu::internal::vk::PreparedRenderPass classic =
+        gpu::internal::vk::lower_render_pass(record, &pass)!!;
+    assert(classic.attachments[0].image_layout
+            == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL
+        && classic.depth_attachment.image_layout
+            == vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        "classic rendering retains distinct color and depth layouts");
+
+    backend.caps.resource_agnostic_texture_sync = true;
+    gpu::internal::vk::PreparedRenderPass selected =
+        gpu::internal::vk::lower_render_pass(record, &pass)!!;
+    assert(selected.attachments[0].image_layout
+            == vk::ImageLayout.GENERAL
+        && selected.depth_attachment.image_layout
+            == vk::ImageLayout.GENERAL,
+        "selected rendering uses GENERAL for color and depth");
+    backend.caps.resource_agnostic_texture_sync = false;
 }
 
 fn void multisample_color_depth_resolves_to_readback() @test {
@@ -167,6 +234,24 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .width  = DP_RT,
         .height = DP_RT,
     };
+    gpu::internal::vk::VkDeviceState* backend =
+        (gpu::internal::vk::VkDeviceState*)
+            gpu::internal::device_backend_state(device);
+    gpu::internal::CommandRecord* record =
+        gpu::internal::recording_command(&commands, false)!!;
+    gpu::internal::vk::PreparedRenderPass classic =
+        gpu::internal::vk::lower_render_pass(record, &pass)!!;
+    assert(classic.attachments[0].resolve_image_layout
+            == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+        "classic resolve retains the color-attachment layout");
+    backend.caps.resource_agnostic_texture_sync = true;
+    gpu::internal::vk::PreparedRenderPass selected =
+        gpu::internal::vk::lower_render_pass(record, &pass)!!;
+    assert(selected.attachments[0].resolve_image_layout
+            == vk::ImageLayout.GENERAL,
+        "selected resolve uses GENERAL");
+    backend.caps.resource_agnostic_texture_sync = false;
+
     gpu::DepthState depth_state = {
         .test_enable  = true,
         .write_enable = true,

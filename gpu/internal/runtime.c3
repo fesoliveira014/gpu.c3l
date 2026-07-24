@@ -14,6 +14,7 @@ alias CreateX11SurfaceBackendFn @private = fn void*? (void*, void*, ulong);
 alias DestroySurfaceBackendFn @private = fn void (void*, void*);
 alias SupportsPresentationBackendFn @private = fn bool? (void*, uint, void*);
 alias SupportsQueueRequirementsBackendFn @private = fn bool? (void*, uint, QueueRequirements*, void*);
+alias SupportsResourceAgnosticTextureSyncBackendFn @private = fn bool? (void*, uint);
 
 const uint MAX_RUNTIMES @private = 16;
 const uint MAX_ADAPTERS_PER_RUNTIME @private = (uint)ushort::max + 1;
@@ -30,6 +31,7 @@ struct RuntimeBackendVTable @private {
     DestroySurfaceBackendFn         destroy_surface;
     SupportsPresentationBackendFn   supports_presentation;
     SupportsQueueRequirementsBackendFn supports_queue_requirements;
+    SupportsResourceAgnosticTextureSyncBackendFn supports_resource_agnostic_texture_sync;
 }
 
 struct RuntimeData @private {

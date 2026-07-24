@@ -250,6 +250,8 @@ fn PreparedRenderPass? lower_render_pass(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = command_device_state(commands);
+    bool resource_agnostic =
+        state.caps.resource_agnostic_texture_sync;
     PreparedRenderPass pass = {
         .width       = desc.width,
         .height      = desc.height,
@@ -271,7 +273,11 @@ fn PreparedRenderPass? lower_render_pass(
         vk::RenderingAttachmentInfo* attachment = &pass.attachments[i];
         *attachment = vk::rendering_attachment_info();
         attachment.image_view = view.native;
-        attachment.image_layout = vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
+        attachment.image_layout = texture_layout_to_vk(
+            layout:            gpu::TextureLayout.COLOR_ATTACHMENT,
+            format:            view.format,
+            resource_agnostic: resource_agnostic,
+        );
         attachment.load_op = load_op_to_vk(target.load_op);
         attachment.store_op = store_op_to_vk(target.store_op);
         attachment.clear_value.color = clear_color_to_vk(
@@ -288,8 +294,11 @@ fn PreparedRenderPass? lower_render_pass(
             pass.resolve_handles[i] = target.resolve_view;
             attachment.resolve_mode = color_resolve_mode(view.format);
             attachment.resolve_image_view = resolve.native;
-            attachment.resolve_image_layout =
-                vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
+            attachment.resolve_image_layout = texture_layout_to_vk(
+                layout:            gpu::TextureLayout.COLOR_ATTACHMENT,
+                format:            resolve.format,
+                resource_agnostic: resource_agnostic,
+            );
         }
     }
 
@@ -306,8 +315,11 @@ fn PreparedRenderPass? lower_render_pass(
         }
         pass.depth_attachment = vk::rendering_attachment_info();
         pass.depth_attachment.image_view = depth.native;
-        pass.depth_attachment.image_layout =
-            vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        pass.depth_attachment.image_layout = texture_layout_to_vk(
+            layout:            gpu::TextureLayout.DEPTH_ATTACHMENT,
+            format:            depth.format,
+            resource_agnostic: resource_agnostic,
+        );
         pass.depth_attachment.load_op = load_op_to_vk(desc.depth.load_op);
         pass.depth_attachment.store_op = store_op_to_vk(desc.depth.store_op);
         pass.depth_attachment.clear_value.depth_stencil = {

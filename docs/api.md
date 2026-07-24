@@ -239,8 +239,8 @@ return `INVALID_HANDLE`.
 
 ### Device requests and creation
 
-Presentation and queue requirements are explicit additions to the immutable
-strict request.
+Presentation, queue requirements, and resource-agnostic ordinary texture
+synchronization are explicit additions to the immutable strict request.
 
 Strict device creation takes one exact borrowed adapter plus an immutable
 semantic request. Support detection is read-only and enables nothing;
@@ -260,6 +260,7 @@ QueueRequirements
 
 strict_device_request()          -> DeviceRequest
 request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
+request_resource_agnostic_texture_sync(DeviceRequest) -> DeviceRequest?
 request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
 supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
 create_device(Adapter*, DeviceRequest*) -> Device?
@@ -274,6 +275,14 @@ least one count must be nonzero. A role marked
 `distinct` must have a nonzero count and may not alias another requested role.
 Invalid or duplicate queue groups return `INVALID_ARGUMENT`. Support queries
 report unavailable counts or topology without enabling device state.
+
+`request_resource_agnostic_texture_sync` requests one independent semantic
+capability. A supporting created device reports
+`DeviceCaps.resource_agnostic_texture_sync = true`; an unrequested device
+remains on the classic texture-layout path even when the adapter supports the
+native feature. Support queries return the semantic unmet label
+`resource-agnostic texture synchronization` when the complete capability is
+unavailable. Duplicate contributions fault `INVALID_ARGUMENT`.
 
 A live adapter-created device retains its runtime and reuses the runtime-owned
 backend instance. Device defaults are copied by `create_runtime` and inherited
@@ -304,6 +313,7 @@ DeviceCaps
     usz min_texel_buffer_alignment
     float max_sampler_lod_bias
     float max_sampler_anisotropy
+    bool resource_agnostic_texture_sync
 
 Device                           (slot | generation | reserved)
 get_device_backend(Device*)      -> BackendKind?
@@ -336,6 +346,7 @@ Creation:
 strict_device_request() -> DeviceRequest
 supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
 request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
+request_resource_agnostic_texture_sync(DeviceRequest) -> DeviceRequest?
 request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
 create_device(Adapter*, DeviceRequest*) -> Device?
 destroy_device(Device*) -> void?
@@ -1828,6 +1839,15 @@ commands, and presentation waits that semaphore.
 
 `UNDEFINED` supplies no source dependency and discards prior contents. Use it
 only for first use or after earlier access has been ordered separately.
+
+When `DeviceCaps.resource_agnostic_texture_sync` is true, every initialized
+ordinary non-WSI texture use lowers to one native `GENERAL` representation.
+After explicit initialization, an ordinary whole-resource dependency may
+therefore use `cmd_barrier` without an image barrier. Explicit
+`TextureBarrier` remains required for `UNDEFINED` initialization/discard,
+presentation, subresource-specific dependencies, and any dependency that needs
+resource precision. The capability does not infer history, insert barriers,
+cover attachment feedback loops, or provide video-layout semantics.
 
 No command helper should silently insert barriers for a later use.
 

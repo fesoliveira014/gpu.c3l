@@ -7,6 +7,9 @@ import vk;
 alias TextureBarrierEmitHook @if(env::TESTING) = fn void (
     void*, vk::ImageMemoryBarrier2*
 );
+alias BarrierEmitHook @if(env::TESTING) = fn void (
+    void*, vk::MemoryBarrier2*
+);
 alias SemaphoreWaitFn @private = fn vk::Result (
     vk::Device,
     vk::SemaphoreWaitInfo*,
@@ -72,6 +75,13 @@ struct TextureBarrierWorkCounters @if(env::TESTING) {
     ulong state_validations;
     ulong native_assemblies;
     ulong native_emissions;
+}
+
+struct BarrierWorkCounters @if(env::TESTING) {
+    ulong native_memory_emissions;
+    ulong native_image_emissions;
+    ulong texture_helper_calls;
+    ulong texture_handle_resolutions;
 }
 
 fn bool texture_format_is_depth_stencil(gpu::Format format) @private {
@@ -142,57 +152,98 @@ fn vk::AccessFlags2 texture_access_to_vk(
     return (vk::AccessFlags2)mask;
 }
 
+fn vk::ImageLayout texture_layout_to_vk(
+    gpu::TextureLayout layout,
+    gpu::Format format,
+    bool resource_agnostic,
+) {
+    switch (layout) {
+        case gpu::TextureLayout.UNDEFINED:
+            return vk::ImageLayout.UNDEFINED;
+        case gpu::TextureLayout.TRANSFER_SOURCE:
+            return resource_agnostic
+                ? vk::ImageLayout.GENERAL
+                : vk::ImageLayout.TRANSFER_SRC_OPTIMAL;
+        case gpu::TextureLayout.TRANSFER_DESTINATION:
+            return resource_agnostic
+                ? vk::ImageLayout.GENERAL
+                : vk::ImageLayout.TRANSFER_DST_OPTIMAL;
+        case gpu::TextureLayout.SAMPLED:
+            if (resource_agnostic) return vk::ImageLayout.GENERAL;
+            return texture_format_is_depth_stencil(format)
+                ? vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL;
+        case gpu::TextureLayout.STORAGE:
+            return vk::ImageLayout.GENERAL;
+        case gpu::TextureLayout.COLOR_ATTACHMENT:
+            return resource_agnostic
+                ? vk::ImageLayout.GENERAL
+                : vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
+        case gpu::TextureLayout.DEPTH_ATTACHMENT:
+            return resource_agnostic
+                ? vk::ImageLayout.GENERAL
+                : vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        case gpu::TextureLayout.PRESENT:
+            return vk::ImageLayout.PRESENT_SRC_KHR;
+        default:
+            return {};
+    }
+}
+
 fn TextureStateScope texture_state_to_vk(
     gpu::TextureState state,
     gpu::Format format,
     TextureStateSide side,
     gpu::StageMask paired_stages,
+    bool resource_agnostic,
 ) {
-    bool depth_stencil = texture_format_is_depth_stencil(format);
+    vk::ImageLayout layout = texture_layout_to_vk(
+        layout:            state.layout,
+        format:            format,
+        resource_agnostic: resource_agnostic,
+    );
     switch (state.layout) {
         case gpu::TextureLayout.UNDEFINED:
             return {
                 .stages = vk::PipelineStageFlagBits2.STAGE_2_NONE,
                 .access = vk::AccessFlagBits2.ACCESS_2_NONE,
-                .layout = vk::ImageLayout.UNDEFINED,
+                .layout = layout,
             };
         case gpu::TextureLayout.TRANSFER_SOURCE:
             return {
                 .stages = barrier_before_stages_to_vk(state.stages),
                 .access = texture_access_to_vk(state.layout, state.access),
-                .layout = vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
+                .layout = layout,
             };
         case gpu::TextureLayout.TRANSFER_DESTINATION:
             return {
                 .stages = barrier_before_stages_to_vk(state.stages),
                 .access = texture_access_to_vk(state.layout, state.access),
-                .layout = vk::ImageLayout.TRANSFER_DST_OPTIMAL,
+                .layout = layout,
             };
         case gpu::TextureLayout.SAMPLED:
             return {
                 .stages = barrier_before_stages_to_vk(state.stages),
                 .access = texture_access_to_vk(state.layout, state.access),
-                .layout = depth_stencil
-                    ? vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL
-                    : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+                .layout = layout,
             };
         case gpu::TextureLayout.STORAGE:
             return {
                 .stages = barrier_before_stages_to_vk(state.stages),
                 .access = texture_access_to_vk(state.layout, state.access),
-                .layout = vk::ImageLayout.GENERAL,
+                .layout = layout,
             };
         case gpu::TextureLayout.COLOR_ATTACHMENT:
             return {
                 .stages = barrier_before_stages_to_vk(state.stages),
                 .access = texture_access_to_vk(state.layout, state.access),
-                .layout = vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+                .layout = layout,
             };
         case gpu::TextureLayout.DEPTH_ATTACHMENT:
             return {
                 .stages = barrier_before_stages_to_vk(state.stages),
                 .access = texture_access_to_vk(state.layout, state.access),
-                .layout = vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .layout = layout,
             };
         case gpu::TextureLayout.PRESENT:
             return {
@@ -201,7 +252,7 @@ fn TextureStateScope texture_state_to_vk(
                     ? barrier_before_stages_to_vk(paired_stages)
                     : vk::PipelineStageFlagBits2.STAGE_2_NONE,
                 .access = vk::AccessFlagBits2.ACCESS_2_NONE,
-                .layout = vk::ImageLayout.PRESENT_SRC_KHR,
+                .layout = layout,
             };
         default:
             return {};
@@ -605,10 +656,11 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         )~;
     }
     TextureStateScope before = texture_state_to_vk(
-        state:         barrier.before,
-        format:        slot.format,
-        side:          TextureStateSide.BEFORE,
-        paired_stages: barrier.after.stages,
+        state:             barrier.before,
+        format:            slot.format,
+        side:              TextureStateSide.BEFORE,
+        paired_stages:     barrier.after.stages,
+        resource_agnostic: state.caps.resource_agnostic_texture_sync,
     );
 
     note_texture_barrier_state_validation(state);
@@ -627,10 +679,11 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         )~;
     }
     TextureStateScope after = texture_state_to_vk(
-        state:         barrier.after,
-        format:        slot.format,
-        side:          TextureStateSide.AFTER,
-        paired_stages: barrier.before.stages,
+        state:             barrier.after,
+        format:            slot.format,
+        side:              TextureStateSide.AFTER,
+        paired_stages:     barrier.before.stages,
+        resource_agnostic: state.caps.resource_agnostic_texture_sync,
     );
 
     note_texture_barrier_native_assembly(state);
@@ -795,10 +848,7 @@ fn void? vk_cmd_barrier(
         descriptor_buffer,
         state.generated_work.enabled,
     );
-    vk::DependencyInfo dependency =
-        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
-    vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-    gpu::internal::note_command_native_call();
+    emit_barrier(commands, &native_barrier);
 }
 
 fn void? trusted_barrier(
@@ -818,8 +868,26 @@ fn void? trusted_barrier(
         descriptor_buffer,
         state.generated_work.enabled,
     );
+    emit_barrier(commands, &native_barrier);
+}
+
+fn void emit_barrier(
+    gpu::internal::CommandRecord* commands,
+    vk::MemoryBarrier2* native_barrier,
+) {
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     vk::DependencyInfo dependency =
-        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
+        vk::dependency_info().set_memory_barriers(native_barrier[:1]);
+    $if env::TESTING:
+        (void)state.barrier_native_emissions.add(1, AtomicOrdering.RELAXED);
+        if (state.barrier_emit_hook != null) {
+            state.barrier_emit_hook(
+                state.barrier_emit_user_data,
+                native_barrier,
+            );
+        }
+    $endif
     vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
     gpu::internal::note_command_native_call();
 }
@@ -849,16 +917,18 @@ fn LoweredTextureBarrier? lower_texture_barrier_trusted(
         slot,
     )!;
     TextureStateScope before = texture_state_to_vk(
-        state:         barrier.before,
-        format:        slot.format,
-        side:          TextureStateSide.BEFORE,
-        paired_stages: barrier.after.stages,
+        state:             barrier.before,
+        format:            slot.format,
+        side:              TextureStateSide.BEFORE,
+        paired_stages:     barrier.after.stages,
+        resource_agnostic: state.caps.resource_agnostic_texture_sync,
     );
     TextureStateScope after = texture_state_to_vk(
-        state:         barrier.after,
-        format:        slot.format,
-        side:          TextureStateSide.AFTER,
-        paired_stages: barrier.before.stages,
+        state:             barrier.after,
+        format:            slot.format,
+        side:              TextureStateSide.AFTER,
+        paired_stages:     barrier.before.stages,
+        resource_agnostic: state.caps.resource_agnostic_texture_sync,
     );
     vk::ImageMemoryBarrier2 native = vk::image_memory_barrier2()
         .set_src_stage_mask(before.stages)
@@ -1021,6 +1091,47 @@ fn void set_texture_barrier_emit_hook(
 ) @if(env::TESTING) {
     state.texture_barrier_emit_hook = hook;
     state.texture_barrier_emit_user_data = user_data;
+}
+
+fn BarrierWorkCounters barrier_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING) {
+    return {
+        .native_memory_emissions = state.barrier_native_emissions.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .native_image_emissions =
+            state.texture_barrier_native_emissions.load(
+                AtomicOrdering.RELAXED,
+            ),
+        .texture_helper_calls = state.texture_barrier_helper_calls.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .texture_handle_resolutions = state.textures.get_calls.load(
+            AtomicOrdering.RELAXED,
+        ),
+    };
+}
+
+fn void reset_barrier_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING) {
+    state.barrier_native_emissions.store(0, AtomicOrdering.RELAXED);
+    state.texture_barrier_native_emissions.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
+    state.texture_barrier_helper_calls.store(0, AtomicOrdering.RELAXED);
+    state.textures.get_calls.store(0, AtomicOrdering.RELAXED);
+}
+
+fn void set_barrier_emit_hook(
+    VkDeviceState* state,
+    BarrierEmitHook hook,
+    void* user_data,
+) @if(env::TESTING) {
+    state.barrier_emit_hook = hook;
+    state.barrier_emit_user_data = user_data;
 }
 
 fn vk::Semaphore? create_private_timeline(VkDeviceState* state) @private {

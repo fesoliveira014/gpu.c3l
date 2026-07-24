@@ -32,6 +32,44 @@ fn void strict_request_state_is_explicit() @test {
     assert(gpu::internal::requests_strict(strict), "the strict request enables strict state");
 }
 
+fn void resource_agnostic_texture_sync_request_is_explicit_and_immutable() @test {
+    gpu::DeviceRequest strict = gpu::strict_device_request();
+    gpu::DeviceRequest original = strict;
+    gpu::DeviceRequest requested =
+        gpu::request_resource_agnostic_texture_sync(strict)!!;
+
+    assert((uint128)strict == (uint128)original, "composition preserves its input");
+    assert(
+        gpu::internal::requests_resource_agnostic_texture_sync(requested),
+        "the contribution records the semantic request"
+    );
+    assert(
+        !gpu::internal::requests_resource_agnostic_texture_sync(strict),
+        "the input remains unrequested"
+    );
+    gpu::internal::validate_device_request(&requested)!!;
+}
+
+fn void resource_agnostic_texture_sync_request_rejects_duplicate_and_malformed_inputs() @test {
+    gpu::DeviceRequest requested = gpu::request_resource_agnostic_texture_sync(
+        gpu::strict_device_request(),
+    )!!;
+    assert(
+        @catch(gpu::request_resource_agnostic_texture_sync(requested))
+            == gpu::INVALID_ARGUMENT,
+        "duplicate composition is rejected"
+    );
+
+    gpu::DeviceRequest malformed = (gpu::DeviceRequest)(
+        (uint128)gpu::strict_device_request() | ((uint128)1 << 31)
+    );
+    assert(
+        @catch(gpu::request_resource_agnostic_texture_sync(malformed))
+            == gpu::INVALID_ARGUMENT,
+        "unknown request bits are rejected"
+    );
+}
+
 fn void request_composition_rejects_duplicate_and_malformed_inputs() @test {
     gpu::DeviceRequest strict = gpu::strict_device_request();
     assert(

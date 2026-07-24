@@ -48,6 +48,13 @@ page doesn't explain it, that's a bug in this page — file an issue.
   state once in every policy, but stores no global or per-subresource layout
   history and inserts no repair transition. Applications must retain separate
   history for independently transitioned mip/layer ranges.
+- **Resource-agnostic texture synchronization is narrow and opt-in.** It is
+  selected only through `request_resource_agnostic_texture_sync` on adapters
+  supporting `VK_KHR_unified_image_layouts`. The classic layout path remains
+  the default. The capability covers already-initialized ordinary non-WSI
+  uses; it does not replace `UNDEFINED` initialization/discard, presentation,
+  subresource-specific barriers, attachment feedback loops, video layouts, or
+  caller-owned history. Unsupported requests fail rather than fall back.
 - **Async compute is capability-gated.** A distinct compute queue is used
   when available and reported by `DeviceCaps.async_compute`. Resources declare
   their semantic access roles; distinct admitted families use private concurrent
