@@ -35,6 +35,22 @@ $assert vk::BoundPipeline::members[5].type == vk::PipelineKind::typeid;
 $assert vk::BoundPipeline::members[6].name == "render";
 $assert vk::BoundPipeline::members[6].type
     == vk::RenderCompatibility::typeid;
+$assert vk::NativePipelineBinding::members.len == 6;
+$assert vk::NativePipelineBinding::members[0].name == "pipeline";
+$assert vk::NativePipelineBinding::members[0].type == vk::Pipeline::typeid;
+$assert vk::NativePipelineBinding::members[1].name == "layout";
+$assert vk::NativePipelineBinding::members[1].type == vk::PipelineLayout::typeid;
+$assert vk::NativePipelineBinding::members[2].name
+    == "generated_dispatch_layout";
+$assert vk::NativePipelineBinding::members[2].type
+    == vk::IndirectCommandsLayoutEXT::typeid;
+$assert vk::NativePipelineBinding::members[3].name == "cache_entry";
+$assert vk::NativePipelineBinding::members[3].type == uint::typeid;
+$assert vk::NativePipelineBinding::members[4].name == "kind";
+$assert vk::NativePipelineBinding::members[4].type == vk::PipelineKind::typeid;
+$assert vk::NativePipelineBinding::members[5].name == "render";
+$assert vk::NativePipelineBinding::members[5].type
+    == vk::RenderCompatibility::typeid;
 
 fn gpu::Device make_performance_invariant_device() {
     gpu::RuntimeDesc desc = {
@@ -170,6 +186,8 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     gpu::CommandResolutionStats after_bind =
         gpu::command_resolution_stats();
     assert_warm_command_resolution(after_bind, 1, 1);
+    assert(after_bind.pipeline_bind_commands == 1,
+        "the first compute bind emits one native pipeline bind");
     gpu::PipelineHandle[PERFORMANCE_PIPELINE_CHURN_COUNT] churned_pipelines;
     for (uint i = 0; i < churned_pipelines.len; i++) {
         churned_pipelines[i] = gpu::create_compute_pipeline(
@@ -262,6 +280,8 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
         "dispatch performs no pipeline resolution after cache churn");
     assert(resolution.native_commands == post_churn.native_commands + 2,
         "dispatch emits one root push and one native dispatch");
+    assert(resolution.pipeline_bind_commands == 0,
+        "warm dispatch reuses the compute native pipeline snapshot");
     gpu::discard_executable_commands(&executable)!!;
 }
 

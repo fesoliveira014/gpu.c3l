@@ -394,6 +394,7 @@ Atomic{ulong} command_encoder_cell_computations @private @if(env::TESTING || $fe
 Atomic{ulong} command_encoder_lease_comparisons @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_recording_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_native_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_pipeline_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 
 fn void note_command_device_registry_resolution() @private {
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
@@ -473,6 +474,12 @@ fn void note_command_recording_call() @private {
 fn void note_command_native_call() @private {
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         (void)command_native_commands.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_pipeline_bind() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_pipeline_bind_commands.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 

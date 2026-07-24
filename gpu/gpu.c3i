@@ -490,6 +490,7 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong encoder_lease_comparisons;
     ulong recording_commands;
     ulong native_commands;
+    ulong pipeline_bind_commands;
 }
 
 // A shader-visible 64-bit GPU address. Distinct from a plain ulong so it can't

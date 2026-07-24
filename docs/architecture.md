@@ -355,9 +355,12 @@ Pipeline bind generation-checks the public handle, resolves the cache entry,
 optionally retains tracked ownership, and publishes a complete bound snapshot: native
 pipeline and layout, kind, render compatibility, cache identity, generated-work
 layout, and public diagnostic identity. Later draw, dispatch, render-pass,
-indirect, and generated commands use that snapshot without reading a pipeline
-cell, pipeline table, or cache. Ending a render pass clears a graphics snapshot;
-a legal compute snapshot remains available. Command-policy variants are outside
+indirect, and generated commands use that logical snapshot without reading a
+pipeline cell, pipeline table, or cache. Native graphics and compute pipeline
+snapshots are tracked independently by bind point, so switching bind points
+does not lose either native selection. Ending a render pass clears only active
+render compatibility; a compatible logical graphics binding may remain selected
+for a later pass. Command-policy variants are outside
 this mechanism: policy selection happens when the device or encoder is created,
 never in a warm recording call.
 

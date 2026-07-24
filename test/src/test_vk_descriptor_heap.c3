@@ -150,7 +150,7 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
     gpu::PipelineHandle requested = { .index = 11, .generation = 5 };
     gpu::internal::vk::CommandRecord record = {
         .state = gpu::internal::vk::CommandState.RECORDING,
-        .bound_pipeline = {
+        .logical_pipeline = {
             .handle      = cached,
             .cache_entry = 19,
         },
@@ -163,9 +163,9 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
     fault bind_fault = @catch(gpu::internal::vk::checked_bind_pipeline(&encoder, requested));
     assert(bind_fault == gpu::UNSUPPORTED_FEATURE,
         "pipeline binding preflight rejects a disabled descriptor heap");
-    assert(record.bound_pipeline.handle == cached,
+    assert(record.logical_pipeline.handle == cached,
         "rejected binding preserves the active pipeline");
-    assert(record.bound_pipeline.cache_entry == 19,
+    assert(record.logical_pipeline.cache_entry == 19,
         "rejected binding preserves the active pipeline entry");
 }
 

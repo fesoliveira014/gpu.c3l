@@ -28,7 +28,7 @@ fn CommandPathNativeContext? command_path_native_context(
     );
     return {
         .record            = record,
-        .pipeline_layout   = record.bound_pipeline.layout,
+        .pipeline_layout   = record.logical_pipeline.layout,
         .descriptor_buffer = state.strict_heap.implementation
             == VkHeapImplementation.DESCRIPTOR_BUFFER,
         .generated_work    = state.generated_work.enabled,

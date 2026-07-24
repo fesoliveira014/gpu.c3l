@@ -34,6 +34,15 @@ struct BoundPipeline {
     RenderCompatibility               render;
 }
 
+struct NativePipelineBinding {
+    vk::Pipeline                  pipeline;
+    vk::PipelineLayout            layout;
+    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
+    uint                          cache_entry;
+    PipelineKind                  kind;
+    RenderCompatibility            render;
+}
+
 struct CommandRecord {
     vk::CommandBuffer            command_buffer;
     gpu::CommandAllocatorHandle  allocator;
@@ -42,7 +51,9 @@ struct CommandRecord {
     CommandState                 state;
     ulong                        submit_visit_epoch;
     RenderCompatibility          active_render;
-    BoundPipeline                bound_pipeline;
+    BoundPipeline                logical_pipeline;
+    NativePipelineBinding        native_graphics_pipeline;
+    NativePipelineBinding        native_compute_pipeline;
     CommandScratch*              scratch;
 }
 

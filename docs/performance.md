@@ -165,7 +165,7 @@ subsystem snapshots:
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
 | Submission ownership | Submitted-batch references, caller tokens, retained-reference counts, and ordered retirement state |
-| Bound pipeline snapshot | Exact bind-time table/cache lookups, zero post-bind resolution under cache churn, and unchanged layout use after backing-slot mutation |
+| Bound pipeline snapshot | Exact bind-time table/cache lookups, per-bind-point `pipeline_bind_commands`, zero post-bind resolution under cache churn, and unchanged layout use after backing-slot mutation |
 | Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and zero post-intern shader work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Exact collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
