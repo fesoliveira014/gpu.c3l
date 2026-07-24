@@ -6,6 +6,41 @@ import gpu::internal::vk @public;
 import vk;
 import std::core::mem;
 
+const char[*] REVIEW_ALT_COMP_SPIRV =
+    $embed("shaders/heap_write.comp.spv");
+
+struct ReviewValidationCapture {
+    uint errors;
+}
+
+fn void capture_review_validation_error(
+    gpu::DebugMessage* message,
+    void* user_data,
+) {
+    if (message.category.backend
+        && message.category.validation
+        && message.severity == gpu::DebugMessageSeverity.ERROR) {
+        ReviewValidationCapture* capture =
+            (ReviewValidationCapture*)user_data;
+        capture.errors++;
+    }
+}
+
+fn gpu::Device make_review_validation_device(
+    ReviewValidationCapture* capture,
+) {
+    gpu::RuntimeDesc desc = {
+        .backend                  = gpu::BackendKind.VULKAN,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_pipeline_binding_review_test",
+        .debug_callback           = &capture_review_validation_error,
+        .debug_user_data           = capture,
+    };
+    return create_test_device(&desc)!!;
+}
+
 struct DynamicStateFixture {
     gpu::Device               device;
     gpu::TextureHandle        target;
@@ -13,6 +48,46 @@ struct DynamicStateFixture {
     gpu::CommandAllocator     allocator;
     gpu::CommandList          commands;
     vk::VkDeviceState*        state;
+}
+
+fn gpu::PipelineHandle review_distinct_graphics_pipeline(
+    gpu::Device* device,
+    gpu::Format format,
+) {
+    gpu::ShaderDesc vertex_desc = {
+        .stage       = gpu::ShaderStage.VERTEX,
+        .spirv       = VAL_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderDesc fragment_desc = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = VAL_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ColorTargetState[1] colors = {{
+        .format     = format,
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    gpu::GraphicsPipelineDesc desc = {
+        .vertex_shader = gpu::prepare_shader_code(&vertex_desc)!!,
+        .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
+        .colors = colors[..],
+    };
+    return gpu::create_graphics_pipeline(device, &desc)!!;
+}
+
+fn gpu::PipelineHandle review_distinct_compute_pipeline(
+    gpu::Device* device,
+) {
+    gpu::ShaderDesc shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = REVIEW_ALT_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc desc = {
+        .shader = gpu::prepare_shader_code(&shader_desc)!!,
+    };
+    return gpu::create_compute_pipeline(device, &desc)!!;
 }
 
 fn DynamicStateFixture make_dynamic_state_fixture_before_pass(
@@ -534,6 +609,8 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     defer destroy_test_device(&device)!!;
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
     gpu::TextureHandle target = make_render_validation_target(
         &device,
         gpu::Format.BGRA8_UNORM,
@@ -562,9 +639,14 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     gpu::CommandList prebound = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&prebound)!!;
     record_val_target_to_attach(&prebound, target);
+    gpu::cmd_bind_pipeline(&prebound, compute.pipeline)!!;
     gpu::cmd_bind_pipeline(&prebound, draw.graphics)!!;
     vk::CommandRecord* prebound_record = vk::resolve_command(&prebound)!!;
     uint prebound_references = prebound_record.scratch.reference_count;
+    vk::NativePipelineBinding native_graphics_before =
+        prebound_record.native_graphics_pipeline;
+    vk::NativePipelineBinding native_compute_before =
+        prebound_record.native_compute_pipeline;
     assert(@catch(gpu::cmd_begin_render_pass(
         &prebound,
         &pass,
@@ -576,6 +658,16 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
         "prebound incompatibility records no native render pass");
     assert(prebound_record.scratch.reference_count == prebound_references,
         "prebound incompatibility retains no attachment references");
+    assert(prebound_record.logical_pipeline.handle == draw.graphics
+        && prebound_record.native_graphics_pipeline.pipeline
+            == native_graphics_before.pipeline
+        && prebound_record.native_graphics_pipeline.cache_entry
+            == native_graphics_before.cache_entry
+        && prebound_record.native_compute_pipeline.pipeline
+            == native_compute_before.pipeline
+        && prebound_record.native_compute_pipeline.cache_entry
+            == native_compute_before.cache_entry,
+        "prebound incompatibility preserves both native pipeline caches");
 
     gpu::CommandList in_pass = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&in_pass)!!;
@@ -594,7 +686,8 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
 }
 
 fn void preserves_graphics_binding_across_render_passes() @test {
-    gpu::Device device = make_val_device();
+    ReviewValidationCapture capture = {};
+    gpu::Device device = make_review_validation_device(&capture);
     defer destroy_test_device(&device)!!;
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
@@ -654,6 +747,13 @@ fn void preserves_graphics_binding_across_render_passes() @test {
         "ending a render pass preserves the logical graphics binding");
     assert(record.native_graphics_pipeline.pipeline != null,
         "ending a render pass preserves the native graphics binding");
+    gpu::CommandResolutionStats before_reuse =
+        gpu::command_resolution_stats();
+    gpu::cmd_begin_render_pass(&commands, &second_pass, &graphics_state)!!;
+    assert(gpu::command_resolution_stats().pipeline_bind_commands
+            == before_reuse.pipeline_bind_commands,
+        "a compatible pass reuses the selected graphics binding");
+    gpu::cmd_end_render_pass(&commands)!!;
     gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
     gpu::cmd_begin_render_pass(&commands, &second_pass, &graphics_state)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
@@ -661,6 +761,142 @@ fn void preserves_graphics_binding_across_render_passes() @test {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.pipeline_bind_commands == 2,
         "graphics and compute bind points retain independent native bindings");
+    assert(capture.errors == 0,
+        "cross-pass and cross-bind recording emits no Vulkan validation errors");
+}
+
+fn void distinct_graphics_cache_entries_emit_distinct_binds() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    gpu::PipelineHandle alternate = review_distinct_graphics_pipeline(
+        &device,
+        gpu::Format.BGRA8_UNORM,
+    );
+    defer gpu::destroy_pipeline(&device, alternate)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+    gpu::cmd_bind_pipeline(&commands, alternate)!!;
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 2,
+        "distinct graphics cache entries emit two native binds");
+}
+
+fn void distinct_compute_cache_entries_emit_distinct_binds() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    gpu::PipelineHandle alternate = review_distinct_compute_pipeline(&device);
+    defer gpu::destroy_pipeline(&device, alternate)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
+    gpu::cmd_bind_pipeline(&commands, alternate)!!;
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 2,
+        "distinct compute cache entries emit two native binds");
+}
+
+fn void compute_graphics_compute_reuses_compute_binding() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
+    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 2,
+        "compute binding survives an intervening graphics bind");
+}
+
+fn void graphics_alias_updates_logical_handle_without_rebinding() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    gpu::PipelineHandle alias_pipeline = review_distinct_graphics_pipeline(
+        &device,
+        gpu::Format.RGBA8_UNORM,
+    );
+    defer gpu::destroy_pipeline(&device, alias_pipeline)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+    gpu::cmd_bind_pipeline(&commands, alias_pipeline)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 1,
+        "graphics aliases sharing one cache entry emit one native bind");
+    assert(record.logical_pipeline.handle == alias_pipeline,
+        "graphics aliases still advance the logical public handle");
+}
+
+fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList first = gpu::begin_commands(&allocator)!!;
+    gpu::cmd_bind_pipeline(&first, compute.pipeline)!!;
+    gpu::cmd_bind_pipeline(&first, draw.graphics)!!;
+    discard_test_commands(&first)!!;
+
+    gpu::CommandList reused = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&reused)!!;
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&reused, compute.pipeline)!!;
+    gpu::cmd_bind_pipeline(&reused, draw.graphics)!!;
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 2,
+        "command-buffer reuse resets both native pipeline caches");
 }
 
 fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
