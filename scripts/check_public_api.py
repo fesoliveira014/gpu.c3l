@@ -940,11 +940,10 @@ def validate_document(document: dict) -> list[str]:
             for member in begin_render_pass.get("members", [])
         )
         if (
-            parameter_names != ("commands", "desc", "state")
+            parameter_names != ("commands", "desc")
             or parameter_types != (
                 "CommandList*",
                 "RenderPassDesc*",
-                "GraphicsState*",
             )
         ):
             failures.append(
@@ -953,6 +952,39 @@ def validate_document(document: dict) -> list[str]:
         if begin_render_pass.get("return_type", {}).get("name") != "void?":
             failures.append(
                 "cmd_begin_render_pass must return void?"
+            )
+
+    begin_render_pass_with_state = functions.get(
+        "cmd_begin_render_pass_with_state"
+    )
+    if begin_render_pass_with_state is None:
+        failures.append("missing cmd_begin_render_pass_with_state")
+    else:
+        parameter_names = tuple(
+            member.get("name")
+            for member in begin_render_pass_with_state.get("members", [])
+        )
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in begin_render_pass_with_state.get("members", [])
+        )
+        if (
+            parameter_names != ("commands", "desc", "state")
+            or parameter_types != (
+                "CommandList*",
+                "RenderPassDesc*",
+                "GraphicsState*",
+            )
+        ):
+            failures.append(
+                "cmd_begin_render_pass_with_state has the wrong parameters"
+            )
+        if (
+            begin_render_pass_with_state.get("return_type", {}).get("name")
+            != "void?"
+        ):
+            failures.append(
+                "cmd_begin_render_pass_with_state must return void?"
             )
 
     end_render_pass = functions.get("cmd_end_render_pass")
@@ -2060,25 +2092,43 @@ def validate_graphics_state_backend_sources(
     required_orders = {
         "trusted_begin_render_pass": (
             "lower_render_pass",
-            "lower_graphics_state",
             "record_render_pass",
         ),
         "trusted_tracking_begin_render_pass": (
             "lower_render_pass",
-            "lower_graphics_state",
             "track_render_pass",
             "record_render_pass",
         ),
         "checked_begin_render_pass": (
             "checked_prepare_render_pass",
-            "checked_prepare_graphics_state",
             "record_render_pass",
         ),
         "checked_tracking_begin_render_pass": (
             "checked_prepare_render_pass",
-            "checked_prepare_graphics_state",
             "track_render_pass",
             "record_render_pass",
+        ),
+        "trusted_begin_render_pass_with_state": (
+            "lower_render_pass",
+            "lower_graphics_state",
+            "record_render_pass_with_state",
+        ),
+        "trusted_tracking_begin_render_pass_with_state": (
+            "lower_render_pass",
+            "lower_graphics_state",
+            "track_render_pass",
+            "record_render_pass_with_state",
+        ),
+        "checked_begin_render_pass_with_state": (
+            "checked_prepare_render_pass",
+            "checked_prepare_graphics_state",
+            "record_render_pass_with_state",
+        ),
+        "checked_tracking_begin_render_pass_with_state": (
+            "checked_prepare_render_pass",
+            "checked_prepare_graphics_state",
+            "track_render_pass",
+            "record_render_pass_with_state",
         ),
     }
     for function, calls in required_orders.items():
@@ -2115,17 +2165,91 @@ def validate_graphics_state_backend_sources(
         )
         if (
             len(begin_calls) != 1
-            or len(packet_emissions) != 1
-            or begin_calls[0].start() > packet_emissions[0].start()
+            or len(packet_emissions) != 0
         ):
             failures.append(
-                "record_render_pass must emit exactly one native begin "
-                "followed by exactly one complete graphics-state packet"
+                "record_render_pass must emit exactly one native begin and "
+                "no graphics-state packet"
+            )
+
+    combined_recording = callable_body(
+        render_pass_source,
+        "record_render_pass_with_state",
+    )
+    if combined_recording is None:
+        failures.append("missing record_render_pass_with_state implementation")
+    else:
+        begin = tuple(
+            re.finditer(r"\brecord_render_pass\s*\(", combined_recording)
+        )
+        packet = tuple(
+            re.finditer(r"\bemit_graphics_state\s*\(", combined_recording)
+        )
+        if (
+            len(begin) != 1
+            or len(packet) != 1
+            or begin[0].start() > packet[0].start()
+        ):
+            failures.append(
+                "record_render_pass_with_state must emit one begin followed "
+                "by one complete graphics-state packet"
             )
 
     combined_state = mask_non_code(
         command_state_source + "\n" + render_pass_source
     )
+    if len(re.findall(r"\bgraphics_state_initialized\b", command_state_source)) != 1:
+        failures.append(
+            "CommandRecord must contain exactly one "
+            "graphics_state_initialized field"
+        )
+    for function in (
+        "validate_graphics_execution_state",
+        "validate_generated_graphics_execution_state",
+    ):
+        body = callable_body(render_pass_source, function)
+        if body is None:
+            failures.append(f"missing {function} implementation")
+        elif not re.search(
+            r"\brecord\.graphics_state_initialized\b",
+            mask_non_code(body),
+        ):
+            failures.append(
+                f"{function} must require complete graphics-state "
+                "initialization"
+            )
+    for function in (
+        "checked_set_graphics_state",
+        "checked_begin_render_pass_with_state",
+        "checked_tracking_begin_render_pass_with_state",
+    ):
+        body = callable_body(render_pass_source, function)
+        if body is None:
+            failures.append(f"missing {function} implementation")
+        elif len(re.findall(
+            r"\bgraphics_state_initialized\s*=\s*true\b",
+            mask_non_code(body),
+        )) != 1:
+            failures.append(
+                f"{function} must publish complete graphics-state "
+                "initialization exactly once"
+            )
+    for function in (
+        "trusted_set_graphics_state",
+        "trusted_begin_render_pass_with_state",
+        "trusted_tracking_begin_render_pass_with_state",
+    ):
+        body = callable_body(render_pass_source, function)
+        if body is None:
+            failures.append(f"missing {function} implementation")
+        elif re.search(
+            r"\bgraphics_state_initialized\b",
+            mask_non_code(body),
+        ):
+            failures.append(
+                f"{function} must not inspect or publish checked "
+                "graphics-state initialization"
+            )
     for symbol in RETIRED_COMMAND_RENDER_STATE_SYMBOLS:
         if re.search(rf"\b{symbol}\b", combined_state):
             failures.append(f"retired command render state {symbol}")

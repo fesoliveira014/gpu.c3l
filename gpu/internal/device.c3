@@ -110,7 +110,8 @@ alias CmdSetDepthStateFn @private            = fn void? (CommandEncoderState*, D
 alias CmdSetRasterStateFn @private           = fn void? (CommandEncoderState*, DynamicRasterState*);
 alias CmdSetGraphicsStateFn @private         = fn void? (CommandEncoderState*, GraphicsState*);
 alias CmdDispatchFn @private                 = fn void? (CommandEncoderState*, GpuAddress, Vec3u);
-alias CmdBeginRenderPassFn @private          = fn void? (CommandEncoderState*, RenderPassDesc*, GraphicsState*);
+alias CmdBeginRenderPassFn @private          = fn void? (CommandEncoderState*, RenderPassDesc*);
+alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandEncoderState*, RenderPassDesc*, GraphicsState*);
 alias CmdSetViewportFn @private              = fn void? (CommandEncoderState*, Viewport*);
 alias CmdSetScissorFn @private               = fn void? (CommandEncoderState*, ScissorRect*);
 alias CmdEndRenderPassFn @private            = fn void? (CommandEncoderState*);
@@ -258,6 +259,7 @@ struct CommandOps @private {
     CmdSetGraphicsStateFn         set_graphics_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
+    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;
     CmdEndRenderPassFn            end_render_pass;

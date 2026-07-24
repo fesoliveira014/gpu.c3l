@@ -357,6 +357,12 @@ def valid_document() -> dict:
                         "void?",
                         ("commands", "CommandList*"),
                         ("desc", "RenderPassDesc*"),
+                    ),
+                    api_function(
+                        "cmd_begin_render_pass_with_state",
+                        "void?",
+                        ("commands", "CommandList*"),
+                        ("desc", "RenderPassDesc*"),
                         ("state", "GraphicsState*"),
                     ),
                     api_function(
@@ -2485,13 +2491,13 @@ method gpu::Runtime.is_valid
         )
 
         document = valid_document()
-        begin = next(
+        combined = next(
             entry for entry in document["modules"]["gpu"]["functions"]
-            if entry["name"] == "cmd_begin_render_pass"
+            if entry["name"] == "cmd_begin_render_pass_with_state"
         )
-        begin["members"][2]["name"] = "initial_state"
+        combined["members"][2]["name"] = "initial_state"
         self.assertIn(
-            "cmd_begin_render_pass has the wrong parameters",
+            "cmd_begin_render_pass_with_state has the wrong parameters",
             check_public_api.validate_document(document),
         )
 
@@ -2536,10 +2542,16 @@ method gpu::Runtime.is_valid
     def test_requires_explicit_graphics_state_function_signatures(self) -> None:
         mutations = (
             (
-                "retired two-argument begin",
+                "minimal begin parameter",
                 "cmd_begin_render_pass",
                 lambda function: function["members"].pop(),
                 "cmd_begin_render_pass has the wrong parameters",
+            ),
+            (
+                "combined begin state parameter",
+                "cmd_begin_render_pass_with_state",
+                lambda function: function["members"].pop(),
+                "cmd_begin_render_pass_with_state has the wrong parameters",
             ),
             (
                 "graphics state setter parameter",
@@ -2611,33 +2623,74 @@ method gpu::Runtime.is_valid
                 "checked_prepare_graphics_state(\n"
             ),
             (
-                "    record_render_pass(commands, &pass, &graphics);\n"
+                "    record_render_pass_with_state("
+                "commands, &pass, &graphics);\n"
                 "    LoweredGraphicsState graphics = "
                 "checked_prepare_graphics_state(\n"
             ),
             1,
         )
         self.assertIn(
-            "checked_begin_render_pass must complete lowering, validation, "
-            "and tracking before native render-pass recording",
+            "checked_begin_render_pass_with_state must complete lowering, "
+            "validation, and tracking before native render-pass recording",
             validate(early_validation_emission, command_state),
         )
 
         early_tracking_emission = render_pass.replace(
             (
                 "    track_render_pass(commands, &pass)!;\n"
-                "    record_render_pass(commands, &pass, &graphics);\n"
+                "    record_render_pass_with_state("
+                "commands, &pass, &graphics);\n"
             ),
             (
-                "    record_render_pass(commands, &pass, &graphics);\n"
+                "    record_render_pass_with_state("
+                "commands, &pass, &graphics);\n"
                 "    track_render_pass(commands, &pass)!;\n"
             ),
             1,
         )
         self.assertIn(
-            "trusted_tracking_begin_render_pass must complete lowering, "
-            "validation, and tracking before native render-pass recording",
+            "trusted_tracking_begin_render_pass_with_state must complete "
+            "lowering, validation, and tracking before native render-pass "
+            "recording",
             validate(early_tracking_emission, command_state),
+        )
+
+        missing_initialization = command_state.replace(
+            "    bool                         graphics_state_initialized;\n",
+            "",
+            1,
+        )
+        self.assertIn(
+            "CommandRecord must contain exactly one "
+            "graphics_state_initialized field",
+            validate(render_pass, missing_initialization),
+        )
+
+        head, tail = render_pass.rsplit(
+            "    if (!record.graphics_state_initialized) {",
+            1,
+        )
+        missing_generated_guard = (
+            head
+            + "    if (false) {"
+            + tail
+        )
+        self.assertIn(
+            "validate_generated_graphics_execution_state must require "
+            "complete graphics-state initialization",
+            validate(missing_generated_guard, command_state),
+        )
+
+        head, tail = render_pass.rsplit(
+            "    record.graphics_state_initialized = true;\n",
+            1,
+        )
+        missing_publication = head + tail
+        self.assertIn(
+            "checked_set_graphics_state must publish complete "
+            "graphics-state initialization exactly once",
+            validate(missing_publication, command_state),
         )
 
         self.assertIn(

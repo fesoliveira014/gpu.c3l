@@ -110,7 +110,7 @@ Goal: compute culls, GPU decides the draw count.
 // Compute writes DrawIndirectCommand[] + a count word.
 gpu::GraphicsState state =
     gpu::full_render_graphics_state(pass.width, pass.height)!;
-gpu::cmd_begin_render_pass(&cmd, &pass, &state)!;
+gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
 gpu::cmd_bind_pipeline(&cmd, pipeline)!;
 gpu::cmd_draw_indirect(
     commands:      &cmd,
@@ -123,6 +123,13 @@ gpu::cmd_draw_indirect(
 ```
 
 Shader side indexes per-draw data with `gl_DrawID`.
+
+For several compatible passes, record the complete packet once with
+`cmd_set_graphics_state`, then use two-argument `cmd_begin_render_pass` for
+each pass. Minimal begin does not replay the packet; record another complete or
+partial setter only when state changes. Under `ContractValidation.FULL`, the
+first regular or generated draw still requires one successful complete packet
+in that command-buffer recording.
 Running example: `gpu_driven_draw_sdl`, `frustum_culling`.
 
 ## 7. Split submits linked by a completion point
@@ -310,7 +317,7 @@ state.depth = {
     .write_enable = true,
     .compare      = gpu::CompareOp.LESS,
 };
-gpu::cmd_begin_render_pass(&cmd, &pass, &state)!;
+gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
 gpu::cmd_bind_pipeline(&cmd, shadow_pipeline)!;
 ```
 

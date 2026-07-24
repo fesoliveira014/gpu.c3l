@@ -175,7 +175,7 @@ fn void multisample_color_depth_resolves_to_readback() @test {
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
     graphics_state.depth = depth_state;
-    gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     gpu::cmd_draw(
         commands:       &commands,

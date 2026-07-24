@@ -14,7 +14,8 @@ const char[*] PERFORMANCE_FRAG_SPIRV =
 
 const uint PERFORMANCE_PIPELINE_CHURN_COUNT = 16;
 const uint PERFORMANCE_DRAW_COUNT = 4;
-const ulong PERFORMANCE_BEGIN_PACKET_NATIVE_COMMANDS = 11;
+const ulong PERFORMANCE_BEGIN_NATIVE_COMMANDS = 1;
+const ulong PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
 const usz BOUND_PIPELINE_SNAPSHOT_SIZE = 96;
 
 $assert vk::BoundPipeline::size == BOUND_PIPELINE_SNAPSHOT_SIZE;
@@ -356,7 +357,7 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         },
     };
     gpu::cmd_texture_barrier(&warmup, &transition)!!;
-    gpu::cmd_begin_render_pass(&warmup, &pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&warmup, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&warmup, pipeline);
     gpu::cmd_draw(
         commands:       &warmup,
@@ -381,13 +382,20 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     gpu::reset_command_resolution_stats();
-    gpu::cmd_begin_render_pass(&commands, &pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics)!!;
+    gpu::CommandResolutionStats after_state =
+        gpu::command_resolution_stats();
+    assert_warm_command_resolution(after_state, 1);
+    assert(after_state.native_commands
+            == PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS,
+        "complete graphics state emits exactly ten native commands");
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::CommandResolutionStats after_begin =
         gpu::command_resolution_stats();
     assert_warm_command_resolution(after_begin, 1);
-    assert(after_begin.native_commands
-            == PERFORMANCE_BEGIN_PACKET_NATIVE_COMMANDS,
-        "render-pass begin emits one native begin and one complete state packet");
+    assert(after_begin.native_commands == PERFORMANCE_BEGIN_NATIVE_COMMANDS,
+        "minimal render-pass begin emits one native command");
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
@@ -399,8 +407,8 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         gpu::command_resolution_stats();
     assert_warm_command_resolution(after_first_draw, 2);
     assert(after_first_draw.native_commands
-            == PERFORMANCE_BEGIN_PACKET_NATIVE_COMMANDS + 2,
-        "begin, state packet, and one draw emit exact native work");
+            == PERFORMANCE_BEGIN_NATIVE_COMMANDS + 2,
+        "minimal begin and one draw emit exact native work");
     assert(after_first_draw.pipeline_table_lookups
             == after_begin.pipeline_table_lookups
         && after_first_draw.pipeline_cache_lookups
@@ -419,9 +427,9 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         gpu::command_resolution_stats();
     assert_warm_command_resolution(resolution, 1 + PERFORMANCE_DRAW_COUNT);
     assert(resolution.native_commands
-            == PERFORMANCE_BEGIN_PACKET_NATIVE_COMMANDS
+            == PERFORMANCE_BEGIN_NATIVE_COMMANDS
                 + PERFORMANCE_DRAW_COUNT * 2,
-        "begin, state packet, and N draws emit exact native work");
+        "minimal begin and N draws emit exact native work");
     assert(resolution.pipeline_table_lookups
             == after_begin.pipeline_table_lookups
         && resolution.pipeline_cache_lookups
@@ -446,4 +454,65 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     assert(after.command_buffer_resets == before.command_buffer_resets + 1,
         "warm render recording resets its reusable command buffer");
     gpu::discard_executable_commands(&executable)!!;
+
+    uint[3] pass_counts = { 2, 16, 256 };
+    foreach (pass_count : pass_counts) {
+        gpu::internal::RecordingWorkCounters reuse_before =
+            vk::command_recording_work_counters(state);
+        ulong reuse_shader_modules_before =
+            vk::pipeline_shader_module_create_count(state);
+        ulong reuse_pipelines_before = vk::pipeline_native_create_count(state);
+        gpu::CommandList reuse = gpu::begin_commands(&allocator)!!;
+        gpu::cmd_bind_pipeline(&reuse, pipeline)!!;
+        gpu::reset_command_resolution_stats();
+        gpu::cmd_set_graphics_state(&reuse, &graphics)!!;
+        for (uint i = 0; i < pass_count; i++) {
+            gpu::cmd_begin_render_pass(&reuse, &pass)!!;
+            gpu::cmd_draw(
+                commands:       &reuse,
+                vertex_root:    (gpu::GpuAddress)1,
+                fragment_root:  (gpu::GpuAddress)1,
+                vertex_count:   0,
+                instance_count: 0,
+            )!!;
+            gpu::cmd_end_render_pass(&reuse)!!;
+        }
+        gpu::CommandResolutionStats reuse_stats =
+            gpu::command_resolution_stats();
+        assert_warm_command_resolution(
+            reuse_stats,
+            1 + (ulong)pass_count * 3,
+        );
+        assert(reuse_stats.native_commands
+                == PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS
+                    + (ulong)pass_count * 4,
+            "many passes reuse one complete graphics-state packet");
+        gpu::cmd_set_graphics_state(&reuse, &graphics)!!;
+        gpu::cmd_set_viewport(&reuse, &graphics.viewport)!!;
+        gpu::CommandResolutionStats replacement_stats =
+            gpu::command_resolution_stats();
+        assert_warm_command_resolution(
+            replacement_stats,
+            3 + (ulong)pass_count * 3,
+        );
+        assert(replacement_stats.native_commands
+                == reuse_stats.native_commands
+                    + PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS + 1,
+            "explicit complete and partial replacements add exact native work");
+        gpu::ExecutableCommandList reuse_executable =
+            gpu::end_commands(&reuse)!!;
+        gpu::internal::RecordingWorkCounters reuse_after =
+            vk::command_recording_work_counters(state);
+        assert_zero_warm_creation_work(
+            before:                reuse_before,
+            after:                 reuse_after,
+            shader_modules_before: reuse_shader_modules_before,
+            shader_modules_after:  vk::pipeline_shader_module_create_count(
+                state,
+            ),
+            pipelines_before:      reuse_pipelines_before,
+            pipelines_after:       vk::pipeline_native_create_count(state),
+        );
+        gpu::discard_executable_commands(&reuse_executable)!!;
+    }
 }

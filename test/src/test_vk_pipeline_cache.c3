@@ -456,7 +456,7 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass(&commands, &pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&commands, pipeline);
     gpu::GpuAddress root = test_span_address(&device, vertices.span);
     gpu::cmd_draw(
@@ -1241,7 +1241,7 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
                 .topology = gpu::PrimitiveTopology.LINES,
             };
         }
-        gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
+        gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
         bind_test_graphics_pipeline(&cmd, pipeline);
         gpu::cmd_draw(
             commands:       &cmd,
@@ -1391,7 +1391,7 @@ fn void alias_survives_peer_destroy() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass(&cmd, &pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&cmd, survivor);
     gpu::cmd_draw(
         commands:       &cmd,

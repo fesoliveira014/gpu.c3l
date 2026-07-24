@@ -331,6 +331,7 @@ fn void? validate_render_pass_desc_fields(
 fn PreparedRenderPass? checked_prepare_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
+    ZString operation,
 ) {
     if (commands == null || desc == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
@@ -350,12 +351,12 @@ fn PreparedRenderPass? checked_prepare_render_pass(
             queue_roles: record.queue.roles,
             slot:        texture,
             handle:      view.texture,
-            operation:   "cmd_begin_render_pass",
+            operation:   operation,
         )!;
         if (!texture.usage.color_attach) {
             return report_contract_failure(
                 state:               state,
-                operation:           "cmd_begin_render_pass",
+                operation:           operation,
                 public_fault:        gpu::INVALID_ARGUMENT,
                 resource_kind:       gpu::DebugResourceKind.TEXTURE,
                 has_public_identity: true,
@@ -373,7 +374,7 @@ fn PreparedRenderPass? checked_prepare_render_pass(
                 : "RenderPassDesc.height";
             return report_contract_failure(
                 state:               state,
-                operation:           "cmd_begin_render_pass",
+                operation:           operation,
                 public_fault:        gpu::INVALID_ARGUMENT,
                 resource_kind:       gpu::DebugResourceKind.TEXTURE,
                 has_public_identity: true,
@@ -400,7 +401,7 @@ fn PreparedRenderPass? checked_prepare_render_pass(
                 queue_roles: record.queue.roles,
                 slot:        resolve_texture,
                 handle:      resolve.texture,
-                operation:   "cmd_begin_render_pass",
+                operation:   operation,
             )!;
             if (view.sample_count == gpu::SampleCount.ONE
                 || !resolve_texture.usage.color_attach
@@ -421,7 +422,7 @@ fn PreparedRenderPass? checked_prepare_render_pass(
             queue_roles: record.queue.roles,
             slot:        depth_texture,
             handle:      depth.texture,
-            operation:   "cmd_begin_render_pass",
+            operation:   operation,
         )!;
         if (!depth_texture.usage.depth_attach
             || desc.width > depth.width
@@ -513,7 +514,6 @@ fn void? track_render_pass(
 fn void record_render_pass(
     gpu::internal::CommandEncoderState* commands,
     PreparedRenderPass* pass,
-    LoweredGraphicsState* graphics,
 ) {
     CommandRecord* record = encoder_command(commands);
     vk::CommandBuffer cb = record.command_buffer;
@@ -538,24 +538,88 @@ fn void record_render_pass(
             state.begin_rendering_emissions++;
         }
     $endif
-    emit_graphics_state(commands, graphics);
     record.active_render = pass.compatibility;
     record.state = CommandState.RECORDING_RENDER_PASS;
+}
+
+fn void record_render_pass_with_state(
+    gpu::internal::CommandEncoderState* commands,
+    PreparedRenderPass* pass,
+    LoweredGraphicsState* graphics,
+) {
+    record_render_pass(commands, pass);
+    emit_graphics_state(commands, graphics);
 }
 
 fn void? trusted_begin_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
-    gpu::GraphicsState* state,
 ) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
-    LoweredGraphicsState graphics = lower_graphics_state(state)!;
-    record_render_pass(commands, &pass, &graphics);
+    record_render_pass(commands, &pass);
 }
 
 fn void? trusted_tracking_begin_render_pass(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
+) {
+    PreparedRenderPass pass = lower_render_pass(commands, desc)!;
+    CommandRecord* record = encoder_command(commands);
+    uint checkpoint = record.scratch.reference_count;
+    defer catch rollback_command_references(
+        encoder_device_state(commands),
+        record,
+        checkpoint,
+    );
+    track_render_pass(commands, &pass)!;
+    record_render_pass(commands, &pass);
+}
+
+fn void? checked_begin_render_pass(
+    gpu::internal::CommandEncoderState* commands,
+    gpu::RenderPassDesc* desc,
+) {
+    PreparedRenderPass pass = checked_prepare_render_pass(
+        commands,
+        desc,
+        "cmd_begin_render_pass",
+    )!;
+    record_render_pass(commands, &pass);
+}
+
+fn void? checked_tracking_begin_render_pass(
+    gpu::internal::CommandEncoderState* commands,
+    gpu::RenderPassDesc* desc,
+) {
+    PreparedRenderPass pass = checked_prepare_render_pass(
+        commands,
+        desc,
+        "cmd_begin_render_pass",
+    )!;
+    CommandRecord* record = encoder_command(commands);
+    uint checkpoint = record.scratch.reference_count;
+    defer catch rollback_command_references(
+        encoder_device_state(commands),
+        record,
+        checkpoint,
+    );
+    track_render_pass(commands, &pass)!;
+    record_render_pass(commands, &pass);
+}
+
+fn void? trusted_begin_render_pass_with_state(
+    gpu::internal::CommandEncoderState* commands,
+    gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
+) {
+    PreparedRenderPass pass = lower_render_pass(commands, desc)!;
+    LoweredGraphicsState graphics = lower_graphics_state(state)!;
+    record_render_pass_with_state(commands, &pass, &graphics);
+}
+
+fn void? trusted_tracking_begin_render_pass_with_state(
+    gpu::internal::CommandEncoderState* commands,
+    gpu::RenderPassDesc* desc,
     gpu::GraphicsState* state,
 ) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
@@ -568,10 +632,10 @@ fn void? trusted_tracking_begin_render_pass(
         checkpoint,
     );
     track_render_pass(commands, &pass)!;
-    record_render_pass(commands, &pass, &graphics);
+    record_render_pass_with_state(commands, &pass, &graphics);
 }
 
-fn void? checked_begin_render_pass(
+fn void? checked_begin_render_pass_with_state(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
     gpu::GraphicsState* state,
@@ -579,16 +643,18 @@ fn void? checked_begin_render_pass(
     PreparedRenderPass pass = checked_prepare_render_pass(
         commands,
         desc,
+        "cmd_begin_render_pass_with_state",
     )!;
     LoweredGraphicsState graphics = checked_prepare_graphics_state(
         device:    encoder_device_state(commands),
-        operation: "cmd_begin_render_pass",
+        operation: "cmd_begin_render_pass_with_state",
         state:     state,
     )!;
-    record_render_pass(commands, &pass, &graphics);
+    record_render_pass_with_state(commands, &pass, &graphics);
+    encoder_command(commands).graphics_state_initialized = true;
 }
 
-fn void? checked_tracking_begin_render_pass(
+fn void? checked_tracking_begin_render_pass_with_state(
     gpu::internal::CommandEncoderState* commands,
     gpu::RenderPassDesc* desc,
     gpu::GraphicsState* state,
@@ -596,10 +662,11 @@ fn void? checked_tracking_begin_render_pass(
     PreparedRenderPass pass = checked_prepare_render_pass(
         commands,
         desc,
+        "cmd_begin_render_pass_with_state",
     )!;
     LoweredGraphicsState graphics = checked_prepare_graphics_state(
         device:    encoder_device_state(commands),
-        operation: "cmd_begin_render_pass",
+        operation: "cmd_begin_render_pass_with_state",
         state:     state,
     )!;
     CommandRecord* record = encoder_command(commands);
@@ -610,7 +677,8 @@ fn void? checked_tracking_begin_render_pass(
         checkpoint,
     );
     track_render_pass(commands, &pass)!;
-    record_render_pass(commands, &pass, &graphics);
+    record_render_pass_with_state(commands, &pass, &graphics);
+    record.graphics_state_initialized = true;
 }
 
 fn fault report_dynamic_state_rejection(
@@ -832,13 +900,21 @@ fn void emit_viewport(
     gpu::internal::note_command_native_call();
 }
 
+fn bool graphics_state_settable(CommandState state) =>
+    state == CommandState.RECORDING
+        || state == CommandState.RECORDING_RENDER_PASS;
+
+fn void? validate_graphics_state_queue(CommandRecord* record) @private {
+    if (!record.queue.roles.graphics) return gpu::INVALID_ARGUMENT~;
+}
+
 fn void? trusted_set_viewport(
     gpu::internal::CommandEncoderState* commands,
     gpu::Viewport* viewport,
 ) {
     if (viewport == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     vk::Viewport native = lower_viewport(viewport);
@@ -853,9 +929,10 @@ fn void? checked_set_viewport(
     VkDeviceState* state = encoder_device_state(commands);
     note_command_semantic_check(state);
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
+    validate_graphics_state_queue(record)!;
     validate_viewport(state, "cmd_set_viewport", viewport)!;
     vk::Viewport native = lower_viewport(viewport);
     emit_viewport(commands, &native);
@@ -1068,7 +1145,7 @@ fn void? trusted_set_graphics_state(
 ) {
     if (state == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     LoweredGraphicsState graphics = lower_graphics_state(state)!;
@@ -1083,15 +1160,17 @@ fn void? checked_set_graphics_state(
     VkDeviceState* device = encoder_device_state(commands);
     note_command_semantic_check(device);
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
+    validate_graphics_state_queue(record)!;
     LoweredGraphicsState graphics = checked_prepare_graphics_state(
         device,
         "cmd_set_graphics_state",
         state,
     )!;
     emit_graphics_state(commands, &graphics);
+    record.graphics_state_initialized = true;
 }
 
 fn void reset_dynamic_state_observation(
@@ -1131,7 +1210,7 @@ fn void? trusted_set_scissor(
 ) {
     if (scissor == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     vk::Rect2D native = lower_scissor(scissor);
@@ -1146,9 +1225,10 @@ fn void? checked_set_scissor(
     VkDeviceState* state = encoder_device_state(commands);
     note_command_semantic_check(state);
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
+    validate_graphics_state_queue(record)!;
     validate_scissor(state, "cmd_set_scissor", scissor)!;
     vk::Rect2D native = lower_scissor(scissor);
     emit_scissor(commands, &native);
@@ -1168,7 +1248,7 @@ fn void? vk_cmd_set_depth_state(
     gpu::DepthState* depth,
 ) @private {
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     if (depth == null || !compare_op_valid(depth.compare)) {
@@ -1183,7 +1263,7 @@ fn void? trusted_set_depth_state(
 ) {
     if (depth == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     emit_depth_state(commands, depth);
@@ -1195,6 +1275,11 @@ fn void? checked_set_depth_state(
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     note_command_semantic_check(encoder_device_state(commands));
+    CommandRecord* record = encoder_command(commands);
+    if (!graphics_state_settable(record.state)) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    validate_graphics_state_queue(record)!;
     return vk_cmd_set_depth_state(commands, depth);
 }
 
@@ -1203,7 +1288,7 @@ fn void? vk_cmd_set_raster_state(
     gpu::DynamicRasterState* raster,
 ) @private {
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     if (raster == null
@@ -1227,7 +1312,7 @@ fn void? trusted_set_raster_state(
 ) {
     if (raster == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING_RENDER_PASS) {
+    if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     emit_raster_state(commands, raster);
@@ -1239,6 +1324,11 @@ fn void? checked_set_raster_state(
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     note_command_semantic_check(encoder_device_state(commands));
+    CommandRecord* record = encoder_command(commands);
+    if (!graphics_state_settable(record.state)) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    validate_graphics_state_queue(record)!;
     return vk_cmd_set_raster_state(commands, raster);
 }
 
@@ -1255,6 +1345,9 @@ fn BoundPipeline*? validate_graphics_execution_state(
         expected_kind: PipelineKind.GRAPHICS,
         operation:     operation,
     )!;
+    if (!record.graphics_state_initialized) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
     return pipeline;
 }
 
@@ -2277,6 +2370,9 @@ fn BoundPipeline*? validate_generated_graphics_execution_state(
         expected_kind: PipelineKind.GRAPHICS,
         operation:     operation,
     )!;
+    if (!record.graphics_state_initialized) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
     return pipeline;
 }
 

@@ -1322,35 +1322,32 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
     return encoder.ops.dispatch(encoder, root, groups);
 }
 
-<* Set separate dynamic depth state for subsequent draws in the active render
-   pass. A failed update leaves the previous depth state unchanged. *>
+<* Set dynamic depth state on a graphics command list before or during a pass.
+   A failed update leaves the previous state unchanged. *>
 fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
     gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (depth == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_depth_state(encoder, depth);
 }
 
-<* Set pass-bounded topology, culling, front face, and depth bias for
-   subsequent draws. Requires an active render pass. A failed update leaves
-   the previous state unchanged. *>
+<* Set raster state on a graphics command list before or during a pass.
+   A failed update leaves the previous state unchanged. *>
 fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
     gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (raster == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_raster_state(encoder, raster);
 }
 
-<* Set one dynamic viewport for subsequent draws. Requires an active render
-   pass. Device-unrepresentable or non-finite values and zero height fault
-   INVALID_ARGUMENT; negative height and off-pass overscan are valid. *>
+<* Set one dynamic viewport on a graphics command list before or during a pass.
+   Device-unrepresentable or non-finite values and zero height fault. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
     gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
     return encoder.ops.set_viewport(encoder, viewport);
 }
 
-<* Set one dynamic scissor for subsequent draws. Requires an active render
-   pass. Negative or signed-overflowing fields fault INVALID_ARGUMENT;
-   off-pass overscan and zero extent are valid. *>
+<* Set one dynamic scissor on a graphics command list before or during a pass.
+   Negative or signed-overflowing fields fault; overscan is valid. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
     gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
@@ -1547,8 +1544,15 @@ fn GraphicsState? full_render_graphics_state(uint width, uint height) {
     };
 }
 
-<* Begin a pass with complete dynamic graphics state and no synchronization. *>
-fn void? cmd_begin_render_pass(
+<* Begin a render pass without changing command-buffer graphics state. *>
+fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
+    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
+    return encoder.ops.begin_render_pass(encoder, desc);
+}
+
+<* Begin a render pass and set complete graphics state atomically. *>
+fn void? cmd_begin_render_pass_with_state(
     CommandList* commands,
     RenderPassDesc* desc,
     GraphicsState* state,
@@ -1558,10 +1562,10 @@ fn void? cmd_begin_render_pass(
         || !gpu::internal::graphics_state_host_safe(state)) {
         return INVALID_ARGUMENT~;
     }
-    return encoder.ops.begin_render_pass(encoder, desc, state);
+    return encoder.ops.begin_render_pass_with_state(encoder, desc, state);
 }
 
-<* Replace the complete dynamic graphics state in an active render pass. *>
+<* Replace complete state on a graphics command list before or during a pass. *>
 fn void? cmd_set_graphics_state(
     CommandList* commands,
     GraphicsState* state,
