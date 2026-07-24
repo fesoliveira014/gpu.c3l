@@ -44,6 +44,15 @@
       "features": [ "COMMAND_RESOLUTION_STATS", "VALIDATION_POLICY_STATS" ],
       "sources": [ "src/command_record_bench.c3" ]
     },
+    "command_record_fast_bench": {
+      "type": "executable",
+      "features": [
+        "DIRECT_COMMAND_TOKENS",
+        "COMMAND_RESOLUTION_STATS",
+        "VALIDATION_POLICY_STATS"
+      ],
+      "sources": [ "src/command_record_bench.c3" ]
+    },
     // Advisory direct Vulkan/public command-path and submitted lifecycle
     // calibration. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
     "command_path_baseline_bench": {
@@ -136,6 +145,11 @@
     "vk_command": {
       "type": "test",
       "sources": [ "src/test_vk_command_submit.c3", "src/test_generated_scratch.c3", "src/test_vk_command_validation.c3", "src/test_vk_render_pass_validation.c3", "src/test_vk_texture_transition.c3", "src/offscreen_abi.c3" ]
+    },
+    "vk_command_tokens_fast": {
+      "type": "test",
+      "features": [ "DIRECT_COMMAND_TOKENS", "COMMAND_RESOLUTION_STATS" ],
+      "sources": [ "src/test_vk_command_tokens_fast.c3" ]
     },
     "vk_texture": {
       "type": "test",

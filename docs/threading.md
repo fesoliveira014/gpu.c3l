@@ -3,8 +3,9 @@
 Every public entry point belongs to one of three tiers. Anything not sanctioned
 here is misuse; results and validation verdicts are undefined. The library's
 own state remains memory-safe except when concurrent use of the same Tier C
-token races its consumption and device destruction: consumption releases the
-token's retained device pin while another call can still be in flight.
+token races its consumption or retirement: aliases refer to one authoritative
+record, and direct-token builds deliberately add no synchronization that would
+make concurrent aliases valid.
 
 ## Tiers
 
@@ -52,13 +53,15 @@ token's retained device pin while another call can still be in flight.
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
 Most public device operations take a short-lived atomic pin. `begin_commands`
-transfers its pin to the recording token and publishes a stable encoder cell.
-Recording calls select that bounded cell and compare one packed identity lease;
-they do not borrow a registry pin or load device-loss state. End, submit, and
-other lifecycle boundaries report loss, while discard remains available.
-Successful end transfers the same cell and pin ownership to the executable
-token; successful `submit` or executable discard invalidates the cell before
-releasing the pin.
+transfers its pin to one stable device-table command record paired with the
+originating allocator unit and publishes `RECORDING` last. Recording calls
+reach that record through either the default bounded token or the compile-time
+`DIRECT_COMMAND_TOKENS` pointer; they do not borrow another registry pin or load
+device-loss state. End, submit, and other lifecycle boundaries report loss,
+while discard remains available. Successful end transfers the same record and
+retained ownership to the executable phase. Executable discard releases that
+ownership immediately. Successful submission consumes the public token but
+keeps the record and its ownership live through ordered completion retirement.
 Pin acquisition may return `DEVICE_BUSY`; failed destruction restores the live
 state and preserves the token and generation.
 
@@ -75,8 +78,8 @@ mutex is acquired only when a new exact identity must be retained. Duplicate
 hits require neither that mutex nor another retain. Tracking-off scratch owns no
 reference list or index.
 
-The first live recording sets the allocator's owner thread. Under `FULL`, a
-different thread attempting to begin through that allocator receives
+The first live recording sets the allocator's owner thread. Under `FULL` in the
+bounded-token build, a different thread attempting to begin through that allocator receives
 `RESOURCE_IN_USE` before its pool is touched. The owner clears after the last
 recording ends or is discarded; application synchronization can then hand the
 allocator to another worker. Executable tokens no longer hold recording
@@ -119,8 +122,11 @@ span operations may overlap, but callers synchronize writes to mapped storage
 and keep every allocation live through its last submitted use.
 
 Submission consumes executable command tokens only after native acceptance and
-returns a reusable `CompletionPoint`. The caller retains that point whenever it
-guards resource reuse, command-dependent destruction, or cross-queue ordering.
+returns a reusable `CompletionPoint`. The authoritative records remain
+`SUBMITTED`, retain their devices, allocators, native buffers, and fixed scratch,
+and cannot be reused before ordered retirement. The caller retains the point
+whenever it guards resource reuse, command-dependent destruction, or cross-queue
+ordering.
 Before device destruction, wait for the latest point on every used queue and
 destroy every swapchain and child resource.
 
@@ -158,15 +164,19 @@ ownership transfers.
 - Resource slot reads (`get` paths), including allocation and span queries,
   are lock-free: tables never reallocate, and a token reaches another thread
   only through your synchronization. That hand-off is the happens-before edge.
-- Command records and root encoder cells live in fixed tables. `CommandList`
-  carries the owner-bearing handle and an opaque pointer to its exact cell.
-  That cell publishes one packed lease for the device generation/index and
-  command owner/generation; a warm call compares it once after cell selection.
-  Publication, recording-to-executable transfer, and invalidation follow Tier C
-  confinement. Passing the token through caller synchronization is the required
-  hand-off and makes the published cell visible; copies remain aliases and must
-  not be used concurrently. Its embedded `Device` value is independent of the
-  caller variable stored in its originating allocator.
+- Command records live at stable addresses in the fixed device command table
+  and are paired with fixed allocator-owned native buffer/scratch units.
+  The default token carries only bounded device, owner, slot, and generation
+  identity; resolution validates every bound before obtaining the record. A
+  `DIRECT_COMMAND_TOKENS` token carries exactly one opaque pointer to that
+  record. Publication, recording-to-executable transfer, submission, discard,
+  and retirement mutate the record's sole state under Tier C confinement.
+  Passing a live token through caller synchronization is the required hand-off
+  and makes the initialized record visible. Copies remain one-shot aliases and
+  must neither be used concurrently nor used after another alias consumes or
+  retires the record. Fabricated or stale direct pointers are outside the
+  contract; use the bounded representation with `FULL` when deterministic
+  misuse diagnostics are required.
 - Allocator slots and all fixed scratch live in a nonmoving generational table.
   The allocator mutex publishes returned buffer indices and recording-owner
   changes. Application synchronization is the happens-before edge for allocator
@@ -235,8 +245,10 @@ elided.
 
 Each queue release-publishes one retired prefix. Sequence N is retired
 only after native completion and after every published submitted-command batch
-through N has released any tracked command references, returned generated
-scratch, and returned every buffer/scratch index to its originating allocator.
+through N has moved every authoritative record to `INACTIVE`, released any
+tracked command references, returned generated scratch and every buffer/scratch
+index to its originating allocator, released retained device/backend ownership,
+and invalidated or generation-advanced its bounded identity.
 Every first successful native observation also queries and drains all queue
 identities represented by pending batches before publishing any retired prefix.
 An already-retired point can therefore use the zero-work cached path safely.

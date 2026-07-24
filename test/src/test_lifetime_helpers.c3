@@ -96,14 +96,14 @@ fn gpu::GpuAddress test_span_address(gpu::Device* device, gpu::GpuSpan span) {
 }
 
 fn void? discard_test_commands(gpu::CommandList* commands) {
-    if (commands == null || !commands.handle.is_valid()) return;
+    if (commands == null || !commands.is_valid()) return;
     if (catch err = gpu::discard_commands(commands)) {
         if (err != gpu::INVALID_HANDLE) return err~;
     }
 }
 
 fn void? discard_test_executable(gpu::ExecutableCommandList* commands) {
-    if (commands == null || !commands.handle.is_valid()) return;
+    if (commands == null || !commands.is_valid()) return;
     if (catch err = gpu::discard_executable_commands(commands)) {
         if (err != gpu::INVALID_HANDLE) return err~;
     }
@@ -113,12 +113,10 @@ fn void release_submitted_executables(
     gpu::internal::DeviceOperation* operation,
     gpu::ExecutableCommandList[] commands,
 ) {
+    (void)operation;
     foreach (&command : commands) {
-        gpu::internal::release_executable_command_pin_lease(operation, command);
         *command = {};
     }
-    gpu::internal::release_device_children(operation, (ulong)commands.len);
-    (void)gpu::internal::release_retained_device_pins(operation, (uint)commands.len);
 }
 
 fn gpu::AttachmentViewHandle? create_test_attachment_view(
@@ -348,18 +346,23 @@ fn void assert_warm_command_resolution(
         "warm commands do not borrow retained pins");
     assert(stats.lifecycle_vtable_dispatches == 0,
         "warm commands do not load the lifecycle vtable");
-    assert(stats.command_table_lookups == 0,
-        "warm commands do not resolve the command table");
+    $if $feature(DIRECT_COMMAND_TOKENS):
+        assert(stats.command_table_lookups == 0,
+            "direct warm commands do not resolve the command table");
+    $else
+        assert(stats.command_table_lookups == expected_commands,
+            "bounded warm commands resolve one stable record per call");
+    $endif
     assert(stats.pipeline_table_lookups == expected_pipeline_lookups,
         "warm commands perform the expected pipeline table lookups");
     assert(stats.pipeline_cache_lookups == expected_pipeline_lookups,
         "warm commands perform the expected pipeline cache lookups");
     assert(stats.command_policy_selections == 0,
         "warm commands do not select a command policy");
-    assert(stats.encoder_cell_computations <= expected_commands,
-        "warm commands stay within one encoder-cell computation per call");
-    assert(stats.encoder_lease_comparisons <= expected_commands,
-        "warm commands stay within one encoder-lease comparison per call");
+    assert(stats.encoder_cell_computations == 0,
+        "warm commands perform no frontend encoder-cell computation");
+    assert(stats.encoder_lease_comparisons == 0,
+        "warm commands perform no packed-lease comparison");
     assert(stats.recording_commands == expected_commands,
         "the command counter observes each warm recording call");
 }

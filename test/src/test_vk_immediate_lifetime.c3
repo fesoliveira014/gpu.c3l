@@ -411,7 +411,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     vk::track_command_reference(
         state:      state,
         record:     record,
@@ -563,10 +563,10 @@ fn void submitted_command_reservations_prevent_capacity_overcommit() @test {
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
 
-    vk::CommandRecord first_record;
-    vk::CommandRecord second_record;
-    vk::CommandRecord*[1] first_records = { &first_record };
-    vk::CommandRecord*[1] second_records = { &second_record };
+    gpu::internal::CommandRecord first_record;
+    gpu::internal::CommandRecord second_record;
+    gpu::internal::CommandRecord*[1] first_records = { &first_record };
+    gpu::internal::CommandRecord*[1] second_records = { &second_record };
 
     uint first = vk::prepare_submitted_commands(
         &state,

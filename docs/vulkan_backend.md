@@ -697,16 +697,23 @@ CommandList                recording
 ExecutableCommandList      ended, one-shot
 ```
 
-Both carry a device token, `CommandListHandle`, and opaque encoder pointer.
-Begin resolves the handle once and publishes a stable root encoder containing
-one packed capability lease, the selected command-operation table,
-`VkDeviceState*`, and fixed `CommandRecord*`. Warm recording validates one
-bounded encoder cell and one lease comparison, then uses those cached pointers;
-trusted backend entries do not repeat capability null checks. Only lifecycle
-operations continue through the device vtable and report device loss. The record identifies the
-originating allocator and fixed buffer/scratch index, and owns the exact public
-queue, lifecycle state, logical and bind-point native pipeline snapshots, and
-pending texture transitions.
+Their representation is selected at compile time. The default bounded form
+carries a device token plus `CommandListHandle`; each use validates the bounded
+owner, slot, generation, device, and phase before resolving the record. A build
+with `DIRECT_COMMAND_TOKENS` carries only an opaque `CommandRecord*` and is for
+trusted callers; it cannot request `ContractValidation.FULL`.
+
+Begin claims one stable `CommandRecord` from the device's fixed command table
+and one native buffer/scratch unit from the originating allocator's fixed
+storage. The record is the sole lifecycle authority. It owns the selected
+immutable command-operation table, backend state and backend-command pointers,
+retained device ownership, bounded identity when present, and the current
+recording/submission state. The linked `VkCommandRecord` identifies the
+originating allocator and fixed buffer/scratch index and holds Vulkan-specific
+pipeline snapshots and pending texture transitions. Warm direct recording loads
+the record pointer and checks its phase; bounded recording first resolves its
+identity. Trusted backend entries do not repeat capability null checks. Only
+lifecycle operations continue through the device vtable and report device loss.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
 
@@ -716,10 +723,11 @@ stores it before policy-dependent subsystems initialize and selects one of four
 immutable command tables: trusted/no-tracking, trusted/tracking,
 checked/no-tracking, or checked/tracking. `OBJECT_BOUNDARIES` shares trusted
 recording entries because its additional checks occur at public boundaries.
-The encoder snapshots the selected table during begin; warm recording performs
-no policy lookup or branch. Every table retains host pointer/slice/range safety,
-overflow protection, command-state and internal-table integrity, public device
-ownership, Vulkan result/device-loss handling, and transactional rollback.
+The authoritative record stores the selected table during begin; warm recording
+performs no policy lookup or branch. Every table retains host
+pointer/slice/range safety, overflow protection, command-state and
+internal-table integrity, public device ownership, Vulkan result/device-loss
+handling, and transactional rollback.
 
 `cmd_bind_pipeline` generation-checks the pipeline slot, resolves its cache
 entry, optionally retains tracked ownership, and stores native pipeline/layout, kind,
@@ -730,28 +738,36 @@ Without lifetime tracking, the caller-owned lifetime contract requires the
 pipeline to remain live through command completion. `FULL` controls detailed
 semantic preparation independently of that retention choice.
 
-Submission preflights the batch under the command-table mutex. It rejects stale,
-duplicate, non-executable, or wrong-queue tokens before claiming records. A
-nonempty attempt allocates one nonzero device-local visit epoch and stamps each
-resolved record as it is visited, so duplicate detection performs one record
-visit per input until rejection or completion. When the epoch space is
-exhausted, the next attempt clears live stamps across the allocated command
-cells once before restarting at epoch one. Empty submissions allocate no epoch.
-A failure before native acceptance restores every claim; success commits pending
-texture state and invalidates each encoder before its command-table index becomes
-reusable. No fallible token resolution occurs after native acceptance.
+Submission resolves the complete batch before mutation. Bounded builds validate
+the command table and reject stale, duplicate, non-executable, or wrong-queue
+tokens before claiming records. A nonempty bounded attempt allocates one nonzero
+device-local visit epoch and stamps each resolved record as it is visited, so
+duplicate detection performs one record visit per input until rejection or
+completion. When the epoch space is exhausted, the next attempt clears live
+stamps across the allocated command cells once before restarting at epoch one.
+Empty submissions allocate no epoch. Direct builds resolve their trusted record
+pointers without a command-table lookup. Both forms claim
+`EXECUTABLE -> SUBMITTING`; a failure before native acceptance restores every
+claim, while success commits pending texture state and publishes `SUBMITTED`.
+No fallible token resolution occurs after native acceptance.
 
 Render passes resolve explicit `AttachmentViewHandle` values from a fixed
 device-owned table into fixed-size local arrays. Attachment creation owns any
 non-default native `VkImageView`; render-pass begin performs no image-view
 creation, texture-view-cache lookup, or host allocation.
 
-Discard returns the native buffer and scratch index to its allocator. `submit`
-stores an allocator handle/index for every command unit in the completion-
-tracked batch, so one same-queue batch may mix allocators. Completion observation
-returns each unit to the exact allocator exactly once. The next begin resets the
-preallocated buffer and clears its fixed scratch counts. If no index is
-available, begin returns `DEVICE_BUSY`; native/host growth is never a fallback.
+Discard invalidates the authoritative record before returning its native buffer
+and scratch index to the allocator. `submit` retains stable record pointers in
+the completion-tracked batch, so one same-queue batch may mix allocators.
+Completion observation retires each record exactly once: it first transitions
+the record to `INACTIVE`, then releases tracked references and generated
+reservations, returns the exact allocator unit, releases retained device
+ownership, and finally generation-advances/frees the bounded command cell when
+present. Submitted records and allocator units cannot be reused before that
+retirement completes.
+The next begin resets the preallocated buffer and clears its fixed scratch
+counts. If no index is available, begin returns `DEVICE_BUSY`; native/host
+growth is never a fallback.
 
 Allocator recording uses its own mutex, and `FULL` rejects a second recording
 thread while another recording remains live. Different allocators do not share

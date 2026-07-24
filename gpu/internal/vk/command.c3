@@ -1175,7 +1175,6 @@ fn CommandRecordingOps command_recording_ops_real() @private {
 fn void? vk_begin_commands_with_ops(
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
-    gpu::internal::CommandBackendContext* out_backend,
     CommandRecordingOps* ops,
 ) @private {
     VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(
@@ -1217,6 +1216,32 @@ fn void? vk_begin_commands_with_ops(
     }
 
     vk::CommandBuffer command_buffer = slot.command_buffers[buffer_index];
+    VkCommandRecord backend_record = {
+        .command_buffer   = command_buffer,
+        .allocator        = allocator.handle,
+        .allocator_buffer = buffer_index,
+        .queue            = allocator.queue,
+        .scratch          = scratch,
+    };
+    gpu::internal::CommandRecord* record;
+    {
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        record = state.commands.claim(
+            device:        allocator.device,
+            ops:           state.command_ops,
+            backend_state: state,
+            value:         backend_record,
+        )!;
+    }
+    bool record_claimed = true;
+    defer catch {
+        if (record_claimed) {
+            state.command_mutex.lock()!!;
+            (void)state.commands.cancel_claim(record.identity);
+            state.command_mutex.unlock();
+        }
+    }
     check_device_result(state, ops.reset(
         ops.user_data,
         command_buffer,
@@ -1231,49 +1256,34 @@ fn void? vk_begin_commands_with_ops(
         &begin,
     ))!;
 
-    CommandRecord record = {
-        .command_buffer = command_buffer,
-        .allocator = allocator.handle,
-        .allocator_buffer = buffer_index,
-        .queue = allocator.queue,
-        .state = CommandState.RECORDING,
-        .scratch = scratch,
-    };
-    state.command_mutex.lock()!!;
-    defer state.command_mutex.unlock();
-    gpu::CommandListHandle handle = state.commands.alloc(record)!;
-    *out_commands = {
-        .device = allocator.device,
-        .handle = handle,
-    };
-    *out_backend = {
-        .state   = state,
-        .command = state.commands.get(handle)!!,
-    };
+    gpu::internal::note_command_policy_selection();
+    record.state = gpu::internal::CommandState.RECORDING;
+    gpu::internal::publish_command_list(record, out_commands);
+    record_claimed = false;
     claimed = false;
 }
 
 fn void? vk_begin_commands(
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
-    gpu::internal::CommandBackendContext* out_backend,
 ) @private {
     CommandRecordingOps ops = command_recording_ops_real();
     return vk_begin_commands_with_ops(
         allocator:    allocator,
         out_commands: out_commands,
-        out_backend:  out_backend,
         ops:          &ops,
     );
 }
 
 fn void? vk_end_commands_with_ops(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     CommandRecordingOps* ops,
 ) @private {
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = encoder_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
+    if (commands.state != gpu::internal::CommandState.RECORDING) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = command_device_state(commands);
     CommandAllocatorSlot* slot = lock_command_allocator_handle(
         state,
         record.allocator,
@@ -1283,60 +1293,65 @@ fn void? vk_end_commands_with_ops(
         ops.user_data,
         record.command_buffer,
     ))!;
-    record.state = CommandState.EXECUTABLE;
+    commands.state = gpu::internal::CommandState.EXECUTABLE;
     slot.live_recordings--;
     slot.live_executables++;
     if (slot.live_recordings == 0) slot.recording_thread_set = false;
 }
 
-fn void? vk_end_commands(gpu::internal::CommandEncoderState* commands) @private {
+fn void? vk_end_commands(gpu::internal::CommandRecord* commands) @private {
     CommandRecordingOps ops = command_recording_ops_real();
     return vk_end_commands_with_ops(commands, &ops);
 }
 
-fn CommandRecord*? begin_commands_with_injected_ops(
+fn VkCommandRecord*? begin_commands_with_injected_ops(
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
     CommandRecordingOps* ops,
 ) @if(env::TESTING) {
-    gpu::internal::CommandBackendContext backend;
     vk_begin_commands_with_ops(
         allocator:    allocator,
         out_commands: out_commands,
-        out_backend:  &backend,
         ops:          ops,
     )!;
-    return (CommandRecord*)backend.command;
+    $if $feature(DIRECT_COMMAND_TOKENS):
+        gpu::internal::CommandRecord* record =
+            (gpu::internal::CommandRecord*)out_commands.record;
+        return backend_command(record);
+    $else
+        VkDeviceState* state = (VkDeviceState*)
+            gpu::internal::device_backend_state_ptr(&out_commands.device);
+        return state.commands.get(out_commands.handle);
+    $endif
 }
 
 fn void? end_commands_with_injected_ops(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     CommandRecordingOps* ops,
 ) @if(env::TESTING) {
-    gpu::internal::CommandEncoderState encoder = {
-        .backend_state   = state,
-        .backend_command = record,
-    };
-    return vk_end_commands_with_ops(&encoder, ops);
+    if (record.root == null
+        || command_device_state(record.root) != state) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return vk_end_commands_with_ops(record.root, ops);
 }
 
 fn void? vk_discard_commands(
-    gpu::Device* device,
-    gpu::CommandListHandle handle,
+    gpu::internal::CommandRecord* command,
     bool executable,
-    gpu::internal::CommandEncoderState* encoder,
 ) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+    VkDeviceState* state = command_device_state(command);
+    gpu::CommandListHandle handle = command.identity;
     gpu::CommandAllocatorHandle allocator_handle;
     {
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
-        CommandRecord* record = state.commands.get(handle)!;
+        VkCommandRecord* record = state.commands.get(handle)!;
         bool state_matches = executable
-            ? record.state == CommandState.EXECUTABLE
-            : record.state == CommandState.RECORDING
-                || record.state == CommandState.RECORDING_RENDER_PASS;
+            ? record.root.state == gpu::internal::CommandState.EXECUTABLE
+            : record.root.state == gpu::internal::CommandState.RECORDING
+                || record.root.state == gpu::internal::CommandState.RECORDING_RENDER_PASS;
         if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
         allocator_handle = record.allocator;
     }
@@ -1347,15 +1362,15 @@ fn void? vk_discard_commands(
     defer slot.mutex.unlock();
     state.command_mutex.lock()!!;
     defer state.command_mutex.unlock();
-    CommandRecord* record = state.commands.get(handle)!;
+    VkCommandRecord* record = state.commands.get(handle)!;
     bool state_matches = executable
-        ? record.state == CommandState.EXECUTABLE
-        : record.state == CommandState.RECORDING
-            || record.state == CommandState.RECORDING_RENDER_PASS;
+        ? record.root.state == gpu::internal::CommandState.EXECUTABLE
+        : record.root.state == gpu::internal::CommandState.RECORDING
+            || record.root.state == gpu::internal::CommandState.RECORDING_RENDER_PASS;
     if (!state_matches || record.allocator != allocator_handle) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    if (encoder != null) gpu::internal::invalidate_command_encoder(encoder);
+    command.state = gpu::internal::CommandState.INACTIVE;
     clear_command_scratch_references(state, record.scratch);
     recycle_generated_preprocess_indices_locked(
         state,
@@ -1374,15 +1389,15 @@ fn void? vk_discard_commands(
 }
 
 fn PreparedBufferCopy? lower_buffer_copy(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = encoder_device_state(commands);
+    VkDeviceState* state = command_device_state(commands);
     return {
         .src = resolve_span_slot(
             state:          state,
@@ -1411,12 +1426,12 @@ fn bool buffer_copy_is_safe(PreparedBufferCopy* copy) {
 }
 
 fn PreparedBufferCopy? validate_and_lower_buffer_copy(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
-    CommandRecord* checked_record = encoder_command(commands);
-    if (checked_record.state != CommandState.RECORDING) {
-        VkDeviceState* checked_state = encoder_device_state(commands);
+    VkCommandRecord* checked_record = backend_command(commands);
+    if (checked_record.root.state != gpu::internal::CommandState.RECORDING) {
+        VkDeviceState* checked_state = command_device_state(commands);
         uint command_index = 0;
         uint command_generation = 0;
         bool has_public_identity = false;
@@ -1442,8 +1457,8 @@ fn PreparedBufferCopy? validate_and_lower_buffer_copy(
         )~;
     }
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     note_command_semantic_check(state);
     validate_span_transfer_usage(
         state:     state,
@@ -1507,11 +1522,11 @@ fn PreparedBufferCopy? validate_and_lower_buffer_copy(
 }
 
 fn void? track_buffer_copy_references(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedBufferCopy* copy,
 ) {
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[2] references = {
         {
             .owner      = copy.src_span.owner,
@@ -1530,10 +1545,10 @@ fn void? track_buffer_copy_references(
 }
 
 fn void record_buffer_copy(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedBufferCopy* copy,
 ) {
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     vk::BufferCopy region = {
         .src_offset = (vk::DeviceSize)copy.src.offset,
         .dst_offset = (vk::DeviceSize)copy.dst.offset,
@@ -1550,7 +1565,7 @@ fn void record_buffer_copy(
 }
 
 fn void? trusted_copy_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
@@ -1559,15 +1574,15 @@ fn void? trusted_copy_buffer(
 }
 
 fn void? trusted_tracking_copy_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
     if (!buffer_copy_is_safe(&copy)) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         checkpoint,
     );
@@ -1576,7 +1591,7 @@ fn void? trusted_tracking_copy_buffer(
 }
 
 fn void? checked_copy_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = validate_and_lower_buffer_copy(commands, desc)!;
@@ -1584,14 +1599,14 @@ fn void? checked_copy_buffer(
 }
 
 fn void? checked_tracking_copy_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = validate_and_lower_buffer_copy(commands, desc)!;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         checkpoint,
     );
@@ -1600,15 +1615,15 @@ fn void? checked_tracking_copy_buffer(
 }
 
 fn PreparedBufferFill? lower_buffer_fill(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = encoder_device_state(commands);
+    VkDeviceState* state = command_device_state(commands);
     ResolvedSpan resolved = resolve_span_slot(
         state:          state,
         span:           &dst,
@@ -1624,13 +1639,13 @@ fn PreparedBufferFill? lower_buffer_fill(
 }
 
 fn PreparedBufferFill? validate_and_lower_buffer_fill(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
     PreparedBufferFill fill = lower_buffer_fill(commands, dst, value)!;
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     note_command_semantic_check(state);
     if (fill.span.offset % 4 != 0 || fill.span.size % 4 != 0) {
         bool offset_misaligned = fill.span.offset % 4 != 0;
@@ -1670,11 +1685,11 @@ fn PreparedBufferFill? validate_and_lower_buffer_fill(
 }
 
 fn void record_buffer_fill(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedBufferFill* fill,
 ) {
     vk::cmd_fill_buffer(
-        command_buffer: encoder_command(commands).command_buffer,
+        command_buffer: backend_command(commands).command_buffer,
         dst_buffer:     fill.span.slot.buffer,
         dst_offset:     (vk::DeviceSize)fill.span.offset,
         size:           (vk::DeviceSize)fill.span.size,
@@ -1684,7 +1699,7 @@ fn void record_buffer_fill(
 }
 
 fn void? trusted_fill_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1696,7 +1711,7 @@ fn void? trusted_fill_buffer(
 }
 
 fn void? trusted_tracking_fill_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1704,15 +1719,15 @@ fn void? trusted_tracking_fill_buffer(
     if (fill.span.offset % 4 != 0 || fill.span.size % 4 != 0) {
         return gpu::INVALID_ARGUMENT~;
     }
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         checkpoint,
     );
     track_span_command_reference(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         &fill.source,
     )!;
@@ -1720,7 +1735,7 @@ fn void? trusted_tracking_fill_buffer(
 }
 
 fn void? checked_fill_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1733,7 +1748,7 @@ fn void? checked_fill_buffer(
 }
 
 fn void? checked_tracking_fill_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
@@ -1742,15 +1757,15 @@ fn void? checked_tracking_fill_buffer(
         dst,
         value,
     )!;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         checkpoint,
     );
     track_span_command_reference(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         &fill.source,
     )!;
@@ -1819,15 +1834,15 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
 }
 
 fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = encoder_device_state(commands);
+    VkDeviceState* state = command_device_state(commands);
     TextureSlot* texture = state.textures.get(desc.texture)!;
     ResolvedSpan buffer = resolve_span_slot(
         state:          state,
@@ -1857,12 +1872,12 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
 }
 
 fn PreparedBufferTextureCopy? validate_and_lower_buffer_to_texture_copy(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     note_command_semantic_check(state);
     validate_span_recording_access_only(
         state:     state,
@@ -1890,15 +1905,15 @@ fn PreparedBufferTextureCopy? validate_and_lower_buffer_to_texture_copy(
 }
 
 fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = encoder_device_state(commands);
+    VkDeviceState* state = command_device_state(commands);
     TextureSlot* texture = state.textures.get(desc.texture)!;
     ResolvedSpan buffer = resolve_span_slot(
         state:          state,
@@ -1928,12 +1943,12 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
 }
 
 fn PreparedBufferTextureCopy? validate_and_lower_texture_to_buffer_copy(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     note_command_semantic_check(state);
     validate_texture_recording_access_only(
         state:     state,
@@ -1961,11 +1976,11 @@ fn PreparedBufferTextureCopy? validate_and_lower_texture_to_buffer_copy(
 }
 
 fn void? track_buffer_texture_copy_references(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedBufferTextureCopy* copy,
 ) {
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[2] references = {
         {
             .owner      = copy.buffer_span.owner,
@@ -1984,11 +1999,11 @@ fn void? track_buffer_texture_copy_references(
 }
 
 fn void record_buffer_to_texture_copy(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedBufferTextureCopy* copy,
 ) {
     vk::cmd_copy_buffer_to_image(
-        command_buffer:  encoder_command(commands).command_buffer,
+        command_buffer:  backend_command(commands).command_buffer,
         src_buffer:      copy.buffer.slot.buffer,
         dst_image:       copy.texture.image,
         dst_image_layout: vk::ImageLayout.TRANSFER_DST_OPTIMAL,
@@ -1999,11 +2014,11 @@ fn void record_buffer_to_texture_copy(
 }
 
 fn void record_texture_to_buffer_copy(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedBufferTextureCopy* copy,
 ) {
     vk::cmd_copy_image_to_buffer(
-        command_buffer:  encoder_command(commands).command_buffer,
+        command_buffer:  backend_command(commands).command_buffer,
         src_image:       copy.texture.image,
         src_image_layout: vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
         dst_buffer:      copy.buffer.slot.buffer,
@@ -2014,7 +2029,7 @@ fn void record_texture_to_buffer_copy(
 }
 
 fn void? trusted_copy_buffer_to_texture(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
@@ -2022,19 +2037,19 @@ fn void? trusted_copy_buffer_to_texture(
 }
 
 fn void? trusted_tracking_copy_buffer_to_texture(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(encoder_device_state(commands), record, checkpoint);
+    defer catch rollback_command_references(command_device_state(commands), record, checkpoint);
     track_buffer_texture_copy_references(commands, &copy)!;
     record_buffer_to_texture_copy(commands, &copy);
 }
 
 fn void? checked_copy_buffer_to_texture(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy =
@@ -2043,20 +2058,20 @@ fn void? checked_copy_buffer_to_texture(
 }
 
 fn void? checked_tracking_copy_buffer_to_texture(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy =
         validate_and_lower_buffer_to_texture_copy(commands, desc)!;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(encoder_device_state(commands), record, checkpoint);
+    defer catch rollback_command_references(command_device_state(commands), record, checkpoint);
     track_buffer_texture_copy_references(commands, &copy)!;
     record_buffer_to_texture_copy(commands, &copy);
 }
 
 fn void? trusted_copy_texture_to_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
@@ -2064,19 +2079,19 @@ fn void? trusted_copy_texture_to_buffer(
 }
 
 fn void? trusted_tracking_copy_texture_to_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(encoder_device_state(commands), record, checkpoint);
+    defer catch rollback_command_references(command_device_state(commands), record, checkpoint);
     track_buffer_texture_copy_references(commands, &copy)!;
     record_texture_to_buffer_copy(commands, &copy);
 }
 
 fn void? checked_copy_texture_to_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy =
@@ -2085,14 +2100,14 @@ fn void? checked_copy_texture_to_buffer(
 }
 
 fn void? checked_tracking_copy_texture_to_buffer(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy =
         validate_and_lower_texture_to_buffer_copy(commands, desc)!;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(encoder_device_state(commands), record, checkpoint);
+    defer catch rollback_command_references(command_device_state(commands), record, checkpoint);
     track_buffer_texture_copy_references(commands, &copy)!;
     record_texture_to_buffer_copy(commands, &copy);
 }
@@ -2116,7 +2131,7 @@ fn ResolvedSpan? lower_indirect_span(
 <* Resolve an indirect argument span and validate its command semantics. *>
 fn ResolvedSpan? validate_and_lower_indirect_span(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     gpu::GpuSpan* span,
     usz arg_size,
     uint count,
@@ -2180,7 +2195,7 @@ fn ResolvedSpan? validate_and_lower_indirect_span(
     return resolved;
 }
 
-fn BoundPipeline? bound_pipeline_snapshot(CommandRecord* record) {
+fn BoundPipeline? bound_pipeline_snapshot(VkCommandRecord* record) {
     BoundPipeline pipeline = record.logical_pipeline;
     if (!pipeline.handle.is_valid() || pipeline.pipeline == null
         || pipeline.layout == null) {
@@ -2191,7 +2206,7 @@ fn BoundPipeline? bound_pipeline_snapshot(CommandRecord* record) {
 
 fn BoundPipeline*? active_bound_pipeline(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     PipelineKind expected_kind,
     ZString operation,
 ) @private {
@@ -2238,7 +2253,7 @@ fn void? validate_pipeline_render_compatibility(
 
 fn void? validate_active_pipeline_render_compatibility(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     RenderCompatibility* render,
 ) @private {
     BoundPipeline* pipeline = &record.logical_pipeline;
@@ -2262,15 +2277,15 @@ fn RenderCompatibility pipeline_render_compatibility(
 }
 
 fn BoundPipeline? lower_bound_pipeline(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::PipelineHandle pipeline,
 ) {
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING
-        && record.state != CommandState.RECORDING_RENDER_PASS) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING
+        && record.root.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = encoder_device_state(commands);
+    VkDeviceState* state = command_device_state(commands);
     validate_descriptor_heap_binding(state)!;
     PipelineCell* cell = state.pipelines.get_cell(pipeline)!;
     PipelineSlot* slot = &cell.value;
@@ -2292,14 +2307,14 @@ fn BoundPipeline? lower_bound_pipeline(
 }
 
 fn BoundPipeline? validate_and_lower_bound_pipeline(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     note_command_semantic_check(state);
-    if (record.state == CommandState.RECORDING_RENDER_PASS) {
+    if (record.root.state == gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         validate_pipeline_render_compatibility(
             &bound,
             &record.active_render,
@@ -2309,12 +2324,12 @@ fn BoundPipeline? validate_and_lower_bound_pipeline(
 }
 
 fn void? track_bound_pipeline(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     BoundPipeline* pipeline,
 ) {
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     return track_command_reference(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         pipeline.handle.owner,
         pipeline.handle.index,
@@ -2323,11 +2338,11 @@ fn void? track_bound_pipeline(
 }
 
 fn void? record_bound_pipeline(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     BoundPipeline* bound,
 ) {
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     NativePipelineBinding* native = bound.kind == PipelineKind.COMPUTE
         ? &record.native_compute_pipeline
         : &record.native_graphics_pipeline;
@@ -2360,7 +2375,7 @@ fn void? record_bound_pipeline(
 }
 
 fn void? trusted_bind_pipeline(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
@@ -2368,14 +2383,14 @@ fn void? trusted_bind_pipeline(
 }
 
 fn void? trusted_tracking_bind_pipeline(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         checkpoint,
     );
@@ -2384,7 +2399,7 @@ fn void? trusted_tracking_bind_pipeline(
 }
 
 fn void? checked_bind_pipeline(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
@@ -2392,14 +2407,14 @@ fn void? checked_bind_pipeline(
 }
 
 fn void? checked_tracking_bind_pipeline(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         checkpoint,
     );
@@ -2408,7 +2423,7 @@ fn void? checked_tracking_bind_pipeline(
 }
 
 fn void push_compute_root(
-    CommandRecord* record,
+    VkCommandRecord* record,
     BoundPipeline* pipeline,
     gpu::GpuAddress root,
 ) @private {
@@ -2429,13 +2444,13 @@ fn void push_compute_root(
 }
 
 fn void? vk_cmd_dispatch(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) @private {
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = encoder_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = command_device_state(commands);
     BoundPipeline* pipeline = active_bound_pipeline(
         state:         state,
         record:        record,
@@ -2468,12 +2483,12 @@ fn void? vk_cmd_dispatch(
 }
 
 fn void? trusted_dispatch(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) {
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     BoundPipeline pipeline = bound_pipeline_snapshot(record)!;
@@ -2488,25 +2503,25 @@ fn void? trusted_dispatch(
 }
 
 fn void? checked_dispatch(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
-    note_command_semantic_check(encoder_device_state(commands));
+    note_command_semantic_check(command_device_state(commands));
     return vk_cmd_dispatch(commands, root, groups);
 }
 
 fn PreparedDispatchIndirect? lower_dispatch_indirect(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = encoder_device_state(commands);
+    VkDeviceState* state = command_device_state(commands);
     return {
         .pipeline  = bound_pipeline_snapshot(record)!,
         .args      = lower_indirect_span(
@@ -2521,16 +2536,16 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
 }
 
 fn PreparedDispatchIndirect? checked_prepare_dispatch_indirect(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record == null || record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = encoder_device_state(commands);
+    VkDeviceState* state = command_device_state(commands);
     note_command_semantic_check(state);
     BoundPipeline pipeline = *active_bound_pipeline(
         state:         state,
@@ -2555,21 +2570,21 @@ fn PreparedDispatchIndirect? checked_prepare_dispatch_indirect(
 }
 
 fn void? track_dispatch_indirect(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedDispatchIndirect* dispatch,
 ) {
     return track_span_command_reference(
-        encoder_device_state(commands),
-        encoder_command(commands),
+        command_device_state(commands),
+        backend_command(commands),
         &dispatch.args_span,
     );
 }
 
 fn void record_dispatch_indirect(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedDispatchIndirect* dispatch,
 ) {
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     push_compute_root(record, &dispatch.pipeline, dispatch.root);
     vk::cmd_dispatch_indirect(
         record.command_buffer,
@@ -2580,7 +2595,7 @@ fn void record_dispatch_indirect(
 }
 
 fn void? trusted_dispatch_indirect(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2593,7 +2608,7 @@ fn void? trusted_dispatch_indirect(
 }
 
 fn void? trusted_tracking_dispatch_indirect(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2607,7 +2622,7 @@ fn void? trusted_tracking_dispatch_indirect(
 }
 
 fn void? checked_dispatch_indirect(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2620,7 +2635,7 @@ fn void? checked_dispatch_indirect(
 }
 
 fn void? checked_tracking_dispatch_indirect(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -2673,7 +2688,7 @@ fn ResolvedSpan? lower_generated_work_records(
 
 fn ResolvedSpan? validate_and_lower_generated_work_records(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     gpu::GpuSpan* records,
     usz record_size,
     uint max_count,
@@ -2719,7 +2734,7 @@ fn void set_generated_dispatch_layout_read_hook(
 
 fn void? execute_generated_work(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     BoundPipeline* pipeline,
     gpu::GeneratedWorkKind kind,
     vk::IndirectCommandsLayoutEXT layout,
@@ -2791,16 +2806,16 @@ fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
 }
 
 fn PreparedGeneratedDispatch? lower_generated_dispatch(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
 ) {
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = encoder_device_state(commands);
+    VkDeviceState* state = command_device_state(commands);
     PreparedGeneratedDispatch dispatch = {
         .pipeline     = bound_pipeline_snapshot(record)!,
         .records_span = records,
@@ -2830,17 +2845,17 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
 }
 
 fn PreparedGeneratedDispatch? checked_prepare_generated_dispatch(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = encoder_command(commands);
-    if (record == null || record.state != CommandState.RECORDING) {
+    VkCommandRecord* record = backend_command(commands);
+    if (record == null || record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = encoder_device_state(commands);
+    VkDeviceState* state = command_device_state(commands);
     note_command_semantic_check(state);
     PreparedGeneratedDispatch dispatch = {
         .pipeline = *active_bound_pipeline(
@@ -2881,11 +2896,11 @@ fn PreparedGeneratedDispatch? checked_prepare_generated_dispatch(
 }
 
 fn void? track_generated_dispatch(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedGeneratedDispatch* dispatch,
 ) {
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[2] references = {
         {
             .owner      = dispatch.records_span.owner,
@@ -2904,12 +2919,12 @@ fn void? track_generated_dispatch(
 }
 
 fn void? record_generated_dispatch(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     PreparedGeneratedDispatch* dispatch,
 ) {
     if (dispatch.max_count == 0) return;
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     execute_generated_work(
         state:         state,
         record:        record,
@@ -2924,7 +2939,7 @@ fn void? record_generated_dispatch(
 }
 
 fn void? trusted_dispatch_generated(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2939,7 +2954,7 @@ fn void? trusted_dispatch_generated(
 }
 
 fn void? trusted_tracking_dispatch_generated(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2951,10 +2966,10 @@ fn void? trusted_tracking_dispatch_generated(
         max_dispatch_count: max_dispatch_count,
     )!;
     if (dispatch.max_count == 0) return;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         checkpoint,
     );
@@ -2963,7 +2978,7 @@ fn void? trusted_tracking_dispatch_generated(
 }
 
 fn void? checked_dispatch_generated(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2978,7 +2993,7 @@ fn void? checked_dispatch_generated(
 }
 
 fn void? checked_tracking_dispatch_generated(
-    gpu::internal::CommandEncoderState* commands,
+    gpu::internal::CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -2990,10 +3005,10 @@ fn void? checked_tracking_dispatch_generated(
         max_dispatch_count: max_dispatch_count,
     )!;
     if (dispatch.max_count == 0) return;
-    CommandRecord* record = encoder_command(commands);
+    VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        encoder_device_state(commands),
+        command_device_state(commands),
         record,
         checkpoint,
     );
@@ -3106,7 +3121,7 @@ fn GeneratedPreprocessBuffer? allocate_generated_preprocess_buffer(
 
 fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     gpu::PipelineHandle pipeline,
     gpu::GeneratedWorkKind kind,
     uint max_count,

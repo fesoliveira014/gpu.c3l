@@ -315,7 +315,7 @@ fn void descriptor_buffer_binding_is_cached_per_command_and_bind_point() @test {
         && stats.strict_heap_offset_commands == 0,
         "a descriptor hazard barrier preserves cached buffer binding");
 
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     vk::invalidate_strict_heap_binding(record);
     gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, second_compute)!!;

@@ -13,8 +13,9 @@ const ulong VIEWPORT_OBSERVATION = 11;
 const ulong COPY_BUFFER_OBSERVATION = 13;
 
 struct WrapperBenchState {
-    ulong resource_owner;
-    ulong command_marker;
+    ulong                        resource_owner;
+    ulong                        command_marker;
+    gpu::internal::CommandRecord record;
 }
 
 struct WrapperBenchSamples {
@@ -74,14 +75,16 @@ fn void? destroy_wrapper_bench_allocator(
 fn void? begin_wrapper_bench_commands(
     CommandAllocator* allocator,
     CommandList* out_commands,
-    gpu::internal::CommandBackendContext* out_backend,
 ) {
     WrapperBenchState* state = (WrapperBenchState*)gpu::internal::device_backend_state_ptr(
         &allocator.device,
     );
-    *out_commands = {
-        .device = allocator.device,
-        .handle = {
+    state.record = {
+        .ops             = &wrapper_bench_command_ops,
+        .backend_state   = state,
+        .backend_command = &state.command_marker,
+        .device          = allocator.device,
+        .identity        = {
             .owner      = gpu::internal::resource_owner_tag(
                 state.resource_owner,
                 gpu::internal::ResourceOwnerKind.COMMAND,
@@ -89,75 +92,85 @@ fn void? begin_wrapper_bench_commands(
             .index      = 0,
             .generation = 1,
         },
+        .state = gpu::internal::CommandState.RECORDING,
     };
-    *out_backend = {
-        .state   = state,
-        .command = &state.command_marker,
-    };
+    gpu::internal::publish_command_list(&state.record, out_commands);
 }
 
-fn void? end_wrapper_bench_commands(gpu::internal::CommandEncoderState* encoder) {
-    (void)encoder;
+fn gpu::internal::CommandRecord*? resolve_wrapper_bench_command(
+    void* backend_state,
+    CommandListHandle handle,
+) {
+    WrapperBenchState* state = (WrapperBenchState*)backend_state;
+    if (state == null || state.record.identity != handle) {
+        return INVALID_HANDLE~;
+    }
+    return &state.record;
+}
+
+fn void? end_wrapper_bench_commands(
+    gpu::internal::CommandRecord* record,
+) {
+    if (record.state != gpu::internal::CommandState.RECORDING) {
+        return COMMAND_RECORDING_ERROR~;
+    }
+    record.state = gpu::internal::CommandState.EXECUTABLE;
 }
 
 fn void? discard_wrapper_bench_commands(
-    Device* device,
-    CommandListHandle handle,
+    gpu::internal::CommandRecord* record,
     bool executable,
-    gpu::internal::CommandEncoderState* encoder,
 ) {
-    (void)device;
-    (void)handle;
     (void)executable;
-    (void)encoder;
+    record.state = gpu::internal::CommandState.INACTIVE;
 }
 
 fn void? wrapper_bench_copy_buffer(
-    gpu::internal::CommandEncoderState* encoder,
+    gpu::internal::CommandRecord* record,
     BufferCopyDesc* desc,
 ) {
-    (void)encoder;
+    (void)record;
     (void)desc;
     observe_copy_buffer();
 }
 
 fn void? wrapper_bench_barrier(
-    gpu::internal::CommandEncoderState* encoder,
+    gpu::internal::CommandRecord* record,
     Barrier* barrier,
 ) {
-    (void)encoder;
+    (void)record;
     (void)barrier;
     observe_barrier();
 }
 
 fn void? wrapper_bench_dispatch(
-    gpu::internal::CommandEncoderState* encoder,
+    gpu::internal::CommandRecord* record,
     GpuAddress root,
     Vec3u groups,
 ) {
-    (void)encoder;
+    (void)record;
     (void)root;
     (void)groups;
     observe_dispatch();
 }
 
 fn void? wrapper_bench_viewport(
-    gpu::internal::CommandEncoderState* encoder,
+    gpu::internal::CommandRecord* record,
     Viewport* viewport,
 ) {
-    (void)encoder;
+    (void)record;
     (void)viewport;
     observe_viewport();
 }
 
 fn void? wrapper_bench_draw(
-    gpu::internal::CommandEncoderState* encoder,
+    gpu::internal::CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     uint vertex_count,
     uint instance_count,
 ) {
-    (void)encoder;
+    (void)record;
     (void)vertex_root;
     (void)fragment_root;
     (void)vertex_count;
@@ -178,6 +191,7 @@ gpu::internal::BackendVTable wrapper_bench_vtable @private = {
     .create_command_allocator  = &create_wrapper_bench_allocator,
     .destroy_command_allocator = &destroy_wrapper_bench_allocator,
     .begin_commands            = &begin_wrapper_bench_commands,
+    .resolve_command           = &resolve_wrapper_bench_command,
     .end_commands              = &end_wrapper_bench_commands,
     .discard_commands          = &discard_wrapper_bench_commands,
     .command_ops               = &wrapper_bench_command_ops,

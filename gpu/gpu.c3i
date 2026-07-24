@@ -107,6 +107,8 @@ const CommandAllocatorHandle COMMAND_ALLOCATOR_HANDLE_INVALID = {};
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
 
+const bool DIRECT_COMMAND_TOKENS = $feature(DIRECT_COMMAND_TOKENS);
+
 // Public fault set. `faultdef` declares a flat list of globally-unique values
 // in module gpu, referenced as `gpu::<NAME>` and raised with the `~` suffix.
 // Each entry notes when it fires; docs/api.md carries the full fault table.
@@ -486,6 +488,7 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong pipeline_table_lookups;
     ulong pipeline_cache_lookups;
     ulong command_policy_selections;
+    // Retired proof counters retained in benchmark schema; always zero.
     ulong encoder_cell_computations;
     ulong encoder_lease_comparisons;
     ulong recording_commands;
@@ -997,19 +1000,23 @@ struct CommandAllocatorDesc {
 
 <* A recording command token. Successful end consumes it. *>
 struct CommandList {
-    Device            device;
-    CommandListHandle handle;
-    void*             encoder;
+    void* record @if($feature(DIRECT_COMMAND_TOKENS));
+    Device device @if(!$feature(DIRECT_COMMAND_TOKENS));
+    CommandListHandle handle @if(!$feature(DIRECT_COMMAND_TOKENS));
 }
-$assert CommandList::size <= ulong::size * 4;
+$assert CommandList::size <= ulong::size * 3;
+$assert !$feature(DIRECT_COMMAND_TOKENS)
+    || CommandList::size == void*::size;
 
 <* A one-shot executable command token. Submit or discard consumes it. *>
 struct ExecutableCommandList {
-    Device            device;
-    CommandListHandle handle;
-    void*             encoder;
+    void* record @if($feature(DIRECT_COMMAND_TOKENS));
+    Device device @if(!$feature(DIRECT_COMMAND_TOKENS));
+    CommandListHandle handle @if(!$feature(DIRECT_COMMAND_TOKENS));
 }
-$assert ExecutableCommandList::size <= ulong::size * 4;
+$assert ExecutableCommandList::size <= ulong::size * 3;
+$assert !$feature(DIRECT_COMMAND_TOKENS)
+    || ExecutableCommandList::size == void*::size;
 
 <* Cold reservation for one generated-work pipeline and command kind on one
    allocator. Count bounds each call; buffer count bounds concurrent use. *>

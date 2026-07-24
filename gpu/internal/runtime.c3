@@ -155,6 +155,11 @@ fn void? runtime_release_device(Runtime* runtime) @private {
 fn void? validate_runtime_desc(RuntimeDesc* desc) @private {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
     validate_contract_validation(desc.contract_validation)!;
+    $if $feature(DIRECT_COMMAND_TOKENS):
+        if (desc.contract_validation == ContractValidation.FULL) {
+            return gpu::UNSUPPORTED_FEATURE~;
+        }
+    $endif
     if (desc.texture_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
         || desc.sampler_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
         || desc.texture_capacity > gpu::MAX_SHADER_HEAP_CAPACITY

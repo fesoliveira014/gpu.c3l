@@ -30,6 +30,7 @@ constant gpu::DEFAULT_ATTACHMENT_VIEW_CAPACITY
 constant gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
 constant gpu::DEFAULT_COMMAND_PREPROCESS_PER_LIST
 constant gpu::DEFAULT_COMMAND_REFERENCES_PER_LIST
+constant gpu::DIRECT_COMMAND_TOKENS
 constant gpu::DEFAULT_SAMPLER_HEAP_CAPACITY
 constant gpu::DEFAULT_TEXTURE_CAPACITY
 constant gpu::DEFAULT_TEXTURE_HEAP_CAPACITY
@@ -211,11 +212,13 @@ method gpu::AttachmentViewHandle.equals
 method gpu::AttachmentViewHandle.is_valid
 method gpu::CommandAllocatorHandle.equals
 method gpu::CommandAllocatorHandle.is_valid
+method gpu::CommandList.is_valid
 method gpu::CommandListHandle.equals
 method gpu::CommandListHandle.is_valid
 method gpu::CompletionPoint.equals
 method gpu::CompletionPoint.is_valid
 method gpu::Device.is_valid
+method gpu::ExecutableCommandList.is_valid
 method gpu::GpuAllocation.equals
 method gpu::GpuAllocation.is_valid
 method gpu::GpuSpan.checked_subspan

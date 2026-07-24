@@ -6,10 +6,8 @@ import std::atomic::types;
 import std::thread;
 import std::core::mem;
 
-typedef CommandLease = uint128;
-
 // Backend dispatch functions. Lifecycle entries take validated public tokens;
-// recording entries take the encoder resolved at begin.
+// recording entries take the authoritative record resolved at begin.
 alias CheckDeviceDestroyFn @private  = fn void? (void*);
 alias DestroyDeviceFn @private       = fn void (void*);
 alias ReportContractFailureFn @private = fn fault (
@@ -43,7 +41,10 @@ alias DestroyCommandAllocatorFn @private = fn void? (
 alias BeginCommandsFn @private = fn void? (
     CommandAllocator* allocator,
     CommandList* out_commands,
-    CommandBackendContext* out_backend,
+);
+alias ResolveCommandFn @private = fn CommandRecord*? (
+    void* backend_state,
+    CommandListHandle handle,
 );
 alias ReserveGeneratedScratchFn @private = fn void? (
     CommandAllocator*,
@@ -54,22 +55,20 @@ alias ReleaseGeneratedScratchFn @private = fn void? (
     PipelineHandle,
     GeneratedWorkKind,
 );
-alias EndCommandsFn @private     = fn void? (CommandEncoderState*);
+alias EndCommandsFn @private     = fn void? (CommandRecord*);
 alias DiscardCommandsFn @private = fn void? (
-    Device*,
-    CommandListHandle,
+    CommandRecord*,
     bool executable,
-    CommandEncoderState*,
 );
 alias SubmitFn @private          = fn CompletionPoint? (Queue, SubmitDesc*);
 alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
 alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
-alias CmdCopyBufferFn @private       = fn void? (CommandEncoderState*, BufferCopyDesc*);
-alias CmdFillBufferFn @private       = fn void? (CommandEncoderState*, GpuSpan, uint);
-alias CmdCopyBufferToTextureFn @private = fn void? (CommandEncoderState*, BufferTextureCopyDesc*);
-alias CmdCopyTextureToBufferFn @private = fn void? (CommandEncoderState*, TextureBufferCopyDesc*);
-alias CmdBarrierFn @private          = fn void? (CommandEncoderState*, Barrier*);
-alias CmdTextureBarrierFn @private   = fn void? (CommandEncoderState*, TextureBarrier*);
+alias CmdCopyBufferFn @private       = fn void? (CommandRecord*, BufferCopyDesc*);
+alias CmdFillBufferFn @private       = fn void? (CommandRecord*, GpuSpan, uint);
+alias CmdCopyBufferToTextureFn @private = fn void? (CommandRecord*, BufferTextureCopyDesc*);
+alias CmdCopyTextureToBufferFn @private = fn void? (CommandRecord*, TextureBufferCopyDesc*);
+alias CmdBarrierFn @private          = fn void? (CommandRecord*, Barrier*);
+alias CmdTextureBarrierFn @private   = fn void? (CommandRecord*, TextureBarrier*);
 alias GetTextureFormatSupportFn @private = fn TextureFormatSupport? (Device*, Format);
 alias SupportsTextureDescFn @private     = fn bool? (Device*, TextureDesc*);
 alias GetTextureRequirementsFn @private  = fn TextureRequirements? (Device*, TextureDesc*);
@@ -105,25 +104,25 @@ alias CreateGraphicsPipelinesFn @private = fn void? (Device*, GraphicsPipelineDe
 alias DestroyPipelineFn @private        = fn void? (Device*, PipelineHandle);
 alias GetPipelineCacheSizeFn @private   = fn usz? (Device*);
 alias GetPipelineCacheDataFn @private   = fn usz? (Device*, char[]);
-alias CmdBindPipelineFn @private             = fn void? (CommandEncoderState*, PipelineHandle);
-alias CmdSetDepthStateFn @private            = fn void? (CommandEncoderState*, DepthState*);
-alias CmdSetRasterStateFn @private           = fn void? (CommandEncoderState*, DynamicRasterState*);
-alias CmdSetGraphicsStateFn @private         = fn void? (CommandEncoderState*, GraphicsState*);
-alias CmdDispatchFn @private                 = fn void? (CommandEncoderState*, GpuAddress, Vec3u);
-alias CmdBeginRenderPassFn @private          = fn void? (CommandEncoderState*, RenderPassDesc*);
-alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandEncoderState*, RenderPassDesc*, GraphicsState*);
-alias CmdSetViewportFn @private              = fn void? (CommandEncoderState*, Viewport*);
-alias CmdSetScissorFn @private               = fn void? (CommandEncoderState*, ScissorRect*);
-alias CmdEndRenderPassFn @private            = fn void? (CommandEncoderState*);
+alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, PipelineHandle);
+alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, DepthState*);
+alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, DynamicRasterState*);
+alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, GraphicsState*);
+alias CmdDispatchFn @private                 = fn void? (CommandRecord*, GpuAddress, Vec3u);
+alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, RenderPassDesc*);
+alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandRecord*, RenderPassDesc*, GraphicsState*);
+alias CmdSetViewportFn @private              = fn void? (CommandRecord*, Viewport*);
+alias CmdSetScissorFn @private               = fn void? (CommandRecord*, ScissorRect*);
+alias CmdEndRenderPassFn @private            = fn void? (CommandRecord*);
 alias CmdDrawFn @private = fn void? (
-    CommandEncoderState* encoder,
+    CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     uint vertex_count,
     uint instance_count,
 );
 alias CmdDrawIndexedFn @private = fn void? (
-    CommandEncoderState* encoder,
+    CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     GpuSpan index_span,
@@ -132,14 +131,14 @@ alias CmdDrawIndexedFn @private = fn void? (
     IndexType index_type,
 );
 alias CmdDrawIndirectFn @private = fn void? (
-    CommandEncoderState* encoder,
+    CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     GpuSpan args,
     uint draw_count,
 );
 alias CmdDrawIndexedIndirectFn @private = fn void? (
-    CommandEncoderState* encoder,
+    CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     GpuSpan args,
@@ -148,7 +147,7 @@ alias CmdDrawIndexedIndirectFn @private = fn void? (
     IndexType index_type,
 );
 alias CmdDrawIndexedIndirectCountFn @private = fn void? (
-    CommandEncoderState* encoder,
+    CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     GpuSpan args,
@@ -157,15 +156,15 @@ alias CmdDrawIndexedIndirectCountFn @private = fn void? (
     GpuSpan index_span,
     IndexType index_type,
 );
-alias CmdDispatchIndirectFn @private         = fn void? (CommandEncoderState*, GpuAddress, GpuSpan);
+alias CmdDispatchIndirectFn @private         = fn void? (CommandRecord*, GpuAddress, GpuSpan);
 alias CmdDrawGeneratedFn @private = fn void? (
-    CommandEncoderState* encoder,
+    CommandRecord* record,
     GpuSpan records,
     GpuSpan count_span,
     uint max_draw_count,
 );
 alias CmdDrawIndexedGeneratedFn @private = fn void? (
-    CommandEncoderState* encoder,
+    CommandRecord* record,
     GpuSpan records,
     GpuSpan count_span,
     uint max_draw_count,
@@ -173,13 +172,13 @@ alias CmdDrawIndexedGeneratedFn @private = fn void? (
     IndexType index_type,
 );
 alias CmdDispatchGeneratedFn @private = fn void? (
-    CommandEncoderState* encoder,
+    CommandRecord* record,
     GpuSpan records,
     GpuSpan count_span,
     uint max_dispatch_count,
 );
-alias CmdBeginLabelFn @private               = fn void? (CommandEncoderState*, ZString, float[4]);
-alias CmdEndLabelFn @private                 = fn void? (CommandEncoderState*);
+alias CmdBeginLabelFn @private               = fn void? (CommandRecord*, ZString, float[4]);
+alias CmdEndLabelFn @private                 = fn void? (CommandRecord*);
 alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
@@ -193,17 +192,19 @@ const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
 const uint MAX_DEVICE_OPERATION_PINS @private = 0x3FFF_FFFF;
 const uint MAX_DEVICE_OPERATION_PIN_ATTEMPTS @private = 64;
 const uint MAX_DEVICE_COMMANDS @private = 4096;
-const usz MAX_COMMAND_ENCODER_STORAGE_BYTES @private = 16 * 1024 * 1024;
 
 const uint DEVICE_SLOT_FREE @private = 0;
 const uint DEVICE_SLOT_LIVE @private = 1;
 const uint DEVICE_SLOT_CLOSING @private = 2;
 const uint DEVICE_SLOT_RETIRED @private = 3;
 
-enum CommandEncoderPhase @private {
+enum CommandState @private {
     INACTIVE,
     RECORDING,
+    RECORDING_RENDER_PASS,
     EXECUTABLE,
+    SUBMITTING,
+    SUBMITTED,
 }
 
 enum ResourceOwnerKind @private {
@@ -230,21 +231,15 @@ bitstruct DeviceSlotControl : ulong @private {
     uint reserved   : 56..63;
 }
 
-struct CommandBackendContext @private {
-    void* state;
-    void* command;
+struct CommandRecord @private {
+    CommandOps*       ops;
+    void*             backend_state;
+    void*             backend_command;
+    Device            device;
+    CommandListHandle identity;
+    CommandState      state;
 }
-
-struct CommandEncoderState @private {
-    CommandLease        lease;
-    CommandOps*         ops;
-    void*               backend_state;
-    void*               backend_command;
-    CommandEncoderPhase phase;
-}
-$assert CommandEncoderState::size <= ulong::size * 8;
-$assert CommandEncoderState::size * MAX_DEVICES * MAX_DEVICE_COMMANDS
-    <= MAX_COMMAND_ENCODER_STORAGE_BYTES;
+$assert CommandRecord::size <= ulong::size * 8;
 
 struct CommandOps @private {
     CmdCopyBufferFn               copy_buffer;
@@ -296,6 +291,7 @@ struct BackendVTable @private {
     ReserveGeneratedScratchFn reserve_generated_scratch;
     ReleaseGeneratedScratchFn release_generated_scratch;
     BeginCommandsFn           begin_commands;
+    ResolveCommandFn         resolve_command;
     EndCommandsFn             end_commands;
     DiscardCommandsFn         discard_commands;
     SubmitFn                  submit;
@@ -346,13 +342,10 @@ struct DeviceData @private {
 }
 
 struct DeviceSlot @private {
-    Atomic{ulong}                            control;
-    Atomic{ulong}                            live_children;
-    Atomic{ulong}                            command_owner;
-    Atomic{bool}                             lost;
-    Atomic{uint}[MAX_DEVICE_COMMANDS]        command_leases;
-    CommandEncoderState[MAX_DEVICE_COMMANDS] command_encoders;
-    DeviceData                               data;
+    Atomic{ulong} control;
+    Atomic{ulong} live_children;
+    Atomic{bool}  lost;
+    DeviceData    data;
 }
 
 struct DeviceOperation @private {
@@ -392,8 +385,6 @@ Atomic{ulong} command_table_lookups @private @if(env::TESTING || $feature(COMMAN
 Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_policy_selections @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_encoder_cell_computations @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_encoder_lease_comparisons @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_recording_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_native_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
@@ -455,18 +446,6 @@ fn void note_command_pipeline_cache_lookup() @private {
 fn void note_command_policy_selection() @private {
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         (void)command_policy_selections.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_encoder_cell_computation() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
-        (void)command_encoder_cell_computations.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_encoder_lease_comparison() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
-        (void)command_encoder_lease_comparisons.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 
@@ -596,36 +575,6 @@ fn DeviceOperation? begin_device_operation(
     return gpu::DEVICE_BUSY~;
 }
 
-fn bool has_retained_command_pin_fields(
-    Device device,
-    CommandListHandle handle,
-) @private {
-    if (!device.is_valid()) return false;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return false;
-    if (handle.generation == 0 || handle.index >= MAX_DEVICE_COMMANDS) {
-        return false;
-    }
-    DeviceSlot* slot = &device_slots[device.index];
-    if (slot.command_owner.load(AtomicOrdering.ACQUIRE) != handle.owner) {
-        return false;
-    }
-    return slot.command_leases[handle.index].load(
-        AtomicOrdering.ACQUIRE,
-    ) == handle.generation;
-}
-
-fn bool has_retained_command_pin(CommandList* commands) @private {
-    return commands != null
-        && has_retained_command_pin_fields(commands.device, commands.handle);
-}
-
-fn bool has_retained_executable_command_pin(
-    ExecutableCommandList* commands,
-) @private {
-    return commands != null
-        && has_retained_command_pin_fields(commands.device, commands.handle);
-}
-
 fn DeviceOperation? borrow_retained_device_operation(
     Device* device,
     bool allow_lost = false,
@@ -650,56 +599,6 @@ fn DeviceOperation? borrow_retained_device_operation(
         .vtable = slot.data.vtable,
         .active = true,
     };
-}
-
-fn bool retain_command_pin_lease(
-    DeviceOperation* operation,
-    CommandList* commands,
-) @private {
-    if (operation == null || operation.slot == null || commands == null) {
-        return false;
-    }
-    if (commands.handle.generation == 0
-        || commands.handle.index >= MAX_DEVICE_COMMANDS) {
-        return false;
-    }
-    operation.slot.command_leases[commands.handle.index].store(
-        commands.handle.generation,
-        AtomicOrdering.RELEASE,
-    );
-    return true;
-}
-
-fn bool release_command_pin_lease_fields(
-    DeviceOperation* operation,
-    CommandListHandle handle,
-) @private {
-    if (operation == null || handle.index >= MAX_DEVICE_COMMANDS) return false;
-    Atomic{uint}* lease = &operation.slot.command_leases[handle.index];
-    uint seen = mem::compare_exchange(
-        &lease.data,
-        handle.generation,
-        (uint)0,
-        AtomicOrdering.ACQUIRE_RELEASE,
-        AtomicOrdering.ACQUIRE,
-    );
-    return seen == handle.generation;
-}
-
-fn bool release_command_pin_lease(
-    DeviceOperation* operation,
-    CommandList* commands,
-) @private {
-    return commands != null
-        && release_command_pin_lease_fields(operation, commands.handle);
-}
-
-fn bool release_executable_command_pin_lease(
-    DeviceOperation* operation,
-    ExecutableCommandList* commands,
-) @private {
-    return commands != null
-        && release_command_pin_lease_fields(operation, commands.handle);
 }
 
 fn void end_device_operation(DeviceOperation* operation) @private {
@@ -748,6 +647,23 @@ fn bool release_retained_device_pins(
         }
         return true;
     }
+}
+
+fn void release_command_record_ownership(
+    CommandRecord* record,
+) @private {
+    if (record == null || !record.device.is_valid()
+        || record.device.index >= MAX_DEVICES) {
+        return;
+    }
+    DeviceSlot* slot = &device_slots[record.device.index];
+    (void)slot.live_children.sub(1, AtomicOrdering.RELEASE);
+    DeviceOperation operation = {
+        .slot   = slot,
+        .active = true,
+    };
+    (void)release_retained_device_pins(&operation);
+    operation.active = false;
 }
 
 fn void retain_device_children(DeviceOperation* operation, ulong count = 1) @private {
@@ -901,12 +817,7 @@ fn Device? register_device(
             .generation = control.generation,
         };
         slot.live_children.store(0, AtomicOrdering.RELAXED);
-        slot.command_owner.store(
-            resource_owner_tag(resource_owner, ResourceOwnerKind.COMMAND),
-            AtomicOrdering.RELAXED,
-        );
         slot.lost.store(false, AtomicOrdering.RELAXED);
-        slot.command_encoders = {};
         slot.data = {
             .backend              = backend,
             .caps                 = caps,

@@ -7,6 +7,7 @@ import os
 import pathlib
 import platform
 import re
+import struct
 import subprocess
 import sys
 
@@ -20,6 +21,7 @@ BENCHMARK_TARGETS = (
     "command_path_baseline_bench",
     "command_reference_bench",
     "command_record_bench",
+    "command_record_fast_bench",
     "lifecycle_bench",
     "submit_batch_bench",
     "pipeline_cache_bench",
@@ -54,6 +56,10 @@ BENCHMARK_METHODS = {
         "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; cold/warm work counters",
         "ns/record",
     ),
+    "command_record_fast_bench": (
+        "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; commands/list=1,16,256,4096",
+        "ns/record",
+    ),
     "lifecycle_bench": (
         "submit=256x5; poll=100000x5; destroy=300x5",
         "ns/submit, ns/poll, ns/destroy",
@@ -74,7 +80,7 @@ BENCHMARK_METHODS = {
 }
 
 C3_BUILD_FLAGS = ("-O1",)
-EXPECTATION_VERSION = 1
+EXPECTATION_VERSION = 2
 
 BENCHMARK_PROJECTS = {
     "command_wrapper_bench": "test/cpu",
@@ -134,6 +140,16 @@ COMMAND_RECORD_INVARIANTS = re.compile(
 )
 COMMAND_RECORD_EXPECTATION = re.compile(
     r"^expectation_version=(?P<version>[1-9][0-9]*)$",
+    re.MULTILINE,
+)
+COMMAND_RECORD_TOKENS = re.compile(
+    r"^command_tokens: representation=(?P<representation>direct|bounded) "
+    r"recording_token_bytes=(?P<recording_token_bytes>[1-9][0-9]*) "
+    r"executable_token_bytes=(?P<executable_token_bytes>[1-9][0-9]*) "
+    r"record_bytes=(?P<record_bytes>[1-9][0-9]*) "
+    r"cell_bytes=(?P<cell_bytes>[1-9][0-9]*) "
+    r"fixed_storage_bytes=(?P<fixed_storage_bytes>[1-9][0-9]*) "
+    r"commands_per_list=1,16,256,4096$",
     re.MULTILINE,
 )
 COMMAND_RECORD_RESOLUTION = re.compile(
@@ -952,6 +968,36 @@ def require_command_record_outcomes(output):
             "semantic invariant: command_record_bench expectation version "
             f"{version} != {EXPECTATION_VERSION}"
         )
+    token_records = tuple(COMMAND_RECORD_TOKENS.finditer(output))
+    if len(token_records) != 1:
+        raise ValueError(
+            "semantic invariant: command_record_bench token/storage record "
+            "is missing, duplicated, or malformed"
+        )
+    token_record = token_records[0]
+    representation = token_record.group("representation")
+    recording_token_bytes = int(token_record.group("recording_token_bytes"))
+    executable_token_bytes = int(
+        token_record.group("executable_token_bytes")
+    )
+    if recording_token_bytes != executable_token_bytes:
+        raise ValueError(
+            "semantic invariant: command recording/executable token sizes differ"
+        )
+    if (
+        representation == "direct"
+        and recording_token_bytes != struct.calcsize("P")
+    ):
+        raise ValueError(
+            "semantic invariant: direct command token is not one pointer"
+        )
+    cell_bytes = int(token_record.group("cell_bytes"))
+    record_bytes = int(token_record.group("record_bytes"))
+    fixed_storage_bytes = int(token_record.group("fixed_storage_bytes"))
+    if record_bytes > cell_bytes or fixed_storage_bytes != cell_bytes * 4096:
+        raise ValueError(
+            "semantic invariant: command fixed-storage evidence is inconsistent"
+        )
     invariant_lines = [
         line for line in output.splitlines()
         if line.startswith("invariants:")
@@ -999,7 +1045,6 @@ def require_command_record_outcomes(output):
         "device_registry",
         "retained_pins",
         "lifecycle_vtable",
-        "command_table",
         "pipeline_table",
         "pipeline_cache",
         "policy",
@@ -1036,13 +1081,21 @@ def require_command_record_outcomes(output):
             "semantic invariant: command_record_bench recording command "
             f"count {recording_commands} != {expected_recording_commands}"
         )
-    if values["encoder_cells"] > recording_commands:
+    expected_command_table = (
+        0 if representation == "direct" else recording_commands
+    )
+    if values["command_table"] != expected_command_table:
         raise ValueError(
-            "forbidden work: command_record_bench encoder-cell budget exceeded"
+            "forbidden work: command_record_bench command-table work "
+            f"{values['command_table']} != {expected_command_table}"
         )
-    if values["encoder_leases"] > recording_commands:
+    if values["encoder_cells"] != 0:
         raise ValueError(
-            "forbidden work: command_record_bench encoder-lease budget exceeded"
+            "forbidden work: command_record_bench encoder-cell work is nonzero"
+        )
+    if values["encoder_leases"] != 0:
+        raise ValueError(
+            "forbidden work: command_record_bench encoder-lease work is nonzero"
         )
     if values["native_commands"] != expected_native_commands:
         raise ValueError(
@@ -1110,7 +1163,7 @@ def require_measurement(
             raise ValueError(f"{target} reports live resources")
     if target == "descriptor_churn_bench":
         require_sampler_lookup_evidence(output)
-    if target == "command_record_bench":
+    if target in ("command_record_bench", "command_record_fast_bench"):
         require_command_record_outcomes(output)
         require_command_policy_evidence(output)
     if target == "pipeline_cache_bench" and not PIPELINE_CACHE_MATRIX.search(output):
@@ -1292,6 +1345,29 @@ def main():
                 )
                 lines.append(report_section(title, annotated))
             require_command_policy_matrix(command_outputs)
+            continue
+        if target == "command_record_fast_bench":
+            command_env = env.copy()
+            command_env["GPU_C3L_BENCH_CONTRACT"] = "trusted"
+            command_env["GPU_C3L_BENCH_TRACKING"] = "false"
+            command_env["GPU_C3L_BENCH_LAYERS"] = "false"
+            output = run(
+                (str(executable(root, target)),),
+                root,
+                command_env,
+            )
+            require_command_policy_evidence(
+                output,
+                ("trusted", False, False),
+            )
+            timing_advisories.extend(require_measurement(
+                output,
+                target,
+                enforce_thresholds=False,
+                evaluate_thresholds=False,
+            ))
+            annotated = f"iterations={iterations}\nunits={units}\n{output}"
+            lines.append(report_section(target, annotated))
             continue
         if target == "command_path_baseline_bench":
             command_path_outputs = []

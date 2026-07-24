@@ -18,9 +18,8 @@ struct CommandResourceReference {
 }
 
 struct SubmittedCommandBatch {
-    gpu::CompletionPoint        completion;
-    gpu::CommandAllocatorHandle allocator;
-    uint                        allocator_buffer;
+    gpu::CompletionPoint          completion;
+    gpu::internal::CommandRecord* record;
 }
 
 struct CommandBufferStats {
@@ -191,7 +190,7 @@ fn void? ensure_submitted_command_capacity(
 
 fn uint? prepare_submitted_commands(
     VkDeviceState* state,
-    CommandRecord*[] records,
+    gpu::internal::CommandRecord*[] records,
 ) {
     uint additional = (uint)records.len;
     state.resource_mutex.lock()!!;
@@ -213,7 +212,7 @@ fn void cancel_submitted_command_reservation(
 
 fn void publish_submitted_commands(
     VkDeviceState* state,
-    CommandRecord*[] records,
+    gpu::internal::CommandRecord*[] records,
     gpu::CompletionPoint completion,
     uint reservation,
 ) {
@@ -222,12 +221,12 @@ fn void publish_submitted_commands(
     state.submitted_command_reserved -= reservation;
     foreach (record : records) {
         state.submitted_commands[state.submitted_command_count++] = {
-            .allocator        = record.allocator,
-            .allocator_buffer = record.allocator_buffer,
-            .completion       = completion,
+            .completion = completion,
+            .record     = record,
         };
+        VkCommandRecord* backend = backend_command(record);
         CommandAllocatorSlot* slot = state.command_allocators.get(
-            record.allocator,
+            backend.allocator,
         )!!;
         slot.mutex.lock()!!;
         slot.live_executables--;
@@ -241,12 +240,15 @@ fn void release_submitted_command_batch(
     uint index,
 ) {
     SubmittedCommandBatch* batch = &state.submitted_commands[index];
+    gpu::internal::CommandRecord* record = batch.record;
+    VkCommandRecord* backend = backend_command(record);
     CommandAllocatorSlot* slot = state.command_allocators.get(
-        batch.allocator,
+        backend.allocator,
     )!!;
     slot.mutex.lock()!!;
     defer slot.mutex.unlock();
-    CommandScratch* scratch = &slot.scratch[batch.allocator_buffer];
+    record.state = gpu::internal::CommandState.INACTIVE;
+    CommandScratch* scratch = backend.scratch;
     clear_command_scratch_references(state, scratch);
     recycle_generated_preprocess_indices_locked(
         state,
@@ -254,11 +256,16 @@ fn void release_submitted_command_batch(
         scratch.generated_preprocess_indices,
         scratch.generated_preprocess_count,
     );
-    return_allocator_buffer_locked(slot, batch.allocator_buffer);
+    return_allocator_buffer_locked(slot, backend.allocator_buffer);
     slot.in_flight_buffers--;
+    gpu::CommandListHandle identity = record.identity;
     state.submitted_command_count--;
     *batch = state.submitted_commands[state.submitted_command_count];
     state.submitted_commands[state.submitted_command_count] = {};
+    gpu::internal::release_command_record_ownership(record);
+    state.command_mutex.lock()!!;
+    (void)state.commands.free(identity);
+    state.command_mutex.unlock();
 }
 
 fn void release_completed_submitted_commands_locked(

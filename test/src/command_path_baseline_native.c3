@@ -5,7 +5,7 @@ import gpu @public;
 import vk;
 
 struct CommandPathNativeContext {
-    CommandRecord*    record;
+    VkCommandRecord*  record;
     vk::PipelineLayout pipeline_layout;
     bool              descriptor_buffer;
     bool              generated_work;
@@ -22,10 +22,13 @@ struct CommandPathNativeCopy {
 fn CommandPathNativeContext? command_path_native_context(
     gpu::CommandList* commands,
 ) {
-    CommandRecord* record = resolve_command(commands)!;
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(
-        &commands.device,
-    );
+    gpu::internal::CommandRecord* root =
+        gpu::internal::recording_command(
+            commands,
+            count_command: false,
+        )!;
+    VkCommandRecord* record = backend_command(root);
+    VkDeviceState* state = command_device_state(root);
     return {
         .record            = record,
         .pipeline_layout   = record.logical_pipeline.layout,

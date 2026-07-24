@@ -32,7 +32,13 @@ LIFECYCLE_OUTPUT = "\n".join(
 )
 COMMAND_OUTPUT = "\n".join(
     (
-        "expectation_version=1",
+        "expectation_version=2",
+        (
+            "command_tokens: representation=bounded "
+            "recording_token_bytes=24 executable_token_bytes=24 "
+            "record_bytes=56 cell_bytes=456 fixed_storage_bytes=1867776 "
+            "commands_per_list=1,16,256,4096"
+        ),
         "barrier: iterations=20000 repetitions=5 median=130.0 ns/record",
         "hazard barrier: iterations=20000 repetitions=5 median=135.0 ns/record",
         "indirect dispatch: iterations=20000 repetitions=5 median=180.0 ns/record",
@@ -46,9 +52,9 @@ COMMAND_OUTPUT = "\n".join(
             "pipeline_binds=0 descriptor_set_binds=0 "
             "descriptor_buffer_binds=0 descriptor_buffer_offsets=0 "
             "device_registry=0 "
-            "retained_pins=0 lifecycle_vtable=0 command_table=0 "
+            "retained_pins=0 lifecycle_vtable=0 command_table=300320 "
             "pipeline_table=0 pipeline_cache=0 policy=0 "
-            "encoder_cells=300320 encoder_leases=300320"
+            "encoder_cells=0 encoder_leases=0"
         ),
         (
             "validation policy=trusted tracking=false layers=false "
@@ -336,6 +342,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "command_path_baseline_bench",
                 "command_reference_bench",
                 "command_record_bench",
+                "command_record_fast_bench",
                 "lifecycle_bench",
                 "submit_batch_bench",
                 "pipeline_cache_bench",
@@ -960,7 +967,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "device_registry",
             "retained_pins",
             "lifecycle_vtable",
-            "command_table",
             "pipeline_table",
             "pipeline_cache",
             "policy",
@@ -970,23 +976,15 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "forbidden work"):
                     runner.require_measurement(output, "command_record_bench")
 
-    def test_command_measurement_accepts_zero_private_encoder_work(self):
-        runner = load_runner()
-        output = COMMAND_OUTPUT.replace(
-            "encoder_cells=300320 encoder_leases=300320",
-            "encoder_cells=0 encoder_leases=0",
-        )
-        runner.require_measurement(output, "command_record_bench")
-
-    def test_command_measurement_rejects_encoder_work_over_budget(self):
+    def test_command_measurement_requires_zero_private_encoder_work(self):
         runner = load_runner()
         for field in ("encoder_cells", "encoder_leases"):
             with self.subTest(field=field):
                 output = COMMAND_OUTPUT.replace(
-                    f"{field}=300320",
-                    f"{field}=300321",
+                    f"{field}=0",
+                    f"{field}=1",
                 )
-                with self.assertRaisesRegex(ValueError, "budget exceeded"):
+                with self.assertRaisesRegex(ValueError, "nonzero"):
                     runner.require_measurement(output, "command_record_bench")
 
     def test_command_measurement_requires_exact_semantic_and_native_counts(self):
@@ -1023,13 +1021,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         mutations = (
             (
-                COMMAND_OUTPUT.replace("expectation_version=1\n", ""),
+                COMMAND_OUTPUT.replace("expectation_version=2\n", ""),
                 "expectation version",
             ),
             (
                 COMMAND_OUTPUT.replace(
-                    "expectation_version=1",
                     "expectation_version=2",
+                    "expectation_version=3",
                 ),
                 "expectation version",
             ),

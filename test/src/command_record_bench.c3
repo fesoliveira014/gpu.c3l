@@ -13,7 +13,7 @@ const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint GENERATED_RECORD_ITERATIONS = 64;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 const uint MEASURED_COMMAND_PATH_COUNT = 3;
-const uint BENCHMARK_EXPECTATION_VERSION = 1;
+const uint BENCHMARK_EXPECTATION_VERSION = 2;
 
 struct CommandBenchPolicy {
     gpu::ContractValidation contract;
@@ -118,6 +118,38 @@ fn double record_barriers(
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_bench_executable(&commands_executable)!!;
     return (double)elapsed_ns / (double)COMMAND_RECORD_ITERATIONS;
+}
+
+fn void verify_commands_per_list(gpu::CommandAllocator* allocator) {
+    uint[4] command_counts = { 1, 16, 256, 4096 };
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after  = { .compute = true },
+    };
+    foreach (count : command_counts) {
+        gpu::CommandList commands = gpu::begin_commands(allocator)!!;
+        gpu::reset_command_resolution_stats();
+        for (uint i = 0; i < count; i++) {
+            gpu::cmd_barrier(&commands, &barrier)!!;
+        }
+        gpu::CommandResolutionStats resolution =
+            gpu::command_resolution_stats();
+        assert(resolution.recording_commands == count,
+            "commands-per-list evidence counts every recording call");
+        assert(resolution.encoder_cell_computations == 0
+            && resolution.encoder_lease_comparisons == 0,
+            "commands-per-list evidence observes no retired frontend proof");
+        $if $feature(DIRECT_COMMAND_TOKENS):
+            assert(resolution.command_table_lookups == 0,
+                "direct commands-per-list evidence performs no table lookup");
+        $else
+            assert(resolution.command_table_lookups == count,
+                "bounded commands-per-list evidence resolves once per call");
+        $endif
+        gpu::ExecutableCommandList executable =
+            gpu::end_commands(&commands)!!;
+        gpu::discard_executable_commands(&executable)!!;
+    }
 }
 
 fn double record_hazard_barriers(
@@ -345,6 +377,7 @@ fn int main() {
             &warmup_resolution,
         );
     }
+    verify_commands_per_list(&allocator);
 
     gpu::internal::RecordingWorkCounters warm_before =
         vk::command_recording_work_counters(state);
@@ -435,8 +468,14 @@ fn int main() {
         "warm recording does not borrow retained pins");
     assert(resolution.lifecycle_vtable_dispatches == 0,
         "warm recording does not load the lifecycle vtable");
-    assert(resolution.command_table_lookups == 0,
-        "warm recording does not resolve the backend command table");
+    $if $feature(DIRECT_COMMAND_TOKENS):
+        assert(resolution.command_table_lookups == 0,
+            "direct warm recording does not resolve the command table");
+    $else
+        assert(resolution.command_table_lookups
+                == expected_recording_commands,
+            "bounded warm recording resolves one command record per call");
+    $endif
     assert(resolution.pipeline_table_lookups == 0,
         "warm recording does not resolve the pipeline table after bind");
     assert(resolution.pipeline_cache_lookups == 0,
@@ -448,10 +487,10 @@ fn int main() {
         "post-bind recording emits no pipeline or descriptor heap binds");
     assert(resolution.command_policy_selections == 0,
         "warm recording does not select a validation policy");
-    assert(resolution.encoder_cell_computations <= expected_recording_commands,
-        "warm recording stays within one encoder-cell computation per call");
-    assert(resolution.encoder_lease_comparisons <= expected_recording_commands,
-        "warm recording stays within one encoder-lease comparison per call");
+    assert(resolution.encoder_cell_computations == 0,
+        "warm recording performs no frontend encoder-cell computation");
+    assert(resolution.encoder_lease_comparisons == 0,
+        "warm recording performs no packed-lease comparison");
     assert(resolution.recording_commands == expected_recording_commands,
         "resolution evidence counts every measured recording call");
     assert(resolution.native_commands >= resolution.recording_commands,
@@ -484,6 +523,15 @@ fn int main() {
     }
 
     io::printfn("expectation_version=%d", BENCHMARK_EXPECTATION_VERSION);
+    io::printfn(
+        "command_tokens: representation=%s recording_token_bytes=%d executable_token_bytes=%d record_bytes=%d cell_bytes=%d fixed_storage_bytes=%d commands_per_list=1,16,256,4096",
+        gpu::DIRECT_COMMAND_TOKENS ? "direct" : "bounded",
+        gpu::CommandList::size,
+        gpu::ExecutableCommandList::size,
+        gpu::internal::CommandRecord::size,
+        vk::CommandCell::size,
+        state.commands.slots.len * vk::CommandCell::size,
+    );
     io::printfn(
         "barrier: iterations=%d repetitions=%d median=%.1f ns/record",
         COMMAND_RECORD_ITERATIONS, COMMAND_RECORD_REPETITIONS, command_median(barrier_results),
