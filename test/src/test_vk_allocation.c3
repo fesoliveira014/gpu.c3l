@@ -723,10 +723,19 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         fixture.state.command_allocators.get(allocator)!!;
     allocator_slot.mutex.init()!!;
     defer (void)allocator_slot.mutex.destroy();
+    vk::CommandCell[1] command_cells;
+    init_submitted_command_fixture(
+        &fixture.state,
+        command_cells[..],
+    );
+    defer (void)fixture.state.command_mutex.destroy();
     vk::SubmittedCommandBatch[1] batches = {{
-        .completion       = completion,
-        .allocator        = allocator,
-        .allocator_buffer = 0,
+        .completion = completion,
+        .record = submitted_command_fixture_record(
+            &fixture.state,
+            allocator,
+            0,
+        ),
     }};
     fixture.state.submitted_commands = batches[..];
     fixture.state.submitted_command_count = 1;

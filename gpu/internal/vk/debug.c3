@@ -357,12 +357,12 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     return count;
 }
 
-fn void? vk_cmd_begin_label(gpu::internal::CommandEncoderState* commands, ZString label, float[4] color) @private {
+fn void? vk_cmd_begin_label(gpu::internal::CommandRecord* commands, ZString label, float[4] color) @private {
     if (label == null) return gpu::INVALID_ARGUMENT~;
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING
-        && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING
+        && record.root.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     vk::DebugUtilsLabelEXT info = vk::debug_utils_label_ext();
     info.p_label_name = (char*)label;
@@ -371,11 +371,11 @@ fn void? vk_cmd_begin_label(gpu::internal::CommandEncoderState* commands, ZStrin
     gpu::internal::note_command_native_call();
 }
 
-fn void? vk_cmd_end_label(gpu::internal::CommandEncoderState* commands) @private {
-    VkDeviceState* state = encoder_device_state(commands);
-    CommandRecord* record = encoder_command(commands);
-    if (record.state != CommandState.RECORDING
-        && record.state != CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
+fn void? vk_cmd_end_label(gpu::internal::CommandRecord* commands) @private {
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING
+        && record.root.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     state.device_dispatch.debug.cmd_end_label(record.command_buffer);
     gpu::internal::note_command_native_call();

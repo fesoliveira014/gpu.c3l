@@ -1042,7 +1042,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     gpu::cmd_end_render_pass(&commands)!!;
 
     bind_test_compute_pipeline(&commands, dispatch_pipeline);
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::internal::RecordingWorkCounters dispatch_work_before =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats dispatch_recording_before =

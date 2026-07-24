@@ -205,23 +205,28 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     defer discard_test_executable(&original_executable)!!;
     gpu::ExecutableCommandList[1] copied = { original_executable };
     gpu::SubmitDesc first = { .command_lists = copied[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &first)!!;
+    gpu::CompletionPoint original_completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &first,
+    )!!;
     gpu::CommandList replacement = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&replacement)!!;
     gpu::ExecutableCommandList replacement_executable = gpu::end_commands(&replacement)!!;
     defer discard_test_executable(&replacement_executable)!!;
-    assert(replacement_executable.handle.index == original_executable.handle.index,
-        "the freed command slot is reused");
-    assert(replacement_executable.handle.generation != original_executable.handle.generation,
-        "slot reuse advances the command generation");
+    assert(replacement_executable.handle.index
+            != original_executable.handle.index,
+        "a submitted command record is not reused before retirement");
 
 
     ulong before = command_submit_count(&device);
     gpu::ExecutableCommandList[1] original_alias = { original_executable };
     gpu::SubmitDesc second = { .command_lists = original_alias[..] };
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &second));
-    assert(rejected == gpu::INVALID_HANDLE, "a consumed alias faults INVALID_HANDLE");
+    assert(rejected == gpu::COMMAND_RECORDING_ERROR,
+        "a submitted alias faults on its authoritative phase");
     assert(command_submit_count(&device) == before, "a consumed alias reaches no Vulkan queue submit");
+    gpu::wait_completion(original_completion)!!;
     gpu::ExecutableCommandList[1] replacement_lists = { replacement_executable };
     gpu::SubmitDesc replacement_submit = { .command_lists = replacement_lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &replacement_submit)!!;
@@ -245,21 +250,18 @@ fn void command_generation_exhaustion_retires_slot() @test {
     state.commands.slots[final_generation_executable.handle.index].generation =
         vk::HANDLE_GENERATION_MAX - 1;
     final_generation_executable.handle.generation = vk::HANDLE_GENERATION_MAX - 1;
-    ((gpu::internal::CommandEncoderState*)final_generation_executable.encoder).lease =
-        gpu::internal::make_command_lease(
-            final_generation_executable.device,
-            final_generation_executable.handle,
-        );
-    gpu::internal::device_slots[device.index].command_leases[
+    state.commands.slots[
         final_generation_executable.handle.index
-    ].store(
-        final_generation_executable.handle.generation,
-        AtomicOrdering.RELEASE,
-    );
+    ].record.identity = final_generation_executable.handle;
 
     gpu::ExecutableCommandList[1] first_lists = { final_generation_executable };
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &first_submit)!!;
+    gpu::CompletionPoint retired = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &first_submit,
+    )!!;
+    gpu::wait_completion(retired)!!;
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
@@ -372,8 +374,8 @@ fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
     assert(command_submit_count(&device) == submits_before,
         "all duplicate positions reject before native submit");
     foreach (list : unique) {
-        assert(state.commands.get(list.handle)!!.state
-                == vk::CommandState.EXECUTABLE,
+        assert(state.commands.get(list.handle)!!.root.state
+                == gpu::internal::CommandState.EXECUTABLE,
             "duplicate faults preserve every command record as executable");
     }
 
@@ -483,7 +485,7 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
     vk::CommandCell* unused =
         &state.commands.slots[discarded_handle.index];
     uint unused_generation = unused.generation;
-    vk::CommandRecord* unvisited_live = state.commands.get(lists[1].handle)!!;
+    vk::VkCommandRecord* unvisited_live = state.commands.get(lists[1].handle)!!;
     unvisited_live.submit_visit_epoch = ulong::max;
     gpu::ExecutableCommandList[2] duplicate = { lists[0], lists[0] };
     gpu::SubmitDesc submit = { .command_lists = duplicate[..] };
@@ -1072,7 +1074,7 @@ fn void submit_rejects_stale_allocator_generation_before_claim() @test {
     defer discard_test_executable(&executable)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
         gpu::internal::device_backend_state_ptr(&device);
-    vk::CommandRecord* record = state.commands.get(executable.handle)!!;
+    vk::VkCommandRecord* record = state.commands.get(executable.handle)!!;
     gpu::CommandAllocatorHandle original = record.allocator;
     record.allocator.generation++;
 
@@ -1081,7 +1083,7 @@ fn void submit_rejects_stale_allocator_generation_before_claim() @test {
     assert(@catch(gpu::submit(queue, &submit)) == gpu::INVALID_HANDLE,
         "submit rejects a stale allocator generation before claiming tokens");
     assert(lists[0].handle.is_valid()
-        && record.state == vk::CommandState.EXECUTABLE,
+        && record.root.state == gpu::internal::CommandState.EXECUTABLE,
         "allocator validation failure preserves executable state");
 
     record.allocator = original;

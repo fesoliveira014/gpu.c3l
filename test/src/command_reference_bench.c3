@@ -47,7 +47,7 @@ fn void track_reference(
     vk::CommandScratch* scratch,
     uint index,
 ) {
-    vk::CommandRecord record = { .scratch = scratch };
+    vk::VkCommandRecord record = { .scratch = scratch };
     vk::track_command_reference(
         state:      state,
         record:     &record,
@@ -249,7 +249,7 @@ fn void run_capacity_case(vk::VkDeviceState* state) {
             .epoch = 1,
         },
     };
-    vk::CommandRecord record = { .scratch = &scratch };
+    vk::VkCommandRecord record = { .scratch = &scratch };
     vk::reset_command_reference_work_counters(state);
     vk::reset_command_recording_work_counters(state);
     std::time::Clock start = std::time::clock::now();

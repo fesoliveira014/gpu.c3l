@@ -93,7 +93,7 @@ fn void reference_capacity_preflight_counts_unique_identities() @test {
             .epoch = 1,
         },
     };
-    vk::CommandRecord record = {
+    vk::VkCommandRecord record = {
         .scratch = &scratch,
     };
     vk::CommandResourceReference first = {
@@ -174,7 +174,7 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
         gpu::internal::device_backend_state(device);
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -234,7 +234,7 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
     record_val_target_to_attach(&commands, target);
     vk::VkDeviceState* state = (vk::VkDeviceState*)
         gpu::internal::device_backend_state(device);
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
     uint reference_epoch_before = record.scratch.reference_index.epoch;
     assert(references_before == 1,
@@ -261,7 +261,7 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
         vk::command_reference_work_counters(state);
     vk::DynamicStateObservation observation =
         vk::dynamic_state_observation(state);
-    assert(record.state == vk::CommandState.RECORDING,
+    assert(record.root.state == gpu::internal::CommandState.RECORDING,
         "tracking rejection leaves the command outside a render pass");
     assert(record.scratch.reference_count == references_before
         && record.scratch.reference_index.epoch == reference_epoch_before,
@@ -476,7 +476,7 @@ fn void submit_requires_exact_recording_queue_token() @test {
 
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::CommandRecord* record = state.commands.get(executable.handle)!!;
+    vk::VkCommandRecord* record = state.commands.get(executable.handle)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.id++;
 
@@ -600,7 +600,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
         "allocation subspans preserve immutable access");
     assert(multi_access_span.access.graphics && multi_access_span.access.compute,
         "allocation subspans preserve every immutable role");
-    vk::CommandRecord* record = state.commands.get(commands.handle)!!;
+    vk::VkCommandRecord* record = state.commands.get(commands.handle)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics, .compute };
 
@@ -783,7 +783,7 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, admitted);
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics };
     uint references_before = record.scratch.reference_count;
@@ -808,7 +808,7 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
         "a later attachment outside the recording role rejects the whole pass");
     assert(record.scratch.reference_count == references_before,
         "attachment access failure rolls back precreated-view references");
-    assert(record.state == vk::CommandState.RECORDING,
+    assert(record.root.state == gpu::internal::CommandState.RECORDING,
         "attachment access rejection leaves command state reusable");
 
     record.queue = recorded_queue;
@@ -1094,7 +1094,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         "repeated binds and aliases emit once per selected bind point");
     assert_strict_heap_bind_work(state, bind_stats, 2);
 
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     vk::invalidate_strict_heap_bind_point(
         record,
         vk::PipelineBindPoint.COMPUTE,
@@ -1427,7 +1427,7 @@ fn void full_graphics_state_setters_reject_non_graphics_recording_roles() @test 
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .compute };
     defer record.queue = recorded_queue;
@@ -2418,7 +2418,7 @@ fn void barrier_queue_stage_mismatch_faults_without_poisoning_recording() @test 
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     vk::QueueCompletionState* completion =
@@ -2459,7 +2459,7 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     vk::QueueCompletionState* completion =
@@ -2685,7 +2685,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         "one mixed-size attachment that cannot cover the pass faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "mixed-size rejection records no pass");
 
-    vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&cmd)!!;
     uint references_before = record.scratch.reference_count;
     gpu::ColorTargetDesc[2] invalid_later = {
         { .view = large_mip_two },
@@ -3080,7 +3080,7 @@ fn void buffer_to_texture_access_diagnostic_precedes_recording() @test {
         .height  = 1,
     };
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::CommandRecord* record = state.commands.get(commands.handle)!!;
+    vk::VkCommandRecord* record = state.commands.get(commands.handle)!!;
     gpu::QueueRoles selected_roles = record.queue.roles;
     // Keep diagnostic precedence independent of physical queue aliasing.
     record.queue.roles = { .transfer };
@@ -3421,7 +3421,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
 
     record_val_target_to_attach(&commands, color_target);
     gpu::RenderPassDesc oversized = { .colors = colors[..], .width = 9, .height = 8 };
-    vk::CommandRecord* render_record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* render_record = vk::resolve_command(&commands)!!;
     uint render_references_before =
         render_record.scratch.reference_count;
     reset_sync_diagnostic(

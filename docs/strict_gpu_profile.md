@@ -72,8 +72,20 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 ## Commands and synchronization
 
 - Command lists are transient and one-shot.
-- Recording storage is device-managed and safe for concurrent recording.
+- Each begin pairs one fixed allocator unit with one address-stable record from
+  the device command table. That record owns the sole lifecycle state through
+  discard or completion retirement.
+- The default command token is a compact bounded identity suitable for
+  deterministic `FULL` diagnostics. A `DIRECT_COMMAND_TOKENS` build uses an
+  exact one-pointer FAST token and treats provenance, correct phase, one-shot
+  use, and alias confinement as caller preconditions.
+- Recording is thread-confined per token and allocator owner; distinct
+  allocator records may be recorded concurrently without a device-wide
+  recording lock.
 - Successful submission consumes command tokens and returns a compact queue-owned `CompletionPoint`.
+- Submission retains the authoritative record, allocator unit, native buffer,
+  fixed scratch, and device/backend ownership until ordered completion
+  retirement releases them exactly once.
 - Completion points support host poll/wait and stage-scoped cross-queue waits;
   same-queue order is inherent after point and stage validation.
 - Failed submission publishes no point and preserves retryable command tokens.
@@ -116,6 +128,9 @@ descriptors, silently change binding models, or provide a Vulkan 1.2 fallback.
 - Device creation either enables the complete request or publishes no device.
 - Native pipeline compilation never occurs implicitly during draw or dispatch.
 - Public synchronization does not require resource lists for generic GPU memory.
+- Direct command tokens do not promise deterministic diagnostics for
+  fabricated, stale, consumed, wrong-phase, or concurrently used aliases; use
+  the bounded-token build with `FULL` for those diagnostics.
 - Non-WSI resource and device destruction never hide waits or deferred release; strict presentation extends that rule to swapchain destruction and resize.
 - Strict completion and readback require no root-level work lifecycle or public synchronization objects.
 - Public documentation and generated API references remain backend-neutral.

@@ -64,6 +64,25 @@ fn bool CommandAllocatorHandle.equals(
         && self.generation == other.generation;
 }
 
+<* Tests only whether this value differs from the invalid token sentinel.
+   This does not validate live provenance or recording phase. *>
+fn bool CommandList.is_valid(&self) @if($feature(DIRECT_COMMAND_TOKENS)) =>
+    self.record != null;
+<* Tests only whether this value differs from the invalid token sentinel.
+   This does not validate live provenance or recording phase. *>
+fn bool CommandList.is_valid(&self) @if(!$feature(DIRECT_COMMAND_TOKENS)) =>
+    self.device.is_valid() && self.handle.is_valid();
+<* Tests only whether this value differs from the invalid token sentinel.
+   This does not validate live provenance or executable phase. *>
+fn bool ExecutableCommandList.is_valid(&self) @if(
+    $feature(DIRECT_COMMAND_TOKENS)
+) => self.record != null;
+<* Tests only whether this value differs from the invalid token sentinel.
+   This does not validate live provenance or executable phase. *>
+fn bool ExecutableCommandList.is_valid(&self) @if(
+    !$feature(DIRECT_COMMAND_TOKENS)
+) => self.device.is_valid() && self.handle.is_valid();
+
 <* True for a live heap index; the zero value is the invalid sentinel. *>
 fn bool TextureIndex.is_valid(self) => (uint)self != 0;
 <* True for a live heap index; the zero value is the invalid sentinel. *>
@@ -328,8 +347,6 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
     gpu::internal::command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_policy_selections.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_encoder_cell_computations.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_encoder_lease_comparisons.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_recording_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_native_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_bind_commands.store(0, AtomicOrdering.RELAXED);
@@ -339,7 +356,7 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
 }
 
 <* Snapshot process-wide command instrumentation with relaxed loads.
-   recording_commands counts live-encoder entry-point attempts;
+   recording_commands counts live-record entry-point attempts;
    native_commands counts every Vulkan command emitted by those paths. *>
 fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
     return {
@@ -362,12 +379,6 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
             AtomicOrdering.RELAXED,
         ),
         .command_policy_selections = gpu::internal::command_policy_selections.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .encoder_cell_computations = gpu::internal::command_encoder_cell_computations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .encoder_lease_comparisons = gpu::internal::command_encoder_lease_comparisons.load(
             AtomicOrdering.RELAXED,
         ),
         .recording_commands = gpu::internal::command_recording_commands.load(
@@ -536,15 +547,15 @@ fn String? build_memory_report(Device* device, bool detailed) {
    Valid while recording, including inside render passes; balance is the
    caller's responsibility. *>
 fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (label == null) return INVALID_ARGUMENT~;
-    return encoder.ops.begin_label(encoder, label, color);
+    return record.ops.begin_label(record, label, color);
 }
 
 <* Counterpart of cmd_begin_label. *>
 fn void? cmd_end_label(CommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.end_label(encoder);
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.end_label(record);
 }
 
 <* Allocate caller-managed GPU storage. Free with `free_allocation`. *>
@@ -1157,160 +1168,112 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
     gpu::internal::BackendVTable* vtable = operation.vtable;
     if (vtable.begin_commands == null) return BACKEND_ERROR~;
     CommandList commands;
-    gpu::internal::CommandBackendContext backend;
-    bool backend_created = false;
-    bool lease_retained = false;
-    defer catch {
-        if (lease_retained) {
-            (void)gpu::internal::release_command_pin_lease(&operation, &commands);
-        }
-        if (backend_created) {
-            gpu::internal::note_command_lifecycle_vtable_dispatch();
-            (void)vtable.discard_commands(
-                &commands.device,
-                commands.handle,
-                false,
-                null,
-            );
-        }
-    }
     gpu::internal::note_command_lifecycle_vtable_dispatch();
-    vtable.begin_commands(allocator, &commands, &backend)!;
-    backend_created = true;
-    if (!gpu::internal::retain_command_pin_lease(&operation, &commands)) {
-        return INVALID_HANDLE~;
-    }
-    lease_retained = true;
-    gpu::internal::publish_command_encoder(&operation, &commands, &backend)!;
+    vtable.begin_commands(allocator, &commands)!;
     gpu::internal::retain_device_children(&operation);
     gpu::internal::transfer_device_operation_pin(&operation);
-    backend_created = false;
-    lease_retained = false;
     return commands;
 }
 
 <* Finish and consume a recording token. Failure leaves it recording. *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    gpu::internal::DeviceOperation operation = gpu::internal::command_operation(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::command_operation(record)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::note_command_lifecycle_vtable_dispatch();
-    operation.vtable.end_commands(encoder)!;
-    gpu::internal::transfer_command_encoder_to_executable(encoder);
-    ExecutableCommandList executable = {
-        .device = commands.device,
-        .handle = commands.handle,
-        .encoder = commands.encoder,
-    };
+    operation.vtable.end_commands(record)!;
+    ExecutableCommandList executable;
+    gpu::internal::publish_executable_command_list(record, &executable);
     *commands = {};
     return executable;
 }
 
 <* Consume an unfinished recording, including after device loss. *>
 fn void? discard_commands(CommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(
         commands,
         count_command: false,
+        allow_lost: true,
     )!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
-        commands,
+        record,
         allow_lost: true,
     )!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::BackendVTable* vtable = operation.vtable;
-    CommandList consumed = *commands;
     gpu::internal::note_command_lifecycle_vtable_dispatch();
-    vtable.discard_commands(
-        &consumed.device,
-        consumed.handle,
-        false,
-        encoder,
-    )!;
+    vtable.discard_commands(record, false)!;
     *commands = {};
-    bool released_lease = gpu::internal::release_command_pin_lease(&operation, &consumed);
-    if (released_lease || !operation.owns_pin) {
-        gpu::internal::release_device_children(&operation);
-        (void)gpu::internal::release_retained_device_pins(&operation);
-    }
+    gpu::internal::release_device_children(&operation);
+    (void)gpu::internal::release_retained_device_pins(&operation);
 }
 
 <* Consume an executable token without submitting it. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder =
-        gpu::internal::executable_encoder(commands)!;
-    gpu::internal::DeviceOperation operation = gpu::internal::executable_command_operation(
-        commands,
+    gpu::internal::CommandRecord* record =
+        gpu::internal::executable_command(commands, allow_lost: true)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
+        record,
         allow_lost: true,
     )!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::BackendVTable* vtable = operation.vtable;
-    ExecutableCommandList consumed = *commands;
     gpu::internal::note_command_lifecycle_vtable_dispatch();
-    vtable.discard_commands(
-        &consumed.device,
-        consumed.handle,
-        true,
-        encoder,
-    )!;
+    vtable.discard_commands(record, true)!;
     *commands = {};
-    bool released_lease = gpu::internal::release_executable_command_pin_lease(
-        &operation,
-        &consumed,
-    );
-    if (released_lease || !operation.owns_pin) {
-        gpu::internal::release_device_children(&operation);
-        (void)gpu::internal::release_retained_device_pins(&operation);
-    }
+    gpu::internal::release_device_children(&operation);
+    (void)gpu::internal::release_retained_device_pins(&operation);
 }
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return encoder.ops.copy_buffer(encoder, desc);
+    return record.ops.copy_buffer(record, desc);
 }
 
 <* Record a 32-bit-pattern fill over dst; its offset and size must be 4-byte
    multiples. *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.fill_buffer(encoder, dst, value);
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.fill_buffer(record, dst, value);
 }
 
 <* The texture's effective layout must be TRANSFER_DST; the caller records
    the surrounding barriers. *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return encoder.ops.copy_buffer_to_texture(encoder, desc);
+    return record.ops.copy_buffer_to_texture(record, desc);
 }
 
 <* The texture's effective layout must be TRANSFER_SRC. *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return encoder.ops.copy_texture_to_buffer(encoder, desc);
+    return record.ops.copy_texture_to_buffer(record, desc);
 }
 
 <* Record a global semantic execution and memory barrier. *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
-    return encoder.ops.barrier(encoder, barrier);
+    return record.ops.barrier(record, barrier);
 }
 
 <* Record an explicit semantic texture transition. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
-    return encoder.ops.texture_barrier(encoder, barrier);
+    return record.ops.texture_barrier(record, barrier);
 }
 
 <* Bind the active compute or graphics pipeline for later execution commands.
    A failed bind leaves the previous active pipeline unchanged. *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.bind_pipeline(encoder, pipeline);
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.bind_pipeline(record, pipeline);
 }
 
 <* Dispatch the active compute pipeline with a single nonzero root GPU address
@@ -1318,49 +1281,49 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    recording queue's role. Counts may be zero and may not exceed
    DeviceCaps.max_compute_work_group_count on any axis. *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.dispatch(encoder, root, groups);
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.dispatch(record, root, groups);
 }
 
 <* Set dynamic depth state on a graphics command list before or during a pass.
    A failed update leaves the previous state unchanged. *>
 fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (depth == null) return INVALID_ARGUMENT~;
-    return encoder.ops.set_depth_state(encoder, depth);
+    return record.ops.set_depth_state(record, depth);
 }
 
 <* Set raster state on a graphics command list before or during a pass.
    A failed update leaves the previous state unchanged. *>
 fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (raster == null) return INVALID_ARGUMENT~;
-    return encoder.ops.set_raster_state(encoder, raster);
+    return record.ops.set_raster_state(record, raster);
 }
 
 <* Set one dynamic viewport on a graphics command list before or during a pass.
    Device-unrepresentable or non-finite values and zero height fault. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
-    return encoder.ops.set_viewport(encoder, viewport);
+    return record.ops.set_viewport(record, viewport);
 }
 
 <* Set one dynamic scissor on a graphics command list before or during a pass.
    Negative or signed-overflowing fields fault; overscan is valid. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
-    return encoder.ops.set_scissor(encoder, scissor);
+    return record.ops.set_scissor(record, scissor);
 }
 
 <* Draw inside a render pass, pushing the vertex and fragment root addresses.
    Every allocation reachable from either root must admit the recording queue's
    role. *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.draw(
-        encoder:        encoder,
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw(
+        record:        record,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
         vertex_count:   vertex_count,
@@ -1372,9 +1335,9 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    Every allocation reachable from either root must admit the recording queue's
    role. *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.draw_indexed(
-        encoder:        encoder,
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw_indexed(
+        record:        record,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
         index_span:     index_span,
@@ -1391,9 +1354,9 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    from either root must admit the recording queue's role. draw_count may not
    exceed DeviceCaps.max_draw_indirect_count. *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.draw_indirect(
-        encoder:       encoder,
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw_indirect(
+        record:       record,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
         args:          args,
@@ -1407,9 +1370,9 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    DeviceCaps.max_draw_indirect_count. Every allocation reachable from either
    root must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.draw_indexed_indirect(
-        encoder:       encoder,
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw_indexed_indirect(
+        record:       record,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
         args:          args,
@@ -1425,9 +1388,9 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    DeviceCaps.draw_indirect_count. Every allocation reachable from either root
    must admit the recording queue's role. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.draw_indexed_indirect_count(
-        encoder:        encoder,
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw_indexed_indirect_count(
+        record:        record,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
         args:           args,
@@ -1443,17 +1406,17 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    DeviceCaps.max_compute_work_group_count component. Every allocation
    reachable from the root must admit the recording queue's role. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.dispatch_indirect(encoder, root, args);
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.dispatch_indirect(record, root, args);
 }
 
 <* Execute up to max_draw_count GPU-written draw records. The GPU-written uint
    at count_span selects the actual count. Ordering against producer writes is
    the caller's barrier with hazards.draw_arguments set. *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.draw_generated(
-        encoder:        encoder,
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw_generated(
+        record:        record,
         records:        records,
         count_span:     count_span,
         max_draw_count: max_draw_count,
@@ -1462,9 +1425,9 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
 
 <* Indexed generated-work variant. Index bounds remain GPU execution-time data. *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.draw_indexed_generated(
-        encoder:        encoder,
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw_indexed_generated(
+        record:        record,
         records:        records,
         count_span:     count_span,
         max_draw_count: max_draw_count,
@@ -1475,9 +1438,9 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
 
 <* Execute up to max_dispatch_count GPU-written dispatch records. *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.dispatch_generated(
-        encoder:            encoder,
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.dispatch_generated(
+        record:            record,
         records:            records,
         count_span:         count_span,
         max_dispatch_count: max_dispatch_count,
@@ -1546,9 +1509,9 @@ fn GraphicsState? full_render_graphics_state(uint width, uint height) {
 
 <* Begin a render pass without changing command-buffer graphics state. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
-    return encoder.ops.begin_render_pass(encoder, desc);
+    return record.ops.begin_render_pass(record, desc);
 }
 
 <* Begin a render pass and set complete graphics state atomically. *>
@@ -1557,12 +1520,12 @@ fn void? cmd_begin_render_pass_with_state(
     RenderPassDesc* desc,
     GraphicsState* state,
 ) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)
         || !gpu::internal::graphics_state_host_safe(state)) {
         return INVALID_ARGUMENT~;
     }
-    return encoder.ops.begin_render_pass_with_state(encoder, desc, state);
+    return record.ops.begin_render_pass_with_state(record, desc, state);
 }
 
 <* Replace complete state on a graphics command list before or during a pass. *>
@@ -1570,15 +1533,15 @@ fn void? cmd_set_graphics_state(
     CommandList* commands,
     GraphicsState* state,
 ) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
-    return encoder.ops.set_graphics_state(encoder, state);
+    return record.ops.set_graphics_state(record, state);
 }
 
 <* End the active render pass without adding synchronization. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
-    gpu::internal::CommandEncoderState* encoder = gpu::internal::recording_encoder(commands)!;
-    return encoder.ops.end_render_pass(encoder);
+    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.end_render_pass(record);
 }
 
 fn bool CompletionPoint.is_valid(self) => self.device.is_valid()
@@ -1732,13 +1695,9 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
         return INVALID_ARGUMENT~;
     }
     foreach (&commands : desc.command_lists) {
-        if (commands.device != device) return INVALID_HANDLE~;
-        gpu::internal::executable_encoder(commands)!;
-        gpu::internal::validate_resource_owner(
-            &operation,
-            commands.handle.owner,
-            gpu::internal::ResourceOwnerKind.COMMAND,
-        )!;
+        gpu::internal::CommandRecord* record =
+            gpu::internal::executable_command(commands)!;
+        if (record.device != device) return INVALID_HANDLE~;
     }
     foreach (wait : desc.completion_waits) {
         gpu::internal::validate_completion_point(&operation, &device, wait.point)!;
@@ -1764,14 +1723,8 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     gpu::internal::note_command_lifecycle_vtable_dispatch();
     CompletionPoint point = operation.vtable.submit(queue, desc)!;
     foreach (&commands : desc.command_lists) {
-        gpu::internal::release_executable_command_pin_lease(&operation, commands);
         *commands = {};
     }
-    gpu::internal::release_device_children(&operation, (ulong)desc.command_lists.len);
-    (void)gpu::internal::release_retained_device_pins(
-        &operation,
-        (uint)desc.command_lists.len,
-    );
     return point;
 }
 

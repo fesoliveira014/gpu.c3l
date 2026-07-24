@@ -411,7 +411,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     vk::track_command_reference(
         state:      state,
         record:     record,
@@ -563,10 +563,10 @@ fn void submitted_command_reservations_prevent_capacity_overcommit() @test {
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
 
-    vk::CommandRecord first_record;
-    vk::CommandRecord second_record;
-    vk::CommandRecord*[1] first_records = { &first_record };
-    vk::CommandRecord*[1] second_records = { &second_record };
+    gpu::internal::CommandRecord first_record;
+    gpu::internal::CommandRecord second_record;
+    gpu::internal::CommandRecord*[1] first_records = { &first_record };
+    gpu::internal::CommandRecord*[1] second_records = { &second_record };
 
     uint first = vk::prepare_submitted_commands(
         &state,
@@ -626,10 +626,16 @@ fn void incomplete_reference_drain_is_deterministic() @test {
         state.command_allocators.get(allocator)!!;
     allocator_slot.mutex.init()!!;
     defer (void)allocator_slot.mutex.destroy();
+    vk::CommandCell[1] command_cells;
+    init_submitted_command_fixture(&state, command_cells[..]);
+    defer (void)state.command_mutex.destroy();
     state.submitted_commands[0] = {
-        .completion       = gpu::internal::make_completion_point(queue, 7)!!,
-        .allocator        = allocator,
-        .allocator_buffer = 0,
+        .completion = gpu::internal::make_completion_point(queue, 7)!!,
+        .record = submitted_command_fixture_record(
+            &state,
+            allocator,
+            0,
+        ),
     };
     state.submitted_command_count = 1;
 
@@ -694,10 +700,16 @@ fn void successful_observation_drains_distinct_upstream_identity() @test {
     )!!;
     slot.mutex.init()!!;
     defer (void)slot.mutex.destroy();
+    vk::CommandCell[1] command_cells;
+    init_submitted_command_fixture(&state, command_cells[..]);
+    defer (void)state.command_mutex.destroy();
     state.submitted_commands[0] = {
         .completion = gpu::internal::make_completion_point(upstream_queue, 3)!!,
-        .allocator = allocator,
-        .allocator_buffer = 0,
+        .record = submitted_command_fixture_record(
+            &state,
+            allocator,
+            0,
+        ),
     };
     state.submitted_command_count = 1;
     distinct_upstream_counter_value = 3;
@@ -734,7 +746,8 @@ fn void completed_submission_release_boundary_is_exact() @test {
     };
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
-    state.command_mutex.init()!!;
+    vk::CommandCell[3] command_cells;
+    init_submitted_command_fixture(&state, command_cells[..]);
     defer (void)state.command_mutex.destroy();
     vk::QueueCompletionState[1] completions = {{ .bound = true }};
     state.queue_completions = completions[..];
@@ -822,19 +835,28 @@ fn void completed_submission_release_boundary_is_exact() @test {
     second_allocator_slot.mutex.init()!!;
     defer (void)second_allocator_slot.mutex.destroy();
     state.submitted_commands[0] = {
-        .completion       = gpu::internal::make_completion_point(queue, 7)!!,
-        .allocator        = first_allocator,
-        .allocator_buffer = 0,
+        .completion = gpu::internal::make_completion_point(queue, 7)!!,
+        .record = submitted_command_fixture_record(
+            &state,
+            first_allocator,
+            0,
+        ),
     };
     state.submitted_commands[1] = {
-        .completion       = gpu::internal::make_completion_point(queue, 8)!!,
-        .allocator        = second_allocator,
-        .allocator_buffer = 0,
+        .completion = gpu::internal::make_completion_point(queue, 8)!!,
+        .record = submitted_command_fixture_record(
+            &state,
+            second_allocator,
+            0,
+        ),
     };
     state.submitted_commands[2] = {
-        .completion       = gpu::internal::make_completion_point(queue, 8)!!,
-        .allocator        = second_allocator,
-        .allocator_buffer = 1,
+        .completion = gpu::internal::make_completion_point(queue, 8)!!,
+        .record = submitted_command_fixture_record(
+            &state,
+            second_allocator,
+            1,
+        ),
     };
     state.submitted_command_count = 3;
 
@@ -933,6 +955,9 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
     };
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
+    vk::CommandCell[2] command_cells;
+    init_submitted_command_fixture(&state, command_cells[..]);
+    defer (void)state.command_mutex.destroy();
     state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 2);
     gpu::Queue queue = {
         .device = { .generation = 1 },
@@ -1003,12 +1028,18 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
     second_slot.mutex.init()!!;
     defer (void)second_slot.mutex.destroy();
     state.submitted_commands[0] = {
-        .allocator        = first_allocator,
-        .allocator_buffer = 0,
+        .record = submitted_command_fixture_record(
+            &state,
+            first_allocator,
+            0,
+        ),
     };
     state.submitted_commands[1] = {
-        .allocator        = second_allocator,
-        .allocator_buffer = 0,
+        .record = submitted_command_fixture_record(
+            &state,
+            second_allocator,
+            0,
+        ),
     };
     state.submitted_command_count = 2;
 
@@ -1045,6 +1076,9 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
     };
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
+    vk::CommandCell[vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD] command_cells;
+    init_submitted_command_fixture(&state, command_cells[..]);
+    defer (void)state.command_mutex.destroy();
     vk::QueueCompletionState[1] completions = {{
         .timeline = (vk::Semaphore)(uptr)1,
         .bound    = true,
@@ -1083,9 +1117,15 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
     for (uint i = 0; i < vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD; i++) {
         scratch[i].in_use = true;
         state.submitted_commands[i] = {
-            .completion       = gpu::internal::make_completion_point(queue, (ulong)i + 1)!!,
-            .allocator        = allocator,
-            .allocator_buffer = i,
+            .completion = gpu::internal::make_completion_point(
+                queue,
+                (ulong)i + 1,
+            )!!,
+            .record = submitted_command_fixture_record(
+                &state,
+                allocator,
+                i,
+            ),
         };
     }
     state.submitted_command_count = vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD;

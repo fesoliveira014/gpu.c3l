@@ -4,18 +4,11 @@ import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::core::mem;
+import std::core::env;
 import std::hash::fnv64a;
 
 const uint MAX_COMMAND_LISTS = gpu::internal::MAX_DEVICE_COMMANDS;
 const uint COMMAND_FREE_NONE = 0;
-
-enum CommandState : int {
-    RECORDING,
-    RECORDING_RENDER_PASS,
-    EXECUTABLE,
-    SUBMITTING,
-    SUBMITTED,
-}
 
 struct RenderCompatibility {
     uint                                    color_count;
@@ -51,12 +44,12 @@ struct StrictHeapCommandBinding {
     bool compute_set_bound;
 }
 
-struct CommandRecord {
+struct VkCommandRecord {
+    gpu::internal::CommandRecord* root;
     vk::CommandBuffer            command_buffer;
     gpu::CommandAllocatorHandle  allocator;
     uint                         allocator_buffer;
     gpu::Queue                   queue;
-    CommandState                 state;
     ulong                        submit_visit_epoch;
     RenderCompatibility          active_render;
     bool                         graphics_state_initialized;
@@ -68,10 +61,11 @@ struct CommandRecord {
 }
 
 struct CommandCell {
-    CommandRecord value;
-    uint          generation;
-    uint          next_free;
-    bool          used;
+    gpu::internal::CommandRecord record;
+    VkCommandRecord              value;
+    uint                         generation;
+    uint                         next_free;
+    bool                         used;
 }
 
 struct CommandTable {
@@ -87,7 +81,13 @@ struct CommandReferenceProbe {
     bool found;
 }
 
-fn gpu::CommandListHandle? CommandTable.alloc(&self, CommandRecord value) {
+fn gpu::internal::CommandRecord*? CommandTable.claim(
+    &self,
+    gpu::Device device,
+    gpu::internal::CommandOps* ops,
+    void* backend_state,
+    VkCommandRecord value,
+) {
     uint idx;
     bool found = false;
     while (self.free_head != COMMAND_FREE_NONE) {
@@ -107,25 +107,47 @@ fn gpu::CommandListHandle? CommandTable.alloc(&self, CommandRecord value) {
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
     self.slots[idx].used = true;
-    return (gpu::CommandListHandle){
+    gpu::CommandListHandle identity = {
         .owner = self.owner,
         .index = idx,
         .generation = self.slots[idx].generation,
     };
+    self.slots[idx].record = {
+        .ops             = ops,
+        .backend_state   = backend_state,
+        .backend_command = &self.slots[idx].value,
+        .device          = device,
+        .identity        = identity,
+        .state           = gpu::internal::CommandState.INACTIVE,
+    };
+    self.slots[idx].value.root = &self.slots[idx].record;
+    return &self.slots[idx].record;
 }
 
-fn CommandRecord*? CommandTable.get(&self, gpu::CommandListHandle handle) {
+fn gpu::internal::CommandRecord*? CommandTable.get_record(
+    &self,
+    gpu::CommandListHandle handle,
+) {
     gpu::internal::note_command_table_lookup();
     if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = handle.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
     if (self.slots[idx].generation != handle.generation) return gpu::INVALID_HANDLE~;
-    return &self.slots[idx].value;
+    return &self.slots[idx].record;
+}
+
+fn VkCommandRecord*? CommandTable.get(
+    &self,
+    gpu::CommandListHandle handle,
+) {
+    gpu::internal::CommandRecord* record = self.get_record(handle)!;
+    return (VkCommandRecord*)record.backend_command;
 }
 
 fn void? CommandTable.free(&self, gpu::CommandListHandle handle) {
     self.get(handle)!;
     uint idx = handle.index;
+    self.slots[idx].record = {};
     self.slots[idx].value = {};
     self.slots[idx].used = false;
     if (!should_recycle_handle_generation(self.slots[idx].generation)) {
@@ -138,23 +160,47 @@ fn void? CommandTable.free(&self, gpu::CommandListHandle handle) {
     self.free_head = idx + 1;
 }
 
-fn CommandRecord*? resolve_command(gpu::CommandList* token) {
-    if (token == null || !token.handle.is_valid()) return gpu::INVALID_HANDLE~;
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(&token.device);
-    if (state == null) return gpu::INVALID_HANDLE~;
-    return state.commands.get(token.handle);
+fn void? CommandTable.cancel_claim(
+    &self,
+    gpu::CommandListHandle handle,
+) {
+    return self.free(handle);
 }
 
-fn VkDeviceState* encoder_device_state(gpu::internal::CommandEncoderState* encoder) {
-    return (VkDeviceState*)encoder.backend_state;
+fn gpu::internal::CommandRecord*? vk_resolve_command(
+    void* backend_state,
+    gpu::CommandListHandle handle,
+) @private {
+    if (backend_state == null) return gpu::INVALID_HANDLE~;
+    VkDeviceState* state = (VkDeviceState*)backend_state;
+    return state.commands.get_record(handle);
 }
 
-fn CommandRecord* encoder_command(gpu::internal::CommandEncoderState* encoder) {
-    return (CommandRecord*)encoder.backend_command;
+fn VkCommandRecord*? resolve_command(
+    gpu::CommandList* token,
+) @if(env::TESTING) {
+    gpu::internal::CommandRecord* record =
+        gpu::internal::recording_command(
+            token,
+            count_command: false,
+        )!;
+    return backend_command(record);
+}
+
+fn VkDeviceState* command_device_state(
+    gpu::internal::CommandRecord* record,
+) {
+    return (VkDeviceState*)record.backend_state;
+}
+
+fn VkCommandRecord* backend_command(
+    gpu::internal::CommandRecord* record,
+) {
+    return (VkCommandRecord*)record.backend_command;
 }
 
 fn void? ensure_command_reference_capacity(
-    CommandRecord* record,
+    VkCommandRecord* record,
     uint additional,
 ) {
     if (additional
@@ -256,7 +302,7 @@ fn void reset_command_reference_index(
 
 fn void? preflight_command_references(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     CommandResourceReference[] candidates,
 ) {
     uint additional = 0;
@@ -280,7 +326,7 @@ fn void? preflight_command_references(
 
 fn void? track_command_reference(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     ulong owner,
     uint index,
     uint generation,
@@ -321,7 +367,7 @@ fn void? track_command_reference(
 
 fn TextureSlot*? resolve_tracked_texture_command_reference(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     gpu::TextureHandle handle,
 ) {
     note_command_tracking_call(state);
@@ -377,14 +423,14 @@ fn void clear_command_scratch_references(
 
 fn void clear_command_references(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
 ) {
     clear_command_scratch_references(state, record.scratch);
 }
 
 fn void rollback_command_references(
     VkDeviceState* state,
-    CommandRecord* record,
+    VkCommandRecord* record,
     uint checkpoint,
 ) {
     if (record.scratch.reference_count == checkpoint) return;

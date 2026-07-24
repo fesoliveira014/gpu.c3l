@@ -119,8 +119,8 @@ struct QueueSubmitScratch {
     Mutex mutex;
     ResolvedCompletionWait[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS]
         completion_waits;
-    CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS] records;
-    gpu::internal::CommandEncoderState*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS] encoders;
+    gpu::internal::CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
+        records;
     vk::CommandBufferSubmitInfo[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
         command_buffer_infos;
     vk::SemaphoreSubmitInfo[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS + 1]
@@ -128,11 +128,10 @@ struct QueueSubmitScratch {
 }
 
 struct SubmitInputs {
-    CommandRecord*[]            records;
-    gpu::internal::CommandEncoderState*[] encoders;
-    ResolvedCompletionWait[]    completion_waits;
-    SwapchainSlot*              swapchain;
-    vk::PipelineStageFlags2     readiness_stages;
+    gpu::internal::CommandRecord*[] records;
+    ResolvedCompletionWait[]        completion_waits;
+    SwapchainSlot*                  swapchain;
+    vk::PipelineStageFlags2         readiness_stages;
 }
 
 fn vk::Result real_queue_submit2(
@@ -2061,8 +2060,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
     gpu::SubmitDesc* desc,
     QueueCompletionState* target,
     ResolvedCompletionWait[] completion_wait_storage,
-    CommandRecord*[] record_storage,
-    gpu::internal::CommandEncoderState*[] encoder_storage,
+    gpu::internal::CommandRecord*[] record_storage,
 ) {
     SubmitInputs inputs;
     gpu::Device device = queue.device;
@@ -2125,24 +2123,22 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
 
     if (desc.command_lists.len > 0) {
         inputs.records = record_storage[:desc.command_lists.len];
-        inputs.encoders = encoder_storage[:desc.command_lists.len];
         {
             state.command_mutex.lock()!!;
             defer state.command_mutex.unlock();
             foreach (i, &token : desc.command_lists) {
-                if (token.device != device) return gpu::INVALID_HANDLE~;
-                gpu::internal::CommandEncoderState* encoder =
-                    gpu::internal::executable_encoder(token)!;
-                if (encoder.backend_state != state) {
+                gpu::internal::CommandRecord* record =
+                    gpu::internal::executable_command(token)!;
+                if (record.device != device
+                    || record.backend_state != state) {
                     return gpu::INVALID_HANDLE~;
                 }
-                CommandRecord* record = encoder_command(encoder);
-                if (record.state != CommandState.EXECUTABLE) {
+                if (record.state != gpu::internal::CommandState.EXECUTABLE) {
                     return gpu::COMMAND_RECORDING_ERROR~;
                 }
-                if (record.queue != queue) return gpu::INVALID_ARGUMENT~;
+                VkCommandRecord* backend = backend_command(record);
+                if (backend.queue != queue) return gpu::INVALID_ARGUMENT~;
                 inputs.records[i] = record;
-                inputs.encoders[i] = encoder;
             }
         }
         {
@@ -2150,7 +2146,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             defer state.resource_mutex.unlock();
             foreach (record : inputs.records) {
                 CommandAllocatorSlot* slot = state.command_allocators.get(
-                    record.allocator,
+                    backend_command(record).allocator,
                 )!;
                 if (slot.queue != queue) return gpu::INVALID_ARGUMENT~;
             }
@@ -2160,23 +2156,22 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             defer state.command_mutex.unlock();
             ulong epoch = next_submit_visit_epoch_locked(state);
             foreach (i, &token : desc.command_lists) {
-                gpu::internal::CommandEncoderState* encoder =
-                    gpu::internal::executable_encoder(token)!;
-                CommandRecord* record = encoder_command(encoder);
-                if (encoder != inputs.encoders[i]
-                    || record != inputs.records[i]
-                    || record.state != CommandState.EXECUTABLE
-                    || record.queue != queue) {
+                gpu::internal::CommandRecord* record =
+                    gpu::internal::executable_command(token)!;
+                VkCommandRecord* backend = backend_command(record);
+                if (record != inputs.records[i]
+                    || record.state != gpu::internal::CommandState.EXECUTABLE
+                    || backend.queue != queue) {
                     return gpu::COMMAND_RECORDING_ERROR~;
                 }
                 note_submit_duplicate_token_visit(state);
-                if (record.submit_visit_epoch == epoch) {
+                if (backend.submit_visit_epoch == epoch) {
                     return gpu::COMMAND_RECORDING_ERROR~;
                 }
-                record.submit_visit_epoch = epoch;
+                backend.submit_visit_epoch = epoch;
             }
             foreach (record : inputs.records) {
-                record.state = CommandState.SUBMITTING;
+                record.state = gpu::internal::CommandState.SUBMITTING;
             }
         }
     }
@@ -2228,16 +2223,17 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             target: completion,
             completion_wait_storage: scratch.completion_waits[..],
             record_storage:          scratch.records[..],
-            encoder_storage:         scratch.encoders[..],
         )!;
         vk::SubmitInfo2 submit = vk::submit_info2();
-        CommandRecord*[] records = inputs.records;
+        gpu::internal::CommandRecord*[] records = inputs.records;
         bool claimed = records.len > 0;
 
         if (records.len > 0) {
             foreach (i, record : records) {
                 scratch.command_buffer_infos[i] = vk::command_buffer_submit_info()
-                    .set_command_buffer(record.command_buffer);
+                    .set_command_buffer(
+                        backend_command(record).command_buffer,
+                    );
             }
             submit = submit.set_command_buffer_infos(
                 scratch.command_buffer_infos[:records.len],
@@ -2249,8 +2245,9 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 state.command_mutex.lock()!!;
                 defer state.command_mutex.unlock();
                 foreach (record : records) {
-                    if (record.state == CommandState.SUBMITTING) {
-                        record.state = CommandState.EXECUTABLE;
+                    if (record.state
+                        == gpu::internal::CommandState.SUBMITTING) {
+                        record.state = gpu::internal::CommandState.EXECUTABLE;
                     }
                 }
             }
@@ -2366,7 +2363,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
                 commit_swapchain_submit(swapchain, point);
             }
             foreach (record : records) {
-                record.state = CommandState.SUBMITTED;
+                record.state = gpu::internal::CommandState.SUBMITTED;
             }
             publish_queue_completion_locked(state, point)!!;
             $if env::TESTING:
@@ -2379,15 +2376,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
             submitted = point;
         }
 
-        if (claimed) {
-            state.command_mutex.lock()!!;
-            defer state.command_mutex.unlock();
-            foreach (i, token : desc.command_lists) {
-                gpu::internal::invalidate_command_encoder(inputs.encoders[i]);
-                release_command(state, token.handle);
-            }
-            claimed = false;
-        }
+        claimed = false;
     return submitted;
 }
 

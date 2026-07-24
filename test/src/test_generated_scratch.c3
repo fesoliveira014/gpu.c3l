@@ -109,7 +109,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         == gpu::RESOURCE_IN_USE,
         "reservation replacement requires a quiescent allocator");
 
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         record.allocator,
     )!!;
@@ -165,7 +165,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
 
     gpu::discard_commands(&commands)!!;
     gpu::CommandList retry = gpu::begin_commands(&allocator)!!;
-    vk::CommandRecord* retry_record = vk::resolve_command(&retry)!!;
+    vk::VkCommandRecord* retry_record = vk::resolve_command(&retry)!!;
     vk::GeneratedPreprocessBuffer* reacquired =
         vk::acquire_generated_preprocess_buffer(
             state:        state,
@@ -336,7 +336,7 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     gpu::CommandList unreserved_commands = gpu::begin_commands(
         &unreserved_allocator,
     )!!;
-    vk::CommandRecord* unreserved_record = vk::resolve_command(
+    vk::VkCommandRecord* unreserved_record = vk::resolve_command(
         &unreserved_commands,
     )!!;
     uint unreserved_indices =
@@ -487,7 +487,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         &reserved_allocator,
     )!!;
     bind_test_compute_pipeline(&reserved_commands, pipeline);
-    vk::CommandRecord* reserved_record = vk::resolve_command(
+    vk::VkCommandRecord* reserved_record = vk::resolve_command(
         &reserved_commands,
     )!!;
     gpu::cmd_dispatch_generated(
@@ -522,7 +522,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         &unreserved_allocator,
     )!!;
     bind_test_compute_pipeline(&unreserved_commands, pipeline);
-    vk::CommandRecord* unreserved_record = vk::resolve_command(
+    vk::VkCommandRecord* unreserved_record = vk::resolve_command(
         &unreserved_commands,
     )!!;
     assert(@catch(gpu::cmd_dispatch_generated(

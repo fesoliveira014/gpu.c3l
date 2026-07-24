@@ -696,7 +696,6 @@ fn void tri_queue_completions_wait_cleanly() @test {
             gpu::CommandList cmd = gpu::begin_commands(&allocators[i])!!;
             defer discard_test_commands(&cmd)!!;
             gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-            defer discard_test_executable(&cmd_executable)!!;
             gpu::ExecutableCommandList[1] one = { cmd_executable };
             gpu::SubmitDesc submit = { .command_lists = one[..] };
             completions[i] = submit_test_queue(&device, kinds[i], &submit)!!;

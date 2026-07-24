@@ -12,7 +12,7 @@ env:
   DESCRIPTOR_BUFFER_E2E_RETEST_MESA_VERSION: "25.1.5"
   REQUIRED_GPU_CAPABILITIES: ""
   HEADLESS_TEST_TARGETS: >-
-    vk_bootstrap vk_allocation vk_command vk_texture vk_descriptor_heap vk_root_pointer
+    vk_bootstrap vk_allocation vk_command vk_command_tokens_fast vk_texture vk_descriptor_heap vk_root_pointer
     vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
     vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading vk_performance
     vk_allocator_observation

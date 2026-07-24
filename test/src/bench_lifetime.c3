@@ -42,7 +42,7 @@ fn gpu::Device? create_bench_device(
 }
 
 fn void? discard_bench_executable(gpu::ExecutableCommandList* commands) {
-    if (commands == null || !commands.handle.is_valid()) return;
+    if (commands == null || !commands.is_valid()) return;
     if (catch err = gpu::discard_executable_commands(commands)) {
         if (err != gpu::INVALID_HANDLE) return err~;
     }

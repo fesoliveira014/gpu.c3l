@@ -834,6 +834,7 @@ const gpu::internal::BackendVTable VK_VTABLE @private = {
     .reserve_generated_scratch   = &vk_reserve_generated_scratch,
     .release_generated_scratch   = &vk_release_generated_scratch,
     .begin_commands              = &vk_begin_commands,
+    .resolve_command             = &vk_resolve_command,
     .end_commands                = &vk_end_commands,
     .discard_commands            = &vk_discard_commands,
     .submit                      = &vk_submit,

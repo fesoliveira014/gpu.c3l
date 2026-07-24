@@ -148,11 +148,14 @@ full_validation_runtime_desc()     -> RuntimeDesc
 ```
 
 Runtime policy has independent axes. `ContractValidation.TRUSTED` is the zero
-value and uses the direct command path. Every level rejects stale/foreign
-identities at public resolve/destroy boundaries as mandatory safety;
-`OBJECT_BOUNDARIES` adds structured diagnostics for those failures at covered
-public resource and command-lifecycle boundaries while sharing that direct
-path. `FULL` selects detailed command semantic checks.
+value. Every level rejects stale/foreign identities at public resource
+resolve/destroy boundaries as mandatory safety; `OBJECT_BOUNDARIES` adds
+structured diagnostics for those failures at covered public resource and
+command-lifecycle boundaries. `FULL` selects detailed command semantic checks
+and requires the default bounded command-token representation. Token
+representation is a separate compile-time axis: `DIRECT_COMMAND_TOKENS` selects
+the one-pointer FAST representation and rejects `FULL` before backend
+initialization.
 `track_resource_lifetimes` independently selects command reference retention,
 and `enable_vulkan_validation` independently requests the Khronos layer.
 Debug names request best-effort native naming, while a callback only selects
@@ -215,10 +218,11 @@ get_device_caps(Device*)       -> DeviceCaps?
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
 Most public device operations pin the slot before reading backend state.
-`begin_commands` transfers its pin to the command token and publishes one
-stable, backend-opaque encoder cell. Hot recording calls validate that cell and
-dispatch through its immutable command-operation table without resolving the
-device registry, borrowing another pin, or loading the lifecycle vtable.
+`begin_commands` transfers its pin to one stable allocator-owned command
+record. Hot recording calls reach that record through the build-selected
+command token and dispatch through its immutable command-operation table
+without resolving the device registry, borrowing another pin, or loading the
+lifecycle vtable.
 
 Destruction first rejects known live children, then closes the slot. Closing
 blocks new pins while active pins, a second child check, and queue completion
@@ -284,43 +288,69 @@ pool creation, and command-buffer allocation before publication. Destroying a
 live allocator never waits and returns `RESOURCE_IN_USE` until all its command
 units are discarded or completion-retired.
 
-A command list is a transient, owner-bearing token for a device-owned command
-record and one allocator buffer/scratch index. The public token contains a
-`Device` value, generation-checked handle, and one opaque encoder pointer; the
-Vulkan command buffer, pool, bind cache, allocator identity, queue, and lifecycle
-state remain backend-owned. The encoder pointer is part of the command-token
-ABI. Copies alias one encoder phase and record.
-Each device slot owns a fixed `MAX_DEVICE_COMMANDS` encoder array. Across all
-device slots this zero-initialized storage is capped at 16 MiB; operating-system
-pages commit as encoder cells are touched.
-Warm command entry validates the device and command indices, derives exactly
-one encoder cell, compares the opaque pointer to that cell, and compares one
-packed lease containing the device generation/index and command owner/generation.
-It does not repeat stored token-field, publication-pointer, or device-loss
-checks. Device loss is reported by lifecycle operations; explicit discard
+A command list is a transient token for one device-table command record paired
+with one originating allocator native buffer/scratch unit. The public payload
+is selected at compile time:
+
+- the default bounded representation carries a `Device` plus a compact
+  generation-checked command identity;
+- a build with `DIRECT_COMMAND_TOKENS` carries exactly one opaque pointer to the
+  stable record.
+
+The public `DIRECT_COMMAND_TOKENS` constant reports which representation was
+built. The two layouts are alternatives; no token carries both identities.
+Bounded resolution validates indices, owners, and generations before obtaining
+a backend pointer, so `ContractValidation.FULL` can diagnose fabricated, stale,
+foreign, wrong-phase, duplicate, and consumed values deterministically. Direct
+resolution trusts the token's provenance and reaches the record without an
+encoder-cell computation, packed-lease reconstruction, command-table lookup,
+device-registry pin, or validation-policy branch. A direct-token build therefore
+rejects `ContractValidation.FULL` before backend initialization.
+
+Every preallocated command cell owns one address-stable authoritative
+`CommandRecord`. It contains the selected immutable `CommandOps`, backend state
+and backend-command pointers, retained device/backend ownership, bounded
+identity when present, and the sole lifecycle state. Its linked backend record
+contains the originating allocator and buffer identity, fixed reference and
+generated-work scratch, and native command state. Copies of either public token
+representation alias the authoritative record; they do not copy or fork its
+state. Device loss is reported by lifecycle operations; explicit discard
 remains available so a lost device can release retained command state.
 
 State transitions:
 
 ```text
-RECORDING -> RECORDING_RENDER_PASS -> RECORDING -> EXECUTABLE -> SUBMITTING -> consumed
+INACTIVE -> RECORDING
+RECORDING <-> RECORDING_RENDER_PASS
+RECORDING -> EXECUTABLE -> SUBMITTING
+SUBMITTING -> EXECUTABLE          (failed submission)
+SUBMITTING -> SUBMITTED
+SUBMITTED -> INACTIVE             (ordered completion retirement)
+RECORDING/EXECUTABLE -> INACTIVE  (discard)
 ```
 
-`begin_commands(allocator)` pops one preallocated index and creates a record in
-`RECORDING`. If all configured indices are live it returns `DEVICE_BUSY`
-without allocation or state change. Render passes nest into
-`RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands` closes
-the record to `EXECUTABLE`. `submit` atomically preflights and claims the whole
-batch as `SUBMITTING`. Duplicate detection visits the submitted records once,
+`begin_commands(allocator)` claims one inactive device command cell, pops one
+preallocated allocator index, pairs them, initializes the record while
+inactive, and publishes `RECORDING` last. If either fixed capacity is exhausted,
+it returns `DEVICE_BUSY` without allocation or state change. Render passes nest
+into `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands`
+closes the same record to `EXECUTABLE`. `submit` resolves the complete batch
+before mutation, then atomically claims every record as `SUBMITTING`. Duplicate
+detection visits the submitted records once,
 using a device-local epoch stored on each record; ordinary work is proportional
 to the command-list count rather than the square of it. Epoch rollover scans the
 allocated command table once before reusing epoch one. Validation or native
 failure restores it without publishing queue progress. Success publishes one
-`CompletionPoint` and invalidates every submitted token and alias. A submission
-may mix allocators only when every token targets the exact submit queue.
-Completion observation and discard return each native buffer and scratch index
-to its originating allocator. The next begin resets and reuses that unit. Warm
-begin, recording, end, submit, discard, retirement, and reuse never allocate
+`CompletionPoint`, changes every record to `SUBMITTED`, and consumes the caller
+tokens. The records, native buffers, fixed scratch, allocator units, and retained
+device/backend ownership remain live and unavailable for reuse. Ordered
+completion retirement first moves each record to `INACTIVE`, then releases
+record-owned references and reservations, returns each buffer/scratch index to
+its originating allocator, releases retained ownership, and finally invalidates
+or generation-advances its bounded identity. A submission may mix allocators
+only when every token targets the exact submit queue. The next begin completely
+reinitializes a retired unit before publishing `RECORDING`. Warm begin,
+recording, end, submit, discard, retirement, and reuse never allocate
 host storage, native command buffers, pools, VMA storage, or C3 temporary-pool
 memory. Per-list reference or generated-index exhaustion returns
 `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` transactionally. Device teardown rejects
@@ -361,7 +391,7 @@ snapshots are tracked independently by bind point, so switching bind points
 does not lose either native selection. Ending a render pass clears only active
 render compatibility; a compatible logical graphics binding may remain selected
 for a later pass. Command-policy variants are outside
-this mechanism: policy selection happens when the device or encoder is created,
+this mechanism: policy selection happens when the device or record is created,
 never in a warm recording call.
 
 ### Independent allocations
@@ -589,12 +619,21 @@ owned by allocators, not workers or frame boundaries; see `docs/threading.md`.
 Vulkan device creation selects one immutable command table from contract depth
 and tracking: trusted/no-tracking, trusted/tracking, checked/no-tracking, or
 checked/tracking. `OBJECT_BOUNDARIES` uses the trusted command entries because
-its additional work belongs at public boundaries. The encoder snapshots the
-chosen pointer once; repeated `cmd_*` calls do not inspect contract, tracking,
-layer, callback, naming policy, or encoder capability fields. All four tables retain mandatory host
+its additional work belongs at public boundaries. The authoritative record
+stores the chosen pointer once; repeated `cmd_*` calls do not inspect contract,
+tracking, layer, callback, naming policy, or separate command-capability fields.
+All four tables retain mandatory host
 pointer/slice/range safety, overflow protection, internal state integrity,
 public ownership, Vulkan result handling, and rollback. Detailed command misuse
-outside that floor is a caller contract violation unless `FULL` is selected.
+outside that floor is a caller contract violation unless `FULL` is selected in
+the bounded-token build. Direct-token provenance, one-shot use, correct phase,
+and alias confinement remain caller preconditions.
+
+The representation change is based on the private-proof outcome rules
+introduced by #438, which allow removed work to be observed as zero. It does not
+remove the record-owned runtime `CommandOps` dispatch or change fallible
+`cmd_*` signatures; direct build-time command dispatch and the final public
+FAST/CHECKED surface remain the separate #440 boundary.
 
 Static command-policy checking verifies complete operation coverage for each
 literal runtime `CommandOps` table that exists. It does not require a fixed
