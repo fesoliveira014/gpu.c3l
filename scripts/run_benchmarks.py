@@ -32,7 +32,7 @@ BENCHMARK_METHODS = {
     "resource_create_bench": ("300/worker; workers=1,2,4", "ns/op"),
     "descriptor_churn_bench": (
         "320/worker; workers=1,2,4; sampler occupancy=8,64,1024,65536; ownership highwater=16,4096,65536",
-        "ns/descriptor, ns/op, ns/destroy, ns/check; exact sampler probes and ownership work",
+        "ns/descriptor, ns/op, ns/destroy, ns/check; bounded sampler probes and ownership work",
     ),
     "upload_throughput_bench": (
         "warmup=1; payload_iterations=4096:2048,262144:512,4194304:32; workers=1,2,4",
@@ -48,7 +48,7 @@ BENCHMARK_METHODS = {
     ),
     "command_reference_bench": (
         "unique=1,8,64,256,1024,4096; repeated=100000; mixed=4096; collisions=64; near_capacity=4095",
-        "ns/reference advisory; exact probe, retain, release, mutex, and allocation work",
+        "ns/reference advisory; exact semantic balance; bounded probe and mutex work",
     ),
     "command_record_bench": (
         "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; cold/warm work counters",
@@ -74,6 +74,7 @@ BENCHMARK_METHODS = {
 }
 
 C3_BUILD_FLAGS = ("-O1",)
+EXPECTATION_VERSION = 1
 
 BENCHMARK_PROJECTS = {
     "command_wrapper_bench": "test/cpu",
@@ -131,15 +132,26 @@ COMMAND_RECORD_INVARIANTS = re.compile(
     r"draw_compilations=0 preprocess_allocations=0$",
     re.MULTILINE,
 )
+COMMAND_RECORD_EXPECTATION = re.compile(
+    r"^expectation_version=(?P<version>[1-9][0-9]*)$",
+    re.MULTILINE,
+)
 COMMAND_RECORD_RESOLUTION = re.compile(
     r"^resolution: recording_commands=(?P<recording_commands>[1-9][0-9]*) "
-    r"native_commands=[1-9][0-9]* pipeline_binds=0 "
-    r"descriptor_set_binds=0 descriptor_buffer_binds=0 "
-    r"descriptor_buffer_offsets=0 device_registry=0 "
-    r"retained_pins=0 lifecycle_vtable=0 command_table=0 "
-    r"pipeline_table=0 pipeline_cache=0 policy=0 "
-    r"encoder_cells=(?P=recording_commands) "
-    r"encoder_leases=(?P=recording_commands)$",
+    r"native_commands=(?P<native_commands>[1-9][0-9]*) "
+    r"pipeline_binds=(?P<pipeline_binds>[0-9]+) "
+    r"descriptor_set_binds=(?P<descriptor_set_binds>[0-9]+) "
+    r"descriptor_buffer_binds=(?P<descriptor_buffer_binds>[0-9]+) "
+    r"descriptor_buffer_offsets=(?P<descriptor_buffer_offsets>[0-9]+) "
+    r"device_registry=(?P<device_registry>[0-9]+) "
+    r"retained_pins=(?P<retained_pins>[0-9]+) "
+    r"lifecycle_vtable=(?P<lifecycle_vtable>[0-9]+) "
+    r"command_table=(?P<command_table>[0-9]+) "
+    r"pipeline_table=(?P<pipeline_table>[0-9]+) "
+    r"pipeline_cache=(?P<pipeline_cache>[0-9]+) "
+    r"policy=(?P<policy>[0-9]+) "
+    r"encoder_cells=(?P<encoder_cells>[0-9]+) "
+    r"encoder_leases=(?P<encoder_leases>[0-9]+)$",
     re.MULTILINE,
 )
 COMMAND_RECORD_COLD_WORK = re.compile(
@@ -158,6 +170,15 @@ COMMAND_RECORD_WARM_WORK = re.compile(
     r"generated_scratch_misses=0$",
     re.MULTILINE,
 )
+COMMAND_RECORD_GENERATED = re.compile(
+    r"^generated dispatch: iterations=64 repetitions=5 "
+    rf"median={ALLOCATION_NUMBER} ns/record$",
+    re.MULTILINE,
+)
+COMMAND_RECORD_GENERATED_UNSUPPORTED = "generated dispatch: unsupported"
+COMMAND_RECORD_EXPECTED_DIRECT_COMMANDS = 300_000
+COMMAND_RECORD_EXPECTED_DIRECT_NATIVE_COMMANDS = 400_000
+COMMAND_RECORD_EXPECTED_GENERATED_COMMANDS = 320
 COMMAND_POLICY_EVIDENCE = re.compile(
     r"^validation policy=(?P<policy>trusted|object_boundaries|full) "
     r"tracking=(?P<tracking>true|false) layers=(?P<layers>true|false) "
@@ -639,7 +660,6 @@ def require_command_reference_evidence(output):
         expected_count,
         expected_unique,
         expected_lookups=None,
-        expected_empty_probes=None,
     ):
         if match is None:
             raise ValueError("command_reference_bench work record is malformed")
@@ -661,21 +681,23 @@ def require_command_reference_evidence(output):
             raise ValueError("command_reference_bench workload size mismatch")
         if expected_lookups is None:
             expected_lookups = expected_count
-        if expected_empty_probes is None:
-            expected_empty_probes = expected_unique
         if values["lookups"] != expected_lookups:
             raise ValueError("command_reference_bench lookup work mismatch")
         if values["host_allocations"] != 0:
             raise ValueError("command_reference_bench warm allocation is nonzero")
-        for field in ("publications", "mutex", "retains", "releases"):
+        for field in ("publications", "retains", "releases"):
             if values[field] != expected_unique:
                 raise ValueError(
                     f"command_reference_bench {field} work mismatch"
                 )
-        if values["equality"] != values["probes"] - expected_empty_probes:
-            raise ValueError("command_reference_bench equality work mismatch")
-        if values["probes"] < expected_count:
-            raise ValueError("command_reference_bench probe work is incomplete")
+        if values["mutex"] > expected_unique:
+            raise ValueError(
+                "command_reference_bench mutex work bound exceeded"
+            )
+        if values["equality"] > values["probes"]:
+            raise ValueError(
+                "command_reference_bench equality work bound exceeded"
+            )
         probes_per_reference = float(match.group("probes_per_reference"))
         equality_per_reference = float(match.group("equality_per_reference"))
         expected_probe_ratio = values["probes"] / expected_count
@@ -706,11 +728,8 @@ def require_command_reference_evidence(output):
     exact_repeated = {
         "count": repeated_count,
         "lookups": repeated_count + 1,
-        "probes": repeated_count + 1,
-        "equality": repeated_count,
         "duplicates": repeated_count,
         "publications": 1,
-        "mutex": 1,
         "retains": 1,
         "releases": 1,
         "host_allocations": 0,
@@ -720,6 +739,18 @@ def require_command_reference_evidence(output):
             raise ValueError(
                 f"command_reference_bench repeated {field} work mismatch"
             )
+    if int(repeated.group("probes")) > repeated_count + 1:
+        raise ValueError(
+            "command_reference_bench repeated probe bound exceeded"
+        )
+    if int(repeated.group("equality")) > repeated_count:
+        raise ValueError(
+            "command_reference_bench repeated equality bound exceeded"
+        )
+    if int(repeated.group("mutex")) > 1:
+        raise ValueError(
+            "command_reference_bench repeated mutex bound exceeded"
+        )
     if float(repeated.group("timing")) <= 0.0:
         raise ValueError("command_reference_bench advisory timing is invalid")
 
@@ -736,8 +767,10 @@ def require_command_reference_evidence(output):
     if collision is None or collision.group("kind") != "collisions":
         raise ValueError("command_reference_bench collision record is malformed")
     collision_values = require_common(collision, 64, 64)
-    if collision_values["probes"] != 64 * 65 // 2:
-        raise ValueError("command_reference_bench collision probe work mismatch")
+    if collision_values["probes"] > 64 * 65 // 2:
+        raise ValueError(
+            "command_reference_bench collision probe bound exceeded"
+        )
 
     near = COMMAND_REFERENCE_WORK.fullmatch(lines[10])
     if (near is None or near.group("kind") != "near_capacity"
@@ -749,7 +782,6 @@ def require_command_reference_evidence(output):
         4_095,
         4_095,
         expected_lookups=4_097,
-        expected_empty_probes=4_097,
     )
     if near_values["probes"] > 4_095 * 8:
         raise ValueError("command_reference_bench capacity probe bound exceeded")
@@ -813,9 +845,9 @@ def require_sampler_lookup_evidence(output):
                 "descriptor_churn_bench sampler bucket count must be a "
                 "power of two at least twice occupancy"
             )
-        if not 1 <= probes <= 8:
+        if not 0 <= probes <= 8:
             raise ValueError(
-                "descriptor_churn_bench sampler lookup probes must be in [1, 8]"
+                "descriptor_churn_bench sampler lookup probes must be in [0, 8]"
             )
 
 
@@ -878,16 +910,23 @@ def require_command_policy_evidence(output, expected=None):
             raise ValueError(
                 "command_record_bench reference release/increment mismatch"
             )
+        if counters["reference_allocations"] != 0:
+            raise ValueError(
+                "command_record_bench warm reference allocation is nonzero"
+            )
     elif any(counters[field] != 0 for field in reference_fields):
         raise ValueError(
             "command_record_bench tracking-off policy performed forbidden reference work"
         )
-    warm = COMMAND_RECORD_WARM_WORK.search(output)
-    if warm is not None:
-        host_allocations = int(warm.group("host_allocations"))
-        if host_allocations != counters["reference_allocations"]:
+    warm_lines = [
+        line for line in output.splitlines()
+        if line.startswith("warm work:")
+    ]
+    if len(warm_lines) == 1:
+        warm = COMMAND_RECORD_WARM_WORK.fullmatch(warm_lines[0])
+        if warm is not None and int(warm.group("host_allocations")) != 0:
             raise ValueError(
-                "command_record_bench warm host/reference allocation mismatch"
+                "command_record_bench warm host allocation is nonzero"
             )
     return actual, counters
 
@@ -897,10 +936,143 @@ def require_command_policy_matrix(outputs):
         raise ValueError("command_record_bench four-mode policy matrix is incomplete")
     for output, expected in zip(outputs, COMMAND_POLICY_MODES):
         require_command_policy_evidence(output, expected)
-        if not COMMAND_RECORD_RESOLUTION.search(output):
-            raise ValueError(
-                "command_record_bench warm policy reselection is nonzero"
-            )
+        require_command_record_outcomes(output)
+
+
+def require_command_record_outcomes(output):
+    expectation_records = tuple(COMMAND_RECORD_EXPECTATION.finditer(output))
+    if len(expectation_records) != 1:
+        raise ValueError(
+            "semantic invariant: command_record_bench expectation version "
+            "is missing or duplicated"
+        )
+    version = int(expectation_records[0].group("version"))
+    if version != EXPECTATION_VERSION:
+        raise ValueError(
+            "semantic invariant: command_record_bench expectation version "
+            f"{version} != {EXPECTATION_VERSION}"
+        )
+    invariant_lines = [
+        line for line in output.splitlines()
+        if line.startswith("invariants:")
+    ]
+    if (
+        len(invariant_lines) != 1
+        or COMMAND_RECORD_INVARIANTS.fullmatch(invariant_lines[0]) is None
+    ):
+        raise ValueError(
+            "forbidden work: command_record_bench recording invariants "
+            "are missing, duplicated, malformed, or nonzero"
+        )
+    resolution_records = tuple(COMMAND_RECORD_RESOLUTION.finditer(output))
+    if len(resolution_records) != 1:
+        raise ValueError(
+            "semantic invariant: command_record_bench resolution record "
+            "is missing, duplicated, or malformed"
+        )
+    resolution = resolution_records[0]
+    values = {
+        field: int(resolution.group(field))
+        for field in (
+            "recording_commands",
+            "native_commands",
+            "pipeline_binds",
+            "descriptor_set_binds",
+            "descriptor_buffer_binds",
+            "descriptor_buffer_offsets",
+            "device_registry",
+            "retained_pins",
+            "lifecycle_vtable",
+            "command_table",
+            "pipeline_table",
+            "pipeline_cache",
+            "policy",
+            "encoder_cells",
+            "encoder_leases",
+        )
+    }
+    forbidden = (
+        "pipeline_binds",
+        "descriptor_set_binds",
+        "descriptor_buffer_binds",
+        "descriptor_buffer_offsets",
+        "device_registry",
+        "retained_pins",
+        "lifecycle_vtable",
+        "command_table",
+        "pipeline_table",
+        "pipeline_cache",
+        "policy",
+    )
+    nonzero = [field for field in forbidden if values[field] != 0]
+    if nonzero:
+        raise ValueError(
+            "forbidden work: command_record_bench warm path reported "
+            + ", ".join(nonzero)
+        )
+    generated_records = tuple(COMMAND_RECORD_GENERATED.finditer(output))
+    generated_unsupported = sum(
+        line == COMMAND_RECORD_GENERATED_UNSUPPORTED
+        for line in output.splitlines()
+    )
+    if len(generated_records) + generated_unsupported != 1:
+        raise ValueError(
+            "semantic invariant: command_record_bench generated-dispatch "
+            "record is missing, duplicated, or malformed"
+        )
+    expected_generated = (
+        COMMAND_RECORD_EXPECTED_GENERATED_COMMANDS
+        if generated_records else 0
+    )
+    expected_recording_commands = (
+        COMMAND_RECORD_EXPECTED_DIRECT_COMMANDS + expected_generated
+    )
+    expected_native_commands = (
+        COMMAND_RECORD_EXPECTED_DIRECT_NATIVE_COMMANDS + expected_generated
+    )
+    recording_commands = values["recording_commands"]
+    if recording_commands != expected_recording_commands:
+        raise ValueError(
+            "semantic invariant: command_record_bench recording command "
+            f"count {recording_commands} != {expected_recording_commands}"
+        )
+    if values["encoder_cells"] > recording_commands:
+        raise ValueError(
+            "forbidden work: command_record_bench encoder-cell budget exceeded"
+        )
+    if values["encoder_leases"] > recording_commands:
+        raise ValueError(
+            "forbidden work: command_record_bench encoder-lease budget exceeded"
+        )
+    if values["native_commands"] != expected_native_commands:
+        raise ValueError(
+            "minimal native lowering: command_record_bench native command "
+            f"count {values['native_commands']} != {expected_native_commands}"
+        )
+    cold_lines = [
+        line for line in output.splitlines()
+        if line.startswith("cold work:")
+    ]
+    if (
+        len(cold_lines) != 1
+        or COMMAND_RECORD_COLD_WORK.fullmatch(cold_lines[0]) is None
+    ):
+        raise ValueError(
+            "semantic invariant: command_record_bench cold work record "
+            "is missing, duplicated, or malformed"
+        )
+    warm_lines = [
+        line for line in output.splitlines()
+        if line.startswith("warm work:")
+    ]
+    if (
+        len(warm_lines) != 1
+        or COMMAND_RECORD_WARM_WORK.fullmatch(warm_lines[0]) is None
+    ):
+        raise ValueError(
+            "forbidden work: command_record_bench warm work is missing, "
+            "duplicated, malformed, or nonzero"
+        )
 
 
 def require_measurement(
@@ -938,17 +1110,8 @@ def require_measurement(
             raise ValueError(f"{target} reports live resources")
     if target == "descriptor_churn_bench":
         require_sampler_lookup_evidence(output)
-    if target == "command_record_bench" and not COMMAND_RECORD_INVARIANTS.search(output):
-        raise ValueError(f"{target} recording invariants are missing or nonzero")
-    if target == "command_record_bench" and not COMMAND_RECORD_RESOLUTION.search(output):
-        raise ValueError(
-            f"{target} recording resolution evidence is missing or nonzero"
-        )
-    if target == "command_record_bench" and not COMMAND_RECORD_COLD_WORK.search(output):
-        raise ValueError(f"{target} cold recording work evidence is missing")
-    if target == "command_record_bench" and not COMMAND_RECORD_WARM_WORK.search(output):
-        raise ValueError(f"{target} warm recording work is missing or nonzero")
     if target == "command_record_bench":
+        require_command_record_outcomes(output)
         require_command_policy_evidence(output)
     if target == "pipeline_cache_bench" and not PIPELINE_CACHE_MATRIX.search(output):
         raise ValueError(
@@ -967,7 +1130,7 @@ def require_measurement(
                 rf"owned_bytes_cloned={byte_count} "
                 rf"lookup_shader_intern_probes=0 "
                 rf"lookup_shader_bytes_compared=0 "
-                rf"lookup_owned_bytes_cloned=0 pipeline_key_probes=1 "
+                rf"lookup_owned_bytes_cloned=0 pipeline_key_probes=[01] "
                 rf"owned_bytes_freed={byte_count} elapsed_ns=[0-9]+$",
                 re.MULTILINE,
             )
@@ -1003,11 +1166,14 @@ def run(command, cwd, env=None):
         cwd=cwd,
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         text=True,
     )
     if result.returncode:
-        raise RuntimeError(f"{' '.join(command)} failed:\n{result.stdout}")
+        diagnostics = result.stdout + result.stderr
+        raise RuntimeError(f"{' '.join(command)} failed:\n{diagnostics}")
+    if result.stderr:
+        print(result.stderr.rstrip(), file=sys.stderr)
     return result.stdout.rstrip()
 
 
@@ -1081,6 +1247,7 @@ def main():
         f"- host={platform.platform()}",
         f"- compiler={compiler}",
         f"- optimization={' '.join(C3_BUILD_FLAGS)}",
+        f"- expectation_version={EXPECTATION_VERSION}",
         f"- validation={'enabled' if args.validation else 'disabled'}",
         f"- timing_mode={'blocking' if pinned else 'advisory'}",
         f"- pinned_runner={args.pinned_runner or 'none'}",

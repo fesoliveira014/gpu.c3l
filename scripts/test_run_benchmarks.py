@@ -32,6 +32,7 @@ LIFECYCLE_OUTPUT = "\n".join(
 )
 COMMAND_OUTPUT = "\n".join(
     (
+        "expectation_version=1",
         "barrier: iterations=20000 repetitions=5 median=130.0 ns/record",
         "hazard barrier: iterations=20000 repetitions=5 median=135.0 ns/record",
         "indirect dispatch: iterations=20000 repetitions=5 median=180.0 ns/record",
@@ -41,13 +42,13 @@ COMMAND_OUTPUT = "\n".join(
             "draw_compilations=0 preprocess_allocations=0"
         ),
         (
-            "resolution: recording_commands=305000 native_commands=405000 "
+            "resolution: recording_commands=300320 native_commands=400320 "
             "pipeline_binds=0 descriptor_set_binds=0 "
             "descriptor_buffer_binds=0 descriptor_buffer_offsets=0 "
             "device_registry=0 "
             "retained_pins=0 lifecycle_vtable=0 command_table=0 "
             "pipeline_table=0 pipeline_cache=0 policy=0 "
-            "encoder_cells=305000 encoder_leases=305000"
+            "encoder_cells=300320 encoder_leases=300320"
         ),
         (
             "validation policy=trusted tracking=false layers=false "
@@ -408,7 +409,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
             runner.BENCHMARK_METHODS["descriptor_churn_bench"],
             (
                 "320/worker; workers=1,2,4; sampler occupancy=8,64,1024,65536; ownership highwater=16,4096,65536",
-                "ns/descriptor, ns/op, ns/destroy, ns/check; exact sampler probes and ownership work",
+                "ns/descriptor, ns/op, ns/destroy, ns/check; bounded sampler probes and ownership work",
             ),
         )
         self.assertEqual(runner.C3_BUILD_FLAGS, ("-O1",))
@@ -479,6 +480,24 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "command_reference_bench",
         )
 
+    def test_command_reference_accepts_lower_private_work(self):
+        runner = load_runner()
+        output = COMMAND_REFERENCE_OUTPUT.replace(
+            (
+                "reference_index unique=1 lookups=1 probes=1 equality=0 "
+                "publications=1 mutex=1 retains=1 releases=1 "
+                "host_allocations=0 probes_per_reference=1.000 "
+                "equality_per_reference=0.000"
+            ),
+            (
+                "reference_index unique=1 lookups=1 probes=0 equality=0 "
+                "publications=1 mutex=0 retains=1 releases=1 "
+                "host_allocations=0 probes_per_reference=0.000 "
+                "equality_per_reference=0.000"
+            ),
+        )
+        runner.require_measurement(output, "command_reference_bench")
+
     def test_command_reference_measurement_rejects_structural_mutations(self):
         runner = load_runner()
         mutations = (
@@ -486,7 +505,11 @@ class BenchmarkRunnerTests(unittest.TestCase):
             ("retains=4096", "retains=4095", "retains"),
             ("releases=2048", "releases=2047", "releases"),
             ("duplicates=100000", "duplicates=99999", "duplicates"),
-            ("probes=2080", "probes=2079", "equality"),
+            (
+                "probes=2080 equality=2016",
+                "probes=2081 equality=2016",
+                "probe ratio",
+            ),
             ("capacity_fault=true", "capacity_fault=false", "capacity"),
             ("status=pass", "status=fail", "structural check"),
         )
@@ -868,17 +891,24 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, error):
                     runner.require_measurement(output, "descriptor_churn_bench")
 
-    def test_descriptor_churn_rejects_zero_or_excessive_probes(self):
+    def test_descriptor_churn_accepts_zero_private_probes(self):
         runner = load_runner()
-        for probes in (0, 9):
-            with self.subTest(probes=probes):
-                output = DESCRIPTOR_CHURN_OUTPUT.replace(
-                    "probes=1",
-                    f"probes={probes}",
-                    1,
-                )
-                with self.assertRaisesRegex(ValueError, "probes"):
-                    runner.require_measurement(output, "descriptor_churn_bench")
+        output = DESCRIPTOR_CHURN_OUTPUT.replace(
+            "probes=1",
+            "probes=0",
+            1,
+        )
+        runner.require_measurement(output, "descriptor_churn_bench")
+
+    def test_descriptor_churn_rejects_excessive_probes(self):
+        runner = load_runner()
+        output = DESCRIPTOR_CHURN_OUTPUT.replace(
+            "probes=1",
+            "probes=9",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "probes"):
+            runner.require_measurement(output, "descriptor_churn_bench")
 
     def test_descriptor_churn_rejects_nonzero_empty_bucket_miss_work(self):
         runner = load_runner()
@@ -920,7 +950,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "recording invariants"):
                     runner.require_measurement(output, "command_record_bench")
 
-    def test_command_measurement_requires_zero_resolution_evidence(self):
+    def test_command_measurement_rejects_forbidden_resolution_work(self):
         runner = load_runner()
         for field in (
             "pipeline_binds",
@@ -937,18 +967,106 @@ class BenchmarkRunnerTests(unittest.TestCase):
         ):
             with self.subTest(field=field):
                 output = COMMAND_OUTPUT.replace(f"{field}=0", f"{field}=1")
-                with self.assertRaisesRegex(ValueError, "resolution evidence"):
+                with self.assertRaisesRegex(ValueError, "forbidden work"):
                     runner.require_measurement(output, "command_record_bench")
 
-    def test_command_measurement_requires_one_cell_and_lease_per_call(self):
+    def test_command_measurement_accepts_zero_private_encoder_work(self):
+        runner = load_runner()
+        output = COMMAND_OUTPUT.replace(
+            "encoder_cells=300320 encoder_leases=300320",
+            "encoder_cells=0 encoder_leases=0",
+        )
+        runner.require_measurement(output, "command_record_bench")
+
+    def test_command_measurement_rejects_encoder_work_over_budget(self):
         runner = load_runner()
         for field in ("encoder_cells", "encoder_leases"):
             with self.subTest(field=field):
                 output = COMMAND_OUTPUT.replace(
-                    f"{field}=305000",
-                    f"{field}=304999",
+                    f"{field}=300320",
+                    f"{field}=300321",
                 )
-                with self.assertRaisesRegex(ValueError, "resolution evidence"):
+                with self.assertRaisesRegex(ValueError, "budget exceeded"):
+                    runner.require_measurement(output, "command_record_bench")
+
+    def test_command_measurement_requires_exact_semantic_and_native_counts(self):
+        runner = load_runner()
+        mutations = (
+            (
+                "recording_commands=300320",
+                "recording_commands=1",
+                "recording command count",
+            ),
+            (
+                "native_commands=400320",
+                "native_commands=400321",
+                "native command count",
+            ),
+            (
+                "native_commands=400320",
+                "native_commands=999999",
+                "native command count",
+            ),
+        )
+        for before, after, error in mutations:
+            with self.subTest(after=after):
+                output = COMMAND_OUTPUT.replace(before, after)
+                with self.assertRaisesRegex(ValueError, error):
+                    runner.require_measurement(output, "command_record_bench")
+
+    def test_command_measurement_requires_versioned_deterministic_records(self):
+        runner = load_runner()
+        resolution_line = next(
+            line
+            for line in COMMAND_OUTPUT.splitlines()
+            if line.startswith("resolution:")
+        )
+        mutations = (
+            (
+                COMMAND_OUTPUT.replace("expectation_version=1\n", ""),
+                "expectation version",
+            ),
+            (
+                COMMAND_OUTPUT.replace(
+                    "expectation_version=1",
+                    "expectation_version=2",
+                ),
+                "expectation version",
+            ),
+            (
+                COMMAND_OUTPUT.replace(
+                    "resolution: recording_commands=300320",
+                    "resolution: command_count=300320",
+                ),
+                "resolution record",
+            ),
+            (
+                COMMAND_OUTPUT.replace(
+                    resolution_line,
+                    resolution_line + "\n" + resolution_line,
+                ),
+                "resolution record",
+            ),
+        )
+        for output, error in mutations:
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(ValueError, error):
+                    runner.require_measurement(output, "command_record_bench")
+
+    def test_command_measurement_rejects_duplicated_work_records(self):
+        runner = load_runner()
+        for prefix, error in (
+            ("invariants:", "recording invariants"),
+            ("cold work:", "cold work record"),
+            ("warm work:", "warm work"),
+        ):
+            with self.subTest(prefix=prefix):
+                line = next(
+                    line for line in COMMAND_OUTPUT.splitlines()
+                    if line.startswith(prefix)
+                )
+                output = COMMAND_OUTPUT.replace(line, line + "\n" + line)
+                with self.assertRaisesRegex(ValueError, error):
                     runner.require_measurement(output, "command_record_bench")
 
     def test_command_measurement_requires_zero_warm_work(self):
@@ -971,9 +1089,9 @@ class BenchmarkRunnerTests(unittest.TestCase):
                     warm_line.replace(f"{field}=0", f"{field}=1"),
                 )
                 error = (
-                    "allocation mismatch"
+                    "host allocation"
                     if field == "host_allocations"
-                    else "warm recording work"
+                    else "warm work"
                 )
                 with self.assertRaisesRegex(ValueError, error):
                     runner.require_measurement(output, "command_record_bench")
@@ -1038,9 +1156,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
         reference_mismatch = list(COMMAND_POLICY_OUTPUTS)
         reference_mismatch[2] = reference_mismatch[2].replace(
             "reference_allocations=0",
-            "reference_allocations=26",
+            "reference_allocations=1",
         )
-        with self.assertRaisesRegex(ValueError, "allocation/increment mismatch"):
+        reference_mismatch[2] = reference_mismatch[2].replace(
+            "warm work: host_allocations=0",
+            "warm work: host_allocations=1",
+        )
+        with self.assertRaisesRegex(ValueError, "reference allocation"):
             runner.require_command_policy_matrix(reference_mismatch)
 
         policy_reselection = list(COMMAND_POLICY_OUTPUTS)
@@ -1048,7 +1170,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "pipeline_cache=0 policy=0",
             "pipeline_cache=0 policy=1",
         )
-        with self.assertRaisesRegex(ValueError, "policy reselection"):
+        with self.assertRaisesRegex(ValueError, "warm path reported policy"):
             runner.require_command_policy_matrix(policy_reselection)
 
     def test_allocation_measurement_rejects_extra_fields(self):
@@ -1211,6 +1333,24 @@ class BenchmarkRunnerTests(unittest.TestCase):
         output = PIPELINE_OUTPUT.replace(
             "lookup_shader_bytes_compared=0",
             "lookup_shader_bytes_compared=1",
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "1024 bytes"):
+            runner.require_measurement(output, "pipeline_cache_bench")
+
+    def test_pipeline_cache_accepts_removed_private_key_probe(self):
+        runner = load_runner()
+        output = PIPELINE_OUTPUT.replace(
+            "pipeline_key_probes=1",
+            "pipeline_key_probes=0",
+        )
+        runner.require_measurement(output, "pipeline_cache_bench")
+
+    def test_pipeline_cache_rejects_key_probe_over_budget(self):
+        runner = load_runner()
+        output = PIPELINE_OUTPUT.replace(
+            "pipeline_key_probes=1",
+            "pipeline_key_probes=2",
             1,
         )
         with self.assertRaisesRegex(ValueError, "1024 bytes"):

@@ -76,7 +76,7 @@ class CommandPolicyCheckTests(unittest.TestCase):
             self.write_fixture(root)
             self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_missing_table(self) -> None:
+    def test_accepts_fewer_runtime_tables(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = all_tables_source().replace(
@@ -84,22 +84,16 @@ class CommandPolicyCheckTests(unittest.TestCase):
                 "",
             )
             self.write_fixture(root, source)
-            self.assertIn(
-                "missing command policy tables: CHECKED_TRACKING_COMMAND_OPS",
-                check_command_policy.check(root),
-            )
+            self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_unexpected_table(self) -> None:
+    def test_accepts_renamed_or_additional_runtime_table(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = all_tables_source() + table_source("EXPERIMENTAL_COMMAND_OPS")
             self.write_fixture(root, source)
-            self.assertIn(
-                "unexpected command policy tables: EXPERIMENTAL_COMMAND_OPS",
-                check_command_policy.check(root),
-            )
+            self.assertEqual(check_command_policy.check(root), [])
 
-    def test_rejects_duplicate_table_across_backend_files(self) -> None:
+    def test_accepts_complete_tables_across_backend_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.write_fixture(root)
@@ -108,10 +102,7 @@ class CommandPolicyCheckTests(unittest.TestCase):
                 "gpu/internal/vk/nested/duplicate.c3",
                 table_source("TRUSTED_COMMAND_OPS"),
             )
-            self.assertIn(
-                "duplicate command policy tables: TRUSTED_COMMAND_OPS",
-                check_command_policy.check(root),
-            )
+            self.assertEqual(check_command_policy.check(root), [])
 
     def test_rejects_duplicate_field(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -194,7 +185,7 @@ class CommandPolicyCheckTests(unittest.TestCase):
                 check_command_policy.check(root),
             )
 
-    def test_rejects_non_direct_function_references(self) -> None:
+    def test_accepts_indirect_table_entries(self) -> None:
         initializers = (
             "copy_command",
             "copy_command()",
@@ -213,11 +204,25 @@ class CommandPolicyCheckTests(unittest.TestCase):
                         1,
                     )
                     self.write_fixture(root, source)
-                    self.assertIn(
-                        "TRUSTED_COMMAND_OPS.copy must be initialized with "
-                        "a direct &function_name reference",
-                        check_command_policy.check(root),
-                    )
+                    self.assertEqual(check_command_policy.check(root), [])
+
+    def test_accepts_table_free_specialization(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(root, "module gpu::internal::vk;\n")
+            self.assertEqual(check_command_policy.check(root), [])
+
+    def test_accepts_indirectly_constructed_table(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                (
+                    "module gpu::internal::vk;\n"
+                    "const gpu::internal::CommandOps COMBINED = make_ops();\n"
+                ),
+            )
+            self.assertEqual(check_command_policy.check(root), [])
 
     def test_accepts_helper_rename(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

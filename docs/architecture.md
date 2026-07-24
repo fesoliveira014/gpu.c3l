@@ -596,13 +596,13 @@ pointer/slice/range safety, overflow protection, internal state integrity,
 public ownership, Vulkan result handling, and rollback. Detailed command misuse
 outside that floor is a caller contract violation unless `FULL` is selected.
 
-Static command-policy checking stops at direct table shape: exactly
-`TRUSTED_COMMAND_OPS`, `TRUSTED_TRACKING_COMMAND_OPS`, `CHECKED_COMMAND_OPS`,
-and `CHECKED_TRACKING_COMMAND_OPS`; each table initializes every `CommandOps`
-field exactly once with a direct function reference. C3 compilation checks
-reference existence and pointer types. The checker does not infer behavior from
-function bodies, helper names, call reachability, or statement order. The
-six-mode command-policy matrix and exact allocator, work, resolution,
+Static command-policy checking verifies complete operation coverage for each
+literal runtime `CommandOps` table that exists. It does not require a fixed
+table count or names, direct initializer expressions, or runtime tables when a
+specialized topology is used. C3 compilation checks reference existence and
+pointer types. The checker does not infer behavior from function bodies, helper
+names, call reachability, or statement order. The six-mode command-policy matrix
+and allocator, work, resolution,
 reference-state, fault, and native-emission observations are the authority for
 warm policy and tracking behavior. Timing is blocking only for an explicitly
 pinned runner, driver, and comparison profile.
