@@ -50,7 +50,6 @@ bool fail_device_after_temporary_allocation @private;
 gpu::Adapter last_device_adapter @private;
 uint runtime_creates @private;
 uint runtime_destroys @private;
-bool surface_destroy_available @private = true;
 bool probe_destroy_visibility @private;
 fault destroy_visibility_fault @private;
 uint surface_creates @private;
@@ -153,54 +152,53 @@ fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
     };
 }
 
-fn void*? create_stub_win32_surface(
-    void* backend_state,
+fn void*? vk_create_win32_surface(
+    VkRuntimeState* state,
     void* instance,
     void* window,
 ) {
-    if (backend_state == null || instance == null || window == null) {
+    if (state == null || instance == null || window == null) {
         return gpu::INVALID_ARGUMENT~;
     }
     surface_creates++;
     return mem::new(char);
 }
 
-fn void*? create_stub_wayland_surface(
-    void* backend_state,
+fn void*? vk_create_wayland_surface(
+    VkRuntimeState* state,
     void* display,
     void* surface,
 ) {
-    return create_stub_win32_surface(
-        backend_state,
+    return vk_create_win32_surface(
+        state,
         display,
         surface,
     );
 }
 
-fn void*? create_stub_x11_surface(
-    void* backend_state,
+fn void*? vk_create_x11_surface(
+    VkRuntimeState* state,
     void* display,
     ulong window,
 ) {
-    if (backend_state == null || display == null || window == 0) {
+    if (state == null || display == null || window == 0) {
         return gpu::INVALID_ARGUMENT~;
     }
     surface_creates++;
     return mem::new(char);
 }
 
-fn void destroy_stub_surface(void* backend_state, void* surface) {
-    if (backend_state == null || surface == null) return;
+fn void vk_destroy_surface(VkRuntimeState* state, void* surface) {
+    if (state == null || surface == null) return;
     surface_destroys++;
     mem::free(surface);
 }
 
-fn bool? supports_stub_presentation(
-    void* backend_state,
+fn bool? vk_supports_presentation(
+    VkRuntimeState* state,
     uint adapter_index,
     void* surface,
 ) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || surface == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
@@ -252,21 +250,6 @@ fn bool? vk_supports_dynamic_color_state(
     return configured_dynamic_color_state_support;
 }
 
-const gpu::internal::RuntimeBackendVTable STUB_RUNTIME_VTABLE @private = {
-    .create_win32_surface    = &create_stub_win32_surface,
-    .create_wayland_surface  = &create_stub_wayland_surface,
-    .create_x11_surface      = &create_stub_x11_surface,
-    .destroy_surface         = &destroy_stub_surface,
-    .supports_presentation   = &supports_stub_presentation,
-};
-
-const gpu::internal::RuntimeBackendVTable STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY @private = {
-    .create_win32_surface    = &create_stub_win32_surface,
-    .create_wayland_surface  = &create_stub_wayland_surface,
-    .create_x11_surface      = &create_stub_x11_surface,
-    .supports_presentation   = &supports_stub_presentation,
-};
-
 fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     VkRuntimeState* state = mem::new(VkRuntimeState);
     state.adapter_count = configured_adapter_count;
@@ -274,9 +257,6 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     defer catch destroy_vk_runtime_state(state);
     gpu::Runtime runtime = gpu::internal::register_runtime(
         state:         state,
-        vtable:        surface_destroy_available
-            ? &STUB_RUNTIME_VTABLE
-            : &STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY,
         adapter_count: state.adapter_count,
     )!;
     state.runtime = runtime;
@@ -326,10 +306,6 @@ fn uint stub_device_temporary_destroy_count() => device_temporary_destroys;
 
 fn void stub_fail_device_after_temporary_allocation(bool fail) {
     fail_device_after_temporary_allocation = fail;
-}
-
-fn void stub_set_surface_destroy_available(bool available) {
-    surface_destroy_available = available;
 }
 
 fn gpu::Adapter stub_last_device_adapter() => last_device_adapter;

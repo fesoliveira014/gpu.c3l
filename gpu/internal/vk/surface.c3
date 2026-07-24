@@ -4,11 +4,10 @@ import gpu @public;
 import vk;
 
 fn void*? vk_create_win32_surface(
-    void* backend_state,
+    VkRuntimeState* state,
     void* instance,
     void* window,
 ) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || instance == null || window == null) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -32,11 +31,10 @@ fn void*? vk_create_win32_surface(
 }
 
 fn void*? vk_create_wayland_surface(
-    void* backend_state,
+    VkRuntimeState* state,
     void* display,
     void* window_surface,
 ) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || display == null || window_surface == null) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -60,11 +58,10 @@ fn void*? vk_create_wayland_surface(
 }
 
 fn void*? vk_create_x11_surface(
-    void* backend_state,
+    VkRuntimeState* state,
     void* display,
     ulong window,
 ) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || display == null || window == 0) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -87,8 +84,10 @@ fn void*? vk_create_x11_surface(
     return (void*)surface;
 }
 
-fn void vk_destroy_surface(void* backend_state, void* backend_surface) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
+fn void vk_destroy_surface(
+    VkRuntimeState* state,
+    void* backend_surface,
+) {
     if (state == null || backend_surface == null || state.dispatch.surface.destroy_surface == null) {
         return;
     }
@@ -100,11 +99,10 @@ fn void vk_destroy_surface(void* backend_state, void* backend_surface) {
 }
 
 fn bool? vk_supports_presentation(
-    void* backend_state,
+    VkRuntimeState* state,
     uint adapter_index,
     void* backend_surface,
 ) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || backend_surface == null || adapter_index >= state.adapters.len) {
         return gpu::INVALID_HANDLE~;
     }

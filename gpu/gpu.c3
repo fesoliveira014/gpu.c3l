@@ -106,7 +106,6 @@ fn void? destroy_runtime(Runtime* runtime) {
 
     gpu::internal::vk::VkRuntimeState* state = data.state;
     data.state = null;
-    data.vtable = null;
     data.adapter_count = 0;
     data.used = false;
     *runtime = RUNTIME_INVALID;
@@ -319,8 +318,7 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
 
     gpu::internal::RuntimeData* surface_runtime = gpu::internal::resolve_runtime(&surface_data.runtime);
     if (surface_runtime != adapter_runtime) return INVALID_HANDLE~;
-    if (adapter_runtime.vtable.supports_presentation == null) return false;
-    return adapter_runtime.vtable.supports_presentation(
+    return gpu::internal::vk::vk_supports_presentation(
         adapter_runtime.state,
         adapter.adapter_index,
         surface_data.backend_surface,
@@ -347,7 +345,7 @@ fn void? destroy_surface(Surface* surface) {
     data.used = false;
     *surface = SURFACE_INVALID;
 
-    runtime_data.vtable.destroy_surface(
+    gpu::internal::vk::vk_destroy_surface(
         runtime_data.state,
         backend_surface,
     );

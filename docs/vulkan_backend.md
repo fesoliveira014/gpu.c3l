@@ -118,10 +118,12 @@ install a persistent debug-utils messenger for layer, name, or callback routing
 ```
 
 Runtime creation enables available platform surface extensions and owns the
-surface dispatch. A device retains surface procedures only for a presentation
-request and loads only the selected device dispatch groups after logical-device
-creation. Headless devices create no presentation state. Missing platform
-support faults when that platform constructor is called.
+surface dispatch. The public platform modules resolve their runtime token to
+`VkRuntimeState*` and call the matching WSI functions directly; no runtime
+backend vtable is retained. A device retains surface procedures only for a
+presentation request and loads only the selected device dispatch groups after
+logical-device creation. Headless devices create no presentation state.
+Missing platform support faults when that platform constructor is called.
 
 `VK_EXT_debug_utils` is requested when Vulkan validation, Vulkan debug names,
 or a structured callback needs it. `enable_debug_names` remains independent of

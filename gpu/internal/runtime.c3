@@ -6,12 +6,6 @@ import std::atomic;
 import std::atomic::types;
 import std::core::mem;
 
-alias CreateWin32SurfaceBackendFn @private = fn void*? (void*, void*, void*);
-alias CreateWaylandSurfaceBackendFn @private = fn void*? (void*, void*, void*);
-alias CreateX11SurfaceBackendFn @private = fn void*? (void*, void*, ulong);
-alias DestroySurfaceBackendFn @private = fn void (void*, void*);
-alias SupportsPresentationBackendFn @private = fn bool? (void*, uint, void*);
-
 const uint MAX_RUNTIMES @private = 16;
 const uint MAX_ADAPTERS_PER_RUNTIME @private = (uint)ushort::max + 1;
 const uint MAX_RUNTIME_GENERATION @private = 0x00FF_FFFF;
@@ -20,19 +14,9 @@ enum BackendKind @private {
     VULKAN,
 }
 
-
-struct RuntimeBackendVTable @private {
-    CreateWin32SurfaceBackendFn     create_win32_surface;
-    CreateWaylandSurfaceBackendFn   create_wayland_surface;
-    CreateX11SurfaceBackendFn       create_x11_surface;
-    DestroySurfaceBackendFn         destroy_surface;
-    SupportsPresentationBackendFn   supports_presentation;
-}
-
 struct RuntimeData @private {
     uint                              generation;
     gpu::internal::vk::VkRuntimeState* state;
-    RuntimeBackendVTable*             vtable;
     uint                              adapter_count;
     uint                              live_surface_count;
     Atomic{uint}                      live_device_count;
@@ -68,17 +52,15 @@ fn RuntimeData* resolve_runtime(Runtime* runtime) @private {
 
 fn Runtime? register_runtime(
     gpu::internal::vk::VkRuntimeState* state,
-    RuntimeBackendVTable* vtable,
     uint adapter_count,
 ) @private {
-    if (vtable == null || state == null) return gpu::INVALID_ARGUMENT~;
+    if (state == null) return gpu::INVALID_ARGUMENT~;
     if (adapter_count > MAX_ADAPTERS_PER_RUNTIME) return gpu::SLOT_TABLE_FULL~;
     for (uint i = 0; i < MAX_RUNTIMES; i++) {
         RuntimeData* data = &runtime_slots[i];
         if (data.used || data.generation == MAX_RUNTIME_GENERATION) continue;
         data.generation++;
         data.state = state;
-        data.vtable = vtable;
         data.adapter_count = adapter_count;
         data.live_surface_count = 0;
         data.live_device_count.store(0, AtomicOrdering.RELAXED);

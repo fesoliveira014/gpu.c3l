@@ -2825,6 +2825,7 @@ method gpu::Runtime.is_valid
             "module gpu::surface::win32;\n"
             "import gpu @public;\n"
             "import gpu::internal @public;\n"
+            "import gpu::internal::vk;\n"
             "fn void create_surface() {}\n"
             "fn void extra() {}\n",
         )
@@ -2835,6 +2836,7 @@ method gpu::Runtime.is_valid
         reordered_implementation = (
             "module gpu::surface::win32;\n"
             "import gpu::internal @public;\n"
+            "import gpu::internal::vk;\n"
             "import gpu @public;\n"
             "fn void create_surface() {}\n"
         )
@@ -3258,6 +3260,7 @@ method gpu::Runtime.is_valid
                     f"module {module};\n"
                     "import gpu @public;\n"
                     "import gpu::internal @public;\n"
+                    "import gpu::internal::vk;\n"
                     "fn void create_surface() {}\n",
                     encoding="utf-8",
                 )

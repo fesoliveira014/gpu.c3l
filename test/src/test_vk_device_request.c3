@@ -11,10 +11,6 @@ import std::io;
 const gpu::internal::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
     .destroy_device = &destroy_registry_blocker,
 };
-const gpu::internal::RuntimeBackendVTable PRESENTATION_INSTANCE_GATE_VTABLE @private = {
-    .destroy_surface = &destroy_presentation_instance_gate_surface,
-};
-
 struct ResourceAgnosticCreateObservation {
     bool selected;
     uint calls;
@@ -353,14 +349,6 @@ fn void strict_disabled_state_owns_no_sampler_table() @test {
 
 fn void destroy_registry_blocker(void* backend_state) @private {
     (void)backend_state;
-}
-
-fn void destroy_presentation_instance_gate_surface(
-    void* backend_state,
-    void* backend_surface,
-) @private {
-    (void)backend_state;
-    (void)backend_surface;
 }
 
 fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
@@ -939,7 +927,6 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
     );
     gpu::Runtime runtime = gpu::internal::register_runtime(
         state:         runtime_state,
-        vtable:        &PRESENTATION_INSTANCE_GATE_VTABLE,
         adapter_count: 1,
     )!!;
     defer gpu::destroy_runtime(&runtime)!!;

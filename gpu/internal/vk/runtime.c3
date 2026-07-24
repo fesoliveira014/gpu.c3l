@@ -132,14 +132,6 @@ fn void destroy_vk_runtime_state(VkRuntimeState* state) {
     mem::free(state);
 }
 
-const gpu::internal::RuntimeBackendVTable VK_RUNTIME_VTABLE @private = {
-    .create_win32_surface    = &vk_create_win32_surface,
-    .create_wayland_surface  = &vk_create_wayland_surface,
-    .create_x11_surface      = &vk_create_x11_surface,
-    .destroy_surface         = &vk_destroy_surface,
-    .supports_presentation   = &vk_supports_presentation,
-};
-
 fn VkInstanceDesc runtime_instance_desc(
     gpu::RuntimeDesc* desc,
     vk::DebugUtilsMessengerCreateInfoEXT* messenger_info,
@@ -223,7 +215,6 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     enumerate_vk_adapters(state)!;
     return gpu::internal::register_runtime(
         state:         state,
-        vtable:        &VK_RUNTIME_VTABLE,
         adapter_count: (uint)state.adapters.len,
     );
 }
