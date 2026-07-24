@@ -619,6 +619,8 @@ fn gpu::Device? create_vk_device(
     gpu::DeviceCaps caps = {
         .strict_enabled       = true,
         .presentation_enabled = presentation_surface.is_valid(),
+        .dynamic_color_state  =
+            gpu::internal::requests_dynamic_color_state(*request),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
     };

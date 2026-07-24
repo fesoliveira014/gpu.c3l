@@ -146,6 +146,25 @@ fn void supported_but_unrequested_device_has_immutable_color_state() @test {
     );
 }
 
+fn void supported_requested_device_publishes_dynamic_color_state() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_dynamic_color_state_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceRequest request =
+        gpu::request_dynamic_color_state(gpu::strict_device_request())!!;
+    Device device = gpu::create_device(&adapter, &request)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    assert(
+        gpu::get_device_caps(&device)!!.dynamic_color_state,
+        "a supported requested capability is published only by the device"
+    );
+}
+
 fn void unsupported_request_names_the_first_semantic_requirement() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
     gpu::internal::vk::stub_set_strict_support(false);

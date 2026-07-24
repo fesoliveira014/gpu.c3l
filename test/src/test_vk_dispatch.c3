@@ -13,6 +13,7 @@ struct DispatchLookupCounts {
     uint device_debug;
     uint device_presentation;
     uint descriptor_buffer;
+    uint dynamic_color;
     uint unexpected;
 }
 
@@ -25,6 +26,7 @@ fn bool DispatchLookupCounts.is_empty(self) {
         && self.device_debug == 0
         && self.device_presentation == 0
         && self.descriptor_buffer == 0
+        && self.dynamic_color == 0
         && self.unexpected == 0;
 }
 
@@ -227,6 +229,10 @@ fn vk::PFN_vkVoidFunction recording_device_proc_loader(
         || proc_name == "vkCmdBindDescriptorBuffersEXT"
         || proc_name == "vkCmdSetDescriptorBufferOffsetsEXT") {
         counts.descriptor_buffer++;
+    } else if (proc_name == "vkCmdSetColorBlendEnableEXT"
+        || proc_name == "vkCmdSetColorBlendEquationEXT"
+        || proc_name == "vkCmdSetColorWriteMaskEXT") {
+        counts.dynamic_color++;
     } else {
         counts.unexpected++;
     }
@@ -323,6 +329,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_debug == 0, "presentation selection does not load debug procedures");
     assert(counts.device_presentation == 5, "presentation selection loads only device WSI");
     assert(counts.descriptor_buffer == 0, "presentation selection does not load descriptor procedures");
+    assert(counts.dynamic_color == 0, "presentation selection does not load color procedures");
     assert(counts.unexpected == 0, "presentation selection loads no unrelated procedures");
 
     counts = {};
@@ -335,7 +342,21 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_debug == 0, "descriptor selection does not load debug procedures");
     assert(counts.device_presentation == 0, "descriptor selection does not load presentation procedures");
     assert(counts.descriptor_buffer == 5, "descriptor selection loads only descriptor-buffer procedures");
+    assert(counts.dynamic_color == 0, "descriptor selection does not load color procedures");
     assert(counts.unexpected == 0, "descriptor selection loads no unrelated procedures");
+
+    counts = {};
+    plan = { .dynamic_color = true };
+    (void)gpu::internal::vk::load_vk_device_dispatch(
+        (vk::Device)&counts,
+        &recording_device_proc_loader,
+        plan,
+    );
+    assert(counts.device_debug == 0, "color selection does not load debug procedures");
+    assert(counts.device_presentation == 0, "color selection does not load presentation procedures");
+    assert(counts.descriptor_buffer == 0, "color selection does not load descriptor procedures");
+    assert(counts.dynamic_color == 3, "color selection loads the complete command set");
+    assert(counts.unexpected == 0, "color selection loads no unrelated procedures");
 }
 
 fn void fake_get_descriptor_a(
@@ -446,4 +467,31 @@ fn void device_label_dispatch_requires_complete_pair() @test {
         },
     };
     assert(gpu::internal::vk::device_dispatch_supports_labels(&complete), "complete pair is available");
+}
+
+fn void device_dynamic_color_dispatch_requires_complete_set() @test {
+    gpu::internal::vk::VkDeviceDispatchPlan plan = {
+        .dynamic_color = true,
+    };
+    DispatchLookupCounts counts;
+    gpu::internal::vk::VkDeviceDispatch complete =
+        gpu::internal::vk::load_vk_device_dispatch(
+            (vk::Device)&counts,
+            &recording_device_proc_loader,
+            plan,
+        );
+    assert(
+        gpu::internal::vk::device_dispatch_supports_dynamic_color(&complete),
+        "all three color commands make the dispatch available"
+    );
+
+    gpu::internal::vk::VkDeviceDispatch missing = complete;
+    missing.dynamic_color.set_blend_enable = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_dynamic_color(&missing));
+    missing = complete;
+    missing.dynamic_color.set_blend_equation = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_dynamic_color(&missing));
+    missing = complete;
+    missing.dynamic_color.set_write_mask = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_dynamic_color(&missing));
 }

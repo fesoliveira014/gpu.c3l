@@ -19,6 +19,7 @@ struct VkDeviceDispatchPlan {
     bool presentation;
     bool descriptor_buffer;
     bool generated_work;
+    bool dynamic_color;
 }
 
 struct VkInstanceDebugDispatch {
@@ -236,6 +237,22 @@ fn VkDeviceDispatch load_vk_device_dispatch(
             ),
         };
     }
+    if (plan.dynamic_color) {
+        dispatch.dynamic_color = {
+            .set_blend_enable = (vk::PFN_vkCmdSetColorBlendEnableEXT)loader(
+                device,
+                "vkCmdSetColorBlendEnableEXT",
+            ),
+            .set_blend_equation = (vk::PFN_vkCmdSetColorBlendEquationEXT)loader(
+                device,
+                "vkCmdSetColorBlendEquationEXT",
+            ),
+            .set_write_mask = (vk::PFN_vkCmdSetColorWriteMaskEXT)loader(
+                device,
+                "vkCmdSetColorWriteMaskEXT",
+            ),
+        };
+    }
     return dispatch;
 }
 
@@ -276,6 +293,12 @@ fn bool device_dispatch_supports_generated_work(VkDeviceDispatch* dispatch) {
         && dispatch.generated_work.get_memory_requirements != null
         && dispatch.generated_work.create_layout != null
         && dispatch.generated_work.destroy_layout != null;
+}
+
+fn bool device_dispatch_supports_dynamic_color(VkDeviceDispatch* dispatch) {
+    return dispatch.dynamic_color.set_blend_enable != null
+        && dispatch.dynamic_color.set_blend_equation != null
+        && dispatch.dynamic_color.set_write_mask != null;
 }
 
 <* Loader instance version, or 0 if unavailable. A real `vk` call, so it pulls
