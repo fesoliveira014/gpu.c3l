@@ -240,6 +240,7 @@ fn void? validate_dynamic_graphics_pipeline_desc(
 ) {
     if (desc == null
         || desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
+        || (desc.colors.len > 0 && desc.colors.ptr == null)
         || !gpu::internal::sample_count_valid(desc.sample_count)
         || !polygon_mode_valid(desc.polygon_mode)) {
         return gpu::INVALID_ARGUMENT~;

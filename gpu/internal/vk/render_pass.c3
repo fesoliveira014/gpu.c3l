@@ -1275,6 +1275,12 @@ fn fault color_state_rejection(
     );
 }
 
+fn bool dynamic_color_state_enabled(VkDeviceState* state) @private {
+    return state != null
+        && state.caps.dynamic_color_state
+        && device_dispatch_supports_dynamic_color(&state.device_dispatch);
+}
+
 fn LoweredColorState? checked_prepare_color_state(
     VkDeviceState* state,
     VkCommandRecord* record,
@@ -1348,6 +1354,10 @@ fn void? trusted_set_color_state(
     gpu::ColorState* state,
 ) {
     if (state == null) return gpu::INVALID_ARGUMENT~;
+    VkDeviceState* device = command_device_state(commands);
+    if (!dynamic_color_state_enabled(device)) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     VkCommandRecord* record = backend_command(commands);
     if (!graphics_state_settable(record.root.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1362,6 +1372,9 @@ fn void? checked_set_color_state(
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     VkDeviceState* device = command_device_state(commands);
+    if (!dynamic_color_state_enabled(device)) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     note_command_semantic_check(device);
     VkCommandRecord* record = backend_command(commands);
     if (!graphics_state_settable(record.root.state)) {

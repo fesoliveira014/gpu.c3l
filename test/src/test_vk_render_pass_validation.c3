@@ -310,6 +310,7 @@ fn vk::VkDynamicColorDispatch install_dynamic_color_capture(
 ) {
     vk::VkDynamicColorDispatch original =
         state.device_dispatch.dynamic_color;
+    state.caps.dynamic_color_state = true;
     dynamic_color_capture = capture;
     state.device_dispatch.dynamic_color = {
         .set_blend_enable   = &capture_color_blend_enable,
@@ -317,6 +318,44 @@ fn vk::VkDynamicColorDispatch install_dynamic_color_capture(
         .set_write_mask     = &capture_color_write_mask,
     };
     return original;
+}
+
+fn void assert_unrequested_color_state_rejected(
+    gpu::ContractValidation contract,
+) {
+    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
+        contract,
+    );
+    vk::VkCommandRecord* record =
+        vk::resolve_command(&fixture.commands)!!;
+    gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
+    select_dynamic_color_pipeline(record, formats[..]);
+    gpu::internal::CommandState phase_before = record.root.state;
+    vk::BoundPipeline pipeline_before = record.logical_pipeline;
+    gpu::ColorTargetBlendState[1] targets = {
+        gpu::alpha_blend(),
+    };
+    gpu::ColorState color = { .targets = targets[..] };
+
+    gpu::reset_command_resolution_stats();
+    fault set_fault = @catch(gpu::cmd_set_color_state(
+        &fixture.commands,
+        &color,
+    ));
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+
+    assert(set_fault == gpu::UNSUPPORTED_FEATURE,
+        "an unrequested device rejects dynamic color deterministically");
+    assert(stats.native_commands == 0,
+        "unsupported color state emits no native command");
+    assert(record.root.state == phase_before
+            && record.logical_pipeline.handle == pipeline_before.handle
+            && record.logical_pipeline.kind == pipeline_before.kind
+            && record.logical_pipeline.color_profile
+                == pipeline_before.color_profile
+            && !record.color_state_initialized,
+        "unsupported color state preserves command and pipeline state");
+    destroy_dynamic_state_fixture(&fixture);
 }
 
 fn void select_dynamic_color_pipeline(
@@ -1878,6 +1917,18 @@ fn void trusted_dynamic_state_bypasses_checked_device_bounds() @test {
         &trusted_observation.viewport,
         &over_limit,
     ), "TRUSTED preserves the over-limit native viewport");
+}
+
+fn void unrequested_color_state_rejects_under_every_policy() @test {
+    assert_unrequested_color_state_rejected(
+        gpu::ContractValidation.TRUSTED,
+    );
+    assert_unrequested_color_state_rejected(
+        gpu::ContractValidation.OBJECT_BOUNDARIES,
+    );
+    assert_unrequested_color_state_rejected(
+        gpu::ContractValidation.FULL,
+    );
 }
 
 fn void dynamic_color_packet_emits_three_heterogeneous_arrays() @test {

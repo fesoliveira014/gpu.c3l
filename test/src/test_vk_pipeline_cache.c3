@@ -7,6 +7,7 @@ import vk;
 import std::core::mem;
 import std::core::mem::allocators;
 import std::atomic;
+import std::io;
 import std::thread;
 
 // Headless (lavapipe): deterministic pipeline identity, transactional batches,
@@ -2337,4 +2338,140 @@ fn void dynamic_color_batch_prevalidates_transactionally() @test {
         "dynamic batch validation publishes no cache entry");
     assert(vk::shader_store_live_count(state) == 0,
         "dynamic batch validation retains no shader identity");
+}
+
+fn void dynamic_color_formats_require_host_safe_storage() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = cache_test_state(&device);
+    state.caps.dynamic_color_state = true;
+    gpu::ColorTargetFormat* missing = null;
+    gpu::ColorTargetFormat[] forged = missing[:1];
+    gpu::DynamicGraphicsPipelineDesc desc = { .colors = forged };
+    ulong shader_checks_before = vk::shader_reflection_validation_count(state);
+    ulong native_before = vk::pipeline_native_create_count(state);
+
+    fault single_fault = @catch(vk::vk_create_dynamic_graphics_pipeline(
+        &device,
+        &desc,
+    ));
+    assert(single_fault == gpu::INVALID_ARGUMENT,
+        "a forged nonempty null color slice faults before iteration: %s",
+        single_fault);
+    assert(vk::shader_reflection_validation_count(state) == shader_checks_before
+            && vk::pipeline_native_create_count(state) == native_before
+            && cache_entry_count(&device) == 0,
+        "single rejection performs no shader, native, or cache work");
+
+    gpu::DynamicGraphicsPipelineDesc[1] descs = { desc };
+    gpu::PipelineHandle[1] outputs = {{
+        .owner      = 7,
+        .index      = 8,
+        .generation = 9,
+    }};
+    gpu::PipelineHandle before = outputs[0];
+    assert(@catch(vk::vk_create_dynamic_graphics_pipelines(
+        device:        &device,
+        descs:         descs[..],
+        out_pipelines: outputs[..],
+    )) == gpu::INVALID_ARGUMENT,
+        "a dynamic batch rejects forged color storage transactionally");
+    assert(outputs[0] == before,
+        "batch rejection preserves caller output");
+    assert(vk::shader_reflection_validation_count(state) == shader_checks_before
+            && vk::pipeline_native_create_count(state) == native_before
+            && cache_entry_count(&device) == 0,
+        "batch rejection performs no shader, native, or cache work");
+}
+
+fn void dynamic_color_packets_share_one_live_pipeline_identity() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .backend                   = gpu::BackendKind.VULKAN,
+        .contract_validation       = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes  = true,
+        .enable_vulkan_validation  = true,
+        .application_name          = "gpu_dynamic_color_identity_test",
+    };
+    gpu::Device? maybe_device = create_dynamic_color_test_device(&runtime_desc);
+    if (catch err = maybe_device) {
+        assert(err == gpu::UNSUPPORTED_FEATURE,
+            "dynamic color creation fails only when live support is absent");
+        io::eprintfn(
+            "dynamic_color_packets_share_one_live_pipeline_identity: unsupported, skipping"
+        );
+        return;
+    }
+    gpu::Device device = maybe_device;
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::ColorWriteMask red_green = { .red, .green };
+    gpu::ColorTargetBlendState[5] packets = {
+        gpu::color_blend_disabled(),
+        gpu::alpha_blend(),
+        gpu::premultiplied_alpha_blend(),
+        gpu::additive_blend(),
+        gpu::color_blend_disabled(red_green),
+    };
+    gpu::ColorTargetState[1][5] immutable_colors;
+    gpu::GraphicsPipelineDesc[5] immutable_descs;
+    foreach (i, packet : packets) {
+        immutable_colors[i][0] = {
+            .format     = gpu::Format.RGBA8_UNORM,
+            .blend      = packet.blend,
+            .write_mask = packet.write_mask,
+        };
+        immutable_descs[i] = base_graphics_desc(
+            &shaders,
+            immutable_colors[i][..],
+        );
+    }
+    gpu::PipelineHandle[5] immutable_pipelines;
+    vk::VkDeviceState* state = cache_test_state(&device);
+    ulong native_before = vk::pipeline_native_create_count(state);
+
+    gpu::create_graphics_pipelines(
+        device:        &device,
+        descs:         immutable_descs[..],
+        out_pipelines: immutable_pipelines[..],
+    )!!;
+
+    assert(vk::pipeline_native_create_count(state) - native_before == 5,
+        "immutable blend and write variants compile distinct native pipelines");
+    gpu::ColorTargetFormat[1] formats = {{
+        .format = gpu::Format.RGBA8_UNORM,
+    }};
+    gpu::DynamicGraphicsPipelineDesc dynamic_desc = {
+        .vertex_shader   = shaders.vert,
+        .fragment_shader = shaders.frag,
+        .colors          = formats[..],
+    };
+    gpu::DynamicGraphicsPipelineDesc[5] dynamic_descs;
+    foreach (&desc : dynamic_descs) *desc = dynamic_desc;
+    gpu::PipelineHandle[5] dynamic_pipelines;
+    native_before = vk::pipeline_native_create_count(state);
+
+    gpu::create_dynamic_graphics_pipelines(
+        device:        &device,
+        descs:         dynamic_descs[..],
+        out_pipelines: dynamic_pipelines[..],
+    )!!;
+
+    assert(vk::pipeline_native_create_count(state) - native_before == 1,
+        "opaque, alpha, premultiplied, additive, and mask packets share one dynamic native pipeline");
+    foreach (i, pipeline : dynamic_pipelines) {
+        assert(pipeline.is_valid(), "every dynamic batch output is valid");
+        if (i > 0) {
+            assert(pipeline != dynamic_pipelines[0],
+                "dynamic batch aliases publish distinct owning handles");
+        }
+    }
+    assert(cache_entry_count(&device) == 6,
+        "five immutable identities and one dynamic identity remain separate");
+
+    foreach (pipeline : dynamic_pipelines) {
+        gpu::destroy_pipeline(&device, pipeline)!!;
+    }
+    foreach (pipeline : immutable_pipelines) {
+        gpu::destroy_pipeline(&device, pipeline)!!;
+    }
 }
