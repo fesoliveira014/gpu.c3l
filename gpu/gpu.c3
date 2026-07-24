@@ -1793,6 +1793,20 @@ fn void? cmd_set_graphics_state(
     return record.ops.set_graphics_state(record, state);
 }
 
+<* Replace complete blend and write-mask state for the selected dynamic-color
+   pipeline. FULL validates the entire packet before native mutation. *>
+fn void? cmd_set_color_state(
+    CommandList* commands,
+    ColorState* state,
+) {
+    gpu::internal::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    if (!gpu::internal::color_state_host_safe(state)) {
+        return INVALID_ARGUMENT~;
+    }
+    return record.ops.set_color_state(record, state);
+}
+
 <* End the active render pass without adding synchronization.
    Preconditions: a render pass is active.
    Always checked: bounded identity and authoritative render-pass phase. *>

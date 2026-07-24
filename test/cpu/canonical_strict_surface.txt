@@ -132,6 +132,7 @@ function gpu::cmd_draw_indirect
 function gpu::cmd_end_label
 function gpu::cmd_end_render_pass
 function gpu::cmd_fill_buffer
+function gpu::cmd_set_color_state
 function gpu::cmd_set_depth_state
 function gpu::cmd_set_graphics_state
 function gpu::cmd_set_raster_state

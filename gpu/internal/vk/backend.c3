@@ -71,11 +71,18 @@ struct VkGeneratedWorkDispatch {
     vk::PFN_vkDestroyIndirectCommandsLayoutEXT       destroy_layout;
 }
 
+struct VkDynamicColorDispatch {
+    vk::PFN_vkCmdSetColorBlendEnableEXT   set_blend_enable;
+    vk::PFN_vkCmdSetColorBlendEquationEXT set_blend_equation;
+    vk::PFN_vkCmdSetColorWriteMaskEXT     set_write_mask;
+}
+
 struct VkDeviceDispatch {
     VkDeviceDebugDispatch        debug;
     VkDevicePresentationDispatch presentation;
     VkDescriptorBufferDispatch   descriptor_buffer;
     VkGeneratedWorkDispatch      generated_work;
+    VkDynamicColorDispatch       dynamic_color;
 }
 
 fn VkInstanceDispatch load_vk_instance_dispatch(

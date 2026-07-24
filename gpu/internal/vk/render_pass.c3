@@ -28,6 +28,13 @@ struct LoweredGraphicsState {
     gpu::DepthState         depth;
 }
 
+struct LoweredColorState {
+    uint count;
+    uint[gpu::MAX_COLOR_ATTACHMENTS] blend_enables;
+    vk::ColorBlendEquationEXT[gpu::MAX_COLOR_ATTACHMENTS] blend_equations;
+    vk::ColorComponentFlags[gpu::MAX_COLOR_ATTACHMENTS] write_masks;
+}
+
 struct PreparedIndexedDraw {
     BoundPipeline   pipeline;
     ResolvedSpan    index;
@@ -1149,6 +1156,198 @@ fn void emit_graphics_state(
     emit_scissor(commands, &state.scissor);
     emit_raster_state(commands, &state.raster);
     emit_depth_state(commands, &state.depth);
+}
+
+fn LoweredColorState? lower_color_state(
+    gpu::ColorState* state,
+) @private {
+    if (state == null
+        || state.targets.len > gpu::MAX_COLOR_ATTACHMENTS
+        || (state.targets.len > 0 && state.targets.ptr == null)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    LoweredColorState lowered = {
+        .count = (uint)state.targets.len,
+    };
+    foreach (i, &target : state.targets) {
+        lowered.blend_enables[i] =
+            target.blend.enable ? vk::TRUE : vk::FALSE;
+        vk::ColorBlendEquationEXT* equation =
+            &lowered.blend_equations[i];
+        if (target.blend.enable) {
+            *equation = {
+                .src_color_blend_factor =
+                    blend_factor_to_vk(target.blend.src_color),
+                .dst_color_blend_factor =
+                    blend_factor_to_vk(target.blend.dst_color),
+                .color_blend_op =
+                    blend_op_to_vk(target.blend.color_op),
+                .src_alpha_blend_factor =
+                    blend_factor_to_vk(target.blend.src_alpha),
+                .dst_alpha_blend_factor =
+                    blend_factor_to_vk(target.blend.dst_alpha),
+                .alpha_blend_op =
+                    blend_op_to_vk(target.blend.alpha_op),
+            };
+        } else {
+            *equation = {
+                .src_color_blend_factor = vk::BlendFactor.ONE,
+                .dst_color_blend_factor = vk::BlendFactor.ZERO,
+                .color_blend_op         = vk::BlendOp.ADD,
+                .src_alpha_blend_factor = vk::BlendFactor.ONE,
+                .dst_alpha_blend_factor = vk::BlendFactor.ZERO,
+                .alpha_blend_op         = vk::BlendOp.ADD,
+            };
+        }
+        lowered.write_masks[i] =
+            color_write_mask_to_vk(target.write_mask);
+    }
+    return lowered;
+}
+
+fn void emit_color_state(
+    gpu::internal::CommandRecord* commands,
+    LoweredColorState* state,
+) @private {
+    if (state.count == 0) return;
+    VkCommandRecord* record = backend_command(commands);
+    VkDynamicColorDispatch* dispatch =
+        &command_device_state(commands).device_dispatch.dynamic_color;
+    dispatch.set_blend_enable(
+        record.command_buffer,
+        0,
+        state.count,
+        &state.blend_enables[0],
+    );
+    gpu::internal::note_command_native_call();
+    dispatch.set_blend_equation(
+        record.command_buffer,
+        0,
+        state.count,
+        &state.blend_equations[0],
+    );
+    gpu::internal::note_command_native_call();
+    dispatch.set_write_mask(
+        record.command_buffer,
+        0,
+        state.count,
+        &state.write_masks[0],
+    );
+    gpu::internal::note_command_native_call();
+}
+
+fn fault color_state_rejection(
+    VkDeviceState* state,
+    ZString field,
+    ZString invariant,
+) @private {
+    DynamicStateRejection rejection = {
+        .field     = field,
+        .invariant = invariant,
+    };
+    return report_dynamic_state_rejection(
+        state,
+        "cmd_set_color_state",
+        rejection,
+    );
+}
+
+fn LoweredColorState? checked_prepare_color_state(
+    VkDeviceState* state,
+    VkCommandRecord* record,
+    gpu::ColorState* color,
+) @private {
+    BoundPipeline* pipeline = active_bound_pipeline(
+        state:         state,
+        record:        record,
+        expected_kind: PipelineKind.GRAPHICS,
+        operation:     "cmd_set_color_state",
+    )!;
+    if (pipeline.color_profile != GraphicsColorProfile.DYNAMIC) {
+        return color_state_rejection(
+            state,
+            "pipeline",
+            "selected graphics pipeline must use dynamic color state",
+        )~;
+    }
+    if (color.targets.len != pipeline.render.color_count) {
+        return color_state_rejection(
+            state,
+            "ColorState.targets",
+            "target count must match the selected dynamic pipeline",
+        )~;
+    }
+    if (record.root.state
+            == gpu::internal::CommandState.RECORDING_RENDER_PASS) {
+        if (catch compatibility_fault =
+            validate_pipeline_render_compatibility(
+                pipeline,
+                &record.active_render,
+            )) {
+            return color_state_rejection(
+                state,
+                "pipeline",
+                "selected pipeline formats must match the active render pass",
+            )~;
+        }
+    }
+    foreach (i, &target : color.targets) {
+        if (!blend_state_valid(&target.blend)) {
+            return color_state_rejection(
+                state,
+                "ColorState.targets.blend",
+                "enabled blend factors and operations must be defined",
+            )~;
+        }
+        if (!color_write_mask_valid(target.write_mask)) {
+            return color_state_rejection(
+                state,
+                "ColorState.targets.write_mask",
+                "write mask may contain only RGBA channel bits",
+            )~;
+        }
+        if (target.blend.enable
+            && color_format_is_integer(
+                pipeline.render.color_formats[i],
+            )) {
+            return color_state_rejection(
+                state,
+                "ColorState.targets.blend.enable",
+                "integer color targets do not support blending",
+            )~;
+        }
+    }
+    return lower_color_state(color);
+}
+
+fn void? trusted_set_color_state(
+    gpu::internal::CommandRecord* commands,
+    gpu::ColorState* state,
+) {
+    if (state == null) return gpu::INVALID_ARGUMENT~;
+    VkCommandRecord* record = backend_command(commands);
+    if (!graphics_state_settable(record.root.state)) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    LoweredColorState color = lower_color_state(state)!;
+    emit_color_state(commands, &color);
+}
+
+fn void? checked_set_color_state(
+    gpu::internal::CommandRecord* commands,
+    gpu::ColorState* state,
+) {
+    if (commands == null) return gpu::INVALID_ARGUMENT~;
+    VkDeviceState* device = command_device_state(commands);
+    note_command_semantic_check(device);
+    VkCommandRecord* record = backend_command(commands);
+    if (!graphics_state_settable(record.root.state)) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    validate_graphics_state_queue(record)!;
+    LoweredColorState color =
+        checked_prepare_color_state(device, record, state)!;
+    emit_color_state(commands, &color);
 }
 
 fn void? trusted_set_graphics_state(

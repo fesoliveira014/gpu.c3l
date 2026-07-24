@@ -13,6 +13,67 @@ struct ReviewValidationCapture {
     uint errors;
 }
 
+struct DynamicColorCapture {
+    uint blend_enable_calls;
+    uint blend_equation_calls;
+    uint write_mask_calls;
+    uint first_attachment;
+    uint target_count;
+    uint[gpu::MAX_COLOR_ATTACHMENTS] blend_enables;
+    vk::ColorBlendEquationEXT[gpu::MAX_COLOR_ATTACHMENTS] blend_equations;
+    vk::ColorComponentFlags[gpu::MAX_COLOR_ATTACHMENTS] write_masks;
+}
+
+DynamicColorCapture* dynamic_color_capture;
+
+fn void capture_color_blend_enable(
+    vk::CommandBuffer command_buffer,
+    uint first_attachment,
+    uint target_count,
+    uint* blend_enables,
+) {
+    (void)command_buffer;
+    DynamicColorCapture* capture = dynamic_color_capture;
+    capture.blend_enable_calls++;
+    capture.first_attachment = first_attachment;
+    capture.target_count = target_count;
+    for (uint i = 0; i < target_count; i++) {
+        capture.blend_enables[i] = blend_enables[i];
+    }
+}
+
+fn void capture_color_blend_equation(
+    vk::CommandBuffer command_buffer,
+    uint first_attachment,
+    uint target_count,
+    vk::ColorBlendEquationEXT* blend_equations,
+) {
+    (void)command_buffer;
+    DynamicColorCapture* capture = dynamic_color_capture;
+    capture.blend_equation_calls++;
+    assert(capture.first_attachment == first_attachment
+        && capture.target_count == target_count);
+    for (uint i = 0; i < target_count; i++) {
+        capture.blend_equations[i] = blend_equations[i];
+    }
+}
+
+fn void capture_color_write_mask(
+    vk::CommandBuffer command_buffer,
+    uint first_attachment,
+    uint target_count,
+    vk::ColorComponentFlags* write_masks,
+) {
+    (void)command_buffer;
+    DynamicColorCapture* capture = dynamic_color_capture;
+    capture.write_mask_calls++;
+    assert(capture.first_attachment == first_attachment
+        && capture.target_count == target_count);
+    for (uint i = 0; i < target_count; i++) {
+        capture.write_masks[i] = write_masks[i];
+    }
+}
+
 fn void capture_review_validation_error(
     gpu::DebugMessage* message,
     void* user_data,
@@ -241,6 +302,64 @@ fn bool observation_has_no_emissions(
         && observation.scissor_emissions == 0
         && observation.raster_state_emissions == 0
         && observation.depth_state_emissions == 0;
+}
+
+fn vk::VkDynamicColorDispatch install_dynamic_color_capture(
+    vk::VkDeviceState* state,
+    DynamicColorCapture* capture,
+) {
+    vk::VkDynamicColorDispatch original =
+        state.device_dispatch.dynamic_color;
+    dynamic_color_capture = capture;
+    state.device_dispatch.dynamic_color = {
+        .set_blend_enable   = &capture_color_blend_enable,
+        .set_blend_equation = &capture_color_blend_equation,
+        .set_write_mask     = &capture_color_write_mask,
+    };
+    return original;
+}
+
+fn void select_dynamic_color_pipeline(
+    vk::VkCommandRecord* record,
+    gpu::Format[] formats,
+) {
+    record.logical_pipeline = {
+        .handle = {
+            .owner      = 1,
+            .index      = 1,
+            .generation = 1,
+        },
+        .kind          = vk::PipelineKind.GRAPHICS,
+        .color_profile = vk::GraphicsColorProfile.DYNAMIC,
+    };
+    record.logical_pipeline.render.color_count = (uint)formats.len;
+    foreach (i, format : formats) {
+        record.logical_pipeline.render.color_formats[i] = format;
+    }
+}
+
+fn bool dynamic_color_captures_match(
+    DynamicColorCapture* first,
+    DynamicColorCapture* second,
+) {
+    if (first.blend_enable_calls != second.blend_enable_calls
+        || first.blend_equation_calls != second.blend_equation_calls
+        || first.write_mask_calls != second.write_mask_calls
+        || first.first_attachment != second.first_attachment
+        || first.target_count != second.target_count) return false;
+    for (uint i = 0; i < first.target_count; i++) {
+        vk::ColorBlendEquationEXT* a = &first.blend_equations[i];
+        vk::ColorBlendEquationEXT* b = &second.blend_equations[i];
+        if (first.blend_enables[i] != second.blend_enables[i]
+            || first.write_masks[i] != second.write_masks[i]
+            || a.src_color_blend_factor != b.src_color_blend_factor
+            || a.dst_color_blend_factor != b.dst_color_blend_factor
+            || a.color_blend_op != b.color_blend_op
+            || a.src_alpha_blend_factor != b.src_alpha_blend_factor
+            || a.dst_alpha_blend_factor != b.dst_alpha_blend_factor
+            || a.alpha_blend_op != b.alpha_blend_op) return false;
+    }
+    return true;
 }
 
 fn gpu::TextureHandle make_render_validation_target(
@@ -1752,4 +1871,225 @@ fn void trusted_dynamic_state_bypasses_checked_device_bounds() @test {
         &trusted_observation.viewport,
         &over_limit,
     ), "TRUSTED preserves the over-limit native viewport");
+}
+
+fn void dynamic_color_packet_emits_three_heterogeneous_arrays() @test {
+    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+    DynamicColorCapture capture;
+    vk::VkDynamicColorDispatch original =
+        install_dynamic_color_capture(fixture.state, &capture);
+    defer {
+        fixture.state.device_dispatch.dynamic_color = original;
+        dynamic_color_capture = null;
+    }
+    vk::VkCommandRecord* record =
+        vk::resolve_command(&fixture.commands)!!;
+    gpu::Format[2] formats = {
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA16_FLOAT,
+    };
+    select_dynamic_color_pipeline(record, formats[..]);
+    gpu::ColorWriteMask red_alpha = { .red, .alpha };
+    gpu::ColorTargetBlendState[2] targets = {
+        gpu::color_blend_disabled(red_alpha),
+        gpu::alpha_blend(),
+    };
+    gpu::ColorWriteMask green_blue = { .green, .blue };
+    targets[1].write_mask = green_blue;
+    gpu::ColorState color = { .targets = targets[..] };
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_set_color_state(&fixture.commands, &color)!!;
+
+    assert(capture.blend_enable_calls == 1
+        && capture.blend_equation_calls == 1
+        && capture.write_mask_calls == 1
+        && capture.first_attachment == 0
+        && capture.target_count == 2,
+        "one packet emits exactly three arrays over the complete target range");
+    assert(capture.blend_enables[0] == vk::FALSE
+        && capture.blend_enables[1] == vk::TRUE,
+        "blend enables preserve heterogeneous target order");
+    vk::ColorBlendEquationEXT* disabled = &capture.blend_equations[0];
+    assert(disabled.src_color_blend_factor == vk::BlendFactor.ONE
+        && disabled.dst_color_blend_factor == vk::BlendFactor.ZERO
+        && disabled.color_blend_op == vk::BlendOp.ADD
+        && disabled.src_alpha_blend_factor == vk::BlendFactor.ONE
+        && disabled.dst_alpha_blend_factor == vk::BlendFactor.ZERO
+        && disabled.alpha_blend_op == vk::BlendOp.ADD,
+        "disabled blend lowers to the canonical opaque equation");
+    vk::ColorBlendEquationEXT* alpha = &capture.blend_equations[1];
+    assert(alpha.src_color_blend_factor == vk::BlendFactor.SRC_ALPHA
+        && alpha.dst_color_blend_factor
+            == vk::BlendFactor.ONE_MINUS_SRC_ALPHA
+        && alpha.color_blend_op == vk::BlendOp.ADD
+        && alpha.src_alpha_blend_factor == vk::BlendFactor.ONE
+        && alpha.dst_alpha_blend_factor
+            == vk::BlendFactor.ONE_MINUS_SRC_ALPHA
+        && alpha.alpha_blend_op == vk::BlendOp.ADD,
+        "enabled blend factors and operations lower exactly");
+    vk::ColorComponentFlags red_alpha_native =
+        (vk::ColorComponentFlags)(
+            (uint)vk::ColorComponentFlagBits.R_BIT
+            | (uint)vk::ColorComponentFlagBits.A_BIT
+        );
+    vk::ColorComponentFlags green_blue_native =
+        (vk::ColorComponentFlags)(
+            (uint)vk::ColorComponentFlagBits.G_BIT
+            | (uint)vk::ColorComponentFlagBits.B_BIT
+        );
+    assert(capture.write_masks[0] == red_alpha_native
+        && capture.write_masks[1] == green_blue_native,
+        "write masks preserve heterogeneous target order");
+    assert(gpu::command_resolution_stats().native_commands == 3,
+        "one nonempty packet records exactly three native commands");
+}
+
+fn void trusted_and_full_color_packets_lower_identically() @test {
+    DynamicStateFixture trusted = make_dynamic_state_fixture_before_pass(
+        gpu::ContractValidation.TRUSTED,
+    );
+    defer destroy_dynamic_state_fixture(&trusted);
+    DynamicStateFixture checked = make_dynamic_state_fixture_before_pass(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&checked);
+    gpu::Format[2] formats = {
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA16_FLOAT,
+    };
+    select_dynamic_color_pipeline(
+        vk::resolve_command(&trusted.commands)!!,
+        formats[..],
+    );
+    select_dynamic_color_pipeline(
+        vk::resolve_command(&checked.commands)!!,
+        formats[..],
+    );
+    gpu::ColorTargetBlendState[2] targets = {
+        gpu::premultiplied_alpha_blend(),
+        gpu::additive_blend(),
+    };
+    gpu::ColorState color = { .targets = targets[..] };
+    DynamicColorCapture trusted_capture;
+    vk::VkDynamicColorDispatch trusted_original =
+        install_dynamic_color_capture(
+            trusted.state,
+            &trusted_capture,
+        );
+    gpu::cmd_set_color_state(&trusted.commands, &color)!!;
+    trusted.state.device_dispatch.dynamic_color = trusted_original;
+
+    DynamicColorCapture checked_capture;
+    vk::VkDynamicColorDispatch checked_original =
+        install_dynamic_color_capture(
+            checked.state,
+            &checked_capture,
+        );
+    defer {
+        checked.state.device_dispatch.dynamic_color = checked_original;
+        dynamic_color_capture = null;
+    }
+    gpu::cmd_set_color_state(&checked.commands, &color)!!;
+
+    assert(dynamic_color_captures_match(
+        &trusted_capture,
+        &checked_capture,
+    ), "TRUSTED and FULL emit identical native color arrays");
+}
+
+fn void zero_target_color_packet_emits_no_native_command() @test {
+    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+    DynamicColorCapture capture;
+    vk::VkDynamicColorDispatch original =
+        install_dynamic_color_capture(fixture.state, &capture);
+    defer {
+        fixture.state.device_dispatch.dynamic_color = original;
+        dynamic_color_capture = null;
+    }
+    gpu::Format[] formats;
+    select_dynamic_color_pipeline(
+        vk::resolve_command(&fixture.commands)!!,
+        formats[..],
+    );
+    gpu::ColorState color;
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_set_color_state(&fixture.commands, &color)!!;
+
+    assert(capture.blend_enable_calls == 0
+        && capture.blend_equation_calls == 0
+        && capture.write_mask_calls == 0
+        && gpu::command_resolution_stats().native_commands == 0,
+        "a depth-only dynamic domain emits no color command");
+}
+
+fn void full_color_validation_rejects_before_mutation() @test {
+    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
+        gpu::ContractValidation.FULL,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+    DynamicColorCapture capture;
+    vk::VkDynamicColorDispatch original =
+        install_dynamic_color_capture(fixture.state, &capture);
+    defer {
+        fixture.state.device_dispatch.dynamic_color = original;
+        dynamic_color_capture = null;
+    }
+    vk::VkCommandRecord* record =
+        vk::resolve_command(&fixture.commands)!!;
+    gpu::Format[2] formats = {
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.R8_UINT,
+    };
+    select_dynamic_color_pipeline(record, formats[..]);
+    vk::BoundPipeline pipeline_before = record.logical_pipeline;
+    gpu::internal::CommandState phase_before = record.root.state;
+    gpu::ColorTargetBlendState[2] targets = {
+        gpu::color_blend_disabled(),
+        gpu::alpha_blend(),
+    };
+    gpu::ColorState color = { .targets = targets[..] };
+
+    gpu::reset_command_resolution_stats();
+    assert(@catch(gpu::cmd_set_color_state(
+        &fixture.commands,
+        &color,
+    )) == gpu::INVALID_ARGUMENT,
+        "FULL rejects blending on an integer target");
+    assert(capture.blend_enable_calls == 0
+        && capture.blend_equation_calls == 0
+        && capture.write_mask_calls == 0
+        && gpu::command_resolution_stats().native_commands == 0,
+        "late-target validation completes before the first native call");
+    assert(record.root.state == phase_before
+        && record.logical_pipeline.handle == pipeline_before.handle
+        && record.logical_pipeline.kind == pipeline_before.kind
+        && record.logical_pipeline.color_profile
+            == pipeline_before.color_profile
+        && record.logical_pipeline.render.color_count
+            == pipeline_before.render.color_count
+        && record.logical_pipeline.render.color_formats[0]
+            == pipeline_before.render.color_formats[0]
+        && record.logical_pipeline.render.color_formats[1]
+            == pipeline_before.render.color_formats[1],
+        "rejection preserves command phase and selected pipeline state");
+
+    targets[1] = gpu::color_blend_disabled();
+    record.logical_pipeline.color_profile =
+        vk::GraphicsColorProfile.IMMUTABLE;
+    assert(@catch(gpu::cmd_set_color_state(
+        &fixture.commands,
+        &color,
+    )) == gpu::INVALID_ARGUMENT
+        && capture.blend_enable_calls == 0
+        && capture.blend_equation_calls == 0
+        && capture.write_mask_calls == 0,
+        "FULL rejects an immutable selected pipeline before native mutation");
 }

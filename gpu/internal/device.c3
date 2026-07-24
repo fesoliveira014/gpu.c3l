@@ -112,6 +112,7 @@ alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, Pipelin
 alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, DepthState*);
 alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, DynamicRasterState*);
 alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, GraphicsState*);
+alias CmdSetColorStateFn @private            = fn void? (CommandRecord*, ColorState*);
 alias CmdDispatchFn @private                 = fn void? (CommandRecord*, GpuAddress, Vec3u);
 alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, RenderPassDesc*);
 alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandRecord*, RenderPassDesc*, GraphicsState*);
@@ -256,6 +257,7 @@ struct CommandOps @private {
     CmdSetDepthStateFn            set_depth_state;
     CmdSetRasterStateFn           set_raster_state;
     CmdSetGraphicsStateFn         set_graphics_state;
+    CmdSetColorStateFn            set_color_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdBeginRenderPassWithStateFn begin_render_pass_with_state;

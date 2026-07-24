@@ -2320,6 +2320,8 @@ fn BoundPipeline? lower_bound_pipeline(
         .generated_dispatch_layout = slot.generated_dispatch_layout,
         .cache_entry               = slot.entry,
         .kind                      = (PipelineKind)entry.key.kind,
+        .color_profile             =
+            (GraphicsColorProfile)entry.key.color_profile,
         .render                    = pipeline_render_compatibility(&entry.key),
     };
 }
@@ -2380,6 +2382,7 @@ fn void? record_bound_pipeline(
             .generated_dispatch_layout = bound.generated_dispatch_layout,
             .cache_entry               = bound.cache_entry,
             .kind                      = bound.kind,
+            .color_profile             = bound.color_profile,
             .render                    = bound.render,
         };
     }

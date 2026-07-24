@@ -248,6 +248,7 @@ fn void pin_commands_and_completion() {
     };
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(1, 1) ?? {};
+    gpu::ColorState color_state = {};
     graphics_state.raster = raster;
     graphics_state.depth = depth;
     gpu::SubmitDesc submit = {};
@@ -310,6 +311,7 @@ fn void pin_commands_and_completion() {
         &graphics_state,
     );
     (void)gpu::cmd_set_graphics_state(&commands, &graphics_state);
+    (void)gpu::cmd_set_color_state(&commands, &color_state);
     (void)gpu::cmd_set_depth_state(&commands, &depth);
     (void)gpu::cmd_set_raster_state(&commands, &raster);
     (void)gpu::cmd_set_viewport(&commands, &viewport);

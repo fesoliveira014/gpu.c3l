@@ -24,6 +24,7 @@ struct BoundPipeline {
     vk::IndirectCommandsLayoutEXT     generated_dispatch_layout;
     uint                              cache_entry;
     PipelineKind                      kind;
+    GraphicsColorProfile              color_profile;
     RenderCompatibility               render;
 }
 
@@ -33,6 +34,7 @@ struct NativePipelineBinding {
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
     uint                          cache_entry;
     PipelineKind                  kind;
+    GraphicsColorProfile          color_profile;
     RenderCompatibility            render;
 }
 
