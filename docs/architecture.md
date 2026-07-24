@@ -210,15 +210,20 @@ Public shape:
 
 ```text
 Device                         (slot | generation | reserved)
+request_resource_agnostic_texture_sync(DeviceRequest) -> DeviceRequest?
+request_dynamic_color_state(DeviceRequest) -> DeviceRequest?
 get_device_backend(Device*)    -> BackendKind?
 get_device_caps(Device*)       -> DeviceCaps?
 ```
 
 Device requests compose strict semantics with independent queue, presentation,
-and resource-agnostic texture-synchronization contributions. The last is
-selected only when explicitly requested and fully enabled; its result is
-published as `DeviceCaps.resource_agnostic_texture_sync`. Unrequested devices
-retain classic native texture layouts.
+resource-agnostic texture-synchronization, and dynamic-color contributions.
+Each optional capability is selected only when explicitly requested and fully
+enabled. The results are published as
+`DeviceCaps.resource_agnostic_texture_sync` and
+`DeviceCaps.dynamic_color_state`. Unrequested devices retain classic native
+texture layouts and immutable pipeline color state. Immutable pipelines remain
+available on every strict device and are the fallback application path.
 
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
@@ -491,14 +496,23 @@ Pipelines are immutable shader execution objects. Creation is split by kind:
 ```text
 create_compute_pipeline(device, ComputePipelineDesc)    -> PipelineHandle?
 create_graphics_pipeline(device, GraphicsPipelineDesc)  -> PipelineHandle?
+create_dynamic_graphics_pipeline(device, DynamicGraphicsPipelineDesc)
+                                                        -> PipelineHandle?
 create_compute_pipelines(device, descriptions, outputs)  -> void?
 create_graphics_pipelines(device, descriptions, outputs) -> void?
+create_dynamic_graphics_pipelines(device, descriptions, outputs)
+                                                        -> void?
 ```
 
-Graphics pipeline identity includes shaders, per-target format/blend/write-mask
-state, depth format, sample count, and polygon mode. Topology, cull mode,
-front face, depth bias, depth state, viewport, and scissor are command-time
-state. Compute pipelines share one device-owned `RootPush` layout and, when
+Graphics pipeline identity has an explicit color profile. The immutable profile
+includes shaders, per-target format/blend/write-mask state, depth format,
+sample count, and polygon mode. The dynamic profile includes the same
+dimensions except blend and write mask; those are complete caller-owned command
+packets and never enter the cache key. The profile tag itself prevents an
+immutable descriptor from aliasing a dynamic descriptor. Format, sample count,
+and polygon mode remain distinct in both profiles. Topology, cull mode, front
+face, depth bias, depth state, viewport, and scissor are command-time state.
+Compute pipelines share one device-owned `RootPush` layout and, when
 generated work is available, one generated-dispatch layout. Batch creation
 reuses temporary modules by shader ID, deduplicates pipeline identity, and
 publishes every handle transactionally. Pipeline-cache entries own refcounted

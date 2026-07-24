@@ -353,6 +353,46 @@ Running example: `shadow_mapping` (3×3 PCF).
 
 Goal: G-buffer in one pass.
 
+Keep `GraphicsPipelineDesc` as the default when blend/write state is stable. To
+reuse one format-compatible pipeline across explicit color packets, opt in
+before device creation:
+
+```c3
+gpu::DeviceRequest request = gpu::request_dynamic_color_state(
+    gpu::strict_device_request(),
+)!;
+gpu::DeviceRequestSupport support =
+    gpu::supports_device_request(&adapter, &request)!;
+if (!support.supported) { /* keep the immutable path */ }
+gpu::Device device = gpu::create_device(&adapter, &request)!;
+
+gpu::ColorTargetFormat[3] formats = {
+    { .format = albedo_format },
+    { .format = normal_format },
+    { .format = position_format },
+};
+gpu::DynamicGraphicsPipelineDesc pipeline_desc = {
+    .vertex_shader   = vertex,
+    .fragment_shader = fragment,
+    .colors          = formats[..],
+};
+gpu::PipelineHandle pipeline =
+    gpu::create_dynamic_graphics_pipeline(&device, &pipeline_desc)!;
+
+gpu::ColorTargetBlendState[3] targets;
+gpu::ColorState opaque = gpu::uniform_color_state(
+    targets[..],
+    gpu::color_blend_disabled(),
+);
+gpu::cmd_bind_pipeline(&cmd, pipeline)!;
+gpu::cmd_set_color_state(&cmd, &opaque)!;
+```
+
+The target array is caller-owned and may be reused after the call. Record a
+complete packet after selecting a compatible dynamic pipeline and before its
+first draw. Compatible pass boundaries preserve it; record again only when the
+application wants a new state.
+
 ```c3
 gpu::AttachmentViewHandle albedo_view = gpu::create_attachment_view(
     &device,

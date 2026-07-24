@@ -421,9 +421,9 @@ Test names describe behavior, not roadmap or ticket labels.
 | Commands | fixed bounded token size and deterministic fabricated/stale/foreign/wrong-phase/consumed diagnostics; one authoritative state through begin/end/submit/rollback/discard/retirement; one backend claim with exact linear bounded resolutions and duplicate visits; authoritative record-queue validation without allocator reproof; retryable failure; intrusive exact-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; checked regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; transactional convenience rejection without native or command-state mutation; exact ten-command complete packets; state reuse across pass boundaries and reset on command-buffer reuse; optional partial updates; checked regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; and pipeline-alias persistence. |
+| Graphics | offscreen clear/draw/readback; immutable/dynamic parity for opaque, alpha, premultiplied, additive, and masked writes; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; transactional convenience rejection without native or command-state mutation; exact ten-command graphics and three-command color packets; state reuse across pass boundaries and reset on command-buffer reuse; optional partial updates; checked regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
-| Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, per-target immutable identity, and singleton compute/generated-dispatch layouts. |
+| Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, immutable blend/write separation, five-state dynamic-color aliasing, profile separation, transactional batches, and singleton compute/generated-dispatch layouts. |
 | Threading | one explicit allocator per concurrent worker, same-allocator bounded-full rejection, synchronized allocator migration and executable handoff, one-thread-at-a-time alias confinement, no device-wide recording lock, no temp-pool setup, historical worker churn, private command-buffer/generated-scratch reuse, parallel record, same-queue submit/present serialization, distinct-queue submission concurrency, and prior-point retirement across a later publication gap. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
@@ -538,6 +538,13 @@ layout through the bound pipeline slot. Validation-mode lifetime coverage also
 proves a recording command blocks public pipeline destruction, then continues
 from its cached native snapshot before discard releases ownership.
 
+Injected native pipeline and dynamic-color dispatch arrays are the direct
+native-call oracle: they verify the declared EDS3 state set and exact emitted
+array contents without relying on driver interpretation. `PipelineKey` is
+process-local and is never serialized. Profile equality/inequality tests cover
+its exact bytes and hash contract, while opaque driver-cache export/import smoke
+tests cover the only persistent cache representation.
+
 `vk_performance` runs complete warm
 begin/bind/dispatch/end and render-pass operations against existing pipelines,
 shaders, descriptor state, texture views, and allocations. Command-buffer reset
@@ -559,6 +566,12 @@ layout snapshot to remain unchanged. No compile-time exact member-shape guard
 is used for private pipeline or command-record state; semantic, resolution,
 and native-emission outcomes remain the authority as those representations
 change.
+
+Dynamic-color work coverage selects a requested live device when available and
+otherwise reports deterministic unsupported capability. On a supported device,
+one packet and an identical replacement each require exactly three native
+calls, one bounded command resolution, and zero host/VMA allocation, resource
+lookup/lock, native pipeline creation, or pipeline/cache lookup.
 
 The benchmark runner builds thirteen executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
@@ -704,6 +717,7 @@ Run the behavioral performance targets directly with:
 
 ```sh
 c3c test vk_performance --path test --test-show-output
+c3c test vk_offscreen --path test --test-show-output
 c3c test vk_indirect --path test --test-show-output
 c3c test vk_pipeline_cache --path test --test-show-output
 c3c test vk_queue --path test --test-show-output

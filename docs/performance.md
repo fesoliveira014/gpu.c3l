@@ -148,7 +148,7 @@ The suite covers:
 | `command_record_bench` | Bounded-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording across the validation/tracking matrix; 1/16/256/4,096 command lists; exact native output; one lookup per accepted command and zero forbidden warm work |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact bounded resolution, duplicate-visit, claim, queue-serialization, native-submit, and forbidden-work evidence |
-| `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
+| `pipeline_cache_bench` | Dynamic raster and five-state dynamic-color matrix aliasing, state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
 | `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; zero-through-eight sampler probes at occupancy 8/64/1,024/65,536; upper-bounded texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
 | `upload_throughput_bench` | Explicit uploads at 4 KiB, 256 KiB, and 4 MiB across 1/2/4 workers |
@@ -180,6 +180,7 @@ exact zero. Timings and unpinned generated assembly are advisory.
 | Cold allocator creation | Host allocations, exactly one exact-family command-pool create, one complete native command-buffer allocation call, and configured buffer count |
 | Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and pre-bind `CommandResolutionStats` |
 | Warm minimal begin + state packet + draw | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, exactly one native begin per pass, exactly ten dynamic-state commands per explicit complete packet, and native draw emission |
+| Warm dynamic-color packet | Exactly three native array commands, one bounded command resolution, and zero allocation, resource locks, pipeline creation, pipeline/cache lookup, or identical-packet suppression |
 | Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
@@ -271,6 +272,13 @@ probe, and zero shader probes, byte comparisons, and clones after interning.
 Collision and distinct-storage tests bound intern probes and compared bytes
 while preserving exact identity and clone outcomes. Boundary elapsed time is
 advisory.
+
+The same advisory target creates opaque, alpha, premultiplied-alpha, additive,
+and masked-write aliases through one format-only dynamic descriptor. It asserts
+one cache entry and one native pipeline, then records all five packets and
+asserts three native commands per packet with no post-bind pipeline lookup.
+Blocking `vk_performance` coverage snapshots recording, reference, pipeline,
+and resolution counters around repeated identical packets; timing never gates.
 
 ### Expectation changes and generated assembly
 
