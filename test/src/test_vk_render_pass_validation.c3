@@ -792,6 +792,68 @@ fn void distinct_graphics_cache_entries_emit_distinct_binds() @test {
         "distinct graphics cache entries emit two native binds");
 }
 
+fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    gpu::TextureHandle first = make_render_validation_target(
+        &device,
+        gpu::Format.RGBA8_UNORM,
+    );
+    defer gpu::destroy_texture(&device, first)!!;
+    gpu::TextureHandle second = make_render_validation_target(
+        &device,
+        gpu::Format.RGBA8_UNORM,
+    );
+    defer gpu::destroy_texture(&device, second)!!;
+    gpu::TextureHandle third = make_render_validation_target(
+        &device,
+        gpu::Format.RGBA8_UNORM,
+    );
+    defer gpu::destroy_texture(&device, third)!!;
+    gpu::AttachmentViewHandle[3] views = {
+        create_test_attachment_view(&device, first)!!,
+        create_test_attachment_view(&device, second)!!,
+        create_test_attachment_view(&device, third)!!,
+    };
+    defer destroy_test_attachment_view(&device, &views[0])!!;
+    defer destroy_test_attachment_view(&device, &views[1])!!;
+    defer destroy_test_attachment_view(&device, &views[2])!!;
+    gpu::ColorTargetDesc[1] colors = {{ .view = views[0] }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    gpu::GraphicsState graphics_state =
+        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    record_val_target_to_attach(&commands, first);
+    record_val_target_to_attach(&commands, second);
+    record_val_target_to_attach(&commands, third);
+
+    gpu::reset_command_resolution_stats();
+    for (uint i = 0; i < views.len; i++) {
+        colors[0].view = views[i];
+        gpu::cmd_begin_render_pass(&commands, &pass, &graphics_state)!!;
+        if (i == 0) {
+            gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+        }
+        gpu::cmd_end_render_pass(&commands)!!;
+    }
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 1,
+        "the same graphics pipeline across passes emits one native bind");
+}
+
 fn void distinct_compute_cache_entries_emit_distinct_binds() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
