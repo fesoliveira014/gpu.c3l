@@ -17,6 +17,11 @@ struct RenderCompatibility {
     gpu::SampleCount                        sample_count;
 }
 
+struct ColorCompatibility {
+    uint                                    count;
+    gpu::Format[gpu::MAX_COLOR_ATTACHMENTS] formats;
+}
+
 struct BoundPipeline {
     gpu::PipelineHandle               handle;
     vk::Pipeline                      pipeline;
@@ -57,6 +62,8 @@ struct VkCommandRecord {
     gpu::internal::CommandRecord* next_submitted;
     RenderCompatibility          active_render;
     bool                         graphics_state_initialized;
+    bool                         color_state_initialized;
+    ColorCompatibility           color_state;
     BoundPipeline                logical_pipeline;
     NativePipelineBinding        native_graphics_pipeline;
     NativePipelineBinding        native_compute_pipeline;

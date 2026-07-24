@@ -2395,6 +2395,22 @@ fn void? record_bound_pipeline(
     record.logical_pipeline = *bound;
 }
 
+fn void update_checked_color_state_for_bind(
+    VkCommandRecord* record,
+    BoundPipeline* bound,
+) @private {
+    if (!record.color_state_initialized
+        || bound.kind != PipelineKind.GRAPHICS
+        || bound.color_profile != GraphicsColorProfile.DYNAMIC) return;
+    if (!color_compatibility_matches(
+        &record.color_state,
+        &bound.render,
+    )) {
+        record.color_state_initialized = false;
+        record.color_state = {};
+    }
+}
+
 fn void? trusted_bind_pipeline(
     gpu::internal::CommandRecord* commands,
     gpu::PipelineHandle pipeline,
@@ -2425,6 +2441,10 @@ fn void? checked_bind_pipeline(
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
     record_bound_pipeline(commands, &bound)!;
+    update_checked_color_state_for_bind(
+        backend_command(commands),
+        &bound,
+    );
 }
 
 fn void? checked_tracking_bind_pipeline(
@@ -2441,6 +2461,7 @@ fn void? checked_tracking_bind_pipeline(
     );
     track_bound_pipeline(commands, &bound)!;
     record_bound_pipeline(commands, &bound)!;
+    update_checked_color_state_for_bind(record, &bound);
 }
 
 fn void push_compute_root(

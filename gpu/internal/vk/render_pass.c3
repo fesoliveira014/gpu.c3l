@@ -1158,6 +1158,29 @@ fn void emit_graphics_state(
     emit_depth_state(commands, &state.depth);
 }
 
+fn ColorCompatibility color_compatibility(
+    RenderCompatibility* render,
+) @private {
+    ColorCompatibility compatibility = {
+        .count = render.color_count,
+    };
+    for (uint i = 0; i < render.color_count; i++) {
+        compatibility.formats[i] = render.color_formats[i];
+    }
+    return compatibility;
+}
+
+fn bool color_compatibility_matches(
+    ColorCompatibility* color,
+    RenderCompatibility* render,
+) @private {
+    if (color.count != render.color_count) return false;
+    for (uint i = 0; i < color.count; i++) {
+        if (color.formats[i] != render.color_formats[i]) return false;
+    }
+    return true;
+}
+
 fn LoweredColorState? lower_color_state(
     gpu::ColorState* state,
 ) @private {
@@ -1348,6 +1371,9 @@ fn void? checked_set_color_state(
     LoweredColorState color =
         checked_prepare_color_state(device, record, state)!;
     emit_color_state(commands, &color);
+    record.color_state =
+        color_compatibility(&record.logical_pipeline.render);
+    record.color_state_initialized = true;
 }
 
 fn void? trusted_set_graphics_state(
@@ -1543,6 +1569,21 @@ fn void? checked_set_raster_state(
     return vk_cmd_set_raster_state(commands, raster);
 }
 
+fn void? validate_dynamic_color_execution_state(
+    VkCommandRecord* record,
+    BoundPipeline* pipeline,
+) @private {
+    if (pipeline.color_profile != GraphicsColorProfile.DYNAMIC
+        || pipeline.render.color_count == 0) return;
+    if (!record.color_state_initialized
+        || !color_compatibility_matches(
+            &record.color_state,
+            &pipeline.render,
+        )) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+}
+
 fn BoundPipeline*? validate_graphics_execution_state(
     VkDeviceState* state,
     VkCommandRecord* record,
@@ -1559,6 +1600,7 @@ fn BoundPipeline*? validate_graphics_execution_state(
     if (!record.graphics_state_initialized) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
+    validate_dynamic_color_execution_state(record, pipeline)!;
     return pipeline;
 }
 
@@ -2584,7 +2626,30 @@ fn BoundPipeline*? validate_generated_graphics_execution_state(
     if (!record.graphics_state_initialized) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
+    validate_dynamic_color_execution_state(record, pipeline)!;
     return pipeline;
+}
+
+fn void? validate_color_execution_state_for_test(
+    VkDeviceState* state,
+    VkCommandRecord* record,
+    bool generated,
+) @if(env::TESTING) {
+    if (generated) {
+        (void)validate_generated_graphics_execution_state(
+            state,
+            record,
+            "cmd_draw_generated",
+        )!;
+        return;
+    }
+    (void)validate_graphics_execution_state(
+        state:         state,
+        record:        record,
+        vertex_root:   {},
+        fragment_root: {},
+        operation:     "cmd_draw",
+    )!;
 }
 
 fn vk::ShaderStageFlags generated_graphics_shader_stages() =>
