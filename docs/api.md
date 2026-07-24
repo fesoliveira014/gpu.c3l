@@ -863,10 +863,15 @@ or persist it. Stage, entry point, length, and exact bytes participate in shader
 identity; `debug_name` does not. One prepared value may be reused across
 pipelines and devices. Pipeline creation reflects only the selected entry point.
 It permits no push-constant block, or requires one declared block to match the
-selected stage's generated root ABI exactly; reflected names are ignored. A
-reflection mismatch returns `SHADER_INVALID` before native shader creation or
-pipeline publication. Supplying valid shader code in the wrong pipeline role
-returns `INVALID_ARGUMENT`. There is no public shader-module handle.
+selected stage's generated root ABI exactly. Physical offset, size, complete
+member coverage, order, and 64-bit width are fixed. The supported authoring
+policy additionally requires flat unsigned integer root members; signed,
+aggregate, and physical-reference members remain noncanonical and rejected even
+when a particular SPIR-V form is byte-compatible. Reflected names are ignored.
+A reflection mismatch returns `SHADER_INVALID` before native shader creation or
+pipeline publication, and diagnostic-enabled runtimes identify the incompatible
+property. Supplying valid shader code in the wrong pipeline role returns
+`INVALID_ARGUMENT`. There is no public shader-module handle.
 
 ### Compute pipelines
 
