@@ -1992,15 +1992,34 @@ fn void? track_buffer_texture_copy_references(
     track_texture_command_reference(state, record, copy.texture_handle)!;
 }
 
+fn vk::ImageLayout texture_copy_layout(
+    TextureSlot* texture,
+    bool destination,
+    bool resource_agnostic,
+) {
+    return texture_layout_to_vk(
+        layout: destination
+            ? gpu::TextureLayout.TRANSFER_DESTINATION
+            : gpu::TextureLayout.TRANSFER_SOURCE,
+        format:            texture.format,
+        resource_agnostic: resource_agnostic,
+    );
+}
+
 fn void record_buffer_to_texture_copy(
     gpu::internal::CommandRecord* commands,
     PreparedBufferTextureCopy* copy,
 ) {
+    VkDeviceState* state = command_device_state(commands);
     vk::cmd_copy_buffer_to_image(
         command_buffer:  backend_command(commands).command_buffer,
         src_buffer:      copy.buffer.slot.buffer,
         dst_image:       copy.texture.image,
-        dst_image_layout: vk::ImageLayout.TRANSFER_DST_OPTIMAL,
+        dst_image_layout: texture_copy_layout(
+            copy.texture,
+            true,
+            state.caps.resource_agnostic_texture_sync,
+        ),
         region_count:    1,
         p_regions:       &copy.region,
     );
@@ -2011,10 +2030,15 @@ fn void record_texture_to_buffer_copy(
     gpu::internal::CommandRecord* commands,
     PreparedBufferTextureCopy* copy,
 ) {
+    VkDeviceState* state = command_device_state(commands);
     vk::cmd_copy_image_to_buffer(
         command_buffer:  backend_command(commands).command_buffer,
         src_image:       copy.texture.image,
-        src_image_layout: vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
+        src_image_layout: texture_copy_layout(
+            copy.texture,
+            false,
+            state.caps.resource_agnostic_texture_sync,
+        ),
         dst_buffer:      copy.buffer.slot.buffer,
         region_count:    1,
         p_regions:       &copy.region,
