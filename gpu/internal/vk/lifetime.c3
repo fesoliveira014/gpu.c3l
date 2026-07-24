@@ -17,11 +17,6 @@ struct CommandResourceReference {
     Atomic{uint}* tracked_command_references;
 }
 
-struct SubmittedCommandBatch {
-    gpu::CompletionPoint          completion;
-    gpu::internal::CommandRecord* record;
-}
-
 struct CommandBufferStats {
     ulong allocated;
     ulong freed;
@@ -185,10 +180,7 @@ fn void publish_pending_commands_locked(
 ) {
     foreach (record : records) {
         VkCommandRecord* backend = backend_command(record);
-        backend.submitted = {
-            .completion = point,
-            .record     = record,
-        };
+        backend.submitted_completion = point;
         backend.next_submitted = null;
         if (completion.submitted_tail == null) {
             completion.submitted_head = record;
@@ -219,6 +211,7 @@ fn gpu::internal::CommandRecord* release_pending_command_locked(
     )!!;
     slot.mutex.lock()!!;
     record.state = gpu::internal::CommandState.INACTIVE;
+    // Reference gates plus retirement/destroy serialization make resource_mutex unnecessary.
     CommandScratch* scratch = backend.scratch;
     clear_command_scratch_references(state, scratch);
     recycle_generated_preprocess_indices_locked(
@@ -232,7 +225,7 @@ fn gpu::internal::CommandRecord* release_pending_command_locked(
     slot.mutex.unlock();
     gpu::CommandListHandle identity = record.identity;
     gpu::internal::CommandRecord ownership = *record;
-    backend.submitted = {};
+    backend.submitted_completion = {};
     backend.next_submitted = null;
     completion.submitted_count--;
     state.command_mutex.lock()!!;
@@ -316,7 +309,7 @@ fn void retire_queue_through_locked(
         gpu::internal::CommandRecord* record = completion.submitted_head;
         VkCommandRecord* backend = backend_command(record);
         if (gpu::internal::completion_point_sequence(
-            backend.submitted.completion,
+            backend.submitted_completion,
         ) > target) {
             break;
         }

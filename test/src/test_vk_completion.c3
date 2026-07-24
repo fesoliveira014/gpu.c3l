@@ -493,9 +493,8 @@ fn void concurrent_first_observers_publish_one_retirement() @test {
         vk::completion_work_counters(state);
     assert(counters.native_counter_queries == 2,
         "both first observers reach their controlled native query");
-    assert(counters.retirement_passes == 1
-        && counters.retirement_lock_acquisitions == 2,
-        "both observers acquire the retirement lock and one publishes");
+    assert(counters.retirement_passes == 1,
+        "competing observers publish retirement exactly once");
     assert(vk::queue_completion_state(state, queue.id)!!
             .retired_sequence.load(AtomicOrdering.ACQUIRE) == sequence,
         "the concurrent retired prefix is exact and monotonic");

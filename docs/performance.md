@@ -243,16 +243,12 @@ miss. The 65,536-entry zero-probe observation is also enforced by the live
 The submit-batch benchmark submits real executable command lists in batches of
 1, 8, 32, 128, and 1,024. `SUBMIT_WORK_STATS` exposes atomic counters around an
 externally synchronized measured interval. Every ordinary tracking-off record
-requires `consumed`, `resolutions`, and `duplicate_visits` equal to the batch
-length; `command_mutex=1`, `queue_submission_mutex=1`, and
+requires `resolutions` and `duplicate_visits` equal to the batch length;
+`command_mutex=1`, `queue_submission_mutex=1`, and
 `native_submissions=1`; and these exact zeros:
 
 ```text
-public_prechecks=0
 epoch_reset_cells=0
-resource_mutex=0
-scratch_mutex=0
-allocator_reproofs=0
 rollback_mutex=0
 host_allocations=0
 ```
@@ -260,9 +256,9 @@ host_allocations=0
 The runner rejects missing, duplicate, malformed, reordered, or nonzero
 forbidden fields. The counters prove one bounded backend claim against each
 record's authoritative queue, one long per-queue submission boundary, and no
-frontend resolution, allocator queue reproof, scratch lock, ordinary resource
-lock, or warm allocation. Failure coverage requires one rollback command-lock
-acquisition, retryable tokens, and no pending link or point publication.
+warm allocation. Token consumption and pending-list drainage are asserted
+directly. Failure coverage requires one rollback command-lock acquisition,
+retryable tokens, and no pending link or point publication.
 Retirement-lock work is measured separately because prior-point observation
 uses the short queue retirement boundary independently of submission.
 These semantic and work counts are blocking; `ns/submit` and `ns/list` remain

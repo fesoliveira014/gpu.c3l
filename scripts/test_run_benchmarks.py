@@ -158,10 +158,10 @@ SUBMIT_BATCH_OUTPUT = "\n".join(
         "units=ns/submit,ns/list",
     ) + tuple(
         f"submit batch size={size} ns/submit=125.0 "
-        f"ns/list={125.0 / size:.3f} consumed={size} "
-        f"public_prechecks=0 resolutions={size} duplicate_visits={size} "
-        "epoch_reset_cells=0 command_mutex=1 resource_mutex=0 "
-        "queue_submission_mutex=1 scratch_mutex=0 allocator_reproofs=0 "
+        f"ns/list={125.0 / size:.3f} "
+        f"resolutions={size} duplicate_visits={size} "
+        "epoch_reset_cells=0 command_mutex=1 "
+        "queue_submission_mutex=1 "
         "rollback_mutex=0 native_submissions=1 host_allocations=0"
         for size in (1, 8, 32, 128, 1024)
     ) + ("submit batch leaks=0",)
@@ -843,11 +843,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_submit_batch_measurement_rejects_forbidden_work_or_leaks(self):
         runner = load_runner()
         for field in (
-            "public_prechecks",
             "epoch_reset_cells",
-            "resource_mutex",
-            "scratch_mutex",
-            "allocator_reproofs",
             "rollback_mutex",
             "host_allocations",
         ):

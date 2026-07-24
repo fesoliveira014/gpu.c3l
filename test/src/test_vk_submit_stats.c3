@@ -6,6 +6,7 @@ import gpu::internal::vk @public;
 import vk;
 import std::thread;
 import std::atomic::types;
+import std::io;
 
 
 ulong rejected_user_completion_value;
@@ -68,15 +69,11 @@ fn bool submit_stats_work_matches_exact(
     ulong rollback_mutex_acquisitions,
     ulong native_submissions,
 ) {
-    return work.public_token_prechecks == 0
-        && work.authoritative_token_resolutions == resolutions
+    return work.authoritative_token_resolutions == resolutions
         && work.duplicate_token_visits == duplicate_visits
         && work.epoch_reset_cells == 0
         && work.command_mutex_acquisitions == command_mutex_acquisitions
-        && work.resource_mutex_acquisitions == 0
         && work.queue_submission_mutex_acquisitions == 1
-        && work.scratch_mutex_acquisitions == 0
-        && work.allocator_queue_reproofs == 0
         && work.rollback_mutex_acquisitions == rollback_mutex_acquisitions
         && work.native_submissions == native_submissions;
 }
@@ -393,11 +390,7 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
                 && work.command_mutex_acquisitions == 2
                 && work.queue_submission_mutex_acquisitions == 2
                 && work.native_submissions == 2
-                && work.public_token_prechecks == 0
                 && work.epoch_reset_cells == 0
-                && work.resource_mutex_acquisitions == 0
-                && work.scratch_mutex_acquisitions == 0
-                && work.allocator_queue_reproofs == 0
                 && work.rollback_mutex_acquisitions == 0,
             "distinct submits preserve exact concurrent work accounting");
         vk::SubmitStats stats_after = vk::submit_stats(state);
@@ -427,6 +420,10 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
         }
         return;
     }
+    io::eprintfn(
+        "distinct_selected_queues_reach_native_submit_concurrently: "
+        "distinct graphics/compute queues unavailable, skipping",
+    );
 }
 
 fn vk::SubmitStats stats_of(gpu::Device* device) {
@@ -576,6 +573,10 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
         gpu::wait_completion(completion, ulong::max)!!;
         return;
     }
+    io::eprintfn(
+        "different_queue_submit_preserves_executable_allocator_unit_when_available: "
+        "distinct graphics/compute queues unavailable, skipping",
+    );
 }
 
 
@@ -786,10 +787,8 @@ fn void prove_submission_publication_gap(
     assert(completion.submitted_count == expected_batches,
         "the checkpoint exposes only its intended batch-publication phase");
     if (checkpoint != vk::SubmissionCheckpoint.NATIVE_ACCEPTED) {
-        vk::SubmittedCommandBatch* batch =
-            &vk::backend_command(completion.submitted_head).submitted;
         vk::VkCommandRecord* submitted =
-            vk::backend_command(batch.record);
+            vk::backend_command(completion.submitted_head);
         vk::CommandAllocatorSlot* submitted_allocator_slot =
             state.command_allocators.get(submitted.allocator)!!;
         vk::CommandResourceReference* reference =

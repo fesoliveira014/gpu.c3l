@@ -51,7 +51,7 @@ struct VkCommandRecord {
     uint                         allocator_buffer;
     gpu::Queue                   queue;
     ulong                        submit_visit_epoch;
-    SubmittedCommandBatch        submitted;
+    gpu::CompletionPoint         submitted_completion;
     gpu::internal::CommandRecord* next_submitted;
     RenderCompatibility          active_render;
     bool                         graphics_state_initialized;

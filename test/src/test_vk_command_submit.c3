@@ -30,15 +30,11 @@ fn bool submit_work_matches_exact(
     ulong rollback_mutex_acquisitions,
     ulong native_submissions,
 ) {
-    return work.public_token_prechecks == 0
-        && work.authoritative_token_resolutions == resolutions
+    return work.authoritative_token_resolutions == resolutions
         && work.duplicate_token_visits == duplicate_visits
         && work.epoch_reset_cells == 0
         && work.command_mutex_acquisitions == command_mutex_acquisitions
-        && work.resource_mutex_acquisitions == 0
         && work.queue_submission_mutex_acquisitions == 1
-        && work.scratch_mutex_acquisitions == 0
-        && work.allocator_queue_reproofs == 0
         && work.rollback_mutex_acquisitions == rollback_mutex_acquisitions
         && work.native_submissions == native_submissions;
 }

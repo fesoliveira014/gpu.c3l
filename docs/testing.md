@@ -577,15 +577,15 @@ indexing. Private probes, equality checks, and mutex decisions use
 scenario-specific upper bounds that accept zero; `ns/reference` is advisory.
 The submit-batch target enables `SUBMIT_WORK_STATS` and submits real batches of
 1, 8, 32, 128, and 1,024 executable lists. For every ordinary tracking-off
-batch it requires `consumed`, `resolutions`, and `duplicate_visits` equal to the
-batch length; one command mutex, one queue submission mutex, and one native
-submission; and zero public prechecks, epoch-reset cells, resource mutexes,
-scratch mutexes, allocator reproofs, rollback mutexes, and warm host
-allocations. The runner rejects missing, duplicate, reordered, malformed, or
-nonzero forbidden fields. Duplicate-position tests stop resolution and visits
-at the first repeat. Post-claim failure tests require one rollback lock,
-retryable records, and no pending link or point. `ns/submit` and `ns/list`
-remain advisory. The pipeline-cache target requests 200
+batch it requires `resolutions` and `duplicate_visits` equal to the batch
+length; one command mutex, one queue submission mutex, and one native
+submission; and zero epoch-reset cells, rollback mutexes, and warm host
+allocations. Token consumption and pending-list drainage are asserted directly.
+The runner rejects missing, duplicate, reordered, malformed, or nonzero
+forbidden fields. Duplicate-position tests stop resolution and visits at the
+first repeat. Post-claim failure tests require one rollback lock, retryable
+records, and no pending link or point. `ns/submit` and `ns/list` remain
+advisory. The pipeline-cache target requests 200
 topology/cull/front-face/depth-bias permutations through
 `cmd_set_raster_state`, reports the requested count, native graphics creates,
 cache entries/aliases, and recording/create timings; all permutations share

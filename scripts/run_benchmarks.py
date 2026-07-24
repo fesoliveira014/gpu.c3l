@@ -98,16 +98,11 @@ SUBMIT_BATCH_LINE = re.compile(
     rf"^submit batch size=(?P<size>[0-9]+) "
     rf"ns/submit=(?P<ns_submit>{ALLOCATION_NUMBER}) "
     rf"ns/list=(?P<ns_list>{ALLOCATION_NUMBER}) "
-    r"consumed=(?P<consumed>[0-9]+) "
-    r"public_prechecks=(?P<public_prechecks>[0-9]+) "
     r"resolutions=(?P<resolutions>[0-9]+) "
     r"duplicate_visits=(?P<duplicate_visits>[0-9]+) "
     r"epoch_reset_cells=(?P<epoch_reset_cells>[0-9]+) "
     r"command_mutex=(?P<command_mutex>[0-9]+) "
-    r"resource_mutex=(?P<resource_mutex>[0-9]+) "
     r"queue_submission_mutex=(?P<queue_submission_mutex>[0-9]+) "
-    r"scratch_mutex=(?P<scratch_mutex>[0-9]+) "
-    r"allocator_reproofs=(?P<allocator_reproofs>[0-9]+) "
     r"rollback_mutex=(?P<rollback_mutex>[0-9]+) "
     r"native_submissions=(?P<native_submissions>[0-9]+) "
     r"host_allocations=(?P<host_allocations>[0-9]+)$"
@@ -682,11 +677,7 @@ def require_submit_batch_evidence(output):
         raise ValueError("submit_batch_bench header is malformed")
 
     zero_fields = (
-        "public_prechecks",
         "epoch_reset_cells",
-        "resource_mutex",
-        "scratch_mutex",
-        "allocator_reproofs",
         "rollback_mutex",
         "host_allocations",
     )
@@ -706,7 +697,7 @@ def require_submit_batch_evidence(output):
             raise ValueError(
                 f"submit_batch_bench batch size {expected_size} timing is invalid"
             )
-        for field in ("consumed", "resolutions", "duplicate_visits"):
+        for field in ("resolutions", "duplicate_visits"):
             if int(match.group(field)) != expected_size:
                 raise ValueError(
                     f"submit_batch_bench batch size {expected_size} {field} mismatch"

@@ -80,15 +80,11 @@ struct SubmitStats {
 }
 
 struct SubmitWorkCounters @if(env::TESTING || $feature(SUBMIT_WORK_STATS)) {
-    ulong public_token_prechecks;
     ulong authoritative_token_resolutions;
     ulong duplicate_token_visits;
     ulong epoch_reset_cells;
     ulong command_mutex_acquisitions;
-    ulong resource_mutex_acquisitions;
     ulong queue_submission_mutex_acquisitions;
-    ulong scratch_mutex_acquisitions;
-    ulong allocator_queue_reproofs;
     ulong rollback_mutex_acquisitions;
     ulong native_submissions;
 }
@@ -2015,15 +2011,6 @@ fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
     return native_queue_mutex_for(state, state.presentation.queue);
 }
 
-fn void note_submit_public_token_precheck(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
-        (void)state.submit_public_token_prechecks.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
 fn void note_submit_authoritative_resolution(VkDeviceState* state) @private {
     $if env::TESTING || $feature(SUBMIT_WORK_STATS):
         (void)state.submit_authoritative_token_resolutions.add(
@@ -2060,38 +2047,11 @@ fn void note_submit_command_mutex_acquisition(VkDeviceState* state) @private {
     $endif
 }
 
-fn void note_submit_resource_mutex_acquisition(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
-        (void)state.submit_resource_mutex_acquisitions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
 fn void note_submit_queue_submission_mutex_acquisition(
     VkDeviceState* state,
 ) @private {
     $if env::TESTING || $feature(SUBMIT_WORK_STATS):
         (void)state.submit_queue_submission_mutex_acquisitions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_submit_scratch_mutex_acquisition(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
-        (void)state.submit_scratch_mutex_acquisitions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_submit_allocator_queue_reproof(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
-        (void)state.submit_allocator_queue_reproofs.add(
             1,
             AtomicOrdering.RELAXED,
         );
@@ -2119,7 +2079,6 @@ fn void note_submit_native_submission(VkDeviceState* state) @private {
 fn void reset_submit_work_counters(
     VkDeviceState* state,
 ) @if(env::TESTING || $feature(SUBMIT_WORK_STATS)) {
-    state.submit_public_token_prechecks.store(0, AtomicOrdering.RELAXED);
     state.submit_authoritative_token_resolutions.store(
         0,
         AtomicOrdering.RELAXED,
@@ -2127,13 +2086,10 @@ fn void reset_submit_work_counters(
     state.submit_duplicate_token_visits.store(0, AtomicOrdering.RELAXED);
     state.submit_epoch_reset_cells.store(0, AtomicOrdering.RELAXED);
     state.submit_command_mutex_acquisitions.store(0, AtomicOrdering.RELAXED);
-    state.submit_resource_mutex_acquisitions.store(0, AtomicOrdering.RELAXED);
     state.submit_queue_submission_mutex_acquisitions.store(
         0,
         AtomicOrdering.RELAXED,
     );
-    state.submit_scratch_mutex_acquisitions.store(0, AtomicOrdering.RELAXED);
-    state.submit_allocator_queue_reproofs.store(0, AtomicOrdering.RELAXED);
     state.submit_rollback_mutex_acquisitions.store(0, AtomicOrdering.RELAXED);
     state.submit_native_submissions.store(0, AtomicOrdering.RELAXED);
 }
@@ -2142,8 +2098,6 @@ fn SubmitWorkCounters submit_work_counters(
     VkDeviceState* state,
 ) @if(env::TESTING || $feature(SUBMIT_WORK_STATS)) {
     return {
-        .public_token_prechecks =
-            state.submit_public_token_prechecks.load(AtomicOrdering.RELAXED),
         .authoritative_token_resolutions =
             state.submit_authoritative_token_resolutions.load(
                 AtomicOrdering.RELAXED,
@@ -2156,20 +2110,8 @@ fn SubmitWorkCounters submit_work_counters(
             state.submit_command_mutex_acquisitions.load(
                 AtomicOrdering.RELAXED,
             ),
-        .resource_mutex_acquisitions =
-            state.submit_resource_mutex_acquisitions.load(
-                AtomicOrdering.RELAXED,
-            ),
         .queue_submission_mutex_acquisitions =
             state.submit_queue_submission_mutex_acquisitions.load(
-                AtomicOrdering.RELAXED,
-            ),
-        .scratch_mutex_acquisitions =
-            state.submit_scratch_mutex_acquisitions.load(
-                AtomicOrdering.RELAXED,
-            ),
-        .allocator_queue_reproofs =
-            state.submit_allocator_queue_reproofs.load(
                 AtomicOrdering.RELAXED,
             ),
         .rollback_mutex_acquisitions =

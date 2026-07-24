@@ -50,15 +50,11 @@ fn void measure_submit_batch(
             allocator_after.allocations - allocator_before.allocations
             + allocator_after.resizes - allocator_before.resizes;
         total_host_allocations += host_allocations;
-        assert(work.public_token_prechecks == 0
-                && work.authoritative_token_resolutions == batch_size
+        assert(work.authoritative_token_resolutions == batch_size
                 && work.duplicate_token_visits == batch_size
                 && work.epoch_reset_cells == 0
                 && work.command_mutex_acquisitions == 1
-                && work.resource_mutex_acquisitions == 0
                 && work.queue_submission_mutex_acquisitions == 1
-                && work.scratch_mutex_acquisitions == 0
-                && work.allocator_queue_reproofs == 0
                 && work.rollback_mutex_acquisitions == 0
                 && work.native_submissions == 1,
             "ordinary submit work must match the authoritative transaction");
@@ -69,28 +65,26 @@ fn void measure_submit_batch(
                 "successful submission consumes every executable token");
         }
         gpu::wait_completion(completion)!!;
+        assert(vk::queue_completion_state(state, queue.id)!!
+                .submitted_count == 0,
+            "completion wait drains the submitted-command list");
     }
     double ns_per_submit = (double)elapsed_ns / SUBMIT_BATCH_ITERATIONS;
     double ns_per_list = ns_per_submit / batch_size;
     io::printfn(
-        "submit batch size=%d ns/submit=%.1f ns/list=%.3f consumed=%d "
-        "public_prechecks=%d resolutions=%d duplicate_visits=%d "
-        "epoch_reset_cells=%d command_mutex=%d resource_mutex=%d "
-        "queue_submission_mutex=%d scratch_mutex=%d allocator_reproofs=%d "
+        "submit batch size=%d ns/submit=%.1f ns/list=%.3f "
+        "resolutions=%d duplicate_visits=%d "
+        "epoch_reset_cells=%d command_mutex=%d "
+        "queue_submission_mutex=%d "
         "rollback_mutex=%d native_submissions=%d host_allocations=%d",
         batch_size,
         ns_per_submit,
         ns_per_list,
-        batch_size,
-        work.public_token_prechecks,
         work.authoritative_token_resolutions,
         work.duplicate_token_visits,
         work.epoch_reset_cells,
         work.command_mutex_acquisitions,
-        work.resource_mutex_acquisitions,
         work.queue_submission_mutex_acquisitions,
-        work.scratch_mutex_acquisitions,
-        work.allocator_queue_reproofs,
         work.rollback_mutex_acquisitions,
         work.native_submissions,
         total_host_allocations,

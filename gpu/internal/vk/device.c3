@@ -257,15 +257,11 @@ struct VkDeviceState {
     Atomic{ulong}              completion_cached_poll_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              completion_cached_wait_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              submit_completion_wait_calls;
-    Atomic{ulong}              submit_public_token_prechecks @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
     Atomic{ulong}              submit_authoritative_token_resolutions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
     Atomic{ulong}              submit_duplicate_token_visits @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
     Atomic{ulong}              submit_epoch_reset_cells @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
     Atomic{ulong}              submit_command_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
-    Atomic{ulong}              submit_resource_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
     Atomic{ulong}              submit_queue_submission_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
-    Atomic{ulong}              submit_scratch_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
-    Atomic{ulong}              submit_allocator_queue_reproofs @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
     Atomic{ulong}              submit_rollback_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
     Atomic{ulong}              submit_native_submissions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
     CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);

@@ -43,10 +43,7 @@ fn void append_submitted_command_fixture(
     gpu::CompletionPoint point,
 ) {
     vk::VkCommandRecord* backend = vk::backend_command(record);
-    backend.submitted = {
-        .completion = point,
-        .record     = record,
-    };
+    backend.submitted_completion = point;
     backend.next_submitted = null;
     if (completion.submitted_tail == null) {
         completion.submitted_head = record;
