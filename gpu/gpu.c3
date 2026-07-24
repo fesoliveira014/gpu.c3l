@@ -47,12 +47,6 @@ fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
         && self.index == other.index
         && self.generation == other.generation;
 }
-fn bool CommandListHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
-fn bool CommandListHandle.equals(self, CommandListHandle other) @operator(==) {
-    return self.owner == other.owner
-        && self.index == other.index
-        && self.generation == other.generation;
-}
 fn bool CommandAllocatorHandle.is_valid(self) =>
     self.owner != 0 && self.generation != 0;
 fn bool CommandAllocatorHandle.equals(
@@ -66,12 +60,10 @@ fn bool CommandAllocatorHandle.equals(
 
 <* Tests only whether this value differs from the invalid token sentinel.
    This does not validate live provenance or recording phase. *>
-fn bool CommandList.is_valid(&self) =>
-    self.device.is_valid() && self.handle.is_valid();
+fn bool CommandList.is_valid(&self) => self.record != null;
 <* Tests only whether this value differs from the invalid token sentinel.
    This does not validate live provenance or executable phase. *>
-fn bool ExecutableCommandList.is_valid(&self) =>
-    self.device.is_valid() && self.handle.is_valid();
+fn bool ExecutableCommandList.is_valid(&self) => self.record != null;
 
 <* True for a live heap index; the zero value is the invalid sentinel. *>
 fn bool TextureIndex.is_valid(self) => (uint)self != 0;
@@ -587,7 +579,7 @@ fn String? build_memory_report(Device* device, bool detailed) {
 
 <* Open a debug-utils label region; a no-op without debug utils.
    Preconditions: calls are balanced while recording.
-   Always checked: bounded identity, authoritative phase, and non-null label. *>
+   Always checked: direct token generation, authoritative phase, and non-null label. *>
 fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (label == null) return INVALID_ARGUMENT~;
@@ -596,7 +588,7 @@ fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = 
 
 <* Close a debug-utils label region.
    Preconditions: a matching label region is open.
-   Always checked: bounded identity and authoritative recording phase. *>
+   Always checked: direct token generation and authoritative recording phase. *>
 fn void? cmd_end_label(CommandList* commands) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.end_label(record);
@@ -1345,7 +1337,7 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
 
 <* Finish and consume a recording token.
    Preconditions: the command list is recording outside a render pass.
-   Always checked: bounded identity and authoritative phase.
+   Always checked: direct token generation and authoritative phase.
    Runtime failures: failure leaves the token recording. *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -1362,13 +1354,12 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
 
 <* Consume an unfinished recording, including after device loss.
    Preconditions: aliases are thread-confined and have not been consumed.
-   Always checked: bounded identity and authoritative recording phase.
+   Always checked: direct token generation and authoritative recording phase.
    Runtime failures: failure preserves the token. *>
 fn void? discard_commands(CommandList* commands) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(
         commands,
         count_command: false,
-        allow_lost: true,
     )!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
@@ -1385,11 +1376,11 @@ fn void? discard_commands(CommandList* commands) {
 
 <* Consume an executable token without submitting it.
    Preconditions: aliases are thread-confined and have not been consumed.
-   Always checked: bounded identity and authoritative executable phase.
+   Always checked: direct token generation and authoritative executable phase.
    Runtime failures: failure preserves the token. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
     gpu::internal::CommandRecord* record =
-        gpu::internal::executable_command(commands, allow_lost: true)!;
+        gpu::internal::executable_command(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
         allow_lost: true,
@@ -1446,7 +1437,7 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
 
 <* Record a global semantic execution and memory barrier.
    Preconditions: stages and hazards are known, consistent, and queue-supported.
-   Always checked: bounded identity, authoritative phase, and required pointer.
+   Always checked: direct token generation, authoritative phase, and required pointer.
    FULL diagnostics: stage, hazard, and queue-support misuse. *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -1479,7 +1470,7 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    Preconditions: a compute pipeline is active, group counts fit DeviceCaps,
    root-reachable allocations admit the queue, and shaders branch before
    dereferencing zero unless relying on defined robustness.
-   Always checked: bounded identity, authoritative recording phase, and a
+   Always checked: direct token generation, authoritative recording phase, and a
    usable bound-pipeline snapshot.
    FULL diagnostics: active-kind and group-limit misuse. *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
@@ -1530,7 +1521,7 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
 <* Draw with vertex and fragment roots passed unchanged; either may be zero.
    Preconditions: a compatible graphics pipeline, render pass, complete state,
    and queue-admitted root data; shaders make zero dereference safe.
-   Always checked: bounded identity, authoritative render-pass phase, and a
+   Always checked: direct token generation, authoritative render-pass phase, and a
    usable bound-pipeline snapshot.
    FULL diagnostics: pipeline-kind and state misuse. *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
@@ -1811,7 +1802,7 @@ fn void? cmd_set_color_state(
 
 <* End the active render pass without adding synchronization.
    Preconditions: a render pass is active.
-   Always checked: bounded identity and authoritative render-pass phase. *>
+   Always checked: direct token generation and authoritative render-pass phase. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.end_render_pass(record);

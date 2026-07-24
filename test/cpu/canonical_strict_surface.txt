@@ -24,7 +24,6 @@ constant gpu::ADAPTER_INVALID
 constant gpu::ATTACHMENT_VIEW_HANDLE_INVALID
 constant gpu::COLOR_WRITE_ALL
 constant gpu::COMMAND_ALLOCATOR_HANDLE_INVALID
-constant gpu::COMMAND_LIST_HANDLE_INVALID
 constant gpu::COMPLETION_POINT_INVALID
 constant gpu::DEFAULT_ATTACHMENT_VIEW_CAPACITY
 constant gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
@@ -222,8 +221,6 @@ method gpu::AttachmentViewHandle.is_valid
 method gpu::CommandAllocatorHandle.equals
 method gpu::CommandAllocatorHandle.is_valid
 method gpu::CommandList.is_valid
-method gpu::CommandListHandle.equals
-method gpu::CommandListHandle.is_valid
 method gpu::CompletionPoint.equals
 method gpu::CompletionPoint.is_valid
 method gpu::Device.is_valid
@@ -277,7 +274,6 @@ struct gpu::CommandAllocator
 struct gpu::CommandAllocatorDesc
 struct gpu::CommandAllocatorHandle
 struct gpu::CommandList
-struct gpu::CommandListHandle
 struct gpu::CompletionPoint
 struct gpu::CompletionWait
 struct gpu::ComputePipelineDesc

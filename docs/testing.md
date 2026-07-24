@@ -252,7 +252,7 @@ Do not make SDL3 a required dependency of the shipped library unless a public he
 
 Policy tests treat contract depth, lifetime tracking, Vulkan layers, debug
 names, and callback delivery as independent inputs. The required command matrix
-uses the sole bounded command-token representation:
+uses the sole direct-record command-token representation:
 
 | Contract | Tracking | Vulkan layers | Detailed semantic work | Reference work |
 |---|---:|---:|---:|---:|
@@ -279,8 +279,8 @@ authoritative command phase and internal-table integrity, public device
 ownership, lifecycle/cold-path checks, Vulkan result/device-loss handling, and
 transactional creation rollback. Trusted-mode cases distinguish that floor
 from semantic misuse that is intentionally a caller precondition. Every policy
-rejects fabricated, stale, consumed, foreign-owner, and wrong-phase identities
-through the common bounded resolver before native mutation.
+checks direct command generation and phase before native mutation; lifecycle
+and submit coverage additionally validates device/backend ownership.
 
 Zero-root execution evidence covers direct compute, direct graphics, indirect
 work, and generated draw, indexed-draw, and dispatch records. Each family
@@ -369,8 +369,8 @@ and no public child allocation. Deterministic seams pause after native
 acceptance and batch publication, rendezvous concurrent first polls, and prove
 the published-prefix cap, exact wait retirement, timeout preservation, and
 100,000 cached polls with zero native queries or retirement-lock acquisitions.
-Submission coverage also includes one bounded authoritative resolution and
-duplicate visit per inspected token, exact record-queue validation, mixed
+Submission coverage also includes one direct-token validation and duplicate
+visit per inspected token, exact record-queue validation, mixed
 allocators on one queue, deterministic empty-work targeting, intrusive
 queue-owned pending records, contiguous publication, and exact
 completion/readiness destination masks. Invalid and queue-unsupported scopes,
@@ -418,7 +418,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
 | Command allocators | exact device/queue binding; default, ceiling, and overflow validation; transactional pool/buffer/host rollback; recyclable generations; begin/reference/generated capacity faults; address-stable authoritative records; fixed per-scratch reference indices; epoch reuse; no submitted-unit reuse before retirement; non-waiting destroy in recording/executable/in-flight states; device-child accounting; exact-family pools; and tracking-off zero reference/index storage. |
-| Commands | fixed bounded token size and deterministic fabricated/stale/foreign/wrong-phase/consumed diagnostics; one authoritative state through begin/end/submit/rollback/discard/retirement; one backend claim with exact linear bounded resolutions and duplicate visits; authoritative record-queue validation without allocator reproof; retryable failure; intrusive exact-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; checked regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
+| Commands | fixed direct token size and deterministic stale/foreign/wrong-phase/consumed diagnostics; one authoritative state through begin/end/submit/rollback/discard/retirement; one backend claim with exact linear direct-token visits and duplicate visits; authoritative record-queue validation without allocator reproof; retryable failure; intrusive exact-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; checked regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback; immutable/dynamic parity for opaque, alpha, premultiplied, additive, and masked writes; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; transactional convenience rejection without native or command-state mutation; exact ten-command graphics and three-command color packets; state reuse across pass boundaries and reset on command-buffer reuse; optional partial updates; checked regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; and pipeline-alias persistence. |
@@ -554,9 +554,9 @@ image-view creation, and pipeline/shader creation are required to remain zero. R
 snapshots begin before pipeline binding: binding the opaque pipeline handle
 performs exactly one pipeline-table and one pipeline-cache lookup and records
 one `pipeline_bind_commands` increment for the selected bind point, while
-registry, retained-pin, lifecycle-vtable, and policy work remain zero. The
-bounded token performs exactly one command-table resolution for each public
-recording call. Exact heap counters require one indexing set bind or descriptor-buffer
+registry, retained-pin, lifecycle-vtable, command-table, and policy work remain
+zero. The direct token loads the stable record for each public recording call.
+Exact heap counters require one indexing set bind or descriptor-buffer
 offset per used bind point and one descriptor-buffer bind per command record;
 later compatible pipeline changes add none. Dispatch and draw add no further
 resolution and each emits exactly one root push plus its native execution
@@ -570,7 +570,7 @@ change.
 Dynamic-color work coverage selects a requested live device when available and
 otherwise reports deterministic unsupported capability. On a supported device,
 one packet and an identical replacement each require exactly three native
-calls, one bounded command resolution, and zero host/VMA allocation, resource
+calls, one direct-record phase check, and zero host/VMA allocation, resource
 lookup/lock, native pipeline creation, or pipeline/cache lookup.
 
 The benchmark runner builds thirteen executable targets with `-O1`:
@@ -634,8 +634,8 @@ lookup-side counters require zero shader probes, byte comparisons, and clones
 after interning, mirroring the blocking `vk_pipeline_cache` scale test; elapsed
 boundary time remains advisory. Command recording covers ordinary and
 semantic-hazard barriers, indirect dispatch, and capability-gated generated
-dispatch with the sole bounded representation. The target runs the four policy
-modes and reports bounded recording/executable token sizes,
+dispatch with the sole direct representation. The target runs the four policy
+modes and reports direct recording/executable token sizes,
 authoritative-record, cell, and total fixed-storage sizes plus lists containing
 1, 16, 256, and 4,096 commands. The timing workload
 measures five 64-record lists after an untimed 64-record warmup. Before warmup,
@@ -652,9 +652,9 @@ followed by exactly ten state commands. A complete
 compatible passes and draws add only their begin/end/draw commands unless
 another setter is recorded. The `{2, 16, 256}` matrix rejects hidden pass-boundary
 replay, default, or state-diff work and requires zero registry,
-retained-pin, lifecycle-vtable, pipeline-table/cache, and policy selections
-during warm recording. Warm recording requires exactly one safe command-table
-resolution per public recording call and zero encoder-cell computations,
+retained-pin, lifecycle-vtable, command-table, pipeline-table/cache, and policy
+selections during warm recording. Warm recording requires zero command-table
+resolution and zero encoder-cell computations,
 packed-lease comparisons, frontend phase transitions, registry/pin operations,
 and warm allocation. Source helper names, call topology, and proof-note
 placement are not blocking contracts.
@@ -700,9 +700,9 @@ completion queries/waits, device waits, and deferred-release enqueues in their
 respective intervals. Run `python -B scripts/run_benchmarks.py`; one build of
 `command_record_bench` executes the four policy rows above with the same fixed
 workload. The runner enforces exact policy fields, zero trusted/boundary work,
-nonzero full/tracking work, balanced increments/releases, exactly one
-command-table lookup per accepted command, zero other warm resolution/proof
-work, exact token/storage sizes, and exact native output. Only
+nonzero full/tracking work, balanced increments/releases, zero warm
+command-table and other resolution/proof work, exact token/storage sizes, and
+exact native output. Only
 trusted/no-tracking/no-layer command timings participate in
 release threshold evaluation. `--validation` still supplies the separate
 all-enabled debug run for the other benchmark devices; those timings are not
@@ -821,7 +821,7 @@ CI is shipped: `.github/workflows/ci.yml`, one workflow, three jobs.
 
 ```text
 linux (blocking): documentation/source-list, API/retired-API/backend-boundary,
-    command-operation-table shape, bounded command-token representation, generator and ABI drift
+    command-operation-table shape, direct command-token representation, generator and ABI drift
     gates; benchmark executable builds and schema tests (no benchmark
     execution); deterministic behavioral performance targets; shader build;
     full lavapipe sweep; and a c3c docgen API reference artifact
@@ -972,7 +972,7 @@ Before first release:
 pure CPU tests pass
 headless Vulkan tests pass validation-clean
 validation-policy matrix and structural command-table checks pass
-bounded command lifecycle tests pass
+direct command lifecycle tests pass
 root-pointer compute sample works
 bindless texture compute sample works
 offscreen graphics sample readback matches expected output
@@ -983,7 +983,7 @@ leak reports are clean after all samples
 public API docs match signatures
 explicit command allocators are balanced and retired queue-based begin/reservation signatures are absent
 warm command recording/submission paths allocate no host/native/VMA/temp-pool storage
-warm command recording performs one bounded table lookup and zero other resolution/proof work
+warm command recording performs zero command-table lookup and zero other resolution/proof work
 no public API signature exposes vk::, vma::, or sdl:: types
 public sources declare only gpu and the three platform surface modules
 private sources declare only gpu::internal and gpu::internal::vk

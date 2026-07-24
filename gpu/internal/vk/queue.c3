@@ -2148,11 +2148,15 @@ fn gpu::internal::CommandRecord*[]? claim_submit_records_locked(
     ulong epoch = next_submit_visit_epoch_locked(state);
     foreach (i, &token : tokens) {
         note_submit_authoritative_resolution(state);
-        if (token.device != queue.device) return gpu::INVALID_HANDLE~;
+        if (token.record == null || token.generation == 0) {
+            return gpu::INVALID_HANDLE~;
+        }
         gpu::internal::CommandRecord* record =
-            state.commands.get_record(token.handle)!;
+            (gpu::internal::CommandRecord*)token.record;
+        if (record.identity.generation != token.generation) {
+            return gpu::INVALID_HANDLE~;
+        }
         if (record.device != queue.device
-            || record.identity != token.handle
             || record.backend_state != state) {
             return gpu::INVALID_HANDLE~;
         }

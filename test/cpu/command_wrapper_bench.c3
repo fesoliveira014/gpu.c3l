@@ -97,17 +97,6 @@ fn void? begin_wrapper_bench_commands(
     gpu::internal::publish_command_list(&state.record, out_commands);
 }
 
-fn gpu::internal::CommandRecord*? resolve_wrapper_bench_command(
-    void* backend_state,
-    CommandListHandle handle,
-) {
-    WrapperBenchState* state = (WrapperBenchState*)backend_state;
-    if (state == null || state.record.identity != handle) {
-        return INVALID_HANDLE~;
-    }
-    return &state.record;
-}
-
 fn void? end_wrapper_bench_commands(
     gpu::internal::CommandRecord* record,
 ) {
@@ -191,7 +180,6 @@ gpu::internal::BackendVTable wrapper_bench_vtable @private = {
     .create_command_allocator  = &create_wrapper_bench_allocator,
     .destroy_command_allocator = &destroy_wrapper_bench_allocator,
     .begin_commands            = &begin_wrapper_bench_commands,
-    .resolve_command           = &resolve_wrapper_bench_command,
     .end_commands              = &end_wrapper_bench_commands,
     .discard_commands          = &discard_wrapper_bench_commands,
     .command_ops               = &wrapper_bench_command_ops,

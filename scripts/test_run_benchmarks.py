@@ -32,10 +32,10 @@ LIFECYCLE_OUTPUT = "\n".join(
 )
 COMMAND_OUTPUT = "\n".join(
     (
-        "expectation_version=2",
+        "expectation_version=3",
         (
-            "command_tokens: representation=bounded "
-            "recording_token_bytes=24 executable_token_bytes=24 "
+            "command_tokens: representation=direct "
+            "recording_token_bytes=16 executable_token_bytes=16 "
             "record_bytes=56 cell_bytes=456 fixed_storage_bytes=1867776 "
             "commands_per_list=1,16,256,4096"
         ),
@@ -52,7 +52,7 @@ COMMAND_OUTPUT = "\n".join(
             "pipeline_binds=0 descriptor_set_binds=0 "
             "descriptor_buffer_binds=0 descriptor_buffer_offsets=0 "
             "device_registry=0 "
-            "retained_pins=0 lifecycle_vtable=0 command_table=300320 "
+            "retained_pins=0 lifecycle_vtable=0 command_table=0 "
             "pipeline_table=0 pipeline_cache=0 policy=0 "
             "encoder_cells=0 encoder_leases=0"
         ),
@@ -1013,22 +1013,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "recording invariants"):
                     runner.require_measurement(output, "command_record_bench")
 
-    def test_command_measurement_requires_bounded_representation(self):
+    def test_command_measurement_requires_direct_representation(self):
         runner = load_runner()
         output = COMMAND_OUTPUT.replace(
-            "representation=bounded",
-            "representation=" + "direct",
+            "representation=direct",
+            "representation=" + "bounded",
         )
         with self.assertRaisesRegex(ValueError, "token/storage record"):
-            runner.require_measurement(output, "command_record_bench")
-
-    def test_command_measurement_requires_one_bounded_lookup_per_command(self):
-        runner = load_runner()
-        output = COMMAND_OUTPUT.replace(
-            "command_table=300320",
-            "command_table=0",
-        )
-        with self.assertRaisesRegex(ValueError, "command-table work"):
             runner.require_measurement(output, "command_record_bench")
 
     def test_command_measurement_rejects_forbidden_resolution_work(self):
@@ -1041,6 +1032,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "device_registry",
             "retained_pins",
             "lifecycle_vtable",
+            "command_table",
             "pipeline_table",
             "pipeline_cache",
             "policy",
@@ -1095,13 +1087,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         mutations = (
             (
-                COMMAND_OUTPUT.replace("expectation_version=2\n", ""),
+                COMMAND_OUTPUT.replace("expectation_version=3\n", ""),
                 "expectation version",
             ),
             (
                 COMMAND_OUTPUT.replace(
-                    "expectation_version=2",
                     "expectation_version=3",
+                    "expectation_version=4",
                 ),
                 "expectation version",
             ),

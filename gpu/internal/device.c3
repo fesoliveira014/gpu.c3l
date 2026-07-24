@@ -42,10 +42,6 @@ alias BeginCommandsFn @private = fn void? (
     CommandAllocator* allocator,
     CommandList* out_commands,
 );
-alias ResolveCommandFn @private = fn CommandRecord*? (
-    void* backend_state,
-    CommandListHandle handle,
-);
 alias ReserveGeneratedScratchFn @private = fn void? (
     CommandAllocator*,
     GeneratedScratchDesc*,
@@ -228,6 +224,12 @@ enum ResourceOwnerKind @private {
 $assert (ulong)ResourceOwnerKind.COMPLETION_POINT + 1
     == gpu::RESOURCE_OWNER_KIND_COUNT;
 
+struct CommandListHandle @private {
+    ulong owner;
+    uint  index;
+    uint  generation;
+}
+$assert CommandListHandle::size <= ulong::size * 2;
 
 bitstruct DeviceSlotControl : ulong @private {
     uint state      : 0..1;
@@ -297,7 +299,6 @@ struct BackendVTable @private {
     ReserveGeneratedScratchFn reserve_generated_scratch;
     ReleaseGeneratedScratchFn release_generated_scratch;
     BeginCommandsFn           begin_commands;
-    ResolveCommandFn         resolve_command;
     EndCommandsFn             end_commands;
     DiscardCommandsFn         discard_commands;
     SubmitFn                  submit;

@@ -233,7 +233,7 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
             .command_buffer = (vk::CommandBuffer)(uptr)1,
         },
     )!!;
-    gpu::CommandListHandle first_identity = first.identity;
+    gpu::internal::CommandListHandle first_identity = first.identity;
     gpu::internal::CommandRecord* concurrent = table.claim(
         device:        device,
         ops:           null,
@@ -242,7 +242,7 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
             .command_buffer = (vk::CommandBuffer)(uptr)2,
         },
     )!!;
-    gpu::CommandListHandle concurrent_identity = concurrent.identity;
+    gpu::internal::CommandListHandle concurrent_identity = concurrent.identity;
 
     table.cancel_claim(first_identity)!!;
     assert(table.get_record(concurrent_identity)!! == concurrent,
@@ -722,7 +722,8 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
     uint available_index = slot.available[0];
     gpu::internal::vk::CommandScratch* scratch = &slot.scratch[available_index];
     gpu::CommandList token = {
-        .handle = { .owner = 91, .index = 3, .generation = 5 },
+        .record     = (void*)(uptr)91,
+        .generation = 5,
     };
     CommandRecordingProbe probe = {
         .reset_result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
@@ -749,9 +750,7 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
         && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0,
         "reset failure restores the exact scratch unit");
-    assert(token.handle.owner == 91
-        && token.handle.index == 3
-        && token.handle.generation == 5,
+    assert(token.record == (void*)(uptr)91 && token.generation == 5,
         "reset failure publishes neither a command record nor a token");
 
     probe.reset_result = vk::Result.SUCCESS;
@@ -794,7 +793,8 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
     uint available_index = slot.available[0];
     gpu::internal::vk::CommandScratch* scratch = &slot.scratch[available_index];
     gpu::CommandList token = {
-        .handle = { .owner = 93, .index = 4, .generation = 7 },
+        .record     = (void*)(uptr)93,
+        .generation = 7,
     };
     CommandRecordingProbe probe = {
         .begin_result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
@@ -821,9 +821,7 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
         && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0,
         "begin failure restores the exact scratch unit");
-    assert(token.handle.owner == 93
-        && token.handle.index == 4
-        && token.handle.generation == 7,
+    assert(token.record == (void*)(uptr)93 && token.generation == 7,
         "begin failure publishes neither a command record nor a token");
 
     probe.begin_result = vk::Result.SUCCESS;
@@ -874,7 +872,9 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
             &token,
             &ops,
         )!!;
-    gpu::CommandListHandle handle = token.handle;
+    gpu::internal::CommandListHandle handle = record.root.identity;
+    void* token_record = token.record;
+    uint token_generation = token.generation;
     uint next_new = state.commands.next_new;
     uint free_head = state.commands.free_head;
     probe.end_result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY;
@@ -905,7 +905,8 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
     assert(state.commands.next_new == next_new
         && state.commands.free_head == free_head
         && state.commands.get(handle)!! == record
-        && token.handle == handle,
+        && token.record == token_record
+        && token.generation == token_generation,
         "end failure preserves the published recording token and table entry");
 
     probe.end_result = vk::Result.SUCCESS;

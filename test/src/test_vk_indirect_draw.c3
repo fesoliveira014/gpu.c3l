@@ -1852,7 +1852,7 @@ fn void discard_consumes_active_render_pass_recording() @test {
     gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
 
     gpu::discard_commands(&commands)!!;
-    assert(!commands.handle.is_valid(),
+    assert(!commands.is_valid(),
         "discard consumes a recording with an active render pass");
     gpu::destroy_attachment_view(&device, target_view)!!;
     gpu::destroy_texture(&device, target)!!;

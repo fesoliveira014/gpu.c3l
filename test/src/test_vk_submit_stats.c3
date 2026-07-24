@@ -541,7 +541,7 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
         assert(@catch(gpu::submit(graphics, &desc)) == gpu::INVALID_ARGUMENT,
             "an executable faults before native submit on a different queue");
         assert(stats_of(&device).queue_submits == submits_before
-                && lists[0].handle.is_valid()
+                && lists[0].is_valid()
                 && record.root.state == gpu::internal::CommandState.EXECUTABLE,
             "different-queue rejection preserves the token before native work");
         assert(submit_stats_work_matches_exact(
@@ -744,7 +744,7 @@ fn void prove_submission_publication_gap(
         scratch_in_use: true,
         message:        "each submission checkpoint has one exact allocator owner",
     );
-    assert(args.executable.handle.is_valid(),
+    assert(args.executable.is_valid(),
         "the backend checkpoint precedes caller-token publication");
     assert(@catch(gpu::destroy_command_allocator(&allocator))
             == gpu::RESOURCE_IN_USE
@@ -931,7 +931,7 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
             && completion.submitted_head == null
             && completion.submitted_tail == null,
         "native rejection publishes no intrusive pending record");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "native failure preserves the executable token for retry");
     AllocatorSubmissionState allocator_after = allocator_submission_state(
         state,
@@ -954,7 +954,7 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     assert(point.is_valid(), "retry returns a valid completion point");
     assert(completion.next_sequence == next_before + 1,
         "retry reuses the rolled-back sequence");
-    assert(!lists[0].handle.is_valid(), "successful retry consumes the token");
+    assert(!lists[0].is_valid(), "successful retry consumes the token");
     gpu::wait_completion(point, 1_000_000_000)!!;
 }
 
@@ -1288,7 +1288,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     ), "pre-native headroom rejection rolls back one complete claim");
     assert(completion.next_sequence == 2,
         "backpressure reserves no completion sequence");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "backpressure preserves the executable token");
     AllocatorSubmissionState allocator_after = allocator_submission_state(
         state,
@@ -1321,7 +1321,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     assert(completion_counter_query_calls == 1
         && completion.retired_sequence.load(AtomicOrdering.ACQUIRE) == 2,
         "a required headroom query advances the retired prefix");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "native rejection after headroom preserves the executable token");
     assert(submit_stats_work_matches(
         work:                        vk::submit_work_counters(state),
@@ -1381,7 +1381,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
         "sequence exhaustion reaches no native queue submit");
     assert(completion.next_sequence == gpu::internal::MAX_COMPLETION_SEQUENCE,
         "sequence exhaustion does not mutate queue state");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "sequence exhaustion preserves the executable token");
 
     completion.next_sequence = next_before;
@@ -1430,7 +1430,7 @@ fn void native_device_loss_rolls_back_and_allows_discard() @test {
     assert(completion.published_sequence.load(AtomicOrdering.ACQUIRE)
         == published_before,
         "device loss publishes no completion point");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "device loss leaves the executable token discardable");
     AllocatorSubmissionState allocator_after = allocator_submission_state(
         state,
@@ -1449,7 +1449,7 @@ fn void native_device_loss_rolls_back_and_allows_discard() @test {
         "device-loss submission failure leaves allocator destruction retryable");
 
     gpu::discard_executable_commands(&lists[0])!!;
-    assert(!lists[0].handle.is_valid(),
+    assert(!lists[0].is_valid(),
         "discard consumes the token after device loss");
 }
 
@@ -1653,13 +1653,13 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
         "an empty completion wait destination stage is rejected");
     assert(stats_of(&device).queue_submits == submits_before,
         "invalid wait stages reach no native submit");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "invalid wait stages preserve the executable token");
 
     waits[0].consumers = (gpu::CompletionConsumerFlags)(1u << 1);
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
         "unknown completion consumer bits are rejected");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "unknown completion consumers preserve the executable token");
 
     waits[0] = {
@@ -1669,7 +1669,7 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
     };
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
         "all cannot be combined with a completion consumer");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "contradictory completion scopes preserve the executable token");
 
     waits[0] = {
@@ -1719,7 +1719,7 @@ fn void queue_incompatible_completion_consumer_rejects_through_submit() @test {
         "a real submit rejects consumers unsupported by the target queue");
     assert(stats_of(&device).queue_submits == submits_before,
         "queue-consumer rejection reaches no native submit");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "queue-consumer rejection preserves the executable token");
 
     completion.queue_flags = selected_flags;
@@ -1762,7 +1762,7 @@ fn void same_queue_wait_elides_through_full_submit_path() @test {
         "the injected native failure remains retryable after elision");
     assert(same_queue_elision_submit_calls == 1,
         "the full backend submit seam observed same-queue elision");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "the injected failure preserves the executable token");
 
     desc.completion_waits = {};
@@ -1852,7 +1852,7 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
         "a completion point from another device is rejected");
     assert(stats_of(&consumer).queue_submits == submits_before,
         "foreign completion rejection reaches no native submit");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "foreign completion rejection preserves the executable token");
 
     desc.completion_waits = {};
@@ -1892,7 +1892,7 @@ fn void unpublished_same_queue_wait_preserves_token() @test {
 
     assert(@catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)) == gpu::INVALID_HANDLE,
         "an unpublished same-queue wait is rejected");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "invalid completion wait preserves the executable token");
 
     vk::QueueCompletionState* completion =

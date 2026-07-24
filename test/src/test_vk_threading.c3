@@ -704,7 +704,7 @@ fn void executable_handoff_to_submit_thread_retires_to_allocator() @test {
     worker.create(&executable_submit_worker, &args)!!;
     assert(worker.join()!! == 0 && args.succeeded,
         "a synchronized submit thread consumes and waits for the executable");
-    assert(!args.executable.handle.is_valid() && args.completion.is_valid(),
+    assert(!args.executable.is_valid() && args.completion.is_valid(),
         "successful handoff consumes the executable and publishes completion");
 
     vk::VkDeviceState* state =

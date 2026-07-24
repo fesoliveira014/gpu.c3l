@@ -223,7 +223,7 @@ fn gpu::internal::CommandRecord* release_pending_command_locked(
     return_allocator_buffer_locked(slot, backend.allocator_buffer);
     slot.in_flight_buffers--;
     slot.mutex.unlock();
-    gpu::CommandListHandle identity = record.identity;
+    gpu::internal::CommandListHandle identity = record.identity;
     gpu::internal::CommandRecord ownership = *record;
     backend.submitted_completion = {};
     backend.next_submitted = null;

@@ -56,9 +56,9 @@ concurrent aliases valid.
 Most public device operations take a short-lived atomic pin. `begin_commands`
 transfers its pin to one stable device-table command record paired with the
 originating allocator unit and publishes `RECORDING` last. Recording calls
-resolve the bounded device plus owner/slot/generation identity and authoritative
-phase before obtaining that record; they do not borrow another registry pin or
-load device-loss state. End, submit, and other lifecycle boundaries report
+load that record from the direct token and compare its generation and
+authoritative phase; they do not borrow another registry pin, resolve a command
+table, or load device-loss state. End, submit, and other lifecycle boundaries report
 loss, while discard remains available. Successful end transfers the same
 record and retained ownership to the executable phase. Executable discard
 releases that ownership immediately. Successful submission consumes the public
@@ -122,7 +122,7 @@ allocators may be recorded in parallel. Tier S allocation and
 span operations may overlap, but callers synchronize writes to mapped storage
 and keep every allocation live through its last submitted use.
 
-Submission resolves and claims the complete bounded-token batch once inside the
+Submission validates and claims the complete direct-token batch once inside the
 backend, using the exact queue stored by each authoritative record. It consumes
 executable command tokens only after native acceptance, pending-record append,
 and completion-sequence publication, then returns a reusable
@@ -183,15 +183,15 @@ ownership transfers.
   only through your synchronization. That hand-off is the happens-before edge.
 - Command records live at stable addresses in the fixed device command table
   and are paired with fixed allocator-owned native buffer/scratch units.
-  The token carries bounded device, owner, slot, and generation identity;
-  resolution validates every bound and the authoritative phase before
-  obtaining the record. Publication, recording-to-executable transfer,
+  The token carries an opaque record pointer and reuse generation; recording
+  compares that generation and the authoritative phase directly on the stable
+  record. Publication, recording-to-executable transfer,
   submission, discard, and retirement mutate the record's sole state under
   Tier C confinement. Passing a live token through caller synchronization is
   the required hand-off and makes the initialized record visible. Copies remain
   one-shot aliases and must neither be used concurrently nor used after another
-  alias consumes or retires the record; bounded resolution rejects fabricated,
-  stale, and consumed identities before native mutation.
+  alias consumes or retires the record. Token storage is opaque and must not be
+  fabricated by callers.
 - Allocator slots and all fixed scratch live in a nonmoving generational table.
   The allocator mutex publishes returned buffer indices and recording-owner
   changes. Application synchronization is the happens-before edge for allocator

@@ -79,13 +79,6 @@ struct SwapchainHandle {
 }
 $assert SwapchainHandle::size <= ulong::size * 2;
 
-struct CommandListHandle {
-    ulong owner;
-    uint  index;
-    uint  generation;
-}
-$assert CommandListHandle::size <= ulong::size * 2;
-
 <* Generation-checked identity for a command allocator owned by one device. *>
 struct CommandAllocatorHandle {
     ulong owner;
@@ -101,7 +94,6 @@ const AttachmentViewHandle   ATTACHMENT_VIEW_HANDLE_INVALID   = {};
 const TextureView            TEXTURE_VIEW_INVALID             = {};
 const PipelineHandle         PIPELINE_HANDLE_INVALID          = {};
 const SwapchainHandle        SWAPCHAIN_HANDLE_INVALID         = {};
-const CommandListHandle      COMMAND_LIST_HANDLE_INVALID      = {};
 const CommandAllocatorHandle COMMAND_ALLOCATOR_HANDLE_INVALID = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
@@ -355,7 +347,7 @@ struct DebugMessage {
 <* Selects library contract behavior; this is independent of lifetime tracking
    and Vulkan validation layers.
    Preconditions: valid callers satisfy operation contracts under every policy.
-   Always checked: bounded identity, authoritative phase, host safety,
+   Always checked: direct token generation, authoritative phase, host safety,
    safe lowering, lifecycle integrity, cold paths, and runtime results.
    FULL diagnostics: detailed command semantic misuse.
    Runtime failures: valid callers may receive documented faults in every policy. *>
@@ -1039,20 +1031,19 @@ struct CommandAllocatorDesc {
     ZString debug_name;
 }
 
-<* A recording command token. Successful end consumes it. *>
+<* An opaque recording token. Successful end consumes it and every alias. *>
 struct CommandList {
-    Device            device;
-    CommandListHandle handle;
+    void* record;
+    uint  generation;
 }
-$assert CommandList::size == Device::size + CommandListHandle::size;
+$assert CommandList::size <= ulong::size * 2;
 
-<* A one-shot executable command token. Submit or discard consumes it. *>
+<* An opaque executable token. Submit or discard consumes it and every alias. *>
 struct ExecutableCommandList {
-    Device            device;
-    CommandListHandle handle;
+    void* record;
+    uint  generation;
 }
-$assert ExecutableCommandList::size
-    == Device::size + CommandListHandle::size;
+$assert ExecutableCommandList::size <= ulong::size * 2;
 
 <* Cold reservation for one generated-work pipeline and command kind on one
    allocator. Count bounds each call; buffer count bounds concurrent use. *>

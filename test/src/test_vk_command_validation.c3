@@ -210,7 +210,7 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
         "capacity preflight retains and rolls back no partial reference");
     assert(gpu::command_resolution_stats().native_commands == 0,
         "capacity preflight rejects before the native copy command");
-    assert(commands.handle.is_valid() && slot.live_recordings == 1
+    assert(commands.is_valid() && slot.live_recordings == 1
         && slot.available_count == 0 && record.scratch.in_use,
         "capacity failure preserves the recording token and allocator unit");
 
@@ -491,7 +491,9 @@ fn void submit_requires_exact_recording_queue_token() @test {
 
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::VkCommandRecord* record = state.commands.get(executable.handle)!!;
+    vk::VkCommandRecord* record = vk::backend_command(
+        (gpu::internal::CommandRecord*)executable.record,
+    );
     gpu::Queue recorded_queue = record.queue;
     record.queue.id++;
 
@@ -500,7 +502,7 @@ fn void submit_requires_exact_recording_queue_token() @test {
     fault mismatched = @catch(gpu::submit(queue, &submit));
     assert(mismatched == gpu::INVALID_ARGUMENT,
         "submission requires the exact queue token captured while recording");
-    assert(lists[0].handle.is_valid(),
+    assert(lists[0].is_valid(),
         "queue-token rejection preserves the executable token");
 
     record.queue = recorded_queue;
@@ -615,7 +617,9 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
         "allocation subspans preserve immutable access");
     assert(multi_access_span.access.graphics && multi_access_span.access.compute,
         "allocation subspans preserve every immutable role");
-    vk::VkCommandRecord* record = state.commands.get(commands.handle)!!;
+    vk::VkCommandRecord* record = vk::backend_command(
+        (gpu::internal::CommandRecord*)commands.record,
+    );
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics, .compute };
 
@@ -3101,7 +3105,9 @@ fn void buffer_to_texture_access_diagnostic_precedes_recording() @test {
         .height  = 1,
     };
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::VkCommandRecord* record = state.commands.get(commands.handle)!!;
+    vk::VkCommandRecord* record = vk::backend_command(
+        (gpu::internal::CommandRecord*)commands.record,
+    );
     gpu::QueueRoles selected_roles = record.queue.roles;
     // Keep diagnostic precedence independent of physical queue aliasing.
     record.queue.roles = { .transfer };
@@ -3516,13 +3522,15 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     );
     fault state_fault = @catch(gpu::cmd_copy_buffer(&commands, &state_copy));
     assert(state_fault == gpu::COMMAND_RECORDING_ERROR, "recording-state fault is unchanged");
+    gpu::internal::CommandRecord* command_record =
+        (gpu::internal::CommandRecord*)commands.record;
     assert_sync_contract_diagnostic(
         capture:             &capture,
         expected_fault:      state_fault,
         resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
         has_public_identity: true,
-        index:               commands.handle.index,
-        generation:          commands.handle.generation,
+        index:               command_record.identity.index,
+        generation:          command_record.identity.generation,
     );
     state.debug_callback = null;
     assert(@catch(gpu::cmd_copy_buffer(&commands, &state_copy)) == state_fault,

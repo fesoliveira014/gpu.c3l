@@ -125,7 +125,7 @@ fn void policy_matrix_creates_exact_runtime_and_device_state() @test {
     }
 }
 
-fn void every_policy_rejects_fabricated_command_identity() @test {
+fn void every_policy_rejects_null_command_record() @test {
     gpu::ContractValidation[3] contracts = {
         gpu::ContractValidation.TRUSTED,
         gpu::ContractValidation.OBJECT_BOUNDARIES,
@@ -143,17 +143,10 @@ fn void every_policy_rejects_fabricated_command_identity() @test {
             capture:         &capture,
         );
         gpu::Device device = create_test_device(&desc)!!;
-        gpu::CommandList fabricated = {
-            .device = device,
-            .handle = {
-                .owner      = ulong::max,
-                .index      = uint::max,
-                .generation = 1,
-            },
-        };
+        gpu::CommandList fabricated = { .generation = 1 };
         fault rejected = @catch(gpu::end_commands(&fabricated));
         assert(rejected == gpu::INVALID_HANDLE,
-            "every contract policy bounds fabricated command identity");
+            "every contract policy rejects a null command record");
         destroy_test_device(&device)!!;
     }
 }
@@ -228,7 +221,9 @@ fn void tracking_off_keeps_reference_storage_empty_through_retirement() @test {
     assert_zero_tracking_work(state);
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    record = state.commands.get(executable.handle)!!;
+    record = vk::backend_command(
+        (gpu::internal::CommandRecord*)executable.record,
+    );
     assert(record.scratch.references.ptr == null
         && record.scratch.reference_count == 0,
         "tracking-off executable owns no reference storage");

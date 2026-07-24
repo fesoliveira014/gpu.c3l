@@ -122,7 +122,7 @@ gpu.cmd_dispatch:
         )
         self.assertNotIn("--direct-command-" + "tokens", result.stdout)
 
-    def test_emit_builds_only_the_bounded_profile(self) -> None:
+    def test_emit_builds_the_sole_direct_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             asm_dir = root / "asm"
@@ -151,7 +151,7 @@ gpu.cmd_dispatch:
         )
         self.assertNotIn("DIRECT_COMMAND_" + "TOKENS", command)
 
-    def test_advisory_report_identifies_bounded_representation(self) -> None:
+    def test_advisory_report_identifies_direct_representation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             argv = [
                 str(SCRIPT),
@@ -163,7 +163,7 @@ gpu.cmd_dispatch:
                 self.assertEqual(report_command_asm.main(), 0)
         self.assertIn(
             "asm_expectation version=1 mode=advisory "
-            "representation=bounded",
+            "representation=direct",
             output.getvalue(),
         )
 

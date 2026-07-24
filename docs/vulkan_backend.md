@@ -727,20 +727,21 @@ CommandList                recording
 ExecutableCommandList      ended, one-shot
 ```
 
-Each value carries a device token plus `CommandListHandle`. Every use validates
-the bounded owner, slot, generation, device, allocator, and authoritative phase
-before resolving the record.
+Each value carries an opaque pointer to the address-stable authoritative record
+plus its reuse generation. Warm recording compares that generation and the
+authoritative phase directly on the record.
 
 Begin claims one stable `CommandRecord` from the device's fixed command table
 and one native buffer/scratch unit from the originating allocator's fixed
 storage. The record is the sole lifecycle authority. It owns the selected
 immutable command-operation table, backend state and backend-command pointers,
-retained device ownership, bounded identity, and the current
+retained device ownership, private table identity, and the current
 recording/submission state. The linked `VkCommandRecord` identifies the
 originating allocator and fixed buffer/scratch index and holds Vulkan-specific
-pipeline snapshots and pending texture transitions. Warm recording resolves the
-bounded identity once and dispatches through the record's preselected operation
-entry. Trusted backend entries do not repeat capability null checks. Only
+pipeline snapshots and pending texture transitions. Warm recording loads the
+record directly and dispatches through its preselected operation entry without
+a device borrow, backend resolver, or command-table lookup. Trusted backend
+entries do not repeat capability null checks. Only
 lifecycle operations continue through the device vtable and report device loss.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
@@ -766,9 +767,9 @@ Without lifetime tracking, the caller-owned lifetime contract requires the
 pipeline to remain live through command completion. `FULL` controls detailed
 semantic preparation independently of that retention choice.
 
-Submission resolves the complete batch before mutation. Bounded resolution
-validates the command table and rejects stale, duplicate, non-executable, or
-wrong-queue tokens before claiming records. A nonempty attempt allocates one
+Submission validates the complete batch before mutation. Direct-token
+validation rejects generation-mismatched, foreign-device, duplicate,
+non-executable, or wrong-queue tokens before claiming records. A nonempty attempt allocates one
 nonzero device-local visit epoch and stamps each resolved record as it is
 visited, so duplicate detection performs one record visit per input until
 rejection or completion. When the epoch space is exhausted, the next attempt
@@ -789,7 +790,7 @@ the completion-tracked batch, so one same-queue batch may mix allocators.
 Completion observation retires each record exactly once: it first transitions
 the record to `INACTIVE`, then releases tracked references and generated
 reservations, returns the exact allocator unit, releases retained device
-ownership, and finally generation-advances/frees the bounded command cell when
+ownership, and finally generation-advances/frees the command cell when
 present. Submitted records and allocator units cannot be reused before that
 retirement completes.
 The next begin resets the preallocated buffer and clears its fixed scratch

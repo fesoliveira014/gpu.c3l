@@ -74,7 +74,7 @@ BENCHMARK_METHODS = {
 }
 
 C3_BUILD_FLAGS = ("-O1",)
-EXPECTATION_VERSION = 2
+EXPECTATION_VERSION = 3
 
 BENCHMARK_PROJECTS = {
     "command_wrapper_bench": "test/cpu",
@@ -150,7 +150,7 @@ COMMAND_RECORD_EXPECTATION = re.compile(
     re.MULTILINE,
 )
 COMMAND_RECORD_TOKENS = re.compile(
-    r"^command_tokens: representation=bounded "
+    r"^command_tokens: representation=direct "
     r"recording_token_bytes=(?P<recording_token_bytes>[1-9][0-9]*) "
     r"executable_token_bytes=(?P<executable_token_bytes>[1-9][0-9]*) "
     r"record_bytes=(?P<record_bytes>[1-9][0-9]*) "
@@ -1099,6 +1099,7 @@ def require_command_record_outcomes(output):
         "device_registry",
         "retained_pins",
         "lifecycle_vtable",
+        "command_table",
         "pipeline_table",
         "pipeline_cache",
         "policy",
@@ -1134,12 +1135,6 @@ def require_command_record_outcomes(output):
         raise ValueError(
             "semantic invariant: command_record_bench recording command "
             f"count {recording_commands} != {expected_recording_commands}"
-        )
-    expected_command_table = recording_commands
-    if values["command_table"] != expected_command_table:
-        raise ValueError(
-            "forbidden work: command_record_bench command-table work "
-            f"{values['command_table']} != {expected_command_table}"
         )
     if values["encoder_cells"] != 0:
         raise ValueError(

@@ -118,7 +118,7 @@ fn gpu::internal::CommandRecord*? CommandTable.claim(
     self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
     self.slots[idx].used = true;
-    gpu::CommandListHandle identity = {
+    gpu::internal::CommandListHandle identity = {
         .owner = self.owner,
         .index = idx,
         .generation = self.slots[idx].generation,
@@ -137,7 +137,7 @@ fn gpu::internal::CommandRecord*? CommandTable.claim(
 
 fn gpu::internal::CommandRecord*? CommandTable.get_record(
     &self,
-    gpu::CommandListHandle handle,
+    gpu::internal::CommandListHandle handle,
 ) {
     gpu::internal::note_command_table_lookup();
     if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
@@ -149,13 +149,13 @@ fn gpu::internal::CommandRecord*? CommandTable.get_record(
 
 fn VkCommandRecord*? CommandTable.get(
     &self,
-    gpu::CommandListHandle handle,
+    gpu::internal::CommandListHandle handle,
 ) {
     gpu::internal::CommandRecord* record = self.get_record(handle)!;
     return (VkCommandRecord*)record.backend_command;
 }
 
-fn void? CommandTable.free(&self, gpu::CommandListHandle handle) {
+fn void? CommandTable.free(&self, gpu::internal::CommandListHandle handle) {
     self.get(handle)!;
     uint idx = handle.index;
     self.slots[idx].record = {};
@@ -173,18 +173,9 @@ fn void? CommandTable.free(&self, gpu::CommandListHandle handle) {
 
 fn void? CommandTable.cancel_claim(
     &self,
-    gpu::CommandListHandle handle,
+    gpu::internal::CommandListHandle handle,
 ) {
     return self.free(handle);
-}
-
-fn gpu::internal::CommandRecord*? vk_resolve_command(
-    void* backend_state,
-    gpu::CommandListHandle handle,
-) @private {
-    if (backend_state == null) return gpu::INVALID_HANDLE~;
-    VkDeviceState* state = (VkDeviceState*)backend_state;
-    return state.commands.get_record(handle);
 }
 
 fn VkCommandRecord*? resolve_command(
@@ -471,7 +462,10 @@ fn void rollback_command_references(
     }
 }
 
-fn void release_command(VkDeviceState* state, gpu::CommandListHandle handle) {
+fn void release_command(
+    VkDeviceState* state,
+    gpu::internal::CommandListHandle handle,
+) {
     if (try record = state.commands.get(handle)) {
         (void)state.commands.free(handle);
     }

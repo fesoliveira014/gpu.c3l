@@ -15,8 +15,8 @@ python -B scripts/run_benchmarks.py
 
 The runner builds every target once with C3 `-O1`, uses trusted/no-tracking/no-
 layer defaults for release evidence, validates output schemas and zero-work
-fields, records hand-maintained `expectation_version=2`, and writes
-`test/build/benchmark-report.md`. The bounded `command_record_bench` executable
+fields, records hand-maintained `expectation_version=3`, and writes
+`test/build/benchmark-report.md`. The direct-token `command_record_bench` executable
 and fixed workload run in this required order:
 
 | Mode | Contract | Tracking | Vulkan layers |
@@ -65,17 +65,17 @@ calls, reference allocations/increments/releases, and layer selection. Trusted
 and object-boundary modes require every policy-work counter to be zero. Both
 full modes require semantic and tracking work, releases must equal increments,
 and allocations cannot exceed increments. Every warm interval must report zero
-device-registry, pipeline-table/cache, and policy-reselection work, with exactly
-one command-table lookup per accepted recording command.
+device-registry, retained-pin, lifecycle-vtable, command-table,
+pipeline-table/cache, and policy-reselection work.
 Each target creates its explicit queue-bound allocator before warmup and outside
 every measured interval. Its cold counters report allocator host allocation,
 one pool creation, and one complete native command-buffer allocation separately
 from warm recording. All four policy modes require zero warm host/native/VMA
 allocation; tracking modes use the reference slab allocated at allocator create.
-The target reports the bounded recording/executable token size,
+The target reports the direct recording/executable token size,
 authoritative-record and cell size, total fixed command storage, and
 command-list workloads of 1, 16, 256, and 4,096 commands. Every accepted
-recording command performs exactly one command-table lookup.
+recording command uses the stable record directly.
 
 ### Command-path baselines
 
@@ -145,9 +145,9 @@ The suite covers:
 | `command_wrapper_bench` | ICD-free direct no-op and public-wrapper floor for five command classes, with exact volatile observation |
 | `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero forbidden work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
 | `command_reference_bench` | Exact public lookup/publication/retain/release outcomes plus upper-bounded private probe, equality, and mutex work for unique, repeated, mixed, forced-collision, and capacity scenarios |
-| `command_record_bench` | Bounded-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording across the validation/tracking matrix; 1/16/256/4,096 command lists; exact native output; one lookup per accepted command and zero forbidden warm work |
+| `command_record_bench` | Direct-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording across the validation/tracking matrix; 1/16/256/4,096 command lists; exact native output and zero forbidden warm work |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
-| `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact bounded resolution, duplicate-visit, claim, queue-serialization, native-submit, and forbidden-work evidence |
+| `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact direct-token visits, duplicate detection, claim, queue serialization, native submit, and forbidden-work evidence |
 | `pipeline_cache_bench` | Dynamic raster and five-state dynamic-color matrix aliasing, state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
 | `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; zero-through-eight sampler probes at occupancy 8/64/1,024/65,536; upper-bounded texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
@@ -180,7 +180,7 @@ exact zero. Timings and unpinned generated assembly are advisory.
 | Cold allocator creation | Host allocations, exactly one exact-family command-pool create, one complete native command-buffer allocation call, and configured buffer count |
 | Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and pre-bind `CommandResolutionStats` |
 | Warm minimal begin + state packet + draw | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, exactly one native begin per pass, exactly ten dynamic-state commands per explicit complete packet, and native draw emission |
-| Warm dynamic-color packet | Exactly three native array commands, one bounded command resolution, and zero allocation, resource locks, pipeline creation, pipeline/cache lookup, or identical-packet suppression |
+| Warm dynamic-color packet | Exactly three native array commands, one direct-record phase check, and zero allocation, resource locks, pipeline creation, pipeline/cache lookup, or identical-packet suppression |
 | Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
@@ -190,8 +190,9 @@ exact zero. Timings and unpinned generated assembly are advisory.
 | Shader identity | Owned clone/free balance, zero post-intern shader work, and bounded intern/compact-key work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Bounded collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
-Warm `CommandResolutionStats` require one bounded command-table resolution and
-authoritative phase check per recorded public command, with zero encoder-cell
+Warm `CommandResolutionStats` require one direct-record generation and
+authoritative phase check per recorded public command, with zero command-table
+lookup, encoder-cell
 computations, packed-lease comparisons, frontend phase transitions,
 registry/pin operations, and warm allocation. The benchmark requires exact
 native emission and GPU output. Pipeline and descriptor-heap counters measure native
@@ -211,8 +212,8 @@ prohibited in every policy mode; tracking modes retain into fixed reference
 storage allocated with the command allocator. VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
 and registry, retained-pin, lifecycle-vtable, command-table, and policy work
-remain prohibited in warm recording; bounded command-token lookup is
-reported separately and limited to one per public recording call. Binding an opaque pipeline handle performs exactly one
+remain prohibited in warm recording. Binding an opaque pipeline handle performs
+exactly one
 pipeline-table and one pipeline-cache lookup; dispatch and draw perform no
 additional resolution and each emits exactly one root push plus its native
 execution command. The dispatch invariant mutates the bound handle's backing
@@ -255,7 +256,7 @@ host_allocations=0
 ```
 
 The runner rejects missing, duplicate, malformed, reordered, or nonzero
-forbidden fields. The counters prove one bounded backend claim against each
+forbidden fields. The counters prove one direct-token backend claim against each
 record's authoritative queue, one long per-queue submission boundary, and no
 warm allocation. Token consumption and pending-list drainage are asserted
 directly. Failure coverage requires one rollback command-lock acquisition,
@@ -288,8 +289,8 @@ raw records. Observed output is never copied back into expectations
 automatically; increases require a reason that the additional native work is
 necessary.
 
-The bounded recording gates require one command-table lookup per accepted
-recording command and exact zero for retired frontend proof work, registry
+The direct-recording gates require zero command-table lookups and exact zero
+for retired frontend proof work, registry
 resolution, retained pins, lifecycle dispatch, policy reselection, and warm
 allocation. Runtime `CommandOps` indirect dispatch and fallible recording
 signatures remain intentional.
