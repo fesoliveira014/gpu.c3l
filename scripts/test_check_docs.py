@@ -74,6 +74,29 @@ class DocumentationCheckTests(unittest.TestCase):
                 ],
             )
 
+    def test_manifest_rejects_project_features_on_library_targets(self) -> None:
+        manifest = {
+            "targets": {
+                "linux-x64": {
+                    "features": [
+                        "GPU_FAST_COMMANDS",
+                        "DIRECT_COMMAND_TOKENS",
+                    ],
+                },
+                "windows-x64": {"dependencies": ["vk"]},
+            },
+        }
+
+        self.assertEqual(
+            check_docs.validate_manifest_target_features(manifest),
+            [
+                (
+                    "manifest target linux-x64 defines unsupported features; "
+                    "select build features from project targets"
+                ),
+            ],
+        )
+
     def test_rejects_project_history_in_current_state_docs(self) -> None:
         source = (
             "# API\n"

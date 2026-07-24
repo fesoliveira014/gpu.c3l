@@ -122,6 +122,19 @@ def validate_manifest_sources(
     return failures
 
 
+def validate_manifest_target_features(manifest: dict) -> list[str]:
+    return [
+        (
+            f"manifest target {target_name} defines unsupported features; "
+            "select build features from project targets"
+        )
+        for target_name, target in sorted(
+            manifest.get("targets", {}).items()
+        )
+        if "features" in target
+    ]
+
+
 def validate_current_state_text(
     relative: Path,
     source: str,
@@ -183,6 +196,7 @@ def collect_failures(root: Path) -> list[str]:
     failures.extend(
         validate_manifest_sources(root, manifest.get("sources", []))
     )
+    failures.extend(validate_manifest_target_features(manifest))
     return failures
 
 
