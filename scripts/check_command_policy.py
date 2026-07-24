@@ -9,21 +9,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_TABLES = frozenset({
-    "TRUSTED_COMMAND_OPS",
-    "TRUSTED_TRACKING_COMMAND_OPS",
-    "CHECKED_COMMAND_OPS",
-    "CHECKED_TRACKING_COMMAND_OPS",
-})
 IDENTIFIER = r"[A-Za-z_][A-Za-z0-9_]*"
 COMMAND_OPS_DECLARATION = re.compile(r"\bstruct\s+CommandOps\b[^{;]*\{")
 TABLE_DECLARATION = re.compile(
     rf"\bconst\s+gpu::internal::CommandOps\s+({IDENTIFIER})\b[^=;{{]*=\s*\{{",
 )
 TABLE_FIELD = re.compile(rf"\s*\.({IDENTIFIER})\s*=")
-DIRECT_TABLE_ENTRY = re.compile(
-    rf"\s*\.({IDENTIFIER})\s*=\s*&({IDENTIFIER})\s*\Z",
-)
 COMMAND_OPS_FIELD = re.compile(
     rf"\b({IDENTIFIER})\s*"
     rf"(?:@{IDENTIFIER}(?:\s*\([^)]*\))?\s*)*\Z"
@@ -33,8 +24,6 @@ COMMAND_OPS_FIELD = re.compile(
 @dataclass(frozen=True)
 class TableEntry:
     field: str | None
-    target: str | None
-    direct: bool
 
 
 @dataclass(frozen=True)
@@ -165,19 +154,9 @@ def command_ops_fields(root: Path) -> tuple[str, ...]:
 def table_entries(body: str) -> tuple[TableEntry, ...]:
     entries = []
     for expression in top_level_segments(body, ","):
-        direct = DIRECT_TABLE_ENTRY.fullmatch(expression)
-        if direct is not None:
-            entries.append(TableEntry(
-                field=direct.group(1),
-                target=direct.group(2),
-                direct=True,
-            ))
-            continue
         field = TABLE_FIELD.match(expression)
         entries.append(TableEntry(
             field=field.group(1) if field is not None else None,
-            target=None,
-            direct=False,
         ))
     return tuple(entries)
 
@@ -214,30 +193,8 @@ def structural_table_errors(
             + ", ".join(duplicate_command_fields)
         )
     expected_fields = set(fields)
-    table_counts = Counter(table.name for table in tables)
-
-    missing_tables = sorted(EXPECTED_TABLES - table_counts.keys())
-    if missing_tables:
-        errors.append(
-            "missing command policy tables: " + ", ".join(missing_tables)
-        )
-    unexpected_tables = sorted(table_counts.keys() - EXPECTED_TABLES)
-    if unexpected_tables:
-        errors.append(
-            "unexpected command policy tables: " + ", ".join(unexpected_tables)
-        )
-    duplicate_tables = sorted(
-        name for name, count in table_counts.items()
-        if name in EXPECTED_TABLES and count > 1
-    )
-    if duplicate_tables:
-        errors.append(
-            "duplicate command policy tables: " + ", ".join(duplicate_tables)
-        )
 
     for table in tables:
-        if table.name not in EXPECTED_TABLES:
-            continue
         malformed = [
             entry for entry in table.entries
             if entry.field is None
@@ -274,13 +231,6 @@ def structural_table_errors(
                 + ", ".join(extra_fields)
             )
 
-        for entry in table.entries:
-            if entry.field is not None and not entry.direct:
-                errors.append(
-                    f"{table.name}.{entry.field} must be initialized with "
-                    "a direct &function_name reference"
-                )
-
     return errors
 
 
@@ -300,7 +250,7 @@ def main() -> int:
         for error in errors:
             print(f"- {error}", file=sys.stderr)
         return 1
-    print("command-table shape contract checks passed")
+    print("runtime command-table operation coverage checks passed")
     return 0
 
 

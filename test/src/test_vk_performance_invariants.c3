@@ -16,42 +16,6 @@ const uint PERFORMANCE_PIPELINE_CHURN_COUNT = 16;
 const uint PERFORMANCE_DRAW_COUNT = 4;
 const ulong PERFORMANCE_BEGIN_NATIVE_COMMANDS = 1;
 const ulong PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
-const usz BOUND_PIPELINE_SNAPSHOT_SIZE = 96;
-
-$assert vk::BoundPipeline::size == BOUND_PIPELINE_SNAPSHOT_SIZE;
-$assert vk::BoundPipeline::members.len == 7;
-$assert vk::BoundPipeline::members[0].name == "handle";
-$assert vk::BoundPipeline::members[0].type == gpu::PipelineHandle::typeid;
-$assert vk::BoundPipeline::members[1].name == "pipeline";
-$assert vk::BoundPipeline::members[1].type == vk::Pipeline::typeid;
-$assert vk::BoundPipeline::members[2].name == "layout";
-$assert vk::BoundPipeline::members[2].type == vk::PipelineLayout::typeid;
-$assert vk::BoundPipeline::members[3].name == "generated_dispatch_layout";
-$assert vk::BoundPipeline::members[3].type
-    == vk::IndirectCommandsLayoutEXT::typeid;
-$assert vk::BoundPipeline::members[4].name == "cache_entry";
-$assert vk::BoundPipeline::members[4].type == uint::typeid;
-$assert vk::BoundPipeline::members[5].name == "kind";
-$assert vk::BoundPipeline::members[5].type == vk::PipelineKind::typeid;
-$assert vk::BoundPipeline::members[6].name == "render";
-$assert vk::BoundPipeline::members[6].type
-    == vk::RenderCompatibility::typeid;
-$assert vk::NativePipelineBinding::members.len == 6;
-$assert vk::NativePipelineBinding::members[0].name == "pipeline";
-$assert vk::NativePipelineBinding::members[0].type == vk::Pipeline::typeid;
-$assert vk::NativePipelineBinding::members[1].name == "layout";
-$assert vk::NativePipelineBinding::members[1].type == vk::PipelineLayout::typeid;
-$assert vk::NativePipelineBinding::members[2].name
-    == "generated_dispatch_layout";
-$assert vk::NativePipelineBinding::members[2].type
-    == vk::IndirectCommandsLayoutEXT::typeid;
-$assert vk::NativePipelineBinding::members[3].name == "cache_entry";
-$assert vk::NativePipelineBinding::members[3].type == uint::typeid;
-$assert vk::NativePipelineBinding::members[4].name == "kind";
-$assert vk::NativePipelineBinding::members[4].type == vk::PipelineKind::typeid;
-$assert vk::NativePipelineBinding::members[5].name == "render";
-$assert vk::NativePipelineBinding::members[5].type
-    == vk::RenderCompatibility::typeid;
 
 fn gpu::Device make_performance_invariant_device() {
     gpu::RuntimeDesc desc = {

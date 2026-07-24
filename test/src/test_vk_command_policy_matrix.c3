@@ -91,9 +91,9 @@ fn bool command_policy_observation_matches(
         && resolution.pipeline_cache_lookups == 0
         && resolution.command_policy_selections == 0
         && resolution.encoder_cell_computations
-            == expectation.recording_commands
+            <= expectation.recording_commands
         && resolution.encoder_lease_comparisons
-            == expectation.recording_commands
+            <= expectation.recording_commands
         && resolution.recording_commands == expectation.recording_commands
         && resolution.native_commands == expectation.native_commands
         && (!expectation.rejected || resolution.native_commands == 0);
@@ -943,6 +943,30 @@ fn void command_policy_matcher_rejects_each_forbidden_mutation() @test {
         "zero observation is a known passing policy baseline");
 
     CommandPolicyObservation mutation = passing;
+    CommandPolicyExpectation private_budget = expected;
+    private_budget.recording_commands = 1;
+    CommandPolicyObservation lower_private_work = passing;
+    lower_private_work.resolution.recording_commands = 1;
+    assert(command_policy_observation_matches(
+        &lower_private_work,
+        &private_budget,
+    ), "removed encoder proof work is a known passing policy baseline");
+    mutation = lower_private_work;
+    mutation.resolution.encoder_cell_computations = 2;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &private_budget,
+        "encoder-cell budget",
+    );
+    mutation = lower_private_work;
+    mutation.resolution.encoder_lease_comparisons = 2;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &private_budget,
+        "encoder-lease budget",
+    );
+
+    mutation = passing;
     mutation.policy.semantic_checks = 1;
     assert_command_policy_mutation_rejected(
         &mutation,

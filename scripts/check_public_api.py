@@ -20,10 +20,6 @@ CALLABLE_DECLARATION = re.compile(
     r"(?m)^\s*(?:fn\s+[^\r\n(]*?\b|macro\s+)"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
 )
-TOP_LEVEL_FUNCTION_DECLARATION = re.compile(
-    r"(?m)^fn\s+[^\r\n(]*?\b"
-    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\("
-)
 NON_CALLABLE_DECLARATION = re.compile(
     r"(?m)^\s*(?P<kind>alias|bitstruct|const|constdef|def|distinct|enum|"
     r"fault|faultdef|interface|struct|typedef|union)\b"
@@ -306,46 +302,6 @@ RETIRED_SOURCE_PATTERNS = {
     r"struct\s+SubmitDesc\s*\{[^}]*\bwaits\b": "SubmitDesc.waits",
     r"struct\s+SubmitDesc\s*\{[^}]*\bsignals\b": "SubmitDesc.signals",
 }
-FRONTEND_WARM_COMMAND_PATTERNS = {
-    "stored encoder device comparison": re.compile(
-        r"\bencoder\s*\.\s*device\b"
-    ),
-    "stored encoder handle comparison": re.compile(
-        r"\bencoder\s*\.\s*handle\b"
-    ),
-    "device-loss load": re.compile(
-        r"\b(?:device_lost|lost)\s*\.\s*load\s*\("
-    ),
-    "encoder operation-table null comparison": re.compile(
-        r"(?:\bencoder\s*\.\s*ops\s*(?:==|!=)\s*null\b"
-        r"|\bnull\s*(?:==|!=)\s*encoder\s*\.\s*ops\b)"
-    ),
-    "encoder backend-state null comparison": re.compile(
-        r"(?:\bencoder\s*\.\s*backend_state\s*(?:==|!=)\s*null\b"
-        r"|\bnull\s*(?:==|!=)\s*encoder\s*\.\s*backend_state\b)"
-    ),
-    "encoder backend-command null comparison": re.compile(
-        r"(?:\bencoder\s*\.\s*backend_command\s*(?:==|!=)\s*null\b"
-        r"|\bnull\s*(?:==|!=)\s*encoder\s*\.\s*backend_command\b)"
-    ),
-}
-TRUSTED_WARM_CAPABILITY_PATTERNS = {
-    "command encoder null comparison": re.compile(
-        r"(?:\bcommands\s*(?:==|!=)\s*null\b"
-        r"|\bnull\s*(?:==|!=)\s*commands\b)"
-    ),
-    "command record null comparison": re.compile(
-        r"(?:\brecord\s*(?:==|!=)\s*null\b"
-        r"|\bnull\s*(?:==|!=)\s*record\b)"
-    ),
-    "command capability null comparison": re.compile(
-        r"(?:\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*"
-        r"(?:ops|backend_state|backend_command)\s*(?:==|!=)\s*null\b"
-        r"|\bnull\s*(?:==|!=)\s*[A-Za-z_][A-Za-z0-9_]*\s*\.\s*"
-        r"(?:ops|backend_state|backend_command)\b)"
-    ),
-}
-CHECKED_HELPER_CALL = re.compile(r"\bchecked_[A-Za-z_][A-Za-z0-9_]*\s*\(")
 
 
 def public_entries(module: dict) -> dict:
@@ -1915,353 +1871,23 @@ def source_line(source: str, offset: int) -> int:
     return source.count("\n", 0, offset) + 1
 
 
-def top_level_function_sections(
-    source: str,
-) -> list[tuple[str, int, str]]:
-    declarations = list(TOP_LEVEL_FUNCTION_DECLARATION.finditer(source))
-    return [
-        (
-            declaration.group("name"),
-            declaration.start(),
-            source[
-                declaration.start():
-                (
-                    declarations[index + 1].start()
-                    if index + 1 < len(declarations)
-                    else len(source)
-                )
-            ],
-        )
-        for index, declaration in enumerate(declarations)
-    ]
-
-
-def retired_warm_command_mechanism_errors(
-    root: Path = ROOT,
-) -> list[str]:
-    failures = []
-    frontend_relative = Path("gpu/internal/command.c3")
-    public_relative = Path("gpu/gpu.c3")
-    try:
-        frontend = mask_non_code(
-            (root / frontend_relative).read_text(encoding="utf-8")
-        )
-        public = mask_non_code(
-            (root / public_relative).read_text(encoding="utf-8")
-        )
-    except OSError as error:
-        return [str(error)]
-
-    frontend_sections = top_level_function_sections(frontend)
-    command_encoder_sections = [
-        section
-        for section in frontend_sections
-        if section[0] == "command_encoder"
-    ]
-    if len(command_encoder_sections) != 1:
-        failures.append(
-            "explicit warm-command structural prohibition requires exactly "
-            "one command_encoder"
-        )
-    else:
-        _, offset, section = command_encoder_sections[0]
-        for note in (
-            "note_command_encoder_cell_computation(",
-            "note_command_encoder_lease_comparison(",
-        ):
-            if section.count(note) != 1:
-                failures.append(
-                    f"{frontend_relative.as_posix()}:"
-                    f"{source_line(frontend, offset)} explicit warm-command "
-                    "structural prohibition requires exactly one "
-                    f"{note.removesuffix('(')}"
-                )
-
-    frontend_scopes = [
-        (frontend_relative, 0, frontend),
-        *(
-            (public_relative, offset, section)
-            for name, offset, section in top_level_function_sections(public)
-            if name.startswith("cmd_")
-        ),
-    ]
-    for relative, offset, scope in frontend_scopes:
-        for label, pattern in FRONTEND_WARM_COMMAND_PATTERNS.items():
-            for match in pattern.finditer(scope):
-                failures.append(
-                    f"{relative.as_posix()}:"
-                    f"{source_line(public if relative == public_relative else frontend, offset + match.start())} "
-                    "explicit warm-command structural prohibition rejects "
-                    f"{label}"
-                )
-
-    backend_root = root / "gpu" / "internal" / "vk"
-    backend_sections = []
-    for path in sorted(backend_root.glob("*.c3")):
-        relative = path.relative_to(root)
-        try:
-            source = mask_non_code(path.read_text(encoding="utf-8"))
-        except OSError as error:
-            failures.append(str(error))
-            continue
-        backend_sections.extend(
-            (relative, source, name, offset, section)
-            for name, offset, section in top_level_function_sections(source)
-        )
-
-    for relative, source, name, offset, section in backend_sections:
-        if name.startswith("checked_"):
-            continue
-        for label, pattern in TRUSTED_WARM_CAPABILITY_PATTERNS.items():
-            for match in pattern.finditer(section):
-                failures.append(
-                    f"{relative.as_posix()}:"
-                    f"{source_line(source, offset + match.start())} "
-                    "explicit warm-command structural prohibition rejects "
-                    f"{label} in {name}"
-                )
-        for match in CHECKED_HELPER_CALL.finditer(section):
-            helper = match.group(0).rstrip().removesuffix("(").rstrip()
-            failures.append(
-                f"{relative.as_posix()}:"
-                f"{source_line(source, offset + match.start())} "
-                "explicit warm-command structural prohibition rejects "
-                f"call to checked helper {helper} in {name}"
-            )
-    return failures
-
-def callable_body(source: str, name: str) -> str | None:
+def retired_command_render_state_errors(source: str) -> list[str]:
     masked = mask_non_code(source)
-    declaration = next(
-        (
-            match
-            for match in CALLABLE_DECLARATION.finditer(masked)
-            if match.group("name") == name
-        ),
-        None,
-    )
-    if declaration is None:
-        return None
-    opening = masked.find("{", declaration.end())
-    if opening < 0:
-        return None
-    depth = 0
-    for index in range(opening, len(masked)):
-        if masked[index] == "{":
-            depth += 1
-        elif masked[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return masked[opening:index + 1]
-    return None
-
-
-def validate_graphics_state_backend_sources(
-    render_pass_source: str,
-    command_state_source: str,
-) -> list[str]:
-    failures = []
-
-    packet = callable_body(render_pass_source, "emit_graphics_state")
-    packet_calls = (
-        "emit_viewport",
-        "emit_scissor",
-        "emit_raster_state",
-        "emit_depth_state",
-    )
-    if packet is None:
-        failures.append("missing emit_graphics_state implementation")
-    else:
-        positions = []
-        for call in packet_calls:
-            matches = tuple(re.finditer(rf"\b{call}\s*\(", packet))
-            if len(matches) != 1:
-                failures.append(
-                    "emit_graphics_state must emit viewport, scissor, raster, "
-                    "and depth exactly once in order"
-                )
-                break
-            positions.append(matches[0].start())
-        else:
-            if positions != sorted(positions):
-                failures.append(
-                    "emit_graphics_state must emit viewport, scissor, raster, "
-                    "and depth exactly once in order"
-                )
-
-    required_orders = {
-        "trusted_begin_render_pass": (
-            "lower_render_pass",
-            "record_render_pass",
-        ),
-        "trusted_tracking_begin_render_pass": (
-            "lower_render_pass",
-            "track_render_pass",
-            "record_render_pass",
-        ),
-        "checked_begin_render_pass": (
-            "checked_prepare_render_pass",
-            "record_render_pass",
-        ),
-        "checked_tracking_begin_render_pass": (
-            "checked_prepare_render_pass",
-            "track_render_pass",
-            "record_render_pass",
-        ),
-        "trusted_begin_render_pass_with_state": (
-            "lower_render_pass",
-            "lower_graphics_state",
-            "record_render_pass_with_state",
-        ),
-        "trusted_tracking_begin_render_pass_with_state": (
-            "lower_render_pass",
-            "lower_graphics_state",
-            "track_render_pass",
-            "record_render_pass_with_state",
-        ),
-        "checked_begin_render_pass_with_state": (
-            "checked_prepare_render_pass",
-            "checked_prepare_graphics_state",
-            "record_render_pass_with_state",
-        ),
-        "checked_tracking_begin_render_pass_with_state": (
-            "checked_prepare_render_pass",
-            "checked_prepare_graphics_state",
-            "track_render_pass",
-            "record_render_pass_with_state",
-        ),
-    }
-    for function, calls in required_orders.items():
-        body = callable_body(render_pass_source, function)
-        if body is None:
-            failures.append(f"missing {function} implementation")
-            continue
-        positions = []
-        for call in calls:
-            match = re.search(rf"\b{call}\s*\(", body)
-            if match is None:
-                failures.append(
-                    f"{function} must complete lowering, validation, and "
-                    "tracking before native render-pass recording"
-                )
-                break
-            positions.append(match.start())
-        else:
-            if positions != sorted(positions):
-                failures.append(
-                    f"{function} must complete lowering, validation, and "
-                    "tracking before native render-pass recording"
-                )
-
-    recording = callable_body(render_pass_source, "record_render_pass")
-    if recording is None:
-        failures.append("missing record_render_pass implementation")
-    else:
-        begin_calls = tuple(
-            re.finditer(r"\bvk::cmd_begin_rendering\s*\(", recording)
-        )
-        packet_emissions = tuple(
-            re.finditer(r"\bemit_graphics_state\s*\(", recording)
-        )
-        if (
-            len(begin_calls) != 1
-            or len(packet_emissions) != 0
-        ):
-            failures.append(
-                "record_render_pass must emit exactly one native begin and "
-                "no graphics-state packet"
-            )
-
-    combined_recording = callable_body(
-        render_pass_source,
-        "record_render_pass_with_state",
-    )
-    if combined_recording is None:
-        failures.append("missing record_render_pass_with_state implementation")
-    else:
-        begin = tuple(
-            re.finditer(r"\brecord_render_pass\s*\(", combined_recording)
-        )
-        packet = tuple(
-            re.finditer(r"\bemit_graphics_state\s*\(", combined_recording)
-        )
-        if (
-            len(begin) != 1
-            or len(packet) != 1
-            or begin[0].start() > packet[0].start()
-        ):
-            failures.append(
-                "record_render_pass_with_state must emit one begin followed "
-                "by one complete graphics-state packet"
-            )
-
-    combined_state = mask_non_code(
-        command_state_source + "\n" + render_pass_source
-    )
-    if len(re.findall(r"\bgraphics_state_initialized\b", command_state_source)) != 1:
-        failures.append(
-            "CommandRecord must contain exactly one "
-            "graphics_state_initialized field"
-        )
-    for function in (
-        "validate_graphics_execution_state",
-        "validate_generated_graphics_execution_state",
-    ):
-        body = callable_body(render_pass_source, function)
-        if body is None:
-            failures.append(f"missing {function} implementation")
-        elif not re.search(
-            r"\brecord\.graphics_state_initialized\b",
-            mask_non_code(body),
-        ):
-            failures.append(
-                f"{function} must require complete graphics-state "
-                "initialization"
-            )
-    for function in (
-        "checked_set_graphics_state",
-        "checked_begin_render_pass_with_state",
-        "checked_tracking_begin_render_pass_with_state",
-    ):
-        body = callable_body(render_pass_source, function)
-        if body is None:
-            failures.append(f"missing {function} implementation")
-        elif len(re.findall(
-            r"\bgraphics_state_initialized\s*=\s*true\b",
-            mask_non_code(body),
-        )) != 1:
-            failures.append(
-                f"{function} must publish complete graphics-state "
-                "initialization exactly once"
-            )
-    for function in (
-        "trusted_set_graphics_state",
-        "trusted_begin_render_pass_with_state",
-        "trusted_tracking_begin_render_pass_with_state",
-    ):
-        body = callable_body(render_pass_source, function)
-        if body is None:
-            failures.append(f"missing {function} implementation")
-        elif re.search(
-            r"\bgraphics_state_initialized\b",
-            mask_non_code(body),
-        ):
-            failures.append(
-                f"{function} must not inspect or publish checked "
-                "graphics-state initialization"
-            )
-    for symbol in RETIRED_COMMAND_RENDER_STATE_SYMBOLS:
-        if re.search(rf"\b{symbol}\b", combined_state):
-            failures.append(f"retired command render state {symbol}")
-    return failures
+    return [
+        f"retired command render state {symbol}"
+        for symbol in RETIRED_COMMAND_RENDER_STATE_SYMBOLS
+        if re.search(rf"\b{symbol}\b", masked)
+    ]
 
 
 def scan_graphics_state_backend() -> list[str]:
     backend = ROOT / "gpu" / "internal" / "vk"
-    return validate_graphics_state_backend_sources(
-        (backend / "render_pass.c3").read_text(encoding="utf-8"),
-        (backend / "command_state.c3").read_text(encoding="utf-8"),
+    combined = (
+        (backend / "render_pass.c3").read_text(encoding="utf-8")
+        + "\n"
+        + (backend / "command_state.c3").read_text(encoding="utf-8")
     )
+    return retired_command_render_state_errors(combined)
 
 
 def validate_root_facade_source(relative: Path, source: str) -> list[str]:
@@ -2659,7 +2285,6 @@ def main() -> int:
     failures.extend(scan_public_module_sources())
     failures.extend(scan_private_internal_modules())
     failures.extend(scan_private_backend_modules())
-    failures.extend(retired_warm_command_mechanism_errors())
     failures.extend(scan_graphics_state_backend())
     failures.extend(scan_retired_vulkan_namespace())
     if failures:

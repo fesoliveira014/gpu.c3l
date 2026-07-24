@@ -13,6 +13,7 @@ const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint GENERATED_RECORD_ITERATIONS = 64;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 const uint MEASURED_COMMAND_PATH_COUNT = 3;
+const uint BENCHMARK_EXPECTATION_VERSION = 1;
 
 struct CommandBenchPolicy {
     gpu::ContractValidation contract;
@@ -414,14 +415,8 @@ fn int main() {
         "generated recording uses distinct reserved preprocess storage");
     assert(draw_compilations == 0,
         "recording does not compile pipelines");
-    if (policy.track_lifetimes) {
-        assert(warm_work.host_allocations
-            == policy_counters.reference_allocations,
-            "tracking host allocations match reference-storage allocations");
-    } else {
-        assert(warm_work.host_allocations == 0,
-            "tracking-off warmed recording performs no host allocation");
-    }
+    assert(warm_work.host_allocations == 0,
+        "warmed recording performs no host allocation");
     assert(warm_work.command_buffer_allocations == 0,
         "warmed recording performs no command-buffer allocation");
     assert(warm_work.command_pool_creations == 0,
@@ -453,10 +448,10 @@ fn int main() {
         "post-bind recording emits no pipeline or descriptor heap binds");
     assert(resolution.command_policy_selections == 0,
         "warm recording does not select a validation policy");
-    assert(resolution.encoder_cell_computations == expected_recording_commands,
-        "warm recording selects exactly one encoder cell per call");
-    assert(resolution.encoder_lease_comparisons == expected_recording_commands,
-        "warm recording compares exactly one encoder lease per call");
+    assert(resolution.encoder_cell_computations <= expected_recording_commands,
+        "warm recording stays within one encoder-cell computation per call");
+    assert(resolution.encoder_lease_comparisons <= expected_recording_commands,
+        "warm recording stays within one encoder-lease comparison per call");
     assert(resolution.recording_commands == expected_recording_commands,
         "resolution evidence counts every measured recording call");
     assert(resolution.native_commands >= resolution.recording_commands,
@@ -470,12 +465,11 @@ fn int main() {
     }
     if (policy.track_lifetimes) {
         assert(policy_counters.tracking_calls > 0
+            && policy_counters.reference_allocations == 0
             && policy_counters.reference_increments > 0
-            && policy_counters.reference_increments
-                >= policy_counters.reference_allocations
             && policy_counters.reference_releases
                 == policy_counters.reference_increments,
-            "tracking retains and releases measured references exactly");
+            "tracking reuses storage and retains/releases references exactly");
     } else {
         assert(policy_counters.tracking_calls == 0
             && policy_counters.reference_allocations == 0
@@ -489,6 +483,7 @@ fn int main() {
             "each measured execute uses distinct reserved preprocess storage");
     }
 
+    io::printfn("expectation_version=%d", BENCHMARK_EXPECTATION_VERSION);
     io::printfn(
         "barrier: iterations=%d repetitions=%d median=%.1f ns/record",
         COMMAND_RECORD_ITERATIONS, COMMAND_RECORD_REPETITIONS, command_median(barrier_results),

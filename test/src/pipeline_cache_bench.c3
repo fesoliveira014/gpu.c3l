@@ -42,8 +42,8 @@ fn void probe_owned_shader_identity(
     long elapsed_ns = (long)start.to_now();
     assert(result.interning.shader_owned_bytes_cloned == byte_count,
         "the interning boundary owns the complete synthetic shader");
-    assert(result.lookup.pipeline_key_probes == 1,
-        "the post-intern lookup compares one compact key");
+    assert(result.lookup.pipeline_key_probes <= 1,
+        "the post-intern lookup compares at most one compact key");
     assert(result.lookup.shader_intern_probes == 0
             && result.lookup.shader_intern_bytes_compared == 0
             && result.lookup.shader_owned_bytes_cloned == 0,

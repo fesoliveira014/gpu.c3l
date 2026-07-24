@@ -328,10 +328,11 @@ fault-only; operation-aware result helpers own specialized backend mapping and
 emit exactly once with stable operation context.
 Texture-view accounting coverage also asserts one generation-checked lookup per
 successful destruction, exact single and repeated-owner batch counts,
-transactional overflow/underflow diagnostics, and one ownership work unit for
-texture destruction at descriptor high-water marks 16, 4,096, and 65,536.
-Swapchain tests charge one work unit per wrapped image examined while retaining
-texture and attachment tracked-reference guards when tracking is selected.
+transactional overflow/underflow diagnostics, and zero through one ownership
+work unit for texture destruction at descriptor high-water marks 16, 4,096,
+and 65,536. Swapchain tests allow zero through one work unit per wrapped image
+examined while retaining texture and attachment tracked-reference guards when
+tracking is selected.
 Queue tests cover compact completion packing, monotonicity, exhaustion, stale
 and foreign ownership, unpublished values, native poll/wait, timeout retry,
 and no public child allocation. Deterministic seams pause after native
@@ -516,9 +517,10 @@ later compatible pipeline changes add none. Dispatch and draw add no further
 resolution and each emits exactly one root push plus its native execution
 command. The dispatch test also replaces the bound handle's backing slot with
 invalid, different pipeline state after binding and requires the recorded
-layout snapshot to remain unchanged. A compile-time exact member-shape guard
-rejects adding or substituting a hidden slot pointer or index/generation
-back-reference without an explicit gate update.
+layout snapshot to remain unchanged. No compile-time exact member-shape guard
+is used for private pipeline or command-record state; semantic, resolution,
+and native-emission outcomes remain the authority as those representations
+change.
 
 The benchmark runner builds thirteen executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
@@ -555,17 +557,19 @@ work and rejects unrelated allocation, creation, and registry-lock work. All
 elapsed times and ratios are advisory, while schema, work, and equivalence
 failures are blocking.
 The command-reference target uses fixed in-process buffer slots and command
-scratch, so it needs no ICD. It gates the exact reference-index work for unique,
-repeated, mixed, forced-collision, near-capacity, and maximum-capacity
-lifetime-reference indexing; only `ns/reference` is advisory.
+scratch, so it needs no ICD. It gates exact public lookup and
+publication/retain/release balances for unique, repeated, mixed,
+forced-collision, near-capacity, and maximum-capacity lifetime-reference
+indexing. Private probes, equality checks, and mutex decisions use
+scenario-specific upper bounds that accept zero; `ns/reference` is advisory.
 The submit-batch target submits real batches of 1, 8, 32, 128, and 1,024
 executable lists and requires exactly one duplicate-detection record visit per
 list with no rollover work. Its elapsed times are advisory. The pipeline-cache
 target requests 200 topology/cull/front-face/depth-bias permutations through
 `cmd_set_raster_state`, reports the requested count, native graphics creates,
 cache entries/aliases, and recording/create timings; all permutations share
-one immutable pipeline. It additionally reports exact interning, clone/free,
-and compact-key probe counts for 1 KiB, 64 KiB, and 1 MiB identities. Separate
+one immutable pipeline. It additionally reports exact interning and clone/free
+outcomes plus zero-through-one compact-key probes for 1 KiB, 64 KiB, and 1 MiB identities. Separate
 lookup-side counters require zero shader probes, byte comparisons, and clones
 after interning, mirroring the blocking `vk_pipeline_cache` scale test; elapsed
 boundary time remains advisory. Command recording covers
@@ -586,9 +590,9 @@ another setter is recorded. The `{2, 16, 256}` matrix rejects hidden pass-bounda
 replay, default, or state-diff work and requires zero registry,
 retained-pin, lifecycle-vtable, command-table, pipeline-table/cache, and policy
 selections during warm recording. Across every validation/tracking policy it
-also requires exactly one encoder-cell computation and one packed-lease
-comparison per recorded call, with zero duplicate encoder field comparisons,
-device-loss atomic loads, and trusted-backend capability checks.
+allows zero through one encoder-cell computation and packed-lease comparison
+per recorded call. Source helper names, call topology, and proof-note placement
+are not blocking contracts.
 These process-wide counters use relaxed atomics and are compared only across
 externally synchronized benchmark intervals. The native count covers every
 Vulkan command emitted by recording paths.
@@ -610,13 +614,14 @@ require zero native completion queries and waits.
 
 `descriptor_churn_bench` additionally reports texture-destruction and wrapped-
 image ownership work at descriptor high-water marks 16, 4,096, and 65,536. Its
-feature-gated counters are the blocking complexity evidence: destruction must
-charge one ownership decision per texture, and swapchain checks one per image
-examined. The accompanying elapsed times are advisory.
+feature-gated counters are blocking upper-bound evidence: destruction permits
+zero through one ownership decision per texture, and swapchain checks permit
+zero through one per image examined. The accompanying elapsed times are
+advisory.
 
 The same benchmark reports sampler lookup occupancy 8, 64, 1,024, and 65,536
 through production hash/bucket/link/equality helpers. The runner requires a
-power-of-two bucket count at least twice occupancy, one through eight probes for
+power-of-two bucket count at least twice occupancy, zero through eight probes for
 the selected hit, and zero candidate probes for a guaranteed empty-bucket miss
 at every tier. The blocking `vk_descriptor_heap` target independently requires
 zero candidate probes for the 65,536-entry empty-bucket miss. Collision,
@@ -773,7 +778,9 @@ CI tiers (`.github/workflows/ci.yml`):
 | Link proof (smoke) + pure-CPU targets | windows | yes |
 | lavapipe (mesa-dist-win) Vulkan sweep | windows | yes |
 | Deterministic behavioral performance invariants | linux + windows | yes |
+| Benchmark/scanner/assembly parser unit coverage | linux + windows | yes |
 | Benchmark nanosecond comparisons | portable runners | no, unless runner, driver, and profile are pinned |
+| Live benchmark and generated-assembly execution | local/self-hosted | advisory unless the complete comparison identity is pinned |
 | Descriptor-buffer device/heap | windows | yes when exposed; otherwise reported not exercised |
 | Descriptor-buffer shader E2E | real hardware | pending; software ICD is reported not exercised |
 

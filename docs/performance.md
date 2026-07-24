@@ -15,7 +15,8 @@ python -B scripts/run_benchmarks.py
 
 The runner builds every target once with C3 `-O1`, uses trusted/no-tracking/no-
 layer defaults for release evidence, validates output schemas and zero-work
-fields, and writes `test/build/benchmark-report.md`. The command-recording
+fields, records hand-maintained `expectation_version=1`, and writes
+`test/build/benchmark-report.md`. The command-recording
 target is the exception: the same built executable and fixed workload run in
 this required order:
 
@@ -122,11 +123,13 @@ work, equivalence, and lifecycle records. Minimum/median/maximum times and
 direct/public ratios remain advisory; schema, deterministic work/state, and
 semantic failures are blocking.
 
-Direct command-table shape is the only static command-policy authority.
+Static command-policy checking verifies complete field coverage for each
+literal runtime `CommandOps` table that exists. Table names, table count,
+initializer expressions, and table-free specialization are not contracts.
 Allocation, policy selection, tracking, reference publication/release ordering,
-and performance are established by allocator operations, exact work/state
-counters, native emissions/faults, and ownership transitions; wall time blocks
-only when runner, driver, and comparison profile are pinned.
+and performance are established by allocator operations, work/state counters,
+native emissions/faults, and ownership transitions; wall time blocks only when
+runner, driver, and comparison profile are pinned.
 
 ## Evidence and regression gates
 
@@ -137,13 +140,13 @@ The suite covers:
 | `allocation_bench` | Explicit `CPU_WRITE` allocation and free |
 | `command_wrapper_bench` | ICD-free direct no-op and public-wrapper floor for five command classes, with exact volatile observation |
 | `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero forbidden work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
-| `command_reference_bench` | Exact unique, repeated, mixed, forced-collision, 4,095-capacity, and 4,096-reference probe/retain/release work with advisory per-reference timing |
+| `command_reference_bench` | Exact public lookup/publication/retain/release outcomes plus upper-bounded private probe, equality, and mutex work for unique, repeated, mixed, forced-collision, and capacity scenarios |
 | `command_record_bench` | Barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact one-visit-per-list duplicate-detection work |
 | `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
-| `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; exact sampler lookup probes at occupancy 8/64/1,024/65,536; exact texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
+| `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; zero-through-eight sampler probes at occupancy 8/64/1,024/65,536; upper-bounded texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
 | `upload_throughput_bench` | Explicit uploads at 4 KiB, 256 KiB, and 4 MiB across 1/2/4 workers |
 | `async_overlap_bench` | Serialized and independent graphics/compute submissions |
 
@@ -156,6 +159,18 @@ Completed or discarded lists return compatible buffers to the same allocator.
 Required performance evidence executes complete operations and compares narrow
 subsystem snapshots:
 
+Blocking records use three outcome classes:
+
+| Class | Blocking rule |
+|---|---|
+| Semantic invariant | Exact output, fault/state preservation, ownership balance, submission, and completion outcomes |
+| Forbidden work | Exact zero allocation, object creation, unrelated locking, policy reselection, and post-bind resolution |
+| Minimal native lowering | Exact Vulkan emission count for the named scenario |
+
+Private probes, identity comparisons, mutex decisions, and encoder proof work
+use documented upper bounds that include zero. Timings and unpinned generated
+assembly are advisory.
+
 | Invariant | Required observation |
 |---|---|
 | Cold allocator creation | Host allocations, exactly one exact-family command-pool create, one complete native command-buffer allocation call, and configured buffer count |
@@ -167,15 +182,13 @@ subsystem snapshots:
 | Submission ownership | Submitted-batch references, caller tokens, retained-reference counts, and ordered retirement state |
 | Bound pipeline snapshot | Exact bind-time table/cache lookups, per-bind-point `pipeline_bind_commands`, zero post-bind resolution under cache churn, and unchanged layout use after backing-slot mutation |
 | Strict descriptor heap | Exact `strict_heap_set_bind_commands`, `strict_heap_buffer_bind_commands`, and `strict_heap_offset_commands`: one set or offset per used bind point and one descriptor-buffer bind per command record |
-| Shader identity | Exact intern probes, collision-byte comparisons, owned clone/free bytes, and zero post-intern shader work at 1 KiB/64 KiB/1 MiB |
-| Sampler buckets | Exact collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
+| Shader identity | Owned clone/free balance, zero post-intern shader work, and bounded intern/compact-key work at 1 KiB/64 KiB/1 MiB |
+| Sampler buckets | Bounded collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
-Warm `CommandResolutionStats` require exactly one encoder-cell computation and
-one packed-lease comparison per recorded public command. Duplicate encoder
-identity comparisons, device-loss loads, and trusted-backend capability
-comparisons are explicit structural prohibitions checked against the warm
-frontend and trusted backend sources; they are not represented as runtime
-counter evidence. Pipeline and descriptor-heap counters measure native
+Warm `CommandResolutionStats` allow zero or one encoder-cell computation and
+zero or one packed-lease comparison per recorded public command. More than one
+fails the nearest work budget; an implementation that removes either private
+operation passes. Pipeline and descriptor-heap counters measure native
 emission, not public bind attempts, so compatible pipeline switches can increase
 pipeline binds without increasing heap binds.
 
@@ -197,9 +210,8 @@ pipeline-table and one pipeline-cache lookup; dispatch and draw perform no
 additional resolution and each emits exactly one root push plus its native
 execution command. The dispatch invariant mutates the bound handle's backing
 slot after binding and observes the pushed layout, proving command recording
-uses the bind-time value snapshot. A compile-time exact member-shape guard makes
-any hidden slot pointer or index/generation back-reference an explicit test
-change.
+uses the bind-time value snapshot. Private pipeline and command-record member
+inventories are intentionally not static contracts.
 
 The lifecycle benchmark first establishes full retirement for each measured
 point, then resets completion-work counters before 100,000 repeated polls. The
@@ -208,16 +220,16 @@ acquisitions; these counters are compiled only for tests and this benchmark
 target.
 
 The descriptor-churn benchmark separately varies descriptor high-water state at
-16, 4,096, and 65,536. Texture destruction must report exactly one ownership
-work unit per texture, and the swapchain seam exactly one per wrapped image
-examined, at every level. These exact counters are blocking; `ns/destroy` and
-`ns/check` remain advisory because runner, driver, build, and profile identity
-are not fully pinned by that single observation.
+16, 4,096, and 65,536. Texture destruction permits zero through one ownership
+decision per texture, and the swapchain seam permits zero through one per
+wrapped image examined. `ns/destroy` and `ns/check` remain advisory because
+runner, driver, build, and profile identity are not fully pinned by that single
+observation.
 
 The same target builds synthetic sampler tables at occupancy 8, 64, 1,024, and
 65,536 with the production canonical hash, bucket, link, equality, and lookup
 helpers. Every tier requires a power-of-two bucket count at least twice the
-occupancy and between one and eight candidate probes for the selected hit.
+occupancy and between zero and eight candidate probes for the selected hit.
 Every tier also requires zero candidate probes for a guaranteed empty-bucket
 miss. The 65,536-entry zero-probe observation is also enforced by the live
 `vk_descriptor_heap` test target. Elapsed lookup time is advisory.
@@ -229,10 +241,45 @@ work counts are blocking; `ns/submit` remains advisory.
 
 The pipeline-cache benchmark separately interns synthetic 1 KiB, 64 KiB, and
 1 MiB identities. For every size, the live `vk_pipeline_cache` test and the
-benchmark require one complete owned clone and free, one compact-key probe, and
-zero shader probes, byte comparisons, and clones after interning. Collision and
-distinct-storage tests require exact intern probes and compared bytes. Boundary
-elapsed time is advisory.
+benchmark require one complete owned clone and free, zero or one compact-key
+probe, and zero shader probes, byte comparisons, and clones after interning.
+Collision and distinct-storage tests bound intern probes and compared bytes
+while preserving exact identity and clone outcomes. Boundary elapsed time is
+advisory.
+
+### Expectation changes and generated assembly
+
+Exact semantic or native-work changes are hand-edited. The same review updates
+the scenario, expected value, `expectation_version`, rationale, and before/after
+raw records. Observed output is never copied back into expectations
+automatically; increases require a reason that the additional native work is
+necessary.
+
+Representative dispatch, draw, barrier, viewport, and buffer-copy assembly can
+be reported locally:
+
+```sh
+python -B scripts/report_command_asm.py --emit
+```
+
+The reviewed Linux C3 0.8.0 profile can be enforced with:
+
+```sh
+python -B scripts/report_command_asm.py \
+  --emit \
+  --pinned-compiler 0.8.0 \
+  --pinned-target linux-x64 \
+  --comparison-profile command-fastpath-o1-v1 \
+  --limits scripts/command_asm_profiles/c3-0.8.0-linux-x64-o1-v1.json
+```
+
+The reporter invokes C3 0.8.0 with `-O1 --emit-asm` and records broad function,
+call, indirect-call, atomic, branch, load/store, and native-dispatch
+observations. A blocking run verifies the installed compiler version, passes
+the named target to C3, and requires the CLI identity and optimization mode to
+match the versioned JSON profile. Missing symbols, unknown instruction forms,
+and count variation remain advisory outside that profile. Exact instruction
+bytes are never compared.
 
 Unpinned runs report crossings of these broad order-of-magnitude thresholds as
 advisories:

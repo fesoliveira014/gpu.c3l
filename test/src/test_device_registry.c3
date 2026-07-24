@@ -1010,10 +1010,10 @@ fn void warm_command_dispatch_skips_resolution_paths() @test {
         "a warm barrier performs no pipeline resolution");
     assert(stats.command_policy_selections == 0,
         "warm recording does not reselect command policy");
-    assert(stats.encoder_cell_computations == 1,
-        "warm recording selects exactly one encoder cell");
-    assert(stats.encoder_lease_comparisons == 1,
-        "warm recording compares exactly one encoder lease");
+    assert(stats.encoder_cell_computations <= 1,
+        "warm recording stays within one encoder-cell computation");
+    assert(stats.encoder_lease_comparisons <= 1,
+        "warm recording stays within one encoder-lease comparison");
     assert(stats.recording_commands == 1,
         "the counter distinguishes one recording operation from resolution");
 

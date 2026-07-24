@@ -92,7 +92,7 @@ jobs:
 
       - name: Benchmark, command, shader, and sampler policy contract tests
         run: |
-          python3 -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy scripts.test_check_shader_reflection_policy scripts.test_check_sampler_policy
+          python3 -B -m unittest scripts.test_run_benchmarks scripts.test_report_command_asm scripts.test_check_command_policy scripts.test_check_shader_reflection_policy scripts.test_check_sampler_policy
           python3 -B scripts/check_command_policy.py
           python3 -B scripts/check_shader_reflection_policy.py
           python3 -B scripts/check_sampler_policy.py
@@ -309,7 +309,7 @@ jobs:
 
       - name: Benchmark, command, shader, and sampler policy contract tests
         run: |
-          python -B -m unittest scripts.test_run_benchmarks scripts.test_check_command_policy scripts.test_check_shader_reflection_policy scripts.test_check_sampler_policy
+          python -B -m unittest scripts.test_run_benchmarks scripts.test_report_command_asm scripts.test_check_command_policy scripts.test_check_shader_reflection_policy scripts.test_check_sampler_policy
           python -B scripts/check_command_policy.py
           python -B scripts/check_shader_reflection_policy.py
           python -B scripts/check_sampler_policy.py
