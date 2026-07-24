@@ -435,8 +435,10 @@ the next barrier's `before`. FIFO is always available; other modes remain a
 support query away. The graphics submission consumes `acquired.readiness` with
 the first concrete consumer stage, such as `{ .color_output = true }`, and
 presentation accepts its returned completion point. The public `PRESENT` state
-has empty stages/access; Vulkan lowering keeps the fixed
-color-attachment-output/no-access presentation scope.
+has empty stages/access. Vulkan lowering anchors a transition from `PRESENT` to
+that first consumer stage with no source access, while a transition to
+`PRESENT` uses destination `NONE`/`NONE`. The acquire and presentation
+semaphores retain the external ordering.
 Running example: `present_mode_explorer`.
 
 ## 14. Choose a memory class

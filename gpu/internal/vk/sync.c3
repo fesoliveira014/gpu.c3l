@@ -145,6 +145,8 @@ fn vk::AccessFlags2 texture_access_to_vk(
 fn TextureStateScope texture_state_to_vk(
     gpu::TextureState state,
     gpu::Format format,
+    TextureStateSide side,
+    gpu::StageMask paired_stages,
 ) {
     bool depth_stencil = texture_format_is_depth_stencil(format);
     switch (state.layout) {
@@ -194,7 +196,9 @@ fn TextureStateScope texture_state_to_vk(
             };
         case gpu::TextureLayout.PRESENT:
             return {
-                .stages = vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                .stages = side == TextureStateSide.BEFORE
+                    ? barrier_before_stages_to_vk(paired_stages)
+                    : vk::PipelineStageFlagBits2.STAGE_2_NONE,
                 .access = vk::AccessFlagBits2.ACCESS_2_NONE,
                 .layout = vk::ImageLayout.PRESENT_SRC_KHR,
             };
@@ -600,8 +604,10 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         )~;
     }
     TextureStateScope before = texture_state_to_vk(
-        barrier.before,
-        slot.format,
+        state:         barrier.before,
+        format:        slot.format,
+        side:          TextureStateSide.BEFORE,
+        paired_stages: barrier.after.stages,
     );
 
     note_texture_barrier_state_validation(state);
@@ -620,8 +626,10 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         )~;
     }
     TextureStateScope after = texture_state_to_vk(
-        barrier.after,
-        slot.format,
+        state:         barrier.after,
+        format:        slot.format,
+        side:          TextureStateSide.AFTER,
+        paired_stages: barrier.before.stages,
     );
 
     note_texture_barrier_native_assembly(state);
@@ -839,8 +847,18 @@ fn LoweredTextureBarrier? lower_texture_barrier_trusted(
         barrier.view,
         slot,
     )!;
-    TextureStateScope before = texture_state_to_vk(barrier.before, slot.format);
-    TextureStateScope after = texture_state_to_vk(barrier.after, slot.format);
+    TextureStateScope before = texture_state_to_vk(
+        state:         barrier.before,
+        format:        slot.format,
+        side:          TextureStateSide.BEFORE,
+        paired_stages: barrier.after.stages,
+    );
+    TextureStateScope after = texture_state_to_vk(
+        state:         barrier.after,
+        format:        slot.format,
+        side:          TextureStateSide.AFTER,
+        paired_stages: barrier.before.stages,
+    );
     vk::ImageMemoryBarrier2 native = vk::image_memory_barrier2()
         .set_src_stage_mask(before.stages)
         .set_src_access_mask(before.access)

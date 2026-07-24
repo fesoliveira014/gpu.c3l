@@ -1808,16 +1808,18 @@ layout history, including history for separate subresource ranges.
 At the presentation boundary, `AcquiredImage.prior_state` is directly usable as
 the first transition's `before` value. The fixed public `PRESENT` state has
 empty stages and access because the presentation engine is external to the
-pipeline. The Vulkan backend preserves the validated WSI policy by lowering
-the presentation-facing side to color-attachment-output with no access; the
-concrete rendering side still comes from the caller's state.
+pipeline. A transition to `PRESENT` keeps the last queue-side producer scope
+and uses destination `NONE`/`NONE`. A transition from `PRESENT` uses no source
+access, anchors its source stage to the paired first queue-side consumer, and
+keeps that consumer's ordinary destination scope.
 
 `SubmitDesc.readiness_before` names the destination stages of the first
 command that consumes the acquired image. When the first recorded transition
-leaves `PRESENT`, the mask must also include `color_output`: the transition's
-fixed color-attachment-output source scope is ordered against the acquire wait
-only through that stage, so a mask without it leaves the layout change
-unordered relative to acquisition.
+leaves `PRESENT`, its paired queue-side state and `readiness_before` must cover
+the same first consumer stages. The acquire semaphore wait and the barrier's
+source-stage anchor then order the layout transition after image readiness.
+Submission still signals the presentation semaphore after all submitted
+commands, and presentation waits that semaphore.
 
 `UNDEFINED` supplies no source dependency and discards prior contents. Use it
 only for first use or after earlier access has been ordered separately.

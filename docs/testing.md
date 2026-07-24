@@ -204,6 +204,11 @@ Texture synchronization coverage pins the compositional matrix: vertex,
 fragment, compute, and combined sampled stages; storage read, write, and
 read-write access; transfer and attachment requirements; swapchain-only
 presentation; exact partial mip/layer ranges; and color/depth native masks.
+Side-aware presentation cases prove transitions to `PRESENT` use destination
+`NONE`/`NONE`, transitions from `PRESENT` use no source access and the paired
+first-consumer stage, and trusted/full command tables emit identical native
+fields. Submit seams separately pin the acquire readiness stage and the
+full-submission presentation signal.
 The injected native-emission seam also proves one accepted barrier performs one
 helper call, handle resolution, recording-access validation, range resolution,
 native assembly, and emission, plus exactly two state validations/lowerings.

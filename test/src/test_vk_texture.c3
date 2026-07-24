@@ -223,15 +223,23 @@ fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture)
     return create_test_device(&desc)!!;
 }
 
-fn gpu::Device make_texture_test_device() {
+fn gpu::Device make_texture_test_device_with_contract(
+    gpu::ContractValidation contract,
+) {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
-        .contract_validation      = gpu::ContractValidation.FULL,
+        .backend                  = gpu::BackendKind.VULKAN,
+        .contract_validation      = contract,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
-        .application_name  = "gpu_texture_test",
+        .application_name         = "gpu_texture_test",
     };
     return create_test_device(&desc)!!;
+}
+
+fn gpu::Device make_texture_test_device() {
+    return make_texture_test_device_with_contract(
+        gpu::ContractValidation.FULL,
+    );
 }
 
 fn void assert_texture_state_accepted(
@@ -828,6 +836,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
         .height    = 16,
         .format    = gpu::Format.RGBA8_UNORM,
         .usage     = {
+            .transfer_src,
             .transfer_dst,
             .sampled,
             .storage,
@@ -893,34 +902,175 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
         "storage states lower to the general layout");
 
     slot.swapchain_owned = true;
-    gpu::TextureBarrier present = {
+    gpu::TextureBarrier to_present = {
         .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.PRESENT },
-        .after   = {
-            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-            .stages = { .transfer },
+        .before  = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
             .access = { .write },
         },
+        .after = { .layout = gpu::TextureLayout.PRESENT },
     };
-    gpu::cmd_texture_barrier(&commands, &present)!!;
-    slot.swapchain_owned = false;
+    gpu::cmd_texture_barrier(&commands, &to_present)!!;
     assert(capture.calls == 3,
         "injected seam captures every composed texture barrier");
     assert(capture.native.src_stage_mask
             == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        "present source lowers to the fixed color-output source scope");
+        "color attachment source preserves its color-output stage");
+    assert(capture.native.src_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        "color attachment source preserves its write access");
+    assert(capture.native.old_layout
+            == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+        "color attachment source preserves its native layout");
+    assert(capture.native.dst_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_NONE,
+        "present destination lowers to no destination stage");
+    assert(capture.native.dst_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_NONE,
+        "present destination lowers to no destination access");
+    assert(capture.native.new_layout == vk::ImageLayout.PRESENT_SRC_KHR,
+        "present destination lowers to the native presentation layout");
+
+    gpu::TextureBarrier to_color = {
+        .texture = texture,
+        .before  = { .layout = gpu::TextureLayout.PRESENT },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .write },
+        },
+    };
+    gpu::cmd_texture_barrier(&commands, &to_color)!!;
+    assert(capture.calls == 4,
+        "present-to-color emits one additional native barrier");
+    assert(capture.native.src_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        "present source anchors to the color-output consumer stage");
     assert(capture.native.src_access_mask
             == vk::AccessFlagBits2.ACCESS_2_NONE,
-        "present source lowers to no source access");
+        "present source has no source access");
     assert(capture.native.old_layout == vk::ImageLayout.PRESENT_SRC_KHR,
         "present source lowers to the native presentation layout");
     assert(capture.native.dst_stage_mask
-            == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT
-        && capture.native.dst_access_mask
-            == vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT
-        && capture.native.new_layout
-            == vk::ImageLayout.TRANSFER_DST_OPTIMAL,
-        "present-to-transfer lowers the exact destination scope and layout");
+            == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        "color attachment destination preserves its color-output stage");
+    assert(capture.native.dst_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        "color attachment destination preserves its write access");
+    assert(capture.native.new_layout
+            == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+        "color attachment destination preserves its native layout");
+
+    gpu::TextureBarrier to_transfer_source = {
+        .texture = texture,
+        .before  = { .layout = gpu::TextureLayout.PRESENT },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
+    };
+    gpu::cmd_texture_barrier(&commands, &to_transfer_source)!!;
+    slot.swapchain_owned = false;
+    assert(capture.calls == 5,
+        "present-to-transfer emits one additional native barrier");
+    assert(capture.native.src_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        "present source anchors to the transfer consumer stage");
+    assert(capture.native.src_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_NONE,
+        "present-to-transfer source has no source access");
+    assert(capture.native.old_layout == vk::ImageLayout.PRESENT_SRC_KHR,
+        "present-to-transfer source retains the presentation layout");
+    assert(capture.native.dst_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        "transfer source destination preserves its transfer stage");
+    assert(capture.native.dst_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_TRANSFER_READ_BIT,
+        "transfer source destination preserves its read access");
+    assert(capture.native.new_layout == vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
+        "transfer source destination preserves its native layout");
+}
+
+fn void assert_present_source_barrier_emission_for_contract(
+    gpu::ContractValidation contract,
+) {
+    gpu::Device device = make_texture_test_device_with_contract(contract);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .access = { .graphics },
+        .width  = 16,
+        .height = 16,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .transfer_src },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::Queue command_queue =
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator command_allocator =
+        gpu::create_command_allocator(&device, command_queue)!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+    vk::TextureSlot* slot = state.textures.get(texture)!!;
+    slot.swapchain_owned = true;
+    TextureBarrierEmitCapture capture;
+    vk::set_texture_barrier_emit_hook(
+        state,
+        &capture_texture_barrier_emit,
+        &capture,
+    );
+    defer vk::set_texture_barrier_emit_hook(state, null, null);
+    vk::reset_texture_barrier_work_counters(state);
+
+    gpu::TextureBarrier barrier = {
+        .texture = texture,
+        .before  = { .layout = gpu::TextureLayout.PRESENT },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
+    };
+    gpu::cmd_texture_barrier(&commands, &barrier)!!;
+    slot.swapchain_owned = false;
+
+    vk::TextureBarrierWorkCounters counters =
+        vk::texture_barrier_work_counters(state);
+    assert(capture.calls == 1,
+        "one presentation transition emits one native barrier");
+    assert(counters.native_emissions == 1,
+        "one presentation transition records one native emission");
+    assert(capture.native.src_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        "present source anchors to the paired transfer consumer stage");
+    assert(capture.native.src_access_mask == vk::AccessFlagBits2.ACCESS_2_NONE,
+        "present source has no native access");
+    assert(capture.native.dst_stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        "transfer destination preserves its native stage");
+    assert(capture.native.dst_access_mask
+            == vk::AccessFlagBits2.ACCESS_2_TRANSFER_READ_BIT,
+        "transfer destination preserves its native access");
+    assert(capture.native.old_layout == vk::ImageLayout.PRESENT_SRC_KHR
+        && capture.native.new_layout == vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
+        "presentation transition preserves the exact native layouts");
+    assert(capture.native.src_queue_family_index == vk::QUEUE_FAMILY_IGNORED
+        && capture.native.dst_queue_family_index == vk::QUEUE_FAMILY_IGNORED,
+        "presentation transition does not add queue-family ownership transfer");
+}
+
+fn void present_source_barrier_emission_matches_trusted_and_full() @test {
+    assert_present_source_barrier_emission_for_contract(
+        gpu::ContractValidation.TRUSTED,
+    );
+    assert_present_source_barrier_emission_for_contract(
+        gpu::ContractValidation.FULL,
+    );
 }
 
 fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {

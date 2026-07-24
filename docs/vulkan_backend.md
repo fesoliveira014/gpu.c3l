@@ -817,7 +817,7 @@ Full texture-state validation uses one layout-specific matrix:
 | `STORAGE` | nonempty vertex/fragment/compute combination or exclusive `all` | read, write, or both | general, selected storage access |
 | `COLOR_ATTACHMENT` | color output or exclusive `all` | read, write, or both | color attachment, selected color access |
 | `DEPTH_ATTACHMENT` | depth output or exclusive `all` | read, write, or both | depth/stencil attachment, selected depth access |
-| `PRESENT` | empty | empty | present source, fixed native presentation scope |
+| `PRESENT` | empty | empty | present source; side-aware native stage, no access |
 
 The layout also enforces immutable texture usage, format class, WSI ownership,
 and a compatible recording queue. `host` and `present` stage bits are invalid
@@ -833,22 +833,27 @@ Trusted variants share safe range/lowering and emission without the semantic
 matrix; non-tracking variants perform no reference work. No path adds a second
 semantic pass or shared layout-history update after successful lowering.
 
-Presentation transitions use these exact synchronization2 scopes:
+Presentation transitions use these synchronization2 scopes in the shown
+write-only color examples:
 
 | Transition | Source scope | Destination scope |
 |---|---|---|
-| `PRESENT -> COLOR_ATTACHMENT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_NONE` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT \| VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT` |
-| `COLOR_ATTACHMENT -> PRESENT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT \| VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_NONE` |
+| `PRESENT -> COLOR_ATTACHMENT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_NONE` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT` |
+| `PRESENT -> TRANSFER_SOURCE` | `VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT`, `VK_ACCESS_2_NONE` | `VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT`, `VK_ACCESS_2_TRANSFER_READ_BIT` |
+| `COLOR_ATTACHMENT -> PRESENT` | `VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT`, `VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT` | `VK_PIPELINE_STAGE_2_NONE`, `VK_ACCESS_2_NONE` |
+| `TRANSFER_SOURCE -> PRESENT` | `VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT`, `VK_ACCESS_2_TRANSFER_READ_BIT` | `VK_PIPELINE_STAGE_2_NONE`, `VK_ACCESS_2_NONE` |
 
 The public `PRESENT` state has empty stages and access because the presentation
-engine is external to the Vulkan pipeline. Native lowering retains the fixed
-color-attachment-output/no-access WSI scope in both directions. The texture
-transitions keep their narrow caller-declared scopes. The private acquire
-semaphore uses the exact `SubmitDesc.readiness_before` destination mask for the
-first actual consumer of the acquired image; because that wait scope is not
-derived from the fixed `PRESENT` barrier source, a transition leaving `PRESENT`
-is ordered after acquisition only when the mask includes color output. The private present signal
-keeps the backend's full-submission scope.
+engine is external to the Vulkan pipeline. A transition to `PRESENT` therefore
+uses destination `NONE`/`NONE`; its source remains the caller-declared last
+queue use. A transition from `PRESENT` uses no source access and derives its
+source-stage anchor from the paired first queue-side state. Non-presentation
+access masks remain the validated caller-selected masks. The private acquire
+semaphore wait uses the exact `SubmitDesc.readiness_before` mask, which must
+cover those same first consumer stages. The private present signal retains the
+full-submission scope, and presentation waits it. Split graphics/present
+families remain concurrent-shared, and texture barriers keep ignored
+queue-family indices.
 
 ## 14. Timeline semaphores
 
