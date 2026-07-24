@@ -146,6 +146,8 @@ const gpu::internal::RuntimeBackendVTable VK_RUNTIME_VTABLE @private = {
     .destroy_surface         = &vk_destroy_surface,
     .supports_presentation   = &vk_supports_presentation,
     .supports_queue_requirements = &vk_supports_queue_requirements,
+    .supports_resource_agnostic_texture_sync =
+        &vk_supports_resource_agnostic_texture_sync,
 };
 
 fn VkInstanceDesc runtime_instance_desc(

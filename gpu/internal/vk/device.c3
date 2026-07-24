@@ -33,6 +33,8 @@ const ZString SWAPCHAIN_MAINTENANCE_EXTENSION = "VK_EXT_swapchain_maintenance1";
 const ZString DYNAMIC_STATE_3_EXTENSION       = "VK_EXT_extended_dynamic_state3";
 const ZString GENERATED_WORK_EXTENSION        = "VK_EXT_device_generated_commands";
 const ZString GENERATED_WORK_USAGE_EXTENSION = "VK_KHR_maintenance5";
+const ZString RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION =
+    "VK_KHR_unified_image_layouts";
 const uint GENERATED_WORK_TOKEN_COUNT  = 2;
 const uint GENERATED_WORK_TOKEN_OFFSET = 16;
 const uint GENERATED_WORK_RECORD_SIZE  = 40;
@@ -111,6 +113,18 @@ struct DeviceCreationProbe {
     DeviceCreationCheckpoint fail_at;
     DeviceCreationCheckpoint reached;
     uint                     rollback_count;
+    bool                     resource_agnostic_texture_sync_override;
+    bool                     resource_agnostic_texture_sync_extension_available;
+    bool                     resource_agnostic_texture_sync_feature_available;
+    bool                     resource_agnostic_texture_sync_requested;
+    bool                     resource_agnostic_texture_sync_selected;
+    bool                     resource_agnostic_texture_sync_extension_enabled;
+    uint                     resource_agnostic_texture_sync_feature_struct_count;
+    vk::StructureType        resource_agnostic_texture_sync_feature_structure_type;
+    uint                     resource_agnostic_texture_sync_feature_enabled;
+    uint                     resource_agnostic_texture_sync_video_enabled;
+    bool                     native_device_create_override;
+    vk::Result               native_device_create_result;
     bool                     descriptor_buffer_override;
     bool                     descriptor_buffer_capability_checked;
     bool                     descriptor_buffer_capability_available;
@@ -170,6 +184,7 @@ struct VkDeviceState {
     uint                       graphics_completion_id;
     uint                       compute_completion_id;
     uint                       transfer_completion_id;
+    bool                       resource_agnostic_texture_sync_selected;
     gpu::DeviceCaps            caps;
     ViewportLimits             viewport_limits;
     ulong                      max_timeline_semaphore_value_difference;
@@ -315,6 +330,32 @@ fn bool presentation_maintenance_supported(
     uint feature_enabled,
 ) {
     return extension_supported && feature_enabled != 0;
+}
+
+fn bool? select_resource_agnostic_texture_sync(
+    bool requested,
+    ResourceAgnosticTextureSyncSupport support,
+) {
+    if (!requested) return false;
+    if (!resource_agnostic_texture_sync_supported(support)) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    return true;
+}
+
+fn ResourceAgnosticTextureSyncSupport
+resource_agnostic_texture_sync_creation_support(
+    vk::PhysicalDevice physical_device,
+    DeviceCreationProbe* probe,
+) {
+    if (probe != null && probe.resource_agnostic_texture_sync_override) {
+        return {
+            .extension = probe.resource_agnostic_texture_sync_extension_available,
+            .unified_image_layouts =
+                probe.resource_agnostic_texture_sync_feature_available,
+        };
+    }
+    return query_resource_agnostic_texture_sync_support(physical_device);
 }
 
 fn bool device_supports_swapchain_maintenance(
@@ -919,6 +960,29 @@ fn gpu::Device? create_vk_device_with_probe(
         && !runtime_state.instance_capabilities.surface_maintenance) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
+    bool resource_agnostic_texture_sync_requested =
+        gpu::internal::requests_resource_agnostic_texture_sync(*request);
+    ResourceAgnosticTextureSyncSupport resource_agnostic_texture_sync_support;
+    if (resource_agnostic_texture_sync_requested) {
+        resource_agnostic_texture_sync_support =
+            resource_agnostic_texture_sync_creation_support(
+            adapter_state.physical_device,
+            probe,
+        );
+    }
+    if (probe != null) {
+        probe.resource_agnostic_texture_sync_requested =
+            resource_agnostic_texture_sync_requested;
+    }
+    bool resource_agnostic_texture_sync_selected =
+        select_resource_agnostic_texture_sync(
+            resource_agnostic_texture_sync_requested,
+            resource_agnostic_texture_sync_support,
+        )!;
+    if (probe != null) {
+        probe.resource_agnostic_texture_sync_selected =
+            resource_agnostic_texture_sync_selected;
+    }
     gpu::QueueRequirements queue_requirements =
         gpu::internal::requested_queue_requirements(*request);
     vk::SurfaceKHR presentation_surface = requested_surface.is_valid()
@@ -929,6 +993,8 @@ fn gpu::Device? create_vk_device_with_probe(
         instance:                   runtime_state.instance,
         physical_device:            adapter_state.physical_device,
         strict_requested:           gpu::internal::requests_strict(*request),
+        resource_agnostic_texture_sync_selected:
+            resource_agnostic_texture_sync_selected,
         retained_runtime:           retained_runtime,
         adapter:                    adapter,
         runtime_state:              runtime_state,
@@ -946,6 +1012,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     vk::Instance instance,
     vk::PhysicalDevice physical_device,
     bool strict_requested,
+    bool resource_agnostic_texture_sync_selected = false,
     gpu::Runtime* retained_runtime = null,
     gpu::Adapter* adapter = null,
     VkRuntimeState* runtime_state = null,
@@ -977,6 +1044,8 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.command_mutex.init()!;
 
     state.strict_heap = resolve_strict_heap_state(strict_requested, desc)!;
+    state.resource_agnostic_texture_sync_selected =
+        resource_agnostic_texture_sync_selected;
 
     state.presentation.enabled = presentation_surface != null;
     if (state.presentation.enabled) state.presentation.queue_mutex.init()!;
@@ -1118,7 +1187,12 @@ fn gpu::Device? create_vk_device_from_runtime(
         state.presentation.queue_index = families.present_index;
     }
 
-    create_logical_device(state, &families, line_polygon_mode)!;
+    create_logical_device(
+        state:             state,
+        families:          &families,
+        line_polygon_mode: line_polygon_mode,
+        probe:             probe,
+    )!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.LOGICAL_DEVICE)!;
     VkDeviceDispatchPlan dispatch_plan = {
         .debug             = debug_utils_enabled,
@@ -1799,6 +1873,7 @@ fn void? create_logical_device(
     VkDeviceState* state,
     QueueFamilies* families,
     bool line_polygon_mode,
+    DeviceCreationProbe* probe,
 ) @private {
     @pool() {
         uint family_capacity = families.counts.graphics
@@ -1842,9 +1917,10 @@ fn void? create_logical_device(
                 .set_queue_priorities(priorities[:queue_count]);
         }
         return create_logical_device_with_queue_infos(
-            state,
-            queue_infos,
-            line_polygon_mode,
+            state:             state,
+            queue_infos:       queue_infos,
+            line_polygon_mode: line_polygon_mode,
+            probe:             probe,
         );
     };
 }
@@ -1853,6 +1929,7 @@ fn void? create_logical_device_with_queue_infos(
     VkDeviceState* state,
     vk::DeviceQueueCreateInfo[] queue_infos,
     bool line_polygon_mode,
+    DeviceCreationProbe* probe,
 ) @private {
 
     vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT generated_work_features =
@@ -1911,6 +1988,19 @@ fn void? create_logical_device_with_queue_infos(
         .set_shader_draw_parameters(vk::TRUE)
         .set_next(&features12);
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
+    vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR
+        resource_agnostic_texture_sync_features =
+            vk::physical_device_unified_image_layouts_features_khr();
+    if (state.resource_agnostic_texture_sync_selected) {
+        resource_agnostic_texture_sync_features =
+            resource_agnostic_texture_sync_features
+                .set_unified_image_layouts(vk::TRUE)
+                .set_unified_image_layouts_video(vk::FALSE)
+                .set_next(features2.p_next);
+        features2 = features2.set_next(
+            &resource_agnostic_texture_sync_features,
+        );
+    }
     features2.features.shader_int64 = vk::TRUE;
     features2.features.independent_blend = vk::TRUE;
     features2.features.depth_bias_clamp = vk::TRUE;
@@ -1923,9 +2013,13 @@ fn void? create_logical_device_with_queue_infos(
     }
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[7] extensions;
+    ZString[8] extensions;
     uint extension_count = 0;
     extensions[extension_count++] = DYNAMIC_STATE_3_EXTENSION;
+    if (state.resource_agnostic_texture_sync_selected) {
+        extensions[extension_count++] =
+            RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION;
+    }
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
     if (state.generated_work.enabled) {
         extensions[extension_count++] = GENERATED_WORK_EXTENSION;
@@ -1955,12 +2049,39 @@ fn void? create_logical_device_with_queue_infos(
         device_info = device_info.set_enabled_extension_names(extensions[:extension_count]);
     }
 
-    check_backend_create_result(vk::create_device(
-        physical_device: state.physical_device,
-        p_create_info:   &device_info,
-        p_allocator:     null,
-        p_device:        &state.device,
-    ))!;
+    if (probe != null) {
+        bool resource_agnostic_texture_sync_extension_enabled;
+        foreach (extension : extensions[:extension_count]) {
+            if (extension.str_view()
+                == RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION.str_view()) {
+                resource_agnostic_texture_sync_extension_enabled = true;
+                break;
+            }
+        }
+        probe.resource_agnostic_texture_sync_extension_enabled =
+            resource_agnostic_texture_sync_extension_enabled;
+        probe.resource_agnostic_texture_sync_feature_struct_count =
+            features2.p_next == &resource_agnostic_texture_sync_features
+                ? 1
+                : 0;
+        probe.resource_agnostic_texture_sync_feature_structure_type =
+            resource_agnostic_texture_sync_features.s_type;
+        probe.resource_agnostic_texture_sync_feature_enabled =
+            resource_agnostic_texture_sync_features.unified_image_layouts;
+        probe.resource_agnostic_texture_sync_video_enabled =
+            resource_agnostic_texture_sync_features.unified_image_layouts_video;
+    }
+
+    vk::Result create_result =
+        probe != null && probe.native_device_create_override
+            ? probe.native_device_create_result
+            : vk::create_device(
+                physical_device: state.physical_device,
+                p_create_info:   &device_info,
+                p_allocator:     null,
+                p_device:        &state.device,
+            );
+    check_backend_create_result(create_result)!;
 }
 
 <* True if `physical_device` advertises the named device extension. *>

@@ -270,7 +270,12 @@ fn bool descriptor_buffer_candidate_fits(
             .sampler_capacity = sampler_capacity,
         },
     };
-    if (catch create_logical_device(&probe, families, false)) return false;
+    if (catch create_logical_device(
+        state:             &probe,
+        families:          families,
+        line_polygon_mode: false,
+        probe:             null,
+    )) return false;
     defer vk::destroy_device(probe.device, null);
 
     VkDeviceDispatchPlan dispatch_plan = { .descriptor_buffer = true };

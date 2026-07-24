@@ -25,6 +25,285 @@ fn uint live_device_slot_count() @private {
     return live_count;
 }
 
+fn fault run_injected_resource_agnostic_texture_sync_create(
+    gpu::Runtime* runtime,
+    gpu::Adapter* adapter,
+    gpu::DeviceRequest* request,
+    gpu::internal::vk::DeviceCreationProbe* probe,
+) @private {
+    gpu::Runtime retained_runtime = *runtime;
+    gpu::internal::runtime_retain_device(&retained_runtime)!!;
+    fault creation_fault = @catch(
+        gpu::internal::vk::create_vk_device_with_probe(
+            adapter:          adapter,
+            request:          request,
+            retained_runtime: &retained_runtime,
+            probe:            probe,
+        )
+    );
+    gpu::internal::runtime_release_device(&retained_runtime)!!;
+    return creation_fault;
+}
+
+fn void resource_agnostic_texture_sync_support_requires_extension_and_feature() @test {
+    assert(
+        gpu::internal::vk::RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION.str_view()
+            == "VK_KHR_unified_image_layouts",
+        "the backend uses the exact unified-image-layout extension name"
+    );
+    gpu::internal::vk::ResourceAgnosticTextureSyncSupport support;
+    assert(
+        !gpu::internal::vk::resource_agnostic_texture_sync_supported(support),
+        "missing extension and feature are unsupported"
+    );
+
+    support.extension = true;
+    assert(
+        !gpu::internal::vk::resource_agnostic_texture_sync_supported(support),
+        "an extension without unifiedImageLayouts is unsupported"
+    );
+
+    support = {
+        .extension             = true,
+        .unified_image_layouts = true,
+    };
+    assert(
+        gpu::internal::vk::resource_agnostic_texture_sync_supported(support),
+        "the extension and unifiedImageLayouts together are supported"
+    );
+    assert(
+        !gpu::internal::vk::select_resource_agnostic_texture_sync(
+            false,
+            support,
+        )!!,
+        "capable unrequested selection stays disabled"
+    );
+    assert(
+        gpu::internal::vk::select_resource_agnostic_texture_sync(
+            true,
+            support,
+        )!!,
+        "a capable explicit request is selected"
+    );
+
+    support.extension = false;
+    assert(
+        @catch(gpu::internal::vk::select_resource_agnostic_texture_sync(
+            true,
+            support,
+        )) == gpu::UNSUPPORTED_FEATURE,
+        "a missing extension rejects the explicit request"
+    );
+    support.extension = true;
+    support.unified_image_layouts = false;
+    assert(
+        @catch(gpu::internal::vk::select_resource_agnostic_texture_sync(
+            true,
+            support,
+        )) == gpu::UNSUPPORTED_FEATURE,
+        "a missing feature rejects the explicit request"
+    );
+}
+
+fn void resource_agnostic_texture_sync_support_hook_uses_cached_availability() @test {
+    assert(
+        gpu::internal::vk::VK_RUNTIME_VTABLE.supports_resource_agnostic_texture_sync
+            == &gpu::internal::vk::vk_supports_resource_agnostic_texture_sync,
+        "the Vulkan runtime routes the semantic support query"
+    );
+    gpu::internal::vk::VkAdapterState[1] adapters;
+    gpu::internal::vk::VkRuntimeState state = {
+        .adapters = adapters[..],
+    };
+    adapters[0].resource_agnostic_texture_sync = {
+        .extension             = true,
+        .unified_image_layouts = true,
+    };
+    assert(
+        gpu::internal::vk::vk_supports_resource_agnostic_texture_sync(
+            &state,
+            0,
+        )!!,
+        "the backend support hook reports cached complete support"
+    );
+
+    adapters[0].resource_agnostic_texture_sync.unified_image_layouts = false;
+    assert(
+        !gpu::internal::vk::vk_supports_resource_agnostic_texture_sync(
+            &state,
+            0,
+        )!!,
+        "the backend support hook reports cached feature absence"
+    );
+    assert(
+        @catch(gpu::internal::vk::vk_supports_resource_agnostic_texture_sync(
+            &state,
+            1,
+        )) == gpu::INVALID_HANDLE,
+        "the backend support hook rejects an invalid adapter index"
+    );
+}
+
+fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactional() @test {
+    gpu::RuntimeDesc desc = {
+        .backend          = gpu::BackendKind.VULKAN,
+        .application_name = "gpu_vk_resource_agnostic_texture_sync_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceRequest classic_request = gpu::strict_device_request();
+    gpu::DeviceRequest selected_request =
+        gpu::request_resource_agnostic_texture_sync(classic_request)!!;
+    bool exercised;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(
+            &adapter,
+            &classic_request,
+        )!!.supported) continue;
+        exercised = true;
+        gpu::internal::RuntimeData* runtime_data =
+            gpu::internal::resolve_adapter(&adapter);
+        gpu::internal::vk::VkRuntimeState* runtime_state =
+            (gpu::internal::vk::VkRuntimeState*)runtime_data.backend_state;
+        gpu::internal::vk::VkAdapterState* adapter_state =
+            &runtime_state.adapters[adapter.adapter_index];
+        adapter_state.resource_agnostic_texture_sync = {
+            .extension             = true,
+            .unified_image_layouts = true,
+        };
+        assert(
+            gpu::supports_device_request(
+                &adapter,
+                &selected_request,
+            )!!.supported,
+            "complete cached support satisfies the semantic request query"
+        );
+
+        gpu::internal::vk::DeviceCreationProbe missing_extension = {
+            .resource_agnostic_texture_sync_override = true,
+            .resource_agnostic_texture_sync_feature_available = true,
+        };
+        assert(
+            @catch(gpu::internal::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                request:          &selected_request,
+                retained_runtime: &runtime,
+                probe:            &missing_extension,
+            )) == gpu::UNSUPPORTED_FEATURE,
+            "creation rechecks and rejects a missing extension"
+        );
+        assert(
+            missing_extension.resource_agnostic_texture_sync_requested
+                && !missing_extension.resource_agnostic_texture_sync_selected
+                && missing_extension.reached
+                    == gpu::internal::vk::DeviceCreationCheckpoint.NONE
+                && missing_extension.rollback_count == 0,
+            "extension absence rejects before backend state mutation"
+        );
+
+        gpu::internal::vk::DeviceCreationProbe missing_feature = {
+            .resource_agnostic_texture_sync_override = true,
+            .resource_agnostic_texture_sync_extension_available = true,
+        };
+        assert(
+            @catch(gpu::internal::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                request:          &selected_request,
+                retained_runtime: &runtime,
+                probe:            &missing_feature,
+            )) == gpu::UNSUPPORTED_FEATURE,
+            "creation rechecks and rejects a missing feature"
+        );
+        assert(
+            missing_feature.resource_agnostic_texture_sync_requested
+                && !missing_feature.resource_agnostic_texture_sync_selected
+                && missing_feature.reached
+                    == gpu::internal::vk::DeviceCreationCheckpoint.NONE
+                && missing_feature.rollback_count == 0,
+            "feature absence rejects before backend state mutation"
+        );
+
+        uint live_slots_before = live_device_slot_count();
+        gpu::internal::vk::DeviceCreationProbe unrequested = {
+            .resource_agnostic_texture_sync_override = true,
+            .resource_agnostic_texture_sync_extension_available = true,
+            .resource_agnostic_texture_sync_feature_available = true,
+            .native_device_create_override = true,
+            .native_device_create_result =
+                vk::Result.ERROR_INITIALIZATION_FAILED,
+        };
+        assert(
+            run_injected_resource_agnostic_texture_sync_create(
+                runtime: &runtime,
+                adapter: &adapter,
+                request: &classic_request,
+                probe:   &unrequested,
+            ) == gpu::UNSUPPORTED_BACKEND,
+            "the injected native failure maps through device creation"
+        );
+        assert(
+            !unrequested.resource_agnostic_texture_sync_requested
+                && !unrequested.resource_agnostic_texture_sync_selected
+                && !unrequested.resource_agnostic_texture_sync_extension_enabled
+                && unrequested.resource_agnostic_texture_sync_feature_struct_count
+                    == 0
+                && unrequested.resource_agnostic_texture_sync_feature_enabled
+                    == vk::FALSE
+                && unrequested.resource_agnostic_texture_sync_video_enabled
+                    == vk::FALSE,
+            "capable unrequested creation omits the extension and feature"
+        );
+        assert(
+            unrequested.rollback_count == 1
+                && live_device_slot_count() == live_slots_before,
+            "unrequested native failure rolls back without publication"
+        );
+
+        gpu::internal::vk::DeviceCreationProbe requested = {
+            .resource_agnostic_texture_sync_override = true,
+            .resource_agnostic_texture_sync_extension_available = true,
+            .resource_agnostic_texture_sync_feature_available = true,
+            .native_device_create_override = true,
+            .native_device_create_result =
+                vk::Result.ERROR_INITIALIZATION_FAILED,
+        };
+        assert(
+            run_injected_resource_agnostic_texture_sync_create(
+                runtime: &runtime,
+                adapter: &adapter,
+                request: &selected_request,
+                probe:   &requested,
+            ) == gpu::UNSUPPORTED_BACKEND,
+            "requested support reaches the injected native create"
+        );
+        assert(
+            requested.resource_agnostic_texture_sync_requested
+                && requested.resource_agnostic_texture_sync_selected
+                && requested.resource_agnostic_texture_sync_extension_enabled
+                && requested.resource_agnostic_texture_sync_feature_struct_count
+                    == 1
+                && requested.resource_agnostic_texture_sync_feature_structure_type
+                    == vk::StructureType.PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR
+                && requested.resource_agnostic_texture_sync_feature_enabled
+                    == vk::TRUE
+                && requested.resource_agnostic_texture_sync_video_enabled
+                    == vk::FALSE,
+            "requested creation enables one exact unified feature and no video"
+        );
+        assert(
+            requested.rollback_count == 1
+                && live_device_slot_count() == live_slots_before,
+            "requested native failure rolls back without publication"
+        );
+        break;
+    }
+
+    assert(exercised, "the controlled native target has a compatible strict adapter");
+}
+
 fn void strict_disabled_state_owns_no_sampler_table() @test {
     gpu::internal::vk::VkDeviceState state;
     gpu::internal::vk::create_sampler_table(&state)!!;
