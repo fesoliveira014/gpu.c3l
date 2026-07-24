@@ -27,6 +27,12 @@ alias SemaphoreCounterQueryFn @private = fn vk::Result (
     ulong*,
 );
 alias GeneratedDispatchLayoutReadHook @private @if(env::TESTING) = fn void (void*);
+alias DeviceCreateHook @if(env::TESTING) = fn vk::Result (
+    void*,
+    vk::PhysicalDevice,
+    vk::DeviceCreateInfo*,
+    vk::Device*,
+);
 
 const ZString SWAPCHAIN_EXTENSION             = "VK_KHR_swapchain";
 const ZString SWAPCHAIN_MAINTENANCE_EXTENSION = "VK_EXT_swapchain_maintenance1";
@@ -125,6 +131,8 @@ struct DeviceCreationProbe {
     uint                     resource_agnostic_texture_sync_video_enabled;
     bool                     native_device_create_override;
     vk::Result               native_device_create_result;
+    DeviceCreateHook         native_device_create_hook @if(env::TESTING);
+    void*                    native_device_create_user_data @if(env::TESTING);
     bool                     descriptor_buffer_override;
     bool                     descriptor_buffer_capability_checked;
     bool                     descriptor_buffer_capability_available;
@@ -302,6 +310,9 @@ struct VkDeviceState {
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);
     TextureBarrierEmitHook     texture_barrier_emit_hook @if(env::TESTING);
     void*                      texture_barrier_emit_user_data @if(env::TESTING);
+    BarrierEmitHook            barrier_emit_hook @if(env::TESTING);
+    void*                      barrier_emit_user_data @if(env::TESTING);
+    Atomic{ulong}              barrier_native_emissions @if(env::TESTING);
     SubmissionCheckpointHook  submission_checkpoint_hook @if(env::TESTING);
     void*                     submission_checkpoint_user_data @if(env::TESTING);
     HostAllocator              host_allocator;
@@ -318,6 +329,7 @@ struct GeneratedWorkSupport {
 struct CapsInputs {
     bool                 strict_enabled;
     bool                 presentation_enabled;
+    bool                 resource_agnostic_texture_sync;
     bool                 async_compute;
     bool                 line_polygon_mode;
     uint                 texture_capacity;
@@ -1317,13 +1329,15 @@ fn gpu::Device? create_vk_device_from_runtime(
         reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PIPELINE_SHARED)!;
     }
     CapsInputs caps_inputs = {
-        .strict_enabled       = state.strict_heap.enabled,
-        .presentation_enabled = state.presentation.enabled,
-        .async_compute        = state.compute_queue_distinct,
-        .line_polygon_mode    = line_polygon_mode,
-        .texture_capacity     = state.strict_heap.texture_capacity,
-        .sampler_capacity     = state.strict_heap.sampler_capacity,
-        .generated_work      = state.generated_work,
+        .strict_enabled                  = state.strict_heap.enabled,
+        .presentation_enabled            = state.presentation.enabled,
+        .resource_agnostic_texture_sync =
+            state.resource_agnostic_texture_sync_selected,
+        .async_compute                   = state.compute_queue_distinct,
+        .line_polygon_mode               = line_polygon_mode,
+        .texture_capacity                = state.strict_heap.texture_capacity,
+        .sampler_capacity                = state.strict_heap.sampler_capacity,
+        .generated_work                  = state.generated_work,
     };
     state.caps = build_caps(
         base:                    &features2.features,
@@ -2072,15 +2086,29 @@ fn void? create_logical_device_with_queue_infos(
             resource_agnostic_texture_sync_features.unified_image_layouts_video;
     }
 
-    vk::Result create_result =
-        probe != null && probe.native_device_create_override
-            ? probe.native_device_create_result
-            : vk::create_device(
-                physical_device: state.physical_device,
-                p_create_info:   &device_info,
-                p_allocator:     null,
-                p_device:        &state.device,
+    vk::Result create_result;
+    $if env::TESTING:
+        if (probe != null && probe.native_device_create_hook != null) {
+            create_result = probe.native_device_create_hook(
+                probe.native_device_create_user_data,
+                state.physical_device,
+                &device_info,
+                &state.device,
             );
+            check_backend_create_result(create_result)!;
+            return;
+        }
+    $endif
+    if (probe != null && probe.native_device_create_override) {
+        create_result = probe.native_device_create_result;
+    } else {
+        create_result = vk::create_device(
+            physical_device: state.physical_device,
+            p_create_info:   &device_info,
+            p_allocator:     null,
+            p_device:        &state.device,
+        );
+    }
     check_backend_create_result(create_result)!;
 }
 
@@ -2142,6 +2170,8 @@ fn gpu::DeviceCaps build_caps(
     return (gpu::DeviceCaps){
         .strict_enabled            = inputs.strict_enabled,
         .presentation_enabled      = inputs.presentation_enabled,
+        .resource_agnostic_texture_sync =
+            inputs.resource_agnostic_texture_sync,
         .buffer_device_address      = v12.buffer_device_address != 0,
         .synchronization2           = v13.synchronization2 != 0,
         .dynamic_rendering          = v13.dynamic_rendering != 0,

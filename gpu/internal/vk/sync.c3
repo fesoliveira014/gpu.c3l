@@ -7,6 +7,9 @@ import vk;
 alias TextureBarrierEmitHook @if(env::TESTING) = fn void (
     void*, vk::ImageMemoryBarrier2*
 );
+alias BarrierEmitHook @if(env::TESTING) = fn void (
+    void*, vk::MemoryBarrier2*
+);
 alias SemaphoreWaitFn @private = fn vk::Result (
     vk::Device,
     vk::SemaphoreWaitInfo*,
@@ -72,6 +75,13 @@ struct TextureBarrierWorkCounters @if(env::TESTING) {
     ulong state_validations;
     ulong native_assemblies;
     ulong native_emissions;
+}
+
+struct BarrierWorkCounters @if(env::TESTING) {
+    ulong native_memory_emissions;
+    ulong native_image_emissions;
+    ulong texture_helper_calls;
+    ulong texture_handle_resolutions;
 }
 
 fn bool texture_format_is_depth_stencil(gpu::Format format) @private {
@@ -838,10 +848,7 @@ fn void? vk_cmd_barrier(
         descriptor_buffer,
         state.generated_work.enabled,
     );
-    vk::DependencyInfo dependency =
-        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
-    vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-    gpu::internal::note_command_native_call();
+    emit_barrier(commands, &native_barrier);
 }
 
 fn void? trusted_barrier(
@@ -861,8 +868,26 @@ fn void? trusted_barrier(
         descriptor_buffer,
         state.generated_work.enabled,
     );
+    emit_barrier(commands, &native_barrier);
+}
+
+fn void emit_barrier(
+    gpu::internal::CommandRecord* commands,
+    vk::MemoryBarrier2* native_barrier,
+) {
+    VkDeviceState* state = command_device_state(commands);
+    VkCommandRecord* record = backend_command(commands);
     vk::DependencyInfo dependency =
-        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
+        vk::dependency_info().set_memory_barriers(native_barrier[:1]);
+    $if env::TESTING:
+        (void)state.barrier_native_emissions.add(1, AtomicOrdering.RELAXED);
+        if (state.barrier_emit_hook != null) {
+            state.barrier_emit_hook(
+                state.barrier_emit_user_data,
+                native_barrier,
+            );
+        }
+    $endif
     vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
     gpu::internal::note_command_native_call();
 }
@@ -1066,6 +1091,47 @@ fn void set_texture_barrier_emit_hook(
 ) @if(env::TESTING) {
     state.texture_barrier_emit_hook = hook;
     state.texture_barrier_emit_user_data = user_data;
+}
+
+fn BarrierWorkCounters barrier_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING) {
+    return {
+        .native_memory_emissions = state.barrier_native_emissions.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .native_image_emissions =
+            state.texture_barrier_native_emissions.load(
+                AtomicOrdering.RELAXED,
+            ),
+        .texture_helper_calls = state.texture_barrier_helper_calls.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .texture_handle_resolutions = state.textures.get_calls.load(
+            AtomicOrdering.RELAXED,
+        ),
+    };
+}
+
+fn void reset_barrier_work_counters(
+    VkDeviceState* state,
+) @if(env::TESTING) {
+    state.barrier_native_emissions.store(0, AtomicOrdering.RELAXED);
+    state.texture_barrier_native_emissions.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
+    state.texture_barrier_helper_calls.store(0, AtomicOrdering.RELAXED);
+    state.textures.get_calls.store(0, AtomicOrdering.RELAXED);
+}
+
+fn void set_barrier_emit_hook(
+    VkDeviceState* state,
+    BarrierEmitHook hook,
+    void* user_data,
+) @if(env::TESTING) {
+    state.barrier_emit_hook = hook;
+    state.barrier_emit_user_data = user_data;
 }
 
 fn vk::Semaphore? create_private_timeline(VkDeviceState* state) @private {
