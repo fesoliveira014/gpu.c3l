@@ -47,6 +47,31 @@ fn gpu::Device? create_test_device(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn gpu::Device? create_dynamic_color_test_device(
+    gpu::RuntimeDesc* desc,
+) {
+    if (desc == null) return gpu::INVALID_ARGUMENT~;
+    gpu::Runtime runtime = gpu::create_runtime(desc)!;
+    defer catch (void)gpu::destroy_runtime(&runtime);
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::DeviceRequest request = gpu::request_dynamic_color_state(
+        gpu::strict_device_request(),
+    )!;
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::DeviceRequestSupport support =
+            gpu::supports_device_request(&adapter, &request)!;
+        if (!support.supported) continue;
+        gpu::Device? device = gpu::create_device(&adapter, &request);
+        if (catch err = device) {
+            if (err == gpu::UNSUPPORTED_FEATURE) continue;
+            return err~;
+        }
+        return device;
+    }
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn void bind_test_compute_pipeline(
     gpu::CommandList* commands,
     gpu::PipelineHandle pipeline,

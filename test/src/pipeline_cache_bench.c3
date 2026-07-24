@@ -15,6 +15,7 @@ const char[*] BENCH_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
 const char[*] BENCH_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 
 const uint BENCH_RASTER_PERMUTATION_COUNT = 200;
+const uint BENCH_COLOR_STATE_COUNT        = 5;
 const uint BENCH_DUPLICATE_COUNT          = 200_000;
 const uint BENCH_BATCH_SIZE               = 64;
 const uint BENCH_BATCH_ROUNDS             = 2_000;
@@ -131,6 +132,140 @@ fn double record_raster_matrix(
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     discard_bench_executable(&executable)!!;
     return (double)elapsed_ns / (double)rasters.len;
+}
+
+fn void probe_dynamic_color_matrix(gpu::RuntimeDesc* runtime_desc) {
+    gpu::Device? maybe_device = create_bench_device(
+        desc:                runtime_desc,
+        dynamic_color_state: true,
+    );
+    if (catch err = maybe_device) {
+        assert(err == gpu::UNSUPPORTED_FEATURE,
+            "dynamic color benchmark fails only when live support is absent");
+        io::printfn("dynamic color matrix: unsupported");
+        return;
+    }
+    gpu::Device device = maybe_device;
+    defer destroy_bench_device(&device)!!;
+    gpu::ShaderDesc vertex_desc = {
+        .stage       = gpu::ShaderStage.VERTEX,
+        .spirv       = BENCH_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderDesc fragment_desc = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = BENCH_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ColorTargetFormat[1] formats = {{
+        .format = gpu::Format.RGBA8_UNORM,
+    }};
+    gpu::DynamicGraphicsPipelineDesc desc = {
+        .vertex_shader = gpu::prepare_shader_code(&vertex_desc)!!,
+        .fragment_shader = gpu::prepare_shader_code(
+            &fragment_desc,
+        )!!,
+        .colors = formats[..],
+    };
+    gpu::DynamicGraphicsPipelineDesc[BENCH_COLOR_STATE_COUNT] descs;
+    foreach (&item : descs) *item = desc;
+    gpu::PipelineHandle[BENCH_COLOR_STATE_COUNT] pipelines;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::internal::device_backend_state_ptr(&device);
+    ulong native_before = vk::pipeline_native_create_count(state);
+    std::time::Clock create_start = std::time::clock::now();
+    gpu::create_dynamic_graphics_pipelines(
+        device:        &device,
+        descs:         descs[..],
+        out_pipelines: pipelines[..],
+    )!!;
+    long create_elapsed_ns = (long)create_start.to_now();
+    assert(vk::pipeline_native_create_count(state) - native_before == 1,
+        "the dynamic color matrix compiles one native pipeline");
+    assert(vk::pipeline_cache_entry_count(state) == 1,
+        "the dynamic color matrix publishes one cache entry");
+
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::TextureDesc target_desc = {
+        .access = { .graphics },
+        .width  = 1,
+        .height = 1,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .color_attach },
+    };
+    gpu::TextureHandle target = gpu::create_texture(&device, &target_desc)!!;
+    defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewDesc view_desc = { .texture = target };
+    gpu::AttachmentViewHandle view = gpu::create_attachment_view(
+        &device,
+        &view_desc,
+    )!!;
+    defer gpu::destroy_attachment_view(&device, view)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::TextureBarrier to_attachment = {
+        .texture = target,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+    };
+    gpu::cmd_texture_barrier(&commands, &to_attachment)!!;
+    gpu::ColorTargetDesc[1] attachments = {{ .view = view }};
+    gpu::RenderPassDesc pass = {
+        .colors = attachments[..],
+        .width  = 1,
+        .height = 1,
+    };
+    gpu::GraphicsState graphics = gpu::full_render_graphics_state(1, 1)!!;
+    gpu::cmd_begin_render_pass_with_state(
+        &commands,
+        &pass,
+        &graphics,
+    )!!;
+    gpu::cmd_bind_pipeline(&commands, pipelines[0])!!;
+    gpu::ColorWriteMask red_green = { .red, .green };
+    gpu::ColorTargetBlendState[BENCH_COLOR_STATE_COUNT] packets = {
+        gpu::color_blend_disabled(),
+        gpu::alpha_blend(),
+        gpu::premultiplied_alpha_blend(),
+        gpu::additive_blend(),
+        gpu::color_blend_disabled(red_green),
+    };
+    gpu::reset_command_resolution_stats();
+    std::time::Clock record_start = std::time::clock::now();
+    foreach (packet : packets) {
+        gpu::ColorTargetBlendState[1] target_state = { packet };
+        gpu::ColorState color = { .targets = target_state[..] };
+        gpu::cmd_set_color_state(&commands, &color)!!;
+    }
+    long record_elapsed_ns = (long)record_start.to_now();
+    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
+    assert(stats.recording_commands == BENCH_COLOR_STATE_COUNT
+            && stats.native_commands == BENCH_COLOR_STATE_COUNT * 3,
+        "each benchmark color packet emits exactly three native calls");
+    assert(stats.pipeline_table_lookups == 0
+            && stats.pipeline_cache_lookups == 0,
+        "color recording performs no post-bind pipeline lookup");
+    gpu::cmd_end_render_pass(&commands)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    discard_bench_executable(&executable)!!;
+    io::printfn(
+        "dynamic color matrix (states=%d native=%d): %.1f ns/create, %.1f ns/state",
+        BENCH_COLOR_STATE_COUNT,
+        vk::pipeline_native_create_count(state) - native_before,
+        (double)create_elapsed_ns / (double)BENCH_COLOR_STATE_COUNT,
+        (double)record_elapsed_ns / (double)BENCH_COLOR_STATE_COUNT,
+    );
+    foreach (pipeline : pipelines) {
+        gpu::destroy_pipeline(&device, pipeline)!!;
+    }
 }
 
 fn int main() {
@@ -267,6 +402,7 @@ fn int main() {
     probe_owned_shader_identity(state, BENCH_SHADER_LARGE_BYTES);
 
     foreach (handle : aliases) gpu::destroy_pipeline(&device, handle)!!;
+    probe_dynamic_color_matrix(&desc);
 
     return 0;
 }
