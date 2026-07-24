@@ -230,8 +230,8 @@ the backend has already required the independently queried
 Vulkan 1.3 core.
 
 When resource-agnostic texture synchronization is requested, creation rechecks
-the cached support, appends `VK_KHR_unified_image_layouts`, and chains exactly
-one `VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR` with
+native extension and feature support, appends `VK_KHR_unified_image_layouts`,
+and chains exactly one `VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR` with
 `unifiedImageLayouts = VK_TRUE`. `unifiedImageLayoutsVideo` remains false.
 Failure publishes neither a device nor the selected capability. Vulkan 1.4 core
 is not requested.
