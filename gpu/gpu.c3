@@ -1793,8 +1793,10 @@ fn void? cmd_set_graphics_state(
     return record.ops.set_graphics_state(record, state);
 }
 
-<* Replace complete blend and write-mask state for the selected dynamic-color
-   pipeline. FULL validates the entire packet before native mutation. *>
+<* Replace complete blend and write-mask state for a dynamic-color pipeline.
+   Preconditions: a compatible dynamic pipeline is selected and values are valid.
+   Always checked: token phase, host-safe input, and safe lowering.
+   FULL diagnostics: pipeline, target-domain, enum, and blend misuse. *>
 fn void? cmd_set_color_state(
     CommandList* commands,
     ColorState* state,

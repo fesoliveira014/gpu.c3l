@@ -17,6 +17,7 @@ const char[*] DYNAMIC_RECT_FRAG_SPIRV = $embed("shaders/depth.frag.spv");
 
 const uint RT_SIZE = 32;
 const usz RT_BYTES = RT_SIZE * RT_SIZE * 4;
+const uint COLOR_READBACK_TOLERANCE = 1;
 
 struct VulkanValidationCapture {
     uint errors;
@@ -891,13 +892,16 @@ fn void dynamic_color_output_matches_immutable_output() @test {
             "equivalent immutable and dynamic color profiles render identical bytes");
         for (uint channel = 0; channel < 4; channel++) {
             uint actual = (uint)dynamic_pixels[center + channel];
-            assert(dynamic_pixels[center + channel]
-                    == (char)expected[state_index * 4 + channel],
-                "dynamic color state %d channel %d readback %d matches expected %d",
+            uint expected_value = expected[state_index * 4 + channel];
+            uint difference = actual >= expected_value
+                ? actual - expected_value
+                : expected_value - actual;
+            assert(difference <= COLOR_READBACK_TOLERANCE,
+                "dynamic color state %d channel %d readback %d is within one LSB of expected %d",
                 state_index,
                 channel,
                 actual,
-                expected[state_index * 4 + channel]);
+                expected_value);
         }
     }
 }

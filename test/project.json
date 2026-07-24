@@ -34,7 +34,7 @@
     // Needs an ICD — pin lavapipe via VK_DRIVER_FILES when running this target.
     "pipeline_cache_bench": {
       "type": "executable",
-      "features": [ "PIPELINE_CACHE_STATS", "COMMAND_RESOLUTION_STATS" ],
+      "features": [ "PIPELINE_CACHE_STATS" ],
       "sources": [ "src/pipeline_cache_bench.c3" ]
     },
     // Advisory command recording timing; executable so it never gates

@@ -2026,12 +2026,6 @@ fn void? create_logical_device_with_queue_infos(
             .set_extended_dynamic_state3color_write_mask(vk::TRUE)
             .set_next(features13.p_next);
         features13 = features13.set_next(&dynamic_color_features);
-        $if env::TESTING:
-            if (probe != null) {
-                probe.dynamic_color_feature_chained =
-                    features13.p_next == &dynamic_color_features;
-            }
-        $endif
     }
     if (state.presentation.enabled) {
         presentation_features = presentation_features.set_next(
@@ -2126,6 +2120,12 @@ fn void? create_logical_device_with_queue_infos(
 
     $if env::TESTING:
         if (probe != null) {
+            probe.dynamic_color_feature_chained =
+                state.dynamic_color_state_enabled
+                && (features13.p_next == &dynamic_color_features
+                    || (state.presentation.enabled
+                        && presentation_features.p_next
+                            == &dynamic_color_features));
             probe.dynamic_color_blend_enable =
                 dynamic_color_features.extended_dynamic_state3color_blend_enable;
             probe.dynamic_color_blend_equation =
