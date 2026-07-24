@@ -576,6 +576,7 @@ fn void sampled_descriptor_layout_matches_semantic_layout() @test {
     assert(gpu::internal::vk::texture_descriptor_layout(
             &color,
             gpu::internal::vk::TextureDescriptorKind.SAMPLED,
+            false
         ) == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
         "sampled color descriptors use the shader read-only layout");
 
@@ -586,6 +587,7 @@ fn void sampled_descriptor_layout_matches_semantic_layout() @test {
     assert(gpu::internal::vk::texture_descriptor_layout(
             &depth,
             gpu::internal::vk::TextureDescriptorKind.SAMPLED,
+            false
         ) == vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL,
         "sampled depth descriptors use the depth-stencil read-only layout");
 
@@ -596,11 +598,13 @@ fn void sampled_descriptor_layout_matches_semantic_layout() @test {
     assert(gpu::internal::vk::texture_descriptor_layout(
             &combined,
             gpu::internal::vk::TextureDescriptorKind.SAMPLED,
+            false
         ) == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
         "sampled bindings retain read-only layout on storage-capable textures");
     assert(gpu::internal::vk::texture_descriptor_layout(
             &combined,
             gpu::internal::vk::TextureDescriptorKind.STORAGE,
+            false
         ) == vk::ImageLayout.GENERAL,
         "storage bindings use the general layout");
 }
@@ -614,13 +618,14 @@ fn void combined_texture_batch_keeps_binding_layouts_distinct() @test {
     vk::DescriptorImageInfo[2] image_infos;
     vk::WriteDescriptorSet[2] writes;
     uint write_count = gpu::internal::vk::accumulate_texture_descriptor_write(
-        heap:         &heap,
-        slot:         3,
-        texture_slot: &texture,
-        view:         {},
-        image_infos:  image_infos[..],
-        writes:       writes[..],
-        write_count:  0,
+        heap:              &heap,
+        slot:              3,
+        texture_slot:      &texture,
+        view:              {},
+        image_infos:       image_infos[..],
+        writes:            writes[..],
+        write_count:       0,
+        resource_agnostic: false,
     );
     assert(write_count == 2, "combined textures publish both descriptor bindings");
     assert(image_infos[0].image_layout == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
