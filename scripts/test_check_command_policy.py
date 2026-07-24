@@ -10,7 +10,7 @@ from scripts import check_command_policy
 STRUCT_SOURCE = """
 module gpu::internal;
 
-struct CommandOps @private {
+struct CommandOps @private @if(!$feature(GPU_FAST_COMMANDS)) {
     CopyFn copy;
     DrawFn draw;
 }
@@ -67,8 +67,70 @@ class CommandPolicyCheckTests(unittest.TestCase):
             (all_tables_source() if tables is None else tables) + helpers,
         )
 
+    def write_fast_fixture(
+        self,
+        root: Path,
+        public_body: str = "fast_copy();",
+        guard_tables: bool = True,
+    ) -> None:
+        tables = all_tables_source()
+        if guard_tables:
+            tables = tables.replace(
+                "@private = {",
+                "@private @if(!$feature(GPU_FAST_COMMANDS)) = {",
+            )
+        self.write_fixture(
+            root,
+            tables=tables,
+        )
+        self.write_source(
+            root,
+            "gpu/gpu.c3",
+            f"""
+module gpu;
+fn void cmd_copy() @if($feature(GPU_FAST_COMMANDS)) {{
+    {public_body}
+}}
+""",
+        )
+
     def test_current_sources_satisfy_contract(self) -> None:
         self.assertEqual(check_command_policy.check(), [])
+
+    def test_fast_rejects_unguarded_command_table(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fast_fixture(root, guard_tables=False)
+            self.assertTrue(any(
+                "must be compiled out of FAST" in error
+                for error in check_command_policy.check(root)
+            ))
+
+    def test_fast_rejects_public_command_ops_access(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fast_fixture(root, public_body="record.ops.copy();")
+            self.assertIn(
+                "FAST public command wrapper reaches CommandOps",
+                check_command_policy.check(root),
+            )
+
+    def test_fast_rejects_unguarded_command_ops_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fast_fixture(root)
+            path = root / "gpu/internal/device.c3"
+            path.write_text(
+                STRUCT_SOURCE.replace(
+                    " @if(!$feature(GPU_FAST_COMMANDS))",
+                    "",
+                ),
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "CommandOps must be compiled out of FAST",
+                check_command_policy.check(root),
+            )
 
     def test_accepts_complete_direct_tables(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

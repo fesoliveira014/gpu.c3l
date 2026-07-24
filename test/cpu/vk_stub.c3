@@ -6,6 +6,288 @@ import std::atomic;
 import std::core::mem;
 import std::thread;
 
+fn void fast_cmd_copy_buffer(
+    gpu::internal::CommandRecord* record,
+    gpu::BufferCopyDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)desc;
+}
+
+fn void fast_cmd_fill_buffer(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuSpan dst,
+    uint value,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)dst;
+    (void)value;
+}
+
+fn void fast_cmd_copy_buffer_to_texture(
+    gpu::internal::CommandRecord* record,
+    gpu::BufferTextureCopyDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)desc;
+}
+
+fn void fast_cmd_copy_texture_to_buffer(
+    gpu::internal::CommandRecord* record,
+    gpu::TextureBufferCopyDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)desc;
+}
+
+fn void fast_cmd_barrier(
+    gpu::internal::CommandRecord* record,
+    gpu::Barrier* barrier,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)barrier;
+}
+
+fn void fast_cmd_texture_barrier(
+    gpu::internal::CommandRecord* record,
+    gpu::TextureBarrier* barrier,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)barrier;
+}
+
+fn void fast_cmd_bind_pipeline(
+    gpu::internal::CommandRecord* record,
+    gpu::PipelineHandle pipeline,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)pipeline;
+}
+
+fn void fast_cmd_dispatch(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress root,
+    gpu::Vec3u groups,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)root;
+    (void)groups;
+}
+
+fn void fast_cmd_dispatch_indirect(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress root,
+    gpu::GpuSpan args,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)root;
+    (void)args;
+}
+
+fn void fast_cmd_set_depth_state(
+    gpu::internal::CommandRecord* record,
+    gpu::DepthState* depth,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)depth;
+}
+
+fn void fast_cmd_set_raster_state(
+    gpu::internal::CommandRecord* record,
+    gpu::DynamicRasterState* raster,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)raster;
+}
+
+fn void fast_cmd_set_viewport(
+    gpu::internal::CommandRecord* record,
+    gpu::Viewport* viewport,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)viewport;
+}
+
+fn void fast_cmd_set_scissor(
+    gpu::internal::CommandRecord* record,
+    gpu::ScissorRect* scissor,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)scissor;
+}
+
+fn void fast_cmd_set_graphics_state(
+    gpu::internal::CommandRecord* record,
+    gpu::GraphicsState* state,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)state;
+}
+
+fn void fast_cmd_begin_render_pass(
+    gpu::internal::CommandRecord* record,
+    gpu::RenderPassDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)desc;
+}
+
+fn void fast_cmd_begin_render_pass_with_state(
+    gpu::internal::CommandRecord* record,
+    gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)desc;
+    (void)state;
+}
+
+fn void fast_cmd_end_render_pass(
+    gpu::internal::CommandRecord* record,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+}
+
+fn void fast_cmd_draw(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)vertex_root;
+    (void)fragment_root;
+    (void)vertex_count;
+    (void)instance_count;
+}
+
+fn void fast_cmd_draw_indexed(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    gpu::IndexType index_type,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)vertex_root;
+    (void)fragment_root;
+    (void)index_span;
+    (void)index_count;
+    (void)instance_count;
+    (void)index_type;
+}
+
+fn void fast_cmd_draw_indirect(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)vertex_root;
+    (void)fragment_root;
+    (void)args;
+    (void)draw_count;
+}
+
+fn void fast_cmd_draw_indexed_indirect(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)vertex_root;
+    (void)fragment_root;
+    (void)args;
+    (void)draw_count;
+    (void)index_span;
+    (void)index_type;
+}
+
+fn void fast_cmd_draw_indexed_indirect_count(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)vertex_root;
+    (void)fragment_root;
+    (void)args;
+    (void)count_span;
+    (void)max_draw_count;
+    (void)index_span;
+    (void)index_type;
+}
+
+fn void fast_cmd_begin_label(
+    gpu::internal::CommandRecord* record,
+    ZString label,
+    float[4] color,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)label;
+    (void)color;
+}
+
+fn void fast_cmd_end_label(
+    gpu::internal::CommandRecord* record,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+}
+
+fn void? fast_cmd_draw_generated(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)records;
+    (void)count_span;
+    (void)max_draw_count;
+}
+
+fn void? fast_cmd_draw_indexed_generated(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)records;
+    (void)count_span;
+    (void)max_draw_count;
+    (void)index_span;
+    (void)index_type;
+}
+
+fn void? fast_cmd_dispatch_generated(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)record;
+    (void)records;
+    (void)count_span;
+    (void)max_dispatch_count;
+}
+
 const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
 const float STUB_SAMPLER_ANISOTROPY_LIMIT @private = 16.0f;

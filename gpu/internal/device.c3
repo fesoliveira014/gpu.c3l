@@ -63,12 +63,12 @@ alias DiscardCommandsFn @private = fn void? (
 alias SubmitFn @private          = fn CompletionPoint? (Queue, SubmitDesc*);
 alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
 alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
-alias CmdCopyBufferFn @private       = fn void? (CommandRecord*, BufferCopyDesc*);
-alias CmdFillBufferFn @private       = fn void? (CommandRecord*, GpuSpan, uint);
-alias CmdCopyBufferToTextureFn @private = fn void? (CommandRecord*, BufferTextureCopyDesc*);
-alias CmdCopyTextureToBufferFn @private = fn void? (CommandRecord*, TextureBufferCopyDesc*);
-alias CmdBarrierFn @private          = fn void? (CommandRecord*, Barrier*);
-alias CmdTextureBarrierFn @private   = fn void? (CommandRecord*, TextureBarrier*);
+alias CmdCopyBufferFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, BufferCopyDesc*);
+alias CmdFillBufferFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, GpuSpan, uint);
+alias CmdCopyBufferToTextureFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, BufferTextureCopyDesc*);
+alias CmdCopyTextureToBufferFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, TextureBufferCopyDesc*);
+alias CmdBarrierFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, Barrier*);
+alias CmdTextureBarrierFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, TextureBarrier*);
 alias GetTextureFormatSupportFn @private = fn TextureFormatSupport? (Device*, Format);
 alias SupportsTextureDescFn @private     = fn bool? (Device*, TextureDesc*);
 alias GetTextureRequirementsFn @private  = fn TextureRequirements? (Device*, TextureDesc*);
@@ -104,24 +104,24 @@ alias CreateGraphicsPipelinesFn @private = fn void? (Device*, GraphicsPipelineDe
 alias DestroyPipelineFn @private        = fn void? (Device*, PipelineHandle);
 alias GetPipelineCacheSizeFn @private   = fn usz? (Device*);
 alias GetPipelineCacheDataFn @private   = fn usz? (Device*, char[]);
-alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, PipelineHandle);
-alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, DepthState*);
-alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, DynamicRasterState*);
-alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, GraphicsState*);
-alias CmdDispatchFn @private                 = fn void? (CommandRecord*, GpuAddress, Vec3u);
-alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, RenderPassDesc*);
-alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandRecord*, RenderPassDesc*, GraphicsState*);
-alias CmdSetViewportFn @private              = fn void? (CommandRecord*, Viewport*);
-alias CmdSetScissorFn @private               = fn void? (CommandRecord*, ScissorRect*);
-alias CmdEndRenderPassFn @private            = fn void? (CommandRecord*);
-alias CmdDrawFn @private = fn void? (
+alias CmdBindPipelineFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, PipelineHandle);
+alias CmdSetDepthStateFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, DepthState*);
+alias CmdSetRasterStateFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, DynamicRasterState*);
+alias CmdSetGraphicsStateFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, GraphicsState*);
+alias CmdDispatchFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, GpuAddress, Vec3u);
+alias CmdBeginRenderPassFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, RenderPassDesc*);
+alias CmdBeginRenderPassWithStateFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, RenderPassDesc*, GraphicsState*);
+alias CmdSetViewportFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, Viewport*);
+alias CmdSetScissorFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, ScissorRect*);
+alias CmdEndRenderPassFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*);
+alias CmdDrawFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (
     CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     uint vertex_count,
     uint instance_count,
 );
-alias CmdDrawIndexedFn @private = fn void? (
+alias CmdDrawIndexedFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (
     CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
@@ -130,14 +130,14 @@ alias CmdDrawIndexedFn @private = fn void? (
     uint instance_count,
     IndexType index_type,
 );
-alias CmdDrawIndirectFn @private = fn void? (
+alias CmdDrawIndirectFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (
     CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
     GpuSpan args,
     uint draw_count,
 );
-alias CmdDrawIndexedIndirectFn @private = fn void? (
+alias CmdDrawIndexedIndirectFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (
     CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
@@ -146,7 +146,7 @@ alias CmdDrawIndexedIndirectFn @private = fn void? (
     GpuSpan index_span,
     IndexType index_type,
 );
-alias CmdDrawIndexedIndirectCountFn @private = fn void? (
+alias CmdDrawIndexedIndirectCountFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (
     CommandRecord* record,
     GpuAddress vertex_root,
     GpuAddress fragment_root,
@@ -156,14 +156,14 @@ alias CmdDrawIndexedIndirectCountFn @private = fn void? (
     GpuSpan index_span,
     IndexType index_type,
 );
-alias CmdDispatchIndirectFn @private         = fn void? (CommandRecord*, GpuAddress, GpuSpan);
-alias CmdDrawGeneratedFn @private = fn void? (
+alias CmdDispatchIndirectFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, GpuAddress, GpuSpan);
+alias CmdDrawGeneratedFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (
     CommandRecord* record,
     GpuSpan records,
     GpuSpan count_span,
     uint max_draw_count,
 );
-alias CmdDrawIndexedGeneratedFn @private = fn void? (
+alias CmdDrawIndexedGeneratedFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (
     CommandRecord* record,
     GpuSpan records,
     GpuSpan count_span,
@@ -171,14 +171,14 @@ alias CmdDrawIndexedGeneratedFn @private = fn void? (
     GpuSpan index_span,
     IndexType index_type,
 );
-alias CmdDispatchGeneratedFn @private = fn void? (
+alias CmdDispatchGeneratedFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (
     CommandRecord* record,
     GpuSpan records,
     GpuSpan count_span,
     uint max_dispatch_count,
 );
-alias CmdBeginLabelFn @private               = fn void? (CommandRecord*, ZString, float[4]);
-alias CmdEndLabelFn @private                 = fn void? (CommandRecord*);
+alias CmdBeginLabelFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*, ZString, float[4]);
+alias CmdEndLabelFn @private @if(!$feature(GPU_FAST_COMMANDS)) = fn void? (CommandRecord*);
 alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
@@ -241,7 +241,9 @@ struct CommandRecord @private {
 }
 $assert CommandRecord::size <= ulong::size * 8;
 
-struct CommandOps @private {
+alias CommandOps @private @if($feature(GPU_FAST_COMMANDS)) = void;
+
+struct CommandOps @private @if(!$feature(GPU_FAST_COMMANDS)) {
     CmdCopyBufferFn               copy_buffer;
     CmdFillBufferFn               fill_buffer;
     CmdCopyBufferToTextureFn      copy_buffer_to_texture;
@@ -372,6 +374,8 @@ struct RecordingWorkCounters @private @if(
     ulong image_view_creations;
     ulong vma_allocations;
     ulong registry_lock_acquisitions;
+    ulong generated_preprocess_acquires;
+    ulong generated_allocator_lock_acquisitions;
     ulong generated_scratch_misses;
     ulong generated_dispatch_emissions;
     ulong generated_draw_emissions;
@@ -382,9 +386,14 @@ Atomic{ulong} command_device_registry_resolutions @private @if(env::TESTING || $
 Atomic{ulong} command_retained_pin_operations @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_lifecycle_vtable_dispatches @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_table_indirect_loads @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_table_indirect_calls @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_policy_selections @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_contract_branches @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_tracking_branches @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_public_misuse_faults @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_recording_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_native_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
@@ -422,6 +431,26 @@ fn void note_command_lifecycle_vtable_dispatch() @private {
 fn void note_command_table_lookup() @private {
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         (void)command_table_lookups.add(1, AtomicOrdering.RELAXED);
+        (void)command_table_indirect_loads.add(1, AtomicOrdering.RELAXED);
+        (void)command_table_indirect_calls.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_contract_branch() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_contract_branches.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_tracking_branch() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_tracking_branches.add(1, AtomicOrdering.RELAXED);
+    $endif
+}
+
+fn void note_command_public_misuse_fault() @private {
+    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+        (void)command_public_misuse_faults.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 

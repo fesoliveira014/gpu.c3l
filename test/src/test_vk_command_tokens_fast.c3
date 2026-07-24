@@ -39,7 +39,7 @@ fn int direct_record_worker(void* raw_args) {
             .before = { .transfer = true },
             .after  = { .host = true },
         };
-        gpu::cmd_barrier(&commands, &barrier)!!;
+        gpu::cmd_barrier(&commands, &barrier);
         args.executable = gpu::end_commands(&commands)!!;
     };
     return 0;
@@ -58,8 +58,8 @@ fn void direct_command_tokens_reject_full_validation() @test {
         .backend             = gpu::BackendKind.VULKAN,
         .contract_validation = gpu::ContractValidation.FULL,
     };
-    assert(@catch(gpu::create_runtime(&desc)) == gpu::UNSUPPORTED_FEATURE,
-        "direct tokens reject full validation before Vulkan initialization");
+    assert(@catch(gpu::create_runtime(&desc)) == gpu::INVALID_ARGUMENT,
+        "the FAST profile rejects full validation before Vulkan initialization");
 }
 
 fn void direct_command_record_lifecycle_reuses_only_after_retirement() @test {
@@ -97,7 +97,7 @@ fn void direct_command_record_lifecycle_reuses_only_after_retirement() @test {
         .after  = { .host = true },
     };
     gpu::reset_command_resolution_stats();
-    gpu::cmd_barrier(&commands, &barrier)!!;
+    gpu::cmd_barrier(&commands, &barrier);
     assert_warm_command_resolution(gpu::command_resolution_stats(), 1);
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;

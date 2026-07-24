@@ -80,7 +80,7 @@ fn void? begin_wrapper_bench_commands(
         &allocator.device,
     );
     state.record = {
-        .ops             = &wrapper_bench_command_ops,
+        .ops             = WRAPPER_BENCH_COMMAND_OPS,
         .backend_state   = state,
         .backend_command = &state.command_marker,
         .device          = allocator.device,
@@ -178,13 +178,20 @@ fn void? wrapper_bench_draw(
     observe_draw();
 }
 
-gpu::internal::CommandOps wrapper_bench_command_ops @private = {
+gpu::internal::CommandOps wrapper_bench_command_ops
+    @private @if(!$feature(GPU_FAST_COMMANDS)) = {
     .copy_buffer  = &wrapper_bench_copy_buffer,
     .barrier      = &wrapper_bench_barrier,
     .dispatch     = &wrapper_bench_dispatch,
     .set_viewport = &wrapper_bench_viewport,
     .draw         = &wrapper_bench_draw,
 };
+
+const gpu::internal::CommandOps* WRAPPER_BENCH_COMMAND_OPS
+    @private @if($feature(GPU_FAST_COMMANDS)) = null;
+const gpu::internal::CommandOps* WRAPPER_BENCH_COMMAND_OPS
+    @private @if(!$feature(GPU_FAST_COMMANDS)) =
+        &wrapper_bench_command_ops;
 
 gpu::internal::BackendVTable wrapper_bench_vtable @private = {
     .destroy_device            = &destroy_wrapper_bench_device,
@@ -194,7 +201,7 @@ gpu::internal::BackendVTable wrapper_bench_vtable @private = {
     .resolve_command           = &resolve_wrapper_bench_command,
     .end_commands              = &end_wrapper_bench_commands,
     .discard_commands          = &discard_wrapper_bench_commands,
-    .command_ops               = &wrapper_bench_command_ops,
+    .command_ops               = WRAPPER_BENCH_COMMAND_OPS,
 };
 
 fn double sample_elapsed(std::time::Clock start) {
@@ -240,6 +247,82 @@ fn void check_sample_observation(ulong before, ulong value) {
     );
 }
 
+fn void? record_bench_dispatch(
+    CommandList* commands,
+    GpuAddress root,
+    Vec3u groups,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        cmd_dispatch(commands, root, groups);
+        observe_dispatch();
+    $else
+        cmd_dispatch(commands, root, groups)!;
+    $endif
+}
+
+fn void? record_bench_draw(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        cmd_draw(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            vertex_count:  vertex_count,
+            instance_count: instance_count,
+        );
+        observe_draw();
+    $else
+        cmd_draw(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            vertex_count:  vertex_count,
+            instance_count: instance_count,
+        )!;
+    $endif
+}
+
+fn void? record_bench_barrier(
+    CommandList* commands,
+    Barrier* barrier,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        cmd_barrier(commands, barrier);
+        observe_barrier();
+    $else
+        cmd_barrier(commands, barrier)!;
+    $endif
+}
+
+fn void? record_bench_viewport(
+    CommandList* commands,
+    Viewport* viewport,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        cmd_set_viewport(commands, viewport);
+        observe_viewport();
+    $else
+        cmd_set_viewport(commands, viewport)!;
+    $endif
+}
+
+fn void? record_bench_copy_buffer(
+    CommandList* commands,
+    BufferCopyDesc* desc,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        cmd_copy_buffer(commands, desc);
+        observe_copy_buffer();
+    $else
+        cmd_copy_buffer(commands, desc)!;
+    $endif
+}
+
 fn void measure_dispatch(
     CommandList* commands,
     WrapperBenchSamples* samples,
@@ -255,13 +338,13 @@ fn void measure_dispatch(
             samples.direct[repetition] = sample_elapsed(direct_start);
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_dispatch(commands, (GpuAddress)1, groups)!!;
+                record_bench_dispatch(commands, (GpuAddress)1, groups)!!;
             }
             samples.public[repetition] = sample_elapsed(public_start);
         } else {
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_dispatch(commands, (GpuAddress)1, groups)!!;
+                record_bench_dispatch(commands, (GpuAddress)1, groups)!!;
             }
             samples.public[repetition] = sample_elapsed(public_start);
             std::time::Clock direct_start = std::time::clock::now();
@@ -288,7 +371,7 @@ fn void measure_draw(
             samples.direct[repetition] = sample_elapsed(direct_start);
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_draw(
+                record_bench_draw(
                     commands:      commands,
                     vertex_root:   (GpuAddress)1,
                     fragment_root: (GpuAddress)2,
@@ -300,7 +383,7 @@ fn void measure_draw(
         } else {
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_draw(
+                record_bench_draw(
                     commands:      commands,
                     vertex_root:   (GpuAddress)1,
                     fragment_root: (GpuAddress)2,
@@ -337,13 +420,13 @@ fn void measure_barrier(
             samples.direct[repetition] = sample_elapsed(direct_start);
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_barrier(commands, &barrier)!!;
+                record_bench_barrier(commands, &barrier)!!;
             }
             samples.public[repetition] = sample_elapsed(public_start);
         } else {
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_barrier(commands, &barrier)!!;
+                record_bench_barrier(commands, &barrier)!!;
             }
             samples.public[repetition] = sample_elapsed(public_start);
             std::time::Clock direct_start = std::time::clock::now();
@@ -375,13 +458,13 @@ fn void measure_viewport(
             samples.direct[repetition] = sample_elapsed(direct_start);
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_set_viewport(commands, &viewport)!!;
+                record_bench_viewport(commands, &viewport)!!;
             }
             samples.public[repetition] = sample_elapsed(public_start);
         } else {
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_set_viewport(commands, &viewport)!!;
+                record_bench_viewport(commands, &viewport)!!;
             }
             samples.public[repetition] = sample_elapsed(public_start);
             std::time::Clock direct_start = std::time::clock::now();
@@ -412,13 +495,13 @@ fn void measure_copy_buffer(
             samples.direct[repetition] = sample_elapsed(direct_start);
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_copy_buffer(commands, &desc)!!;
+                record_bench_copy_buffer(commands, &desc)!!;
             }
             samples.public[repetition] = sample_elapsed(public_start);
         } else {
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_copy_buffer(commands, &desc)!!;
+                record_bench_copy_buffer(commands, &desc)!!;
             }
             samples.public[repetition] = sample_elapsed(public_start);
             std::time::Clock direct_start = std::time::clock::now();
@@ -464,7 +547,7 @@ fn int main() {
         caps:           {},
         vtable:         &wrapper_bench_vtable,
         backend_state:  &state,
-        command_ops:    &wrapper_bench_command_ops,
+        command_ops:    WRAPPER_BENCH_COMMAND_OPS,
         resource_owner: state.resource_owner,
     )!!;
     defer destroy_device(&device)!!;

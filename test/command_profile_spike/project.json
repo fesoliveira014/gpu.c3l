@@ -1,0 +1,31 @@
+{
+  "langrev": "1",
+  "warnings": [ "no-unused" ],
+  "output": "build",
+  "targets": {
+    "fast_pass": {
+      "type": "object-files",
+      "features": [ "GPU_FAST_COMMANDS" ],
+      "sources": [ "command_profile_signature.c3" ]
+    },
+    "checked_pass": {
+      "type": "object-files",
+      "sources": [ "command_profile_signature.c3" ]
+    },
+    "fast_rethrow": {
+      "type": "object-files",
+      "features": [ "GPU_FAST_COMMANDS" ],
+      "sources": [
+        "command_profile_signature.c3",
+        "fast_rethrow.c3"
+      ]
+    },
+    "checked_unhandled": {
+      "type": "object-files",
+      "sources": [
+        "command_profile_signature.c3",
+        "checked_unhandled.c3"
+      ]
+    }
+  }
+}

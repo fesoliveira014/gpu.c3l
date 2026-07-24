@@ -15,7 +15,8 @@ fn void capture_wsi_diagnostic(gpu::DebugMessage* message, void* user_data) {
     capture.last = *message;
 }
 
-fn void wsi_presentation_gate_diagnostic() @test {
+fn void wsi_presentation_gate_diagnostic()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -81,7 +82,8 @@ fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
         "resolved WSI result keeps exact identity");
 }
 
-fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
+fn void wsi_stale_handle_diagnostic_has_no_identity()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,

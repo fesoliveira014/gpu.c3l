@@ -853,13 +853,12 @@ fn void invalidate_strict_heap_bind_point(
     record.strict_heap_binding.graphics_set_bound = false;
 }
 
-fn void? bind_descriptor_heap(
+fn void emit_descriptor_heap_binding(
     VkDeviceState* state,
     VkCommandRecord* record,
     vk::PipelineLayout layout,
     vk::PipelineBindPoint bind_point,
 ) {
-    validate_descriptor_heap_binding(state)!;
     StrictHeapCommandBinding* binding = &record.strict_heap_binding;
     if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
         bool set_bound = bind_point == vk::PipelineBindPoint.COMPUTE
@@ -926,6 +925,16 @@ fn void? bind_descriptor_heap(
     } else {
         binding.graphics_offsets_set = true;
     }
+}
+
+fn void? bind_descriptor_heap(
+    VkDeviceState* state,
+    VkCommandRecord* record,
+    vk::PipelineLayout layout,
+    vk::PipelineBindPoint bind_point,
+) {
+    validate_descriptor_heap_binding(state)!;
+    emit_descriptor_heap_binding(state, record, layout, bind_point);
 }
 
 fn TextureSlot*? resolve_descriptor_texture(

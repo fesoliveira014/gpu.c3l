@@ -13,6 +13,7 @@
   "targets": {
     "linux-x64": {
       "link-args": [],
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
       // Backend bindings this target depends on.
       "dependencies": [ "vk", "vma", "spvreflect" ],
       "linked-libraries": []
@@ -21,6 +22,7 @@
       // Build the VMA static library during Windows setup; its dependency
       // manifest supplies the native link input.
       "link-args": [],
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
       "dependencies": [ "vk", "vma", "spvreflect" ],
       "linked-libraries": []
     }

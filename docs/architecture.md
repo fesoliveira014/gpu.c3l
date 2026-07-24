@@ -220,9 +220,9 @@ generation token resolved through the synchronized process-wide registry.
 Most public device operations pin the slot before reading backend state.
 `begin_commands` transfers its pin to one stable allocator-owned command
 record. Hot recording calls reach that record through the build-selected
-command token and dispatch through its immutable command-operation table
-without resolving the device registry, borrowing another pin, or loading the
-lifecycle vtable.
+command token without resolving the device registry, borrowing another pin, or
+loading the lifecycle vtable. CHECKED then dispatches through the record's
+immutable command-operation table; FAST calls its static Vulkan entry directly.
 
 Destruction first rejects known live children, then closes the slot. Closing
 blocks new pins while active pins, a second child check, and queue completion
@@ -308,9 +308,10 @@ device-registry pin, or validation-policy branch. A direct-token build therefore
 rejects `ContractValidation.FULL` before backend initialization.
 
 Every preallocated command cell owns one address-stable authoritative
-`CommandRecord`. It contains the selected immutable `CommandOps`, backend state
-and backend-command pointers, retained device/backend ownership, bounded
-identity when present, and the sole lifecycle state. Its linked backend record
+`CommandRecord`. In CHECKED it contains the selected immutable `CommandOps`;
+FAST compiles the operation type and tables out. The record also contains
+backend state and backend-command pointers, retained device/backend ownership,
+bounded identity when present, and the sole lifecycle state. Its linked backend record
 contains the originating allocator and buffer identity, fixed reference and
 generated-work scratch, and native command state. Copies of either public token
 representation alias the authoritative record; they do not copy or fork its
@@ -616,24 +617,32 @@ explicit exact-queue allocator. Successful
 or explicit discard consumes the executable token. Native recording pools are
 owned by allocators, not workers or frame boundaries; see `docs/threading.md`.
 
-Vulkan device creation selects one immutable command table from contract depth
-and tracking: trusted/no-tracking, trusted/tracking, checked/no-tracking, or
-checked/tracking. `OBJECT_BOUNDARIES` uses the trusted command entries because
-its additional work belongs at public boundaries. The authoritative record
-stores the chosen pointer once; repeated `cmd_*` calls do not inspect contract,
-tracking, layer, callback, naming policy, or separate command-capability fields.
-All four tables retain mandatory host
+In CHECKED builds, Vulkan device creation selects one immutable command table
+from contract depth and tracking: trusted/no-tracking, trusted/tracking,
+checked/no-tracking, or checked/tracking. `OBJECT_BOUNDARIES` uses the trusted
+command entries because its additional work belongs at public boundaries. The
+authoritative record stores the chosen pointer once; repeated `cmd_*` calls do
+not inspect contract, tracking, layer, callback, naming policy, or separate
+command-capability fields. All four tables retain mandatory host
 pointer/slice/range safety, overflow protection, internal state integrity,
 public ownership, Vulkan result handling, and rollback. Detailed command misuse
 outside that floor is a caller contract violation unless `FULL` is selected in
 the bounded-token build. Direct-token provenance, one-shot use, correct phase,
 and alias confinement remain caller preconditions.
 
-The representation change is based on the private-proof outcome rules
-introduced by #438, which allow removed work to be observed as zero. It does not
-remove the record-owned runtime `CommandOps` dispatch or change fallible
-`cmd_*` signatures; direct build-time command dispatch and the final public
-FAST/CHECKED surface remain the separate #440 boundary.
+In FAST builds, `CommandOps`, its aliases and tables, policy selection, and
+command-reference tracking storage are not compiled. Each of the 24 ordinary
+public commands obtains the direct authoritative record and calls a same-family
+static Vulkan entry returning `void`. The three generated commands use static
+entries too but retain only their configured capacity faults. FAST and CHECKED
+validation/tracking functions converge on shared infallible native emitters
+after the selected profile has established its preconditions. Vulkan layers
+remain independent of this build topology.
+
+The 24 ordinary FAST entries take no allocator mutex. The three generated
+entries remain fallible and take the generated-reservation mutex exactly once
+per reservation attempt because concurrent completion retirement may return
+the same allocator's in-use reservation.
 
 Static command-policy checking verifies complete operation coverage for each
 literal runtime `CommandOps` table that exists. It does not require a fixed

@@ -77,17 +77,19 @@ page doesn't explain it, that's a bug in this page — file an issue.
   There is no default, frame-owned, or ambient per-thread recording owner. Create
   one allocator per concurrently recording worker, size it explicitly, and
   destroy it after all of its command units retire.
-- **Direct command tokens trade misuse diagnostics for one-pointer identity.**
-  Defining `DIRECT_COMMAND_TOKENS` selects the FAST public ABI: both command
-  token types contain exactly one opaque record pointer. The caller must use
-  only values returned by the library, in the correct phase, one-shot, with all
-  aliases confined to one thread at a time. Fabricated, stale, consumed,
-  wrong-phase, or concurrently used direct aliases are invalid application use;
-  deterministic faults are not promised. The default bounded-token build
-  validates owner, bounds, and generations before obtaining a record pointer.
-- **Direct tokens and `ContractValidation.FULL` are incompatible.** A
-  `DIRECT_COMMAND_TOKENS` build rejects `FULL` during runtime creation before
-  backend initialization. Use the default bounded representation for
+- **FAST commands trade misuse diagnostics for static direct recording.**
+  Defining `GPU_FAST_COMMANDS` with `DIRECT_COMMAND_TOKENS` selects the FAST
+  public ABI: both command token types contain exactly one opaque record pointer
+  and the 24 ordinary commands return `void`. The caller must supply valid
+  tokens, descriptors, handles, spans, state, and synchronization, use each
+  token in the correct phase one-shot, and confine aliases to one thread.
+  Fabricated, stale, consumed, wrong-phase, or otherwise invalid calls have no
+  deterministic diagnostic guarantee. The three generated commands remain
+  fallible for configured scratch/capacity exhaustion.
+- **FAST and checked runtime policy are incompatible.** A
+  `GPU_FAST_COMMANDS` build rejects `OBJECT_BOUNDARIES`, `FULL`, and lifetime
+  tracking during runtime creation before backend initialization. Use the
+  default CHECKED representation for
   deterministic stale, foreign, fabricated, wrong-phase, duplicate, and
   consumed-token diagnostics.
 - **Vendored distribution.** There is no package registry; consumers vendor

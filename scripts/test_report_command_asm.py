@@ -93,6 +93,20 @@ gpu.cmd_dispatch:
                     report_command_asm.is_indirect_call_operand(symbol)
                 )
 
+    def test_static_fast_entry_dispatch_accepts_call_and_tail_call(self) -> None:
+        lines = [
+            "    callq gpu.internal.vk.fast_cmd_dispatch@PLT",
+            "    jmp gpu.internal.vk.fast_cmd_dispatch@PLT",
+            "    callq *%rax",
+        ]
+        self.assertEqual(
+            report_command_asm.direct_symbol_dispatches(
+                lines,
+                "fast_cmd_dispatch",
+            ),
+            2,
+        )
+
     def test_compiler_version_normalizes_build_suffix(self) -> None:
         self.assertEqual(
             report_command_asm.parse_compiler_version(
@@ -195,6 +209,63 @@ gpu.cmd_dispatch:
                 "0.8.0",
                 "linux-x64",
                 "command-fastpath-o1-v1",
+            ),
+        )
+
+    def test_fast_profile_requires_indirect_and_static_dispatch_limits(self) -> None:
+        profile = {
+            "expectation_version": report_command_asm.EXPECTATION_VERSION,
+            "identity": {
+                "compiler": "0.8.0",
+                "target": "linux-x64",
+                "comparison_profile": "command-fast-o1-v1",
+                "optimization": "O1",
+            },
+            "limits": {
+                operation: {
+                    field: {"maximum": 100}
+                    for field in (
+                        "instructions",
+                        "calls",
+                        "atomics",
+                        "branches",
+                        "loads",
+                        "stores",
+                        "native_dispatch",
+                    )
+                }
+                for operation in report_command_asm.OPERATIONS
+            },
+        }
+        failures = report_command_asm.validate_profile(
+            profile,
+            "0.8.0",
+            "linux-x64",
+            "command-fast-o1-v1",
+        )
+        self.assertTrue(any(
+            "static_entry_dispatch" in failure
+            for failure in failures
+        ))
+        self.assertTrue(any(
+            "indirect_calls" in failure
+            for failure in failures
+        ))
+
+    def test_extra_indirect_call_fails_fast_pinned_limit(self) -> None:
+        observations = self.collect()
+        complete = {
+            operation: observation
+            for operation, observation in observations.items()
+            if observation is not None
+        }
+        for operation in ("barrier", "viewport", "copy_buffer"):
+            complete[operation] = observations["draw"]
+        self.assertIn(
+            "dispatch: indirect_calls 1 exceeds 0",
+            report_command_asm.validate_limits(
+                complete,
+                {"dispatch": {"indirect_calls": {"maximum": 0}}},
             ),
         )
 

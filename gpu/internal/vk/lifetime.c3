@@ -10,7 +10,7 @@ alias CompletionRetirementLockHook @if(env::TESTING) = fn void (void*);
 
 const uint SUBMITTED_COMMAND_DRAIN_THRESHOLD = 64;
 
-struct CommandResourceReference {
+struct CommandResourceReference @if(!$feature(GPU_FAST_COMMANDS)) {
     ulong         owner;
     uint          index;
     uint          generation;
@@ -31,7 +31,7 @@ struct CommandBufferStats {
 fn bool same_resource_reference(
     CommandResourceReference* left,
     CommandResourceReference* right,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     return left.owner == right.owner
         && left.index == right.index
         && left.generation == right.generation;
@@ -40,7 +40,7 @@ fn bool same_resource_reference(
 fn void? retain_tracked_command_reference(
     VkDeviceState* state,
     CommandResourceReference reference,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     if (reference.owner == state.buffers.owner) {
         BufferHandle handle = {
             .owner = reference.owner, .index = reference.index,
@@ -102,7 +102,7 @@ fn void? retain_tracked_command_reference(
 fn void release_tracked_command_reference(
     VkDeviceState* state,
     CommandResourceReference reference,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     if (reference.tracked_command_references != null) {
         reference.tracked_command_references.sub(1, AtomicOrdering.RELAXED);
         note_command_reference_release(state);
@@ -171,7 +171,7 @@ fn void release_tracked_command_references(
     VkDeviceState* state,
     CommandResourceReference[] references,
     uint count,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     for (uint i = 0; i < count; i++) {
         release_tracked_command_reference(state, references[i]);
     }

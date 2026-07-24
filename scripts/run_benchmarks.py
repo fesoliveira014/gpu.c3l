@@ -21,6 +21,7 @@ BENCHMARK_TARGETS = (
     "command_path_baseline_bench",
     "command_reference_bench",
     "command_record_bench",
+    "command_record_direct_bench",
     "command_record_fast_bench",
     "lifecycle_bench",
     "submit_batch_bench",
@@ -56,6 +57,10 @@ BENCHMARK_METHODS = {
         "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; cold/warm work counters",
         "ns/record",
     ),
+    "command_record_direct_bench": (
+        "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; CHECKED direct tokens",
+        "ns/record",
+    ),
     "command_record_fast_bench": (
         "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; commands/list=1,16,256,4096",
         "ns/record",
@@ -80,7 +85,7 @@ BENCHMARK_METHODS = {
 }
 
 C3_BUILD_FLAGS = ("-O1",)
-EXPECTATION_VERSION = 2
+EXPECTATION_VERSION = 3
 
 BENCHMARK_PROJECTS = {
     "command_wrapper_bench": "test/cpu",
@@ -142,6 +147,10 @@ COMMAND_RECORD_EXPECTATION = re.compile(
     r"^expectation_version=(?P<version>[1-9][0-9]*)$",
     re.MULTILINE,
 )
+COMMAND_RECORD_PROFILE = re.compile(
+    r"^command_profile: build=(?P<build>fast|checked)$",
+    re.MULTILINE,
+)
 COMMAND_RECORD_TOKENS = re.compile(
     r"^command_tokens: representation=(?P<representation>direct|bounded) "
     r"recording_token_bytes=(?P<recording_token_bytes>[1-9][0-9]*) "
@@ -150,6 +159,14 @@ COMMAND_RECORD_TOKENS = re.compile(
     r"cell_bytes=(?P<cell_bytes>[1-9][0-9]*) "
     r"fixed_storage_bytes=(?P<fixed_storage_bytes>[1-9][0-9]*) "
     r"commands_per_list=1,16,256,4096$",
+    re.MULTILINE,
+)
+COMMAND_RECORD_PIPELINE_SCALE = re.compile(
+    r"^pipeline scale: commands=(?P<commands>1|16|256|4096) "
+    r"scenario=(?P<scenario>alias|distinct) "
+    r"recording=(?P<recording>[1-9][0-9]*) "
+    r"native=(?P<native>[1-9][0-9]*) "
+    r"pipeline_binds=(?P<pipeline_binds>[1-9][0-9]*)$",
     re.MULTILINE,
 )
 COMMAND_RECORD_RESOLUTION = re.compile(
@@ -163,9 +180,14 @@ COMMAND_RECORD_RESOLUTION = re.compile(
     r"retained_pins=(?P<retained_pins>[0-9]+) "
     r"lifecycle_vtable=(?P<lifecycle_vtable>[0-9]+) "
     r"command_table=(?P<command_table>[0-9]+) "
+    r"command_table_loads=(?P<command_table_loads>[0-9]+) "
+    r"command_table_calls=(?P<command_table_calls>[0-9]+) "
     r"pipeline_table=(?P<pipeline_table>[0-9]+) "
     r"pipeline_cache=(?P<pipeline_cache>[0-9]+) "
     r"policy=(?P<policy>[0-9]+) "
+    r"contract_branches=(?P<contract_branches>[0-9]+) "
+    r"tracking_branches=(?P<tracking_branches>[0-9]+) "
+    r"public_misuse_faults=(?P<public_misuse_faults>[0-9]+) "
     r"encoder_cells=(?P<encoder_cells>[0-9]+) "
     r"encoder_leases=(?P<encoder_leases>[0-9]+)$",
     re.MULTILINE,
@@ -175,7 +197,9 @@ COMMAND_RECORD_COLD_WORK = re.compile(
     r"command_pool_creations=1 command_buffer_allocations=1 "
     r"command_buffer_frees=[0-9]+ "
     r"command_buffer_resets=[0-9]+ image_view_creations=[0-9]+ "
-    r"vma_allocations=[0-9]+ generated_scratch_misses=[0-9]+$",
+    r"vma_allocations=[0-9]+ generated_acquires=[0-9]+ "
+    r"generated_allocator_locks=[0-9]+ "
+    r"generated_scratch_misses=[0-9]+$",
     re.MULTILINE,
 )
 COMMAND_RECORD_WARM_WORK = re.compile(
@@ -183,6 +207,8 @@ COMMAND_RECORD_WARM_WORK = re.compile(
     r"command_pool_creations=0 command_buffer_allocations=0 "
     r"command_buffer_frees=0 command_buffer_resets=[1-9][0-9]* "
     r"image_view_creations=0 vma_allocations=0 "
+    r"generated_acquires=(?P<generated_acquires>[0-9]+) "
+    r"generated_allocator_locks=(?P<generated_allocator_locks>[0-9]+) "
     r"generated_scratch_misses=0$",
     re.MULTILINE,
 )
@@ -944,6 +970,20 @@ def require_command_policy_evidence(output, expected=None):
             raise ValueError(
                 "command_record_bench warm host allocation is nonzero"
             )
+        if warm is not None:
+            generated_acquires = int(warm.group("generated_acquires"))
+            generated_locks = int(
+                warm.group("generated_allocator_locks")
+            )
+            if generated_acquires == 0:
+                raise ValueError(
+                    "command_record_bench generated lock evidence is vacuous"
+                )
+            if generated_locks != generated_acquires:
+                raise ValueError(
+                    "command_record_bench generated lock evidence "
+                    "does not match acquisitions"
+                )
     return actual, counters
 
 
@@ -952,10 +992,13 @@ def require_command_policy_matrix(outputs):
         raise ValueError("command_record_bench four-mode policy matrix is incomplete")
     for output, expected in zip(outputs, COMMAND_POLICY_MODES):
         require_command_policy_evidence(output, expected)
-        require_command_record_outcomes(output)
+        require_command_record_outcomes(output, "checked")
 
 
-def require_command_record_outcomes(output):
+def require_command_record_outcomes(
+    output,
+    expected_build_profile=None,
+):
     expectation_records = tuple(COMMAND_RECORD_EXPECTATION.finditer(output))
     if len(expectation_records) != 1:
         raise ValueError(
@@ -968,6 +1011,21 @@ def require_command_record_outcomes(output):
             "semantic invariant: command_record_bench expectation version "
             f"{version} != {EXPECTATION_VERSION}"
         )
+    profile_records = tuple(COMMAND_RECORD_PROFILE.finditer(output))
+    if len(profile_records) != 1:
+        raise ValueError(
+            "semantic invariant: command_record_bench build profile "
+            "is missing, duplicated, or malformed"
+        )
+    build_profile = profile_records[0].group("build")
+    if (
+        expected_build_profile is not None
+        and build_profile != expected_build_profile
+    ):
+        raise ValueError(
+            "semantic invariant: command_record_bench build profile "
+            f"{build_profile} != {expected_build_profile}"
+        )
     token_records = tuple(COMMAND_RECORD_TOKENS.finditer(output))
     if len(token_records) != 1:
         raise ValueError(
@@ -976,6 +1034,10 @@ def require_command_record_outcomes(output):
         )
     token_record = token_records[0]
     representation = token_record.group("representation")
+    if build_profile == "fast" and representation != "direct":
+        raise ValueError(
+            "semantic invariant: FAST build profile requires direct tokens"
+        )
     recording_token_bytes = int(token_record.group("recording_token_bytes"))
     executable_token_bytes = int(
         token_record.group("executable_token_bytes")
@@ -997,6 +1059,55 @@ def require_command_record_outcomes(output):
     if record_bytes > cell_bytes or fixed_storage_bytes != cell_bytes * 4096:
         raise ValueError(
             "semantic invariant: command fixed-storage evidence is inconsistent"
+        )
+    scale_records = tuple(COMMAND_RECORD_PIPELINE_SCALE.finditer(output))
+    if len(scale_records) != 8:
+        raise ValueError(
+            "semantic invariant: command_record_bench pipeline scale "
+            "records are missing, duplicated, or malformed"
+        )
+    observed_scale = set()
+    heap_native = None
+    for record in scale_records:
+        commands = int(record.group("commands"))
+        scenario = record.group("scenario")
+        recording = int(record.group("recording"))
+        native = int(record.group("native"))
+        pipeline_binds = int(record.group("pipeline_binds"))
+        key = (commands, scenario)
+        if key in observed_scale:
+            raise ValueError(
+                "semantic invariant: command_record_bench pipeline scale "
+                "record is duplicated"
+            )
+        observed_scale.add(key)
+        expected_binds = 1 if scenario == "alias" else commands
+        current_heap_native = native - pipeline_binds
+        if (
+            recording != commands
+            or pipeline_binds != expected_binds
+            or current_heap_native not in (1, 2)
+        ):
+            raise ValueError(
+                "minimal native lowering: command_record_bench pipeline "
+                "scale record is inconsistent"
+            )
+        if heap_native is None:
+            heap_native = current_heap_native
+        elif current_heap_native != heap_native:
+            raise ValueError(
+                "minimal native lowering: command_record_bench pipeline "
+                "scale heap work is inconsistent"
+            )
+    expected_scale = {
+        (commands, scenario)
+        for commands in (1, 16, 256, 4096)
+        for scenario in ("alias", "distinct")
+    }
+    if observed_scale != expected_scale:
+        raise ValueError(
+            "semantic invariant: command_record_bench pipeline scale "
+            "matrix is incomplete"
         )
     invariant_lines = [
         line for line in output.splitlines()
@@ -1030,9 +1141,14 @@ def require_command_record_outcomes(output):
             "retained_pins",
             "lifecycle_vtable",
             "command_table",
+            "command_table_loads",
+            "command_table_calls",
             "pipeline_table",
             "pipeline_cache",
             "policy",
+            "contract_branches",
+            "tracking_branches",
+            "public_misuse_faults",
             "encoder_cells",
             "encoder_leases",
         )
@@ -1082,12 +1198,31 @@ def require_command_record_outcomes(output):
             f"count {recording_commands} != {expected_recording_commands}"
         )
     expected_command_table = (
-        0 if representation == "direct" else recording_commands
+        0 if build_profile == "fast" else recording_commands
     )
-    if values["command_table"] != expected_command_table:
+    if any(
+        values[field] != expected_command_table
+        for field in (
+            "command_table",
+            "command_table_loads",
+            "command_table_calls",
+        )
+    ):
         raise ValueError(
             "forbidden work: command_record_bench command-table work "
-            f"{values['command_table']} != {expected_command_table}"
+            "does not match the build profile"
+        )
+    if build_profile == "fast" and any(
+        values[field] != 0
+        for field in (
+            "contract_branches",
+            "tracking_branches",
+            "public_misuse_faults",
+        )
+    ):
+        raise ValueError(
+            "forbidden work: FAST command recording performed policy, "
+            "tracking, or public misuse-fault work"
         )
     if values["encoder_cells"] != 0:
         raise ValueError(
@@ -1163,8 +1298,15 @@ def require_measurement(
             raise ValueError(f"{target} reports live resources")
     if target == "descriptor_churn_bench":
         require_sampler_lookup_evidence(output)
-    if target in ("command_record_bench", "command_record_fast_bench"):
-        require_command_record_outcomes(output)
+    if target in (
+        "command_record_bench",
+        "command_record_direct_bench",
+        "command_record_fast_bench",
+    ):
+        require_command_record_outcomes(
+            output,
+            "fast" if target == "command_record_fast_bench" else "checked",
+        )
         require_command_policy_evidence(output)
     if target == "pipeline_cache_bench" and not PIPELINE_CACHE_MATRIX.search(output):
         raise ValueError(
@@ -1346,7 +1488,10 @@ def main():
                 lines.append(report_section(title, annotated))
             require_command_policy_matrix(command_outputs)
             continue
-        if target == "command_record_fast_bench":
+        if target in (
+            "command_record_direct_bench",
+            "command_record_fast_bench",
+        ):
             command_env = env.copy()
             command_env["GPU_C3L_BENCH_CONTRACT"] = "trusted"
             command_env["GPU_C3L_BENCH_TRACKING"] = "false"

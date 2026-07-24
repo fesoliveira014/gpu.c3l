@@ -157,6 +157,15 @@ Validation controls are independent:
 | `enable_debug_names` | `false` | Requests best-effort native object naming through debug utils. It enables no checks, tracking, or layers. |
 | `debug_callback` | null | Selects structured delivery for diagnostics already produced by the contract policy or Vulkan. It does not enable checks, tracking, layers, or names. |
 
+The build-time command profile is separate from these runtime controls.
+`GPU_FAST_COMMANDS` selects static, non-fallible ordinary command entry points
+and requires `TRUSTED` with lifetime tracking off. A FAST runtime request for
+`OBJECT_BOUNDARIES`, `FULL`, tracking, or `full_validation_runtime_desc()`
+returns `INVALID_ARGUMENT` before backend initialization. Vulkan layers, debug
+names, and callback delivery remain independent. Omitting
+`GPU_FAST_COMMANDS` selects CHECKED; its runtime policy chooses the immutable
+checked command table.
+
 Every contract level retains the mandatory safety floor: host pointer and slice
 validity before reads, integer-overflow and backing-range protection required
 for safe lowering, command state transitions and internal table safety, public
@@ -977,6 +986,74 @@ Export must not race pipeline creation; blob usefulness is driver-dependent
 
 ## 9. Command API
 
+### Build-time command profiles
+
+Command signatures are feature-exclusive under the same public names:
+
+| Family | Ordinary FAST `void`; CHECKED `void?` |
+|---|---|
+| Transfer and synchronization | `cmd_copy_buffer`, `cmd_fill_buffer`, `cmd_copy_buffer_to_texture`, `cmd_copy_texture_to_buffer`, `cmd_barrier`, `cmd_texture_barrier` |
+| Pipeline, compute, and labels | `cmd_bind_pipeline`, `cmd_dispatch`, `cmd_dispatch_indirect`, `cmd_begin_label`, `cmd_end_label` |
+| Graphics state and passes | `cmd_set_depth_state`, `cmd_set_raster_state`, `cmd_set_viewport`, `cmd_set_scissor`, `cmd_set_graphics_state`, `cmd_begin_render_pass`, `cmd_begin_render_pass_with_state`, `cmd_end_render_pass` |
+| Draw | `cmd_draw`, `cmd_draw_indexed`, `cmd_draw_indirect`, `cmd_draw_indexed_indirect`, `cmd_draw_indexed_indirect_count` |
+
+These are the complete 24 ordinary commands. The three generated operations
+`cmd_draw_generated`, `cmd_draw_indexed_generated`, and
+`cmd_dispatch_generated` remain `void?` in both profiles because configured
+preprocess capacity can return `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` or
+`GENERATED_SCRATCH_EXHAUSTED`.
+
+Later command signature blocks use `void (FAST) / void? (CHECKED)` for these
+24 ordinary operations. Examples that unwrap an ordinary command show CHECKED
+syntax; FAST callers omit that `!`. Generated commands keep `void?` and `!` in
+both profiles.
+
+FAST is selected in the consumer target, together with its one-pointer token
+representation:
+
+```json
+{
+  "targets": {
+    "app_fast": {
+      "type": "executable",
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
+      "sources": [ "src/main.c3" ]
+    },
+    "app_checked": {
+      "type": "executable",
+      "sources": [ "src/main.c3" ]
+    }
+  }
+}
+```
+
+The source migration for ordinary commands is mechanical:
+
+```c3
+$if $feature(GPU_FAST_COMMANDS):
+    gpu::cmd_dispatch(&commands, root, groups);
+$else
+    gpu::cmd_dispatch(&commands, root, groups)!;
+$endif
+
+gpu::cmd_dispatch_generated(
+    commands:           &commands,
+    records:            records,
+    count_span:         count,
+    max_dispatch_count: 1,
+)!;
+```
+
+FAST treats valid command tokens, descriptors, handles, spans, ranges, counts,
+alignment, usage, queue access, pipeline kind, render state, and synchronization
+as programmer preconditions. It performs direct static lowering without a
+runtime command table, contract/tracking branch, reference retention, or
+ordinary-command misuse fault. The caller keeps every referenced object live
+until observed completion. Command lifecycle, resource creation/destruction,
+allocation, pipeline, submit, completion, wait, surface, swapchain, and WSI
+operations remain fallible. Use CHECKED with `FULL` when deterministic command
+misuse diagnostics are required.
+
 ### Threading
 
 Command tokens and allocator recording are thread-confined. While an allocator
@@ -1210,15 +1287,19 @@ Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
 ### Pipeline command state and dispatch
 
 ```text
-cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) -> void?
-cmd_set_graphics_state(CommandList* commands, GraphicsState* state) -> void?
-cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
-cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
+cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline)
+    -> void (FAST) / void? (CHECKED)
+cmd_set_graphics_state(CommandList* commands, GraphicsState* state)
+    -> void (FAST) / void? (CHECKED)
+cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster)
+    -> void (FAST) / void? (CHECKED)
+cmd_set_depth_state(CommandList* commands, DepthState* depth)
+    -> void (FAST) / void? (CHECKED)
 cmd_dispatch(
     CommandList* commands,
     GpuAddress root,
     Vec3u groups,
-) -> void?
+) -> void (FAST) / void? (CHECKED)
 ```
 
 Pipeline binding selects the active compute or graphics pipeline without
@@ -1254,12 +1335,11 @@ Each group count may be zero and must not exceed the corresponding component
 of `DeviceCaps.max_compute_work_group_count`. An over-limit call faults
 `INVALID_ARGUMENT` before a backend command is recorded.
 
-Warm recording dispatches through the immutable operation table stored in the
-authoritative record. There is currently one checked policy. Policy selection
-happens at device or record setup; a warm `cmd_*` call never branches on policy
-or reloads lifecycle dispatch. This representation seam does not remove
-`CommandOps` indirection or change the fallible public signatures; #440 owns
-those later FAST-artifact changes.
+CHECKED warm recording dispatches through the immutable operation table stored
+in the authoritative record. Policy selection happens at device or record
+setup; a warm `cmd_*` call never branches on policy or reloads lifecycle
+dispatch. FAST compiles that table and its tracking policy out and routes each
+ordinary wrapper directly to its static Vulkan entry.
 
 Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
 `CommandResolutionStats`, `reset_command_resolution_stats`, and
@@ -1268,9 +1348,11 @@ live command entry-point attempts, every emitted Vulkan command, and forbidden
 resolution paths. Exact native-operation fields distinguish pipeline binds,
 descriptor-set binds, descriptor-buffer binds, and descriptor-buffer offset
 commands. FAST gates require zero encoder-cell computations, packed-lease
-comparisons, frontend phase transitions, command-table lookups, registry/pin
-operations, and warm allocation. Bounded builds permit one safe token
-resolution and authoritative phase check. A narrow structural guard rejects
+comparisons, frontend phase transitions, registry/pin operations, and warm
+allocation for ordinary commands. The command-table fields count CHECKED
+`CommandOps` dispatches regardless of bounded or direct token representation;
+FAST requires them to be zero. Bounded tokens perform their separate safe
+identity resolution and authoritative phase check. A narrow structural guard rejects
 reintroduced duplicate identity comparisons, device-loss loads, and
 trusted-backend capability comparisons; those prohibitions are not inferred
 from runtime counters. Reset and compare the counters only across an externally
@@ -1321,14 +1403,16 @@ full_render_graphics_state(uint width, uint height) -> GraphicsState?
 cmd_begin_render_pass(
     CommandList* commands,
     RenderPassDesc* desc,
-) -> void?
+) -> void (FAST) / void? (CHECKED)
 cmd_begin_render_pass_with_state(
     CommandList* commands,
     RenderPassDesc* desc,
     GraphicsState* state,
-) -> void?
-cmd_set_graphics_state(CommandList* commands, GraphicsState* state) -> void?
-cmd_end_render_pass(CommandList* commands) -> void?
+) -> void (FAST) / void? (CHECKED)
+cmd_set_graphics_state(CommandList* commands, GraphicsState* state)
+    -> void (FAST) / void? (CHECKED)
+cmd_end_render_pass(CommandList* commands)
+    -> void (FAST) / void? (CHECKED)
 ```
 
 An `AttachmentViewHandle` is an immutable device child for one texture mip and
@@ -1382,10 +1466,14 @@ ScissorRect
     int width
     int height
 
-cmd_set_viewport(CommandList* commands, Viewport* viewport) -> void?
-cmd_set_scissor(CommandList* commands, ScissorRect* scissor) -> void?
-cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
-cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
+cmd_set_viewport(CommandList* commands, Viewport* viewport)
+    -> void (FAST) / void? (CHECKED)
+cmd_set_scissor(CommandList* commands, ScissorRect* scissor)
+    -> void (FAST) / void? (CHECKED)
+cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster)
+    -> void (FAST) / void? (CHECKED)
+cmd_set_depth_state(CommandList* commands, DepthState* depth)
+    -> void (FAST) / void? (CHECKED)
 ```
 
 A conventional starting packet can be constructed from the pass dimensions:
@@ -1478,7 +1566,7 @@ cmd_draw(
     GpuAddress fragment_root,
     uint vertex_count,
     uint instance_count,
-) -> void?
+) -> void (FAST) / void? (CHECKED)
 
 cmd_draw_indexed(
     CommandList* commands,
@@ -1489,7 +1577,7 @@ cmd_draw_indexed(
     uint index_count,
     uint instance_count,
     IndexType index_type = IndexType.U32,   (enum: U32, U16)
-) -> void?
+) -> void (FAST) / void? (CHECKED)
 ```
 
 ### Indirect execution
@@ -1525,13 +1613,20 @@ release_generated_scratch(
     GeneratedWorkKind kind,
 ) -> void?
 
-cmd_draw_indirect(commands, vertex_root, fragment_root, args, draw_count) -> void?
-cmd_draw_indexed_indirect(commands, vertex_root, fragment_root, args, draw_count, index_span, index_type) -> void?
-cmd_draw_indexed_indirect_count(commands, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type) -> void?
-cmd_dispatch_indirect(commands, root, args) -> void?
-cmd_draw_generated(commands, records, count_span, max_draw_count) -> void?
-cmd_draw_indexed_generated(commands, records, count_span, max_draw_count, index_span, index_type) -> void?
-cmd_dispatch_generated(commands, records, count_span, max_dispatch_count) -> void?
+cmd_draw_indirect(commands, vertex_root, fragment_root, args, draw_count)
+    -> void (FAST) / void? (CHECKED)
+cmd_draw_indexed_indirect(commands, vertex_root, fragment_root, args, draw_count, index_span, index_type)
+    -> void (FAST) / void? (CHECKED)
+cmd_draw_indexed_indirect_count(commands, vertex_root, fragment_root, args, count_span, max_draw_count, index_span, index_type)
+    -> void (FAST) / void? (CHECKED)
+cmd_dispatch_indirect(commands, root, args)
+    -> void (FAST) / void? (CHECKED)
+cmd_draw_generated(commands, records, count_span, max_draw_count)
+    -> void? (FAST and CHECKED)
+cmd_draw_indexed_generated(commands, records, count_span, max_draw_count, index_span, index_type)
+    -> void? (FAST and CHECKED)
+cmd_dispatch_generated(commands, records, count_span, max_dispatch_count)
+    -> void? (FAST and CHECKED)
 ```
 
 The generated records have fixed std430 strides of 32, 40, and 24 bytes. They
@@ -1559,6 +1654,11 @@ the allocator remain live. The allocator descriptor's preprocess count
 multiplied by command-buffer capacity bounds reservation slots, while
 `generated_preprocess_bytes` bounds their total native bytes. A live reservation
 retains its pipeline; release every key before destroying the pipeline.
+
+Each generated reservation attempt takes the allocator reservation mutex exactly
+once because completion retirement may return an in-use reservation
+concurrently. This applies to FAST and CHECKED success and exhaustion paths.
+The 24 ordinary command entries do not take that mutex.
 
 Reservation replacement or `release_generated_scratch` returns
 `RESOURCE_IN_USE` while the allocator has recording, executable, or
@@ -1617,10 +1717,14 @@ BufferCopyDesc
     GpuSpan src
     GpuSpan dst
 
-cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) -> void?
-cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) -> void?
-cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) -> void?
-cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) -> void?
+cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc)
+    -> void (FAST) / void? (CHECKED)
+cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc)
+    -> void (FAST) / void? (CHECKED)
+cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc)
+    -> void (FAST) / void? (CHECKED)
+cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value)
+    -> void (FAST) / void? (CHECKED)
 ```
 
 Copy spans must be nonzero, equal in size, and non-overlapping.
@@ -1673,7 +1777,8 @@ Barrier
     StageMask after
     HazardFlags hazards
 
-cmd_barrier(CommandList* commands, Barrier* barrier) -> void?
+cmd_barrier(CommandList* commands, Barrier* barrier)
+    -> void (FAST) / void? (CHECKED)
 ```
 
 `Barrier` is a global execution and memory dependency. It has no resource
@@ -1723,7 +1828,8 @@ texture_transition(TextureHandle texture, TextureState before,
     -> TextureBarrier?
 texture_view_transition(TextureHandle texture, TextureViewDesc view,
     TextureState before, TextureState after) -> TextureBarrier?
-cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) -> void?
+cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier)
+    -> void (FAST) / void? (CHECKED)
 ```
 
 `before` asserts the caller-established prior state; `after` declares the next
@@ -1845,8 +1951,10 @@ resource references. `GpuAllocation` diagnostics carry the public index and
 generation.
 
 ```text
-cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) -> void?
-cmd_end_label(CommandList* commands) -> void?
+cmd_begin_label(CommandList* commands, ZString label, float[4] color = {})
+    -> void (FAST) / void? (CHECKED)
+cmd_end_label(CommandList* commands)
+    -> void (FAST) / void? (CHECKED)
 ```
 
 Labels group work for capture tools; they are valid while recording,
@@ -2071,7 +2179,8 @@ The public API is acceptable when:
 
 ```text
 no public signature exposes vk::, vma::, or sdl:: types
-all fallible operations return optionals/faults
+all genuinely fallible operations return optionals/faults; FAST ordinary command
+preconditions are documented and its three generated commands remain fallible
 individually owned resources have explicit destruction and caller-managed completion lifetimes
 generic GPU data uses allocations, spans, and addresses without a public buffer object
 root-pointer compute can be written without descriptor-set concepts

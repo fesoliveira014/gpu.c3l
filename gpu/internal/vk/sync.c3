@@ -687,7 +687,7 @@ fn LoweredTextureBarrier? validate_track_and_lower_texture_barrier(
     VkCommandRecord* record,
     gpu::TextureBarrier* barrier,
     ZString operation,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     note_texture_barrier_helper(state);
     if (barrier == null) {
         TextureBarrierRejection rejection = {
@@ -727,6 +727,27 @@ fn LoweredTextureBarrier? validate_track_and_lower_texture_barrier(
         slot:      slot_result,
         operation: operation,
     );
+}
+
+fn void emit_barrier(
+    gpu::internal::CommandRecord* commands,
+    gpu::Barrier* barrier,
+) @private {
+    VkDeviceState* state = command_device_state(commands);
+    bool descriptor_buffer = state.strict_heap.implementation
+        == VkHeapImplementation.DESCRIPTOR_BUFFER;
+    vk::MemoryBarrier2 native_barrier = barrier_to_vk(
+        barrier,
+        descriptor_buffer,
+        state.generated_work.enabled,
+    );
+    vk::DependencyInfo dependency =
+        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
+    vk::cmd_pipeline_barrier2(
+        backend_command(commands).command_buffer,
+        &dependency,
+    );
+    gpu::internal::note_command_native_call();
 }
 
 fn void? vk_cmd_barrier(
@@ -778,18 +799,7 @@ fn void? vk_cmd_barrier(
             backend_text:        null,
         )~;
     }
-
-    bool descriptor_buffer = state.strict_heap.implementation
-        == VkHeapImplementation.DESCRIPTOR_BUFFER;
-    vk::MemoryBarrier2 native_barrier = barrier_to_vk(
-        barrier,
-        descriptor_buffer,
-        state.generated_work.enabled,
-    );
-    vk::DependencyInfo dependency =
-        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
-    vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-    gpu::internal::note_command_native_call();
+    emit_barrier(commands, barrier);
 }
 
 fn void? trusted_barrier(
@@ -801,18 +811,7 @@ fn void? trusted_barrier(
     if (record.root.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    VkDeviceState* state = command_device_state(commands);
-    bool descriptor_buffer = state.strict_heap.implementation
-        == VkHeapImplementation.DESCRIPTOR_BUFFER;
-    vk::MemoryBarrier2 native_barrier = barrier_to_vk(
-        barrier,
-        descriptor_buffer,
-        state.generated_work.enabled,
-    );
-    vk::DependencyInfo dependency =
-        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
-    vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-    gpu::internal::note_command_native_call();
+    emit_barrier(commands, barrier);
 }
 
 fn void? checked_barrier(
@@ -893,7 +892,7 @@ fn void? trusted_texture_barrier(
 fn void? trusted_tracking_texture_barrier(
     gpu::internal::CommandRecord* commands,
     gpu::TextureBarrier* barrier,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     LoweredTextureBarrier lowered = lower_texture_barrier_trusted(
         commands,
         barrier,
@@ -936,7 +935,7 @@ fn void? checked_texture_barrier(
 fn void? checked_tracking_texture_barrier(
     gpu::internal::CommandRecord* commands,
     gpu::TextureBarrier* barrier,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
@@ -1149,4 +1148,54 @@ fn void? vk_wait_completion(
         timeout_ns: timeout_ns,
         wait_fn:    &real_semaphore_wait,
     );
+}
+
+fn void fast_cmd_barrier(
+    gpu::internal::CommandRecord* record,
+    gpu::Barrier* barrier,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    emit_barrier(record, barrier);
+}
+
+fn void fast_cmd_texture_barrier(
+    gpu::internal::CommandRecord* record,
+    gpu::TextureBarrier* barrier,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkDeviceState* state = command_device_state(record);
+    TextureSlot* slot = &state.textures.slots[barrier.texture.index].value;
+    uint mip_count = barrier.view.mip_count == 0
+        ? slot.mip_levels - barrier.view.base_mip
+        : barrier.view.mip_count;
+    uint layer_count = barrier.view.layer_count == 0
+        ? slot.array_layers - barrier.view.base_layer
+        : barrier.view.layer_count;
+    TextureStateScope before = texture_state_to_vk(
+        barrier.before,
+        slot.format,
+    );
+    TextureStateScope after = texture_state_to_vk(
+        barrier.after,
+        slot.format,
+    );
+    LoweredTextureBarrier lowered = {
+        .slot   = slot,
+        .native = vk::image_memory_barrier2()
+            .set_src_stage_mask(before.stages)
+            .set_src_access_mask(before.access)
+            .set_dst_stage_mask(after.stages)
+            .set_dst_access_mask(after.access)
+            .set_old_layout(before.layout)
+            .set_new_layout(after.layout)
+            .set_src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .set_image(slot.image)
+            .set_subresource_range({
+                .aspect_mask      = format_aspect(slot.format),
+                .base_mip_level   = barrier.view.base_mip,
+                .level_count      = mip_count,
+                .base_array_layer = barrier.view.base_layer,
+                .layer_count      = layer_count,
+            }),
+    };
+    emit_texture_barrier(record, &lowered);
 }

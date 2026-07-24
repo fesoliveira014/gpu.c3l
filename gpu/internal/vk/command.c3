@@ -162,9 +162,11 @@ struct CommandReferenceIndex {
 }
 
 struct CommandScratch {
-    CommandResourceReference[] references;
-    CommandReferenceIndex      reference_index;
-    uint                       reference_count;
+    CommandResourceReference[] references
+        @if(!$feature(GPU_FAST_COMMANDS));
+    CommandReferenceIndex reference_index
+        @if(!$feature(GPU_FAST_COMMANDS));
+    uint reference_count @if(!$feature(GPU_FAST_COMMANDS));
     uint[]                     generated_preprocess_indices;
     uint                       generated_preprocess_count;
     bool                       in_use;
@@ -175,8 +177,10 @@ struct CommandAllocatorSlot {
     vk::CommandPool             pool;
     vk::CommandBuffer[]          command_buffers;
     CommandScratch[]             scratch;
-    CommandResourceReference[]   reference_storage;
-    CommandReferenceIndexCell[]  reference_index_storage;
+    CommandResourceReference[] reference_storage
+        @if(!$feature(GPU_FAST_COMMANDS));
+    CommandReferenceIndexCell[] reference_index_storage
+        @if(!$feature(GPU_FAST_COMMANDS));
     uint[]                       preprocess_index_storage;
     uint[]                       available;
     uint                         available_count;
@@ -428,6 +432,28 @@ fn void note_generated_scratch_miss(VkDeviceState* state) {
     $endif
 }
 
+fn void note_generated_preprocess_acquire(VkDeviceState* state) {
+    $if env::TESTING
+            || $feature(COMMAND_RESOLUTION_STATS)
+            || $feature(COMMAND_RECORDING_WORK_STATS):
+        (void)state.generated_preprocess_acquires.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
+fn void note_generated_allocator_lock(VkDeviceState* state) {
+    $if env::TESTING
+            || $feature(COMMAND_RESOLUTION_STATS)
+            || $feature(COMMAND_RECORDING_WORK_STATS):
+        (void)state.generated_allocator_lock_acquisitions.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    $endif
+}
+
 fn void note_generated_native_emission(
     VkDeviceState* state,
     gpu::GeneratedWorkKind kind,
@@ -518,12 +544,17 @@ fn void destroy_command_allocator_slot_with_ops(
         alloc::free(state.host_allocator, slot.command_buffers.ptr);
     }
     if (slot.scratch.ptr != null) alloc::free(state.host_allocator, slot.scratch.ptr);
-    if (slot.reference_storage.ptr != null) {
-        alloc::free(state.host_allocator, slot.reference_storage.ptr);
-    }
-    if (slot.reference_index_storage.ptr != null) {
-        alloc::free(state.host_allocator, slot.reference_index_storage.ptr);
-    }
+    $if !$feature(GPU_FAST_COMMANDS):
+        if (slot.reference_storage.ptr != null) {
+            alloc::free(state.host_allocator, slot.reference_storage.ptr);
+        }
+        if (slot.reference_index_storage.ptr != null) {
+            alloc::free(
+                state.host_allocator,
+                slot.reference_index_storage.ptr,
+            );
+        }
+    $endif
     if (slot.preprocess_index_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.preprocess_index_storage.ptr);
     }
@@ -595,32 +626,35 @@ fn void? initialize_command_allocator_slot_with_ops(
     if (catch available) return gpu::OUT_OF_HOST_MEMORY~;
     slot.available = available;
 
-    uint reference_capacity = state.validation_policy.track_lifetimes
-        ? desc.max_resource_references_per_list
-        : 0;
-    uint reference_index_capacity =
-        command_reference_index_capacity(reference_capacity)!;
-    if (reference_capacity > 0) {
-        CommandResourceReference[]? reference_storage = alloc::new_array_try(
-            state.host_allocator,
-            CommandResourceReference,
-            (usz)capacity * (usz)reference_capacity,
-        );
-        if (catch reference_storage) {
-            return gpu::OUT_OF_HOST_MEMORY~;
+    $if !$feature(GPU_FAST_COMMANDS):
+        uint reference_capacity = state.validation_policy.track_lifetimes
+            ? desc.max_resource_references_per_list
+            : 0;
+        uint reference_index_capacity =
+            command_reference_index_capacity(reference_capacity)!;
+        if (reference_capacity > 0) {
+            CommandResourceReference[]? reference_storage =
+                alloc::new_array_try(
+                    state.host_allocator,
+                    CommandResourceReference,
+                    (usz)capacity * (usz)reference_capacity,
+                );
+            if (catch reference_storage) {
+                return gpu::OUT_OF_HOST_MEMORY~;
+            }
+            slot.reference_storage = reference_storage;
+            CommandReferenceIndexCell[]? reference_index_storage =
+                alloc::new_array_try(
+                    state.host_allocator,
+                    CommandReferenceIndexCell,
+                    (usz)capacity * (usz)reference_index_capacity,
+                );
+            if (catch reference_index_storage) {
+                return gpu::OUT_OF_HOST_MEMORY~;
+            }
+            slot.reference_index_storage = reference_index_storage;
         }
-        slot.reference_storage = reference_storage;
-        CommandReferenceIndexCell[]? reference_index_storage =
-            alloc::new_array_try(
-                state.host_allocator,
-                CommandReferenceIndexCell,
-                (usz)capacity * (usz)reference_index_capacity,
-            );
-        if (catch reference_index_storage) {
-            return gpu::OUT_OF_HOST_MEMORY~;
-        }
-        slot.reference_index_storage = reference_index_storage;
-    }
+    $endif
     uint preprocess_capacity =
         desc.max_generated_preprocess_buffers_per_list;
     if (preprocess_capacity > 0) {
@@ -644,17 +678,20 @@ fn void? initialize_command_allocator_slot_with_ops(
         slot.reservations = reservations;
     }
     for (uint i = 0; i < capacity; i++) {
-        if (reference_capacity > 0) {
-            usz start = (usz)i * (usz)reference_capacity;
-            slot.scratch[i].references = slot.reference_storage[
-                start:reference_capacity
-            ];
-            usz index_start = (usz)i * (usz)reference_index_capacity;
-            slot.scratch[i].reference_index.cells =
-                slot.reference_index_storage[
-                    index_start:reference_index_capacity
+        $if !$feature(GPU_FAST_COMMANDS):
+            if (reference_capacity > 0) {
+                usz start = (usz)i * (usz)reference_capacity;
+                slot.scratch[i].references = slot.reference_storage[
+                    start:reference_capacity
                 ];
-        }
+                usz index_start = (usz)i
+                    * (usz)reference_index_capacity;
+                slot.scratch[i].reference_index.cells =
+                    slot.reference_index_storage[
+                        index_start:reference_index_capacity
+                    ];
+            }
+        $endif
         if (preprocess_capacity > 0) {
             usz start = (usz)i * (usz)preprocess_capacity;
             slot.scratch[i].generated_preprocess_indices =
@@ -1132,7 +1169,9 @@ fn void return_allocator_buffer_locked(
     uint buffer_index,
 ) {
     CommandScratch* scratch = &slot.scratch[buffer_index];
-    scratch.reference_count = 0;
+    $if !$feature(GPU_FAST_COMMANDS):
+        scratch.reference_count = 0;
+    $endif
     scratch.generated_preprocess_count = 0;
     scratch.in_use = false;
     slot.available[slot.available_count++] = buffer_index;
@@ -1199,7 +1238,9 @@ fn void? vk_begin_commands_with_ops(
     uint buffer_index = slot.available[--slot.available_count];
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.in_use = true;
-    scratch.reference_count = 0;
+    $if !$feature(GPU_FAST_COMMANDS):
+        scratch.reference_count = 0;
+    $endif
     scratch.generated_preprocess_count = 0;
     slot.live_recordings++;
     if (!slot.recording_thread_set) {
@@ -1524,7 +1565,7 @@ fn PreparedBufferCopy? validate_and_lower_buffer_copy(
 fn void? track_buffer_copy_references(
     gpu::internal::CommandRecord* commands,
     PreparedBufferCopy* copy,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[2] references = {
@@ -1576,7 +1617,7 @@ fn void? trusted_copy_buffer(
 fn void? trusted_tracking_copy_buffer(
     gpu::internal::CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
     if (!buffer_copy_is_safe(&copy)) return gpu::INVALID_ARGUMENT~;
     VkCommandRecord* record = backend_command(commands);
@@ -1601,7 +1642,7 @@ fn void? checked_copy_buffer(
 fn void? checked_tracking_copy_buffer(
     gpu::internal::CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedBufferCopy copy = validate_and_lower_buffer_copy(commands, desc)!;
     VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
@@ -1714,7 +1755,7 @@ fn void? trusted_tracking_fill_buffer(
     gpu::internal::CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedBufferFill fill = lower_buffer_fill(commands, dst, value)!;
     if (fill.span.offset % 4 != 0 || fill.span.size % 4 != 0) {
         return gpu::INVALID_ARGUMENT~;
@@ -1751,7 +1792,7 @@ fn void? checked_tracking_fill_buffer(
     gpu::internal::CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedBufferFill fill = validate_and_lower_buffer_fill(
         commands,
         dst,
@@ -1978,7 +2019,7 @@ fn PreparedBufferTextureCopy? validate_and_lower_texture_to_buffer_copy(
 fn void? track_buffer_texture_copy_references(
     gpu::internal::CommandRecord* commands,
     PreparedBufferTextureCopy* copy,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[2] references = {
@@ -2039,7 +2080,7 @@ fn void? trusted_copy_buffer_to_texture(
 fn void? trusted_tracking_copy_buffer_to_texture(
     gpu::internal::CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
     VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
@@ -2060,7 +2101,7 @@ fn void? checked_copy_buffer_to_texture(
 fn void? checked_tracking_copy_buffer_to_texture(
     gpu::internal::CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedBufferTextureCopy copy =
         validate_and_lower_buffer_to_texture_copy(commands, desc)!;
     VkCommandRecord* record = backend_command(commands);
@@ -2081,7 +2122,7 @@ fn void? trusted_copy_texture_to_buffer(
 fn void? trusted_tracking_copy_texture_to_buffer(
     gpu::internal::CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
     VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
@@ -2102,7 +2143,7 @@ fn void? checked_copy_texture_to_buffer(
 fn void? checked_tracking_copy_texture_to_buffer(
     gpu::internal::CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedBufferTextureCopy copy =
         validate_and_lower_texture_to_buffer_copy(commands, desc)!;
     VkCommandRecord* record = backend_command(commands);
@@ -2326,7 +2367,7 @@ fn BoundPipeline? validate_and_lower_bound_pipeline(
 fn void? track_bound_pipeline(
     gpu::internal::CommandRecord* commands,
     BoundPipeline* pipeline,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     VkCommandRecord* record = backend_command(commands);
     return track_command_reference(
         command_device_state(commands),
@@ -2337,12 +2378,15 @@ fn void? track_bound_pipeline(
     );
 }
 
-fn void? record_bound_pipeline(
+fn void record_bound_pipeline(
     gpu::internal::CommandRecord* commands,
     BoundPipeline* bound,
 ) {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
+    $if env::TESTING:
+        assert(state.strict_heap.enabled);
+    $endif
     NativePipelineBinding* native = bound.kind == PipelineKind.COMPUTE
         ? &record.native_compute_pipeline
         : &record.native_graphics_pipeline;
@@ -2365,12 +2409,12 @@ fn void? record_bound_pipeline(
             .render                    = bound.render,
         };
     }
-    bind_descriptor_heap(
+    emit_descriptor_heap_binding(
         state:      state,
         record:     record,
         layout:     bound.layout,
         bind_point: bind_point,
-    )!;
+    );
     record.logical_pipeline = *bound;
 }
 
@@ -2379,13 +2423,13 @@ fn void? trusted_bind_pipeline(
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
-    record_bound_pipeline(commands, &bound)!;
+    record_bound_pipeline(commands, &bound);
 }
 
 fn void? trusted_tracking_bind_pipeline(
     gpu::internal::CommandRecord* commands,
     gpu::PipelineHandle pipeline,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
     VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
@@ -2395,7 +2439,7 @@ fn void? trusted_tracking_bind_pipeline(
         checkpoint,
     );
     track_bound_pipeline(commands, &bound)!;
-    record_bound_pipeline(commands, &bound)!;
+    record_bound_pipeline(commands, &bound);
 }
 
 fn void? checked_bind_pipeline(
@@ -2403,13 +2447,13 @@ fn void? checked_bind_pipeline(
     gpu::PipelineHandle pipeline,
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
-    record_bound_pipeline(commands, &bound)!;
+    record_bound_pipeline(commands, &bound);
 }
 
 fn void? checked_tracking_bind_pipeline(
     gpu::internal::CommandRecord* commands,
     gpu::PipelineHandle pipeline,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
     VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
@@ -2419,7 +2463,7 @@ fn void? checked_tracking_bind_pipeline(
         checkpoint,
     );
     track_bound_pipeline(commands, &bound)!;
-    record_bound_pipeline(commands, &bound)!;
+    record_bound_pipeline(commands, &bound);
 }
 
 fn void push_compute_root(
@@ -2439,6 +2483,23 @@ fn void push_compute_root(
         offset:         0,
         size:           gpu::RootPush::size,
         p_values:       &push,
+    );
+    gpu::internal::note_command_native_call();
+}
+
+fn void record_dispatch(
+    gpu::internal::CommandRecord* commands,
+    BoundPipeline* pipeline,
+    gpu::GpuAddress root,
+    gpu::Vec3u groups,
+) {
+    VkCommandRecord* record = backend_command(commands);
+    push_compute_root(record, pipeline, root);
+    vk::cmd_dispatch(
+        command_buffer: record.command_buffer,
+        group_count_x:  groups.x,
+        group_count_y:  groups.y,
+        group_count_z:  groups.z,
     );
     gpu::internal::note_command_native_call();
 }
@@ -2472,14 +2533,7 @@ fn void? vk_cmd_dispatch(
             backend_text:        null,
         )~;
     }
-    push_compute_root(record, pipeline, root);
-    vk::cmd_dispatch(
-        command_buffer: record.command_buffer,
-        group_count_x:  groups.x,
-        group_count_y:  groups.y,
-        group_count_z:  groups.z,
-    );
-    gpu::internal::note_command_native_call();
+    record_dispatch(commands, pipeline, root, groups);
 }
 
 fn void? trusted_dispatch(
@@ -2492,14 +2546,7 @@ fn void? trusted_dispatch(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     BoundPipeline pipeline = bound_pipeline_snapshot(record)!;
-    push_compute_root(record, &pipeline, root);
-    vk::cmd_dispatch(
-        command_buffer: record.command_buffer,
-        group_count_x:  groups.x,
-        group_count_y:  groups.y,
-        group_count_z:  groups.z,
-    );
-    gpu::internal::note_command_native_call();
+    record_dispatch(commands, &pipeline, root, groups);
 }
 
 fn void? checked_dispatch(
@@ -2572,7 +2619,7 @@ fn PreparedDispatchIndirect? checked_prepare_dispatch_indirect(
 fn void? track_dispatch_indirect(
     gpu::internal::CommandRecord* commands,
     PreparedDispatchIndirect* dispatch,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     return track_span_command_reference(
         command_device_state(commands),
         backend_command(commands),
@@ -2611,7 +2658,7 @@ fn void? trusted_tracking_dispatch_indirect(
     gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedDispatchIndirect dispatch = lower_dispatch_indirect(
         commands,
         root,
@@ -2638,7 +2685,7 @@ fn void? checked_tracking_dispatch_indirect(
     gpu::internal::CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedDispatchIndirect dispatch = checked_prepare_dispatch_indirect(
         commands,
         root,
@@ -2732,7 +2779,7 @@ fn void set_generated_dispatch_layout_read_hook(
         (vk::IndirectCommandsLayoutEXT)null;
 }
 
-fn void? execute_generated_work(
+fn void emit_generated_work(
     VkDeviceState* state,
     VkCommandRecord* record,
     BoundPipeline* pipeline,
@@ -2742,20 +2789,13 @@ fn void? execute_generated_work(
     ResolvedSpan* records,
     ResolvedSpan* count,
     uint max_count,
+    GeneratedPreprocessBuffer* preprocess,
     ResolvedSpan* index_span = null,
     gpu::IndexType index_type = gpu::IndexType.U32,
 ) {
     vk::GeneratedCommandsPipelineInfoEXT pipeline_info =
         vk::generated_commands_pipeline_info_ext()
             .set_pipeline(pipeline.pipeline);
-    GeneratedPreprocessBuffer* preprocess =
-        acquire_generated_preprocess_buffer(
-            state:     state,
-            record:    record,
-            pipeline:  pipeline.handle,
-            kind:      kind,
-            max_count: max_count,
-        )!;
     vk::GeneratedCommandsInfoEXT info = vk::generated_commands_info_ext()
         .set_next(&pipeline_info)
         .set_shader_stages(shader_stages)
@@ -2783,6 +2823,43 @@ fn void? execute_generated_work(
     );
     note_generated_native_emission(state, kind);
     gpu::internal::note_command_native_call();
+}
+
+fn void? execute_generated_work(
+    VkDeviceState* state,
+    VkCommandRecord* record,
+    BoundPipeline* pipeline,
+    gpu::GeneratedWorkKind kind,
+    vk::IndirectCommandsLayoutEXT layout,
+    vk::ShaderStageFlags shader_stages,
+    ResolvedSpan* records,
+    ResolvedSpan* count,
+    uint max_count,
+    ResolvedSpan* index_span = null,
+    gpu::IndexType index_type = gpu::IndexType.U32,
+) {
+    GeneratedPreprocessBuffer* preprocess =
+        acquire_generated_preprocess_buffer(
+            state:     state,
+            record:    record,
+            pipeline:  pipeline.handle,
+            kind:      kind,
+            max_count: max_count,
+        )!;
+    emit_generated_work(
+        state:         state,
+        record:        record,
+        pipeline:      pipeline,
+        kind:          kind,
+        layout:        layout,
+        shader_stages: shader_stages,
+        records:       records,
+        count:         count,
+        max_count:     max_count,
+        preprocess:    preprocess,
+        index_span:    index_span,
+        index_type:    index_type,
+    );
 }
 
 fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
@@ -2898,7 +2975,7 @@ fn PreparedGeneratedDispatch? checked_prepare_generated_dispatch(
 fn void? track_generated_dispatch(
     gpu::internal::CommandRecord* commands,
     PreparedGeneratedDispatch* dispatch,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[2] references = {
@@ -2958,7 +3035,7 @@ fn void? trusted_tracking_dispatch_generated(
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedGeneratedDispatch dispatch = lower_generated_dispatch(
         commands:           commands,
         records:            records,
@@ -2997,7 +3074,7 @@ fn void? checked_tracking_dispatch_generated(
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedGeneratedDispatch dispatch = checked_prepare_generated_dispatch(
         commands:           commands,
         records:            records,
@@ -3126,10 +3203,49 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     gpu::GeneratedWorkKind kind,
     uint max_count,
 ) {
+    note_generated_preprocess_acquire(state);
     CommandAllocatorSlot* slot = lock_command_allocator_handle(
         state,
         record.allocator,
     )!;
+    note_generated_allocator_lock(state);
+    defer slot.mutex.unlock();
+    if (record.scratch.generated_preprocess_count
+            >= record.scratch.generated_preprocess_indices.len) {
+        note_generated_scratch_miss(state);
+        return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
+    }
+    foreach (index, &reserved : slot.reservations) {
+        if (!generated_reservation_matches(reserved, pipeline, kind)
+            || max_count > reserved.reservation_max_commands
+            || reserved.reservation_in_use) continue;
+        reserved.reservation_in_use = true;
+        slot.generated_reservations_in_use++;
+        record.scratch.generated_preprocess_indices[
+            record.scratch.generated_preprocess_count++
+        ] = (uint)index;
+        (void)state.generated_preprocess_reuses.add(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+        return reserved;
+    }
+    note_generated_scratch_miss(state);
+    return gpu::GENERATED_SCRATCH_EXHAUSTED~;
+}
+
+fn GeneratedPreprocessBuffer*? fast_acquire_generated_preprocess_buffer(
+    VkDeviceState* state,
+    VkCommandRecord* record,
+    gpu::PipelineHandle pipeline,
+    gpu::GeneratedWorkKind kind,
+    uint max_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    note_generated_preprocess_acquire(state);
+    CommandAllocatorSlot* slot =
+        &state.command_allocators.slots[record.allocator.index].value;
+    slot.mutex.lock()!!;
+    note_generated_allocator_lock(state);
     defer slot.mutex.unlock();
     if (record.scratch.generated_preprocess_count
             >= record.scratch.generated_preprocess_indices.len) {
@@ -3188,6 +3304,12 @@ fn gpu::internal::RecordingWorkCounters command_recording_work_counters(
             AtomicOrdering.RELAXED,
         ),
         .registry_lock_acquisitions = gpu::internal::device_registry_lock_count(),
+        .generated_preprocess_acquires = state
+            .generated_preprocess_acquires.load(AtomicOrdering.RELAXED),
+        .generated_allocator_lock_acquisitions = state
+            .generated_allocator_lock_acquisitions.load(
+                AtomicOrdering.RELAXED,
+            ),
     };
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         counters.generated_scratch_misses = state.generated_scratch_misses.load(
@@ -3229,6 +3351,11 @@ fn void reset_command_recording_work_counters(
     state.command_buffer_resets.store(0, AtomicOrdering.RELAXED);
     state.recording_image_view_creations.store(0, AtomicOrdering.RELAXED);
     state.recording_vma_allocations.store(0, AtomicOrdering.RELAXED);
+    state.generated_preprocess_acquires.store(0, AtomicOrdering.RELAXED);
+    state.generated_allocator_lock_acquisitions.store(
+        0,
+        AtomicOrdering.RELAXED,
+    );
     gpu::internal::reset_device_registry_lock_count();
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         state.generated_scratch_misses.store(0, AtomicOrdering.RELAXED);
@@ -3264,6 +3391,11 @@ fn gpu::internal::RecordingWorkCounters command_recording_work_delta(
         .vma_allocations = after.vma_allocations - before.vma_allocations,
         .registry_lock_acquisitions = after.registry_lock_acquisitions
             - before.registry_lock_acquisitions,
+        .generated_preprocess_acquires = after.generated_preprocess_acquires
+            - before.generated_preprocess_acquires,
+        .generated_allocator_lock_acquisitions =
+            after.generated_allocator_lock_acquisitions
+                - before.generated_allocator_lock_acquisitions,
         .generated_scratch_misses = after.generated_scratch_misses
             - before.generated_scratch_misses,
         .generated_dispatch_emissions = after.generated_dispatch_emissions
@@ -3320,4 +3452,204 @@ fn vk::IndirectCommandsLayoutEXT? create_generated_work_layout(
         ),
     )!;
     return layout;
+}
+
+fn void fast_cmd_copy_buffer(
+    gpu::internal::CommandRecord* record,
+    gpu::BufferCopyDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkDeviceState* state = command_device_state(record);
+    PreparedBufferCopy copy = {
+        .src      = fast_resolve_span(state, &desc.src),
+        .dst      = fast_resolve_span(state, &desc.dst),
+        .src_span = desc.src,
+        .dst_span = desc.dst,
+    };
+    record_buffer_copy(record, &copy);
+}
+
+fn void fast_cmd_fill_buffer(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuSpan dst,
+    uint value,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    PreparedBufferFill fill = {
+        .span   = fast_resolve_span(command_device_state(record), &dst),
+        .source = dst,
+        .value  = value,
+    };
+    record_buffer_fill(record, &fill);
+}
+
+fn void fast_cmd_copy_buffer_to_texture(
+    gpu::internal::CommandRecord* record,
+    gpu::BufferTextureCopyDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkDeviceState* state = command_device_state(record);
+    ResolvedSpan buffer = fast_resolve_span(state, &desc.src);
+    TextureSlot* texture = &state.textures.slots[desc.texture.index].value;
+    uint layers = desc.layer_count == 0 ? 1 : desc.layer_count;
+    MipExtent extent = texture_mip_extent(texture, desc.mip);
+    uint width = desc.width == 0 ? extent.width : desc.width;
+    uint height = desc.height == 0 ? extent.height : desc.height;
+    PreparedBufferTextureCopy copy = {
+        .buffer         = buffer,
+        .buffer_span    = desc.src,
+        .texture        = texture,
+        .texture_handle = desc.texture,
+        .region         = {
+            .buffer_offset       = (vk::DeviceSize)buffer.offset,
+            .buffer_row_length   = desc.row_length_texels,
+            .buffer_image_height = 0,
+            .image_subresource   = {
+                .aspect_mask      = format_aspect(texture.format),
+                .mip_level        = desc.mip,
+                .base_array_layer = desc.base_layer,
+                .layer_count      = layers,
+            },
+            .image_offset = {
+                .x = (int)desc.x,
+                .y = (int)desc.y,
+                .z = 0,
+            },
+            .image_extent = {
+                .width  = width,
+                .height = height,
+                .depth  = 1,
+            },
+        },
+    };
+    record_buffer_to_texture_copy(record, &copy);
+}
+
+fn void fast_cmd_copy_texture_to_buffer(
+    gpu::internal::CommandRecord* record,
+    gpu::TextureBufferCopyDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkDeviceState* state = command_device_state(record);
+    ResolvedSpan buffer = fast_resolve_span(state, &desc.dst);
+    TextureSlot* texture = &state.textures.slots[desc.texture.index].value;
+    uint layers = desc.layer_count == 0 ? 1 : desc.layer_count;
+    MipExtent extent = texture_mip_extent(texture, desc.mip);
+    uint width = desc.width == 0 ? extent.width : desc.width;
+    uint height = desc.height == 0 ? extent.height : desc.height;
+    PreparedBufferTextureCopy copy = {
+        .buffer         = buffer,
+        .buffer_span    = desc.dst,
+        .texture        = texture,
+        .texture_handle = desc.texture,
+        .region         = {
+            .buffer_offset       = (vk::DeviceSize)buffer.offset,
+            .buffer_row_length   = desc.row_length_texels,
+            .buffer_image_height = 0,
+            .image_subresource   = {
+                .aspect_mask      = format_aspect(texture.format),
+                .mip_level        = desc.mip,
+                .base_array_layer = desc.base_layer,
+                .layer_count      = layers,
+            },
+            .image_offset = {
+                .x = (int)desc.x,
+                .y = (int)desc.y,
+                .z = 0,
+            },
+            .image_extent = {
+                .width  = width,
+                .height = height,
+                .depth  = 1,
+            },
+        },
+    };
+    record_texture_to_buffer_copy(record, &copy);
+}
+
+fn void fast_cmd_bind_pipeline(
+    gpu::internal::CommandRecord* record,
+    gpu::PipelineHandle pipeline,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkDeviceState* state = command_device_state(record);
+    PipelineSlot* slot = &state.pipelines.slots[pipeline.index].value;
+    PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
+    BoundPipeline bound = {
+        .handle                    = pipeline,
+        .pipeline                  = slot.pipeline,
+        .layout                    = slot.layout,
+        .generated_dispatch_layout = slot.generated_dispatch_layout,
+        .cache_entry               = slot.entry,
+        .kind                      = (PipelineKind)entry.key.kind,
+        .render                    = pipeline_render_compatibility(&entry.key),
+    };
+    record_bound_pipeline(record, &bound);
+}
+
+fn void fast_cmd_dispatch(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress root,
+    gpu::Vec3u groups,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkCommandRecord* backend = backend_command(record);
+    record_dispatch(record, &backend.logical_pipeline, root, groups);
+}
+
+fn void fast_cmd_dispatch_indirect(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress root,
+    gpu::GpuSpan args,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkCommandRecord* backend = backend_command(record);
+    PreparedDispatchIndirect dispatch = {
+        .pipeline  = backend.logical_pipeline,
+        .args      = fast_resolve_span(command_device_state(record), &args),
+        .args_span = args,
+        .root      = root,
+    };
+    record_dispatch_indirect(record, &dispatch);
+}
+
+fn void fast_cmd_begin_label(
+    gpu::internal::CommandRecord* record,
+    ZString label,
+    float[4] color,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    emit_begin_label(record, label, color);
+}
+
+fn void fast_cmd_end_label(
+    gpu::internal::CommandRecord* record,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    emit_end_label(record);
+}
+
+fn void? fast_cmd_dispatch_generated(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    if (max_dispatch_count == 0) return;
+    VkDeviceState* state = command_device_state(record);
+    VkCommandRecord* backend = backend_command(record);
+    BoundPipeline* pipeline = &backend.logical_pipeline;
+    ResolvedSpan lowered_records = fast_resolve_span(state, &records);
+    ResolvedSpan lowered_count = fast_resolve_span(state, &count_span);
+    GeneratedPreprocessBuffer* preprocess =
+        fast_acquire_generated_preprocess_buffer(
+            state:     state,
+            record:    backend,
+            pipeline:  pipeline.handle,
+            kind:      gpu::GeneratedWorkKind.DISPATCH,
+            max_count: max_dispatch_count,
+        )!;
+    emit_generated_work(
+        state:         state,
+        record:        backend,
+        pipeline:      pipeline,
+        kind:          gpu::GeneratedWorkKind.DISPATCH,
+        layout:        pipeline.generated_dispatch_layout,
+        shader_stages: vk::ShaderStageFlagBits.COMPUTE_BIT,
+        records:       &lowered_records,
+        count:         &lowered_count,
+        max_count:     max_dispatch_count,
+        preprocess:    preprocess,
+    );
 }

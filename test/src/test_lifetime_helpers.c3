@@ -51,14 +51,374 @@ fn void bind_test_compute_pipeline(
     gpu::CommandList* commands,
     gpu::PipelineHandle pipeline,
 ) {
-    gpu::cmd_bind_pipeline(commands, pipeline)!!;
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_bind_pipeline(commands, pipeline);
+    $else
+        gpu::cmd_bind_pipeline(commands, pipeline)!!;
+    $endif
 }
 
 fn void bind_test_graphics_pipeline(
     gpu::CommandList* commands,
     gpu::PipelineHandle pipeline,
 ) {
-    gpu::cmd_bind_pipeline(commands, pipeline)!!;
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_bind_pipeline(commands, pipeline);
+    $else
+        gpu::cmd_bind_pipeline(commands, pipeline)!!;
+    $endif
+}
+
+fn void? record_test_barrier(
+    gpu::CommandList* commands,
+    gpu::Barrier* barrier,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_barrier(commands, barrier);
+    $else
+        gpu::cmd_barrier(commands, barrier)!;
+    $endif
+}
+
+fn void? record_test_copy_buffer(
+    gpu::CommandList* commands,
+    gpu::BufferCopyDesc* desc,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_copy_buffer(commands, desc);
+    $else
+        gpu::cmd_copy_buffer(commands, desc)!;
+    $endif
+}
+
+fn void? record_test_fill_buffer(
+    gpu::CommandList* commands,
+    gpu::GpuSpan dst,
+    uint value,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_fill_buffer(commands, dst, value);
+    $else
+        gpu::cmd_fill_buffer(commands, dst, value)!;
+    $endif
+}
+
+fn void? record_test_texture_barrier(
+    gpu::CommandList* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_texture_barrier(commands, barrier);
+    $else
+        gpu::cmd_texture_barrier(commands, barrier)!;
+    $endif
+}
+
+fn void? record_test_buffer_to_texture(
+    gpu::CommandList* commands,
+    gpu::BufferTextureCopyDesc* desc,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_copy_buffer_to_texture(commands, desc);
+    $else
+        gpu::cmd_copy_buffer_to_texture(commands, desc)!;
+    $endif
+}
+
+fn void? record_test_texture_to_buffer(
+    gpu::CommandList* commands,
+    gpu::TextureBufferCopyDesc* desc,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_copy_texture_to_buffer(commands, desc);
+    $else
+        gpu::cmd_copy_texture_to_buffer(commands, desc)!;
+    $endif
+}
+
+fn void? record_test_dispatch(
+    gpu::CommandList* commands,
+    gpu::GpuAddress root,
+    gpu::Vec3u groups,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_dispatch(commands, root, groups);
+    $else
+        gpu::cmd_dispatch(commands, root, groups)!;
+    $endif
+}
+
+fn void? record_test_dispatch_indirect(
+    gpu::CommandList* commands,
+    gpu::GpuAddress root,
+    gpu::GpuSpan args,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_dispatch_indirect(commands, root, args);
+    $else
+        gpu::cmd_dispatch_indirect(commands, root, args)!;
+    $endif
+}
+
+fn void? record_test_begin_label(
+    gpu::CommandList* commands,
+    ZString label,
+    float[4] color = {},
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_begin_label(commands, label, color);
+    $else
+        gpu::cmd_begin_label(commands, label, color)!;
+    $endif
+}
+
+fn void? record_test_end_label(
+    gpu::CommandList* commands,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_end_label(commands);
+    $else
+        gpu::cmd_end_label(commands)!;
+    $endif
+}
+
+fn void? record_test_depth_state(
+    gpu::CommandList* commands,
+    gpu::DepthState* depth,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_set_depth_state(commands, depth);
+    $else
+        gpu::cmd_set_depth_state(commands, depth)!;
+    $endif
+}
+
+fn void? record_test_raster_state(
+    gpu::CommandList* commands,
+    gpu::DynamicRasterState* raster,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_set_raster_state(commands, raster);
+    $else
+        gpu::cmd_set_raster_state(commands, raster)!;
+    $endif
+}
+
+fn void? record_test_graphics_state(
+    gpu::CommandList* commands,
+    gpu::GraphicsState* state,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_set_graphics_state(commands, state);
+    $else
+        gpu::cmd_set_graphics_state(commands, state)!;
+    $endif
+}
+
+fn void? record_test_scissor(
+    gpu::CommandList* commands,
+    gpu::ScissorRect* scissor,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_set_scissor(commands, scissor);
+    $else
+        gpu::cmd_set_scissor(commands, scissor)!;
+    $endif
+}
+
+fn void? record_test_viewport(
+    gpu::CommandList* commands,
+    gpu::Viewport* viewport,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_set_viewport(commands, viewport);
+    $else
+        gpu::cmd_set_viewport(commands, viewport)!;
+    $endif
+}
+
+fn void? record_test_begin_render_pass(
+    gpu::CommandList* commands,
+    gpu::RenderPassDesc* desc,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_begin_render_pass(commands, desc);
+    $else
+        gpu::cmd_begin_render_pass(commands, desc)!;
+    $endif
+}
+
+fn void? record_test_begin_render_pass_with_state(
+    gpu::CommandList* commands,
+    gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_begin_render_pass_with_state(commands, desc, state);
+    $else
+        gpu::cmd_begin_render_pass_with_state(commands, desc, state)!;
+    $endif
+}
+
+fn void? record_test_draw(
+    gpu::CommandList* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_draw(
+            commands:       commands,
+            vertex_root:    vertex_root,
+            fragment_root:  fragment_root,
+            vertex_count:   vertex_count,
+            instance_count: instance_count,
+        );
+    $else
+        gpu::cmd_draw(
+            commands:       commands,
+            vertex_root:    vertex_root,
+            fragment_root:  fragment_root,
+            vertex_count:   vertex_count,
+            instance_count: instance_count,
+        )!;
+    $endif
+}
+
+fn void? record_test_draw_indexed(
+    gpu::CommandList* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    gpu::IndexType index_type = gpu::IndexType.U32,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_draw_indexed(
+            commands:       commands,
+            vertex_root:    vertex_root,
+            fragment_root:  fragment_root,
+            index_span:     index_span,
+            index_count:    index_count,
+            instance_count: instance_count,
+            index_type:     index_type,
+        );
+    $else
+        gpu::cmd_draw_indexed(
+            commands:       commands,
+            vertex_root:    vertex_root,
+            fragment_root:  fragment_root,
+            index_span:     index_span,
+            index_count:    index_count,
+            instance_count: instance_count,
+            index_type:     index_type,
+        )!;
+    $endif
+}
+
+fn void? record_test_draw_indirect(
+    gpu::CommandList* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_draw_indirect(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            args:          args,
+            draw_count:    draw_count,
+        );
+    $else
+        gpu::cmd_draw_indirect(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            args:          args,
+            draw_count:    draw_count,
+        )!;
+    $endif
+}
+
+fn void? record_test_draw_indexed_indirect(
+    gpu::CommandList* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type = gpu::IndexType.U32,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_draw_indexed_indirect(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            args:          args,
+            draw_count:    draw_count,
+            index_span:    index_span,
+            index_type:    index_type,
+        );
+    $else
+        gpu::cmd_draw_indexed_indirect(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            args:          args,
+            draw_count:    draw_count,
+            index_span:    index_span,
+            index_type:    index_type,
+        )!;
+    $endif
+}
+
+fn void? record_test_draw_indexed_indirect_count(
+    gpu::CommandList* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type = gpu::IndexType.U32,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_draw_indexed_indirect_count(
+            commands:       commands,
+            vertex_root:    vertex_root,
+            fragment_root:  fragment_root,
+            args:           args,
+            count_span:     count_span,
+            max_draw_count: max_draw_count,
+            index_span:     index_span,
+            index_type:     index_type,
+        );
+    $else
+        gpu::cmd_draw_indexed_indirect_count(
+            commands:       commands,
+            vertex_root:    vertex_root,
+            fragment_root:  fragment_root,
+            args:           args,
+            count_span:     count_span,
+            max_draw_count: max_draw_count,
+            index_span:     index_span,
+            index_type:     index_type,
+        )!;
+    $endif
+}
+
+fn void? record_test_end_render_pass(
+    gpu::CommandList* commands,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_end_render_pass(commands);
+    $else
+        gpu::cmd_end_render_pass(commands)!;
+    $endif
 }
 
 fn OwnedSpan? allocate_owned_span(
@@ -236,13 +596,13 @@ fn void? upload_test_texture_data(
             .access = { .write },
         },
     )!;
-    gpu::cmd_texture_barrier(&commands, &to_transfer)!;
+    record_test_texture_barrier(&commands, &to_transfer)!;
     gpu::BufferTextureCopyDesc copy = {
         .src     = upload.span,
         .texture = dst,
         .mip     = mip,
     };
-    gpu::cmd_copy_buffer_to_texture(&commands, &copy)!;
+    record_test_buffer_to_texture(&commands, &copy)!;
     gpu::TextureBarrier transition = gpu::texture_view_transition(
         texture: dst,
         view:    view,
@@ -253,7 +613,7 @@ fn void? upload_test_texture_data(
         },
         after:   next_use,
     )!;
-    gpu::cmd_texture_barrier(&commands, &transition)!;
+    record_test_texture_barrier(&commands, &transition)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
     defer (void)discard_test_executable(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };
@@ -300,18 +660,18 @@ fn void? readback_test_texture_data(
             .access = { .read },
         },
     )!;
-    gpu::cmd_texture_barrier(&commands, &to_transfer)!;
+    record_test_texture_barrier(&commands, &to_transfer)!;
     gpu::TextureBufferCopyDesc copy = {
         .texture = src,
         .dst     = readback.span,
         .mip     = mip,
     };
-    gpu::cmd_copy_texture_to_buffer(&commands, &copy)!;
+    record_test_texture_to_buffer(&commands, &copy)!;
     gpu::Barrier host_read = {
         .before = { .transfer = true },
         .after  = { .host = true },
     };
-    gpu::cmd_barrier(&commands, &host_read)!;
+    record_test_barrier(&commands, &host_read)!;
     gpu::TextureBarrier restore = gpu::texture_view_transition(
         texture: src,
         view:    view,
@@ -322,7 +682,7 @@ fn void? readback_test_texture_data(
         },
         after:   from_use,
     )!;
-    gpu::cmd_texture_barrier(&commands, &restore)!;
+    record_test_texture_barrier(&commands, &restore)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
     defer (void)discard_test_executable(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };
@@ -346,12 +706,16 @@ fn void assert_warm_command_resolution(
         "warm commands do not borrow retained pins");
     assert(stats.lifecycle_vtable_dispatches == 0,
         "warm commands do not load the lifecycle vtable");
-    $if $feature(DIRECT_COMMAND_TOKENS):
-        assert(stats.command_table_lookups == 0,
-            "direct warm commands do not resolve the command table");
+    $if $feature(GPU_FAST_COMMANDS):
+        assert(stats.command_table_lookups == 0
+                && stats.command_table_indirect_loads == 0
+                && stats.command_table_indirect_calls == 0,
+            "FAST warm commands do not dispatch through a command table");
     $else
-        assert(stats.command_table_lookups == expected_commands,
-            "bounded warm commands resolve one stable record per call");
+        assert(stats.command_table_lookups == expected_commands
+                && stats.command_table_indirect_loads == expected_commands
+                && stats.command_table_indirect_calls == expected_commands,
+            "CHECKED warm commands dispatch once through the command table");
     $endif
     assert(stats.pipeline_table_lookups == expected_pipeline_lookups,
         "warm commands perform the expected pipeline table lookups");

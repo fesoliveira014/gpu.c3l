@@ -90,7 +90,8 @@ Good:
 
 ```text
 allocate_memory(...) -> GpuAllocation?
-cmd_dispatch(...) -> void?
+cmd_dispatch(...) -> void (FAST)
+cmd_dispatch(...) -> void? (CHECKED)
 return INVALID_HANDLE~
 ```
 

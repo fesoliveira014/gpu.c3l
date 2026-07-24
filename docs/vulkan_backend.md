@@ -705,9 +705,10 @@ trusted callers; it cannot request `ContractValidation.FULL`.
 
 Begin claims one stable `CommandRecord` from the device's fixed command table
 and one native buffer/scratch unit from the originating allocator's fixed
-storage. The record is the sole lifecycle authority. It owns the selected
-immutable command-operation table, backend state and backend-command pointers,
-retained device ownership, bounded identity when present, and the current
+storage. The record is the sole lifecycle authority. CHECKED owns the selected
+immutable command-operation table; FAST compiles that table out and calls
+static Vulkan entries. Both retain backend state and backend-command pointers,
+device ownership, bounded identity when present, and the current
 recording/submission state. The linked `VkCommandRecord` identifies the
 originating allocator and fixed buffer/scratch index and holds Vulkan-specific
 pipeline snapshots and pending texture transitions. Warm direct recording loads
@@ -718,13 +719,14 @@ Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
 
 `VkRuntimeState`, `VkDeviceConfig`, and `VkDeviceState` carry one named policy:
-contract depth, lifetime tracking, and Vulkan-layer selection. Device creation
-stores it before policy-dependent subsystems initialize and selects one of four
-immutable command tables: trusted/no-tracking, trusted/tracking,
+contract depth, lifetime tracking, and Vulkan-layer selection. CHECKED device
+creation stores it before policy-dependent subsystems initialize and selects
+one of four immutable command tables: trusted/no-tracking, trusted/tracking,
 checked/no-tracking, or checked/tracking. `OBJECT_BOUNDARIES` shares trusted
 recording entries because its additional checks occur at public boundaries.
-The authoritative record stores the selected table during begin; warm recording
-performs no policy lookup or branch. Every table retains host
+The authoritative CHECKED record stores the selected table during begin; warm
+recording performs no policy lookup or branch. FAST compiles these tables out
+and uses static entries. Every CHECKED table retains host
 pointer/slice/range safety, overflow protection, command-state and
 internal-table integrity, public device ownership, Vulkan result/device-loss
 handling, and transactional rollback.

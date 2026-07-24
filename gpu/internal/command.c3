@@ -2,6 +2,24 @@ module gpu::internal @private;
 
 import gpu;
 
+$assert !$feature(GPU_FAST_COMMANDS) || $feature(DIRECT_COMMAND_TOKENS);
+
+fn gpu::internal::CommandRecord* fast_command_record(
+    CommandList* commands,
+) @private @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::CommandRecord* record =
+        (gpu::internal::CommandRecord*)commands.record;
+    $if env::TESTING:
+        assert(commands != null);
+        assert(record != null);
+        assert(record.state == gpu::internal::CommandState.RECORDING
+            || record.state
+                == gpu::internal::CommandState.RECORDING_RENDER_PASS);
+    $endif
+    gpu::internal::note_command_recording_call();
+    return record;
+}
+
 fn void? validate_dispatch_groups(Vec3u groups, Vec3u limit) @private {
     if (groups.x > limit.x || groups.y > limit.y || groups.z > limit.z) {
         return gpu::INVALID_ARGUMENT~;
@@ -87,6 +105,13 @@ fn gpu::internal::CommandRecord*? recording_command(
     }
     if (count_command) gpu::internal::note_command_recording_call();
     return record;
+}
+
+fn CommandOps* recording_command_ops(
+    CommandRecord* record,
+) @private @if(!$feature(GPU_FAST_COMMANDS)) {
+    note_command_table_lookup();
+    return record.ops;
 }
 
 fn gpu::internal::CommandRecord*? executable_command(

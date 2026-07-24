@@ -12,6 +12,37 @@ CPU_PROJECT = ROOT / "test" / "cpu"
 CANONICAL_STRICT_SURFACE = CPU_PROJECT / "canonical_strict_surface.c3"
 CANONICAL_STRICT_MANIFEST = CPU_PROJECT / "canonical_strict_surface.txt"
 ROOT_FUNCTION_REFERENCE = re.compile(r"\bgpu::([a-z_][a-z0-9_]*)\s*\(")
+FAST_ORDINARY_COMMANDS = (
+    "cmd_copy_buffer",
+    "cmd_fill_buffer",
+    "cmd_copy_buffer_to_texture",
+    "cmd_copy_texture_to_buffer",
+    "cmd_barrier",
+    "cmd_texture_barrier",
+    "cmd_bind_pipeline",
+    "cmd_dispatch",
+    "cmd_dispatch_indirect",
+    "cmd_begin_label",
+    "cmd_end_label",
+    "cmd_set_depth_state",
+    "cmd_set_raster_state",
+    "cmd_set_viewport",
+    "cmd_set_scissor",
+    "cmd_set_graphics_state",
+    "cmd_begin_render_pass",
+    "cmd_begin_render_pass_with_state",
+    "cmd_end_render_pass",
+    "cmd_draw",
+    "cmd_draw_indexed",
+    "cmd_draw_indirect",
+    "cmd_draw_indexed_indirect",
+    "cmd_draw_indexed_indirect_count",
+)
+GENERATED_COMMANDS = (
+    "cmd_draw_generated",
+    "cmd_draw_indexed_generated",
+    "cmd_dispatch_generated",
+)
 MODULE_DECLARATION = re.compile(
     r"(?m)^\s*module\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*"
     r"(?:::[A-Za-z_][A-Za-z0-9_]*)*)\s*(?P<attributes>[^;]*);"
@@ -334,6 +365,37 @@ def validate_canonical_function_fixture(
         f"canonical strict fixture missing gpu::{name}"
         for name in sorted(public_functions - referenced_functions)
     ]
+
+
+def validate_command_profile_signatures(source: str) -> list[str]:
+    if "GPU_FAST_COMMANDS" not in source:
+        return []
+    failures = []
+    for name in FAST_ORDINARY_COMMANDS + GENERATED_COMMANDS:
+        declaration = re.compile(
+            rf"\bfn\s+(void\??)\s+{name}\s*\("
+            rf"(?:(?!\n\s*fn\b).)*?\)\s*"
+            rf"@if\(\s*(!?)\$feature\(GPU_FAST_COMMANDS\)\s*\)",
+            re.DOTALL,
+        )
+        signatures = {
+            (match.group(1), match.group(2))
+            for match in declaration.finditer(source)
+        }
+        expected = (
+            {("void", ""), ("void?", "!")}
+            if name in FAST_ORDINARY_COMMANDS
+            else {("void?", ""), ("void?", "!")}
+        )
+        if signatures != expected:
+            failures.append(
+                f"{name} must expose the exact FAST/CHECKED signatures"
+            )
+    if len(FAST_ORDINARY_COMMANDS) != 24:
+        failures.append("FAST ordinary command inventory must contain 24 calls")
+    if len(GENERATED_COMMANDS) != 3:
+        failures.append("generated command inventory must contain 3 calls")
+    return failures
 
 
 def canonical_public_entries(document: dict) -> set[str]:
@@ -2275,6 +2337,9 @@ def main() -> int:
             CANONICAL_STRICT_SURFACE.read_text(encoding="utf-8"),
         )
     )
+    failures.extend(validate_command_profile_signatures(
+        (ROOT / "gpu" / "gpu.c3").read_text(encoding="utf-8")
+    ))
     failures.extend(
         validate_canonical_surface_manifest(
             document,

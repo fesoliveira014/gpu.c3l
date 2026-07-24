@@ -77,8 +77,9 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
   discard or completion retirement.
 - The default command token is a compact bounded identity suitable for
   deterministic `FULL` diagnostics. A `DIRECT_COMMAND_TOKENS` build uses an
-  exact one-pointer FAST token and treats provenance, correct phase, one-shot
-  use, and alias confinement as caller preconditions.
+  exact one-pointer token, independently of FAST versus CHECKED, and treats
+  provenance, correct phase, one-shot use, and alias confinement as caller
+  preconditions.
 - Recording is thread-confined per token and allocator owner; distinct
   allocator records may be recorded concurrently without a device-wide
   recording lock.

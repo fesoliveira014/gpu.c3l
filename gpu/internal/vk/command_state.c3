@@ -128,7 +128,6 @@ fn gpu::internal::CommandRecord*? CommandTable.get_record(
     &self,
     gpu::CommandListHandle handle,
 ) {
-    gpu::internal::note_command_table_lookup();
     if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = handle.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
@@ -202,14 +201,16 @@ fn VkCommandRecord* backend_command(
 fn void? ensure_command_reference_capacity(
     VkCommandRecord* record,
     uint additional,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     if (additional
             <= record.scratch.references.len
                 - record.scratch.reference_count) return;
     return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
 }
 
-fn ulong command_reference_hash(CommandResourceReference* reference) {
+fn ulong command_reference_hash(
+    CommandResourceReference* reference,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandReferenceKey key = {
         .owner      = reference.owner,
         .index      = reference.index,
@@ -222,7 +223,7 @@ fn bool indexed_resource_reference_matches(
     VkDeviceState* state,
     CommandReferenceIndexCell* cell,
     CommandResourceReference* reference,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     note_command_reference_equality_check(state);
     return cell.owner == reference.owner
         && cell.index == reference.index
@@ -233,7 +234,7 @@ fn CommandReferenceProbe? probe_command_reference(
     VkDeviceState* state,
     CommandScratch* scratch,
     CommandResourceReference* reference,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandReferenceIndex* reference_index = &scratch.reference_index;
     if (reference_index.cells.len == 0) {
         return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
@@ -273,7 +274,7 @@ fn void publish_command_reference(
     CommandResourceReference* reference,
     CommandReferenceProbe* probe,
     uint reference_index,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     scratch.reference_index.cells[probe.cell_index] = {
         .owner           = reference.owner,
         .index           = reference.index,
@@ -287,7 +288,7 @@ fn void publish_command_reference(
 fn void reset_command_reference_index(
     VkDeviceState* state,
     CommandScratch* scratch,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandReferenceIndex* reference_index = &scratch.reference_index;
     if (reference_index.cells.len == 0) return;
     if (reference_index.epoch == uint::max) {
@@ -304,7 +305,7 @@ fn void? preflight_command_references(
     VkDeviceState* state,
     VkCommandRecord* record,
     CommandResourceReference[] candidates,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     uint additional = 0;
     foreach (i, &candidate : candidates) {
         CommandReferenceProbe probe = probe_command_reference(
@@ -330,7 +331,7 @@ fn void? track_command_reference(
     ulong owner,
     uint index,
     uint generation,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     note_command_tracking_call(state);
     CommandResourceReference reference = {
         .owner      = owner,
@@ -369,7 +370,7 @@ fn TextureSlot*? resolve_tracked_texture_command_reference(
     VkDeviceState* state,
     VkCommandRecord* record,
     gpu::TextureHandle handle,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     note_command_tracking_call(state);
     CommandResourceReference reference = {
         .owner      = handle.owner,
@@ -411,7 +412,7 @@ fn TextureSlot*? resolve_tracked_texture_command_reference(
 fn void clear_command_scratch_references(
     VkDeviceState* state,
     CommandScratch* scratch,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     release_tracked_command_references(
         state,
         scratch.references,
@@ -424,7 +425,7 @@ fn void clear_command_scratch_references(
 fn void clear_command_references(
     VkDeviceState* state,
     VkCommandRecord* record,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     clear_command_scratch_references(state, record.scratch);
 }
 
@@ -432,7 +433,7 @@ fn void rollback_command_references(
     VkDeviceState* state,
     VkCommandRecord* record,
     uint checkpoint,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     if (record.scratch.reference_count == checkpoint) return;
     while (record.scratch.reference_count > checkpoint) {
         record.scratch.reference_count--;
@@ -458,6 +459,22 @@ fn void rollback_command_references(
         );
         note_command_reference_rollback_rebuild_publication(state);
     }
+}
+
+fn void clear_command_scratch_references(
+    VkDeviceState* state,
+    CommandScratch* scratch,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)state;
+    (void)scratch;
+}
+
+fn void clear_command_references(
+    VkDeviceState* state,
+    VkCommandRecord* record,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)state;
+    (void)record;
 }
 
 fn void release_command(VkDeviceState* state, gpu::CommandListHandle handle) {

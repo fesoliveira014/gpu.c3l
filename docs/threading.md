@@ -90,6 +90,12 @@ pipeline-handle state; another allocator on the same queue cannot borrow them.
 Reference-index visibility resets by epoch only after the sequential retained
 references have been released.
 
+`GPU_FAST_COMMANDS` compiles the reference list, index, retain/release helpers,
+and tracking policy selection out entirely. FAST callers therefore establish
+their own happens-before relationship from the last submitted use to resource
+destruction, normally by observing the covering completion point. This changes
+no Tier C confinement rule and introduces no implicit wait.
+
 Runtime creation and destruction must not overlap other runtime operations. After
 publication, enumeration and adapter queries may run concurrently; all such calls
 must finish before runtime destruction.

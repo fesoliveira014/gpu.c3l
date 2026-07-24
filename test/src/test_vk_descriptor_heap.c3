@@ -219,13 +219,18 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::RuntimeDesc desc = {
         .backend               = gpu::BackendKind.VULKAN,
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .texture_heap_capacity = tex_capacity,
         .sampler_heap_capacity = smp_capacity,
         .application_name      = "gpu_descriptor_heap_test",
     };
+    $if $feature(GPU_FAST_COMMANDS):
+        desc.contract_validation = gpu::ContractValidation.TRUSTED;
+        desc.track_resource_lifetimes = false;
+    $else
+        desc.contract_validation = gpu::ContractValidation.FULL;
+        desc.track_resource_lifetimes = true;
+    $endif
     return create_test_device(&desc)!!;
 }
 
@@ -623,7 +628,8 @@ fn void texture_view_generation_exhaustion_retires_slot() @test {
         "a retired only slot cannot recycle to a stale generation");
 }
 
-fn void texture_view_zero_owner_count_faults_before_destruction_mutation() @test {
+fn void texture_view_zero_owner_count_faults_before_destruction_mutation()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_heap_test_device(4, 1);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_texture(&device);
@@ -721,7 +727,8 @@ fn void texture_view_missing_owner_faults_before_destruction_mutation() @test {
     gpu::destroy_texture_view(&device, view)!!;
 }
 
-fn void texture_view_increment_invariant_faults_transactionally() @test {
+fn void texture_view_increment_invariant_faults_transactionally()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_heap_test_device(8, 1);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
@@ -767,7 +774,8 @@ fn void texture_view_increment_invariant_faults_transactionally() @test {
     owner.live_descriptor_views = 0;
 }
 
-fn void texture_views_batch_increment_invariant_is_transactional() @test {
+fn void texture_views_batch_increment_invariant_is_transactional()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_heap_test_device(8, 1);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
@@ -816,7 +824,8 @@ fn void texture_views_batch_increment_invariant_is_transactional() @test {
     owner.live_descriptor_views = 0;
 }
 
-fn void texture_views_late_increment_invariant_rolls_back_cached_view() @test {
+fn void texture_views_late_increment_invariant_rolls_back_cached_view()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_heap_test_device(8, 1);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle first = make_heap_view_texture(&device);
@@ -1999,7 +2008,8 @@ fn void descriptor_heap_raised_capacity_creates() @test {
     gpu::destroy_texture_view(&device, index)!!;
 }
 
-fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
+fn void descriptor_batch_and_sampler_remaining_failures_report_context()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_heap_test_device(1, 1);
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);

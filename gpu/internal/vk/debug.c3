@@ -121,6 +121,7 @@ fn fault report_contract_failure(
     ZString invariant,
     ZString backend_text,
 ) {
+    gpu::internal::note_command_public_misuse_fault();
     gpu::DebugMessage message = {
         .severity       = gpu::DebugMessageSeverity.ERROR,
         .category       = { .public_contract },
@@ -357,12 +358,13 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     return count;
 }
 
-fn void? vk_cmd_begin_label(gpu::internal::CommandRecord* commands, ZString label, float[4] color) @private {
-    if (label == null) return gpu::INVALID_ARGUMENT~;
+fn void emit_begin_label(
+    gpu::internal::CommandRecord* commands,
+    ZString label,
+    float[4] color,
+) @private {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
-    if (record.root.state != gpu::internal::CommandState.RECORDING
-        && record.root.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     vk::DebugUtilsLabelEXT info = vk::debug_utils_label_ext();
     info.p_label_name = (char*)label;
@@ -371,12 +373,39 @@ fn void? vk_cmd_begin_label(gpu::internal::CommandRecord* commands, ZString labe
     gpu::internal::note_command_native_call();
 }
 
-fn void? vk_cmd_end_label(gpu::internal::CommandRecord* commands) @private {
+fn void emit_end_label(
+    gpu::internal::CommandRecord* commands,
+) @private {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
-    if (record.root.state != gpu::internal::CommandState.RECORDING
-        && record.root.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     state.device_dispatch.debug.cmd_end_label(record.command_buffer);
     gpu::internal::note_command_native_call();
+}
+
+fn void? vk_cmd_begin_label(
+    gpu::internal::CommandRecord* commands,
+    ZString label,
+    float[4] color,
+) @private {
+    if (label == null) return gpu::INVALID_ARGUMENT~;
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING
+        && record.root.state
+            != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    emit_begin_label(commands, label, color);
+}
+
+fn void? vk_cmd_end_label(
+    gpu::internal::CommandRecord* commands,
+) @private {
+    VkCommandRecord* record = backend_command(commands);
+    if (record.root.state != gpu::internal::CommandState.RECORDING
+        && record.root.state
+            != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    emit_end_label(commands);
 }

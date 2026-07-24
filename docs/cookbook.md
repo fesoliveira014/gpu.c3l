@@ -7,6 +7,12 @@ whole program. Samples live in
 
 Ordered roughly by adoption path.
 
+Unless a recipe says otherwise, ordinary `cmd_*` calls below use CHECKED
+syntax and therefore unwrap with `!`. In a `GPU_FAST_COMMANDS` target, omit
+that `!` from the 24 ordinary commands. Keep it for the three generated
+commands and for every lifecycle, resource, submission, wait, and WSI
+operation.
+
 ## 1. Author a shader ABI schema
 
 Goal: one source of truth for a struct shared by C3 and GLSL.
@@ -176,6 +182,13 @@ gpu::CompletionWait[1] indirect_waits = {{
 ## 8. Own command recording explicitly
 
 Goal: make command-pool ownership, concurrency, and reuse explicit.
+
+The snippets below show CHECKED calls with `!`. In a target built with
+`GPU_FAST_COMMANDS` and `DIRECT_COMMAND_TOKENS`, remove `!` from the 24
+ordinary `cmd_*` calls and create the runtime with `TRUSTED` plus tracking off.
+Keep `!` on the three generated commands and on lifecycle, resource, submit,
+wait, and WSI calls. FAST callers keep referenced resources live until the
+covering completion is observed.
 
 ### One queue and one worker
 

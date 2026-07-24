@@ -9,11 +9,13 @@ import std::os::env;
 import std::time;
 
 const char[*] COMMAND_BENCH_SHADER_SPIRV = $embed("shaders/root_pointer.comp.spv");
+const char[*] COMMAND_BENCH_DISTINCT_SHADER_SPIRV =
+    $embed("shaders/heap_write.comp.spv");
 const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint GENERATED_RECORD_ITERATIONS = 64;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 const uint MEASURED_COMMAND_PATH_COUNT = 3;
-const uint BENCHMARK_EXPECTATION_VERSION = 2;
+const uint BENCHMARK_EXPECTATION_VERSION = 3;
 
 struct CommandBenchPolicy {
     gpu::ContractValidation contract;
@@ -71,6 +73,12 @@ fn gpu::internal::RecordingWorkCounters recording_work_delta(
         .image_view_creations = after.image_view_creations
             - before.image_view_creations,
         .vma_allocations = after.vma_allocations - before.vma_allocations,
+        .generated_preprocess_acquires =
+            after.generated_preprocess_acquires
+                - before.generated_preprocess_acquires,
+        .generated_allocator_lock_acquisitions =
+            after.generated_allocator_lock_acquisitions
+                - before.generated_allocator_lock_acquisitions,
         .generated_scratch_misses = after.generated_scratch_misses
             - before.generated_scratch_misses,
     };
@@ -84,9 +92,14 @@ fn void accumulate_resolution_stats(
     total.retained_pin_operations += sample.retained_pin_operations;
     total.lifecycle_vtable_dispatches += sample.lifecycle_vtable_dispatches;
     total.command_table_lookups += sample.command_table_lookups;
+    total.command_table_indirect_loads += sample.command_table_indirect_loads;
+    total.command_table_indirect_calls += sample.command_table_indirect_calls;
     total.pipeline_table_lookups += sample.pipeline_table_lookups;
     total.pipeline_cache_lookups += sample.pipeline_cache_lookups;
     total.command_policy_selections += sample.command_policy_selections;
+    total.contract_branches += sample.contract_branches;
+    total.tracking_branches += sample.tracking_branches;
+    total.public_misuse_faults += sample.public_misuse_faults;
     total.encoder_cell_computations += sample.encoder_cell_computations;
     total.encoder_lease_comparisons += sample.encoder_lease_comparisons;
     total.recording_commands += sample.recording_commands;
@@ -111,7 +124,11 @@ fn double record_barriers(
     gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
-        gpu::cmd_barrier(&commands, &barrier)!!;
+        $if $feature(GPU_FAST_COMMANDS):
+            gpu::cmd_barrier(&commands, &barrier);
+        $else
+            gpu::cmd_barrier(&commands, &barrier)!!;
+        $endif
     }
     long elapsed_ns = (long)start.to_now();
     accumulate_resolution_stats(resolution, gpu::command_resolution_stats());
@@ -130,7 +147,11 @@ fn void verify_commands_per_list(gpu::CommandAllocator* allocator) {
         gpu::CommandList commands = gpu::begin_commands(allocator)!!;
         gpu::reset_command_resolution_stats();
         for (uint i = 0; i < count; i++) {
-            gpu::cmd_barrier(&commands, &barrier)!!;
+            $if $feature(GPU_FAST_COMMANDS):
+                gpu::cmd_barrier(&commands, &barrier);
+            $else
+                gpu::cmd_barrier(&commands, &barrier)!!;
+            $endif
         }
         gpu::CommandResolutionStats resolution =
             gpu::command_resolution_stats();
@@ -139,16 +160,121 @@ fn void verify_commands_per_list(gpu::CommandAllocator* allocator) {
         assert(resolution.encoder_cell_computations == 0
             && resolution.encoder_lease_comparisons == 0,
             "commands-per-list evidence observes no retired frontend proof");
-        $if $feature(DIRECT_COMMAND_TOKENS):
-            assert(resolution.command_table_lookups == 0,
-                "direct commands-per-list evidence performs no table lookup");
+        $if $feature(GPU_FAST_COMMANDS):
+            assert(resolution.command_table_lookups == 0
+                && resolution.command_table_indirect_loads == 0
+                && resolution.command_table_indirect_calls == 0,
+                "FAST commands-per-list evidence performs no table dispatch");
         $else
-            assert(resolution.command_table_lookups == count,
-                "bounded commands-per-list evidence resolves once per call");
+            assert(resolution.command_table_lookups == count
+                && resolution.command_table_indirect_loads == count
+                && resolution.command_table_indirect_calls == count,
+                "CHECKED commands-per-list evidence dispatches once per call");
         $endif
         gpu::ExecutableCommandList executable =
             gpu::end_commands(&commands)!!;
         gpu::discard_executable_commands(&executable)!!;
+    }
+}
+
+fn void verify_pipeline_commands_per_list(
+    gpu::CommandAllocator* allocator,
+    vk::VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+    gpu::PipelineHandle alias_pipeline,
+    gpu::PipelineHandle distinct_pipeline,
+) {
+    uint[4] command_counts = { 1, 16, 256, 4096 };
+    for (uint scenario = 0; scenario < 2; scenario++) {
+        bool use_distinct = scenario == 1;
+        foreach (count : command_counts) {
+            gpu::internal::RecordingWorkCounters work_before =
+                vk::command_recording_work_counters(state);
+            gpu::CommandList commands = gpu::begin_commands(allocator)!!;
+            gpu::reset_command_resolution_stats();
+            for (uint i = 0; i < count; i++) {
+                gpu::PipelineHandle selected = (i & 1) == 0
+                    ? pipeline
+                    : (use_distinct ? distinct_pipeline : alias_pipeline);
+                $if $feature(GPU_FAST_COMMANDS):
+                    gpu::cmd_bind_pipeline(&commands, selected);
+                $else
+                    gpu::cmd_bind_pipeline(&commands, selected)!!;
+                $endif
+            }
+            gpu::CommandResolutionStats resolution =
+                gpu::command_resolution_stats();
+            gpu::ExecutableCommandList executable =
+                gpu::end_commands(&commands)!!;
+            gpu::discard_executable_commands(&executable)!!;
+            gpu::internal::RecordingWorkCounters work_after =
+                vk::command_recording_work_counters(state);
+            ulong expected_pipeline_binds = use_distinct ? count : 1;
+            ulong expected_heap_native =
+                state.strict_heap.implementation
+                    == vk::VkHeapImplementation.DESCRIPTOR_INDEXING
+                ? 1
+                : 2;
+            assert(resolution.recording_commands == count,
+                "scaled pipeline evidence counts every public bind");
+            assert(resolution.native_commands
+                    == expected_pipeline_binds + expected_heap_native,
+                "scaled pipeline evidence emits exact native work");
+            assert(resolution.pipeline_bind_commands
+                    == expected_pipeline_binds,
+                "alias and distinct pipelines have exact native bind counts");
+            assert(resolution.strict_heap_set_bind_commands
+                    + resolution.strict_heap_buffer_bind_commands
+                    + resolution.strict_heap_offset_commands
+                    == expected_heap_native,
+                "scaled pipeline evidence binds the heap once");
+            $if $feature(GPU_FAST_COMMANDS):
+                assert(resolution.command_table_lookups == 0
+                        && resolution.command_table_indirect_loads == 0
+                        && resolution.command_table_indirect_calls == 0
+                        && resolution.pipeline_table_lookups == 0
+                        && resolution.pipeline_cache_lookups == 0
+                        && resolution.contract_branches == 0
+                        && resolution.tracking_branches == 0
+                        && resolution.public_misuse_faults == 0,
+                    "FAST scaled pipeline binds perform no forbidden work");
+            $else
+                ulong expected_pipeline_table_lookups = (ulong)count;
+                if (state.validation_policy.track_lifetimes) {
+                    expected_pipeline_table_lookups +=
+                        (ulong)(count == 1 ? 1 : 2);
+                }
+                assert(resolution.command_table_lookups == count
+                        && resolution.command_table_indirect_loads == count
+                        && resolution.command_table_indirect_calls == count
+                        && resolution.pipeline_table_lookups
+                            == expected_pipeline_table_lookups
+                        && resolution.pipeline_cache_lookups == count,
+                    "CHECKED scaled pipeline binds use exact table work");
+            $endif
+            assert(work_after.host_allocations == work_before.host_allocations
+                    && work_after.command_pool_creations
+                        == work_before.command_pool_creations
+                    && work_after.command_buffer_allocations
+                        == work_before.command_buffer_allocations
+                    && work_after.command_buffer_frees
+                        == work_before.command_buffer_frees
+                    && work_after.image_view_creations
+                        == work_before.image_view_creations
+                    && work_after.vma_allocations
+                        == work_before.vma_allocations
+                    && work_after.registry_lock_acquisitions
+                        == work_before.registry_lock_acquisitions,
+                "scaled pipeline binds perform no warm allocation or registry lock");
+            io::printfn(
+                "pipeline scale: commands=%d scenario=%s recording=%d native=%d pipeline_binds=%d",
+                count,
+                use_distinct ? "distinct" : "alias",
+                resolution.recording_commands,
+                resolution.native_commands,
+                resolution.pipeline_bind_commands,
+            );
+        }
     }
 }
 
@@ -169,7 +295,11 @@ fn double record_hazard_barriers(
     gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
-        gpu::cmd_barrier(&commands, &barrier)!!;
+        $if $feature(GPU_FAST_COMMANDS):
+            gpu::cmd_barrier(&commands, &barrier);
+        $else
+            gpu::cmd_barrier(&commands, &barrier)!!;
+        $endif
     }
     long elapsed_ns = (long)start.to_now();
     accumulate_resolution_stats(resolution, gpu::command_resolution_stats());
@@ -186,15 +316,27 @@ fn double record_indirect_dispatches(
     gpu::CommandResolutionStats* resolution,
 ) {
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
-    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_bind_pipeline(&commands, pipeline);
+    $else
+        gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    $endif
     gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMMAND_RECORD_ITERATIONS; i++) {
-        gpu::cmd_dispatch_indirect(
-            commands: &commands,
-            root:     root,
-            args:     args,
-        )!!;
+        $if $feature(GPU_FAST_COMMANDS):
+            gpu::cmd_dispatch_indirect(
+                commands: &commands,
+                root:     root,
+                args:     args,
+            );
+        $else
+            gpu::cmd_dispatch_indirect(
+                commands: &commands,
+                root:     root,
+                args:     args,
+            )!!;
+        $endif
     }
     long elapsed_ns = (long)start.to_now();
     accumulate_resolution_stats(resolution, gpu::command_resolution_stats());
@@ -211,7 +353,11 @@ fn double record_generated_dispatches(
     gpu::CommandResolutionStats* resolution,
 ) {
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
-    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_bind_pipeline(&commands, pipeline);
+    $else
+        gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    $endif
     gpu::reset_command_resolution_stats();
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < GENERATED_RECORD_ITERATIONS; i++) {
@@ -288,6 +434,28 @@ fn int main() {
     };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::PipelineHandle alias_pipeline = gpu::create_compute_pipeline(
+        &device,
+        &pipeline_desc,
+    )!!;
+    defer gpu::destroy_pipeline(&device, alias_pipeline)!!;
+    gpu::ShaderDesc distinct_shader_desc = {
+        .stage       = gpu::ShaderStage.COMPUTE,
+        .spirv       = COMMAND_BENCH_DISTINCT_SHADER_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc distinct_pipeline_desc = {
+        .shader = gpu::prepare_shader_code(&distinct_shader_desc)!!,
+    };
+    gpu::PipelineHandle distinct_pipeline = gpu::create_compute_pipeline(
+        &device,
+        &distinct_pipeline_desc,
+    )!!;
+    defer gpu::destroy_pipeline(&device, distinct_pipeline)!!;
+    assert(alias_pipeline != pipeline
+            && distinct_pipeline != pipeline
+            && distinct_pipeline != alias_pipeline,
+        "scaled pipeline evidence uses distinct owning handles");
 
     gpu::AllocationDesc generated_records_desc = {
         .size         = gpu::GeneratedDispatchRecord::size,
@@ -378,6 +546,13 @@ fn int main() {
         );
     }
     verify_commands_per_list(&allocator);
+    verify_pipeline_commands_per_list(
+        allocator:         &allocator,
+        state:             state,
+        pipeline:          pipeline,
+        alias_pipeline:    alias_pipeline,
+        distinct_pipeline: distinct_pipeline,
+    );
 
     gpu::internal::RecordingWorkCounters warm_before =
         vk::command_recording_work_counters(state);
@@ -468,13 +643,19 @@ fn int main() {
         "warm recording does not borrow retained pins");
     assert(resolution.lifecycle_vtable_dispatches == 0,
         "warm recording does not load the lifecycle vtable");
-    $if $feature(DIRECT_COMMAND_TOKENS):
-        assert(resolution.command_table_lookups == 0,
-            "direct warm recording does not resolve the command table");
+    $if $feature(GPU_FAST_COMMANDS):
+        assert(resolution.command_table_lookups == 0
+            && resolution.command_table_indirect_loads == 0
+            && resolution.command_table_indirect_calls == 0,
+            "FAST warm recording does not dispatch through a command table");
     $else
         assert(resolution.command_table_lookups
+                == expected_recording_commands
+            && resolution.command_table_indirect_loads
+                == expected_recording_commands
+            && resolution.command_table_indirect_calls
                 == expected_recording_commands,
-            "bounded warm recording resolves one command record per call");
+            "CHECKED warm recording dispatches once through its table per call");
     $endif
     assert(resolution.pipeline_table_lookups == 0,
         "warm recording does not resolve the pipeline table after bind");
@@ -487,6 +668,12 @@ fn int main() {
         "post-bind recording emits no pipeline or descriptor heap binds");
     assert(resolution.command_policy_selections == 0,
         "warm recording does not select a validation policy");
+    $if $feature(GPU_FAST_COMMANDS):
+        assert(resolution.contract_branches == 0
+            && resolution.tracking_branches == 0
+            && resolution.public_misuse_faults == 0,
+            "FAST warm recording has no policy branch or misuse-fault work");
+    $endif
     assert(resolution.encoder_cell_computations == 0,
         "warm recording performs no frontend encoder-cell computation");
     assert(resolution.encoder_lease_comparisons == 0,
@@ -517,12 +704,26 @@ fn int main() {
             "tracking-off recording performs no reference work");
     }
     if (caps.generated_work) {
-        assert(preprocess_reuses
-            >= GENERATED_RECORD_ITERATIONS * COMMAND_RECORD_REPETITIONS,
+        ulong expected_generated_acquires =
+            GENERATED_RECORD_ITERATIONS * COMMAND_RECORD_REPETITIONS;
+        assert(preprocess_reuses == expected_generated_acquires
+            && warm_work.generated_preprocess_acquires
+                == expected_generated_acquires,
             "each measured execute uses distinct reserved preprocess storage");
+        assert(warm_work.generated_allocator_lock_acquisitions
+                == expected_generated_acquires,
+            "generated recording locks once per fallible reservation");
+    } else {
+        assert(warm_work.generated_preprocess_acquires == 0
+                && warm_work.generated_allocator_lock_acquisitions == 0,
+            "unsupported generated work performs no acquisition");
     }
 
     io::printfn("expectation_version=%d", BENCHMARK_EXPECTATION_VERSION);
+    io::printfn(
+        "command_profile: build=%s",
+        $feature(GPU_FAST_COMMANDS) ? "fast" : "checked",
+    );
     io::printfn(
         "command_tokens: representation=%s recording_token_bytes=%d executable_token_bytes=%d record_bytes=%d cell_bytes=%d fixed_storage_bytes=%d commands_per_list=1,16,256,4096",
         gpu::DIRECT_COMMAND_TOKENS ? "direct" : "bounded",
@@ -562,7 +763,7 @@ fn int main() {
         preprocess_allocations,
     );
     io::printfn(
-        "resolution: recording_commands=%d native_commands=%d pipeline_binds=%d descriptor_set_binds=%d descriptor_buffer_binds=%d descriptor_buffer_offsets=%d device_registry=%d retained_pins=%d lifecycle_vtable=%d command_table=%d pipeline_table=%d pipeline_cache=%d policy=%d encoder_cells=%d encoder_leases=%d",
+        "resolution: recording_commands=%d native_commands=%d pipeline_binds=%d descriptor_set_binds=%d descriptor_buffer_binds=%d descriptor_buffer_offsets=%d device_registry=%d retained_pins=%d lifecycle_vtable=%d command_table=%d command_table_loads=%d command_table_calls=%d pipeline_table=%d pipeline_cache=%d policy=%d contract_branches=%d tracking_branches=%d public_misuse_faults=%d encoder_cells=%d encoder_leases=%d",
         resolution.recording_commands,
         resolution.native_commands,
         resolution.pipeline_bind_commands,
@@ -573,9 +774,14 @@ fn int main() {
         resolution.retained_pin_operations,
         resolution.lifecycle_vtable_dispatches,
         resolution.command_table_lookups,
+        resolution.command_table_indirect_loads,
+        resolution.command_table_indirect_calls,
         resolution.pipeline_table_lookups,
         resolution.pipeline_cache_lookups,
         resolution.command_policy_selections,
+        resolution.contract_branches,
+        resolution.tracking_branches,
+        resolution.public_misuse_faults,
         resolution.encoder_cell_computations,
         resolution.encoder_lease_comparisons,
     );
@@ -591,7 +797,7 @@ fn int main() {
         policy_counters.reference_releases,
     );
     io::printfn(
-        "cold work: host_allocations=%d command_pool_creations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",
+        "cold work: host_allocations=%d command_pool_creations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_acquires=%d generated_allocator_locks=%d generated_scratch_misses=%d",
         cold_work.host_allocations,
         cold_work.command_pool_creations,
         cold_work.command_buffer_allocations,
@@ -599,10 +805,12 @@ fn int main() {
         cold_work.command_buffer_resets,
         cold_work.image_view_creations,
         cold_work.vma_allocations,
+        cold_work.generated_preprocess_acquires,
+        cold_work.generated_allocator_lock_acquisitions,
         cold_work.generated_scratch_misses,
     );
     io::printfn(
-        "warm work: host_allocations=%d command_pool_creations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",
+        "warm work: host_allocations=%d command_pool_creations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_acquires=%d generated_allocator_locks=%d generated_scratch_misses=%d",
         warm_work.host_allocations,
         warm_work.command_pool_creations,
         warm_work.command_buffer_allocations,
@@ -610,6 +818,8 @@ fn int main() {
         warm_work.command_buffer_resets,
         warm_work.image_view_creations,
         warm_work.vma_allocations,
+        warm_work.generated_preprocess_acquires,
+        warm_work.generated_allocator_lock_acquisitions,
         warm_work.generated_scratch_misses,
     );
     io::printfn("generated preprocess: reuse_events=%d", preprocess_reuses);

@@ -252,15 +252,13 @@ checking. `FULL` must return the same library fault and structured diagnostic
 with Vulkan layers off or on. Callback- or name-only trusted configurations
 must not request the Khronos layer or enable command checks/tracking.
 
-The direct representation is built separately with `DIRECT_COMMAND_TOKENS`.
-It runs trusted/no-tracking/no-layer lifecycle and recording coverage, requires
-both public token types to be exactly one pointer, and requires
-`ContractValidation.FULL` to fault before backend initialization. It does not
-fabricate or reuse direct pointer values: provenance, correct phase, one-shot
-use, and alias confinement are caller preconditions in that build.
-The zero-work assertions use #438's outcome taxonomy. They do not require
-build-time direct `CommandOps` dispatch or non-fallible FAST signatures; those
-remain #440 coverage.
+The FAST representation is built separately with `GPU_FAST_COMMANDS` and
+`DIRECT_COMMAND_TOKENS`. It runs trusted/no-tracking/no-layer lifecycle and
+recording coverage, requires both public token types to be exactly one pointer,
+and requires `OBJECT_BOUNDARIES`, `FULL`, and tracking requests to fault before
+backend initialization. Its 24 ordinary commands compile only without `!`; the
+three generated commands remain fallible. Provenance, correct phase, one-shot
+use, command arguments, and alias confinement are caller preconditions.
 
 Every mode must preserve the mandatory safety floor: null/slice/range and
 overflow protection needed before host access, command-state/internal-table
@@ -278,6 +276,9 @@ VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
 
 VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
   c3c test vk_command_tokens_fast --path test
+
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
+  c3c test vk_indirect_fast --path test
 ```
 
 It covers the complete runtime matrix, exact table selection, zero tracking
@@ -288,11 +289,12 @@ rollback. Tracking-index coverage additionally pins exact owner/index/generation
 identity under forced collisions, publish-after-retain ordering, duplicate hits
 without another mutex/retain, suffix rollback rebuild, scratch epoch reuse and
 rollover, and expected linear probe work through the 4,096-reference ceiling.
-`scripts/check_command_policy.py` is a direct table-shape gate only. It requires
-exactly the four immutable command tables, every current `CommandOps` field
-exactly once in each table, and a direct `&function_name` initializer for every
-entry. C3 compilation verifies that each function exists and matches the field
-type.
+`scripts/check_command_policy.py` verifies complete field coverage for every
+CHECKED `CommandOps` table that exists without fixing table names or count. It
+also rejects any table declaration, selection, or `.ops` access reachable in
+FAST. `scripts/check_public_api.py` owns the exact 24 ordinary and three
+generated signature inventories; the compile fixtures prove the feature-
+exclusive call syntax.
 
 The checker does not parse function bodies, build call graphs, inventory private
 helpers, or infer allocation, policy, tracking, reference ordering, or
@@ -476,12 +478,13 @@ git submodule update --init --recursive
 The blocking headless matrix is shared by Linux and Windows:
 
 ```text
-vk_bootstrap vk_allocation vk_command vk_command_tokens_fast vk_texture
-vk_descriptor_heap vk_root_pointer
-vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain
-vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth vk_threading vk_performance
+vk_bootstrap vk_allocation vk_allocation_fast vk_command vk_command_tokens_fast vk_texture
+vk_descriptor_heap vk_descriptor_heap_fast vk_root_pointer
+vk_texture_heap vk_shader_reflection vk_offscreen vk_swapchain vk_swapchain_fast
+vk_pipeline_cache vk_indirect vk_indirect_fast vk_indexed_draw vk_depth vk_threading vk_performance
+vk_performance_direct vk_performance_fast
 vk_allocator_observation
-vk_queue vk_debug upload_bench_observation vk_device_request vk_validation_policy
+vk_queue vk_queue_fast vk_debug upload_bench_observation vk_device_request vk_validation_policy
 ```
 
 The workflow stores this list once as `HEADLESS_TEST_TARGETS` and both jobs iterate it.
@@ -519,7 +522,7 @@ layout through the bound pipeline slot. Validation-mode lifetime coverage also
 proves a recording command blocks public pipeline destruction, then continues
 from its cached native snapshot before discard releases ownership.
 
-`vk_performance` runs complete warm
+`vk_performance`, `vk_performance_direct`, and `vk_performance_fast` run the same complete warm
 begin/bind/dispatch/end and render-pass operations against existing pipelines,
 shaders, descriptor state, texture views, and allocations. Command-buffer reset
 is allowed; allocator creation occurs before the measured interval, and
@@ -529,8 +532,9 @@ snapshots begin before pipeline binding: binding the opaque pipeline handle
 performs exactly one pipeline-table and one pipeline-cache lookup and records
 one `pipeline_bind_commands` increment for the selected bind point, while
 registry, retained-pin, lifecycle-vtable, and policy work remain zero. The
-bounded token performs exactly one command-table resolution for each public
-recording call. Exact heap counters require one indexing set bind or descriptor-buffer
+Both CHECKED token representations perform exactly one `CommandOps` load/call
+for each accepted public recording call; FAST direct tokens require zero table,
+policy, tracking, and public misuse-fault work. Exact heap counters require one indexing set bind or descriptor-buffer
 offset per used bind point and one descriptor-buffer bind per command record;
 later compatible pipeline changes add none. Dispatch and draw add no further
 resolution and each emits exactly one root push plus its native execution
@@ -540,6 +544,12 @@ layout snapshot to remain unchanged. No compile-time exact member-shape guard
 is used for private pipeline or command-record state; semantic, resolution,
 and native-emission outcomes remain the authority as those representations
 change.
+
+`vk_allocation_fast`, `vk_descriptor_heap_fast`, `vk_queue_fast`, and
+`vk_swapchain_fast` retain the profile-independent allocation, descriptor,
+queue/completion, submission/wait, and WSI lifecycle/rollback coverage under
+the FAST creation contract. CHECKED-only diagnostic-report and malformed-token
+tests remain in their corresponding feature-free targets.
 
 The benchmark runner builds fourteen executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
@@ -594,17 +604,19 @@ lookup-side counters require zero shader probes, byte comparisons, and clones
 after interning, mirroring the blocking `vk_pipeline_cache` scale test; elapsed
 boundary time remains advisory. Command recording covers ordinary and
 semantic-hazard barriers, indirect dispatch, and capability-gated generated
-dispatch in both token representations. The default bounded target runs the four
-policy modes; the `DIRECT_COMMAND_TOKENS` target runs
-trusted/no-tracking/no-layer and requires one-pointer recording and executable
-tokens. Both report authoritative-record, cell, and total fixed-storage sizes
+dispatch in bounded CHECKED and direct FAST profiles. The default bounded target
+runs the four policy modes; `vk_performance_direct` separately runs CHECKED
+with `DIRECT_COMMAND_TOKENS` and exact table-dispatch counts. Both command-record
+benchmarks report authoritative-record, cell, and total fixed-storage sizes
 plus lists containing 1, 16, 256, and 4,096 commands. The timing workload
 measures five 64-record lists after an untimed 64-record warmup. Before warmup,
 the caller reserves 64 preprocess buffers on the measured explicit allocator
 for the declared generated workload and exact public pipeline
 handle. Alias handles for one native pipeline require independent reservations. Each execute
 receives a distinct reserved address, and reuse occurs only after a list is
-discarded.
+discarded. Every generated reservation attempt takes the allocator mutex once
+because completion retirement may return the same reservation concurrently;
+the benchmark requires exact acquire/lock equality.
 The command target enables test-only resolution counters and measures complete
 recording sequences. Minimal pass begin reports one native begin-rendering
 command and no dynamic-state commands. Convenience begin reports that command
@@ -614,11 +626,13 @@ compatible passes and draws add only their begin/end/draw commands unless
 another setter is recorded. The `{2, 16, 256}` matrix rejects hidden pass-boundary
 replay, default, or state-diff work and requires zero registry,
 retained-pin, lifecycle-vtable, command-table, pipeline-table/cache, and policy
-selections during FAST warm recording. Bounded warm recording permits exactly
-one safe command-table resolution per public recording call. FAST requires zero
-encoder-cell computations, packed-lease comparisons, frontend phase
-transitions, command-table lookups, registry/pin operations, and warm
-allocation. Source helper names, call topology, and proof-note placement are not
+selections during FAST ordinary warm recording. CHECKED requires exactly one
+`CommandOps` dispatch per accepted public call regardless of token
+representation. FAST requires zero encoder-cell computations, packed-lease
+comparisons, frontend phase transitions, command-table dispatches, registry/pin
+operations, and warm allocation for ordinary commands. Generated calls
+separately require one reservation acquisition and one allocator lock per
+attempt. Source helper names, call topology, and proof-note placement are not
 blocking contracts.
 These process-wide counters use relaxed atomics and are compared only across
 externally synchronized benchmark intervals. The native count covers every

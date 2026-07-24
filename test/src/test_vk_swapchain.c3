@@ -477,12 +477,17 @@ fn void extent_clamp_rules() @test {
 
 fn void swapchain_requires_a_presentation_request() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
+        .backend                  = gpu::BackendKind.VULKAN,
         .enable_vulkan_validation = true,
-        .application_name  = "gpu_swapchain_gate_test",
+        .application_name         = "gpu_swapchain_gate_test",
     };
+    $if $feature(GPU_FAST_COMMANDS):
+        desc.contract_validation = gpu::ContractValidation.TRUSTED;
+        desc.track_resource_lifetimes = false;
+    $else
+        desc.contract_validation = gpu::ContractValidation.FULL;
+        desc.track_resource_lifetimes = true;
+    $endif
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -615,7 +620,8 @@ fn void swapchain_present_guard_lifecycle() @test {
     assert(wrong_completion == gpu::INVALID_ARGUMENT, "unrelated completion faults INVALID_ARGUMENT");
 }
 
-fn void present_path_guards_precede_native_mutation() @test {
+fn void present_path_guards_precede_native_mutation()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
@@ -1225,7 +1231,8 @@ fn void swapchain_release_ownership_work_tracks_examined_images() @test {
         "reference detection stops after the first live wrapped-image owner");
 }
 
-fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
+fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::RuntimeDesc runtime_desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
@@ -1670,12 +1677,17 @@ fn void acquired_image_reports_prior_state() @test {
 
 fn void swapchain_info_query_rejects_invalid_handle() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
+        .backend                  = gpu::BackendKind.VULKAN,
         .enable_vulkan_validation = true,
-        .application_name  = "gpu_swapchain_info_invalid_handle_test",
+        .application_name         = "gpu_swapchain_info_invalid_handle_test",
     };
+    $if $feature(GPU_FAST_COMMANDS):
+        desc.contract_validation = gpu::ContractValidation.TRUSTED;
+        desc.track_resource_lifetimes = false;
+    $else
+        desc.contract_validation = gpu::ContractValidation.FULL;
+        desc.track_resource_lifetimes = true;
+    $endif
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 

@@ -228,6 +228,8 @@ struct VkDeviceState {
     Atomic{ulong}              command_buffer_resets @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
     Atomic{ulong}              recording_image_view_creations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
     Atomic{ulong}              recording_vma_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
+    Atomic{ulong}              generated_preprocess_acquires @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
+    Atomic{ulong}              generated_allocator_lock_acquisitions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
     Atomic{ulong}              generated_scratch_misses @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_dispatch_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
@@ -402,7 +404,8 @@ fn void? reach_device_creation_checkpoint(
     if (probe.fail_at == checkpoint) return gpu::BACKEND_ERROR~;
 }
 
-const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
+const gpu::internal::CommandOps TRUSTED_COMMAND_OPS
+    @private @if(!$feature(GPU_FAST_COMMANDS)) = {
     .copy_buffer                 = &trusted_copy_buffer,
     .fill_buffer                 = &trusted_fill_buffer,
     .copy_buffer_to_texture      = &trusted_copy_buffer_to_texture,
@@ -432,7 +435,8 @@ const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
+const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS
+    @private @if(!$feature(GPU_FAST_COMMANDS)) = {
     .copy_buffer                 = &trusted_tracking_copy_buffer,
     .fill_buffer                 = &trusted_tracking_fill_buffer,
     .copy_buffer_to_texture      = &trusted_tracking_copy_buffer_to_texture,
@@ -462,7 +466,8 @@ const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
+const gpu::internal::CommandOps CHECKED_COMMAND_OPS
+    @private @if(!$feature(GPU_FAST_COMMANDS)) = {
     .copy_buffer                 = &checked_copy_buffer,
     .fill_buffer                 = &checked_fill_buffer,
     .copy_buffer_to_texture      = &checked_copy_buffer_to_texture,
@@ -492,7 +497,8 @@ const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
+const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS
+    @private @if(!$feature(GPU_FAST_COMMANDS)) = {
     .copy_buffer                 = &checked_tracking_copy_buffer,
     .fill_buffer                 = &checked_tracking_fill_buffer,
     .copy_buffer_to_texture      = &checked_tracking_copy_buffer_to_texture,
@@ -522,7 +528,9 @@ const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-fn gpu::internal::CommandOps* select_command_ops(DeviceValidationPolicy policy) {
+fn gpu::internal::CommandOps* select_command_ops(
+    DeviceValidationPolicy policy,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     switch (policy.contract) {
         case gpu::ContractValidation.TRUSTED:
         case gpu::ContractValidation.OBJECT_BOUNDARIES:
@@ -540,7 +548,9 @@ fn gpu::internal::CommandOps* select_command_ops(DeviceValidationPolicy policy) 
     }
 }
 
-fn bool command_ops_are_complete(gpu::internal::CommandOps* ops) {
+fn bool command_ops_are_complete(
+    gpu::internal::CommandOps* ops,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     return ops != null
         && ops.copy_buffer != null
         && ops.fill_buffer != null
@@ -571,12 +581,31 @@ fn bool command_ops_are_complete(gpu::internal::CommandOps* ops) {
         && ops.end_label != null;
 }
 
+const gpu::internal::CommandOps* DEFAULT_COMMAND_OPS
+    @private @if($feature(GPU_FAST_COMMANDS)) = null;
+const gpu::internal::CommandOps* DEFAULT_COMMAND_OPS
+    @private @if(!$feature(GPU_FAST_COMMANDS)) = &CHECKED_TRACKING_COMMAND_OPS;
+
+fn gpu::internal::CommandOps* profile_command_ops(
+    DeviceValidationPolicy policy,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    (void)policy;
+    return null;
+}
+
+fn gpu::internal::CommandOps* profile_command_ops(
+    DeviceValidationPolicy policy,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
+    return select_command_ops(policy);
+}
+
 fn void note_command_semantic_check(VkDeviceState* state) @private {
     $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
         (void)state.command_policy_counters.semantic_checks.add(
             1,
             AtomicOrdering.RELAXED,
         );
+        gpu::internal::note_command_contract_branch();
     $endif
 }
 
@@ -586,6 +615,7 @@ fn void note_command_tracking_call(VkDeviceState* state) @private {
             1,
             AtomicOrdering.RELAXED,
         );
+        gpu::internal::note_command_tracking_branch();
     $endif
 }
 
@@ -840,7 +870,7 @@ const gpu::internal::BackendVTable VK_VTABLE @private = {
     .submit                      = &vk_submit,
     .poll_completion             = &vk_poll_completion,
     .wait_completion             = &vk_wait_completion,
-    .command_ops                 = &CHECKED_TRACKING_COMMAND_OPS,
+    .command_ops                 = DEFAULT_COMMAND_OPS,
     .get_texture_format_support  = &vk_get_texture_format_support,
     .supports_texture_desc       = &vk_supports_texture_desc,
     .get_texture_requirements    = &vk_get_texture_requirements,
@@ -967,7 +997,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.debug_user_data = desc.debug_user_data;
     state.debug_names = desc.enable_debug_names;
     state.validation_policy = desc.validation_policy;
-    state.command_ops = select_command_ops(state.validation_policy);
+    state.command_ops = profile_command_ops(state.validation_policy);
     state.resource_mutex.init()!;
     state.pipeline_creation_mutex.init()!;
     state.texture_view_cache_mutex.init()!;

@@ -57,9 +57,12 @@ fn bool command_policy_observation_matches(
     vk::CommandRecordingStats recording_before = observation.recording_before;
     vk::CommandRecordingStats recording_after = observation.recording_after;
     gpu::CommandResolutionStats resolution = observation.resolution;
-    ulong command_table_lookups = gpu::DIRECT_COMMAND_TOKENS
+    ulong command_table_lookups = gpu::FAST_COMMAND_PROFILE
         ? 0
         : expectation.recording_commands;
+    ulong generated_acquires = expectation.generated_dispatch_emissions
+        + expectation.generated_draw_emissions
+        + expectation.generated_indexed_draw_emissions;
     return policy.semantic_checks == expectation.semantic_checks
         && policy.tracking_calls == expectation.tracking_calls
         && policy.reference_allocations == expectation.reference_allocations
@@ -73,6 +76,9 @@ fn bool command_policy_observation_matches(
         && recording.image_view_creations == 0
         && recording.vma_allocations == 0
         && recording.registry_lock_acquisitions == 0
+        && recording.generated_preprocess_acquires == generated_acquires
+        && recording.generated_allocator_lock_acquisitions
+            == generated_acquires
         && recording.generated_scratch_misses == 0
         && recording.generated_dispatch_emissions
             == expectation.generated_dispatch_emissions
@@ -90,6 +96,8 @@ fn bool command_policy_observation_matches(
         && resolution.retained_pin_operations == 0
         && resolution.lifecycle_vtable_dispatches == 0
         && resolution.command_table_lookups == command_table_lookups
+        && resolution.command_table_indirect_loads == command_table_lookups
+        && resolution.command_table_indirect_calls == command_table_lookups
         && resolution.pipeline_table_lookups == 0
         && resolution.pipeline_cache_lookups == 0
         && resolution.command_policy_selections == 0

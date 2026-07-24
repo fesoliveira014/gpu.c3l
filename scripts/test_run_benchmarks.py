@@ -32,13 +32,22 @@ LIFECYCLE_OUTPUT = "\n".join(
 )
 COMMAND_OUTPUT = "\n".join(
     (
-        "expectation_version=2",
+        "expectation_version=3",
+        "command_profile: build=checked",
         (
             "command_tokens: representation=bounded "
             "recording_token_bytes=24 executable_token_bytes=24 "
             "record_bytes=56 cell_bytes=456 fixed_storage_bytes=1867776 "
             "commands_per_list=1,16,256,4096"
         ),
+        "pipeline scale: commands=1 scenario=alias recording=1 native=2 pipeline_binds=1",
+        "pipeline scale: commands=16 scenario=alias recording=16 native=2 pipeline_binds=1",
+        "pipeline scale: commands=256 scenario=alias recording=256 native=2 pipeline_binds=1",
+        "pipeline scale: commands=4096 scenario=alias recording=4096 native=2 pipeline_binds=1",
+        "pipeline scale: commands=1 scenario=distinct recording=1 native=2 pipeline_binds=1",
+        "pipeline scale: commands=16 scenario=distinct recording=16 native=17 pipeline_binds=16",
+        "pipeline scale: commands=256 scenario=distinct recording=256 native=257 pipeline_binds=256",
+        "pipeline scale: commands=4096 scenario=distinct recording=4096 native=4097 pipeline_binds=4096",
         "barrier: iterations=20000 repetitions=5 median=130.0 ns/record",
         "hazard barrier: iterations=20000 repetitions=5 median=135.0 ns/record",
         "indirect dispatch: iterations=20000 repetitions=5 median=180.0 ns/record",
@@ -53,7 +62,10 @@ COMMAND_OUTPUT = "\n".join(
             "descriptor_buffer_binds=0 descriptor_buffer_offsets=0 "
             "device_registry=0 "
             "retained_pins=0 lifecycle_vtable=0 command_table=300320 "
+            "command_table_loads=300320 command_table_calls=300320 "
             "pipeline_table=0 pipeline_cache=0 policy=0 "
+            "contract_branches=0 tracking_branches=0 "
+            "public_misuse_faults=0 "
             "encoder_cells=0 encoder_leases=0"
         ),
         (
@@ -66,6 +78,7 @@ COMMAND_OUTPUT = "\n".join(
             "command_buffer_allocations=1 "
             "command_buffer_frees=0 command_buffer_resets=3 "
             "image_view_creations=0 vma_allocations=64 "
+            "generated_acquires=64 generated_allocator_locks=64 "
             "generated_scratch_misses=0"
         ),
         (
@@ -73,6 +86,7 @@ COMMAND_OUTPUT = "\n".join(
             "command_buffer_allocations=0 "
             "command_buffer_frees=0 command_buffer_resets=20 "
             "image_view_creations=0 vma_allocations=0 "
+            "generated_acquires=320 generated_allocator_locks=320 "
             "generated_scratch_misses=0"
         ),
         "generated preprocess: reuse_events=320",
@@ -103,6 +117,22 @@ COMMAND_POLICY_OUTPUTS = (
     OBJECT_BOUNDARIES_COMMAND_OUTPUT,
     FULL_COMMAND_OUTPUT,
     FULL_LAYERS_COMMAND_OUTPUT,
+)
+FAST_COMMAND_OUTPUT = (
+    COMMAND_OUTPUT
+    .replace("command_profile: build=checked", "command_profile: build=fast")
+    .replace("representation=bounded", "representation=direct")
+    .replace("recording_token_bytes=24", "recording_token_bytes=8")
+    .replace("executable_token_bytes=24", "executable_token_bytes=8")
+    .replace("command_table=300320", "command_table=0")
+    .replace("command_table_loads=300320", "command_table_loads=0")
+    .replace("command_table_calls=300320", "command_table_calls=0")
+)
+CHECKED_DIRECT_COMMAND_OUTPUT = (
+    COMMAND_OUTPUT
+    .replace("representation=bounded", "representation=direct")
+    .replace("recording_token_bytes=24", "recording_token_bytes=8")
+    .replace("executable_token_bytes=24", "executable_token_bytes=8")
 )
 COMMAND_REFERENCE_OUTPUT = "\n".join((
     "iterations=unique:1,8,64,256,1024,4096;mixed:4096;near_capacity:4095;repeated:100000;collisions:64 units=ns/reference",
@@ -342,6 +372,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 "command_path_baseline_bench",
                 "command_reference_bench",
                 "command_record_bench",
+                "command_record_direct_bench",
                 "command_record_fast_bench",
                 "lifecycle_bench",
                 "submit_batch_bench",
@@ -370,6 +401,10 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         self.assertIn(
             ("command_record_bench", "test"),
+            runner.benchmark_build_targets(),
+        )
+        self.assertIn(
+            ("command_record_direct_bench", "test"),
             runner.benchmark_build_targets(),
         )
         self.assertIn(
@@ -1012,6 +1047,120 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, error):
                     runner.require_measurement(output, "command_record_bench")
 
+    def test_command_measurement_rejects_pipeline_scale_mutations(self):
+        runner = load_runner()
+        scale_line = (
+            "pipeline scale: commands=16 scenario=distinct "
+            "recording=16 native=17 pipeline_binds=16"
+        )
+        mutations = (
+            (
+                COMMAND_OUTPUT.replace(scale_line + "\n", ""),
+                "pipeline scale records",
+            ),
+            (
+                COMMAND_OUTPUT.replace(
+                    "commands=16 scenario=alias recording=16 "
+                    "native=2 pipeline_binds=1",
+                    "commands=16 scenario=alias recording=16 "
+                    "native=3 pipeline_binds=2",
+                ),
+                "pipeline scale record",
+            ),
+            (
+                COMMAND_OUTPUT.replace(
+                    scale_line,
+                    scale_line.replace("native=17", "native=18"),
+                ),
+                "heap work",
+            ),
+        )
+        for output, error in mutations:
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(ValueError, error):
+                    runner.require_measurement(output, "command_record_bench")
+
+    def test_fast_command_profile_rejects_removed_frontend_work(self):
+        runner = load_runner()
+        runner.require_measurement(
+            FAST_COMMAND_OUTPUT,
+            "command_record_fast_bench",
+        )
+        for field in (
+            "command_table",
+            "command_table_loads",
+            "command_table_calls",
+            "contract_branches",
+            "tracking_branches",
+            "public_misuse_faults",
+        ):
+            with self.subTest(field=field):
+                output = FAST_COMMAND_OUTPUT.replace(
+                    f"{field}=0",
+                    f"{field}=1",
+                )
+                with self.assertRaisesRegex(ValueError, "forbidden work"):
+                    runner.require_measurement(
+                        output,
+                        "command_record_fast_bench",
+                    )
+
+    def test_checked_direct_profile_requires_command_table_work(self):
+        runner = load_runner()
+        runner.require_measurement(
+            CHECKED_DIRECT_COMMAND_OUTPUT,
+            "command_record_direct_bench",
+        )
+        for field in (
+            "command_table",
+            "command_table_loads",
+            "command_table_calls",
+        ):
+            with self.subTest(field=field):
+                output = CHECKED_DIRECT_COMMAND_OUTPUT.replace(
+                    f"{field}=300320",
+                    f"{field}=0",
+                )
+                with self.assertRaisesRegex(ValueError, "command-table work"):
+                    runner.require_measurement(
+                        output,
+                        "command_record_direct_bench",
+                    )
+
+    def test_generated_allocator_lock_evidence_is_nonvacuous_and_exact(self):
+        runner = load_runner()
+        for before, after in (
+            ("generated_acquires=320", "generated_acquires=0"),
+            (
+                "generated_allocator_locks=320",
+                "generated_allocator_locks=319",
+            ),
+        ):
+            with self.subTest(after=after):
+                output = FAST_COMMAND_OUTPUT.replace(before, after)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "generated lock evidence",
+                ):
+                    runner.require_measurement(
+                        output,
+                        "command_record_fast_bench",
+                    )
+
+    def test_fast_command_profile_requires_matching_build_identity(self):
+        runner = load_runner()
+        for before, after in (
+            ("command_profile: build=fast", "command_profile: build=checked"),
+            ("representation=direct", "representation=bounded"),
+        ):
+            with self.subTest(after=after):
+                output = FAST_COMMAND_OUTPUT.replace(before, after)
+                with self.assertRaisesRegex(ValueError, "build profile"):
+                    runner.require_measurement(
+                        output,
+                        "command_record_fast_bench",
+                    )
+
     def test_command_measurement_requires_versioned_deterministic_records(self):
         runner = load_runner()
         resolution_line = next(
@@ -1021,13 +1170,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         mutations = (
             (
-                COMMAND_OUTPUT.replace("expectation_version=2\n", ""),
+                COMMAND_OUTPUT.replace("expectation_version=3\n", ""),
                 "expectation version",
             ),
             (
                 COMMAND_OUTPUT.replace(
-                    "expectation_version=2",
                     "expectation_version=3",
+                    "expectation_version=4",
                 ),
                 "expectation version",
             ),

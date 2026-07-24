@@ -20,6 +20,11 @@
   "targets": {
     "smoke": {
       "type": "executable",
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
+      "sources": [ "src/smoke.c3" ]
+    },
+    "smoke_checked": {
+      "type": "executable",
       "sources": [ "src/smoke.c3" ]
     },
     "benchmark_info": {
@@ -44,7 +49,7 @@
       "features": [ "COMMAND_RESOLUTION_STATS", "VALIDATION_POLICY_STATS" ],
       "sources": [ "src/command_record_bench.c3" ]
     },
-    "command_record_fast_bench": {
+    "command_record_direct_bench": {
       "type": "executable",
       "features": [
         "DIRECT_COMMAND_TOKENS",
@@ -52,6 +57,25 @@
         "VALIDATION_POLICY_STATS"
       ],
       "sources": [ "src/command_record_bench.c3" ]
+    },
+    "command_record_fast_bench": {
+      "type": "executable",
+      "features": [
+        "GPU_FAST_COMMANDS",
+        "DIRECT_COMMAND_TOKENS",
+        "COMMAND_RESOLUTION_STATS",
+        "VALIDATION_POLICY_STATS"
+      ],
+      "sources": [ "src/command_record_bench.c3" ]
+    },
+    "command_asm_surface_fast": {
+      "type": "executable",
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
+      "sources": [ "src/command_asm_surface.c3" ]
+    },
+    "command_asm_surface_checked": {
+      "type": "executable",
+      "sources": [ "src/command_asm_surface.c3" ]
     },
     // Advisory direct Vulkan/public command-path and submitted lifecycle
     // calibration. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
@@ -142,13 +166,22 @@
       "type": "test",
       "sources": [ "src/test_vk_allocation.c3", "src/submitted_command_fixture.c3" ]
     },
+    "vk_allocation_fast": {
+      "type": "test",
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
+      "sources": [ "src/test_vk_allocation.c3", "src/submitted_command_fixture.c3" ]
+    },
     "vk_command": {
       "type": "test",
       "sources": [ "src/test_vk_command_submit.c3", "src/test_generated_scratch.c3", "src/test_vk_command_validation.c3", "src/test_vk_render_pass_validation.c3", "src/test_vk_texture_transition.c3", "src/offscreen_abi.c3" ]
     },
     "vk_command_tokens_fast": {
       "type": "test",
-      "features": [ "DIRECT_COMMAND_TOKENS", "COMMAND_RESOLUTION_STATS" ],
+      "features": [
+        "GPU_FAST_COMMANDS",
+        "DIRECT_COMMAND_TOKENS",
+        "COMMAND_RESOLUTION_STATS"
+      ],
       "sources": [ "src/test_vk_command_tokens_fast.c3" ]
     },
     "vk_texture": {
@@ -157,6 +190,11 @@
     },
     "vk_descriptor_heap": {
       "type": "test",
+      "sources": [ "src/test_vk_descriptor_heap.c3" ]
+    },
+    "vk_descriptor_heap_fast": {
+      "type": "test",
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
       "sources": [ "src/test_vk_descriptor_heap.c3" ]
     },
     "vk_root_pointer": {
@@ -179,6 +217,21 @@
       "type": "test",
       "sources": [ "src/test_vk_performance_invariants.c3", "src/test_command_path_native_work.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
     },
+    "vk_performance_direct": {
+      "type": "test",
+      "features": [ "DIRECT_COMMAND_TOKENS" ],
+      "sources": [ "src/test_vk_performance_invariants.c3", "src/test_command_path_native_work.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
+    },
+    "vk_performance_fast": {
+      "type": "test",
+      "features": [
+        "GPU_FAST_COMMANDS",
+        "DIRECT_COMMAND_TOKENS",
+        "COMMAND_RESOLUTION_STATS",
+        "COMMAND_RECORDING_WORK_STATS"
+      ],
+      "sources": [ "src/test_vk_performance_invariants.c3", "src/test_command_path_native_work.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
+    },
     "vk_allocator_observation": {
       "type": "test",
       "sources": [ "src/test_vk_allocator_observation.c3" ]
@@ -187,12 +240,26 @@
       "type": "test",
       "sources": [ "src/test_vk_swapchain.c3", "src/test_vk_wsi_diagnostics.c3" ]
     },
+    "vk_swapchain_fast": {
+      "type": "test",
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
+      "sources": [ "src/test_vk_swapchain.c3", "src/test_vk_wsi_diagnostics.c3" ]
+    },
     "vk_pipeline_cache": {
       "type": "test",
       "sources": [ "src/test_vk_pipeline_cache.c3", "src/test_vk_pipeline_cache_io.c3", "src/test_vk_immediate_lifetime.c3", "src/submitted_command_fixture.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
     },
     "vk_indirect": {
       "type": "test",
+      "sources": [ "src/test_vk_indirect_draw.c3", "src/indirect_abi.c3", "src/generated_work_abi.c3", "src/root_pointer_abi.c3", "src/offscreen_abi.c3" ]
+    },
+    "vk_indirect_fast": {
+      "type": "test",
+      "features": [
+        "GPU_FAST_COMMANDS",
+        "DIRECT_COMMAND_TOKENS",
+        "COMMAND_RESOLUTION_STATS"
+      ],
       "sources": [ "src/test_vk_indirect_draw.c3", "src/indirect_abi.c3", "src/generated_work_abi.c3", "src/root_pointer_abi.c3", "src/offscreen_abi.c3" ]
     },
     // Indexed-draw pixel equivalence; needs an ICD — pin lavapipe via VK_DRIVER_FILES.
@@ -211,6 +278,11 @@
     "vk_queue": {
       "type": "test",
       "sources": [ "src/test_vk_queue_selection.c3", "src/test_vk_submit_stats.c3", "src/test_vk_completion.c3" ]
+    },
+    "vk_queue_fast": {
+      "type": "test",
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
+      "sources": [ "src/test_vk_queue_selection.c3", "src/test_vk_completion.c3" ]
     },
     "vk_debug": {
       "type": "test",

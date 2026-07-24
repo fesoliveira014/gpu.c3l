@@ -676,7 +676,8 @@ fn void allocation_transaction_rolls_back_every_failure() @test {
     );
 }
 
-fn void repeated_retirement_and_release_destroy_allocation_once() @test {
+fn void repeated_retirement_and_release_destroy_allocation_once()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     AllocationTransactionFixture fixture;
     init_allocation_transaction_fixture(
         &fixture,
@@ -1102,12 +1103,17 @@ fn void allocation_table_teardown_destroys_each_live_pair_once() @test {
 
 fn gpu::Device create_allocation_test_device(ZString name) {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
+        .backend                  = gpu::BackendKind.VULKAN,
         .enable_vulkan_validation = true,
-        .application_name  = name,
+        .application_name         = name,
     };
+    $if $feature(GPU_FAST_COMMANDS):
+        desc.contract_validation = gpu::ContractValidation.TRUSTED;
+        desc.track_resource_lifetimes = false;
+    $else
+        desc.contract_validation = gpu::ContractValidation.FULL;
+        desc.track_resource_lifetimes = true;
+    $endif
     return create_test_device(&desc)!!;
 }
 
@@ -1267,12 +1273,12 @@ fn void native_mapped_visibility_round_trip() @test {
         .src = written,
         .dst = copied,
     };
-    gpu::cmd_copy_buffer(&commands, &copy)!!;
+    record_test_copy_buffer(&commands, &copy)!!;
     gpu::Barrier host_read = {
         .before = { .transfer = true },
         .after = { .host = true },
     };
-    gpu::cmd_barrier(&commands, &host_read)!!;
+    record_test_barrier(&commands, &host_read)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer (void)discard_test_executable(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };
@@ -1358,28 +1364,28 @@ fn void native_allocation_spans_support_fill_upload_and_readback() @test {
         .src = upload_span,
         .dst = span,
     };
-    gpu::cmd_copy_buffer(&commands, &upload_copy)!!;
+    record_test_copy_buffer(&commands, &upload_copy)!!;
     gpu::Barrier before_fill = {
         .before = { .transfer = true },
         .after = { .transfer = true },
     };
-    gpu::cmd_barrier(&commands, &before_fill)!!;
-    gpu::cmd_fill_buffer(&commands, fill_span, 0x5A5A_5A5A)!!;
+    record_test_barrier(&commands, &before_fill)!!;
+    record_test_fill_buffer(&commands, fill_span, 0x5A5A_5A5A)!!;
     gpu::Barrier before_readback = {
         .before = { .transfer = true },
         .after = { .transfer = true },
     };
-    gpu::cmd_barrier(&commands, &before_readback)!!;
+    record_test_barrier(&commands, &before_readback)!!;
     gpu::BufferCopyDesc readback_copy = {
         .src = span,
         .dst = readback_span,
     };
-    gpu::cmd_copy_buffer(&commands, &readback_copy)!!;
+    record_test_copy_buffer(&commands, &readback_copy)!!;
     gpu::Barrier host_read = {
         .before = { .transfer = true },
         .after = { .host = true },
     };
-    gpu::cmd_barrier(&commands, &host_read)!!;
+    record_test_barrier(&commands, &host_read)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer (void)discard_test_executable(&executable);
     gpu::ExecutableCommandList[1] lists = { executable };
@@ -1397,7 +1403,8 @@ fn void native_allocation_spans_support_fill_upload_and_readback() @test {
             "allocation-backed copies and fill preserve exact bytes");
     }
 }
-fn void allocation_span_commands_reject_stale_and_foreign_owners_before_mutation() @test {
+fn void allocation_span_commands_reject_stale_and_foreign_owners_before_mutation()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = create_allocation_test_device(
         "gpu_allocation_span_rejection_test",
     );

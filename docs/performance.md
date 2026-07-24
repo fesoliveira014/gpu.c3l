@@ -15,10 +15,10 @@ python -B scripts/run_benchmarks.py
 
 The runner builds every target once with C3 `-O1`, uses trusted/no-tracking/no-
 layer defaults for release evidence, validates output schemas and zero-work
-fields, records hand-maintained `expectation_version=2`, and writes
-`test/build/benchmark-report.md`. Command recording is built in both public
-token representations. The default bounded `command_record_bench` executable
-and fixed workload run in this required order:
+fields, records hand-maintained `expectation_version=3`, and writes
+`test/build/benchmark-report.md`. Command recording is built in CHECKED
+bounded, CHECKED direct, and FAST direct profiles. The default bounded
+`command_record_bench` executable and fixed workload run in this required order:
 
 | Mode | Contract | Tracking | Vulkan layers |
 |---|---|---:|---:|
@@ -29,13 +29,17 @@ and fixed workload run in this required order:
 
 Only mode 1 participates in release timing thresholds. All four elapsed times
 remain advisory. `command_record_fast_bench` is compiled with
-`DIRECT_COMMAND_TOKENS` and runs only trusted/no-tracking/no-layer because a
-direct-token build cannot provide `FULL` token diagnostics. Whenever the runner
-is executed locally or on a self-hosted machine, exact work-counter violations
-hard-fail the run. Hosted CI builds the benchmark targets and unit-tests their
-schemas but does not execute this live runner; its blocking equivalents are
-`vk_validation_policy` for the bounded matrix and `vk_command_tokens_fast` for
-the direct representation. To collect the former all-enabled debug
+`GPU_FAST_COMMANDS` and `DIRECT_COMMAND_TOKENS`, and runs only
+trusted/no-tracking/no-layer because a FAST artifact cannot provide CHECKED
+command diagnostics. `command_record_direct_bench` isolates token
+representation from policy: it uses direct tokens but retains CHECKED
+`CommandOps` table/indirect dispatch work. Whenever the runner is executed
+locally or on a self-hosted machine, exact work-counter violations hard-fail
+the run. Hosted CI builds the benchmark targets and unit-tests their schemas
+but does not execute this live runner; its blocking equivalents are
+`vk_validation_policy` for the bounded matrix, `vk_performance_direct` for
+CHECKED direct tokens, and `vk_command_tokens_fast` for the FAST direct
+representation. To collect the former all-enabled debug
 configuration for the other benchmark devices in a separate report, run:
 
 ```sh
@@ -51,6 +55,8 @@ validation layer must recognize every enabled Vulkan extension; otherwise its
 diagnostics invalidate the timing run. `command_record_bench` always uses its
 four explicit modes, even during this separate report.
 `command_record_fast_bench` always uses its single trusted direct-token mode.
+`command_record_direct_bench` uses the same trusted mode but must report the
+same command-table lookup/load/call count as recorded commands.
 `command_path_baseline_bench` likewise keeps its fixed trusted, tracking-off,
 layers-off policy so its native/public comparison stays on the release contract.
 
@@ -72,13 +78,22 @@ c3c build command_record_fast_bench --path test -O1
 GPU_C3L_BENCH_CONTRACT=trusted GPU_C3L_BENCH_TRACKING=false GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_fast_bench
 ```
 
+For the one-pointer CHECKED representation:
+
+```sh
+c3c build command_record_direct_bench --path test -O1
+GPU_C3L_BENCH_CONTRACT=trusted GPU_C3L_BENCH_TRACKING=false GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_direct_bench
+```
+
 The executables reject missing or malformed policy variables. Each output has
 one exact `validation policy=...` line reporting semantic checks, tracking
 calls, reference allocations/increments/releases, and layer selection. Trusted
 and object-boundary modes require every policy-work counter to be zero. Both
 full modes require semantic and tracking work, releases must equal increments,
-and allocations cannot exceed increments. Every warm interval must report zero
-device registry, command-table, pipeline-table/cache, and policy reselection.
+and allocations cannot exceed increments. Every FAST warm interval must report
+zero device registry, command-table lookups/indirect loads/calls,
+contract/tracking branches, public misuse-fault construction,
+pipeline-table/cache work, and policy reselection.
 Each target creates its explicit queue-bound allocator before warmup and outside
 every measured interval. Its cold counters report allocator host allocation,
 one pool creation, and one complete native command-buffer allocation separately
@@ -157,7 +172,9 @@ The suite covers:
 | `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero forbidden work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
 | `command_reference_bench` | Exact public lookup/publication/retain/release outcomes plus upper-bounded private probe, equality, and mutex work for unique, repeated, mixed, forced-collision, and capacity scenarios |
 | `command_record_bench` | Bounded-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording across the validation/tracking matrix |
-| `command_record_fast_bench` | One-pointer FAST token/storage evidence; 1/16/256/4,096 command lists; exact native output; zero removed proof, lookup, pin, and warm-allocation work |
+| `command_record_direct_bench` | Direct-token CHECKED command recording with exact `CommandOps` lookup/load/call accounting |
+| `command_record_fast_bench` | One-pointer FAST token/storage evidence; 1/16/256/4,096 command lists; exact native output; zero removed proof, lookup, pin, and warm-allocation work; exact one allocator lock per fallible generated reservation attempt |
+| `vk_performance_direct` | CHECKED plus `DIRECT_COMMAND_TOKENS`; proves representation remains independent while every accepted command still records one real `CommandOps` load/call |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact one-visit-per-list duplicate-detection work |
 | `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
@@ -180,7 +197,7 @@ Blocking records use three outcome classes:
 | Class | Blocking rule |
 |---|---|
 | Semantic invariant | Exact output, fault/state preservation, ownership balance, submission, and completion outcomes |
-| Forbidden work | Exact zero allocation, object creation, unrelated locking, policy reselection, and post-bind resolution |
+| Forbidden work | Exact zero allocation, object creation, unrelated locking, policy reselection, and post-bind resolution; generated-reservation locking is an exact required operation |
 | Minimal native lowering | Exact Vulkan emission count for the named scenario |
 
 Private probes, identity comparisons, and mutex decisions use documented upper
@@ -192,7 +209,7 @@ is exact zero. Timings and unpinned generated assembly are advisory.
 | Cold allocator creation | Host allocations, exactly one exact-family command-pool create, one complete native command-buffer allocation call, and configured buffer count |
 | Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and pre-bind `CommandResolutionStats` |
 | Warm minimal begin + state packet + draw | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, exactly one native begin per pass, exactly ten dynamic-state commands per explicit complete packet, and native draw emission |
-| Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
+| Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions, non-vacuous acquire attempts, exactly one allocator lock per attempt, plus `CommandRecordingStats` reservation/allocation state |
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
 | Submission ownership | Submitted-batch references, caller tokens, retained-reference counts, and ordered retirement state |
@@ -201,12 +218,13 @@ is exact zero. Timings and unpinned generated assembly are advisory.
 | Shader identity | Owned clone/free balance, zero post-intern shader work, and bounded intern/compact-key work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Bounded collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
-In the bounded build, warm `CommandResolutionStats` permit one bounded
-command-table resolution and authoritative phase check per recorded public
-command. The FAST build requires zero encoder-cell computations, packed-lease
-comparisons, frontend phase transitions, command-table lookups, registry/pin
-operations, and warm allocation. Both representations require exact native
-emission and GPU output. Pipeline and descriptor-heap counters measure native
+CHECKED warm `CommandResolutionStats` require one `CommandOps` dispatch per
+accepted public command in both bounded and direct token representations.
+Bounded identity resolution is a separate representation concern. The FAST
+build requires zero encoder-cell computations, packed-lease comparisons,
+frontend phase transitions, command-table dispatches, registry/pin operations,
+and warm allocation for ordinary commands. Both representations require exact
+native emission and GPU output. Pipeline and descriptor-heap counters measure native
 emission, not public bind attempts, so compatible pipeline switches can increase
 pipeline binds without increasing heap binds.
 
@@ -276,19 +294,32 @@ necessary.
 
 The FAST zero-proof gates depend on #438's outcome taxonomy, which permits a
 removed private mechanism to report zero rather than requiring one observation.
-They cover token resolution and authoritative record lifetime only. Runtime
-`CommandOps` indirect dispatch and fallible recording signatures remain
-intentional here; #440 owns their later build-time specialization and any final
-FAST/CHECKED public artifact split.
+They cover static public command routing as well as token resolution: runtime
+`CommandOps`, policy/tracking branches, and ordinary public misuse-fault
+construction must remain absent.
 
 Representative dispatch, draw, barrier, viewport, and buffer-copy assembly can
 be reported locally:
 
 ```sh
-python -B scripts/report_command_asm.py --emit
+python -B scripts/report_command_asm.py --emit --fast-command-profile
 ```
 
-The reviewed Linux C3 0.8.0 profile can be enforced with:
+The reviewed FAST Linux C3 0.8.0 profile is blocking and uses the real Vulkan
+backend surface. It requires one static FAST-entry dispatch per public wrapper
+and nonzero exact native lowering:
+
+```sh
+python -B scripts/report_command_asm.py \
+  --emit \
+  --fast-command-profile \
+  --pinned-compiler 0.8.0 \
+  --pinned-target linux-x64 \
+  --comparison-profile command-fast-o1-v1 \
+  --limits scripts/command_asm_profiles/c3-0.8.0-linux-x64-o1-fast-v1.json
+```
+
+The corresponding CHECKED profile is:
 
 ```sh
 python -B scripts/report_command_asm.py \
@@ -300,9 +331,11 @@ python -B scripts/report_command_asm.py \
 ```
 
 The reporter invokes C3 0.8.0 with `-O1 --emit-asm` and records broad function,
-call, indirect-call, atomic, branch, load/store, and native-dispatch
-observations. A blocking run verifies the installed compiler version, passes
-the named target to C3, and requires the CLI identity and optimization mode to
+call, indirect-call, atomic, branch, load/store, static-entry, and
+native-dispatch observations. The pinned FAST profile requires zero indirect
+calls and exactly one static backend-entry dispatch in every representative
+wrapper. A blocking run verifies the installed compiler version, passes the
+named target to C3, and requires the CLI identity and optimization mode to
 match the versioned JSON profile. Missing symbols, unknown instruction forms,
 and count variation remain advisory outside that profile. Exact instruction
 bytes are never compared.

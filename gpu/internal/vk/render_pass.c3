@@ -445,7 +445,7 @@ fn PreparedRenderPass? checked_prepare_render_pass(
 fn void? track_render_pass(
     gpu::internal::CommandRecord* commands,
     PreparedRenderPass* pass,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[
@@ -562,7 +562,7 @@ fn void? trusted_begin_render_pass(
 fn void? trusted_tracking_begin_render_pass(
     gpu::internal::CommandRecord* commands,
     gpu::RenderPassDesc* desc,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
     VkCommandRecord* record = backend_command(commands);
     uint checkpoint = record.scratch.reference_count;
@@ -590,7 +590,7 @@ fn void? checked_begin_render_pass(
 fn void? checked_tracking_begin_render_pass(
     gpu::internal::CommandRecord* commands,
     gpu::RenderPassDesc* desc,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedRenderPass pass = checked_prepare_render_pass(
         commands,
         desc,
@@ -621,7 +621,7 @@ fn void? trusted_tracking_begin_render_pass_with_state(
     gpu::internal::CommandRecord* commands,
     gpu::RenderPassDesc* desc,
     gpu::GraphicsState* state,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
     LoweredGraphicsState graphics = lower_graphics_state(state)!;
     VkCommandRecord* record = backend_command(commands);
@@ -658,7 +658,7 @@ fn void? checked_tracking_begin_render_pass_with_state(
     gpu::internal::CommandRecord* commands,
     gpu::RenderPassDesc* desc,
     gpu::GraphicsState* state,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedRenderPass pass = checked_prepare_render_pass(
         commands,
         desc,
@@ -1536,7 +1536,7 @@ fn PreparedIndexedDraw? checked_prepare_indexed_draw(
 fn void? track_indexed_draw(
     gpu::internal::CommandRecord* commands,
     PreparedIndexedDraw* draw,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     return track_span_command_reference(
         command_device_state(commands),
         backend_command(commands),
@@ -1600,7 +1600,7 @@ fn void? trusted_tracking_draw_indexed(
     uint index_count,
     uint instance_count,
     gpu::IndexType index_type,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedIndexedDraw draw = lower_indexed_draw(
         commands:       commands,
         vertex_root:    vertex_root,
@@ -1643,7 +1643,7 @@ fn void? checked_tracking_draw_indexed(
     uint index_count,
     uint instance_count,
     gpu::IndexType index_type,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedIndexedDraw draw = checked_prepare_indexed_draw(
         commands:       commands,
         vertex_root:    vertex_root,
@@ -1726,7 +1726,7 @@ fn PreparedIndirectDraw? checked_prepare_indirect_draw(
 fn void? track_indirect_draw(
     gpu::internal::CommandRecord* commands,
     PreparedIndirectDraw* draw,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     return track_span_command_reference(
         command_device_state(commands),
         backend_command(commands),
@@ -1778,7 +1778,7 @@ fn void? trusted_tracking_draw_indirect(
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
     uint draw_count,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedIndirectDraw draw = lower_indirect_draw(
         commands:       commands,
         vertex_root:    vertex_root,
@@ -1813,7 +1813,7 @@ fn void? checked_tracking_draw_indirect(
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
     uint draw_count,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedIndirectDraw draw = checked_prepare_indirect_draw(
         commands:       commands,
         vertex_root:    vertex_root,
@@ -1932,7 +1932,7 @@ fn PreparedIndexedIndirectDraw? checked_prepare_indexed_indirect_draw(
 fn void? track_indexed_indirect_draw(
     gpu::internal::CommandRecord* commands,
     PreparedIndexedIndirectDraw* draw,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[2] references = {
@@ -2007,7 +2007,7 @@ fn void? trusted_tracking_draw_indexed_indirect(
     uint draw_count,
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedIndexedIndirectDraw draw = lower_indexed_indirect_draw(
         commands:       commands,
         vertex_root:    vertex_root,
@@ -2058,7 +2058,7 @@ fn void? checked_tracking_draw_indexed_indirect(
     uint draw_count,
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedIndexedIndirectDraw draw =
         checked_prepare_indexed_indirect_draw(
             commands:       commands,
@@ -2193,7 +2193,7 @@ fn PreparedIndexedIndirectCountDraw? checked_prepare_indexed_indirect_count_draw
 fn void? track_indexed_indirect_count_draw(
     gpu::internal::CommandRecord* commands,
     PreparedIndexedIndirectCountDraw* draw,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[3] references = {
@@ -2280,7 +2280,7 @@ fn void? trusted_tracking_draw_indexed_indirect_count(
     uint max_draw_count,
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedIndexedIndirectCountDraw draw =
         lower_indexed_indirect_count_draw(
             commands:       commands,
@@ -2336,7 +2336,7 @@ fn void? checked_tracking_draw_indexed_indirect_count(
     uint max_draw_count,
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedIndexedIndirectCountDraw draw =
         checked_prepare_indexed_indirect_count_draw(
             commands:       commands,
@@ -2466,7 +2466,7 @@ fn PreparedGeneratedDraw? checked_prepare_generated_draw(
 fn void? track_generated_draw(
     gpu::internal::CommandRecord* commands,
     PreparedGeneratedDraw* draw,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[2] references = {
@@ -2524,7 +2524,7 @@ fn void? trusted_tracking_draw_generated(
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedGeneratedDraw draw = lower_generated_draw(
         commands:       commands,
         records:        records,
@@ -2563,7 +2563,7 @@ fn void? checked_tracking_draw_generated(
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedGeneratedDraw draw = checked_prepare_generated_draw(
         commands:       commands,
         records:        records,
@@ -2691,7 +2691,7 @@ fn PreparedGeneratedIndexedDraw? checked_prepare_generated_indexed_draw(
 fn void? track_generated_indexed_draw(
     gpu::internal::CommandRecord* commands,
     PreparedGeneratedIndexedDraw* draw,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     VkDeviceState* state = command_device_state(commands);
     VkCommandRecord* record = backend_command(commands);
     CommandResourceReference[3] references = {
@@ -2764,7 +2764,7 @@ fn void? trusted_tracking_draw_indexed_generated(
     uint max_draw_count,
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedGeneratedIndexedDraw draw = lower_generated_indexed_draw(
         commands:       commands,
         records:        records,
@@ -2812,7 +2812,7 @@ fn void? checked_tracking_draw_indexed_generated(
     uint max_draw_count,
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     PreparedGeneratedIndexedDraw draw =
         checked_prepare_generated_indexed_draw(
             commands:       commands,
@@ -2832,4 +2832,343 @@ fn void? checked_tracking_draw_indexed_generated(
     );
     track_generated_indexed_draw(commands, &draw)!;
     record_generated_indexed_draw(commands, &draw)!;
+}
+
+fn PreparedRenderPass fast_prepare_render_pass(
+    gpu::internal::CommandRecord* record,
+    gpu::RenderPassDesc* desc,
+) @private @if($feature(GPU_FAST_COMMANDS)) {
+    VkDeviceState* state = command_device_state(record);
+    PreparedRenderPass pass = {
+        .width       = desc.width,
+        .height      = desc.height,
+        .color_count = (uint)desc.colors.len,
+        .has_depth   = desc.depth != null,
+    };
+    pass.compatibility.color_count = pass.color_count;
+    bool samples_initialized;
+    foreach (i, &target : desc.colors) {
+        AttachmentViewSlot* view =
+            &state.attachment_views.slots[target.view.index].value;
+        pass.color_slots[i] = view;
+        pass.color_handles[i] = target.view;
+        pass.compatibility.color_formats[i] = view.format;
+        if (!samples_initialized) {
+            pass.compatibility.sample_count = view.sample_count;
+            samples_initialized = true;
+        }
+        vk::RenderingAttachmentInfo* attachment = &pass.attachments[i];
+        *attachment = vk::rendering_attachment_info();
+        attachment.image_view = view.native;
+        attachment.image_layout =
+            vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
+        attachment.load_op = load_op_to_vk(target.load_op);
+        attachment.store_op = store_op_to_vk(target.store_op);
+        attachment.clear_value.color = clear_color_to_vk(
+            view.format,
+            target.clear,
+        );
+        if (target.resolve_view.is_valid()) {
+            AttachmentViewSlot* resolve =
+                &state.attachment_views
+                    .slots[target.resolve_view.index].value;
+            pass.resolve_slots[i] = resolve;
+            pass.resolve_handles[i] = target.resolve_view;
+            attachment.resolve_mode = color_resolve_mode(view.format);
+            attachment.resolve_image_view = resolve.native;
+            attachment.resolve_image_layout =
+                vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
+        }
+    }
+    if (desc.depth != null) {
+        AttachmentViewSlot* depth =
+            &state.attachment_views.slots[desc.depth.view.index].value;
+        pass.depth_view = depth;
+        pass.depth_handle = desc.depth.view;
+        pass.compatibility.depth_format = depth.format;
+        if (!samples_initialized) {
+            pass.compatibility.sample_count = depth.sample_count;
+        }
+        pass.depth_attachment = vk::rendering_attachment_info();
+        pass.depth_attachment.image_view = depth.native;
+        pass.depth_attachment.image_layout =
+            vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        pass.depth_attachment.load_op = load_op_to_vk(desc.depth.load_op);
+        pass.depth_attachment.store_op = store_op_to_vk(desc.depth.store_op);
+        pass.depth_attachment.clear_value.depth_stencil = {
+            .depth   = desc.depth.clear.depth,
+            .stencil = 0,
+        };
+    }
+    return pass;
+}
+
+fn LoweredGraphicsState fast_lower_graphics_state(
+    gpu::GraphicsState* state,
+) @private @if($feature(GPU_FAST_COMMANDS)) {
+    return {
+        .viewport = lower_viewport(&state.viewport),
+        .scissor  = lower_scissor(&state.scissor),
+        .raster   = state.raster,
+        .depth    = state.depth,
+    };
+}
+
+fn void fast_cmd_begin_render_pass(
+    gpu::internal::CommandRecord* record,
+    gpu::RenderPassDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    PreparedRenderPass pass = fast_prepare_render_pass(record, desc);
+    record_render_pass(record, &pass);
+}
+
+fn void fast_cmd_begin_render_pass_with_state(
+    gpu::internal::CommandRecord* record,
+    gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    PreparedRenderPass pass = fast_prepare_render_pass(record, desc);
+    LoweredGraphicsState graphics = fast_lower_graphics_state(state);
+    record_render_pass_with_state(record, &pass, &graphics);
+    backend_command(record).graphics_state_initialized = true;
+}
+
+fn void fast_cmd_set_depth_state(
+    gpu::internal::CommandRecord* record,
+    gpu::DepthState* depth,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    emit_depth_state(record, depth);
+}
+
+fn void fast_cmd_set_raster_state(
+    gpu::internal::CommandRecord* record,
+    gpu::DynamicRasterState* raster,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    emit_raster_state(record, raster);
+}
+
+fn void fast_cmd_set_viewport(
+    gpu::internal::CommandRecord* record,
+    gpu::Viewport* viewport,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    vk::Viewport native = lower_viewport(viewport);
+    emit_viewport(record, &native);
+}
+
+fn void fast_cmd_set_scissor(
+    gpu::internal::CommandRecord* record,
+    gpu::ScissorRect* scissor,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    vk::Rect2D native = lower_scissor(scissor);
+    emit_scissor(record, &native);
+}
+
+fn void fast_cmd_set_graphics_state(
+    gpu::internal::CommandRecord* record,
+    gpu::GraphicsState* state,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    LoweredGraphicsState graphics = fast_lower_graphics_state(state);
+    emit_graphics_state(record, &graphics);
+    backend_command(record).graphics_state_initialized = true;
+}
+
+fn void fast_cmd_end_render_pass(
+    gpu::internal::CommandRecord* record,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkCommandRecord* backend = backend_command(record);
+    vk::cmd_end_rendering(backend.command_buffer);
+    gpu::internal::note_command_native_call();
+    backend.active_render = {};
+    backend.root.state = gpu::internal::CommandState.RECORDING;
+}
+
+fn void fast_cmd_draw(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    record_draw(
+        commands:       record,
+        pipeline:       &backend_command(record).logical_pipeline,
+        vertex_root:    vertex_root,
+        fragment_root:  fragment_root,
+        vertex_count:   vertex_count,
+        instance_count: instance_count,
+    );
+}
+
+fn void fast_cmd_draw_indexed(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    gpu::IndexType index_type,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkCommandRecord* backend = backend_command(record);
+    PreparedIndexedDraw draw = {
+        .pipeline       = backend.logical_pipeline,
+        .index          = fast_resolve_span(
+            command_device_state(record),
+            &index_span,
+        ),
+        .index_span     = index_span,
+        .vertex_root    = vertex_root,
+        .fragment_root  = fragment_root,
+        .index_count    = index_count,
+        .instance_count = instance_count,
+        .index_type     = index_type,
+    };
+    record_indexed_draw(record, &draw);
+}
+
+fn void fast_cmd_draw_indirect(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkCommandRecord* backend = backend_command(record);
+    PreparedIndirectDraw draw = {
+        .pipeline      = backend.logical_pipeline,
+        .args          = fast_resolve_span(
+            command_device_state(record),
+            &args,
+        ),
+        .args_span     = args,
+        .vertex_root   = vertex_root,
+        .fragment_root = fragment_root,
+        .draw_count    = draw_count,
+    };
+    record_indirect_draw(record, &draw);
+}
+
+fn void fast_cmd_draw_indexed_indirect(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkCommandRecord* backend = backend_command(record);
+    VkDeviceState* state = command_device_state(record);
+    PreparedIndexedIndirectDraw draw = {
+        .pipeline      = backend.logical_pipeline,
+        .args          = fast_resolve_span(state, &args),
+        .index         = fast_resolve_span(state, &index_span),
+        .args_span     = args,
+        .index_span    = index_span,
+        .vertex_root   = vertex_root,
+        .fragment_root = fragment_root,
+        .draw_count    = draw_count,
+        .index_type    = index_type,
+    };
+    record_indexed_indirect_draw(record, &draw);
+}
+
+fn void fast_cmd_draw_indexed_indirect_count(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    VkCommandRecord* backend = backend_command(record);
+    VkDeviceState* state = command_device_state(record);
+    PreparedIndexedIndirectCountDraw draw = {
+        .pipeline       = backend.logical_pipeline,
+        .args           = fast_resolve_span(state, &args),
+        .count          = fast_resolve_span(state, &count_span),
+        .index          = fast_resolve_span(state, &index_span),
+        .args_span      = args,
+        .count_span     = count_span,
+        .index_span     = index_span,
+        .vertex_root    = vertex_root,
+        .fragment_root  = fragment_root,
+        .max_draw_count = max_draw_count,
+        .index_type     = index_type,
+    };
+    record_indexed_indirect_count_draw(record, &draw);
+}
+
+fn void? fast_cmd_draw_generated(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    if (max_draw_count == 0) return;
+    VkDeviceState* state = command_device_state(record);
+    VkCommandRecord* backend = backend_command(record);
+    BoundPipeline* pipeline = &backend.logical_pipeline;
+    ResolvedSpan lowered_records = fast_resolve_span(state, &records);
+    ResolvedSpan lowered_count = fast_resolve_span(state, &count_span);
+    GeneratedPreprocessBuffer* preprocess =
+        fast_acquire_generated_preprocess_buffer(
+            state:     state,
+            record:    backend,
+            pipeline:  pipeline.handle,
+            kind:      gpu::GeneratedWorkKind.DRAW,
+            max_count: max_draw_count,
+        )!;
+    emit_generated_work(
+        state:         state,
+        record:        backend,
+        pipeline:      pipeline,
+        kind:          gpu::GeneratedWorkKind.DRAW,
+        layout:        state.generated_draw_layout,
+        shader_stages: generated_graphics_shader_stages(),
+        records:       &lowered_records,
+        count:         &lowered_count,
+        max_count:     max_draw_count,
+        preprocess:    preprocess,
+    );
+}
+
+fn void? fast_cmd_draw_indexed_generated(
+    gpu::internal::CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    if (max_draw_count == 0) return;
+    VkDeviceState* state = command_device_state(record);
+    VkCommandRecord* backend = backend_command(record);
+    BoundPipeline* pipeline = &backend.logical_pipeline;
+    ResolvedSpan lowered_records = fast_resolve_span(state, &records);
+    ResolvedSpan lowered_count = fast_resolve_span(state, &count_span);
+    ResolvedSpan lowered_index = fast_resolve_span(state, &index_span);
+    GeneratedPreprocessBuffer* preprocess =
+        fast_acquire_generated_preprocess_buffer(
+            state:     state,
+            record:    backend,
+            pipeline:  pipeline.handle,
+            kind:      gpu::GeneratedWorkKind.DRAW_INDEXED,
+            max_count: max_draw_count,
+        )!;
+    emit_generated_work(
+        state:         state,
+        record:        backend,
+        pipeline:      pipeline,
+        kind:          gpu::GeneratedWorkKind.DRAW_INDEXED,
+        layout:        state.generated_indexed_draw_layout,
+        shader_stages: generated_graphics_shader_stages(),
+        records:       &lowered_records,
+        count:         &lowered_count,
+        max_count:     max_draw_count,
+        preprocess:    preprocess,
+        index_span:    &lowered_index,
+        index_type:    index_type,
+    );
 }

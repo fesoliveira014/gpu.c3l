@@ -234,13 +234,76 @@ def structural_table_errors(
     return errors
 
 
+def fast_profile_errors(root: Path) -> list[str]:
+    public_path = root / "gpu" / "gpu.c3"
+    internal_device_path = root / "gpu" / "internal" / "device.c3"
+    device_path = root / "gpu" / "internal" / "vk" / "device.c3"
+    if (
+        not public_path.exists()
+        or not internal_device_path.exists()
+        or not device_path.exists()
+    ):
+        return []
+    try:
+        public_source = mask_non_code(public_path.read_text(encoding="utf-8"))
+        internal_device_source = mask_non_code(
+            internal_device_path.read_text(encoding="utf-8")
+        )
+        device_source = mask_non_code(device_path.read_text(encoding="utf-8"))
+    except OSError as error:
+        return [str(error)]
+    if "GPU_FAST_COMMANDS" not in public_source:
+        return []
+
+    errors = []
+    declarations = list(COMMAND_OPS_DECLARATION.finditer(
+        internal_device_source
+    ))
+    if len(declarations) == 1:
+        declaration = declarations[0].group(0)
+        if "@if(!$feature(GPU_FAST_COMMANDS))" not in re.sub(
+            r"\s+",
+            "",
+            declaration,
+        ):
+            errors.append("CommandOps must be compiled out of FAST")
+
+    for declaration in TABLE_DECLARATION.finditer(device_source):
+        prefix = device_source[declaration.start():device_source.find(
+            "{",
+            declaration.start(),
+        )]
+        if "@if(!$feature(GPU_FAST_COMMANDS))" not in re.sub(
+            r"\s+",
+            "",
+            prefix,
+        ):
+            errors.append(
+                f"{declaration.group(1)} must be compiled out of FAST"
+            )
+
+    fast_wrapper = re.compile(
+        r"\bfn\s+void\??\s+cmd_[a-z0-9_]+\s*\("
+        r"(?:(?!\n\s*fn\b).)*?\)\s*"
+        r"@if\(\$feature\(GPU_FAST_COMMANDS\)\)\s*\{",
+        re.DOTALL,
+    )
+    for declaration in fast_wrapper.finditer(public_source):
+        start = public_source.find("{", declaration.start())
+        end = matching_delimiter(public_source, start, "{", "}")
+        if ".ops" in public_source[start:end]:
+            errors.append("FAST public command wrapper reaches CommandOps")
+            break
+    return errors
+
+
 def check(root: Path = ROOT) -> list[str]:
     try:
         fields = command_ops_fields(root)
         tables = command_tables(root)
     except (OSError, ValueError) as error:
         return [str(error)]
-    return structural_table_errors(fields, tables)
+    return structural_table_errors(fields, tables) + fast_profile_errors(root)
 
 
 def main() -> int:

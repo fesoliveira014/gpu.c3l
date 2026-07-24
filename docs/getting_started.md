@@ -71,7 +71,12 @@ own `lib/` for the bindings it vendors:
   "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
   "output": "build",
   "targets": {
-    "hello_gpu": {
+    "hello_gpu_fast": {
+      "type": "executable",
+      "features": [ "GPU_FAST_COMMANDS", "DIRECT_COMMAND_TOKENS" ],
+      "sources": [ "src/main.c3" ]
+    },
+    "hello_gpu_checked": {
       "type": "executable",
       "sources": [ "src/main.c3" ]
     }
@@ -192,7 +197,12 @@ fn int main() {
 }
 
 fn void? run() {
-    gpu::RuntimeDesc runtime_desc = gpu::full_validation_runtime_desc();
+    gpu::RuntimeDesc runtime_desc;
+    $if $feature(GPU_FAST_COMMANDS):
+        runtime_desc.backend = gpu::BackendKind.VULKAN;
+    $else
+        runtime_desc = gpu::full_validation_runtime_desc();
+    $endif
     runtime_desc.application_name = "hello_gpu";
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer (void)gpu::destroy_runtime(&runtime);
@@ -290,17 +300,30 @@ fn void? run_compute(
     defer (void)gpu::destroy_command_allocator(&allocator);
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!;
     defer (void)gpu::discard_commands(&cmd);
-    gpu::cmd_bind_pipeline(&cmd, pipeline)!;
-    gpu::cmd_dispatch(
-        commands: &cmd,
-        root:     root_address,
-        groups:   { (COUNT + 63) / 64, 1, 1 },
-    )!;
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_bind_pipeline(&cmd, pipeline);
+        gpu::cmd_dispatch(
+            commands: &cmd,
+            root:     root_address,
+            groups:   { (COUNT + 63) / 64, 1, 1 },
+        );
+    $else
+        gpu::cmd_bind_pipeline(&cmd, pipeline)!;
+        gpu::cmd_dispatch(
+            commands: &cmd,
+            root:     root_address,
+            groups:   { (COUNT + 63) / 64, 1, 1 },
+        )!;
+    $endif
     gpu::Barrier to_host = {
         .before = { .compute = true },
         .after  = { .host = true },
     };
-    gpu::cmd_barrier(&cmd, &to_host)!;
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_barrier(&cmd, &to_host);
+    $else
+        gpu::cmd_barrier(&cmd, &to_host)!;
+    $endif
     gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!;
     defer (void)gpu::discard_executable_commands(&executable);
 
@@ -353,6 +376,13 @@ resource. Every policy still protects host pointer/slice/range access, integer
 overflow, command state and internal tables, public device ownership, Vulkan
 result handling, and creation rollback. A callback or debug names can be added
 to either configuration without enabling checks, tracking, or layers.
+
+Build `hello_gpu_fast` for the static ordinary command surface shown above;
+generated commands and lifecycle/resource operations still propagate faults.
+Build `hello_gpu_checked` for deterministic command misuse diagnostics.
+Requesting `FULL` or tracking in the FAST artifact returns `INVALID_ARGUMENT`
+before backend initialization; runtime policy never upgrades a FAST build into
+CHECKED.
 
 ## 6. Where to go next
 

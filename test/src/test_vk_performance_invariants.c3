@@ -19,8 +19,10 @@ const ulong PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
 
 fn gpu::Device make_performance_invariant_device() {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
-        .application_name = "gpu_performance_invariants",
+        .backend                  = gpu::BackendKind.VULKAN,
+        .contract_validation      = gpu::ContractValidation.TRUSTED,
+        .track_resource_lifetimes = false,
+        .application_name         = "gpu_performance_invariants",
     };
     return create_test_device(&desc)!!;
 }
@@ -128,7 +130,7 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
 
     gpu::CommandList warmup = gpu::begin_commands(&allocator)!!;
     bind_test_compute_pipeline(&warmup, pipeline);
-    gpu::cmd_dispatch(
+    record_test_dispatch(
         commands: &warmup,
         root:     test_span_address(&device, root.span),
         groups:   { 1, 1, 1 },
@@ -150,10 +152,27 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     bind_test_compute_pipeline(&commands, pipeline);
     gpu::CommandResolutionStats after_bind =
         gpu::command_resolution_stats();
-    assert_warm_command_resolution(after_bind, 1, 1);
+    ulong expected_bind_pipeline_lookups;
+    $if $feature(GPU_FAST_COMMANDS):
+        expected_bind_pipeline_lookups = 0;
+    $else
+        expected_bind_pipeline_lookups = 1;
+    $endif
+    assert_warm_command_resolution(
+        after_bind,
+        1,
+        expected_bind_pipeline_lookups,
+    );
     assert(after_bind.pipeline_bind_commands == 1,
         "the first compute bind emits one native pipeline bind");
     assert_strict_heap_bind_work(state, after_bind, 1);
+    ulong expected_bind_native_commands =
+        state.strict_heap.implementation
+            == vk::VkHeapImplementation.DESCRIPTOR_INDEXING
+        ? 2
+        : 3;
+    assert(after_bind.native_commands == expected_bind_native_commands,
+        "pipeline bind emits the exact native pipeline and heap commands");
     gpu::PipelineHandle[PERFORMANCE_PIPELINE_CHURN_COUNT] churned_pipelines;
     for (uint i = 0; i < churned_pipelines.len; i++) {
         churned_pipelines[i] = gpu::create_compute_pipeline(
@@ -208,7 +227,7 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
         bound_cell.value.entry = alternate_cell.value.entry;
         bound_cell.generation = pipeline.generation + 1;
         bound_cell.used = false;
-        gpu::cmd_dispatch(
+        record_test_dispatch(
             commands: &commands,
             root:     test_span_address(&device, root.span),
             groups:   { 1, 1, 1 },
@@ -320,17 +339,21 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
             .access = { .read, .write },
         },
     };
-    gpu::cmd_texture_barrier(&warmup, &transition)!!;
-    gpu::cmd_begin_render_pass_with_state(&warmup, &pass, &graphics)!!;
+    record_test_texture_barrier(&warmup, &transition)!!;
+    record_test_begin_render_pass_with_state(
+        &warmup,
+        &pass,
+        &graphics,
+    )!!;
     bind_test_graphics_pipeline(&warmup, pipeline);
-    gpu::cmd_draw(
+    record_test_draw(
         commands:       &warmup,
         vertex_root:    (gpu::GpuAddress)1,
         fragment_root:  (gpu::GpuAddress)1,
         vertex_count:   3,
         instance_count: 1,
     )!!;
-    gpu::cmd_end_render_pass(&warmup)!!;
+    record_test_end_render_pass(&warmup)!!;
     gpu::ExecutableCommandList warmup_executable =
         gpu::end_commands(&warmup)!!;
     gpu::discard_executable_commands(&warmup_executable)!!;
@@ -344,9 +367,9 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     );
     ulong pipelines_before = vk::pipeline_native_create_count(state);
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    bind_test_graphics_pipeline(&commands, pipeline);
     gpu::reset_command_resolution_stats();
-    gpu::cmd_set_graphics_state(&commands, &graphics)!!;
+    record_test_graphics_state(&commands, &graphics)!!;
     gpu::CommandResolutionStats after_state =
         gpu::command_resolution_stats();
     assert_warm_command_resolution(after_state, 1);
@@ -354,13 +377,13 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
             == PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS,
         "complete graphics state emits exactly ten native commands");
     gpu::reset_command_resolution_stats();
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    record_test_begin_render_pass(&commands, &pass)!!;
     gpu::CommandResolutionStats after_begin =
         gpu::command_resolution_stats();
     assert_warm_command_resolution(after_begin, 1);
     assert(after_begin.native_commands == PERFORMANCE_BEGIN_NATIVE_COMMANDS,
         "minimal render-pass begin emits one native command");
-    gpu::cmd_draw(
+    record_test_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
         fragment_root:  (gpu::GpuAddress)1,
@@ -379,7 +402,7 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
             == after_begin.pipeline_cache_lookups,
         "draw performs no additional pipeline resolution");
     for (uint i = 1; i < PERFORMANCE_DRAW_COUNT; i++) {
-        gpu::cmd_draw(
+        record_test_draw(
             commands:       &commands,
             vertex_root:    (gpu::GpuAddress)1,
             fragment_root:  (gpu::GpuAddress)1,
@@ -399,7 +422,7 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         && resolution.pipeline_cache_lookups
             == after_begin.pipeline_cache_lookups,
         "N draws perform no additional pipeline resolution");
-    gpu::cmd_end_render_pass(&commands)!!;
+    record_test_end_render_pass(&commands)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::internal::RecordingWorkCounters after =
         vk::command_recording_work_counters(state);
@@ -427,19 +450,19 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
             vk::pipeline_shader_module_create_count(state);
         ulong reuse_pipelines_before = vk::pipeline_native_create_count(state);
         gpu::CommandList reuse = gpu::begin_commands(&allocator)!!;
-        gpu::cmd_bind_pipeline(&reuse, pipeline)!!;
+        bind_test_graphics_pipeline(&reuse, pipeline);
         gpu::reset_command_resolution_stats();
-        gpu::cmd_set_graphics_state(&reuse, &graphics)!!;
+        record_test_graphics_state(&reuse, &graphics)!!;
         for (uint i = 0; i < pass_count; i++) {
-            gpu::cmd_begin_render_pass(&reuse, &pass)!!;
-            gpu::cmd_draw(
+            record_test_begin_render_pass(&reuse, &pass)!!;
+            record_test_draw(
                 commands:       &reuse,
                 vertex_root:    (gpu::GpuAddress)1,
                 fragment_root:  (gpu::GpuAddress)1,
                 vertex_count:   0,
                 instance_count: 0,
             )!!;
-            gpu::cmd_end_render_pass(&reuse)!!;
+            record_test_end_render_pass(&reuse)!!;
         }
         gpu::CommandResolutionStats reuse_stats =
             gpu::command_resolution_stats();
@@ -451,8 +474,8 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
                 == PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS
                     + (ulong)pass_count * 4,
             "many passes reuse one complete graphics-state packet");
-        gpu::cmd_set_graphics_state(&reuse, &graphics)!!;
-        gpu::cmd_set_viewport(&reuse, &graphics.viewport)!!;
+        record_test_graphics_state(&reuse, &graphics)!!;
+        record_test_viewport(&reuse, &graphics.viewport)!!;
         gpu::CommandResolutionStats replacement_stats =
             gpu::command_resolution_stats();
         assert_warm_command_resolution(

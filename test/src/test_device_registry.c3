@@ -670,7 +670,8 @@ gpu::internal::BackendVTable blocking_operation_vtable = {
     .get_memory_stats     = &blocking_get_memory_stats,
 };
 
-gpu::internal::CommandOps command_pin_ops = {
+gpu::internal::CommandOps command_pin_ops
+    @if(!$feature(GPU_FAST_COMMANDS)) = {
     .copy_buffer                 = &command_pin_copy_buffer,
     .fill_buffer                 = &command_pin_fill_buffer,
     .copy_buffer_to_texture      = &command_pin_copy_buffer_to_texture,
@@ -700,6 +701,11 @@ gpu::internal::CommandOps command_pin_ops = {
     .end_label                   = &command_pin_end_label,
 };
 
+const gpu::internal::CommandOps* COMMAND_PIN_OPS
+    @if($feature(GPU_FAST_COMMANDS)) = null;
+const gpu::internal::CommandOps* COMMAND_PIN_OPS
+    @if(!$feature(GPU_FAST_COMMANDS)) = &command_pin_ops;
+
 gpu::internal::BackendVTable command_pin_vtable = {
     .destroy_device            = &command_pin_device_destroy,
     .create_command_allocator  = &command_pin_create_allocator,
@@ -711,7 +717,7 @@ gpu::internal::BackendVTable command_pin_vtable = {
     .end_commands              = &command_pin_end,
     .discard_commands          = &command_pin_discard,
     .submit                    = &command_pin_submit,
-    .command_ops               = &command_pin_ops,
+    .command_ops               = COMMAND_PIN_OPS,
 };
 
 fn gpu::CommandList? begin_command_pin(gpu::Device* device) {
@@ -750,7 +756,8 @@ fn int device_operation_worker(void* raw_args) {
     return args.failed ? 1 : 0;
 }
 
-fn int stale_command_worker(void* raw_args) {
+fn int stale_command_worker(void* raw_args)
+    @if(!$feature(GPU_FAST_COMMANDS)) {
     StaleCommandWorkerArgs* args = (StaleCommandWorkerArgs*)raw_args;
     gpu::Barrier barrier = {
         .before = { .compute = true },
@@ -993,7 +1000,8 @@ fn void incomplete_command_allocator_vtable_fails_safely() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void command_calls_borrow_the_lifetime_pin() @test {
+fn void command_calls_borrow_the_lifetime_pin()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1041,7 +1049,8 @@ fn void command_calls_borrow_the_lifetime_pin() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void warm_command_dispatch_skips_resolution_paths() @test {
+fn void warm_command_dispatch_skips_resolution_paths()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1065,8 +1074,10 @@ fn void warm_command_dispatch_skips_resolution_paths() @test {
         "warm recording does not borrow or acquire a device pin");
     assert(stats.lifecycle_vtable_dispatches == 0,
         "warm recording does not load lifecycle dispatch");
-    assert(stats.command_table_lookups == 0,
-        "warm recording does not resolve the backend command table");
+    assert(stats.command_table_lookups == 1
+        && stats.command_table_indirect_loads == 1
+        && stats.command_table_indirect_calls == 1,
+        "CHECKED warm recording dispatches once through CommandOps");
     assert(stats.pipeline_table_lookups == 0
         && stats.pipeline_cache_lookups == 0,
         "a warm barrier performs no pipeline resolution");
@@ -1083,7 +1094,8 @@ fn void warm_command_dispatch_skips_resolution_paths() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void malformed_command_cell_selectors_are_rejected() @test {
+fn void malformed_command_cell_selectors_are_rejected()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1119,7 +1131,8 @@ fn void malformed_command_cell_selectors_are_rejected() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void recording_alias_is_rejected_after_end_phase_transition() @test {
+fn void recording_alias_is_rejected_after_end_phase_transition()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1142,7 +1155,8 @@ fn void recording_alias_is_rejected_after_end_phase_transition() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void failed_command_lifecycle_preserves_record_state() @test {
+fn void failed_command_lifecycle_preserves_record_state()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture = {
         .reject_discard = true,
         .reject_end     = true,
@@ -1177,7 +1191,8 @@ fn void failed_command_lifecycle_preserves_record_state() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void executable_alias_of_recording_token_faults_command_state() @test {
+fn void executable_alias_of_recording_token_faults_command_state()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1198,7 +1213,8 @@ fn void executable_alias_of_recording_token_faults_command_state() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void failed_record_publication_rolls_back_begin() @test {
+fn void failed_record_publication_rolls_back_begin()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::internal::BackendVTable missing_ops = command_pin_vtable;
     missing_ops.command_ops = null;
@@ -1228,7 +1244,8 @@ fn void failed_record_publication_rolls_back_begin() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void missing_backend_publication_pointers_roll_back_begin() @test {
+fn void missing_backend_publication_pointers_roll_back_begin()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     for (uint i = 0; i < 2; i++) {
         CommandPinFixture fixture = {
             .return_null_backend_state   = i == 0,
@@ -1260,7 +1277,8 @@ fn void missing_backend_publication_pointers_roll_back_begin() @test {
     }
 }
 
-fn void registration_accepts_per_device_command_operations() @test {
+fn void registration_accepts_per_device_command_operations()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::internal::BackendVTable missing_ops = command_pin_vtable;
     missing_ops.command_ops = null;
@@ -1279,7 +1297,8 @@ fn void registration_accepts_per_device_command_operations() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void failed_submit_preserves_command_lifetime_pins() @test {
+fn void failed_submit_preserves_command_lifetime_pins()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture = { .submit_busy = true };
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1324,7 +1343,8 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void device_loss_after_backend_submit_still_consumes_every_token() @test {
+fn void device_loss_after_backend_submit_still_consumes_every_token()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture = { .lose_during_submit = true };
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1359,7 +1379,8 @@ fn void device_loss_after_backend_submit_still_consumes_every_token() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
+fn void duplicate_backend_discard_cannot_underflow_command_accounting()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1385,7 +1406,8 @@ fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void command_record_is_not_reused_before_discard_returns() @test {
+fn void command_record_is_not_reused_before_discard_returns()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture = {
         .block_discard       = true,
         .reuse_command_index = true,
@@ -1423,7 +1445,8 @@ fn void command_record_is_not_reused_before_discard_returns() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void lost_commands_can_be_discarded() @test {
+fn void lost_commands_can_be_discarded()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1463,7 +1486,8 @@ fn void lost_commands_can_be_discarded() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void lost_executable_commands_can_be_discarded() @test {
+fn void lost_executable_commands_can_be_discarded()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1490,7 +1514,8 @@ fn void lost_executable_commands_can_be_discarded() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void stale_commands_cannot_borrow_unrelated_lifetime_pins() @test {
+fn void stale_commands_cannot_borrow_unrelated_lifetime_pins()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture = {
         .reject_command = true,
     };
@@ -1524,7 +1549,8 @@ fn void stale_commands_cannot_borrow_unrelated_lifetime_pins() @test {
         "a stale alias retains no device lifetime pin");
 }
 
-fn void forged_command_owners_cannot_borrow_lifetime_pins() @test {
+fn void forged_command_owners_cannot_borrow_lifetime_pins()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -1550,7 +1576,8 @@ fn void forged_command_owners_cannot_borrow_lifetime_pins() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void stale_command_generation_cannot_borrow_reused_slot_pin() @test {
+fn void stale_command_generation_cannot_borrow_reused_slot_pin()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     CommandPinFixture fixture = {
         .reject_command      = true,
         .reuse_command_index = true,

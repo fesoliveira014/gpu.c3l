@@ -344,9 +344,14 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
     gpu::internal::command_retained_pin_operations.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_lifecycle_vtable_dispatches.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_table_lookups.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_table_indirect_loads.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_table_indirect_calls.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_policy_selections.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_contract_branches.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_tracking_branches.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_public_misuse_faults.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_recording_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_native_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_bind_commands.store(0, AtomicOrdering.RELAXED);
@@ -372,6 +377,12 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
         .command_table_lookups = gpu::internal::command_table_lookups.load(
             AtomicOrdering.RELAXED,
         ),
+        .command_table_indirect_loads = gpu::internal::command_table_indirect_loads.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .command_table_indirect_calls = gpu::internal::command_table_indirect_calls.load(
+            AtomicOrdering.RELAXED,
+        ),
         .pipeline_table_lookups = gpu::internal::command_pipeline_table_lookups.load(
             AtomicOrdering.RELAXED,
         ),
@@ -379,6 +390,15 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
             AtomicOrdering.RELAXED,
         ),
         .command_policy_selections = gpu::internal::command_policy_selections.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .contract_branches = gpu::internal::command_contract_branches.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .tracking_branches = gpu::internal::command_tracking_branches.load(
+            AtomicOrdering.RELAXED,
+        ),
+        .public_misuse_faults = gpu::internal::command_public_misuse_faults.load(
             AtomicOrdering.RELAXED,
         ),
         .recording_commands = gpu::internal::command_recording_commands.load(
@@ -546,16 +566,40 @@ fn String? build_memory_report(Device* device, bool detailed) {
 <* Open a debug-utils label region; a no-op when the extension is absent.
    Valid while recording, including inside render passes; balance is the
    caller's responsibility. *>
-fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
+fn void cmd_begin_label(
+    CommandList* commands,
+    ZString label,
+    float[4] color = {},
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_begin_label(
+        gpu::internal::fast_command_record(commands),
+        label,
+        color,
+    );
+}
+
+fn void? cmd_begin_label(
+    CommandList* commands,
+    ZString label,
+    float[4] color = {},
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (label == null) return INVALID_ARGUMENT~;
-    return record.ops.begin_label(record, label, color);
+    return gpu::internal::recording_command_ops(record).begin_label(record, label, color);
 }
 
 <* Counterpart of cmd_begin_label. *>
-fn void? cmd_end_label(CommandList* commands) {
+fn void cmd_end_label(CommandList* commands) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_end_label(
+        gpu::internal::fast_command_record(commands),
+    );
+}
+
+fn void? cmd_end_label(
+    CommandList* commands,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.end_label(record);
+    return gpu::internal::recording_command_ops(record).end_label(record);
 }
 
 <* Allocate caller-managed GPU storage. Free with `free_allocation`. *>
@@ -1227,102 +1271,286 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
 }
 
 <* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>
-fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
+fn void cmd_copy_buffer(
+    CommandList* commands,
+    BufferCopyDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_copy_buffer(
+        gpu::internal::fast_command_record(commands),
+        desc,
+    );
+}
+
+fn void? cmd_copy_buffer(
+    CommandList* commands,
+    BufferCopyDesc* desc,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.copy_buffer(record, desc);
+    return gpu::internal::recording_command_ops(record).copy_buffer(record, desc);
 }
 
 <* Record a 32-bit-pattern fill over dst; its offset and size must be 4-byte
    multiples. *>
-fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
+fn void cmd_fill_buffer(
+    CommandList* commands,
+    GpuSpan dst,
+    uint value,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_fill_buffer(
+        gpu::internal::fast_command_record(commands),
+        dst,
+        value,
+    );
+}
+
+fn void? cmd_fill_buffer(
+    CommandList* commands,
+    GpuSpan dst,
+    uint value,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.fill_buffer(record, dst, value);
+    return gpu::internal::recording_command_ops(record).fill_buffer(record, dst, value);
 }
 
 <* The texture's effective layout must be TRANSFER_DST; the caller records
    the surrounding barriers. *>
-fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
+fn void cmd_copy_buffer_to_texture(
+    CommandList* commands,
+    BufferTextureCopyDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_copy_buffer_to_texture(
+        gpu::internal::fast_command_record(commands),
+        desc,
+    );
+}
+
+fn void? cmd_copy_buffer_to_texture(
+    CommandList* commands,
+    BufferTextureCopyDesc* desc,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.copy_buffer_to_texture(record, desc);
+    return gpu::internal::recording_command_ops(record).copy_buffer_to_texture(record, desc);
 }
 
 <* The texture's effective layout must be TRANSFER_SRC. *>
-fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
+fn void cmd_copy_texture_to_buffer(
+    CommandList* commands,
+    TextureBufferCopyDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_copy_texture_to_buffer(
+        gpu::internal::fast_command_record(commands),
+        desc,
+    );
+}
+
+fn void? cmd_copy_texture_to_buffer(
+    CommandList* commands,
+    TextureBufferCopyDesc* desc,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.copy_texture_to_buffer(record, desc);
+    return gpu::internal::recording_command_ops(record).copy_texture_to_buffer(record, desc);
 }
 
 <* Record a global semantic execution and memory barrier. *>
-fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
+fn void cmd_barrier(
+    CommandList* commands,
+    Barrier* barrier,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_barrier(
+        gpu::internal::fast_command_record(commands),
+        barrier,
+    );
+}
+
+fn void? cmd_barrier(
+    CommandList* commands,
+    Barrier* barrier,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
-    return record.ops.barrier(record, barrier);
+    return gpu::internal::recording_command_ops(record).barrier(record, barrier);
 }
 
 <* Record an explicit semantic texture transition. *>
-fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
+fn void cmd_texture_barrier(
+    CommandList* commands,
+    TextureBarrier* barrier,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_texture_barrier(
+        gpu::internal::fast_command_record(commands),
+        barrier,
+    );
+}
+
+fn void? cmd_texture_barrier(
+    CommandList* commands,
+    TextureBarrier* barrier,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
-    return record.ops.texture_barrier(record, barrier);
+    return gpu::internal::recording_command_ops(record).texture_barrier(record, barrier);
 }
 
 <* Bind the active compute or graphics pipeline for later execution commands.
    A failed bind leaves the previous active pipeline unchanged. *>
-fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
+fn void cmd_bind_pipeline(
+    CommandList* commands,
+    PipelineHandle pipeline,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_bind_pipeline(
+        gpu::internal::fast_command_record(commands),
+        pipeline,
+    );
+}
+
+fn void? cmd_bind_pipeline(
+    CommandList* commands,
+    PipelineHandle pipeline,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.bind_pipeline(record, pipeline);
+    return gpu::internal::recording_command_ops(record).bind_pipeline(record, pipeline);
 }
 
 <* Dispatch the active compute pipeline with a single nonzero root GPU address
    pushed at offset 0. Every allocation reachable from the root must admit the
    recording queue's role. Counts may be zero and may not exceed
    DeviceCaps.max_compute_work_group_count on any axis. *>
-fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
+fn void cmd_dispatch(
+    CommandList* commands,
+    GpuAddress root,
+    Vec3u groups,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_dispatch(
+        gpu::internal::fast_command_record(commands),
+        root,
+        groups,
+    );
+}
+
+fn void? cmd_dispatch(
+    CommandList* commands,
+    GpuAddress root,
+    Vec3u groups,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.dispatch(record, root, groups);
+    return gpu::internal::recording_command_ops(record).dispatch(record, root, groups);
 }
 
 <* Set dynamic depth state on a graphics command list before or during a pass.
    A failed update leaves the previous state unchanged. *>
-fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
+fn void cmd_set_depth_state(
+    CommandList* commands,
+    DepthState* depth,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_set_depth_state(
+        gpu::internal::fast_command_record(commands),
+        depth,
+    );
+}
+
+fn void? cmd_set_depth_state(
+    CommandList* commands,
+    DepthState* depth,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (depth == null) return INVALID_ARGUMENT~;
-    return record.ops.set_depth_state(record, depth);
+    return gpu::internal::recording_command_ops(record).set_depth_state(record, depth);
 }
 
 <* Set raster state on a graphics command list before or during a pass.
    A failed update leaves the previous state unchanged. *>
-fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
+fn void cmd_set_raster_state(
+    CommandList* commands,
+    DynamicRasterState* raster,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_set_raster_state(
+        gpu::internal::fast_command_record(commands),
+        raster,
+    );
+}
+
+fn void? cmd_set_raster_state(
+    CommandList* commands,
+    DynamicRasterState* raster,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (raster == null) return INVALID_ARGUMENT~;
-    return record.ops.set_raster_state(record, raster);
+    return gpu::internal::recording_command_ops(record).set_raster_state(record, raster);
 }
 
 <* Set one dynamic viewport on a graphics command list before or during a pass.
    Device-unrepresentable or non-finite values and zero height fault. *>
-fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
+fn void cmd_set_viewport(
+    CommandList* commands,
+    Viewport* viewport,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_set_viewport(
+        gpu::internal::fast_command_record(commands),
+        viewport,
+    );
+}
+
+fn void? cmd_set_viewport(
+    CommandList* commands,
+    Viewport* viewport,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
-    return record.ops.set_viewport(record, viewport);
+    return gpu::internal::recording_command_ops(record).set_viewport(record, viewport);
 }
 
 <* Set one dynamic scissor on a graphics command list before or during a pass.
    Negative or signed-overflowing fields fault; overscan is valid. *>
-fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
+fn void cmd_set_scissor(
+    CommandList* commands,
+    ScissorRect* scissor,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_set_scissor(
+        gpu::internal::fast_command_record(commands),
+        scissor,
+    );
+}
+
+fn void? cmd_set_scissor(
+    CommandList* commands,
+    ScissorRect* scissor,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
-    return record.ops.set_scissor(record, scissor);
+    return gpu::internal::recording_command_ops(record).set_scissor(record, scissor);
 }
 
 <* Draw inside a render pass, pushing the vertex and fragment root addresses.
    Every allocation reachable from either root must admit the recording queue's
    role. *>
-fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
+fn void cmd_draw(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_draw(
+        record:         gpu::internal::fast_command_record(commands),
+        vertex_root:    vertex_root,
+        fragment_root:  fragment_root,
+        vertex_count:   vertex_count,
+        instance_count: instance_count,
+    );
+}
+
+fn void? cmd_draw(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.draw(
+    return gpu::internal::recording_command_ops(record).draw(
         record:        record,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
@@ -1334,9 +1562,37 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
 <* Draw indexed geometry; indices are read from the start of index_span.
    Every allocation reachable from either root must admit the recording queue's
    role. *>
-fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
+fn void cmd_draw_indexed(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    IndexType index_type = IndexType.U32,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_draw_indexed(
+        record:         gpu::internal::fast_command_record(commands),
+        vertex_root:    vertex_root,
+        fragment_root:  fragment_root,
+        index_span:     index_span,
+        index_count:    index_count,
+        instance_count: instance_count,
+        index_type:     index_type,
+    );
+}
+
+fn void? cmd_draw_indexed(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    IndexType index_type = IndexType.U32,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.draw_indexed(
+    return gpu::internal::recording_command_ops(record).draw_indexed(
         record:        record,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
@@ -1353,9 +1609,31 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    against argument writes is the caller's barrier. Every allocation reachable
    from either root must admit the recording queue's role. draw_count may not
    exceed DeviceCaps.max_draw_indirect_count. *>
-fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
+fn void cmd_draw_indirect(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan args,
+    uint draw_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_draw_indirect(
+        record:        gpu::internal::fast_command_record(commands),
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+        args:          args,
+        draw_count:    draw_count,
+    );
+}
+
+fn void? cmd_draw_indirect(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan args,
+    uint draw_count,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.draw_indirect(
+    return gpu::internal::recording_command_ops(record).draw_indirect(
         record:       record,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
@@ -1369,9 +1647,37 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    out-of-bounds indices follow device robustness. draw_count may not exceed
    DeviceCaps.max_draw_indirect_count. Every allocation reachable from either
    root must admit the recording queue's role. *>
-fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
+fn void cmd_draw_indexed_indirect(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan args,
+    uint draw_count,
+    GpuSpan index_span,
+    IndexType index_type = IndexType.U32,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_draw_indexed_indirect(
+        record:        gpu::internal::fast_command_record(commands),
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+        args:          args,
+        draw_count:    draw_count,
+        index_span:    index_span,
+        index_type:    index_type,
+    );
+}
+
+fn void? cmd_draw_indexed_indirect(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan args,
+    uint draw_count,
+    GpuSpan index_span,
+    IndexType index_type = IndexType.U32,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.draw_indexed_indirect(
+    return gpu::internal::recording_command_ops(record).draw_indexed_indirect(
         record:       record,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
@@ -1387,9 +1693,40 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    The args span must hold max_draw_count entries. Requires
    DeviceCaps.draw_indirect_count. Every allocation reachable from either root
    must admit the recording queue's role. *>
-fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
+fn void cmd_draw_indexed_indirect_count(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan args,
+    GpuSpan count_span,
+    uint max_draw_count,
+    GpuSpan index_span,
+    IndexType index_type = IndexType.U32,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_draw_indexed_indirect_count(
+        record:         gpu::internal::fast_command_record(commands),
+        vertex_root:    vertex_root,
+        fragment_root:  fragment_root,
+        args:           args,
+        count_span:     count_span,
+        max_draw_count: max_draw_count,
+        index_span:     index_span,
+        index_type:     index_type,
+    );
+}
+
+fn void? cmd_draw_indexed_indirect_count(
+    CommandList* commands,
+    GpuAddress vertex_root,
+    GpuAddress fragment_root,
+    GpuSpan args,
+    GpuSpan count_span,
+    uint max_draw_count,
+    GpuSpan index_span,
+    IndexType index_type = IndexType.U32,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.draw_indexed_indirect_count(
+    return gpu::internal::recording_command_ops(record).draw_indexed_indirect_count(
         record:        record,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
@@ -1405,17 +1742,52 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    count must not exceed the corresponding
    DeviceCaps.max_compute_work_group_count component. Every allocation
    reachable from the root must admit the recording queue's role. *>
-fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args) {
+fn void cmd_dispatch_indirect(
+    CommandList* commands,
+    GpuAddress root,
+    GpuSpan args,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_dispatch_indirect(
+        gpu::internal::fast_command_record(commands),
+        root,
+        args,
+    );
+}
+
+fn void? cmd_dispatch_indirect(
+    CommandList* commands,
+    GpuAddress root,
+    GpuSpan args,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.dispatch_indirect(record, root, args);
+    return gpu::internal::recording_command_ops(record).dispatch_indirect(record, root, args);
 }
 
 <* Execute up to max_draw_count GPU-written draw records. The GPU-written uint
    at count_span selects the actual count. Ordering against producer writes is
    the caller's barrier with hazards.draw_arguments set. *>
-fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
+fn void? cmd_draw_generated(
+    CommandList* commands,
+    GpuSpan records,
+    GpuSpan count_span,
+    uint max_draw_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    return gpu::internal::vk::fast_cmd_draw_generated(
+        record:         gpu::internal::fast_command_record(commands),
+        records:        records,
+        count_span:     count_span,
+        max_draw_count: max_draw_count,
+    );
+}
+
+fn void? cmd_draw_generated(
+    CommandList* commands,
+    GpuSpan records,
+    GpuSpan count_span,
+    uint max_draw_count,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.draw_generated(
+    return gpu::internal::recording_command_ops(record).draw_generated(
         record:        record,
         records:        records,
         count_span:     count_span,
@@ -1424,9 +1796,34 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
 }
 
 <* Indexed generated-work variant. Index bounds remain GPU execution-time data. *>
-fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
+fn void? cmd_draw_indexed_generated(
+    CommandList* commands,
+    GpuSpan records,
+    GpuSpan count_span,
+    uint max_draw_count,
+    GpuSpan index_span,
+    IndexType index_type = IndexType.U32,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    return gpu::internal::vk::fast_cmd_draw_indexed_generated(
+        record:         gpu::internal::fast_command_record(commands),
+        records:        records,
+        count_span:     count_span,
+        max_draw_count: max_draw_count,
+        index_span:     index_span,
+        index_type:     index_type,
+    );
+}
+
+fn void? cmd_draw_indexed_generated(
+    CommandList* commands,
+    GpuSpan records,
+    GpuSpan count_span,
+    uint max_draw_count,
+    GpuSpan index_span,
+    IndexType index_type = IndexType.U32,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.draw_indexed_generated(
+    return gpu::internal::recording_command_ops(record).draw_indexed_generated(
         record:        record,
         records:        records,
         count_span:     count_span,
@@ -1437,9 +1834,28 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
 }
 
 <* Execute up to max_dispatch_count GPU-written dispatch records. *>
-fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
+fn void? cmd_dispatch_generated(
+    CommandList* commands,
+    GpuSpan records,
+    GpuSpan count_span,
+    uint max_dispatch_count,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    return gpu::internal::vk::fast_cmd_dispatch_generated(
+        record:             gpu::internal::fast_command_record(commands),
+        records:            records,
+        count_span:         count_span,
+        max_dispatch_count: max_dispatch_count,
+    );
+}
+
+fn void? cmd_dispatch_generated(
+    CommandList* commands,
+    GpuSpan records,
+    GpuSpan count_span,
+    uint max_dispatch_count,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.dispatch_generated(
+    return gpu::internal::recording_command_ops(record).dispatch_generated(
         record:            record,
         records:            records,
         count_span:         count_span,
@@ -1508,40 +1924,85 @@ fn GraphicsState? full_render_graphics_state(uint width, uint height) {
 }
 
 <* Begin a render pass without changing command-buffer graphics state. *>
-fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
+fn void cmd_begin_render_pass(
+    CommandList* commands,
+    RenderPassDesc* desc,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_begin_render_pass(
+        gpu::internal::fast_command_record(commands),
+        desc,
+    );
+}
+
+fn void? cmd_begin_render_pass(
+    CommandList* commands,
+    RenderPassDesc* desc,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
-    return record.ops.begin_render_pass(record, desc);
+    return gpu::internal::recording_command_ops(record).begin_render_pass(record, desc);
 }
 
 <* Begin a render pass and set complete graphics state atomically. *>
+fn void cmd_begin_render_pass_with_state(
+    CommandList* commands,
+    RenderPassDesc* desc,
+    GraphicsState* state,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_begin_render_pass_with_state(
+        gpu::internal::fast_command_record(commands),
+        desc,
+        state,
+    );
+}
+
 fn void? cmd_begin_render_pass_with_state(
     CommandList* commands,
     RenderPassDesc* desc,
     GraphicsState* state,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)
         || !gpu::internal::graphics_state_host_safe(state)) {
         return INVALID_ARGUMENT~;
     }
-    return record.ops.begin_render_pass_with_state(record, desc, state);
+    return gpu::internal::recording_command_ops(record).begin_render_pass_with_state(record, desc, state);
 }
 
 <* Replace complete state on a graphics command list before or during a pass. *>
+fn void cmd_set_graphics_state(
+    CommandList* commands,
+    GraphicsState* state,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_set_graphics_state(
+        gpu::internal::fast_command_record(commands),
+        state,
+    );
+}
+
 fn void? cmd_set_graphics_state(
     CommandList* commands,
     GraphicsState* state,
-) {
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
-    return record.ops.set_graphics_state(record, state);
+    return gpu::internal::recording_command_ops(record).set_graphics_state(record, state);
 }
 
 <* End the active render pass without adding synchronization. *>
-fn void? cmd_end_render_pass(CommandList* commands) {
+fn void cmd_end_render_pass(
+    CommandList* commands,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    gpu::internal::vk::fast_cmd_end_render_pass(
+        gpu::internal::fast_command_record(commands),
+    );
+}
+
+fn void? cmd_end_render_pass(
+    CommandList* commands,
+) @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.end_render_pass(record);
+    return gpu::internal::recording_command_ops(record).end_render_pass(record);
 }
 
 fn bool CompletionPoint.is_valid(self) => self.device.is_valid()

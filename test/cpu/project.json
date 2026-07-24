@@ -48,6 +48,48 @@
         "canonical_strict_surface.c3"
       ]
     },
+    "canonical_strict_surface_fast": {
+      "type": "object-files",
+      "features": [
+        "GPU_FAST_COMMANDS",
+        "DIRECT_COMMAND_TOKENS"
+      ],
+      "sources": [
+        "canonical_strict_surface.c3"
+      ]
+    },
+    "command_profile_surface_fast": {
+      "type": "object-files",
+      "features": [
+        "GPU_FAST_COMMANDS",
+        "DIRECT_COMMAND_TOKENS"
+      ],
+      "sources": [
+        "command_profile_surface.c3"
+      ]
+    },
+    "command_profile_surface_checked": {
+      "type": "object-files",
+      "sources": [
+        "command_profile_surface.c3"
+      ]
+    },
+    "command_profile_fast_rethrow_fail": {
+      "type": "object-files",
+      "features": [
+        "GPU_FAST_COMMANDS",
+        "DIRECT_COMMAND_TOKENS"
+      ],
+      "sources": [
+        "command_profile_fast_rethrow_fail.c3"
+      ]
+    },
+    "command_profile_checked_unhandled_fail": {
+      "type": "object-files",
+      "sources": [
+        "command_profile_checked_unhandled_fail.c3"
+      ]
+    },
     "import_surface_wayland": {
       "type": "executable",
       "sources": [
@@ -104,6 +146,16 @@
         "../src/test_workload_limits.c3"
       ]
     },
+    "runtime_profile_fast": {
+      "type": "test",
+      "features": [
+        "GPU_FAST_COMMANDS",
+        "DIRECT_COMMAND_TOKENS"
+      ],
+      "sources": [
+        "../src/test_runtime.c3"
+      ]
+    },
     "shader_abi": {
       "type": "test",
       "sources": [
@@ -112,6 +164,16 @@
     },
     "command_wrapper_bench": {
       "type": "executable",
+      "sources": [
+        "command_wrapper_bench.c3"
+      ]
+    },
+    "command_wrapper_fast_bench": {
+      "type": "executable",
+      "features": [
+        "GPU_FAST_COMMANDS",
+        "DIRECT_COMMAND_TOKENS"
+      ],
       "sources": [
         "command_wrapper_bench.c3"
       ]

@@ -34,6 +34,218 @@ struct GeneratedRequirementsCapture {
 
 GeneratedRequirementsCapture* generated_requirements_capture;
 
+fn void profile_cmd_barrier(
+    gpu::CommandList* commands,
+    gpu::Barrier* barrier,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_barrier(commands, barrier);
+    $else
+        gpu::cmd_barrier(commands, barrier)!!;
+    $endif
+}
+
+fn void profile_cmd_begin_render_pass(
+    gpu::CommandList* commands,
+    gpu::RenderPassDesc* desc,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_begin_render_pass(commands, desc);
+    $else
+        gpu::cmd_begin_render_pass(commands, desc)!!;
+    $endif
+}
+
+fn void profile_cmd_begin_render_pass_with_state(
+    gpu::CommandList* commands,
+    gpu::RenderPassDesc* desc,
+    gpu::GraphicsState* state,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_begin_render_pass_with_state(commands, desc, state);
+    $else
+        gpu::cmd_begin_render_pass_with_state(commands, desc, state)!!;
+    $endif
+}
+
+fn void profile_cmd_copy_buffer(
+    gpu::CommandList* commands,
+    gpu::BufferCopyDesc* desc,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_copy_buffer(commands, desc);
+    $else
+        gpu::cmd_copy_buffer(commands, desc)!!;
+    $endif
+}
+
+fn void profile_cmd_copy_texture_to_buffer(
+    gpu::CommandList* commands,
+    gpu::TextureBufferCopyDesc* desc,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_copy_texture_to_buffer(commands, desc);
+    $else
+        gpu::cmd_copy_texture_to_buffer(commands, desc)!!;
+    $endif
+}
+
+fn void profile_cmd_dispatch(
+    gpu::CommandList* commands,
+    gpu::GpuAddress root,
+    gpu::Vec3u groups,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_dispatch(commands, root, groups);
+    $else
+        gpu::cmd_dispatch(commands, root, groups)!!;
+    $endif
+}
+
+fn void profile_cmd_dispatch_indirect(
+    gpu::CommandList* commands,
+    gpu::GpuAddress root,
+    gpu::GpuSpan args,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_dispatch_indirect(commands, root, args);
+    $else
+        gpu::cmd_dispatch_indirect(commands, root, args)!!;
+    $endif
+}
+
+fn void profile_cmd_draw_indexed_indirect(
+    gpu::CommandList* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type = gpu::IndexType.U32,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_draw_indexed_indirect(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            args:          args,
+            draw_count:    draw_count,
+            index_span:    index_span,
+            index_type:    index_type,
+        );
+    $else
+        gpu::cmd_draw_indexed_indirect(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            args:          args,
+            draw_count:    draw_count,
+            index_span:    index_span,
+            index_type:    index_type,
+        )!!;
+    $endif
+}
+
+fn void profile_cmd_draw_indexed_indirect_count(
+    gpu::CommandList* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type = gpu::IndexType.U32,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_draw_indexed_indirect_count(
+            commands:       commands,
+            vertex_root:    vertex_root,
+            fragment_root:  fragment_root,
+            args:           args,
+            count_span:     count_span,
+            max_draw_count: max_draw_count,
+            index_span:     index_span,
+            index_type:     index_type,
+        );
+    $else
+        gpu::cmd_draw_indexed_indirect_count(
+            commands:       commands,
+            vertex_root:    vertex_root,
+            fragment_root:  fragment_root,
+            args:           args,
+            count_span:     count_span,
+            max_draw_count: max_draw_count,
+            index_span:     index_span,
+            index_type:     index_type,
+        )!!;
+    $endif
+}
+
+fn void profile_cmd_draw_indirect(
+    gpu::CommandList* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_draw_indirect(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            args:          args,
+            draw_count:    draw_count,
+        );
+    $else
+        gpu::cmd_draw_indirect(
+            commands:      commands,
+            vertex_root:   vertex_root,
+            fragment_root: fragment_root,
+            args:          args,
+            draw_count:    draw_count,
+        )!!;
+    $endif
+}
+
+fn void profile_cmd_end_render_pass(gpu::CommandList* commands) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_end_render_pass(commands);
+    $else
+        gpu::cmd_end_render_pass(commands)!!;
+    $endif
+}
+
+fn void profile_cmd_set_graphics_state(
+    gpu::CommandList* commands,
+    gpu::GraphicsState* state,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_set_graphics_state(commands, state);
+    $else
+        gpu::cmd_set_graphics_state(commands, state)!!;
+    $endif
+}
+
+fn void profile_cmd_texture_barrier(
+    gpu::CommandList* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    $if $feature(GPU_FAST_COMMANDS):
+        gpu::cmd_texture_barrier(commands, barrier);
+    $else
+        gpu::cmd_texture_barrier(commands, barrier)!!;
+    $endif
+}
+
+fn uint profile_reference_count(vk::VkCommandRecord* record) {
+    $if $feature(GPU_FAST_COMMANDS):
+        (void)record;
+        return 0;
+    $else
+        return record.scratch.reference_count;
+    $endif
+}
+
 fn void capture_generated_requirements(
     vk::Device device,
     vk::GeneratedCommandsMemoryRequirementsInfoEXT* info,
@@ -153,7 +365,7 @@ fn void record_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle target
             .access = { .read, .write },
         },
     };
-    gpu::cmd_texture_barrier(cmd, &to_attach)!!;
+    profile_cmd_texture_barrier(cmd, &to_attach);
 }
 
 fn void record_target_readback(
@@ -174,14 +386,14 @@ fn void record_target_readback(
             .access = { .read },
         },
     };
-    gpu::cmd_texture_barrier(cmd, &to_src)!!;
+    profile_cmd_texture_barrier(cmd, &to_src);
     gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = *rb_span };
-    gpu::cmd_copy_texture_to_buffer(cmd, &copy)!!;
+    profile_cmd_copy_texture_to_buffer(cmd, &copy);
     gpu::Barrier host_read = {
         .before = { .transfer = true },
         .after = { .host = true },
     };
-    gpu::cmd_barrier(cmd, &host_read)!!;
+    profile_cmd_barrier(cmd, &host_read);
 }
 
 fn char* center_pixel(gpu::Device* device, gpu::GpuSpan* rb_span) {
@@ -245,7 +457,8 @@ fn OwnedSpan alloc_empty_compute_root(
     return owned;
 }
 
-fn void caller_owned_span_crosses_compute_and_graphics_families_when_available() @test {
+fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
     if (!distinct_graphics_compute_families(&device, "same-range caller-owned span")) return;
@@ -271,11 +484,11 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
     gpu::CommandList compute = gpu::begin_commands(&compute_allocator)!!;
     defer discard_test_commands(&compute)!!;
     bind_test_compute_pipeline(&compute, pipeline);
-    gpu::cmd_dispatch_indirect(
+    profile_cmd_dispatch_indirect(
         commands: &compute,
         root:     test_span_address(&device, compute_root_owned.span),
         args:     args_owned.span,
-    )!!;
+    );
     gpu::ExecutableCommandList compute_executable = gpu::end_commands(&compute)!!;
     defer discard_test_executable(&compute_executable)!!;
     gpu::ExecutableCommandList[1] compute_lists = { compute_executable };
@@ -289,11 +502,11 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
     gpu::CommandList graphics = gpu::begin_commands(&graphics_allocator)!!;
     defer discard_test_commands(&graphics)!!;
     bind_test_compute_pipeline(&graphics, pipeline);
-    gpu::cmd_dispatch_indirect(
+    profile_cmd_dispatch_indirect(
         commands: &graphics,
         root:     test_span_address(&device, graphics_root_owned.span),
         args:     args_owned.span,
-    )!!;
+    );
     gpu::ExecutableCommandList graphics_executable = gpu::end_commands(&graphics)!!;
     defer discard_test_executable(&graphics_executable)!!;
     gpu::ExecutableCommandList[1] graphics_lists = { graphics_executable };
@@ -313,7 +526,8 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
     gpu::wait_completion(graphics_completion, ulong::max)!!;
 }
 
-fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
+fn void caller_owned_span_reuses_across_queue_families_after_wait()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::RuntimeDesc desc = {
         .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
@@ -346,11 +560,11 @@ fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     gpu::CommandList compute = gpu::begin_commands(&compute_allocator)!!;
     defer discard_test_commands(&compute)!!;
     bind_test_compute_pipeline(&compute, pipeline);
-    gpu::cmd_dispatch_indirect(
+    profile_cmd_dispatch_indirect(
         commands: &compute,
         root:     test_span_address(&device, compute_root_owned.span),
         args:     args_owned.span,
-    )!!;
+    );
     gpu::ExecutableCommandList compute_executable = gpu::end_commands(&compute)!!;
     defer discard_test_executable(&compute_executable)!!;
     gpu::ExecutableCommandList[1] compute_lists = { compute_executable };
@@ -365,11 +579,11 @@ fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     gpu::CommandList graphics = gpu::begin_commands(&graphics_allocator)!!;
     defer discard_test_commands(&graphics)!!;
     bind_test_compute_pipeline(&graphics, pipeline);
-    gpu::cmd_dispatch_indirect(
+    profile_cmd_dispatch_indirect(
         commands: &graphics,
         root:     test_span_address(&device, graphics_root_owned.span),
         args:     args_owned.span,
-    )!!;
+    );
     gpu::ExecutableCommandList graphics_executable = gpu::end_commands(&graphics)!!;
     defer discard_test_executable(&graphics_executable)!!;
     gpu::ExecutableCommandList[1] graphics_lists = { graphics_executable };
@@ -382,7 +596,8 @@ fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     gpu::wait_completion(graphics_completion)!!;
 }
 
-fn void compute_generated_indexed_indirect_draw() @test {
+fn void compute_generated_indexed_indirect_draw()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
     if (!distinct_graphics_compute_families(
@@ -522,11 +737,11 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::CommandList producer = gpu::begin_commands(&producer_allocator)!!;
     defer discard_test_commands(&producer)!!;
     bind_test_compute_pipeline(&producer, build_pipeline);
-    gpu::cmd_dispatch(
+    profile_cmd_dispatch(
         commands: &producer,
         root:     test_span_address(&device, root_span),
         groups:   { 1, 1, 1 },
-    )!!;
+    );
     gpu::ExecutableCommandList producer_executable =
         gpu::end_commands(&producer)!!;
     defer discard_test_executable(&producer_executable)!!;
@@ -545,12 +760,12 @@ fn void compute_generated_indexed_indirect_draw() @test {
         .src = args_span,
         .dst = args_readback.span,
     };
-    gpu::cmd_copy_buffer(&cmd, &args_copy)!!;
+    profile_cmd_copy_buffer(&cmd, &args_copy);
     gpu::Barrier args_host_read = {
         .before = { .transfer = true },
         .after = { .host = true },
     };
-    gpu::cmd_barrier(&cmd, &args_host_read)!!;
+    profile_cmd_barrier(&cmd, &args_host_read);
 
     record_target_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -560,17 +775,17 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+    profile_cmd_begin_render_pass_with_state(&cmd, &pass, &graphics);
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-    gpu::cmd_draw_indexed_indirect(
+    profile_cmd_draw_indexed_indirect(
         commands:      &cmd,
         vertex_root:   test_span_address(&device, verts_span),
         fragment_root: test_span_address(&device, frag_span),
         args:          args_span,
         draw_count:    1,
         index_span:    index_span,
-    )!!;
-    gpu::cmd_end_render_pass(&cmd)!!;
+    );
+    profile_cmd_end_render_pass(&cmd);
     record_target_readback(&cmd, target, &rb_span);
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
@@ -949,7 +1164,6 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             && requirements_capture.max_sequence_counts[2] == 2,
         "each reservation queries its declared maximum sequence count");
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
     gpu::CompletionPoint generated_records_ready;
     gpu::CommandAllocator producer_allocator;
     gpu::ExecutableCommandList producer_executable;
@@ -969,11 +1183,11 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         gpu::CommandList producer = gpu::begin_commands(&producer_allocator)!!;
         defer discard_test_commands(&producer)!!;
         bind_test_compute_pipeline(&producer, build_pipeline);
-        gpu::cmd_dispatch(
+        profile_cmd_dispatch(
             commands: &producer,
             root:     test_span_address(&device, build_root.span),
             groups:   { 1, 1, 1 },
-        )!!;
+        );
         producer_executable = gpu::end_commands(&producer)!!;
         gpu::ExecutableCommandList[1] producer_lists = { producer_executable };
         gpu::SubmitDesc producer_submit = {
@@ -985,11 +1199,11 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         )!!;
     } else {
         bind_test_compute_pipeline(&commands, build_pipeline);
-        gpu::cmd_dispatch(
+        profile_cmd_dispatch(
             commands: &commands,
             root:     test_span_address(&device, build_root.span),
             groups:   { 1, 1, 1 },
-        )!!;
+        );
         gpu::Barrier generated_ready = {
             .before  = { .compute = true },
             .after   = {
@@ -999,7 +1213,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             },
             .hazards = { .draw_arguments = true },
         };
-        gpu::cmd_barrier(&commands, &generated_ready)!!;
+        profile_cmd_barrier(&commands, &generated_ready);
     }
 
     bind_test_compute_pipeline(&commands, dispatch_pipeline);
@@ -1023,9 +1237,9 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     };
     gpu::GraphicsState null_graphics =
         gpu::full_render_graphics_state(null_pass.width, null_pass.height)!!;
-    gpu::cmd_begin_render_pass(&commands, &null_pass)!!;
+    profile_cmd_begin_render_pass(&commands, &null_pass);
     bind_test_graphics_pipeline(&commands, draw.pipeline);
-    gpu::cmd_set_graphics_state(&commands, &null_graphics)!!;
+    profile_cmd_set_graphics_state(&commands, &null_graphics);
     gpu::cmd_draw_generated(
         commands:      &commands,
         records:       null_draw_records.span,
@@ -1039,7 +1253,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_draw_count: 1,
         index_span:    indices.span,
     )!!;
-    gpu::cmd_end_render_pass(&commands)!!;
+    profile_cmd_end_render_pass(&commands);
 
     bind_test_compute_pipeline(&commands, dispatch_pipeline);
     vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
@@ -1065,6 +1279,11 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             == dispatch_work_before.host_allocations
         && dispatch_work_after.vma_allocations
             == dispatch_work_before.vma_allocations
+        && dispatch_work_after.generated_preprocess_acquires
+            == dispatch_work_before.generated_preprocess_acquires + 1
+        && dispatch_work_after.generated_allocator_lock_acquisitions
+            == dispatch_work_before.generated_allocator_lock_acquisitions
+                + 1
         && dispatch_recording_after.preprocess_allocations
             == dispatch_recording_before.preprocess_allocations
         && dispatch_recording_after.recording_allocations
@@ -1085,7 +1304,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats dispatch_exhausted_recording_before =
         vk::command_recording_stats(state);
-    uint dispatch_exhausted_references = record.scratch.reference_count;
+    uint dispatch_exhausted_references = profile_reference_count(record);
     uint dispatch_exhausted_preprocess =
         record.scratch.generated_preprocess_count;
     gpu::reset_command_resolution_stats();
@@ -1104,6 +1323,12 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         gpu::command_resolution_stats();
     assert(dispatch_exhausted_after.generated_scratch_misses
             == dispatch_exhausted_before.generated_scratch_misses + 1
+        && dispatch_exhausted_after.generated_preprocess_acquires
+            == dispatch_exhausted_before.generated_preprocess_acquires + 1
+        && dispatch_exhausted_after.generated_allocator_lock_acquisitions
+            == dispatch_exhausted_before
+                .generated_allocator_lock_acquisitions
+                + 1
         && dispatch_exhausted_after.host_allocations
             == dispatch_exhausted_before.host_allocations
         && dispatch_exhausted_after.vma_allocations
@@ -1120,10 +1345,31 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         && dispatch_exhausted_after.generated_indexed_draw_emissions
             == dispatch_exhausted_before.generated_indexed_draw_emissions
         && dispatch_exhausted_resolution.native_commands == 0
-        && record.scratch.reference_count == dispatch_exhausted_references
+        && profile_reference_count(record) == dispatch_exhausted_references
         && record.scratch.generated_preprocess_count
             == dispatch_exhausted_preprocess,
         "generated dispatch exhaustion emits and records no partial command");
+    $if $feature(GPU_FAST_COMMANDS):
+        record.scratch.generated_preprocess_count =
+            record.scratch.generated_preprocess_indices.len;
+        gpu::reset_command_resolution_stats();
+        assert(@catch(gpu::cmd_dispatch_generated(
+            commands:           &commands,
+            records:            dispatch_records.span,
+            count_span:         count.span,
+            max_dispatch_count: 1,
+        )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
+            "FAST generated dispatch preserves command-list capacity faults");
+        gpu::CommandResolutionStats dispatch_capacity_resolution =
+            gpu::command_resolution_stats();
+        assert_warm_command_resolution(dispatch_capacity_resolution, 1);
+        assert(dispatch_capacity_resolution.native_commands == 0
+                && dispatch_capacity_resolution.command_table_indirect_loads == 0
+                && dispatch_capacity_resolution.command_table_indirect_calls == 0,
+            "FAST generated dispatch capacity faults before native or table work");
+        record.scratch.generated_preprocess_count =
+            dispatch_exhausted_preprocess;
+    $endif
     record_target_to_attach(&commands, plain_target);
     gpu::ColorTargetDesc[1] plain_colors = {{
         .view     = plain_view,
@@ -1137,7 +1383,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     };
     gpu::GraphicsState plain_graphics =
         gpu::full_render_graphics_state(plain_pass.width, plain_pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &plain_pass, &plain_graphics)!!;
+    profile_cmd_begin_render_pass_with_state(&commands, &plain_pass, &plain_graphics);
     bind_test_graphics_pipeline(&commands, draw.pipeline);
     gpu::internal::RecordingWorkCounters draw_work_before =
         vk::command_recording_work_counters(state);
@@ -1158,6 +1404,11 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         vk::command_recording_stats(state);
     assert(draw_work_after.host_allocations == draw_work_before.host_allocations
         && draw_work_after.vma_allocations == draw_work_before.vma_allocations
+        && draw_work_after.generated_preprocess_acquires
+            == draw_work_before.generated_preprocess_acquires + 1
+        && draw_work_after.generated_allocator_lock_acquisitions
+            == draw_work_before.generated_allocator_lock_acquisitions
+                + 1
         && draw_recording_after.preprocess_allocations
             == draw_recording_before.preprocess_allocations
         && draw_recording_after.recording_allocations
@@ -1177,7 +1428,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats draw_exhausted_recording_before =
         vk::command_recording_stats(state);
-    uint draw_exhausted_references = record.scratch.reference_count;
+    uint draw_exhausted_references = profile_reference_count(record);
     uint draw_exhausted_preprocess =
         record.scratch.generated_preprocess_count;
     gpu::reset_command_resolution_stats();
@@ -1194,6 +1445,11 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         vk::command_recording_stats(state);
     assert(draw_exhausted_after.generated_scratch_misses
             == draw_exhausted_before.generated_scratch_misses + 1
+        && draw_exhausted_after.generated_preprocess_acquires
+            == draw_exhausted_before.generated_preprocess_acquires + 1
+        && draw_exhausted_after.generated_allocator_lock_acquisitions
+            == draw_exhausted_before.generated_allocator_lock_acquisitions
+                + 1
         && draw_exhausted_after.host_allocations
             == draw_exhausted_before.host_allocations
         && draw_exhausted_after.vma_allocations
@@ -1209,11 +1465,31 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         && draw_exhausted_after.generated_indexed_draw_emissions
             == draw_exhausted_before.generated_indexed_draw_emissions
         && gpu::command_resolution_stats().native_commands == 0
-        && record.scratch.reference_count == draw_exhausted_references
+        && profile_reference_count(record) == draw_exhausted_references
         && record.scratch.generated_preprocess_count
             == draw_exhausted_preprocess,
         "generated draw exhaustion performs no allocation, emission, or partial recording");
-    gpu::cmd_end_render_pass(&commands)!!;
+    $if $feature(GPU_FAST_COMMANDS):
+        record.scratch.generated_preprocess_count =
+            record.scratch.generated_preprocess_indices.len;
+        gpu::reset_command_resolution_stats();
+        assert(@catch(gpu::cmd_draw_generated(
+            commands:      &commands,
+            records:       draw_records.span,
+            count_span:    count.span,
+            max_draw_count: 1,
+        )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
+            "FAST generated draw preserves command-list capacity faults");
+        gpu::CommandResolutionStats draw_capacity_resolution =
+            gpu::command_resolution_stats();
+        assert_warm_command_resolution(draw_capacity_resolution, 1);
+        assert(draw_capacity_resolution.native_commands == 0
+                && draw_capacity_resolution.command_table_indirect_loads == 0
+                && draw_capacity_resolution.command_table_indirect_calls == 0,
+            "FAST generated draw capacity faults before native or table work");
+        record.scratch.generated_preprocess_count = draw_exhausted_preprocess;
+    $endif
+    profile_cmd_end_render_pass(&commands);
     record_target_readback(&commands, plain_target, &plain_readback.span);
 
     record_target_to_attach(&commands, indexed_target);
@@ -1229,11 +1505,11 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     };
     gpu::GraphicsState indexed_graphics =
         gpu::full_render_graphics_state(indexed_pass.width, indexed_pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(
+    profile_cmd_begin_render_pass_with_state(
         &commands,
         &indexed_pass,
         &indexed_graphics,
-    )!!;
+    );
     bind_test_graphics_pipeline(&commands, draw.pipeline);
     gpu::internal::RecordingWorkCounters indexed_work_before =
         vk::command_recording_work_counters(state);
@@ -1258,6 +1534,11 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             == indexed_work_before.host_allocations
         && indexed_work_after.vma_allocations
             == indexed_work_before.vma_allocations
+        && indexed_work_after.generated_preprocess_acquires
+            == indexed_work_before.generated_preprocess_acquires + 1
+        && indexed_work_after.generated_allocator_lock_acquisitions
+            == indexed_work_before.generated_allocator_lock_acquisitions
+                + 1
         && indexed_recording_after.preprocess_allocations
             == indexed_recording_before.preprocess_allocations
         && indexed_recording_after.recording_allocations
@@ -1277,7 +1558,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats indexed_exhausted_recording_before =
         vk::command_recording_stats(state);
-    uint indexed_exhausted_references = record.scratch.reference_count;
+    uint indexed_exhausted_references = profile_reference_count(record);
     uint indexed_exhausted_preprocess =
         record.scratch.generated_preprocess_count;
     gpu::reset_command_resolution_stats();
@@ -1295,6 +1576,12 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         vk::command_recording_stats(state);
     assert(indexed_exhausted_after.generated_scratch_misses
             == indexed_exhausted_before.generated_scratch_misses + 1
+        && indexed_exhausted_after.generated_preprocess_acquires
+            == indexed_exhausted_before.generated_preprocess_acquires + 1
+        && indexed_exhausted_after.generated_allocator_lock_acquisitions
+            == indexed_exhausted_before
+                .generated_allocator_lock_acquisitions
+                + 1
         && indexed_exhausted_after.host_allocations
             == indexed_exhausted_before.host_allocations
         && indexed_exhausted_after.vma_allocations
@@ -1310,11 +1597,33 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         && indexed_exhausted_after.generated_draw_emissions
             == indexed_exhausted_before.generated_draw_emissions
         && gpu::command_resolution_stats().native_commands == 0
-        && record.scratch.reference_count == indexed_exhausted_references
+        && profile_reference_count(record) == indexed_exhausted_references
         && record.scratch.generated_preprocess_count
             == indexed_exhausted_preprocess,
         "generated indexed-draw exhaustion performs no allocation, emission, or partial recording");
-    gpu::cmd_end_render_pass(&commands)!!;
+    $if $feature(GPU_FAST_COMMANDS):
+        record.scratch.generated_preprocess_count =
+            record.scratch.generated_preprocess_indices.len;
+        gpu::reset_command_resolution_stats();
+        assert(@catch(gpu::cmd_draw_indexed_generated(
+            commands:      &commands,
+            records:       indexed_records.span,
+            count_span:    count.span,
+            max_draw_count: 1,
+            index_span:    indices.span,
+        )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
+            "FAST generated indexed draw preserves command-list capacity faults");
+        gpu::CommandResolutionStats indexed_capacity_resolution =
+            gpu::command_resolution_stats();
+        assert_warm_command_resolution(indexed_capacity_resolution, 1);
+        assert(indexed_capacity_resolution.native_commands == 0
+                && indexed_capacity_resolution.command_table_indirect_loads == 0
+                && indexed_capacity_resolution.command_table_indirect_calls == 0,
+            "FAST generated indexed draw capacity faults before native or table work");
+        record.scratch.generated_preprocess_count =
+            indexed_exhausted_preprocess;
+    $endif
+    profile_cmd_end_render_pass(&commands);
     record_target_readback(&commands, indexed_target, &indexed_readback.span);
     assert(requirements_capture.calls == 3,
         "smaller generated recordings perform no native requirements query");
@@ -1323,9 +1632,8 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .before = { .compute = true },
         .after  = { .host = true },
     };
-    gpu::cmd_barrier(&commands, &dispatch_host_read)!!;
+    profile_cmd_barrier(&commands, &dispatch_host_read);
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionWait[1] waits;
@@ -1342,6 +1650,9 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         &submit,
     )!!;
     gpu::wait_completion(completion)!!;
+    $if !$feature(GPU_FAST_COMMANDS):
+        discard_test_executable(&executable)!!;
+    $endif
     gpu::release_generated_scratch(
         &allocator,
         dispatch_pipeline,
@@ -1379,7 +1690,8 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     io::printfn("generated-work: EXERCISED");
 }
 
-fn void full_generated_draw_requires_complete_graphics_state() @test {
+fn void full_generated_draw_requires_complete_graphics_state()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
     IndDrawCtx draw = make_ind_draw_ctx(&device);
@@ -1409,7 +1721,7 @@ fn void full_generated_draw_requires_complete_graphics_state() @test {
         .width  = IND_RT,
         .height = IND_RT,
     };
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    profile_cmd_begin_render_pass(&commands, &pass);
     bind_test_graphics_pipeline(&commands, draw.pipeline);
 
     vk::VkDeviceState* state = (vk::VkDeviceState*)
@@ -1432,7 +1744,8 @@ fn void full_generated_draw_requires_complete_graphics_state() @test {
         "missing generated-draw graphics state emits no native command");
 }
 
-fn void plain_indirect_draw_from_caller_owned_span() @test {
+fn void plain_indirect_draw_from_caller_owned_span()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
@@ -1506,23 +1819,23 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+    profile_cmd_begin_render_pass_with_state(&cmd, &pass, &graphics);
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-    gpu::cmd_draw_indirect(
+    profile_cmd_draw_indirect(
         commands:      &cmd,
         vertex_root:   (gpu::GpuAddress)0,
         fragment_root: (gpu::GpuAddress)0,
         args:          args_span,
         draw_count:    1,
-    )!!;
-    gpu::cmd_draw_indirect(
+    );
+    profile_cmd_draw_indirect(
         commands:      &cmd,
         vertex_root:   test_span_address(&device, verts_span),
         fragment_root: test_span_address(&device, frag_span),
         args:          args_span,
         draw_count:    1,
-    )!!;
-    gpu::cmd_end_render_pass(&cmd)!!;
+    );
+    profile_cmd_end_render_pass(&cmd);
     record_target_readback(&cmd, target, &rb_span);
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
@@ -1540,7 +1853,8 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
     assert(center[0] == (char)255, "non-indexed indirect draw renders");
 }
 
-fn void indirect_dispatch_executes_gpu_counts() @test {
+fn void indirect_dispatch_executes_gpu_counts()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
 
@@ -1622,33 +1936,33 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     bind_test_compute_pipeline(&cmd, build_pipeline);
-    gpu::cmd_dispatch(
+    profile_cmd_dispatch(
         commands: &cmd,
         root:     test_span_address(&device, build_root_span),
         groups:   { 1, 1, 1 },
-    )!!;
+    );
     gpu::Barrier args_ready = {
         .before = { .compute = true },
         .after = { .compute = true },
         .hazards = { .draw_arguments = true },
     };
-    gpu::cmd_barrier(&cmd, &args_ready)!!;
+    profile_cmd_barrier(&cmd, &args_ready);
     bind_test_compute_pipeline(&cmd, double_pipeline);
-    gpu::cmd_dispatch_indirect(
+    profile_cmd_dispatch_indirect(
         commands: &cmd,
         root:     (gpu::GpuAddress)0,
         args:     dispatch_args,
-    )!!;
-    gpu::cmd_dispatch_indirect(
+    );
+    profile_cmd_dispatch_indirect(
         commands: &cmd,
         root:     test_span_address(&device, double_root_span),
         args:     dispatch_args,
-    )!!;
+    );
     gpu::Barrier host_read = {
         .before = { .compute = true },
         .after = { .host = true },
     };
-    gpu::cmd_barrier(&cmd, &host_read)!!;
+    profile_cmd_barrier(&cmd, &host_read);
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
@@ -1667,7 +1981,8 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     }
 }
 
-fn void count_buffer_limits_draws() @test {
+fn void count_buffer_limits_draws()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
     if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
@@ -1791,9 +2106,9 @@ fn void count_buffer_limits_draws() @test {
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
         gpu::GraphicsState graphics =
             gpu::full_render_graphics_state(pass.width, pass.height)!!;
-        gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+        profile_cmd_begin_render_pass_with_state(&cmd, &pass, &graphics);
         bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-        gpu::cmd_draw_indexed_indirect_count(
+        profile_cmd_draw_indexed_indirect_count(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, verts_span),
             fragment_root:  test_span_address(&device, frag_span),
@@ -1801,8 +2116,8 @@ fn void count_buffer_limits_draws() @test {
             count_span:     count_spans[i],
             max_draw_count: 1,
             index_span:     index_span,
-        )!!;
-        gpu::cmd_end_render_pass(&cmd)!!;
+        );
+        profile_cmd_end_render_pass(&cmd);
         record_target_readback(&cmd, targets[i], &rb_spans[i]);
     }
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
@@ -1825,7 +2140,8 @@ fn void count_buffer_limits_draws() @test {
     assert(one_center[0] == (char)255, "GPU count of one draws the triangle");
 }
 
-fn void discard_consumes_active_render_pass_recording() @test {
+fn void discard_consumes_active_render_pass_recording()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_ind_device();
     gpu::TextureHandle target = make_ind_target(&device);
     gpu::AttachmentViewHandle target_view = create_test_attachment_view(
@@ -1849,7 +2165,7 @@ fn void discard_consumes_active_render_pass_recording() @test {
     };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
+    profile_cmd_begin_render_pass_with_state(&commands, &pass, &graphics);
 
     gpu::discard_commands(&commands)!!;
     assert(!commands.handle.is_valid(),
@@ -1860,7 +2176,8 @@ fn void discard_consumes_active_render_pass_recording() @test {
     destroy_test_device(&device)!!;
 }
 
-fn void indirect_argument_validation() @test {
+fn void indirect_argument_validation()
+    @test @if(!$feature(GPU_FAST_COMMANDS)) {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
@@ -1924,7 +2241,7 @@ fn void indirect_argument_validation() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+    profile_cmd_begin_render_pass_with_state(&cmd, &pass, &graphics);
 
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     fault no_usage = @catch(gpu::cmd_draw_indirect(
@@ -1957,7 +2274,7 @@ fn void indirect_argument_validation() @test {
     ));
     assert(overrun == gpu::INVALID_ARGUMENT, "draw_count past the span faults INVALID_ARGUMENT");
 
-    gpu::cmd_end_render_pass(&cmd)!!;
+    profile_cmd_end_render_pass(&cmd);
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
 }

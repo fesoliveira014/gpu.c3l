@@ -15,6 +15,38 @@ struct ResolvedSpan {
     gpu::GpuAddress   address;
 }
 
+fn ResolvedSpan fast_resolve_span(
+    VkDeviceState* state,
+    gpu::GpuSpan* span,
+) @if($feature(GPU_FAST_COMMANDS)) {
+    BufferSlot* slot;
+    BufferHandle backing_buffer;
+    if (span.owner == state.buffers.owner) {
+        slot = &state.buffers.slots[span.index].value;
+        backing_buffer = {
+            .owner      = span.owner,
+            .index      = span.index,
+            .generation = span.generation,
+        };
+    } else {
+        slot = &state.allocations.slots[span.index].value.backing;
+    }
+    return {
+        .slot           = slot,
+        .backing_buffer = backing_buffer,
+        .offset         = span.offset,
+        .size           = span.size,
+        .access         = slot.access,
+        .memory_class   = slot.memory_class,
+        .mapping        = slot.cpu_base == null
+            ? null
+            : (char*)slot.cpu_base + span.offset,
+        .address        = (gpu::GpuAddress)(
+            (ulong)slot.gpu_base + (ulong)span.offset
+        ),
+    };
+}
+
 fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     if (state == null || span == null) return gpu::INVALID_HANDLE~;
 
@@ -159,7 +191,7 @@ fn void? track_texture_command_reference(
     VkDeviceState* state,
     VkCommandRecord* record,
     gpu::TextureHandle handle,
-) @private {
+) @private @if(!$feature(GPU_FAST_COMMANDS)) {
     return track_command_reference(
         state,
         record,
@@ -237,7 +269,7 @@ fn void? track_span_command_reference(
     VkDeviceState* state,
     VkCommandRecord* record,
     gpu::GpuSpan* span,
-) @private {
+) @private @if(!$feature(GPU_FAST_COMMANDS)) {
     return track_command_reference(
         state,
         record,

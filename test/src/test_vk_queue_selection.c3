@@ -273,12 +273,17 @@ fn void descriptor_buffer_capacity_is_checked_per_adapter() @test {
 
 fn gpu::Device make_queue_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
+        .backend                  = gpu::BackendKind.VULKAN,
         .enable_vulkan_validation = true,
-        .application_name  = "gpu_queue_selection_test",
+        .application_name         = "gpu_queue_selection_test",
     };
+    $if $feature(GPU_FAST_COMMANDS):
+        desc.contract_validation = gpu::ContractValidation.TRUSTED;
+        desc.track_resource_lifetimes = false;
+    $else
+        desc.contract_validation = gpu::ContractValidation.FULL;
+        desc.track_resource_lifetimes = true;
+    $endif
     return create_test_device(&desc)!!;
 }
 
@@ -306,6 +311,7 @@ fn void cross_queue_timeline_chain_validates() @test {
     gpu::ExecutableCommandList compute_cmd_executable = gpu::end_commands(&compute_cmd)!!;
     defer discard_test_executable(&compute_cmd_executable)!!;
     gpu::ExecutableCommandList[1] compute_lists = { compute_cmd_executable };
+    compute_cmd_executable = {};
     gpu::SubmitDesc compute_submit = {
         .command_lists = compute_lists[..],
     };
@@ -318,6 +324,7 @@ fn void cross_queue_timeline_chain_validates() @test {
     gpu::ExecutableCommandList gfx_cmd_executable = gpu::end_commands(&gfx_cmd)!!;
     defer discard_test_executable(&gfx_cmd_executable)!!;
     gpu::ExecutableCommandList[1] gfx_lists = { gfx_cmd_executable };
+    gfx_cmd_executable = {};
     gpu::CompletionWait[1] completion_waits = {{
         .point  = compute_done,
         .before = { .all },
@@ -335,12 +342,17 @@ fn void cross_queue_timeline_chain_validates() @test {
 
 fn void distinct_transfer_compute_graphics_completion_chain() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
+        .backend                  = gpu::BackendKind.VULKAN,
         .enable_vulkan_validation = true,
-        .application_name  = "gpu_distinct_completion_chain_test",
+        .application_name         = "gpu_distinct_completion_chain_test",
     };
+    $if $feature(GPU_FAST_COMMANDS):
+        runtime_desc.contract_validation = gpu::ContractValidation.TRUSTED;
+        runtime_desc.track_resource_lifetimes = false;
+    $else
+        runtime_desc.contract_validation = gpu::ContractValidation.FULL;
+        runtime_desc.track_resource_lifetimes = true;
+    $endif
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;

@@ -28,6 +28,13 @@ NATIVE_OPERATIONS = {
     "viewport": "trusted_set_viewport",
     "copy_buffer": "trusted_copy_buffer",
 }
+FAST_NATIVE_OPERATIONS = {
+    "dispatch": "fast_cmd_dispatch",
+    "draw": "fast_cmd_draw",
+    "barrier": "fast_cmd_barrier",
+    "viewport": "fast_cmd_set_viewport",
+    "copy_buffer": "fast_cmd_copy_buffer",
+}
 FUNCTION_TYPE = re.compile(
     r"^\s*\.type\s+(?P<symbol>[^,\s]+)\s*,\s*[@%]function\s*$"
 )
@@ -67,6 +74,7 @@ class Observation:
     loads: int
     stores: int
     native_dispatch: int
+    static_entry_dispatch: int
     unknown: int
 
 
@@ -130,6 +138,7 @@ def observe(symbol: str, lines: list[str]) -> Observation:
         "loads": 0,
         "stores": 0,
         "native_dispatch": 0,
+        "static_entry_dispatch": 0,
         "unknown": 0,
     }
     for line in lines:
@@ -158,7 +167,25 @@ def observe(symbol: str, lines: list[str]) -> Observation:
     return Observation(symbol=symbol, **counts)
 
 
-def collect(asm_dir: Path) -> dict[str, Observation | None]:
+def direct_symbol_dispatches(lines: list[str], fragment: str) -> int:
+    dispatches = 0
+    for line in lines:
+        instruction = INSTRUCTION.match(line)
+        if instruction is None:
+            continue
+        mnemonic = instruction.group("mnemonic").lower()
+        operands = (instruction.group("operands") or "").strip()
+        if not mnemonic.startswith(("call", "bl", "jmp", "b")):
+            continue
+        if fragment in operands and not is_indirect_call_operand(operands):
+            dispatches += 1
+    return dispatches
+
+
+def collect(
+    asm_dir: Path,
+    fast_command_profile: bool = False,
+) -> dict[str, Observation | None]:
     bodies: dict[str, list[str]] = {}
     for path in sorted(asm_dir.rglob("*.s")):
         bodies.update(
@@ -174,7 +201,19 @@ def collect(asm_dir: Path) -> dict[str, Observation | None]:
             observations[operation] = None
             continue
         observation = observe(candidates[0], bodies[candidates[0]])
-        native_fragment = NATIVE_OPERATIONS[operation]
+        if fast_command_profile:
+            observation = replace(
+                observation,
+                static_entry_dispatch=direct_symbol_dispatches(
+                    bodies[candidates[0]],
+                    FAST_NATIVE_OPERATIONS[operation],
+                ),
+            )
+        native_fragment = (
+            FAST_NATIVE_OPERATIONS[operation]
+            if fast_command_profile
+            else NATIVE_OPERATIONS[operation]
+        )
         native_candidates = sorted(
             (
                 symbol for symbol in bodies
@@ -290,6 +329,8 @@ def validate_profile(
         "stores",
         "native_dispatch",
     }
+    if comparison_profile == "command-fast-o1-v1":
+        required_fields.add("static_entry_dispatch")
     for operation in OPERATIONS:
         operation_limits = profile["limits"].get(operation)
         if not isinstance(operation_limits, dict):
@@ -309,13 +350,20 @@ def emit_assembly(
     asm_dir: Path,
     target: str | None = None,
     direct_command_tokens: bool = False,
+    fast_command_profile: bool = False,
 ) -> None:
+    project = "test"
+    build_target = (
+        "command_asm_surface_fast"
+        if fast_command_profile
+        else "command_path_baseline_bench"
+    )
     command = [
         "c3c",
         "build",
-        "command_path_baseline_bench",
+        build_target,
         "--path",
-        "test",
+        project,
         "-O1",
         "--emit-asm",
         "--asm-out",
@@ -337,6 +385,7 @@ def main() -> int:
     parser.add_argument("--asm-dir", type=Path)
     parser.add_argument("--emit", action="store_true")
     parser.add_argument("--direct-command-tokens", action="store_true")
+    parser.add_argument("--fast-command-profile", action="store_true")
     parser.add_argument("--pinned-compiler")
     parser.add_argument("--pinned-target")
     parser.add_argument("--comparison-profile")
@@ -389,17 +438,21 @@ def main() -> int:
             root,
             asm_dir,
             args.pinned_target if pinned else None,
-            args.direct_command_tokens,
+            args.direct_command_tokens or args.fast_command_profile,
+            args.fast_command_profile,
         )
 
-    observations = collect(asm_dir)
+    observations = collect(asm_dir, args.fast_command_profile)
     mode = "blocking" if pinned else "advisory"
     representation = (
-        "direct" if args.direct_command_tokens else "bounded"
+        "direct"
+        if args.direct_command_tokens or args.fast_command_profile
+        else "bounded"
     )
+    profile_text = "profile=fast " if args.fast_command_profile else ""
     print(
         f"asm_expectation version={EXPECTATION_VERSION} mode={mode} "
-        f"representation={representation}"
+        f"{profile_text}representation={representation}"
     )
     if pinned:
         print(
@@ -422,6 +475,7 @@ def main() -> int:
                 "loads",
                 "stores",
                 "native_dispatch",
+                "static_entry_dispatch",
                 "unknown",
             )
         )
@@ -430,10 +484,34 @@ def main() -> int:
             f"{values} status=observed"
         )
 
+    fast_failures = []
+    if args.fast_command_profile:
+        for operation, observation in observations.items():
+            if observation is None:
+                continue
+            if observation.indirect_calls != 0:
+                fast_failures.append(
+                    f"{operation}: FAST wrapper has "
+                    f"{observation.indirect_calls} indirect calls"
+                )
+            if observation.static_entry_dispatch != 1:
+                fast_failures.append(
+                    f"{operation}: FAST wrapper has "
+                    f"{observation.static_entry_dispatch} "
+                    "static entry dispatches"
+                )
+        for failure in fast_failures:
+            print(f"assembly profile failed: {failure}", file=sys.stderr)
+
     if not pinned:
+        if fast_failures:
+            return 1
         return 0
     assert profile is not None
-    failures = validate_limits(observations, profile["limits"])
+    failures = fast_failures + validate_limits(
+        observations,
+        profile["limits"],
+    )
     if failures:
         for failure in failures:
             print(

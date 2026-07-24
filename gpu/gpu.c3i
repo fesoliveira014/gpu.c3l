@@ -485,9 +485,14 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong retained_pin_operations;
     ulong lifecycle_vtable_dispatches;
     ulong command_table_lookups;
+    ulong command_table_indirect_loads;
+    ulong command_table_indirect_calls;
     ulong pipeline_table_lookups;
     ulong pipeline_cache_lookups;
     ulong command_policy_selections;
+    ulong contract_branches;
+    ulong tracking_branches;
+    ulong public_misuse_faults;
     // Retired proof counters retained in benchmark schema; always zero.
     ulong encoder_cell_computations;
     ulong encoder_lease_comparisons;

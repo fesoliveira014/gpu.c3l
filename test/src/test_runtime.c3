@@ -40,13 +40,50 @@ fn void unknown_contract_validation_is_rejected() @test {
 }
 
 fn void direct_command_tokens_reject_full_validation_before_backend_work()
-    @test @if($feature(DIRECT_COMMAND_TOKENS)) {
+    @test @if(
+        $feature(DIRECT_COMMAND_TOKENS)
+        && !$feature(GPU_FAST_COMMANDS)
+    ) {
     RuntimeDesc desc = runtime_desc();
     desc.contract_validation = ContractValidation.FULL;
     assert(
         @catch(gpu::create_runtime(&desc)) == gpu::UNSUPPORTED_FEATURE,
         "direct command tokens reject full validation before backend work"
     );
+}
+
+fn void fast_profile_rejects_unavailable_policy_before_backend_work()
+    @test @if($feature(GPU_FAST_COMMANDS)) {
+    uint create_count = gpu::internal::vk::stub_runtime_create_count();
+    RuntimeDesc desc = runtime_desc();
+    desc.contract_validation = ContractValidation.OBJECT_BOUNDARIES;
+    assert(@catch(gpu::create_runtime(&desc)) == gpu::INVALID_ARGUMENT);
+    desc.contract_validation = ContractValidation.FULL;
+    assert(@catch(gpu::create_runtime(&desc)) == gpu::INVALID_ARGUMENT);
+    desc.contract_validation = bitcast(99, ContractValidation);
+    assert(@catch(gpu::create_runtime(&desc)) == gpu::INVALID_ARGUMENT);
+    desc.contract_validation = ContractValidation.TRUSTED;
+    desc.track_resource_lifetimes = true;
+    assert(@catch(gpu::create_runtime(&desc)) == gpu::INVALID_ARGUMENT);
+    desc = gpu::full_validation_runtime_desc();
+    assert(@catch(gpu::create_runtime(&desc)) == gpu::INVALID_ARGUMENT);
+    assert(
+        gpu::internal::vk::stub_runtime_create_count() == create_count,
+        "unavailable FAST policies reach no backend initialization"
+    );
+}
+
+fn void fast_profile_accepts_trusted_without_tracking()
+    @test @if($feature(GPU_FAST_COMMANDS)) {
+    uint create_count = gpu::internal::vk::stub_runtime_create_count();
+    RuntimeDesc desc = runtime_desc();
+    desc.enable_vulkan_validation = true;
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    assert(
+        gpu::internal::vk::stub_runtime_create_count() == create_count + 1,
+        "Vulkan validation stays independent of the FAST library profile"
+    );
+    gpu::destroy_runtime(&runtime)!!;
 }
 
 fn void runtime_and_adapter_tokens_are_compact() @test {
