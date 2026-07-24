@@ -5,7 +5,6 @@ import gpu @public;
 import gpu::internal::vk @public;
 import vk;
 import std::atomic::types;
-import std::core::mem;
 import std::core::mem::alloc;
 import std::core::mem::allocators;
 
@@ -239,10 +238,11 @@ fn void tracking_off_keeps_reference_storage_empty_through_retirement() @test {
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
         &submit,
     )!!;
-    if (state.submitted_command_count > 0) {
-        vk::SubmittedCommandBatch* batch = &state.submitted_commands[0];
+    vk::QueueCompletionState* completion_state =
+        vk::queue_completion_state(state, queue.id)!!;
+    if (completion_state.submitted_head != null) {
         vk::VkCommandRecord* submitted =
-            vk::backend_command(batch.record);
+            vk::backend_command(completion_state.submitted_head);
         vk::CommandAllocatorSlot* allocator_slot =
             state.command_allocators.get(submitted.allocator)!!;
         vk::CommandScratch* scratch =
@@ -253,7 +253,7 @@ fn void tracking_off_keeps_reference_storage_empty_through_retirement() @test {
             "tracking-off submission transfers empty reference storage");
     }
     gpu::wait_completion(completion)!!;
-    assert(state.submitted_command_count == 0,
+    assert(completion_state.submitted_count == 0,
         "completion retires the tracking-off command batch");
     assert_zero_tracking_work(state);
     gpu::free_allocation(&device, &owned.allocation)!!;
@@ -816,7 +816,10 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
     allocator_slot.mutex.init()!!;
     defer (void)allocator_slot.mutex.destroy();
 
-    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 1);
+    vk::QueueCompletionState[1] completions = {{ .bound = true }};
+    state.queue_completions = completions[..];
+    completions[0].retirement_mutex.init()!!;
+    defer (void)completions[0].retirement_mutex.destroy();
     vk::CommandCell[2] command_cells;
     state.commands = {
         .slots = command_cells[..],
@@ -833,25 +836,24 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
         backend_state: &state,
         value:         empty,
     )!!;
+    empty_record.state = gpu::internal::CommandState.SUBMITTING;
     gpu::internal::CommandRecord*[1] empty_records = { empty_record };
-    uint empty_reservation = vk::prepare_submitted_commands(
-        &state,
-        empty_records[..],
-    )!!;
-    vk::publish_submitted_commands(
-        state:       &state,
-        records:     empty_records[..],
-        completion:  {},
-        reservation: empty_reservation,
+    completions[0].retirement_mutex.lock()!!;
+    vk::publish_pending_commands_locked(
+        state:      &state,
+        completion: &completions[0],
+        records:    empty_records[..],
+        point:      gpu::internal::make_completion_point(queue, 1)!!,
     );
-    assert(state.submitted_command_count == 1
+    completions[0].retirement_mutex.unlock();
+    empty_record.state = gpu::internal::CommandState.SUBMITTED;
+    assert(completions[0].submitted_count == 1
         && scratch[0].reference_count == 0,
         "submission transfers empty reference storage without allocation");
     vk::reset_command_policy_counters(&state);
     vk::destroy_submitted_commands(&state);
     assert_zero_tracking_work(&state);
 
-    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 1);
     allocator_slot.live_executables = 1;
     vk::VkCommandRecord populated = {
         .allocator        = allocator,
@@ -864,19 +866,19 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
         backend_state: &state,
         value:         populated,
     )!!;
+    populated_record.state = gpu::internal::CommandState.SUBMITTING;
     gpu::internal::CommandRecord*[1] populated_records = {
         populated_record,
     };
-    uint populated_reservation = vk::prepare_submitted_commands(
-        &state,
-        populated_records[..],
-    )!!;
-    vk::publish_submitted_commands(
-        state:       &state,
-        records:     populated_records[..],
-        completion:  {},
-        reservation: populated_reservation,
+    completions[0].retirement_mutex.lock()!!;
+    vk::publish_pending_commands_locked(
+        state:      &state,
+        completion: &completions[0],
+        records:    populated_records[..],
+        point:      gpu::internal::make_completion_point(queue, 2)!!,
     );
+    completions[0].retirement_mutex.unlock();
+    populated_record.state = gpu::internal::CommandState.SUBMITTED;
     assert(scratch[1].reference_count == 1,
         "submission transfers populated reference ownership exactly once");
     vk::reset_command_policy_counters(&state);

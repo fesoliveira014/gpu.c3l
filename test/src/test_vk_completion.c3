@@ -252,9 +252,9 @@ fn void queue_completion_poll_wait_is_reusable() @test {
     )!!;
     assert(@catch(gpu::poll_completion(future)) == gpu::INVALID_HANDLE,
         "a later unpublished sequence is rejected");
-    completion.submit_mutex.lock()!!;
+    completion.submission_mutex.lock()!!;
     vk::cancel_queue_completion_locked(state, future)!!;
-    completion.submit_mutex.unlock();
+    completion.submission_mutex.unlock();
 
     vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
         .set_semaphore(completion.timeline)
@@ -301,7 +301,9 @@ fn void completion_cache_skips_native_and_locked_work() @test {
     completion_injected_wait_result = vk::Result.ERROR_DEVICE_LOST;
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, queue.id)!!;
-    CompletionMutexHolderArgs holder_args = { .mutex = &completion.submit_mutex };
+    CompletionMutexHolderArgs holder_args = {
+        .mutex = &completion.retirement_mutex,
+    };
     Thread holder;
     holder.create(&completion_mutex_holder, &holder_args)!!;
     while (!holder_args.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
@@ -491,9 +493,8 @@ fn void concurrent_first_observers_publish_one_retirement() @test {
         vk::completion_work_counters(state);
     assert(counters.native_counter_queries == 2,
         "both first observers reach their controlled native query");
-    assert(counters.retirement_passes == 1
-        && counters.retirement_lock_acquisitions == 2,
-        "both observers acquire the retirement lock and one publishes");
+    assert(counters.retirement_passes == 1,
+        "competing observers publish retirement exactly once");
     assert(vk::queue_completion_state(state, queue.id)!!
             .retired_sequence.load(AtomicOrdering.ACQUIRE) == sequence,
         "the concurrent retired prefix is exact and monotonic");

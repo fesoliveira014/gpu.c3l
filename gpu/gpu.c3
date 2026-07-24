@@ -1684,11 +1684,6 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     if (desc.completion_waits.len > gpu::internal::MAX_SUBMIT_COMPLETION_WAITS) {
         return INVALID_ARGUMENT~;
     }
-    foreach (&commands : desc.command_lists) {
-        gpu::internal::CommandRecord* record =
-            gpu::internal::executable_command(commands)!;
-        if (record.device != device) return INVALID_HANDLE~;
-    }
     foreach (wait : desc.completion_waits) {
         gpu::internal::validate_completion_point(&operation, &device, wait.point)!;
         if (!gpu::internal::completion_wait_scope_valid(

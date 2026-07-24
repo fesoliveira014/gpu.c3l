@@ -59,8 +59,8 @@ BENCHMARK_METHODS = {
         "ns/submit, ns/poll, ns/destroy",
     ),
     "submit_batch_bench": (
-        "batch_sizes=1,8,32,128,1024; exact token visits",
-        "ns/submit; exact work units",
+        "batch_sizes=1,8,32,128,1024; exact authoritative work",
+        "ns/submit, ns/list advisory; exact work and allocation outcomes",
     ),
     "pipeline_cache_bench": (
         "raster=200; duplicate=200000; batch=64x2000; identity=1024,65536,1048576",
@@ -94,6 +94,19 @@ UPLOAD_MEASUREMENT = re.compile(
     r"uploads_per_sec=\d[\d,.]*\b"
 )
 ALLOCATION_NUMBER = r"[0-9]+(?:\.[0-9]+)?"
+SUBMIT_BATCH_LINE = re.compile(
+    rf"^submit batch size=(?P<size>[0-9]+) "
+    rf"ns/submit=(?P<ns_submit>{ALLOCATION_NUMBER}) "
+    rf"ns/list=(?P<ns_list>{ALLOCATION_NUMBER}) "
+    r"resolutions=(?P<resolutions>[0-9]+) "
+    r"duplicate_visits=(?P<duplicate_visits>[0-9]+) "
+    r"epoch_reset_cells=(?P<epoch_reset_cells>[0-9]+) "
+    r"command_mutex=(?P<command_mutex>[0-9]+) "
+    r"queue_submission_mutex=(?P<queue_submission_mutex>[0-9]+) "
+    r"rollback_mutex=(?P<rollback_mutex>[0-9]+) "
+    r"native_submissions=(?P<native_submissions>[0-9]+) "
+    r"host_allocations=(?P<host_allocations>[0-9]+)$"
+)
 ALLOCATION_PHASES = (
     (
         "cpu_write allocate",
@@ -651,6 +664,61 @@ def require_command_path_policy_matrix(outputs):
         require_command_path_vulkan_evidence(output, expected)
 
 
+def require_submit_batch_evidence(output):
+    lines = output.splitlines()
+    if len(lines) != len(SUBMIT_BATCH_SIZES) + 2:
+        raise ValueError(
+            "submit_batch_bench record count is missing or duplicated"
+        )
+    if lines[0] != (
+        "iterations=5 batch_sizes=1,8,32,128,1024 "
+        "units=ns/submit,ns/list"
+    ):
+        raise ValueError("submit_batch_bench header is malformed")
+
+    zero_fields = (
+        "epoch_reset_cells",
+        "rollback_mutex",
+        "host_allocations",
+    )
+    for line, expected_size in zip(lines[1:-1], SUBMIT_BATCH_SIZES):
+        match = SUBMIT_BATCH_LINE.fullmatch(line)
+        if match is None:
+            raise ValueError(
+                f"submit_batch_bench batch size {expected_size} schema is malformed"
+            )
+        if int(match.group("size")) != expected_size:
+            raise ValueError(
+                f"submit_batch_bench batch size {expected_size} is missing or reordered"
+            )
+        if float(match.group("ns_submit")) <= 0.0 or float(
+            match.group("ns_list")
+        ) <= 0.0:
+            raise ValueError(
+                f"submit_batch_bench batch size {expected_size} timing is invalid"
+            )
+        for field in ("resolutions", "duplicate_visits"):
+            if int(match.group(field)) != expected_size:
+                raise ValueError(
+                    f"submit_batch_bench batch size {expected_size} {field} mismatch"
+                )
+        for field in (
+            "command_mutex",
+            "queue_submission_mutex",
+            "native_submissions",
+        ):
+            if int(match.group(field)) != 1:
+                raise ValueError(
+                    f"submit_batch_bench batch size {expected_size} {field} mismatch"
+                )
+        if any(int(match.group(field)) != 0 for field in zero_fields):
+            raise ValueError(
+                f"submit_batch_bench batch size {expected_size} forbidden work is nonzero"
+            )
+    if lines[-1] != "submit batch leaks=0":
+        raise ValueError("submit_batch_bench reports live resources")
+
+
 def require_command_reference_evidence(output):
     lines = output.splitlines()
     if len(lines) != 12:
@@ -1133,18 +1201,7 @@ def require_measurement(
     if target == "lifecycle_bench" and not LIFECYCLE_SCHEMA.fullmatch(output):
         raise ValueError(f"{target} output does not match the exact schema")
     if target == "submit_batch_bench":
-        for size in SUBMIT_BATCH_SIZES:
-            pattern = re.compile(
-                rf"^submit batch size={size}: {ALLOCATION_NUMBER} ns/submit "
-                rf"token_visits={size} epoch_reset_cells=0$",
-                re.MULTILINE,
-            )
-            if not pattern.search(output):
-                raise ValueError(
-                    f"{target} is missing exact work for batch size {size}"
-                )
-        if "submit batch leaks=0" not in output:
-            raise ValueError(f"{target} reports live resources")
+        require_submit_batch_evidence(output)
     if target == "descriptor_churn_bench":
         require_sampler_lookup_evidence(output)
     if target == "command_record_bench":

@@ -320,31 +320,49 @@ preallocated allocator index, pairs them, initializes the record while
 inactive, and publishes `RECORDING` last. If either fixed capacity is exhausted,
 it returns `DEVICE_BUSY` without allocation or state change. Render passes nest
 into `RECORDING_RENDER_PASS` and return to `RECORDING` on end. `end_commands`
-closes the same record to `EXECUTABLE`. `submit` resolves the complete batch
-before mutation, then atomically claims every record as `SUBMITTING`. Duplicate
-detection visits the submitted records once,
-using a device-local epoch stored on each record; ordinary work is proportional
-to the command-list count rather than the square of it. Epoch rollover scans the
-allocated command table once before reusing epoch one. Validation or native
-failure restores it without publishing queue progress. Success publishes one
-`CompletionPoint`, changes every record to `SUBMITTED`, and consumes the caller
-tokens. The records, native buffers, fixed scratch, allocator units, and retained
-device/backend ownership remain live and unavailable for reuse. Ordered
-completion retirement first moves each record to `INACTIVE`, then releases
+closes the same record to `EXECUTABLE`.
+
+For a nonempty submit, the backend resolves each bounded token exactly once
+through the known device command table. One command-lock transaction validates
+identity, authoritative phase, duplicate epoch, and the exact `Queue` stored by
+the backend record, then claims the complete batch as `SUBMITTING`. The public
+wrapper performs no preliminary executable-token resolution, and submission
+does not resolve an allocator merely to re-prove its immutable queue. Duplicate
+detection visits each inspected token once, so ordinary work is proportional to
+the batch length. Epoch rollover accounts separately for the command-table cells
+it resets.
+
+Validation, preparation, or native failure publishes no pending record or
+completion point and preserves tokens, readiness, allocator units, and scratch
+for retry. A fault after the complete claim restores every still-`SUBMITTING`
+record to `EXECUTABLE` under one rollback command-lock acquisition. After native
+acceptance, each backend record embeds its completion metadata and links into
+the exact selected queue's intrusive pending list. The queue publishes the
+completion sequence only after the pending records and `SUBMITTED` states are
+visible, then consumes the caller tokens.
+
+The selected queue's long submission boundary covers fixed-scratch preparation,
+native submission, pending-list append, readiness commit, and completion-point
+publication. A separate short retirement boundary protects its intrusive list
+and covered-record release. Polling an earlier published point can therefore
+retire it while a later same-queue submission is paused before publication.
+Ordered retirement first moves each covered record to `INACTIVE`, then releases
 record-owned references and reservations, returns each buffer/scratch index to
-its originating allocator, releases retained ownership, and finally invalidates
-or generation-advances its bounded identity. A submission may mix allocators
-only when every token targets the exact submit queue. The next begin completely
-reinitializes a retired unit before publishing `RECORDING`. Warm begin,
-recording, end, submit, discard, retirement, and reuse never allocate
+its originating allocator, releases retained ownership, clears its embedded
+pending link, and finally invalidates or generation-advances its bounded
+identity. A submission may mix allocators only when every record names the exact
+submit queue. The next begin completely reinitializes a retired unit before
+publishing `RECORDING`.
+
+Warm begin, recording, end, submit, discard, retirement, and reuse never allocate
 host storage, native command buffers, pools, VMA storage, or C3 temporary-pool
 memory. Per-list reference or generated-index exhaustion returns
 `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` transactionally. Device teardown rejects
-even a quiescent live public allocator. Invalid
-transitions return faults, and render-pass command constraints remain enforced.
-A render pass records its attachment formats and sample count; a graphics
-pipeline must match them before begin or bind mutates native command state.
-Resolve and pass boundaries do not add implicit synchronization.
+even a quiescent live public allocator. Invalid transitions return faults, and
+render-pass command constraints remain enforced. A render pass records its
+attachment formats and sample count; a graphics pipeline must match them before
+begin or bind mutates native command state. Resolve and pass boundaries do not
+add implicit synchronization.
 
 Render targets name explicit `AttachmentViewHandle` children created before
 recording. Each immutable view selects one texture mip and layer. User-created

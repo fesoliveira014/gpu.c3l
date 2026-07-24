@@ -17,11 +17,6 @@ struct CommandResourceReference {
     Atomic{uint}* tracked_command_references;
 }
 
-struct SubmittedCommandBatch {
-    gpu::CompletionPoint          completion;
-    gpu::internal::CommandRecord* record;
-}
-
 struct CommandBufferStats {
     ulong allocated;
     ulong freed;
@@ -177,54 +172,23 @@ fn void release_tracked_command_references(
     }
 }
 
-fn void? ensure_submitted_command_capacity(
+fn void publish_pending_commands_locked(
     VkDeviceState* state,
-    uint additional,
-) {
-    usz required = (usz)state.submitted_command_count
-        + (usz)state.submitted_command_reserved
-        + (usz)additional;
-    if (required <= state.submitted_commands.len) return;
-    return gpu::DEVICE_BUSY~;
-}
-
-fn uint? prepare_submitted_commands(
-    VkDeviceState* state,
+    QueueCompletionState* completion,
     gpu::internal::CommandRecord*[] records,
+    gpu::CompletionPoint point,
 ) {
-    uint additional = (uint)records.len;
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    ensure_submitted_command_capacity(state, additional)!;
-    state.submitted_command_reserved += additional;
-    return additional;
-}
-
-fn void cancel_submitted_command_reservation(
-    VkDeviceState* state,
-    uint reservation,
-) {
-    if (reservation == 0) return;
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    state.submitted_command_reserved -= reservation;
-}
-
-fn void publish_submitted_commands(
-    VkDeviceState* state,
-    gpu::internal::CommandRecord*[] records,
-    gpu::CompletionPoint completion,
-    uint reservation,
-) {
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    state.submitted_command_reserved -= reservation;
     foreach (record : records) {
-        state.submitted_commands[state.submitted_command_count++] = {
-            .completion = completion,
-            .record     = record,
-        };
         VkCommandRecord* backend = backend_command(record);
+        backend.submitted_completion = point;
+        backend.next_submitted = null;
+        if (completion.submitted_tail == null) {
+            completion.submitted_head = record;
+        } else {
+            backend_command(completion.submitted_tail).next_submitted = record;
+        }
+        completion.submitted_tail = record;
+        completion.submitted_count++;
         CommandAllocatorSlot* slot = state.command_allocators.get(
             backend.allocator,
         )!!;
@@ -235,19 +199,19 @@ fn void publish_submitted_commands(
     }
 }
 
-fn void release_submitted_command_batch(
+fn gpu::internal::CommandRecord* release_pending_command_locked(
     VkDeviceState* state,
-    uint index,
+    QueueCompletionState* completion,
+    gpu::internal::CommandRecord* record,
 ) {
-    SubmittedCommandBatch* batch = &state.submitted_commands[index];
-    gpu::internal::CommandRecord* record = batch.record;
     VkCommandRecord* backend = backend_command(record);
+    gpu::internal::CommandRecord* next = backend.next_submitted;
     CommandAllocatorSlot* slot = state.command_allocators.get(
         backend.allocator,
     )!!;
     slot.mutex.lock()!!;
-    defer slot.mutex.unlock();
     record.state = gpu::internal::CommandState.INACTIVE;
+    // Reference gates plus retirement/destroy serialization make resource_mutex unnecessary.
     CommandScratch* scratch = backend.scratch;
     clear_command_scratch_references(state, scratch);
     recycle_generated_preprocess_indices_locked(
@@ -258,33 +222,17 @@ fn void release_submitted_command_batch(
     );
     return_allocator_buffer_locked(slot, backend.allocator_buffer);
     slot.in_flight_buffers--;
+    slot.mutex.unlock();
     gpu::CommandListHandle identity = record.identity;
     gpu::internal::CommandRecord ownership = *record;
-    state.submitted_command_count--;
-    *batch = state.submitted_commands[state.submitted_command_count];
-    state.submitted_commands[state.submitted_command_count] = {};
+    backend.submitted_completion = {};
+    backend.next_submitted = null;
+    completion.submitted_count--;
     state.command_mutex.lock()!!;
     (void)state.commands.free(identity);
     state.command_mutex.unlock();
     gpu::internal::release_command_record_ownership(&ownership);
-}
-
-fn void release_completed_submitted_commands_locked(
-    VkDeviceState* state,
-    uint queue_id,
-    ulong completed_sequence,
-) {
-    uint i;
-    while (i < state.submitted_command_count) {
-        SubmittedCommandBatch* batch = &state.submitted_commands[i];
-        if (gpu::internal::completion_point_queue_id(batch.completion) != queue_id
-            || gpu::internal::completion_point_sequence(batch.completion)
-                > completed_sequence) {
-            i++;
-            continue;
-        }
-        release_submitted_command_batch(state, i);
-    }
+    return next;
 }
 
 fn void note_completion_counter_query(VkDeviceState* state) {
@@ -341,12 +289,10 @@ fn void note_completion_cached_wait_hit(VkDeviceState* state) {
     $endif
 }
 
-<* Retires through min(native_completed, published_sequence): native progress
-   never crosses a submission publication gap. Requires `resource_mutex`. *>
+<* Retires no further than the published prefix. Requires retirement_mutex. *>
 fn void retire_queue_through_locked(
     VkDeviceState* state,
     QueueCompletionState* completion,
-    uint queue_id,
     ulong native_completed,
 ) {
     ulong published = completion.published_sequence.load(
@@ -359,8 +305,91 @@ fn void retire_queue_through_locked(
     if (target <= retired) return;
 
     note_completion_retirement_pass(state);
-    release_completed_submitted_commands_locked(state, queue_id, target);
+    while (completion.submitted_head != null) {
+        gpu::internal::CommandRecord* record = completion.submitted_head;
+        VkCommandRecord* backend = backend_command(record);
+        if (gpu::internal::completion_point_sequence(
+            backend.submitted_completion,
+        ) > target) {
+            break;
+        }
+        completion.submitted_head = release_pending_command_locked(
+            state,
+            completion,
+            record,
+        );
+    }
+    if (completion.submitted_head == null) {
+        completion.submitted_tail = null;
+    }
     completion.retired_sequence.store(target, AtomicOrdering.RELEASE);
+}
+
+fn void retire_observed_queue(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    ulong completed,
+) @private {
+    note_completion_retirement_lock_acquisition(state);
+    completion.retirement_mutex.lock()!!;
+    defer completion.retirement_mutex.unlock();
+    retire_queue_through_locked(state, completion, completed);
+}
+
+fn bool? query_pending_queue(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    SemaphoreCounterQueryFn query_fn,
+    ulong* completed,
+) @private {
+    note_completion_retirement_lock_acquisition(state);
+    completion.retirement_mutex.lock()!!;
+    defer completion.retirement_mutex.unlock();
+    if (completion.submitted_head == null) return false;
+
+    note_completion_counter_query(state);
+    check_device_result(
+        state,
+        query_fn(
+            state.device,
+            completion.timeline,
+            completed,
+        ),
+    )!;
+    return true;
+}
+
+fn void? query_pending_queues_before_retirement(
+    VkDeviceState* state,
+    bool has_observed,
+    uint observed_queue_id,
+    ulong observed_completed,
+    SemaphoreCounterQueryFn query_fn,
+) @private {
+    bool[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] queried = {};
+    ulong[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] completed = {};
+    if (has_observed) {
+        queried[observed_queue_id] = true;
+        completed[observed_queue_id] = observed_completed;
+    }
+
+    foreach (queue_id, &completion : state.queue_completions) {
+        if (has_observed && (uint)queue_id == observed_queue_id) continue;
+        queried[queue_id] = query_pending_queue(
+            state,
+            completion,
+            query_fn,
+            &completed[queue_id],
+        )!;
+    }
+    foreach (queue_id, &completion : state.queue_completions) {
+        if (!queried[queue_id]) continue;
+        retire_observed_queue(
+            state,
+            completion,
+            completed[queue_id],
+        );
+    }
 }
 
 <* Every first successful completion observation drains all pending queue
@@ -371,11 +400,6 @@ fn void? retire_observed_completion_and_drain_with_query(
     ulong observed_completed,
     SemaphoreCounterQueryFn query_fn,
 ) {
-    bool[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] queried = {};
-    ulong[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] completed = {};
-    queried[observed_queue_id] = true;
-    completed[observed_queue_id] = observed_completed;
-
     $if env::TESTING:
         if (state.completion_retirement_lock_hook != null) {
             state.completion_retirement_lock_hook(
@@ -384,43 +408,14 @@ fn void? retire_observed_completion_and_drain_with_query(
         }
     $endif
 
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    note_completion_retirement_lock_acquisition(state);
-    for (uint i = 0; i < state.submitted_command_count; i++) {
-        SubmittedCommandBatch* batch = &state.submitted_commands[i];
-        uint queue_id = gpu::internal::completion_point_queue_id(batch.completion);
-        if (queried[queue_id]) continue;
-        QueueCompletionState* completion = queue_completion_state(
-            state,
-            queue_id,
-        )!;
-        note_completion_counter_query(state);
-        check_device_result(
-            state,
-            query_fn(
-                state.device,
-                completion.timeline,
-                &completed[queue_id],
-            ),
-        )!;
-        queried[queue_id] = true;
-    }
-    for (uint queue_id = 0;
-        queue_id < gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES;
-        queue_id++) {
-        if (!queried[queue_id]) continue;
-        QueueCompletionState* completion = queue_completion_state(
-            state,
-            queue_id,
-        )!;
-        retire_queue_through_locked(
-            state:            state,
-            completion:       completion,
-            queue_id:         queue_id,
-            native_completed: completed[queue_id],
-        );
-    }
+    (void)queue_completion_state(state, observed_queue_id)!;
+    query_pending_queues_before_retirement(
+        state:              state,
+        has_observed:       true,
+        observed_queue_id:  observed_queue_id,
+        observed_completed: observed_completed,
+        query_fn:           query_fn,
+    )!;
 }
 
 fn void set_completion_retirement_lock_hook(
@@ -436,40 +431,13 @@ fn void? drain_completed_submitted_commands_with_query(
     VkDeviceState* state,
     SemaphoreCounterQueryFn query_fn,
 ) {
-    bool[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] queried = {};
-    ulong[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] completed = {};
-    for (uint i = 0; i < state.submitted_command_count; i++) {
-        SubmittedCommandBatch* batch = &state.submitted_commands[i];
-        uint queue_id = gpu::internal::completion_point_queue_id(batch.completion);
-        QueueCompletionState* completion = queue_completion_state(state, queue_id)!;
-        if (!queried[queue_id]) {
-            note_completion_counter_query(state);
-            check_device_result(
-                state,
-                query_fn(
-                    state.device,
-                    completion.timeline,
-                    &completed[queue_id],
-                ),
-            )!;
-            queried[queue_id] = true;
-        }
-    }
-    for (uint queue_id = 0;
-        queue_id < gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES;
-        queue_id++) {
-        if (!queried[queue_id]) continue;
-        QueueCompletionState* completion = queue_completion_state(
-            state,
-            queue_id,
-        )!;
-        retire_queue_through_locked(
-            state:            state,
-            completion:       completion,
-            queue_id:         queue_id,
-            native_completed: completed[queue_id],
-        );
-    }
+    query_pending_queues_before_retirement(
+        state:              state,
+        has_observed:       false,
+        observed_queue_id:  0,
+        observed_completed: 0,
+        query_fn:           query_fn,
+    )!;
 }
 
 fn void? drain_completed_submitted_commands(VkDeviceState* state) {
@@ -483,11 +451,32 @@ fn void? drain_submitted_commands_if_needed_with_query(
     VkDeviceState* state,
     SemaphoreCounterQueryFn query_fn,
 ) {
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    if (state.submitted_command_count
-        < SUBMITTED_COMMAND_DRAIN_THRESHOLD) return;
-    drain_completed_submitted_commands_with_query(state, query_fn)!;
+    foreach (&completion : state.queue_completions) {
+        drain_queue_if_needed_with_query(state, completion, query_fn)!;
+    }
+}
+
+fn void? drain_queue_if_needed_with_query(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    SemaphoreCounterQueryFn query_fn,
+) {
+    note_completion_retirement_lock_acquisition(state);
+    completion.retirement_mutex.lock()!!;
+    defer completion.retirement_mutex.unlock();
+    if (completion.submitted_count < SUBMITTED_COMMAND_DRAIN_THRESHOLD) return;
+
+    ulong completed;
+    note_completion_counter_query(state);
+    check_device_result(
+        state,
+        query_fn(
+            state.device,
+            completion.timeline,
+            &completed,
+        ),
+    )!;
+    retire_queue_through_locked(state, completion, completed);
 }
 
 fn void? drain_submitted_commands_if_needed(VkDeviceState* state) {
@@ -538,25 +527,36 @@ fn void reset_completion_work_counters(
 }
 
 fn void destroy_submitted_commands(VkDeviceState* state) {
-    while (state.submitted_command_count > 0) {
-        release_submitted_command_batch(state, 0);
+    foreach (&completion : state.queue_completions) {
+        bool locked = completion.retirement_mutex.is_initialized();
+        if (locked) completion.retirement_mutex.lock()!!;
+        while (completion.submitted_head != null) {
+            completion.submitted_head = release_pending_command_locked(
+                state,
+                completion,
+                completion.submitted_head,
+            );
+        }
+        completion.submitted_tail = null;
+        completion.submitted_count = 0;
+        if (locked) completion.retirement_mutex.unlock();
     }
-    if (state.submitted_commands.ptr != null) {
-        mem::free(state.submitted_commands.ptr);
-    }
-    state.submitted_commands = {};
-    state.submitted_command_count = 0;
-    state.submitted_command_reserved = 0;
 }
 
 fn CommandBufferStats command_buffer_stats(VkDeviceState* state) {
     state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    uint pending;
+    foreach (&completion : state.queue_completions) {
+        completion.retirement_mutex.lock()!!;
+        pending += completion.submitted_count;
+        completion.retirement_mutex.unlock();
+    }
     state.command_mutex.lock()!!;
     defer state.command_mutex.unlock();
-    defer state.resource_mutex.unlock();
     return {
         .allocated = state.command_buffers_allocated,
         .freed     = state.command_buffers_freed,
-        .pending   = state.submitted_command_count,
+        .pending   = pending,
     };
 }

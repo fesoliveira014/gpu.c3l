@@ -213,9 +213,6 @@ struct VkDeviceState {
     SamplerTable               samplers;
     VkPresentationState        presentation;
     VkStrictHeapState          strict_heap;
-    SubmittedCommandBatch[]    submitted_commands;
-    uint                       submitted_command_count;
-    uint                       submitted_command_reserved;
     Atomic{ulong}              generated_preprocess_allocations;
     Atomic{ulong}              generated_preprocess_reuses;
     Atomic{ulong}              generated_recording_allocations;
@@ -260,8 +257,13 @@ struct VkDeviceState {
     Atomic{ulong}              completion_cached_poll_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              completion_cached_wait_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
     Atomic{ulong}              submit_completion_wait_calls;
-    ulong                      submit_duplicate_token_visits @if(env::TESTING || $feature(SUBMIT_DUPLICATE_STATS));
-    ulong                      submit_epoch_reset_cells @if(env::TESTING || $feature(SUBMIT_DUPLICATE_STATS));
+    Atomic{ulong}              submit_authoritative_token_resolutions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
+    Atomic{ulong}              submit_duplicate_token_visits @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
+    Atomic{ulong}              submit_epoch_reset_cells @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
+    Atomic{ulong}              submit_command_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
+    Atomic{ulong}              submit_queue_submission_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
+    Atomic{ulong}              submit_rollback_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
+    Atomic{ulong}              submit_native_submissions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
     CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
     void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
@@ -289,7 +291,8 @@ struct VkDeviceState {
     void*                     submission_checkpoint_user_data @if(env::TESTING);
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
-    SubmitStats                submit_stats;
+    Atomic{ulong}              submit_queue_submits;
+    Atomic{ulong}              submit_completion_point_publications;
 }
 
 struct GeneratedWorkSupport {
@@ -1211,10 +1214,6 @@ fn gpu::Device? create_vk_device_from_runtime(
         gpu::internal::ResourceOwnerKind.COMMAND,
     );
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
-    state.submitted_commands = mem::new_array(
-        SubmittedCommandBatch,
-        MAX_COMMAND_LISTS,
-    );
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.COMMAND_STORAGE)!;
     uint pipeline_capacity;
     if (state.strict_heap.enabled) {

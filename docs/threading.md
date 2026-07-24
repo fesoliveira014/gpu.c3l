@@ -121,12 +121,16 @@ allocators may be recorded in parallel. Tier S allocation and
 span operations may overlap, but callers synchronize writes to mapped storage
 and keep every allocation live through its last submitted use.
 
-Submission consumes executable command tokens only after native acceptance and
-returns a reusable `CompletionPoint`. The authoritative records remain
-`SUBMITTED`, retain their devices, allocators, native buffers, and fixed scratch,
-and cannot be reused before ordered retirement. The caller retains the point
-whenever it guards resource reuse, command-dependent destruction, or cross-queue
-ordering.
+Submission resolves and claims the complete bounded-token batch once inside the
+backend, using the exact queue stored by each authoritative record. It consumes
+executable command tokens only after native acceptance, pending-record append,
+and completion-sequence publication, then returns a reusable
+`CompletionPoint`. The authoritative records remain `SUBMITTED`, retain their
+devices, allocators, native buffers, and fixed scratch, and cannot be reused
+before ordered retirement. Validation, preparation, or native failure restores
+the batch to retryable `EXECUTABLE` state without consuming tokens or readiness.
+The caller retains the point whenever it guards resource reuse,
+command-dependent destruction, or cross-queue ordering.
 Before device destruction, wait for the latest point on every used queue and
 destroy every swapchain and child resource.
 
@@ -134,22 +138,34 @@ destroy every swapchain and child resource.
 
 Resource creation and destruction use `resource_mutex`; shader-visible
 texture-view cache publication uses `texture_view_cache_mutex`; command-record
-allocation, submit claims, and reclamation use `command_mutex`.
+allocation, submit claims, rollback, and reclamation use `command_mutex`.
 Allocator-table resolution pins a stable allocator slot under `resource_mutex`,
 releases that mutex, and only then acquires the allocator mutex. Begin, end, and
 discard therefore perform native and allocator-local work without a shared
 recording lock, so distinct allocators do not convoy. Cold resource operations
 may acquire `resource_mutex` before an allocator mutex when they must protect
-allocator-table, pipeline, or VMA lifetime together.
-When both resource and view-cache locks are needed, resource comes first.
-Submission first owns the selected queue identity's submit-scratch mutex while
-it fills fixed, queue-owned preparation storage. It may transiently acquire
-resource and command locks during preparation, releases `command_mutex` before
-locking `submit_mutex`, and never acquires the scratch mutex from another lock.
-Queue submission may acquire `resource_mutex` while holding `submit_mutex` to
-publish or retire submitted-command metadata. The nested order is therefore
-submit scratch before `submit_mutex` before `resource_mutex`; resource-locked
-paths never acquire either queue submission mutex.
+allocator-table, pipeline, or VMA lifetime together. When both resource and
+view-cache locks are needed, resource comes first.
+
+Each selected queue owns two independent boundaries:
+
+- `submission_mutex` is the long boundary. It protects the queue's fixed submit
+  scratch, completion-sequence reservation, native queue call, accepted-record
+  append, readiness commit, and point publication. Presentation on the same
+  native queue uses this boundary. There is no separate scratch mutex.
+- `retirement_mutex` is the short boundary. It protects that queue's intrusive
+  pending-record list and covered-record release. Poll and wait use it without
+  acquiring `submission_mutex`.
+
+A nonempty submit holds `submission_mutex`, briefly acquires `command_mutex`
+once to resolve and claim all records, and releases the command lock before the
+native call. Failure after claim reacquires `command_mutex` once for rollback.
+Successful append briefly nests `retirement_mutex` under `submission_mutex`;
+retirement nests exact-allocator locks and then `command_mutex` under
+`retirement_mutex`. Paths that also need resource state acquire
+`resource_mutex` before a queue retirement boundary. Ordinary submit and
+retirement acquire no `resource_mutex`, no allocator-queue reproof lock, and no
+global pending-list lock. No path holds two queues' retirement mutexes at once.
 
 ## Texture-transition discipline
 
@@ -241,26 +257,30 @@ draw-argument consumer, and no application work boundary adds waits or signals.
 Same-queue waits are still scope-validated before the redundant native wait is
 elided.
 
-Each queue release-publishes one retired prefix. Sequence N is retired
-only after native completion and after every published submitted-command batch
-through N has moved every authoritative record to `INACTIVE`, released any
-tracked command references, returned generated scratch and every buffer/scratch
-index to its originating allocator, released retained device/backend ownership,
-and invalidated or generation-advanced its bounded identity.
-Every first successful native observation also queries and drains all queue
-identities represented by pending batches before publishing any retired prefix.
-An already-retired point can therefore use the zero-work cached path safely.
-Poll and wait acquire-load that prefix after point
-validation; an already-retired point performs no native call and acquires
-neither the queue nor resource mutex.
+Each queue owns an intrusive FIFO of its submitted authoritative records and
+release-publishes one retired prefix. Sequence N is retired only after native
+completion and after every covered record through N has moved to `INACTIVE`,
+released tracked references and generated scratch, returned its buffer/scratch
+index to its exact allocator, released retained device/backend ownership,
+cleared its embedded pending link, and invalidated or generation-advanced its
+bounded identity. A first successful observation queries every represented
+pending queue before publishing any retired prefix, then locks and drains those
+queues one at a time. It never holds two retirement mutexes simultaneously.
+Submit threshold and headroom handling remain target-queue-only. An
+already-retired point can therefore use the zero-work cached path safely. Poll
+and wait acquire-load that prefix after point validation; an already-retired
+point performs no native call and acquires neither queue mutex nor
+`resource_mutex`.
 
 Native progress is capped to the acquire-loaded contiguous published prefix
-before retirement. This prevents a native submission paused before metadata or
-point publication from exposing or releasing its predicted sequence. A first
-poll miss may query the queue timeline and retire the observed published
-prefix. A successful wait retires exactly its requested sequence; timeout
-preserves both the point and retired prefix. Headroom and threshold drains
-advance the same prefix.
+before retirement. This prevents a later native submission paused before
+pending-record or point publication from exposing or releasing its predicted
+sequence. Because polling does not need the long submission boundary, a
+completed earlier point can still acquire the short retirement boundary and
+retire while that later submission is paused. A first poll miss may query the
+queue timeline and retire the observed published prefix. A successful wait
+retires exactly its requested sequence; timeout preserves both the point and
+retired prefix. Headroom and threshold drains advance the same strong prefix.
 
 Resource storage, raw addresses, shader indices, and mapped data remain the
 caller's responsibility: retain every owning token until all points covering

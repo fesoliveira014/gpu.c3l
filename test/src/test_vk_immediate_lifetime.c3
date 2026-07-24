@@ -4,7 +4,6 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 import vk;
-import std::core::mem;
 import std::core::mem::allocators;
 import std::atomic::types;
 import std::thread;
@@ -17,6 +16,7 @@ uint lifetime_counter_query_calls;
 ulong distinct_upstream_counter_value;
 uint distinct_upstream_query_calls;
 vk::Semaphore distinct_upstream_queried_semaphore;
+vk::Result distinct_upstream_query_failure;
 
 struct QuiescentReleaseWorkerArgs {
     gpu::Device*       device;
@@ -62,6 +62,10 @@ fn vk::Result distinct_upstream_counter_query(
     (void)device;
     distinct_upstream_query_calls++;
     distinct_upstream_queried_semaphore = semaphore;
+    if (semaphore == (vk::Semaphore)(uptr)11
+        && distinct_upstream_query_failure != vk::Result.SUCCESS) {
+        return distinct_upstream_query_failure;
+    }
     *value = distinct_upstream_counter_value;
     return vk::Result.SUCCESS;
 }
@@ -210,14 +214,14 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         );
     vk::SubmitInfo2 submit = vk::submit_info2()
         .set_wait_semaphore_infos((&wait)[:1]);
-    completion.submit_mutex.lock()!!;
+    completion.submission_mutex.lock()!!;
     vk::Result submit_result = vk::queue_submit2(
         queue:        completion.queue,
         submit_count: 1,
         p_submits:    &submit,
         fence:        fence,
     );
-    completion.submit_mutex.unlock();
+    completion.submission_mutex.unlock();
     if (submit_result == vk::Result.SUCCESS) submission_live = true;
     vk::check_backend_result(
         state:     state,
@@ -382,7 +386,9 @@ fn void incomplete_submitted_commands_retain_references() @test {
     gpu::wait_completion(completion)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    assert(state.submitted_command_count == 0,
+    vk::QueueCompletionState* queue_completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    assert(queue_completion.submitted_count == 0,
         "waiting releases completed validation-reference batches");
     gpu::free_allocation(&device, &src.allocation)!!;
     src.span = {};
@@ -426,12 +432,12 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
-    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
-        && state.submitted_command_count == 1,
-        "submission transfers the borrowed-view reference to the completion batch");
-
     vk::QueueCompletionState* queue_completion =
         vk::queue_completion_state(state, queue.id)!!;
+    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
+        && queue_completion.submitted_count == 1,
+        "submission transfers the borrowed-view reference to the completion batch");
+
     ulong sequence = gpu::internal::completion_point_sequence(completion);
     vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
         .set_semaphore_count(1)
@@ -443,12 +449,12 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
         timeout:       ulong::max,
     ) == vk::Result.SUCCESS, "the submitted command reaches completion");
     assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
-        && state.submitted_command_count == 1,
+        && queue_completion.submitted_count == 1,
         "completion alone preserves the borrowed-view reference until drain");
 
     vk::drain_completed_submitted_commands(state)!!;
     assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
-        && state.submitted_command_count == 0,
+        && queue_completion.submitted_count == 0,
         "drain releases the completed borrowed-view reference");
     vk::QueueCompletionState* completion_state =
         vk::queue_completion_state(
@@ -468,7 +474,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
         "post-drain polling performs no native or retirement-lock work");
     vk::drain_completed_submitted_commands(state)!!;
     assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
-        && state.submitted_command_count == 0,
+        && queue_completion.submitted_count == 0,
         "a repeated drain cannot release the borrowed-view reference twice");
 }
 
@@ -550,45 +556,6 @@ fn void failed_command_validation_retains_no_resource_reference() @test {
     gpu::discard_commands(&commands)!!;
 }
 
-fn void submitted_command_reservations_prevent_capacity_overcommit() @test {
-    vk::VkDeviceState state = {
-        .validation_policy = {
-            .contract        = gpu::ContractValidation.FULL,
-            .track_lifetimes = true,
-        },
-        .host_allocator = &allocators::LIBC_ALLOCATOR,
-    };
-    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 16);
-    state.submitted_command_count = 15;
-    state.resource_mutex.init()!!;
-    defer (void)state.resource_mutex.destroy();
-
-    gpu::internal::CommandRecord first_record;
-    gpu::internal::CommandRecord second_record;
-    gpu::internal::CommandRecord*[1] first_records = { &first_record };
-    gpu::internal::CommandRecord*[1] second_records = { &second_record };
-
-    uint first = vk::prepare_submitted_commands(
-        &state,
-        first_records[..],
-    )!!;
-    assert(@catch(vk::prepare_submitted_commands(
-        &state,
-        second_records[..],
-    )) == gpu::DEVICE_BUSY,
-        "a second reservation cannot exceed fixed submitted-command storage");
-    assert(first == 1 && state.submitted_command_reserved == 1,
-        "the successful reservation remains visible until cancellation");
-    assert(state.submitted_commands.len == 16,
-        "reservation failure preserves fixed submitted-command capacity");
-
-    vk::cancel_submitted_command_reservation(&state, first);
-    assert(state.submitted_command_reserved == 0,
-        "cancellation releases every reserved batch");
-    state.submitted_command_count = 0;
-    vk::destroy_submitted_commands(&state);
-}
-
 fn void incomplete_reference_drain_is_deterministic() @test {
     vk::VkDeviceState state = {
         .validation_policy = {
@@ -603,7 +570,8 @@ fn void incomplete_reference_drain_is_deterministic() @test {
     }};
     completions[0].published_sequence.store(7, AtomicOrdering.RELEASE);
     state.queue_completions = completions[..];
-    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 1);
+    completions[0].retirement_mutex.init()!!;
+    defer (void)completions[0].retirement_mutex.destroy();
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,
@@ -629,22 +597,18 @@ fn void incomplete_reference_drain_is_deterministic() @test {
     vk::CommandCell[1] command_cells;
     init_submitted_command_fixture(&state, command_cells[..]);
     defer (void)state.command_mutex.destroy();
-    state.submitted_commands[0] = {
-        .completion = gpu::internal::make_completion_point(queue, 7)!!,
-        .record = submitted_command_fixture_record(
-            &state,
-            allocator,
-            0,
-        ),
-    };
-    state.submitted_command_count = 1;
+    append_submitted_command_fixture(
+        completion: &completions[0],
+        record:     submitted_command_fixture_record(&state, allocator, 0),
+        point:      gpu::internal::make_completion_point(queue, 7)!!,
+    );
 
     lifetime_counter_value = 6;
     vk::drain_completed_submitted_commands_with_query(
         &state,
         &lifetime_counter_query,
     )!!;
-    assert(state.submitted_command_count == 1,
+    assert(completions[0].submitted_count == 1,
         "an incomplete counter preserves the submitted reference batch");
 
     lifetime_counter_value = 7;
@@ -652,9 +616,8 @@ fn void incomplete_reference_drain_is_deterministic() @test {
         &state,
         &lifetime_counter_query,
     )!!;
-    assert(state.submitted_command_count == 0,
+    assert(completions[0].submitted_count == 0,
         "the reached counter releases the submitted reference batch");
-    vk::destroy_submitted_commands(&state);
 }
 
 fn void successful_observation_drains_distinct_upstream_identity() @test {
@@ -676,7 +639,14 @@ fn void successful_observation_drains_distinct_upstream_identity() @test {
     completions[0].published_sequence.store(3, AtomicOrdering.RELEASE);
     completions[1].published_sequence.store(3, AtomicOrdering.RELEASE);
     state.queue_completions = completions[..];
-    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 1);
+    foreach (&completion : completions) {
+        completion.retirement_mutex.init()!!;
+    }
+    defer {
+        foreach (&completion : completions) {
+            (void)completion.retirement_mutex.destroy();
+        }
+    }
     gpu::Queue upstream_queue = {
         .device = { .generation = 1 },
         .id     = 0,
@@ -703,19 +673,36 @@ fn void successful_observation_drains_distinct_upstream_identity() @test {
     vk::CommandCell[1] command_cells;
     init_submitted_command_fixture(&state, command_cells[..]);
     defer (void)state.command_mutex.destroy();
-    state.submitted_commands[0] = {
-        .completion = gpu::internal::make_completion_point(upstream_queue, 3)!!,
-        .record = submitted_command_fixture_record(
-            &state,
-            allocator,
-            0,
-        ),
-    };
-    state.submitted_command_count = 1;
+    append_submitted_command_fixture(
+        completion: &completions[0],
+        record:     submitted_command_fixture_record(&state, allocator, 0),
+        point:      gpu::internal::make_completion_point(upstream_queue, 3)!!,
+    );
     distinct_upstream_counter_value = 3;
     distinct_upstream_query_calls = 0;
     distinct_upstream_queried_semaphore = (vk::Semaphore)null;
+    distinct_upstream_query_failure = vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 
+    assert(@catch(vk::poll_queue_completion_with_query(
+        state:      &state,
+        completion: &completions[1],
+        queue_id:   1,
+        sequence:   3,
+        query_fn:   &distinct_upstream_counter_query,
+    )) == gpu::OUT_OF_HOST_MEMORY,
+        "a failing pending-identity query propagates before retirement");
+    assert(distinct_upstream_query_calls == 2
+            && completions[0].retired_sequence.load(
+                AtomicOrdering.ACQUIRE,
+            ) == 0
+            && completions[1].retired_sequence.load(
+                AtomicOrdering.ACQUIRE,
+            ) == 0
+            && completions[0].submitted_count == 1,
+        "query failure publishes no retired prefix and preserves pending ownership");
+
+    distinct_upstream_query_failure = vk::Result.SUCCESS;
+    distinct_upstream_query_calls = 0;
     assert(vk::poll_queue_completion_with_query(
         state:      &state,
         completion: &completions[1],
@@ -731,13 +718,13 @@ fn void successful_observation_drains_distinct_upstream_identity() @test {
             && completions[1].retired_sequence.load(AtomicOrdering.ACQUIRE)
                 == 3,
         "distinct upstream and downstream retired prefixes remain independent");
-    assert(state.submitted_command_count == 0
+    assert(completions[0].submitted_count == 0
+            && completions[1].submitted_count == 0
             && slot.in_flight_buffers == 0
             && slot.available_count == 1
             && slot.available[0] == 0
             && !scratch[0].in_use,
         "downstream completion returns the exact upstream allocator unit");
-    vk::destroy_submitted_commands(&state);
 }
 
 fn void completed_submission_release_boundary_is_exact() @test {
@@ -751,8 +738,9 @@ fn void completed_submission_release_boundary_is_exact() @test {
     defer (void)state.command_mutex.destroy();
     vk::QueueCompletionState[1] completions = {{ .bound = true }};
     state.queue_completions = completions[..];
+    completions[0].retirement_mutex.init()!!;
+    defer (void)completions[0].retirement_mutex.destroy();
     completions[0].published_sequence.store(9, AtomicOrdering.RELEASE);
-    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 3);
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,
@@ -834,41 +822,38 @@ fn void completed_submission_release_boundary_is_exact() @test {
     defer (void)first_allocator_slot.mutex.destroy();
     second_allocator_slot.mutex.init()!!;
     defer (void)second_allocator_slot.mutex.destroy();
-    state.submitted_commands[0] = {
-        .completion = gpu::internal::make_completion_point(queue, 7)!!,
-        .record = submitted_command_fixture_record(
+    append_submitted_command_fixture(
+        completion: &completions[0],
+        record:     submitted_command_fixture_record(
             &state,
             first_allocator,
             0,
         ),
-    };
-    state.submitted_commands[1] = {
-        .completion = gpu::internal::make_completion_point(queue, 8)!!,
-        .record = submitted_command_fixture_record(
+        point:      gpu::internal::make_completion_point(queue, 7)!!,
+    );
+    append_submitted_command_fixture(
+        completion: &completions[0],
+        record:     submitted_command_fixture_record(
             &state,
             second_allocator,
             0,
         ),
-    };
-    state.submitted_commands[2] = {
-        .completion = gpu::internal::make_completion_point(queue, 8)!!,
-        .record = submitted_command_fixture_record(
+        point:      gpu::internal::make_completion_point(queue, 8)!!,
+    );
+    append_submitted_command_fixture(
+        completion: &completions[0],
+        record:     submitted_command_fixture_record(
             &state,
             second_allocator,
             1,
         ),
-    };
-    state.submitted_command_count = 3;
+        point:      gpu::internal::make_completion_point(queue, 8)!!,
+    );
 
     vk::CommandBufferStats before = vk::command_buffer_stats(&state);
-    state.resource_mutex.lock()!!;
-    vk::retire_queue_through_locked(
-        state:            &state,
-        completion:       &completions[0],
-        queue_id:         0,
-        native_completed: 7,
-    );
-    state.resource_mutex.unlock();
+    completions[0].retirement_mutex.lock()!!;
+    vk::retire_queue_through_locked(&state, &completions[0], 7);
+    completions[0].retirement_mutex.unlock();
     vk::CommandBufferStats incomplete = vk::command_buffer_stats(&state);
     assert(incomplete.pending == before.pending - 1,
         "sequence N - 1 retires only its covered batch");
@@ -895,14 +880,9 @@ fn void completed_submission_release_boundary_is_exact() @test {
     assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 7,
         "sequence N - 1 publishes only the exact retired prefix");
 
-    state.resource_mutex.lock()!!;
-    vk::retire_queue_through_locked(
-        state:            &state,
-        completion:       &completions[0],
-        queue_id:         0,
-        native_completed: 8,
-    );
-    state.resource_mutex.unlock();
+    completions[0].retirement_mutex.lock()!!;
+    vk::retire_queue_through_locked(&state, &completions[0], 8);
+    completions[0].retirement_mutex.unlock();
     vk::CommandBufferStats completed = vk::command_buffer_stats(&state);
     assert(completed.pending == 0,
         "sequence N retires every batch covered by that sequence");
@@ -923,30 +903,19 @@ fn void completed_submission_release_boundary_is_exact() @test {
         "sequence N routes every later unit to the second allocator");
     assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 8,
         "sequence N publishes only after all covered batches retire");
-    state.resource_mutex.lock()!!;
-    vk::retire_queue_through_locked(
-        state:            &state,
-        completion:       &completions[0],
-        queue_id:         0,
-        native_completed: 8,
-    );
-    state.resource_mutex.unlock();
-    assert(state.submitted_command_count == 0
+    completions[0].retirement_mutex.lock()!!;
+    vk::retire_queue_through_locked(&state, &completions[0], 8);
+    completions[0].retirement_mutex.unlock();
+    assert(completions[0].submitted_count == 0
             && first_allocator_slot.available_count == 1
             && second_allocator_slot.available_count == 2
             && second_allocator_slot.in_flight_buffers == 0,
         "repeating the same retirement is idempotent across allocators");
-    state.resource_mutex.lock()!!;
-    vk::retire_queue_through_locked(
-        state:            &state,
-        completion:       &completions[0],
-        queue_id:         0,
-        native_completed: 9,
-    );
-    state.resource_mutex.unlock();
+    completions[0].retirement_mutex.lock()!!;
+    vk::retire_queue_through_locked(&state, &completions[0], 9);
+    completions[0].retirement_mutex.unlock();
     assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 9,
         "an empty submission advances the retired prefix without a synthetic batch");
-    vk::destroy_submitted_commands(&state);
 }
 
 fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
@@ -958,7 +927,10 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
     vk::CommandCell[2] command_cells;
     init_submitted_command_fixture(&state, command_cells[..]);
     defer (void)state.command_mutex.destroy();
-    state.submitted_commands = mem::new_array(vk::SubmittedCommandBatch, 2);
+    vk::QueueCompletionState[1] completions = {{ .bound = true }};
+    state.queue_completions = completions[..];
+    completions[0].retirement_mutex.init()!!;
+    defer (void)completions[0].retirement_mutex.destroy();
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,
@@ -1027,26 +999,30 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
     defer (void)first_slot.mutex.destroy();
     second_slot.mutex.init()!!;
     defer (void)second_slot.mutex.destroy();
-    state.submitted_commands[0] = {
-        .record = submitted_command_fixture_record(
+    append_submitted_command_fixture(
+        completion: &completions[0],
+        record:     submitted_command_fixture_record(
             &state,
             first_allocator,
             0,
         ),
-    };
-    state.submitted_commands[1] = {
-        .record = submitted_command_fixture_record(
+        point:      gpu::internal::make_completion_point(queue, 1)!!,
+    );
+    append_submitted_command_fixture(
+        completion: &completions[0],
+        record:     submitted_command_fixture_record(
             &state,
             second_allocator,
             0,
         ),
-    };
-    state.submitted_command_count = 2;
+        point:      gpu::internal::make_completion_point(queue, 2)!!,
+    );
 
     vk::destroy_submitted_commands(&state);
 
-    assert(state.submitted_command_count == 0
-            && state.submitted_commands.ptr == null,
+    assert(completions[0].submitted_count == 0
+            && completions[0].submitted_head == null
+            && completions[0].submitted_tail == null,
         "device-loss teardown consumes every submitted batch");
     assert(first_reference.load(AtomicOrdering.RELAXED) == 0
             && second_reference.load(AtomicOrdering.RELAXED) == 0,
@@ -1065,7 +1041,8 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
         "device-loss teardown returns each exact buffer and scratch block");
 
     vk::destroy_submitted_commands(&state);
-    assert(first_slot.available_count == 1
+    assert(completions[0].submitted_count == 0
+            && first_slot.available_count == 1
             && second_slot.available_count == 1,
         "repeated defensive teardown is idempotent");
 }
@@ -1084,13 +1061,11 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
         .bound    = true,
     }};
     state.queue_completions = completions[..];
+    completions[0].retirement_mutex.init()!!;
+    defer (void)completions[0].retirement_mutex.destroy();
     completions[0].published_sequence.store(
         vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
         AtomicOrdering.RELEASE,
-    );
-    state.submitted_commands = mem::new_array(
-        vk::SubmittedCommandBatch,
-        vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
     );
     gpu::Queue queue = {
         .device = { .generation = 1 },
@@ -1116,19 +1091,19 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
     defer (void)allocator_slot.mutex.destroy();
     for (uint i = 0; i < vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD; i++) {
         scratch[i].in_use = true;
-        state.submitted_commands[i] = {
-            .completion = gpu::internal::make_completion_point(
-                queue,
-                (ulong)i + 1,
-            )!!,
-            .record = submitted_command_fixture_record(
+        append_submitted_command_fixture(
+            completion: &completions[0],
+            record:     submitted_command_fixture_record(
                 &state,
                 allocator,
                 i,
             ),
-        };
+            point:      gpu::internal::make_completion_point(
+                queue,
+                (ulong)i + 1,
+            )!!,
+        );
     }
-    state.submitted_command_count = vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD;
     lifetime_counter_value = vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD;
     lifetime_counter_query_calls = 0;
 
@@ -1138,10 +1113,9 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
     )!!;
     assert(lifetime_counter_query_calls == 1,
         "the threshold drain queries one represented queue once");
-    assert(state.submitted_command_count == 0,
+    assert(completions[0].submitted_count == 0,
         "the threshold drain releases every covered batch");
     assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE)
         == vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
         "the threshold drain publishes the retired prefix");
-    vk::destroy_submitted_commands(&state);
 }
