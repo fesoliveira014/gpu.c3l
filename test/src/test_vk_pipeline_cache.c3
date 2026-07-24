@@ -2384,6 +2384,34 @@ fn void dynamic_color_formats_require_host_safe_storage() @test {
         "batch rejection performs no shader, native, or cache work");
 }
 
+fn void unrequested_dynamic_pipeline_stops_before_backend_work() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::ColorTargetFormat[1] formats = {{
+        .format = gpu::Format.RGBA8_UNORM,
+    }};
+    gpu::DynamicGraphicsPipelineDesc desc = {
+        .vertex_shader   = shaders.vert,
+        .fragment_shader = shaders.frag,
+        .colors          = formats[..],
+    };
+    vk::VkDeviceState* state = cache_test_state(&device);
+    ulong shader_checks_before = vk::shader_reflection_validation_count(state);
+    ulong native_before = vk::pipeline_native_create_count(state);
+
+    assert(@catch(gpu::create_dynamic_graphics_pipeline(
+        &device,
+        &desc,
+    )) == gpu::UNSUPPORTED_FEATURE,
+        "a capable but unrequested device rejects dynamic pipeline creation");
+    assert(vk::shader_reflection_validation_count(state) == shader_checks_before
+            && vk::pipeline_native_create_count(state) == native_before
+            && cache_entry_count(&device) == 0
+            && vk::shader_store_live_count(state) == 0,
+        "unrequested creation stops before shader, native, or cache work");
+}
+
 fn void dynamic_color_packets_share_one_live_pipeline_identity() @test {
     gpu::RuntimeDesc runtime_desc = {
         .backend                   = gpu::BackendKind.VULKAN,

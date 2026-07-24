@@ -157,21 +157,58 @@ fn void probe_dynamic_color_matrix(gpu::RuntimeDesc* runtime_desc) {
         .spirv       = BENCH_FRAG_SPIRV[..],
         .entry_point = "main",
     };
+    gpu::ShaderCode vertex = gpu::prepare_shader_code(&vertex_desc)!!;
+    gpu::ShaderCode fragment = gpu::prepare_shader_code(&fragment_desc)!!;
+    gpu::ColorWriteMask red_green = { .red, .green };
+    gpu::ColorTargetBlendState[BENCH_COLOR_STATE_COUNT] packets = {
+        gpu::color_blend_disabled(),
+        gpu::alpha_blend(),
+        gpu::premultiplied_alpha_blend(),
+        gpu::additive_blend(),
+        gpu::color_blend_disabled(red_green),
+    };
+    gpu::ColorTargetState[1][BENCH_COLOR_STATE_COUNT] immutable_colors;
+    gpu::GraphicsPipelineDesc[BENCH_COLOR_STATE_COUNT] immutable_descs;
+    foreach (i, packet : packets) {
+        immutable_colors[i][0] = {
+            .format     = gpu::Format.RGBA8_UNORM,
+            .blend      = packet.blend,
+            .write_mask = packet.write_mask,
+        };
+        immutable_descs[i] = {
+            .vertex_shader   = vertex,
+            .fragment_shader = fragment,
+            .colors          = immutable_colors[i][..],
+        };
+    }
+    gpu::PipelineHandle[BENCH_COLOR_STATE_COUNT] immutable_pipelines;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::internal::device_backend_state_ptr(&device);
+    ulong immutable_native_before = vk::pipeline_native_create_count(state);
+    std::time::Clock immutable_start = std::time::clock::now();
+    gpu::create_graphics_pipelines(
+        device:        &device,
+        descs:         immutable_descs[..],
+        out_pipelines: immutable_pipelines[..],
+    )!!;
+    long immutable_elapsed_ns = (long)immutable_start.to_now();
+    ulong immutable_native_creates =
+        vk::pipeline_native_create_count(state) - immutable_native_before;
+    assert(immutable_native_creates == BENCH_COLOR_STATE_COUNT,
+        "the immutable color matrix compiles five native pipelines");
+    assert(vk::pipeline_cache_entry_count(state) == BENCH_COLOR_STATE_COUNT,
+        "the immutable color matrix publishes five cache entries");
     gpu::ColorTargetFormat[1] formats = {{
         .format = gpu::Format.RGBA8_UNORM,
     }};
     gpu::DynamicGraphicsPipelineDesc desc = {
-        .vertex_shader = gpu::prepare_shader_code(&vertex_desc)!!,
-        .fragment_shader = gpu::prepare_shader_code(
-            &fragment_desc,
-        )!!,
-        .colors = formats[..],
+        .vertex_shader   = vertex,
+        .fragment_shader = fragment,
+        .colors          = formats[..],
     };
     gpu::DynamicGraphicsPipelineDesc[BENCH_COLOR_STATE_COUNT] descs;
     foreach (&item : descs) *item = desc;
     gpu::PipelineHandle[BENCH_COLOR_STATE_COUNT] pipelines;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
     ulong native_before = vk::pipeline_native_create_count(state);
     std::time::Clock create_start = std::time::clock::now();
     gpu::create_dynamic_graphics_pipelines(
@@ -182,8 +219,9 @@ fn void probe_dynamic_color_matrix(gpu::RuntimeDesc* runtime_desc) {
     long create_elapsed_ns = (long)create_start.to_now();
     assert(vk::pipeline_native_create_count(state) - native_before == 1,
         "the dynamic color matrix compiles one native pipeline");
-    assert(vk::pipeline_cache_entry_count(state) == 1,
-        "the dynamic color matrix publishes one cache entry");
+    assert(vk::pipeline_cache_entry_count(state)
+            == BENCH_COLOR_STATE_COUNT + 1,
+        "the dynamic color matrix adds one cache entry");
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
@@ -230,14 +268,6 @@ fn void probe_dynamic_color_matrix(gpu::RuntimeDesc* runtime_desc) {
         &graphics,
     )!!;
     gpu::cmd_bind_pipeline(&commands, pipelines[0])!!;
-    gpu::ColorWriteMask red_green = { .red, .green };
-    gpu::ColorTargetBlendState[BENCH_COLOR_STATE_COUNT] packets = {
-        gpu::color_blend_disabled(),
-        gpu::alpha_blend(),
-        gpu::premultiplied_alpha_blend(),
-        gpu::additive_blend(),
-        gpu::color_blend_disabled(red_green),
-    };
     gpu::reset_command_resolution_stats();
     std::time::Clock record_start = std::time::clock::now();
     foreach (packet : packets) {
@@ -257,13 +287,18 @@ fn void probe_dynamic_color_matrix(gpu::RuntimeDesc* runtime_desc) {
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     discard_bench_executable(&executable)!!;
     io::printfn(
-        "dynamic color matrix (states=%d native=%d): %.1f ns/create, %.1f ns/state",
+        "color profile matrix (states=%d immutable_native=%d dynamic_native=%d): %.1f ns/immutable-create, %.1f ns/dynamic-create, %.1f ns/state",
         BENCH_COLOR_STATE_COUNT,
+        immutable_native_creates,
         vk::pipeline_native_create_count(state) - native_before,
+        (double)immutable_elapsed_ns / (double)BENCH_COLOR_STATE_COUNT,
         (double)create_elapsed_ns / (double)BENCH_COLOR_STATE_COUNT,
         (double)record_elapsed_ns / (double)BENCH_COLOR_STATE_COUNT,
     );
     foreach (pipeline : pipelines) {
+        gpu::destroy_pipeline(&device, pipeline)!!;
+    }
+    foreach (pipeline : immutable_pipelines) {
         gpu::destroy_pipeline(&device, pipeline)!!;
     }
 }
