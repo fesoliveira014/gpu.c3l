@@ -99,8 +99,12 @@ alias CreateTextureViewsFn @private      = fn void? (Device*, TextureViewCreateD
 alias InternSamplerFn @private            = fn SamplerIndex? (Device*, SamplerDesc*);
 alias CreateComputePipelineFn @private  = fn PipelineHandle? (Device*, ComputePipelineDesc*);
 alias CreateGraphicsPipelineFn @private = fn PipelineHandle? (Device*, GraphicsPipelineDesc*);
+alias CreateDynamicGraphicsPipelineFn @private =
+    fn PipelineHandle? (Device*, DynamicGraphicsPipelineDesc*);
 alias CreateComputePipelinesFn @private = fn void? (Device*, ComputePipelineDesc[], PipelineHandle[]);
 alias CreateGraphicsPipelinesFn @private = fn void? (Device*, GraphicsPipelineDesc[], PipelineHandle[]);
+alias CreateDynamicGraphicsPipelinesFn @private =
+    fn void? (Device*, DynamicGraphicsPipelineDesc[], PipelineHandle[]);
 alias DestroyPipelineFn @private        = fn void? (Device*, PipelineHandle);
 alias GetPipelineCacheSizeFn @private   = fn usz? (Device*);
 alias GetPipelineCacheDataFn @private   = fn usz? (Device*, char[]);
@@ -108,6 +112,7 @@ alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, Pipelin
 alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, DepthState*);
 alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, DynamicRasterState*);
 alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, GraphicsState*);
+alias CmdSetColorStateFn @private            = fn void? (CommandRecord*, ColorState*);
 alias CmdDispatchFn @private                 = fn void? (CommandRecord*, GpuAddress, Vec3u);
 alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, RenderPassDesc*);
 alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandRecord*, RenderPassDesc*, GraphicsState*);
@@ -252,6 +257,7 @@ struct CommandOps @private {
     CmdSetDepthStateFn            set_depth_state;
     CmdSetRasterStateFn           set_raster_state;
     CmdSetGraphicsStateFn         set_graphics_state;
+    CmdSetColorStateFn            set_color_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
@@ -313,8 +319,10 @@ struct BackendVTable @private {
     InternSamplerFn           intern_sampler;
     CreateComputePipelineFn   create_compute_pipeline;
     CreateGraphicsPipelineFn  create_graphics_pipeline;
+    CreateDynamicGraphicsPipelineFn create_dynamic_graphics_pipeline;
     CreateComputePipelinesFn  create_compute_pipelines;
     CreateGraphicsPipelinesFn create_graphics_pipelines;
+    CreateDynamicGraphicsPipelinesFn create_dynamic_graphics_pipelines;
     DestroyPipelineFn         destroy_pipeline;
     GetPipelineCacheSizeFn    get_pipeline_cache_size;
     GetPipelineCacheDataFn    get_pipeline_cache_data;

@@ -148,6 +148,7 @@ const gpu::internal::RuntimeBackendVTable VK_RUNTIME_VTABLE @private = {
     .supports_queue_requirements = &vk_supports_queue_requirements,
     .supports_resource_agnostic_texture_sync =
         &vk_supports_resource_agnostic_texture_sync,
+    .supports_dynamic_color_state = &vk_supports_dynamic_color_state,
 };
 
 fn VkInstanceDesc runtime_instance_desc(

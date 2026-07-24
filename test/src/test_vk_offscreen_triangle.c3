@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk;
 import vk;
+import std::io;
 
 // Headless (lavapipe): offscreen graphics. Clear, textured triangle through
 // both root pointers + the heap from the fragment stage, render-to-mip, and
@@ -16,6 +17,7 @@ const char[*] DYNAMIC_RECT_FRAG_SPIRV = $embed("shaders/depth.frag.spv");
 
 const uint RT_SIZE = 32;
 const usz RT_BYTES = RT_SIZE * RT_SIZE * 4;
+const uint COLOR_READBACK_TOLERANCE = 1;
 
 struct VulkanValidationCapture {
     uint errors;
@@ -671,6 +673,237 @@ fn void dynamic_viewport_scissor_pixels() @test {
     char* reset_pixels = viewport_pixels + RT_BYTES * 3;
     assert(reset_pixels[right_green] != 0,
         "an explicit complete replacement restores full raster coverage");
+}
+
+fn void dynamic_color_output_matches_immutable_output() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .backend                   = gpu::BackendKind.VULKAN,
+        .contract_validation       = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes  = true,
+        .enable_vulkan_validation  = true,
+        .application_name          = "gpu_dynamic_color_output_test",
+    };
+    gpu::Device? maybe_device = create_dynamic_color_test_device(&runtime_desc);
+    if (catch err = maybe_device) {
+        assert(err == gpu::UNSUPPORTED_FEATURE,
+            "dynamic color output fails only when live support is absent");
+        io::eprintfn("dynamic_color_output_matches_immutable_output: unsupported, skipping");
+        return;
+    }
+    gpu::Device device = maybe_device;
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc vertex_desc = {
+        .stage       = gpu::ShaderStage.VERTEX,
+        .spirv       = DYNAMIC_RECT_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderDesc fragment_desc = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = DYNAMIC_RECT_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderCode vertex = gpu::prepare_shader_code(&vertex_desc)!!;
+    gpu::ShaderCode fragment = gpu::prepare_shader_code(&fragment_desc)!!;
+    gpu::ColorWriteMask red_green = { .red, .green };
+    gpu::ColorTargetBlendState[5] packets = {
+        gpu::color_blend_disabled(),
+        gpu::alpha_blend(),
+        gpu::premultiplied_alpha_blend(),
+        gpu::additive_blend(),
+        gpu::color_blend_disabled(red_green),
+    };
+    gpu::ColorTargetState[1][5] immutable_colors;
+    gpu::GraphicsPipelineDesc[5] immutable_descs;
+    foreach (i, packet : packets) {
+        immutable_colors[i][0] = {
+            .format     = gpu::Format.RGBA8_UNORM,
+            .blend      = packet.blend,
+            .write_mask = packet.write_mask,
+        };
+        immutable_descs[i] = {
+            .vertex_shader   = vertex,
+            .fragment_shader = fragment,
+            .colors          = immutable_colors[i][..],
+        };
+    }
+    gpu::PipelineHandle[5] immutable_pipelines;
+    gpu::create_graphics_pipelines(
+        device:        &device,
+        descs:         immutable_descs[..],
+        out_pipelines: immutable_pipelines[..],
+    )!!;
+    defer foreach (pipeline : immutable_pipelines) {
+        gpu::destroy_pipeline(&device, pipeline)!!;
+    }
+    gpu::ColorTargetFormat[1] dynamic_formats = {{
+        .format = gpu::Format.RGBA8_UNORM,
+    }};
+    gpu::DynamicGraphicsPipelineDesc dynamic_desc = {
+        .vertex_shader   = vertex,
+        .fragment_shader = fragment,
+        .colors          = dynamic_formats[..],
+    };
+    gpu::PipelineHandle dynamic = gpu::create_dynamic_graphics_pipeline(
+        &device,
+        &dynamic_desc,
+    )!!;
+    defer gpu::destroy_pipeline(&device, dynamic)!!;
+    gpu::TextureHandle[10] targets;
+    foreach (&target : targets) *target = make_render_target(&device);
+    defer foreach (target : targets) {
+        gpu::destroy_texture(&device, target)!!;
+    }
+    gpu::AttachmentViewHandle[10] views;
+    foreach (i, &view : views) {
+        *view = create_test_attachment_view(&device, targets[i])!!;
+    }
+    defer foreach (&view : views) {
+        destroy_test_attachment_view(&device, view)!!;
+    }
+    OwnedSpan vertices = allocate_owned_span(
+        device:       &device,
+        size:         3 * 16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "dynamic_color_output_vertices",
+    )!!;
+    defer free_owned_span(&device, &vertices)!!;
+    float[12] vertex_data = {
+        -1.0f, -1.0f, 0.0f, 0.0f,
+         3.0f, -1.0f, 0.0f, 0.0f,
+        -1.0f,  3.0f, 0.0f, 0.0f,
+    };
+    foreach (i, value : vertex_data) {
+        ((float*)test_span_mapping(&device, vertices.span).ptr)[i] = value;
+    }
+    OwnedSpan color = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "dynamic_color_output_root",
+    )!!;
+    defer free_owned_span(&device, &color)!!;
+    float[4] source_color = { 0.5f, 0.5f, 0.5f, 0.5f };
+    foreach (i, value : source_color) {
+        ((float*)test_span_mapping(&device, color.span).ptr)[i] = value;
+    }
+    gpu::flush_mapped_span(&device, vertices.span)!!;
+    gpu::flush_mapped_span(&device, color.span)!!;
+
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    foreach (i, target : targets) {
+        usz state_index = (usz)i / 2;
+        bool dynamic_profile = i % 2 == 1;
+        gpu::TextureBarrier to_attachment = {
+            .texture = target,
+            .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+            .after   = {
+                .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
+        };
+        gpu::cmd_texture_barrier(&commands, &to_attachment)!!;
+        gpu::ColorTargetDesc[1] attachments = {{
+            .view     = views[i],
+            .load_op  = gpu::LoadOp.CLEAR,
+            .store_op = gpu::StoreOp.STORE,
+            .clear    = { .rgba = { 0.25f, 0.25f, 0.25f, 0.25f } },
+        }};
+        gpu::RenderPassDesc pass = {
+            .colors = attachments[..],
+            .width  = RT_SIZE,
+            .height = RT_SIZE,
+        };
+        gpu::GraphicsState graphics =
+            gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+        gpu::cmd_begin_render_pass_with_state(
+            &commands,
+            &pass,
+            &graphics,
+        )!!;
+        gpu::cmd_bind_pipeline(
+            &commands,
+            dynamic_profile ? dynamic : immutable_pipelines[state_index],
+        )!!;
+        if (dynamic_profile) {
+            gpu::ColorTargetBlendState[1] color_targets = {
+                packets[state_index],
+            };
+            gpu::ColorState color_state = { .targets = color_targets[..] };
+            gpu::cmd_set_color_state(&commands, &color_state)!!;
+        }
+        gpu::cmd_draw(
+            commands:       &commands,
+            vertex_root:    test_span_address(&device, vertices.span),
+            fragment_root:  test_span_address(&device, color.span),
+            vertex_count:   3,
+            instance_count: 1,
+        )!!;
+        gpu::cmd_end_render_pass(&commands)!!;
+    }
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+
+    char[RT_BYTES * 10] pixels;
+    gpu::TextureState color_attachment = {
+        .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+        .stages = { .color_output },
+        .access = { .read, .write },
+    };
+    foreach (i, target : targets) {
+        readback_test_texture_data(
+            device:   &device,
+            src:      target,
+            mip:      0,
+            out_data: pixels[RT_BYTES * (usz)i : RT_BYTES],
+            from_use: color_attachment,
+        )!!;
+    }
+    uint[20] expected = {
+        128, 128, 128, 128,
+         96,  96,  96, 160,
+        160, 160, 160, 160,
+        192, 192, 192, 192,
+        128, 128,  64,  64,
+    };
+    usz center = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE / 2) * 4;
+    for (usz state_index = 0; state_index < packets.len; state_index++) {
+        char[] immutable_pixels =
+            pixels[RT_BYTES * state_index * 2 : RT_BYTES];
+        char[] dynamic_pixels =
+            pixels[RT_BYTES * (state_index * 2 + 1) : RT_BYTES];
+        assert(immutable_pixels == dynamic_pixels,
+            "equivalent immutable and dynamic color profiles render identical bytes");
+        for (uint channel = 0; channel < 4; channel++) {
+            uint actual = (uint)dynamic_pixels[center + channel];
+            uint expected_value = expected[state_index * 4 + channel];
+            uint difference = actual >= expected_value
+                ? actual - expected_value
+                : expected_value - actual;
+            assert(difference <= COLOR_READBACK_TOLERANCE,
+                "dynamic color state %d channel %d readback %d is within one LSB of expected %d",
+                state_index,
+                channel,
+                actual,
+                expected_value);
+        }
+    }
 }
 
 fn void offscreen_render_to_mip() @test {

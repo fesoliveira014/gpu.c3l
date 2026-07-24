@@ -1,6 +1,9 @@
 module gpu_test;
 
+import gpu::internal @public;
 import gpu @public;
+import gpu::internal::vk @public;
+import std::io;
 
 const char[*] COMMAND_PATH_WORK_COMP_SPIRV =
     $embed("shaders/root_pointer.comp.spv");
@@ -10,6 +13,7 @@ const char[*] COMMAND_PATH_WORK_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
 const ulong COMMAND_PATH_BEGIN_NATIVE_COMMANDS = 1;
+const ulong COMMAND_PATH_COLOR_STATE_NATIVE_COMMANDS = 3;
 const ulong COMMAND_PATH_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
 const uint COMMAND_PATH_DRAW_COUNT = 4;
 
@@ -50,6 +54,30 @@ fn gpu::PipelineHandle command_path_work_graphics_pipeline(
         .colors          = colors[..],
     };
     return gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
+}
+
+fn gpu::PipelineHandle command_path_work_dynamic_graphics_pipeline(
+    gpu::Device* device,
+) {
+    gpu::ShaderDesc vertex_desc = {
+        .stage       = gpu::ShaderStage.VERTEX,
+        .spirv       = COMMAND_PATH_WORK_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ShaderDesc fragment_desc = {
+        .stage       = gpu::ShaderStage.FRAGMENT,
+        .spirv       = COMMAND_PATH_WORK_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ColorTargetFormat[1] colors = {{
+        .format = gpu::Format.RGBA8_UNORM,
+    }};
+    gpu::DynamicGraphicsPipelineDesc pipeline_desc = {
+        .vertex_shader   = gpu::prepare_shader_code(&vertex_desc)!!,
+        .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
+        .colors          = colors[..],
+    };
+    return gpu::create_dynamic_graphics_pipeline(device, &pipeline_desc)!!;
 }
 
 fn void require_native_work(ulong expected) {
@@ -228,5 +256,75 @@ fn void public_command_native_work_is_exact() @test {
     require_native_work(2);
     gpu::cmd_end_render_pass(&commands)!!;
     executable = gpu::end_commands(&commands)!!;
+    gpu::discard_executable_commands(&executable)!!;
+}
+
+fn void dynamic_color_command_warm_work_is_exact() @test {
+    gpu::RuntimeDesc desc = {
+        .backend                   = gpu::BackendKind.VULKAN,
+        .contract_validation       = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes  = true,
+        .enable_vulkan_validation  = true,
+        .application_name          = "gpu_dynamic_color_work",
+    };
+    gpu::Device? maybe_device = create_dynamic_color_test_device(&desc);
+    if (catch err = maybe_device) {
+        assert(err == gpu::UNSUPPORTED_FEATURE,
+            "dynamic color work fails only when live support is absent");
+        io::eprintfn("dynamic_color_command_warm_work_is_exact: unsupported, skipping");
+        return;
+    }
+    gpu::Device device = maybe_device;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::PipelineHandle pipeline =
+        command_path_work_dynamic_graphics_pipeline(&device);
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::ColorTargetBlendState[1] targets = {
+        gpu::alpha_blend(),
+    };
+    gpu::ColorState color = { .targets = targets[..] };
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    vk::VkDeviceState* state = (vk::VkDeviceState*)
+        gpu::internal::device_backend_state(device);
+    gpu::internal::RecordingWorkCounters work_before =
+        vk::command_recording_work_counters(state);
+    ulong pipelines_before = vk::pipeline_native_create_count(state);
+    vk::reset_command_reference_work_counters(state);
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_set_color_state(&commands, &color)!!;
+    gpu::CommandResolutionStats first = gpu::command_resolution_stats();
+    assert_warm_command_resolution(first, 1);
+    assert(first.native_commands == COMMAND_PATH_COLOR_STATE_NATIVE_COMMANDS,
+        "one color packet emits exactly three native calls");
+
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_set_color_state(&commands, &color)!!;
+    gpu::CommandResolutionStats repeated = gpu::command_resolution_stats();
+    assert_warm_command_resolution(repeated, 1);
+    assert(repeated.native_commands == COMMAND_PATH_COLOR_STATE_NATIVE_COMMANDS,
+        "an identical packet emits again without state suppression");
+
+    gpu::internal::RecordingWorkCounters work_after =
+        vk::command_recording_work_counters(state);
+    vk::CommandReferenceWorkCounters references =
+        vk::command_reference_work_counters(state);
+    assert(work_after.host_allocations == work_before.host_allocations
+            && work_after.vma_allocations == work_before.vma_allocations,
+        "warm color packets allocate no host or VMA memory");
+    assert(vk::pipeline_native_create_count(state) == pipelines_before,
+        "warm color packets create no native pipeline");
+    assert(references.lookups == 0
+            && references.resource_mutex_acquisitions == 0,
+        "warm color packets perform no resource lookup or resource lock");
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::discard_executable_commands(&executable)!!;
 }

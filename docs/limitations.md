@@ -75,6 +75,13 @@ page doesn't explain it, that's a bug in this page — file an issue.
   also requires independent blending and depth-bias clamp. An adapter missing
   any requirement is rejected with `UNSUPPORTED_FEATURE`; the backend does not
   synthesize raster-specific pipeline variants.
+- **Dynamic color state is opt-in and all-or-nothing.** Add
+  `request_dynamic_color_state` before support query and device creation, then
+  require `DeviceCaps.dynamic_color_state`. The selected adapter must expose
+  all three blend-enable, blend-equation, and write-mask EDS3 features and
+  commands. Unsupported or unrequested devices keep the immutable graphics
+  profile and return `UNSUPPORTED_FEATURE`; the library does not synthesize
+  color-state pipeline variants or replay hidden defaults.
 - **GPU-generated roots are optional.** `DeviceCaps.generated_work` requires
   one backend facility that supports the draw, indexed-draw, and dispatch
   record layouts together. Unsupported devices retain the shared-root indirect

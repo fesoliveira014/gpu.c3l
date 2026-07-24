@@ -2320,6 +2320,8 @@ fn BoundPipeline? lower_bound_pipeline(
         .generated_dispatch_layout = slot.generated_dispatch_layout,
         .cache_entry               = slot.entry,
         .kind                      = (PipelineKind)entry.key.kind,
+        .color_profile             =
+            (GraphicsColorProfile)entry.key.color_profile,
         .render                    = pipeline_render_compatibility(&entry.key),
     };
 }
@@ -2380,6 +2382,7 @@ fn void? record_bound_pipeline(
             .generated_dispatch_layout = bound.generated_dispatch_layout,
             .cache_entry               = bound.cache_entry,
             .kind                      = bound.kind,
+            .color_profile             = bound.color_profile,
             .render                    = bound.render,
         };
     }
@@ -2390,6 +2393,22 @@ fn void? record_bound_pipeline(
         bind_point: bind_point,
     )!;
     record.logical_pipeline = *bound;
+}
+
+fn void update_checked_color_state_for_bind(
+    VkCommandRecord* record,
+    BoundPipeline* bound,
+) @private {
+    if (!record.color_state_initialized
+        || bound.kind != PipelineKind.GRAPHICS
+        || bound.color_profile != GraphicsColorProfile.DYNAMIC) return;
+    if (!color_compatibility_matches(
+        &record.color_state,
+        &bound.render,
+    )) {
+        record.color_state_initialized = false;
+        record.color_state = {};
+    }
 }
 
 fn void? trusted_bind_pipeline(
@@ -2422,6 +2441,10 @@ fn void? checked_bind_pipeline(
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
     record_bound_pipeline(commands, &bound)!;
+    update_checked_color_state_for_bind(
+        backend_command(commands),
+        &bound,
+    );
 }
 
 fn void? checked_tracking_bind_pipeline(
@@ -2438,6 +2461,7 @@ fn void? checked_tracking_bind_pipeline(
     );
     track_bound_pipeline(commands, &bound)!;
     record_bound_pipeline(commands, &bound)!;
+    update_checked_color_state_for_bind(record, &bound);
 }
 
 fn void push_compute_root(

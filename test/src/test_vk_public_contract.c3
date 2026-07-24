@@ -46,6 +46,23 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         "create_graphics_pipeline rejects a null descriptor"
     );
     assert(
+        @catch(gpu::create_dynamic_graphics_pipeline(
+            &device,
+            (gpu::DynamicGraphicsPipelineDesc*)null,
+        )) == gpu::INVALID_ARGUMENT,
+        "create_dynamic_graphics_pipeline rejects a null descriptor"
+    );
+    gpu::DynamicGraphicsPipelineDesc[1] dynamic_descs;
+    gpu::PipelineHandle[2] dynamic_outputs;
+    assert(
+        @catch(gpu::create_dynamic_graphics_pipelines(
+            &device,
+            dynamic_descs[..],
+            dynamic_outputs[..],
+        )) == gpu::INVALID_ARGUMENT,
+        "dynamic pipeline batch rejects mismatched output shape"
+    );
+    assert(
         @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, (gpu::SubmitDesc*)null))
             == gpu::INVALID_ARGUMENT,
         "submit rejects a null descriptor"

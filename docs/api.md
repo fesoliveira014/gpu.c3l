@@ -259,6 +259,7 @@ QueueRequirements
     QueueRoles distinct
 
 strict_device_request()          -> DeviceRequest
+request_dynamic_color_state(DeviceRequest) -> DeviceRequest?
 request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
 request_resource_agnostic_texture_sync(DeviceRequest) -> DeviceRequest?
 request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
@@ -298,6 +299,7 @@ DeviceCaps
     bool shader_int64
     bool draw_indirect_count
     bool generated_work
+    bool dynamic_color_state
     bool async_compute
     QueueCounts queues
     bool line_polygon_mode
@@ -321,6 +323,9 @@ get_device_caps(Device*)         -> DeviceCaps?
 ```
 
 `strict_enabled` reports whether strict semantics were requested and enabled.
+`dynamic_color_state` is true only when the immutable request added dynamic
+color state and device creation enabled the complete semantic profile.
+Unrequested or unsupported devices report false; there is no silent fallback.
 The minimum supported device profile is intentionally Vulkan 1.3 plus
 `VK_EXT_extended_dynamic_state3` and
 `dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. The strict profile also
@@ -935,6 +940,16 @@ ColorTargetState
     BlendState blend
     ColorWriteMask write_mask
 
+ColorTargetFormat
+    Format format
+
+ColorTargetBlendState
+    BlendState blend
+    ColorWriteMask write_mask
+
+ColorState
+    ColorTargetBlendState[] targets
+
 DynamicRasterState
     PrimitiveTopology topology
     CullMode cull_mode
@@ -953,10 +968,28 @@ GraphicsPipelineDesc
     PolygonMode polygon_mode
     ZString debug_name
 
+DynamicGraphicsPipelineDesc
+    ShaderCode vertex_shader
+    ShaderCode fragment_shader
+    ColorTargetFormat[] colors
+    Format depth_format
+    SampleCount sample_count
+    PolygonMode polygon_mode
+    ZString debug_name
+
 create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) -> PipelineHandle?
+create_dynamic_graphics_pipeline(
+    Device* device,
+    DynamicGraphicsPipelineDesc* desc,
+) -> PipelineHandle?
 create_graphics_pipelines(
     Device* device,
     GraphicsPipelineDesc[] descs,
+    PipelineHandle[] out_pipelines,
+) -> void?
+create_dynamic_graphics_pipelines(
+    Device* device,
+    DynamicGraphicsPipelineDesc[] descs,
     PipelineHandle[] out_pipelines,
 ) -> void?
 destroy_pipeline(Device* device, PipelineHandle pipeline) -> void?
@@ -973,6 +1006,15 @@ mask. In particular, a zero-initialized `ColorTargetState` that sets only
 `.format` creates a valid target that renders no color. Enabled blending is
 invalid for integer color formats. A disabled blend equation, or any blend
 equation paired with a zero write mask, is normalized out of pipeline identity.
+
+`GraphicsPipelineDesc` is the immutable color profile: format, blend, and
+write mask all participate in identity. `DynamicGraphicsPipelineDesc` is the
+explicit format-only profile and requires `DeviceCaps.dynamic_color_state`.
+Its blend and write-mask state comes from a complete `ColorState` packet
+recorded with `cmd_set_color_state`. Common caller-owned packet constructors
+are `color_blend_disabled`, `alpha_blend`, `premultiplied_alpha_blend`,
+`additive_blend`, and `uniform_color_state`; the library retains none of their
+storage.
 
 ### Pipeline deduplication
 
@@ -1459,6 +1501,16 @@ Explicit dynamic state survives graphics pipeline and cache-alias handle
 switches and render-pass boundaries. Minimal begin preserves it without
 re-emission; convenience begin and explicit setters replace it.
 The current API intentionally exposes one viewport and one scissor only.
+
+`cmd_set_color_state` applies only to a selected dynamic-color graphics
+pipeline. The packet target count and order must match that pipeline's format
+domain. `FULL` validates the complete packet before any native call, including
+integer-format blend rejection. A compatible dynamic pipeline alias or pass
+boundary preserves initialization; binding a different dynamic format domain
+clears it. Draw and generated-draw paths reject an uninitialized domain.
+Every explicit nonempty packet emits again as exactly three native array
+commands; identical packets are not suppressed. An unrequested device returns
+`UNSUPPORTED_FEATURE` under every validation policy before mutation.
 
 This is a source-breaking experimental API. Migrate an old three-argument
 `cmd_begin_render_pass(commands, desc, state)` call to

@@ -256,6 +256,17 @@ fillModeNonSolid -> DeviceCaps.line_polygon_mode
 `PolygonMode.LINE` faults `UNSUPPORTED_FEATURE` before shader or cache lookup
 when this cap is false. The feature is not a physical-device selection requirement.
 
+Dynamic color state is a separate request-time profile. Support requires all
+three `VkPhysicalDeviceExtendedDynamicState3FeaturesEXT` bits:
+`extendedDynamicState3ColorBlendEnable`,
+`extendedDynamicState3ColorBlendEquation`, and
+`extendedDynamicState3ColorWriteMask`. The backend queries and caches the
+complete set, chains and enables it only for a supported request, loads the
+three command pointers only for the selected device, and publishes
+`DeviceCaps.dynamic_color_state` only after successful creation. Partial
+feature or dispatch availability rejects creation with `UNSUPPORTED_FEATURE`
+and rolls back; an unrequested device leaves the dispatch group empty.
+
 Strict devices probe `VK_EXT_device_generated_commands` and
 `VK_KHR_maintenance5` as the optional implementation of generated work. The
 backend enables them only when both features are advertised and the generated
@@ -597,7 +608,8 @@ vertex shader
 fragment shader
 pipeline layout with vertex/fragment root push constants
 color/depth formats for dynamic rendering
-per-target immutable blend and write-mask state
+immutable profile: per-target blend and write-mask state
+dynamic profile: canonical ignored static attachments plus three EDS3 states
 immutable polygon mode
 separate dynamic raster and depth state
 viewport/scissor dynamic state
@@ -630,8 +642,14 @@ validation.
 
 Topology, cull mode, front face, depth bias, viewport, scissor, and depth state
 are absent from `PipelineKey` and `PipelineSlot`. `PipelineKey` stores each
-color target's format, blend equation, and write mask, plus depth format,
-sample count, polygon mode, and shader identity. Explicit pipeline binding
+color target's format plus an explicit immutable/dynamic profile tag. Immutable
+keys also store blend equations and write masks; dynamic keys canonicalize
+those fields out. Both retain depth format, sample count, polygon mode, and
+shader identity. `cmd_set_color_state` validates a complete selected dynamic
+format domain before emitting `vkCmdSetColorBlendEnableEXT`,
+`vkCmdSetColorBlendEquationEXT`, and `vkCmdSetColorWriteMaskEXT`. Compatible
+passes and dynamic aliases preserve initialization, incompatible dynamic
+domains clear it, and no bind or pass boundary replays state. Explicit pipeline binding
 emits the native pipeline and heap binds when the selected bind point's cache
 entry changes; graphics and compute selections are independent, and rebinding
 the same entry or an alias emits neither. `cmd_set_raster_state`

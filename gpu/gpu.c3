@@ -211,6 +211,14 @@ fn DeviceRequest? request_resource_agnostic_texture_sync(
     );
 }
 
+<* Return a new request that requires command-time color blend state. *>
+fn DeviceRequest? request_dynamic_color_state(DeviceRequest request) {
+    return gpu::internal::compose_device_request(
+        request,
+        gpu::internal::DeviceCapability.DYNAMIC_COLOR_STATE,
+    );
+}
+
 <* Return a new request with one explicit semantic queue group. *>
 fn DeviceRequest? request_queues(
     DeviceRequest request,
@@ -261,6 +269,18 @@ fn DeviceRequestSupport? supports_device_request(
         return {
             .supported         = false,
             .unmet_requirement = "resource-agnostic texture synchronization",
+        };
+    }
+
+    if (gpu::internal::requests_dynamic_color_state(*request)
+        && (data.vtable.supports_dynamic_color_state == null
+            || !data.vtable.supports_dynamic_color_state(
+                data.backend_state,
+                adapter.adapter_index,
+            )!)) {
+        return {
+            .supported         = false,
+            .unmet_requirement = "dynamic color state",
         };
     }
 
@@ -957,6 +977,70 @@ fn ShaderCode? prepare_shader_code(ShaderDesc* desc) {
     };
 }
 
+<* Construct disabled blending with the selected write mask. *>
+fn ColorTargetBlendState color_blend_disabled(
+    ColorWriteMask write_mask = COLOR_WRITE_ALL,
+) {
+    return { .write_mask = write_mask };
+}
+
+<* Construct conventional source-alpha blending with RGBA writes. *>
+fn ColorTargetBlendState alpha_blend() {
+    return {
+        .blend = {
+            .enable    = true,
+            .src_color = BlendFactor.SRC_ALPHA,
+            .dst_color = BlendFactor.ONE_MINUS_SRC_ALPHA,
+            .color_op  = BlendOp.ADD,
+            .src_alpha = BlendFactor.ONE,
+            .dst_alpha = BlendFactor.ONE_MINUS_SRC_ALPHA,
+            .alpha_op  = BlendOp.ADD,
+        },
+        .write_mask = COLOR_WRITE_ALL,
+    };
+}
+
+<* Construct premultiplied-alpha blending with RGBA writes. *>
+fn ColorTargetBlendState premultiplied_alpha_blend() {
+    return {
+        .blend = {
+            .enable    = true,
+            .src_color = BlendFactor.ONE,
+            .dst_color = BlendFactor.ONE_MINUS_SRC_ALPHA,
+            .color_op  = BlendOp.ADD,
+            .src_alpha = BlendFactor.ONE,
+            .dst_alpha = BlendFactor.ONE_MINUS_SRC_ALPHA,
+            .alpha_op  = BlendOp.ADD,
+        },
+        .write_mask = COLOR_WRITE_ALL,
+    };
+}
+
+<* Construct additive blending with RGBA writes. *>
+fn ColorTargetBlendState additive_blend() {
+    return {
+        .blend = {
+            .enable    = true,
+            .src_color = BlendFactor.ONE,
+            .dst_color = BlendFactor.ONE,
+            .color_op  = BlendOp.ADD,
+            .src_alpha = BlendFactor.ONE,
+            .dst_alpha = BlendFactor.ONE,
+            .alpha_op  = BlendOp.ADD,
+        },
+        .write_mask = COLOR_WRITE_ALL,
+    };
+}
+
+<* Fill caller-owned targets with one state and return a borrowed packet. *>
+fn ColorState uniform_color_state(
+    ColorTargetBlendState[] targets,
+    ColorTargetBlendState state,
+) {
+    foreach (&target : targets) *target = state;
+    return { .targets = targets };
+}
+
 <* Create a compute pipeline. Identical descriptors may alias one backend
    pipeline under distinct handles. Ownership: release with destroy_pipeline,
    once per create. *>
@@ -980,6 +1064,27 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline = operation.vtable.create_graphics_pipeline(device, desc)!;
+    gpu::internal::retain_device_children(&operation);
+    return pipeline;
+}
+
+<* Create a format-only graphics pipeline whose blend and write-mask state is
+   supplied with cmd_set_color_state. Requires DeviceCaps.dynamic_color_state.
+   Ownership: release with destroy_pipeline, once per create. *>
+fn PipelineHandle? create_dynamic_graphics_pipeline(
+    Device* device,
+    DynamicGraphicsPipelineDesc* desc,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    if (!operation.data.caps.dynamic_color_state
+        || operation.vtable.create_dynamic_graphics_pipeline == null) {
+        return UNSUPPORTED_FEATURE~;
+    }
+    PipelineHandle pipeline =
+        operation.vtable.create_dynamic_graphics_pipeline(device, desc)!;
     gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
@@ -1012,6 +1117,33 @@ fn void? create_graphics_pipelines(
     if (descs.len == 0) return;
     operation.vtable.create_graphics_pipelines(device, descs, out_pipelines)!;
     for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
+}
+
+<* Create format-only dynamic-color graphics pipelines transactionally. Output
+   count must match descriptor count; an empty batch succeeds. A fault leaves
+   every output unchanged. Requires DeviceCaps.dynamic_color_state. *>
+fn void? create_dynamic_graphics_pipelines(
+    Device* device,
+    DynamicGraphicsPipelineDesc[] descs,
+    PipelineHandle[] out_pipelines,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
+    if (descs.len == 0) return;
+    if (!operation.data.caps.dynamic_color_state
+        || operation.vtable.create_dynamic_graphics_pipelines == null) {
+        return UNSUPPORTED_FEATURE~;
+    }
+    operation.vtable.create_dynamic_graphics_pipelines(
+        device,
+        descs,
+        out_pipelines,
+    )!;
+    for (usz i = 0; i < descs.len; i++) {
+        gpu::internal::retain_device_children(&operation);
+    }
 }
 
 <* Release one returned pipeline handle.
@@ -1659,6 +1791,22 @@ fn void? cmd_set_graphics_state(
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
     return record.ops.set_graphics_state(record, state);
+}
+
+<* Replace complete blend and write-mask state for a dynamic-color pipeline.
+   Preconditions: a compatible dynamic pipeline is selected and values are valid.
+   Always checked: token phase, host-safe input, and safe lowering.
+   FULL diagnostics: pipeline, target-domain, enum, and blend misuse. *>
+fn void? cmd_set_color_state(
+    CommandList* commands,
+    ColorState* state,
+) {
+    gpu::internal::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    if (!gpu::internal::color_state_host_safe(state)) {
+        return INVALID_ARGUMENT~;
+    }
+    return record.ops.set_color_state(record, state);
 }
 
 <* End the active render pass without adding synchronization.
