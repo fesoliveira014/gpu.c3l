@@ -153,9 +153,16 @@ PIPELINE_OUTPUT = "\n".join(
     )
 )
 SUBMIT_BATCH_OUTPUT = "\n".join(
-    ("iterations=batch_sizes=1,8,32,128,1024 units=ns/submit",) + tuple(
-        f"submit batch size={size}: 125.0 ns/submit "
-        f"token_visits={size} epoch_reset_cells=0"
+    (
+        "iterations=5 batch_sizes=1,8,32,128,1024 "
+        "units=ns/submit,ns/list",
+    ) + tuple(
+        f"submit batch size={size} ns/submit=125.0 "
+        f"ns/list={125.0 / size:.3f} consumed={size} "
+        f"public_prechecks=0 resolutions={size} duplicate_visits={size} "
+        "epoch_reset_cells=0 command_mutex=1 resource_mutex=0 "
+        "queue_submission_mutex=1 scratch_mutex=0 allocator_reproofs=0 "
+        "rollback_mutex=0 native_submissions=1 host_allocations=0"
         for size in (1, 8, 32, 128, 1024)
     ) + ("submit batch leaks=0",)
 )
@@ -393,8 +400,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(
             runner.BENCHMARK_METHODS["submit_batch_bench"],
             (
-                "batch_sizes=1,8,32,128,1024; exact token visits",
-                "ns/submit; exact work units",
+                "batch_sizes=1,8,32,128,1024; exact authoritative work",
+                "ns/submit, ns/list advisory; exact work and allocation outcomes",
             ),
         )
         self.assertEqual(
@@ -826,24 +833,32 @@ class BenchmarkRunnerTests(unittest.TestCase):
         for size in (1, 8, 32, 128, 1024):
             with self.subTest(size=size):
                 output = SUBMIT_BATCH_OUTPUT.replace(
-                    f"token_visits={size}",
-                    f"token_visits={size + 1}",
+                    f"resolutions={size}",
+                    f"resolutions={size + 1}",
                     1,
                 )
                 with self.assertRaisesRegex(ValueError, f"batch size {size}"):
                     runner.require_measurement(output, "submit_batch_bench")
 
-    def test_submit_batch_measurement_rejects_rollover_or_leaks(self):
+    def test_submit_batch_measurement_rejects_forbidden_work_or_leaks(self):
         runner = load_runner()
-        with self.assertRaisesRegex(ValueError, "batch size 1"):
-            runner.require_measurement(
-                SUBMIT_BATCH_OUTPUT.replace(
-                    "epoch_reset_cells=0",
-                    "epoch_reset_cells=1",
+        for field in (
+            "public_prechecks",
+            "epoch_reset_cells",
+            "resource_mutex",
+            "scratch_mutex",
+            "allocator_reproofs",
+            "rollback_mutex",
+            "host_allocations",
+        ):
+            with self.subTest(field=field):
+                output = SUBMIT_BATCH_OUTPUT.replace(
+                    f"{field}=0",
+                    f"{field}=1",
                     1,
-                ),
-                "submit_batch_bench",
-            )
+                )
+                with self.assertRaisesRegex(ValueError, "forbidden work"):
+                    runner.require_measurement(output, "submit_batch_bench")
         with self.assertRaisesRegex(ValueError, "live resources"):
             runner.require_measurement(
                 SUBMIT_BATCH_OUTPUT.replace(
@@ -852,6 +867,52 @@ class BenchmarkRunnerTests(unittest.TestCase):
                 ),
                 "submit_batch_bench",
             )
+
+    def test_submit_batch_measurement_rejects_structural_mutations(self):
+        runner = load_runner()
+        first_size_line = SUBMIT_BATCH_OUTPUT.splitlines()[1]
+        mutations = (
+            (
+                SUBMIT_BATCH_OUTPUT.replace(first_size_line + "\n", "", 1),
+                "record count",
+            ),
+            (
+                SUBMIT_BATCH_OUTPUT.replace(
+                    first_size_line,
+                    first_size_line + "\n" + first_size_line,
+                    1,
+                ),
+                "record count",
+            ),
+            (
+                SUBMIT_BATCH_OUTPUT.replace(
+                    "iterations=5",
+                    "iterations=4",
+                    1,
+                ),
+                "header",
+            ),
+            (
+                SUBMIT_BATCH_OUTPUT.replace(
+                    "native_submissions=1",
+                    "native_submissions=2",
+                    1,
+                ),
+                "native_submissions",
+            ),
+            (
+                SUBMIT_BATCH_OUTPUT.replace(
+                    "host_allocations=0",
+                    "host_allocations=0 unknown=0",
+                    1,
+                ),
+                "schema",
+            ),
+        )
+        for output, error in mutations:
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(ValueError, error):
+                    runner.require_measurement(output, "submit_batch_bench")
 
     def test_descriptor_churn_requires_every_sampler_lookup_tier(self):
         runner = load_runner()

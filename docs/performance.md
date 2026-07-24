@@ -147,7 +147,7 @@ The suite covers:
 | `command_reference_bench` | Exact public lookup/publication/retain/release outcomes plus upper-bounded private probe, equality, and mutex work for unique, repeated, mixed, forced-collision, and capacity scenarios |
 | `command_record_bench` | Bounded-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording across the validation/tracking matrix; 1/16/256/4,096 command lists; exact native output; one lookup per accepted command and zero forbidden warm work |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
-| `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact one-visit-per-list duplicate-detection work |
+| `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact bounded resolution, duplicate-visit, claim, queue-serialization, native-submit, and forbidden-work evidence |
 | `pipeline_cache_bench` | Dynamic raster matrix aliasing, raster-state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
 | `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; zero-through-eight sampler probes at occupancy 8/64/1,024/65,536; upper-bounded texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
@@ -183,7 +183,7 @@ exact zero. Timings and unpinned generated assembly are advisory.
 | Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
-| Submission ownership | Submitted-batch references, caller tokens, retained-reference counts, and ordered retirement state |
+| Submission ownership | Queue-owned intrusive pending records, caller tokens, retained-reference counts, publication order, and ordered retirement state |
 | Bound pipeline snapshot | Exact bind-time table/cache lookups, per-bind-point `pipeline_bind_commands`, zero post-bind resolution under cache churn, and unchanged layout use after backing-slot mutation |
 | Strict descriptor heap | Exact `strict_heap_set_bind_commands`, `strict_heap_buffer_bind_commands`, and `strict_heap_offset_commands`: one set or offset per used bind point and one descriptor-buffer bind per command record |
 | Shader identity | Owned clone/free balance, zero post-intern shader work, and bounded intern/compact-key work at 1 KiB/64 KiB/1 MiB |
@@ -241,9 +241,32 @@ miss. The 65,536-entry zero-probe observation is also enforced by the live
 `vk_descriptor_heap` test target. Elapsed lookup time is advisory.
 
 The submit-batch benchmark submits real executable command lists in batches of
-1, 8, 32, 128, and 1,024. Its feature-gated counters require exactly one token
-visit per list and zero epoch-reset cells for each ordinary batch. These exact
-work counts are blocking; `ns/submit` remains advisory.
+1, 8, 32, 128, and 1,024. `SUBMIT_WORK_STATS` exposes atomic counters around an
+externally synchronized measured interval. Every ordinary tracking-off record
+requires `consumed`, `resolutions`, and `duplicate_visits` equal to the batch
+length; `command_mutex=1`, `queue_submission_mutex=1`, and
+`native_submissions=1`; and these exact zeros:
+
+```text
+public_prechecks=0
+epoch_reset_cells=0
+resource_mutex=0
+scratch_mutex=0
+allocator_reproofs=0
+rollback_mutex=0
+host_allocations=0
+```
+
+The runner rejects missing, duplicate, malformed, reordered, or nonzero
+forbidden fields. The counters prove one bounded backend claim against each
+record's authoritative queue, one long per-queue submission boundary, and no
+frontend resolution, allocator queue reproof, scratch lock, ordinary resource
+lock, or warm allocation. Failure coverage requires one rollback command-lock
+acquisition, retryable tokens, and no pending link or point publication.
+Retirement-lock work is measured separately because prior-point observation
+uses the short queue retirement boundary independently of submission.
+These semantic and work counts are blocking; `ns/submit` and `ns/list` remain
+advisory unless runner, driver, build, and comparison profile are pinned.
 
 The pipeline-cache benchmark separately interns synthetic 1 KiB, 64 KiB, and
 1 MiB identities. For every size, the live `vk_pipeline_cache` test and the

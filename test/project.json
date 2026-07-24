@@ -61,11 +61,11 @@
       "features": [ "COMPLETION_RETIREMENT_STATS" ],
       "sources": [ "src/lifecycle_bench.c3" ]
     },
-    // Advisory public submit timing with exact linear duplicate-work evidence.
+    // Advisory public submit timing with exact authoritative-work evidence.
     // Needs an ICD; the runner builds with -O1.
     "submit_batch_bench": {
       "type": "executable",
-      "features": [ "SUBMIT_DUPLICATE_STATS" ],
+      "features": [ "SUBMIT_WORK_STATS", "COMMAND_RECORDING_WORK_STATS" ],
       "sources": [ "src/submit_batch_bench.c3" ]
     },
     // Advisory fixed reference-index scaling with exact structural work.

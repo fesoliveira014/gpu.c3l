@@ -343,13 +343,19 @@ and no public child allocation. Deterministic seams pause after native
 acceptance and batch publication, rendezvous concurrent first polls, and prove
 the published-prefix cap, exact wait retirement, timeout preservation, and
 100,000 cached polls with zero native queries or retirement-lock acquisitions.
-Submission coverage also includes deterministic empty-work targeting,
-contiguous publication, exact completion/readiness destination masks, indirect
-consumer-only and mixed-scope lowering, invalid and queue-unsupported scope
-rollback, same-queue validation and elision,
-distinct transfer/compute/graphics waits, foreign and later-sequence rejection,
-timeline-distance backpressure, sequence exhaustion, native failure rollback,
-device-loss discard, token consumption, and destruction readiness.
+Submission coverage also includes one bounded authoritative resolution and
+duplicate visit per inspected token, exact record-queue validation, mixed
+allocators on one queue, deterministic empty-work targeting, intrusive
+queue-owned pending records, contiguous publication, and exact
+completion/readiness destination masks. Invalid and queue-unsupported scopes,
+wrong queues, duplicates, post-claim preparation faults, and native failures
+must publish no pending link or point and leave tokens and readiness retryable.
+The suite also covers same-queue wait validation and elision, distinct
+transfer/compute/graphics waits, foreign and later-sequence rejection,
+timeline-distance backpressure, sequence exhaustion, device-loss discard,
+token consumption, and destruction readiness. Publication-gap seams prove an
+earlier completed point can retire through the short retirement boundary while
+a later same-queue submit remains paused inside the long submission boundary.
 
 Leak tests verify structured `resource_lifetime` delivery, including
 `GpuAllocation` identity/name metadata, stderr fallback without a callback,
@@ -386,13 +392,13 @@ Test names describe behavior, not roadmap or ticket labels.
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
 | Command allocators | exact device/queue binding; default, ceiling, and overflow validation; transactional pool/buffer/host rollback; recyclable generations; begin/reference/generated capacity faults; address-stable authoritative records; fixed per-scratch reference indices; epoch reuse; no submitted-unit reuse before retirement; non-waiting destroy in recording/executable/in-flight states; device-child accounting; exact-family pools; and tracking-off zero reference/index storage. |
-| Commands | fixed bounded token size and deterministic fabricated/stale/foreign/wrong-phase/consumed diagnostics; one authoritative state through begin/end/submit/rollback/discard/retirement; exact linear duplicate visits and epoch rollover; mixed-allocator same-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; checked regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
+| Commands | fixed bounded token size and deterministic fabricated/stale/foreign/wrong-phase/consumed diagnostics; one authoritative state through begin/end/submit/rollback/discard/retirement; one backend claim with exact linear bounded resolutions and duplicate visits; authoritative record-queue validation without allocator reproof; retryable failure; intrusive exact-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; checked regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; transactional convenience rejection without native or command-state mutation; exact ten-command complete packets; state reuse across pass boundaries and reset on command-buffer reuse; optional partial updates; checked regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, per-target immutable identity, and singleton compute/generated-dispatch layouts. |
-| Threading | one explicit allocator per concurrent worker, same-allocator bounded-full rejection, synchronized allocator migration and executable handoff, one-thread-at-a-time alias confinement, no device-wide recording lock, no temp-pool setup, historical worker churn, private command-buffer/generated-scratch reuse, parallel record, and identical submit. |
+| Threading | one explicit allocator per concurrent worker, same-allocator bounded-full rejection, synchronized allocator migration and executable handoff, one-thread-at-a-time alias confinement, no device-wide recording lock, no temp-pool setup, historical worker churn, private command-buffer/generated-scratch reuse, parallel record, same-queue submit/present serialization, distinct-queue submission concurrency, and prior-point retirement across a later publication gap. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
 | Depth | depth attachment creation, depth-tested draw, exact nonzero mip/layer selection, neighboring-subresource isolation, and readback. |
@@ -569,10 +575,18 @@ publication/retain/release balances for unique, repeated, mixed,
 forced-collision, near-capacity, and maximum-capacity lifetime-reference
 indexing. Private probes, equality checks, and mutex decisions use
 scenario-specific upper bounds that accept zero; `ns/reference` is advisory.
-The submit-batch target submits real batches of 1, 8, 32, 128, and 1,024
-executable lists and requires exactly one duplicate-detection record visit per
-list with no rollover work. Its elapsed times are advisory. The pipeline-cache
-target requests 200 topology/cull/front-face/depth-bias permutations through
+The submit-batch target enables `SUBMIT_WORK_STATS` and submits real batches of
+1, 8, 32, 128, and 1,024 executable lists. For every ordinary tracking-off
+batch it requires `consumed`, `resolutions`, and `duplicate_visits` equal to the
+batch length; one command mutex, one queue submission mutex, and one native
+submission; and zero public prechecks, epoch-reset cells, resource mutexes,
+scratch mutexes, allocator reproofs, rollback mutexes, and warm host
+allocations. The runner rejects missing, duplicate, reordered, malformed, or
+nonzero forbidden fields. Duplicate-position tests stop resolution and visits
+at the first repeat. Post-claim failure tests require one rollback lock,
+retryable records, and no pending link or point. `ns/submit` and `ns/list`
+remain advisory. The pipeline-cache target requests 200
+topology/cull/front-face/depth-bias permutations through
 `cmd_set_raster_state`, reports the requested count, native graphics creates,
 cache entries/aliases, and recording/create timings; all permutations share
 one immutable pipeline. It additionally reports exact interning and clone/free

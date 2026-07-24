@@ -18,6 +18,10 @@ vk::Result completion_counter_result;
 uint same_queue_elision_submit_calls;
 uint draw_argument_wait_submit_calls;
 vk::PipelineStageFlags2 expected_draw_argument_wait_stages;
+Atomic{uint} distinct_native_entered;
+Atomic{uint} distinct_native_active;
+Atomic{bool} distinct_native_release;
+Atomic{bool} distinct_native_overlap;
 
 struct SubmissionCheckpointGate {
     vk::SubmissionCheckpoint target;
@@ -40,12 +44,58 @@ struct ConcurrentSubmitWorkerArgs {
     gpu::CompletionPoint        submitted;
 }
 
+struct DistinctSubmitWorkerArgs {
+    gpu::Queue                  queue;
+    gpu::ExecutableCommandList executable;
+    Atomic{uint}*               ready;
+    Atomic{bool}*               start;
+    gpu::CompletionPoint        submitted;
+}
+
 struct AllocatorSubmissionState {
     uint available;
     uint recordings;
     uint executables;
     uint in_flight;
     bool scratch_in_use;
+}
+
+fn bool submit_stats_work_matches_exact(
+    vk::SubmitWorkCounters work,
+    ulong resolutions,
+    ulong duplicate_visits,
+    ulong command_mutex_acquisitions,
+    ulong rollback_mutex_acquisitions,
+    ulong native_submissions,
+) {
+    return work.public_token_prechecks == 0
+        && work.authoritative_token_resolutions == resolutions
+        && work.duplicate_token_visits == duplicate_visits
+        && work.epoch_reset_cells == 0
+        && work.command_mutex_acquisitions == command_mutex_acquisitions
+        && work.resource_mutex_acquisitions == 0
+        && work.queue_submission_mutex_acquisitions == 1
+        && work.scratch_mutex_acquisitions == 0
+        && work.allocator_queue_reproofs == 0
+        && work.rollback_mutex_acquisitions == rollback_mutex_acquisitions
+        && work.native_submissions == native_submissions;
+}
+
+fn bool submit_stats_work_matches(
+    vk::SubmitWorkCounters work,
+    ulong inspected,
+    ulong command_mutex_acquisitions,
+    ulong rollback_mutex_acquisitions,
+    ulong native_submissions,
+) {
+    return submit_stats_work_matches_exact(
+        work:                        work,
+        resolutions:                 inspected,
+        duplicate_visits:            inspected,
+        command_mutex_acquisitions:  command_mutex_acquisitions,
+        rollback_mutex_acquisitions: rollback_mutex_acquisitions,
+        native_submissions:          native_submissions,
+    );
 }
 
 fn vk::Result accept_injected_publication_submit(
@@ -106,6 +156,59 @@ fn int concurrent_submit_worker(void* raw_args) {
     gpu::CompletionPoint? submitted = gpu::submit(args.queue, &desc);
     if (catch submitted) return 1;
     args.submitted = submitted;
+    return 0;
+}
+
+fn vk::Result overlap_distinct_native_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)submits;
+    (void)fence;
+    assert(submit_count == 1,
+        "each distinct queue reaches one native submit");
+    (void)distinct_native_entered.add(1, AtomicOrdering.ACQUIRE_RELEASE);
+    uint active = distinct_native_active.add(
+        1,
+        AtomicOrdering.ACQUIRE_RELEASE,
+    ) + 1;
+    if (active == 2) {
+        distinct_native_overlap.store(true, AtomicOrdering.RELEASE);
+        distinct_native_release.store(true, AtomicOrdering.RELEASE);
+    }
+    for (uint spin = 0;
+        spin < 1_000_000
+            && !distinct_native_release.load(AtomicOrdering.ACQUIRE);
+        spin++) {
+        thread::yield();
+    }
+    distinct_native_release.store(true, AtomicOrdering.RELEASE);
+    (void)distinct_native_active.sub(1, AtomicOrdering.ACQUIRE_RELEASE);
+    return vk::Result.SUCCESS;
+}
+
+fn int distinct_submit_worker(void* raw_args) {
+    DistinctSubmitWorkerArgs* args = (DistinctSubmitWorkerArgs*)raw_args;
+    (void)args.ready.add(1, AtomicOrdering.RELEASE);
+    while (!args.start.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    gpu::ExecutableCommandList[1] lists = { args.executable };
+    gpu::SubmitDesc desc = { .command_lists = lists[..] };
+    gpu::CompletionPoint? submitted = vk::vk_submit_with(
+        args.queue,
+        &desc,
+        &overlap_distinct_native_submit,
+    );
+    if (catch submitted) return 1;
+    args.submitted = submitted;
+    gpu::Device device = args.queue.device;
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(&device)!!;
+    release_submitted_executables(&operation, lists[..]);
+    gpu::internal::end_device_operation(&operation);
+    args.executable = lists[0];
     return 0;
 }
 
@@ -184,7 +287,7 @@ fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
     while (ready.load(AtomicOrdering.ACQUIRE) < WORKER_COUNT) thread::yield();
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::reset_submit_duplicate_work_counters(state);
+    vk::reset_submit_work_counters(state);
     ulong submits_before = stats_of(&device).queue_submits;
     release.store(true, AtomicOrdering.RELEASE);
 
@@ -192,10 +295,13 @@ fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
         assert(worker.join()!! == 0,
             "each concurrent submit succeeds");
     }
-    vk::SubmitDuplicateWorkCounters work =
-        vk::submit_duplicate_work_counters(state);
-    assert(work.token_visits == WORKER_COUNT
-            && work.epoch_reset_cells == 0,
+    vk::SubmitWorkCounters work = vk::submit_work_counters(state);
+    assert(work.authoritative_token_resolutions == WORKER_COUNT
+            && work.duplicate_token_visits == WORKER_COUNT
+            && work.epoch_reset_cells == 0
+            && work.command_mutex_acquisitions == WORKER_COUNT
+            && work.queue_submission_mutex_acquisitions == WORKER_COUNT
+            && work.native_submissions == WORKER_COUNT,
         "concurrent submits charge one visit under distinct serialized epochs");
     assert(stats_of(&device).queue_submits == submits_before + WORKER_COUNT,
         "both concurrent submits reach the native queue");
@@ -204,6 +310,122 @@ fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
     }
     foreach (&allocator : allocators) {
         gpu::destroy_command_allocator(allocator)!!;
+    }
+}
+
+fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .backend                  = gpu::BackendKind.VULKAN,
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .track_resource_lifetimes = true,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_distinct_submit_concurrency_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::QueueRequirements requirements = {
+        .counts   = { .graphics = 1, .compute = 1 },
+        .distinct = { .compute },
+    };
+    gpu::DeviceRequest request = gpu::request_queues(
+        gpu::strict_device_request(),
+        requirements,
+    )!!;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+            continue;
+        }
+        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        defer gpu::destroy_device(&device)!!;
+        gpu::Queue[2] queues = {
+            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+            gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!,
+        };
+        assert(queues[0].id != queues[1].id,
+            "the concurrency regression requires distinct queue identities");
+        gpu::CommandAllocator[2] allocators;
+        DistinctSubmitWorkerArgs[2] args;
+        Thread[2] workers;
+        Atomic{uint} ready;
+        Atomic{bool} start;
+
+        foreach (worker_index, &worker : workers) {
+            allocators[worker_index] = gpu::create_command_allocator(
+                &device,
+                queues[worker_index],
+            )!!;
+            gpu::CommandList commands =
+                gpu::begin_commands(&allocators[worker_index])!!;
+            args[worker_index] = {
+                .queue      = queues[worker_index],
+                .executable = gpu::end_commands(&commands)!!,
+                .ready      = &ready,
+                .start      = &start,
+            };
+            worker.create(&distinct_submit_worker, &args[worker_index])!!;
+        }
+        while (ready.load(AtomicOrdering.ACQUIRE) < workers.len) {
+            thread::yield();
+        }
+        vk::VkDeviceState* state =
+            (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        vk::SubmitStats stats_before = vk::submit_stats(state);
+        vk::reset_submit_work_counters(state);
+        distinct_native_entered.store(0, AtomicOrdering.RELAXED);
+        distinct_native_active.store(0, AtomicOrdering.RELAXED);
+        distinct_native_release.store(false, AtomicOrdering.RELAXED);
+        distinct_native_overlap.store(false, AtomicOrdering.RELAXED);
+        start.store(true, AtomicOrdering.RELEASE);
+
+        foreach (&worker : workers) {
+            assert(worker.join()!! == 0,
+                "each distinct-queue submit succeeds");
+        }
+        vk::SubmitWorkCounters work = vk::submit_work_counters(state);
+        assert(distinct_native_overlap.load(AtomicOrdering.ACQUIRE)
+                && distinct_native_entered.load(AtomicOrdering.ACQUIRE) == 2,
+            "distinct selected queues overlap at the native submit seam");
+        assert(work.authoritative_token_resolutions == 2
+                && work.duplicate_token_visits == 2
+                && work.command_mutex_acquisitions == 2
+                && work.queue_submission_mutex_acquisitions == 2
+                && work.native_submissions == 2
+                && work.public_token_prechecks == 0
+                && work.epoch_reset_cells == 0
+                && work.resource_mutex_acquisitions == 0
+                && work.scratch_mutex_acquisitions == 0
+                && work.allocator_queue_reproofs == 0
+                && work.rollback_mutex_acquisitions == 0,
+            "distinct submits preserve exact concurrent work accounting");
+        vk::SubmitStats stats_after = vk::submit_stats(state);
+        assert(stats_after.queue_submits == stats_before.queue_submits + 2
+                && stats_after.completion_point_publications
+                    == stats_before.completion_point_publications + 2,
+            "distinct submits publish exact atomic aggregate statistics");
+
+        foreach (worker_index, &worker_args : args) {
+            vk::QueueCompletionState* completion =
+                vk::queue_completion_state(
+                    state,
+                    queues[worker_index].id,
+                )!!;
+            completion.retirement_mutex.lock()!!;
+            vk::retire_queue_through_locked(
+                state,
+                completion,
+                gpu::internal::completion_point_sequence(
+                    worker_args.submitted,
+                ),
+            );
+            completion.retirement_mutex.unlock();
+        }
+        foreach (&allocator : allocators) {
+            gpu::destroy_command_allocator(allocator)!!;
+        }
+        return;
     }
 }
 
@@ -317,6 +539,7 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
         vk::VkDeviceState* state =
             (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
         ulong submits_before = stats_of(&device).queue_submits;
+        vk::reset_submit_work_counters(state);
 
         assert(@catch(gpu::submit(graphics, &desc)) == gpu::INVALID_ARGUMENT,
             "an executable faults before native submit on a different queue");
@@ -324,6 +547,14 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
                 && lists[0].handle.is_valid()
                 && record.root.state == gpu::internal::CommandState.EXECUTABLE,
             "different-queue rejection preserves the token before native work");
+        assert(submit_stats_work_matches_exact(
+            work:                        vk::submit_work_counters(state),
+            resolutions:                 1,
+            duplicate_visits:            0,
+            command_mutex_acquisitions:  1,
+            rollback_mutex_acquisitions: 0,
+            native_submissions:          0,
+        ), "exact wrong-queue rejection stops before duplicate visitation");
         assert_allocator_submission_state(
             actual:         allocator_submission_state(
                 state,
@@ -552,10 +783,11 @@ fn void prove_submission_publication_gap(
     uint expected_batches = checkpoint == vk::SubmissionCheckpoint.NATIVE_ACCEPTED
         ? 0
         : 1;
-    assert(state.submitted_command_count == expected_batches,
+    assert(completion.submitted_count == expected_batches,
         "the checkpoint exposes only its intended batch-publication phase");
     if (checkpoint != vk::SubmissionCheckpoint.NATIVE_ACCEPTED) {
-        vk::SubmittedCommandBatch* batch = &state.submitted_commands[0];
+        vk::SubmittedCommandBatch* batch =
+            &vk::backend_command(completion.submitted_head).submitted;
         vk::VkCommandRecord* submitted =
             vk::backend_command(batch.record);
         vk::CommandAllocatorSlot* submitted_allocator_slot =
@@ -601,7 +833,7 @@ fn void prove_submission_publication_gap(
         sequence: gpu::internal::completion_point_sequence(args.submitted),
         query_fn: &query_completion_counter,
     )!!, "a later observation retires the published submission");
-    assert(state.submitted_command_count == 0,
+    assert(completion.submitted_count == 0,
         "full retirement releases the published command batch");
     assert_allocator_submission_state(
         actual:         allocator_submission_state(
@@ -673,6 +905,7 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
         command_allocator.handle,
         allocator_buffer,
     );
+    vk::reset_submit_work_counters(state);
 
     assert(@catch(vk::vk_submit_with(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
@@ -688,6 +921,17 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
         "native failure publishes no completion point");
     assert(rejected_user_completion_value == next_before + 1,
         "the rejected native submit used only the prospective sequence");
+    assert(submit_stats_work_matches(
+        work:                        vk::submit_work_counters(state),
+        inspected:                   1,
+        command_mutex_acquisitions:  1,
+        rollback_mutex_acquisitions: 1,
+        native_submissions:          1,
+    ), "native rejection performs one claim, one submit, and one rollback");
+    assert(completion.submitted_count == 0
+            && completion.submitted_head == null
+            && completion.submitted_tail == null,
+        "native rejection publishes no intrusive pending record");
     assert(lists[0].handle.is_valid(),
         "native failure preserves the executable token for retry");
     AllocatorSubmissionState allocator_after = allocator_submission_state(
@@ -849,7 +1093,7 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     ulong published_before = completion.published_sequence.load(
         AtomicOrdering.ACQUIRE,
     );
-    vk::SubmitStats stats_before = state.submit_stats;
+    vk::SubmitStats stats_before = vk::submit_stats(state);
     accepted_swapchain_submit_calls = 0;
 
     gpu::SubmitDesc missing_stage = { .readiness = readiness };
@@ -965,7 +1209,18 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
         published_before,
         AtomicOrdering.RELEASE,
     );
-    state.submit_stats = stats_before;
+    state.submit_queue_submits.store(
+        stats_before.queue_submits,
+        AtomicOrdering.RELEASE,
+    );
+    state.submit_completion_point_publications.store(
+        stats_before.completion_point_publications,
+        AtomicOrdering.RELEASE,
+    );
+    state.submit_completion_wait_calls.store(
+        stats_before.completion_wait_calls,
+        AtomicOrdering.RELEASE,
+    );
 }
 
 fn void completion_distance_backpressure_preserves_submit_state() @test {
@@ -1009,6 +1264,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     completion_counter_query_calls = 0;
     completion_counter_value = 0;
     completion_counter_result = vk::Result.SUCCESS;
+    vk::reset_submit_work_counters(state);
 
     assert(@catch(vk::vk_submit_with_queries(
         queue:            gpu::get_queue(
@@ -1024,6 +1280,13 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
         "headroom is queried only when the cached value is insufficient");
     assert(counted_user_submit_calls == 0,
         "backpressure reaches no native queue submit");
+    assert(submit_stats_work_matches(
+        work:                        vk::submit_work_counters(state),
+        inspected:                   1,
+        command_mutex_acquisitions:  1,
+        rollback_mutex_acquisitions: 1,
+        native_submissions:          0,
+    ), "pre-native headroom rejection rolls back one complete claim");
     assert(completion.next_sequence == 2,
         "backpressure reserves no completion sequence");
     assert(lists[0].handle.is_valid(),
@@ -1045,6 +1308,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
 
     completion_counter_query_calls = 0;
     completion_counter_value = 2;
+    vk::reset_submit_work_counters(state);
     assert(@catch(vk::vk_submit_with_queries(
         queue:            gpu::get_queue(
             &device,
@@ -1060,6 +1324,13 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
         "a required headroom query advances the retired prefix");
     assert(lists[0].handle.is_valid(),
         "native rejection after headroom preserves the executable token");
+    assert(submit_stats_work_matches(
+        work:                        vk::submit_work_counters(state),
+        inspected:                   1,
+        command_mutex_acquisitions:  1,
+        rollback_mutex_acquisitions: 1,
+        native_submissions:          1,
+    ), "native rejection after headroom remains one claim and rollback");
 
     completion.next_sequence = next_before;
     completion.retired_sequence.store(retired_before, AtomicOrdering.RELEASE);
@@ -1627,9 +1898,9 @@ fn void unpublished_same_queue_wait_preserves_token() @test {
 
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
-    completion.submit_mutex.lock()!!;
+    completion.submission_mutex.lock()!!;
     vk::cancel_queue_completion_locked(state, future)!!;
-    completion.submit_mutex.unlock();
+    completion.submission_mutex.unlock();
     desc.completion_waits = {};
 
     gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;

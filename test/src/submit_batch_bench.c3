@@ -27,41 +27,73 @@ fn void measure_submit_batch(
     uint batch_size,
 ) {
     long elapsed_ns = 0;
-    ulong total_token_visits = 0;
-    ulong total_epoch_reset_cells = 0;
+    vk::SubmitWorkCounters work;
+    ulong total_host_allocations;
     for (uint i = 0; i < SUBMIT_BATCH_ITERATIONS; i++) {
         gpu::ExecutableCommandList[MAX_SUBMIT_BATCH_SIZE] lists;
         record_submit_batch(allocator, lists[:batch_size]);
-        vk::reset_submit_duplicate_work_counters(state);
+        vk::reset_submit_work_counters(state);
         gpu::SubmitDesc submit = {
             .command_lists = lists[:batch_size],
         };
+        vk::RecordingHostAllocatorSnapshot allocator_before =
+            vk::recording_host_allocator_snapshot(state);
 
         std::time::Clock start = std::time::clock::now();
         gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
         elapsed_ns += (long)start.to_now();
 
-        vk::SubmitDuplicateWorkCounters work =
-            vk::submit_duplicate_work_counters(state);
-        assert(work.token_visits == batch_size,
-            "submit duplicate work must visit each command record once");
-        assert(work.epoch_reset_cells == 0,
-            "ordinary submit batches must not perform epoch rollover work");
-        total_token_visits += work.token_visits;
-        total_epoch_reset_cells += work.epoch_reset_cells;
+        work = vk::submit_work_counters(state);
+        vk::RecordingHostAllocatorSnapshot allocator_after =
+            vk::recording_host_allocator_snapshot(state);
+        ulong host_allocations =
+            allocator_after.allocations - allocator_before.allocations
+            + allocator_after.resizes - allocator_before.resizes;
+        total_host_allocations += host_allocations;
+        assert(work.public_token_prechecks == 0
+                && work.authoritative_token_resolutions == batch_size
+                && work.duplicate_token_visits == batch_size
+                && work.epoch_reset_cells == 0
+                && work.command_mutex_acquisitions == 1
+                && work.resource_mutex_acquisitions == 0
+                && work.queue_submission_mutex_acquisitions == 1
+                && work.scratch_mutex_acquisitions == 0
+                && work.allocator_queue_reproofs == 0
+                && work.rollback_mutex_acquisitions == 0
+                && work.native_submissions == 1,
+            "ordinary submit work must match the authoritative transaction");
+        assert(host_allocations == 0,
+            "warm submission must not allocate host storage");
+        foreach (list : lists[:batch_size]) {
+            assert(!list.handle.is_valid(),
+                "successful submission consumes every executable token");
+        }
         gpu::wait_completion(completion)!!;
     }
-    assert(total_token_visits
-            == (ulong)batch_size * SUBMIT_BATCH_ITERATIONS,
-        "repeated submits preserve one duplicate visit per command record");
-    assert(total_epoch_reset_cells == 0,
-        "repeated ordinary submits perform no epoch rollover work");
+    double ns_per_submit = (double)elapsed_ns / SUBMIT_BATCH_ITERATIONS;
+    double ns_per_list = ns_per_submit / batch_size;
     io::printfn(
-        "submit batch size=%d: %.1f ns/submit token_visits=%d epoch_reset_cells=%d",
+        "submit batch size=%d ns/submit=%.1f ns/list=%.3f consumed=%d "
+        "public_prechecks=%d resolutions=%d duplicate_visits=%d "
+        "epoch_reset_cells=%d command_mutex=%d resource_mutex=%d "
+        "queue_submission_mutex=%d scratch_mutex=%d allocator_reproofs=%d "
+        "rollback_mutex=%d native_submissions=%d host_allocations=%d",
         batch_size,
-        (double)elapsed_ns / SUBMIT_BATCH_ITERATIONS,
+        ns_per_submit,
+        ns_per_list,
         batch_size,
-        0,
+        work.public_token_prechecks,
+        work.authoritative_token_resolutions,
+        work.duplicate_token_visits,
+        work.epoch_reset_cells,
+        work.command_mutex_acquisitions,
+        work.resource_mutex_acquisitions,
+        work.queue_submission_mutex_acquisitions,
+        work.scratch_mutex_acquisitions,
+        work.allocator_queue_reproofs,
+        work.rollback_mutex_acquisitions,
+        work.native_submissions,
+        total_host_allocations,
     );
 }
 
@@ -89,7 +121,7 @@ fn int main() {
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
 
     io::printfn(
-        "iterations=%d batch_sizes=1,8,32,128,1024 units=ns/submit",
+        "iterations=%d batch_sizes=1,8,32,128,1024 units=ns/submit,ns/list",
         SUBMIT_BATCH_ITERATIONS,
     );
     foreach (batch_size : SUBMIT_BATCH_SIZES) {

@@ -703,6 +703,11 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         .id     = 0,
     };
     gpu::CompletionPoint completion = gpu::internal::make_completion_point(queue, 1)!!;
+    vk::QueueCompletionState[1] completions = {{ .bound = true }};
+    fixture.state.queue_completions = completions[..];
+    completions[0].retirement_mutex.init()!!;
+    defer (void)completions[0].retirement_mutex.destroy();
+    completions[0].published_sequence.store(1, AtomicOrdering.RELEASE);
     vk::CommandScratch[1] scratch = {{
         .references      = references[..],
         .reference_count = 1,
@@ -729,26 +734,21 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         command_cells[..],
     );
     defer (void)fixture.state.command_mutex.destroy();
-    vk::SubmittedCommandBatch[1] batches = {{
-        .completion = completion,
-        .record = submitted_command_fixture_record(
+    append_submitted_command_fixture(
+        completion: &completions[0],
+        record:     submitted_command_fixture_record(
             &fixture.state,
             allocator,
             0,
         ),
-    }};
-    fixture.state.submitted_commands = batches[..];
-    fixture.state.submitted_command_count = 1;
-
-    fixture.state.resource_mutex.lock()!!;
-    vk::release_completed_submitted_commands_locked(
-        &fixture.state,
-        queue.id,
-        1,
+        point:      completion,
     );
-    fixture.state.resource_mutex.unlock();
+
+    completions[0].retirement_mutex.lock()!!;
+    vk::retire_queue_through_locked(&fixture.state, &completions[0], 1);
+    completions[0].retirement_mutex.unlock();
     assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
-        && fixture.state.submitted_command_count == 0,
+        && completions[0].submitted_count == 0,
         "the first retirement releases the ownership record exactly once");
     vk::free_allocation_for_state_with_ops(
         &fixture.state,
@@ -758,14 +758,10 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
     assert(fixture.probe.destroy_count == 1,
         "the released allocation reaches native destruction exactly once");
 
-    fixture.state.resource_mutex.lock()!!;
-    vk::release_completed_submitted_commands_locked(
-        &fixture.state,
-        queue.id,
-        1,
-    );
-    fixture.state.resource_mutex.unlock();
-    assert(fixture.state.submitted_command_count == 0,
+    completions[0].retirement_mutex.lock()!!;
+    vk::retire_queue_through_locked(&fixture.state, &completions[0], 1);
+    completions[0].retirement_mutex.unlock();
+    assert(completions[0].submitted_count == 0,
         "repeated retirement finds no ownership record to release again");
     assert(@catch(vk::free_allocation_for_state_with_ops(
         &fixture.state,

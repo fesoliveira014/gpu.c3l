@@ -36,3 +36,23 @@ fn gpu::internal::CommandRecord* submitted_command_fixture_record(
     record.state = gpu::internal::CommandState.SUBMITTED;
     return record;
 }
+
+fn void append_submitted_command_fixture(
+    vk::QueueCompletionState* completion,
+    gpu::internal::CommandRecord* record,
+    gpu::CompletionPoint point,
+) {
+    vk::VkCommandRecord* backend = vk::backend_command(record);
+    backend.submitted = {
+        .completion = point,
+        .record     = record,
+    };
+    backend.next_submitted = null;
+    if (completion.submitted_tail == null) {
+        completion.submitted_head = record;
+    } else {
+        vk::backend_command(completion.submitted_tail).next_submitted = record;
+    }
+    completion.submitted_tail = record;
+    completion.submitted_count++;
+}
