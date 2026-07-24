@@ -497,6 +497,7 @@ fn RootAbiMismatch root_member_mismatch(
         spvreflect::TypeFlags.TYPE_FLAG_REF,
     );
     if (allow_alternate && reference) {
+        // Buffer references reflect as struct pointers, so scalar struct/member checks do not apply.
         bool incompatible_reference_shape = has_type_flag(
             flags,
             spvreflect::TypeFlags.TYPE_FLAG_VECTOR,
@@ -546,17 +547,6 @@ fn RootAbiMismatch root_member_mismatch(
     return RootAbiMismatch.NONE;
 }
 
-fn bool root_member_shape_matches(
-    spvreflect::BlockVariable* member,
-    gpu::internal::RootAbiMemberSpec* expected,
-) @private {
-    return root_member_mismatch(
-        member,
-        expected,
-        false,
-    ) == RootAbiMismatch.NONE;
-}
-
 fn ZString root_abi_mismatch_invariant(
     RootAbiMismatch mismatch,
 ) @private {
@@ -597,7 +587,7 @@ fn RootAbiMismatch root_push_abi_mismatch(
     ZString entry_point,
     gpu::ShaderStage stage,
     bool allow_alternate = false,
-) {
+) @private {
     gpu::internal::RootAbiSpec expected = root_abi_for_stage(stage);
     uint count = 0;
     if (reflect_module.enumerate_entry_point_push_constant_blocks(
@@ -659,7 +649,7 @@ fn void? check_root_push_abi(
 fn void set_root_abi_evidence_enabled(
     VkDeviceState* state,
     bool enabled,
-) @if(env::TESTING) {
+) @private @if(env::TESTING) {
     state.root_abi_evidence_enabled = enabled;
 }
 

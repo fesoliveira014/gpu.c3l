@@ -201,6 +201,18 @@ def check(root: Path = ROOT) -> list[str]:
         "TYPE_FLAG_REF",
     ):
         require(member_check, fragment, f"exact root member check missing: {fragment}", errors)
+    for fragment, error in (
+        (
+            "if (allow_alternate && reference)",
+            "alternate reference acceptance must stay behind allow_alternate",
+        ),
+        (
+            "if (!allow_alternate\n"
+            "        && member.scalar_is_signed() != expected.scalar_signed)",
+            "alternate signedness acceptance must stay behind allow_alternate",
+        ),
+    ):
+        require(member_check, fragment, error, errors)
     mismatch_invariant = function_body(shader, "root_abi_mismatch_invariant")
     for fragment in (
         "RootAbiMismatch.BLOCK_COUNT",

@@ -78,6 +78,17 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
         )
         self.assertTrue(any("float_scalar == expected.integer" in error for error in errors))
 
+    def test_rejects_unguarded_alternate_reference_acceptance(self) -> None:
+        errors = self.mutate(
+            "gpu/internal/vk/shader.c3",
+            "if (allow_alternate && reference) {",
+            "if (reference) {",
+        )
+        self.assertTrue(any(
+            "alternate reference acceptance must stay behind allow_alternate" in error
+            for error in errors
+        ))
+
     def test_requires_property_specific_root_diagnostic(self) -> None:
         errors = self.mutate(
             "gpu/internal/vk/shader.c3",

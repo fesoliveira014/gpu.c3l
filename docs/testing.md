@@ -721,12 +721,15 @@ python3 -B -m unittest scripts.test_check_shader_reflection_policy
 python3 -B scripts/check_shader_reflection_policy.py
 ```
 
-`test/shaders/root_abi_audit.json` is the bounded predicate/fixture inventory.
-The audit rebuilds its inputs, runs `spirv-val --target-env vulkan1.3`, and
-reports exact compiler/tool versions plus SPIR-V/disassembly hashes:
+The bounded evidence surface is behavioral: checked-in shader sources,
+deterministically rebuilt SPIR-V, the reflection-policy mutation gate,
+production rejection tests, and root-pointer runtime tests. The ignored SPIR-V
+fixtures are regenerated from source before focused validation:
 
 ```sh
-python3 -B scripts/audit_root_abi.py
+python3 -B scripts/build_shaders.py
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
+  c3c test vk_shader_reflection --path test
 VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
   c3c test vk_root_pointer --path test
 ```
