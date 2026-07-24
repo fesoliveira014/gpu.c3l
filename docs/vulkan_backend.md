@@ -697,22 +697,20 @@ CommandList                recording
 ExecutableCommandList      ended, one-shot
 ```
 
-Their representation is selected at compile time. The default bounded form
-carries a device token plus `CommandListHandle`; each use validates the bounded
-owner, slot, generation, device, and phase before resolving the record. A build
-with `DIRECT_COMMAND_TOKENS` carries only an opaque `CommandRecord*` and is for
-trusted callers; it cannot request `ContractValidation.FULL`.
+Each value carries a device token plus `CommandListHandle`. Every use validates
+the bounded owner, slot, generation, device, allocator, and authoritative phase
+before resolving the record.
 
 Begin claims one stable `CommandRecord` from the device's fixed command table
 and one native buffer/scratch unit from the originating allocator's fixed
 storage. The record is the sole lifecycle authority. It owns the selected
 immutable command-operation table, backend state and backend-command pointers,
-retained device ownership, bounded identity when present, and the current
+retained device ownership, bounded identity, and the current
 recording/submission state. The linked `VkCommandRecord` identifies the
 originating allocator and fixed buffer/scratch index and holds Vulkan-specific
-pipeline snapshots and pending texture transitions. Warm direct recording loads
-the record pointer and checks its phase; bounded recording first resolves its
-identity. Trusted backend entries do not repeat capability null checks. Only
+pipeline snapshots and pending texture transitions. Warm recording resolves the
+bounded identity once and dispatches through the record's preselected operation
+entry. Trusted backend entries do not repeat capability null checks. Only
 lifecycle operations continue through the device vtable and report device loss.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
@@ -738,15 +736,14 @@ Without lifetime tracking, the caller-owned lifetime contract requires the
 pipeline to remain live through command completion. `FULL` controls detailed
 semantic preparation independently of that retention choice.
 
-Submission resolves the complete batch before mutation. Bounded builds validate
-the command table and reject stale, duplicate, non-executable, or wrong-queue
-tokens before claiming records. A nonempty bounded attempt allocates one nonzero
-device-local visit epoch and stamps each resolved record as it is visited, so
-duplicate detection performs one record visit per input until rejection or
-completion. When the epoch space is exhausted, the next attempt clears live
-stamps across the allocated command cells once before restarting at epoch one.
-Empty submissions allocate no epoch. Direct builds resolve their trusted record
-pointers without a command-table lookup. Both forms claim
+Submission resolves the complete batch before mutation. Bounded resolution
+validates the command table and rejects stale, duplicate, non-executable, or
+wrong-queue tokens before claiming records. A nonempty attempt allocates one
+nonzero device-local visit epoch and stamps each resolved record as it is
+visited, so duplicate detection performs one record visit per input until
+rejection or completion. When the epoch space is exhausted, the next attempt
+clears live stamps across the allocated command cells once before restarting at
+epoch one. Empty submissions allocate no epoch. Each record then claims
 `EXECUTABLE -> SUBMITTING`; a failure before native acceptance restores every
 claim, while success commits pending texture state and publishes `SUBMITTED`.
 No fallible token resolution occurs after native acceptance.

@@ -126,6 +126,39 @@ fn void policy_matrix_creates_exact_runtime_and_device_state() @test {
     }
 }
 
+fn void every_policy_rejects_fabricated_command_identity() @test {
+    gpu::ContractValidation[3] contracts = {
+        gpu::ContractValidation.TRUSTED,
+        gpu::ContractValidation.OBJECT_BOUNDARIES,
+        gpu::ContractValidation.FULL,
+    };
+
+    foreach (contract : contracts) {
+        PolicyDiagnosticCapture capture;
+        gpu::RuntimeDesc desc = policy_runtime_desc(
+            contract:       contract,
+            track_lifetimes: false,
+            vulkan_layers:   false,
+            callback:        false,
+            debug_names:     false,
+            capture:         &capture,
+        );
+        gpu::Device device = create_test_device(&desc)!!;
+        gpu::CommandList fabricated = {
+            .device = device,
+            .handle = {
+                .owner      = ulong::max,
+                .index      = uint::max,
+                .generation = 1,
+            },
+        };
+        fault rejected = @catch(gpu::end_commands(&fabricated));
+        assert(rejected == gpu::INVALID_HANDLE,
+            "every contract policy bounds fabricated command identity");
+        destroy_test_device(&device)!!;
+    }
+}
+
 fn void instance_plans_callback_names_and_layers_independently() @test {
     vk::DebugUtilsMessengerCreateInfoEXT messenger_info;
     PolicyDiagnosticCapture capture;

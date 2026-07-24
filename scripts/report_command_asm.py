@@ -308,7 +308,6 @@ def emit_assembly(
     root: Path,
     asm_dir: Path,
     target: str | None = None,
-    direct_command_tokens: bool = False,
 ) -> None:
     command = [
         "c3c",
@@ -323,8 +322,6 @@ def emit_assembly(
     ]
     if target is not None:
         command.extend(("--target", target))
-    if direct_command_tokens:
-        command.extend(("-D", "DIRECT_COMMAND_TOKENS"))
     subprocess.run(
         tuple(command),
         cwd=root,
@@ -336,7 +333,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--asm-dir", type=Path)
     parser.add_argument("--emit", action="store_true")
-    parser.add_argument("--direct-command-tokens", action="store_true")
     parser.add_argument("--pinned-compiler")
     parser.add_argument("--pinned-target")
     parser.add_argument("--comparison-profile")
@@ -389,17 +385,13 @@ def main() -> int:
             root,
             asm_dir,
             args.pinned_target if pinned else None,
-            args.direct_command_tokens,
         )
 
     observations = collect(asm_dir)
     mode = "blocking" if pinned else "advisory"
-    representation = (
-        "direct" if args.direct_command_tokens else "bounded"
-    )
     print(
         f"asm_expectation version={EXPECTATION_VERSION} mode={mode} "
-        f"representation={representation}"
+        "representation=bounded"
     )
     if pinned:
         print(

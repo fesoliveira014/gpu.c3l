@@ -1314,15 +1314,9 @@ fn VkCommandRecord*? begin_commands_with_injected_ops(
         out_commands: out_commands,
         ops:          ops,
     )!;
-    $if $feature(DIRECT_COMMAND_TOKENS):
-        gpu::internal::CommandRecord* record =
-            (gpu::internal::CommandRecord*)out_commands.record;
-        return backend_command(record);
-    $else
-        VkDeviceState* state = (VkDeviceState*)
-            gpu::internal::device_backend_state_ptr(&out_commands.device);
-        return state.commands.get(out_commands.handle);
-    $endif
+    VkDeviceState* state = (VkDeviceState*)
+        gpu::internal::device_backend_state_ptr(&out_commands.device);
+    return state.commands.get(out_commands.handle);
 }
 
 fn void? end_commands_with_injected_ops(

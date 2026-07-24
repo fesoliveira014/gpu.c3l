@@ -169,7 +169,6 @@ fn void pin_commands_and_completion() {
     gpu::CommandAllocatorDesc command_allocator_desc = {};
     gpu::CommandList commands = {};
     gpu::ExecutableCommandList executable = {};
-    (void)gpu::DIRECT_COMMAND_TOKENS;
     (void)commands.is_valid();
     (void)executable.is_valid();
     gpu::GpuSpan span = {};

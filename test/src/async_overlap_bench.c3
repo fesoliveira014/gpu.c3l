@@ -40,6 +40,15 @@ fn double mask_and_scale(ulong raw, uint valid_bits, float period) {
     return (double)(raw & mask) * (double)period;
 }
 
+fn vk::CommandBuffer command_buffer(gpu::CommandList* commands) {
+    gpu::internal::CommandRecord* record =
+        gpu::internal::recording_command(
+            commands,
+            count_command: false,
+        )!!;
+    return gpu::internal::vk::backend_command(record).command_buffer;
+}
+
 <* Read and normalize one timestamp pair. *>
 fn void read_pool(vk::VkDeviceState* state, vk::QueryPool pool, uint valid_bits, float period, double* begin_ns, double* end_ns) {
     ulong[2] ticks;
@@ -65,7 +74,7 @@ fn void read_pool(vk::VkDeviceState* state, vk::QueryPool pool, uint valid_bits,
 <* Record the compute workload and optional timestamps. *>
 fn gpu::ExecutableCommandList record_compute(gpu::CommandAllocator* allocator, gpu::PipelineHandle pipeline, gpu::GpuAddress root_gpu, vk::QueryPool pool, bool timestamps_ok) {
     gpu::CommandList cmd = gpu::begin_commands(allocator)!!;
-    vk::CommandBuffer raw_cmd = gpu::internal::vk::resolve_command(&cmd)!!.command_buffer;
+    vk::CommandBuffer raw_cmd = command_buffer(&cmd);
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);
@@ -85,7 +94,7 @@ fn gpu::ExecutableCommandList record_compute(gpu::CommandAllocator* allocator, g
 <* Record the graphics workload and optional timestamps. *>
 fn gpu::ExecutableCommandList record_graphics(gpu::CommandAllocator* allocator, gpu::PipelineHandle pipeline, gpu::AttachmentViewHandle view, gpu::GpuAddress vertex_root, gpu::GpuAddress fragment_root, vk::QueryPool pool, bool timestamps_ok) {
     gpu::CommandList cmd = gpu::begin_commands(allocator)!!;
-    vk::CommandBuffer raw_cmd = gpu::internal::vk::resolve_command(&cmd)!!.command_buffer;
+    vk::CommandBuffer raw_cmd = command_buffer(&cmd);
     if (timestamps_ok) {
         vk::cmd_reset_query_pool(raw_cmd, pool, 0, 2);
         vk::cmd_write_timestamp2(raw_cmd, vk::PipelineStageFlagBits2.STAGE_2_TOP_OF_PIPE_BIT, pool, 0);

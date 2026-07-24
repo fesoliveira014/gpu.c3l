@@ -66,22 +66,12 @@ fn bool CommandAllocatorHandle.equals(
 
 <* Tests only whether this value differs from the invalid token sentinel.
    This does not validate live provenance or recording phase. *>
-fn bool CommandList.is_valid(&self) @if($feature(DIRECT_COMMAND_TOKENS)) =>
-    self.record != null;
-<* Tests only whether this value differs from the invalid token sentinel.
-   This does not validate live provenance or recording phase. *>
-fn bool CommandList.is_valid(&self) @if(!$feature(DIRECT_COMMAND_TOKENS)) =>
+fn bool CommandList.is_valid(&self) =>
     self.device.is_valid() && self.handle.is_valid();
 <* Tests only whether this value differs from the invalid token sentinel.
    This does not validate live provenance or executable phase. *>
-fn bool ExecutableCommandList.is_valid(&self) @if(
-    $feature(DIRECT_COMMAND_TOKENS)
-) => self.record != null;
-<* Tests only whether this value differs from the invalid token sentinel.
-   This does not validate live provenance or executable phase. *>
-fn bool ExecutableCommandList.is_valid(&self) @if(
-    !$feature(DIRECT_COMMAND_TOKENS)
-) => self.device.is_valid() && self.handle.is_valid();
+fn bool ExecutableCommandList.is_valid(&self) =>
+    self.device.is_valid() && self.handle.is_valid();
 
 <* True for a live heap index; the zero value is the invalid sentinel. *>
 fn bool TextureIndex.is_valid(self) => (uint)self != 0;

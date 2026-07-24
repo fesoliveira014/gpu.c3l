@@ -77,19 +77,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
   There is no default, frame-owned, or ambient per-thread recording owner. Create
   one allocator per concurrently recording worker, size it explicitly, and
   destroy it after all of its command units retire.
-- **Direct command tokens trade misuse diagnostics for one-pointer identity.**
-  Defining `DIRECT_COMMAND_TOKENS` selects the FAST public ABI: both command
-  token types contain exactly one opaque record pointer. The caller must use
-  only values returned by the library, in the correct phase, one-shot, with all
-  aliases confined to one thread at a time. Fabricated, stale, consumed,
-  wrong-phase, or concurrently used direct aliases are invalid application use;
-  deterministic faults are not promised. The default bounded-token build
-  validates owner, bounds, and generations before obtaining a record pointer.
-- **Direct tokens and `ContractValidation.FULL` are incompatible.** A
-  `DIRECT_COMMAND_TOKENS` build rejects `FULL` during runtime creation before
-  backend initialization. Use the default bounded representation for
-  deterministic stale, foreign, fabricated, wrong-phase, duplicate, and
-  consumed-token diagnostics.
+- **Command tokens are bounded and one-shot.** Both command token types carry a
+  device plus compact owner/slot/generation identity. Each operation resolves
+  that identity and the authoritative phase before obtaining the stable record,
+  so fabricated, stale, foreign, wrong-phase, duplicate, and consumed tokens
+  fault deterministically. Aliases remain thread-confined and one-shot.
 - **Vendored distribution.** There is no package registry; consumers vendor
   the repo (with its binding submodules) under `lib/`. See
   `docs/getting_started.md`.

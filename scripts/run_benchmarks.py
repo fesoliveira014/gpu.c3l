@@ -7,7 +7,6 @@ import os
 import pathlib
 import platform
 import re
-import struct
 import subprocess
 import sys
 
@@ -21,7 +20,6 @@ BENCHMARK_TARGETS = (
     "command_path_baseline_bench",
     "command_reference_bench",
     "command_record_bench",
-    "command_record_fast_bench",
     "lifecycle_bench",
     "submit_batch_bench",
     "pipeline_cache_bench",
@@ -54,10 +52,6 @@ BENCHMARK_METHODS = {
     ),
     "command_record_bench": (
         "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; cold/warm work counters",
-        "ns/record",
-    ),
-    "command_record_fast_bench": (
-        "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; commands/list=1,16,256,4096",
         "ns/record",
     ),
     "lifecycle_bench": (
@@ -143,7 +137,7 @@ COMMAND_RECORD_EXPECTATION = re.compile(
     re.MULTILINE,
 )
 COMMAND_RECORD_TOKENS = re.compile(
-    r"^command_tokens: representation=(?P<representation>direct|bounded) "
+    r"^command_tokens: representation=bounded "
     r"recording_token_bytes=(?P<recording_token_bytes>[1-9][0-9]*) "
     r"executable_token_bytes=(?P<executable_token_bytes>[1-9][0-9]*) "
     r"record_bytes=(?P<record_bytes>[1-9][0-9]*) "
@@ -975,7 +969,6 @@ def require_command_record_outcomes(output):
             "is missing, duplicated, or malformed"
         )
     token_record = token_records[0]
-    representation = token_record.group("representation")
     recording_token_bytes = int(token_record.group("recording_token_bytes"))
     executable_token_bytes = int(
         token_record.group("executable_token_bytes")
@@ -983,13 +976,6 @@ def require_command_record_outcomes(output):
     if recording_token_bytes != executable_token_bytes:
         raise ValueError(
             "semantic invariant: command recording/executable token sizes differ"
-        )
-    if (
-        representation == "direct"
-        and recording_token_bytes != struct.calcsize("P")
-    ):
-        raise ValueError(
-            "semantic invariant: direct command token is not one pointer"
         )
     cell_bytes = int(token_record.group("cell_bytes"))
     record_bytes = int(token_record.group("record_bytes"))
@@ -1081,9 +1067,7 @@ def require_command_record_outcomes(output):
             "semantic invariant: command_record_bench recording command "
             f"count {recording_commands} != {expected_recording_commands}"
         )
-    expected_command_table = (
-        0 if representation == "direct" else recording_commands
-    )
+    expected_command_table = recording_commands
     if values["command_table"] != expected_command_table:
         raise ValueError(
             "forbidden work: command_record_bench command-table work "
@@ -1163,7 +1147,7 @@ def require_measurement(
             raise ValueError(f"{target} reports live resources")
     if target == "descriptor_churn_bench":
         require_sampler_lookup_evidence(output)
-    if target in ("command_record_bench", "command_record_fast_bench"):
+    if target == "command_record_bench":
         require_command_record_outcomes(output)
         require_command_policy_evidence(output)
     if target == "pipeline_cache_bench" and not PIPELINE_CACHE_MATRIX.search(output):
@@ -1345,29 +1329,6 @@ def main():
                 )
                 lines.append(report_section(title, annotated))
             require_command_policy_matrix(command_outputs)
-            continue
-        if target == "command_record_fast_bench":
-            command_env = env.copy()
-            command_env["GPU_C3L_BENCH_CONTRACT"] = "trusted"
-            command_env["GPU_C3L_BENCH_TRACKING"] = "false"
-            command_env["GPU_C3L_BENCH_LAYERS"] = "false"
-            output = run(
-                (str(executable(root, target)),),
-                root,
-                command_env,
-            )
-            require_command_policy_evidence(
-                output,
-                ("trusted", False, False),
-            )
-            timing_advisories.extend(require_measurement(
-                output,
-                target,
-                enforce_thresholds=False,
-                evaluate_thresholds=False,
-            ))
-            annotated = f"iterations={iterations}\nunits={units}\n{output}"
-            lines.append(report_section(target, annotated))
             continue
         if target == "command_path_baseline_bench":
             command_path_outputs = []

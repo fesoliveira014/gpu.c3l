@@ -39,16 +39,6 @@ fn void unknown_contract_validation_is_rejected() @test {
     );
 }
 
-fn void direct_command_tokens_reject_full_validation_before_backend_work()
-    @test @if($feature(DIRECT_COMMAND_TOKENS)) {
-    RuntimeDesc desc = runtime_desc();
-    desc.contract_validation = ContractValidation.FULL;
-    assert(
-        @catch(gpu::create_runtime(&desc)) == gpu::UNSUPPORTED_FEATURE,
-        "direct command tokens reject full validation before backend work"
-    );
-}
-
 fn void runtime_and_adapter_tokens_are_compact() @test {
     assert(Runtime::size == ulong::size, "Runtime is one opaque 64-bit token");
     assert(Adapter::size == ulong::size, "Adapter is one opaque 64-bit token");
