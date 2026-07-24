@@ -972,7 +972,7 @@ fn gpu::Device? create_vk_device_with_probe(
     gpu::internal::validate_device_request(request)!;
     gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(adapter);
     if (runtime_data == null) return gpu::INVALID_HANDLE~;
-    VkRuntimeState* runtime_state = (VkRuntimeState*)runtime_data.backend_state;
+    VkRuntimeState* runtime_state = runtime_data.state;
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
 
     VkDeviceConfig desc = runtime_device_config(runtime_state);

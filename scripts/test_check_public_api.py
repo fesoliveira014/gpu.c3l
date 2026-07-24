@@ -1673,11 +1673,18 @@ method gpu::Runtime.is_valid
                     "visibility": "local",
                 },
             ],
-            "types": [{
-                "name": "PrivateState",
-                "uid": "gpu::internal::vk::PrivateState",
-                "visibility": "private",
-            }],
+            "types": [
+                {
+                    "name": "PrivateState",
+                    "uid": "gpu::internal::vk::PrivateState",
+                    "visibility": "private",
+                },
+                {
+                    "name": "VkRuntimeState",
+                    "uid": "gpu::internal::vk::VkRuntimeState",
+                    "visibility": "public",
+                },
+            ],
         }
         self.assertEqual(
             check_public_api.validate_generated_backend_privacy(document),
@@ -3073,6 +3080,18 @@ method gpu::Runtime.is_valid
                 "gpu/internal/vk/helpers.c3:3 "
                 "backend declaration may not use @public"
             ],
+        )
+        shared_type_source = (
+            "module gpu::internal::vk @private;\n"
+            "import gpu @public;\n"
+            "struct VkRuntimeState @public {}\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_private_backend_source(
+                relative,
+                shared_type_source,
+            ),
+            [],
         )
 
         wrong_module_source = (

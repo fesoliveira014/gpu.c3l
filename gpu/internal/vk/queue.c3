@@ -1471,12 +1471,11 @@ fn QueueFamilies? select_queue_families_for_surface(
 }
 
 fn bool? vk_supports_queue_requirements(
-    void* backend_state,
+    VkRuntimeState* state,
     uint adapter_index,
     gpu::QueueRequirements* requirements,
     void* backend_surface,
 ) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || requirements == null || adapter_index >= state.adapters.len) {
         return gpu::INVALID_HANDLE~;
     }

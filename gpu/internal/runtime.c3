@@ -1,21 +1,16 @@
 module gpu::internal @private;
 
 import gpu;
+import gpu::internal::vk;
 import std::atomic;
 import std::atomic::types;
 import std::core::mem;
 
-alias DestroyRuntimeBackendFn @private = fn void (void*);
-alias GetAdapterInfoBackendFn @private = fn AdapterInfo? (void*, uint);
-alias GetAdapterDiagnosticsBackendFn @private = fn AdapterDiagnostics? (void*, uint);
 alias CreateWin32SurfaceBackendFn @private = fn void*? (void*, void*, void*);
 alias CreateWaylandSurfaceBackendFn @private = fn void*? (void*, void*, void*);
 alias CreateX11SurfaceBackendFn @private = fn void*? (void*, void*, ulong);
 alias DestroySurfaceBackendFn @private = fn void (void*, void*);
 alias SupportsPresentationBackendFn @private = fn bool? (void*, uint, void*);
-alias SupportsQueueRequirementsBackendFn @private = fn bool? (void*, uint, QueueRequirements*, void*);
-alias SupportsResourceAgnosticTextureSyncBackendFn @private = fn bool? (void*, uint);
-alias SupportsDynamicColorStateBackendFn @private = fn bool? (void*, uint);
 
 const uint MAX_RUNTIMES @private = 16;
 const uint MAX_ADAPTERS_PER_RUNTIME @private = (uint)ushort::max + 1;
@@ -27,28 +22,21 @@ enum BackendKind @private {
 
 
 struct RuntimeBackendVTable @private {
-    DestroyRuntimeBackendFn        destroy_runtime;
-    GetAdapterInfoBackendFn        get_adapter_info;
-    GetAdapterDiagnosticsBackendFn get_adapter_diagnostics;
     CreateWin32SurfaceBackendFn     create_win32_surface;
     CreateWaylandSurfaceBackendFn   create_wayland_surface;
     CreateX11SurfaceBackendFn       create_x11_surface;
     DestroySurfaceBackendFn         destroy_surface;
     SupportsPresentationBackendFn   supports_presentation;
-    SupportsQueueRequirementsBackendFn supports_queue_requirements;
-    SupportsResourceAgnosticTextureSyncBackendFn supports_resource_agnostic_texture_sync;
-    SupportsDynamicColorStateBackendFn supports_dynamic_color_state;
 }
 
 struct RuntimeData @private {
-    uint                  generation;
-    BackendKind           backend;
-    RuntimeBackendVTable* vtable;
-    void*                 backend_state;
-    uint                  adapter_count;
-    uint                  live_surface_count;
-    Atomic{uint}          live_device_count;
-    bool                  used;
+    uint                              generation;
+    gpu::internal::vk::VkRuntimeState* state;
+    RuntimeBackendVTable*             vtable;
+    uint                              adapter_count;
+    uint                              live_surface_count;
+    Atomic{uint}                      live_device_count;
+    bool                              used;
 }
 
 RuntimeData[MAX_RUNTIMES] runtime_slots @private;
@@ -79,20 +67,18 @@ fn RuntimeData* resolve_runtime(Runtime* runtime) @private {
 }
 
 fn Runtime? register_runtime(
-    BackendKind backend,
+    gpu::internal::vk::VkRuntimeState* state,
     RuntimeBackendVTable* vtable,
-    void* backend_state,
     uint adapter_count,
 ) @private {
-    if (vtable == null || backend_state == null) return gpu::INVALID_ARGUMENT~;
+    if (vtable == null || state == null) return gpu::INVALID_ARGUMENT~;
     if (adapter_count > MAX_ADAPTERS_PER_RUNTIME) return gpu::SLOT_TABLE_FULL~;
     for (uint i = 0; i < MAX_RUNTIMES; i++) {
         RuntimeData* data = &runtime_slots[i];
         if (data.used || data.generation == MAX_RUNTIME_GENERATION) continue;
         data.generation++;
-        data.backend = backend;
+        data.state = state;
         data.vtable = vtable;
-        data.backend_state = backend_state;
         data.adapter_count = adapter_count;
         data.live_surface_count = 0;
         data.live_device_count.store(0, AtomicOrdering.RELAXED);
@@ -105,9 +91,11 @@ fn Runtime? register_runtime(
     return gpu::SLOT_TABLE_FULL~;
 }
 
-fn void* runtime_backend_state(Runtime* runtime) @private {
+fn gpu::internal::vk::VkRuntimeState* runtime_backend_state(
+    Runtime* runtime,
+) @private {
     RuntimeData* data = resolve_runtime(runtime);
-    return data == null ? null : data.backend_state;
+    return data == null ? null : data.state;
 }
 
 fn void? runtime_retain_surface(Runtime* runtime) @private {

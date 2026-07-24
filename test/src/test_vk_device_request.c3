@@ -5,13 +5,13 @@ import gpu @public;
 import gpu::internal::vk @public;
 import vk;
 import std::atomic;
+import std::core::mem;
 import std::io;
 
 const gpu::internal::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
     .destroy_device = &destroy_registry_blocker,
 };
 const gpu::internal::RuntimeBackendVTable PRESENTATION_INSTANCE_GATE_VTABLE @private = {
-    .destroy_runtime = &destroy_presentation_instance_gate_runtime,
     .destroy_surface = &destroy_presentation_instance_gate_surface,
 };
 
@@ -165,11 +165,6 @@ fn void resource_agnostic_texture_sync_support_requires_extension_and_feature() 
 }
 
 fn void resource_agnostic_texture_sync_support_hook_uses_cached_availability() @test {
-    assert(
-        gpu::internal::vk::VK_RUNTIME_VTABLE.supports_resource_agnostic_texture_sync
-            == &gpu::internal::vk::vk_supports_resource_agnostic_texture_sync,
-        "the Vulkan runtime routes the semantic support query"
-    );
     gpu::internal::vk::VkAdapterState[1] adapters;
     gpu::internal::vk::VkRuntimeState state = {
         .adapters = adapters[..],
@@ -225,7 +220,7 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
         gpu::internal::RuntimeData* runtime_data =
             gpu::internal::resolve_adapter(&adapter);
         gpu::internal::vk::VkRuntimeState* runtime_state =
-            (gpu::internal::vk::VkRuntimeState*)runtime_data.backend_state;
+            runtime_data.state;
         gpu::internal::vk::VkAdapterState* adapter_state =
             &runtime_state.adapters[adapter.adapter_index];
         adapter_state.resource_agnostic_texture_sync = {
@@ -357,12 +352,6 @@ fn void strict_disabled_state_owns_no_sampler_table() @test {
 }
 
 fn void destroy_registry_blocker(void* backend_state) @private {
-    (void)backend_state;
-}
-
-fn void destroy_presentation_instance_gate_runtime(
-    void* backend_state,
-) @private {
     (void)backend_state;
 }
 
@@ -733,7 +722,7 @@ fn void adapter_support_inherits_runtime_device_config() @test {
     gpu::DeviceRequest request = gpu::strict_device_request();
     gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state =
-        (gpu::internal::vk::VkRuntimeState*)runtime_data.backend_state;
+        runtime_data.state;
     gpu::internal::vk::VkDeviceConfig config = gpu::internal::vk::runtime_device_config(runtime_state);
 
     for (uint i = 0; i < adapters.count; i++) {
@@ -803,7 +792,7 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
 
         gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
         gpu::internal::vk::VkRuntimeState* runtime_state =
-            (gpu::internal::vk::VkRuntimeState*)runtime_data.backend_state;
+            runtime_data.state;
         gpu::Device device = gpu::create_device(&adapter, &request)!!;
         gpu::internal::vk::VkDeviceState* device_state =
             (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
@@ -942,14 +931,15 @@ fn void malformed_native_request_preserves_runtime_state() @test {
 }
 
 fn void presentation_device_creation_requires_instance_maintenance() @test {
-    gpu::internal::vk::VkAdapterState[1] adapter_states;
-    gpu::internal::vk::VkRuntimeState runtime_state = {
-        .adapters = adapter_states[..],
-    };
+    gpu::internal::vk::VkRuntimeState* runtime_state =
+        mem::new(gpu::internal::vk::VkRuntimeState);
+    runtime_state.adapters = mem::new_array(
+        gpu::internal::vk::VkAdapterState,
+        1,
+    );
     gpu::Runtime runtime = gpu::internal::register_runtime(
-        backend:       gpu::internal::BackendKind.VULKAN,
+        state:         runtime_state,
         vtable:        &PRESENTATION_INSTANCE_GATE_VTABLE,
-        backend_state: &runtime_state,
         adapter_count: 1,
     )!!;
     defer gpu::destroy_runtime(&runtime)!!;
@@ -1154,7 +1144,7 @@ fn void dynamic_color_activation_rejects_missing_support_and_rolls_back() @test 
         gpu::internal::RuntimeData* runtime_data =
             gpu::internal::resolve_adapter(&adapter);
         gpu::internal::vk::VkRuntimeState* runtime_state =
-            (gpu::internal::vk::VkRuntimeState*)runtime_data.backend_state;
+            runtime_data.state;
         gpu::internal::vk::VkAdapterState* adapter_state =
             &runtime_state.adapters[adapter.adapter_index];
         bool original_support = adapter_state.dynamic_color_state_supported;
@@ -1356,7 +1346,7 @@ fn void runtime_devices_destroy_independently() @test {
 
         gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
         gpu::internal::vk::VkRuntimeState* runtime_state =
-            (gpu::internal::vk::VkRuntimeState*)runtime_data.backend_state;
+            runtime_data.state;
         gpu::Device first = gpu::create_device(&adapter, &request)!!;
         gpu::Device second = gpu::create_device(&second_adapter, &request)!!;
         uptr first_physical = device_physical_adapter(&first);

@@ -104,14 +104,13 @@ fn void? destroy_runtime(Runtime* runtime) {
         return RESOURCE_IN_USE~;
     }
 
-    gpu::internal::DestroyRuntimeBackendFn destroy_backend = data.vtable.destroy_runtime;
-    void* backend_state = data.backend_state;
+    gpu::internal::vk::VkRuntimeState* state = data.state;
+    data.state = null;
     data.vtable = null;
-    data.backend_state = null;
     data.adapter_count = 0;
     data.used = false;
     *runtime = RUNTIME_INVALID;
-    destroy_backend(backend_state);
+    gpu::internal::vk::destroy_vk_runtime_state(state);
 }
 
 <* True when the token is not the invalid zero value. *>
@@ -145,8 +144,8 @@ fn AdapterList? enumerate_adapters(Runtime* runtime) {
 fn AdapterInfo? get_adapter_info(Adapter* adapter) {
     gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
-    return data.vtable.get_adapter_info(
-        data.backend_state,
+    return gpu::internal::vk::vk_get_adapter_info(
+        data.state,
         adapter.adapter_index,
     );
 }
@@ -155,8 +154,8 @@ fn AdapterInfo? get_adapter_info(Adapter* adapter) {
 fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
     gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
-    return data.vtable.get_adapter_diagnostics(
-        data.backend_state,
+    return gpu::internal::vk::vk_get_adapter_diagnostics(
+        data.state,
         adapter.adapter_index,
     );
 }
@@ -230,8 +229,8 @@ fn DeviceRequestSupport? supports_device_request(
     gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
 
-    AdapterInfo info = data.vtable.get_adapter_info(
-        data.backend_state,
+    AdapterInfo info = gpu::internal::vk::vk_get_adapter_info(
+        data.state,
         adapter.adapter_index,
     )!;
     if (!info.strict_supported) {
@@ -242,11 +241,10 @@ fn DeviceRequestSupport? supports_device_request(
     }
 
     if (gpu::internal::requests_resource_agnostic_texture_sync(*request)
-        && (data.vtable.supports_resource_agnostic_texture_sync == null
-            || !data.vtable.supports_resource_agnostic_texture_sync(
-                data.backend_state,
-                adapter.adapter_index,
-            )!)) {
+        && !gpu::internal::vk::vk_supports_resource_agnostic_texture_sync(
+            data.state,
+            adapter.adapter_index,
+        )!) {
         return {
             .supported         = false,
             .unmet_requirement = "resource-agnostic texture synchronization",
@@ -254,11 +252,10 @@ fn DeviceRequestSupport? supports_device_request(
     }
 
     if (gpu::internal::requests_dynamic_color_state(*request)
-        && (data.vtable.supports_dynamic_color_state == null
-            || !data.vtable.supports_dynamic_color_state(
-                data.backend_state,
-                adapter.adapter_index,
-            )!)) {
+        && !gpu::internal::vk::vk_supports_dynamic_color_state(
+            data.state,
+            adapter.adapter_index,
+        )!) {
         return {
             .supported         = false,
             .unmet_requirement = "dynamic color state",
@@ -297,13 +294,12 @@ fn DeviceRequestSupport? supports_device_request(
         backend_surface = gpu::internal::surface_backend_handle(&surface)!;
     }
 
-    if (data.vtable.supports_queue_requirements == null
-        || !data.vtable.supports_queue_requirements(
-            data.backend_state,
-            adapter.adapter_index,
-            &queues,
-            backend_surface,
-        )!) {
+    if (!gpu::internal::vk::vk_supports_queue_requirements(
+        state:           data.state,
+        adapter_index:   adapter.adapter_index,
+        requirements:    &queues,
+        backend_surface: backend_surface,
+    )!) {
         return {
             .supported         = false,
             .unmet_requirement = "queue topology",
@@ -325,7 +321,7 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
     if (surface_runtime != adapter_runtime) return INVALID_HANDLE~;
     if (adapter_runtime.vtable.supports_presentation == null) return false;
     return adapter_runtime.vtable.supports_presentation(
-        adapter_runtime.backend_state,
+        adapter_runtime.state,
         adapter.adapter_index,
         surface_data.backend_surface,
     );
@@ -352,7 +348,7 @@ fn void? destroy_surface(Surface* surface) {
     *surface = SURFACE_INVALID;
 
     runtime_data.vtable.destroy_surface(
-        runtime_data.backend_state,
+        runtime_data.state,
         backend_surface,
     );
     gpu::internal::runtime_release_surface(&runtime)!!;
@@ -458,12 +454,7 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
         }
     }
 
-    switch (runtime_data.backend) {
-        case gpu::internal::BackendKind.VULKAN:
-            device = gpu::internal::vk::create_vk_device(adapter, request, &runtime)!;
-        default:
-            return UNSUPPORTED_BACKEND~;
-    }
+    device = gpu::internal::vk::create_vk_device(adapter, request, &runtime)!;
     retain_transferred = true;
     return device;
 }

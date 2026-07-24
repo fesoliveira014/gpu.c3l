@@ -75,7 +75,7 @@ fn gpu::Device? create_selected_device() {
         gpu::internal::RuntimeData* runtime_data =
             gpu::internal::resolve_adapter(&adapter);
         vk::VkRuntimeState* runtime_state =
-            (vk::VkRuntimeState*)runtime_data.backend_state;
+            runtime_data.state;
         vk::VkAdapterState* adapter_state =
             &runtime_state.adapters[adapter.adapter_index];
         adapter_state.resource_agnostic_texture_sync = {

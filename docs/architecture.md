@@ -118,7 +118,10 @@ The library ships **no application shaders**. Shader entry points are written an
 
 ### Runtime and adapters
 
-`Runtime` owns backend discovery, diagnostics, and borrowed adapters. Creating one is the first operation that may initialize native backend state. Multiple runtimes may coexist.
+`Runtime` owns Vulkan discovery, diagnostics, and borrowed adapters. Its opaque
+token resolves to typed private Vulkan state; adapter and support queries call
+that implementation directly. Creating a runtime is the first operation that
+may initialize native state. Multiple runtimes may coexist.
 
 Public shape:
 

@@ -10,7 +10,7 @@ const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
 const float STUB_SAMPLER_ANISOTROPY_LIMIT @private = 16.0f;
 
-struct StubRuntimeState {
+struct VkRuntimeState @public {
     gpu::Runtime runtime;
     uint         adapter_count;
 }
@@ -114,8 +114,7 @@ fn uint stub_sampler_native_create_count(gpu::Device* device) {
 
 fn uint stub_sampler_native_destroy_count() => sampler_native_destroys;
 
-fn void destroy_stub_runtime(void* backend_state) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
+fn void destroy_vk_runtime_state(VkRuntimeState* state) {
     if (probe_destroy_visibility) {
         destroy_visibility_fault = @catch(gpu::enumerate_adapters(&state.runtime));
         probe_destroy_visibility = false;
@@ -124,8 +123,7 @@ fn void destroy_stub_runtime(void* backend_state) {
     mem::free(state);
 }
 
-fn gpu::AdapterInfo? get_stub_adapter_info(void* backend_state, uint index) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
+fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
     device_support_queries++;
     if (state == null || index >= state.adapter_count) return gpu::INVALID_HANDLE~;
     return {
@@ -144,8 +142,10 @@ fn gpu::AdapterInfo? get_stub_adapter_info(void* backend_state, uint index) {
     };
 }
 
-fn gpu::AdapterDiagnostics? get_stub_adapter_diagnostics(void* backend_state, uint index) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
+fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
+    VkRuntimeState* state,
+    uint index,
+) {
     if (state == null || index >= state.adapter_count) return gpu::INVALID_HANDLE~;
     return {
         .backend_name = "stub",
@@ -200,21 +200,20 @@ fn bool? supports_stub_presentation(
     uint adapter_index,
     void* surface,
 ) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
+    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || surface == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
     return presentation_supported;
 }
 
-fn bool? supports_stub_queue_requirements(
-    void* backend_state,
+fn bool? vk_supports_queue_requirements(
+    VkRuntimeState* state,
     uint adapter_index,
     gpu::QueueRequirements* requirements,
     void* backend_surface,
 ) {
     (void)backend_surface;
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
     if (state == null || requirements == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
@@ -231,11 +230,10 @@ fn bool? supports_stub_queue_requirements(
     return true;
 }
 
-fn bool? supports_stub_resource_agnostic_texture_sync(
-    void* backend_state,
+fn bool? vk_supports_resource_agnostic_texture_sync(
+    VkRuntimeState* state,
     uint adapter_index,
 ) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
     if (state == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
@@ -243,11 +241,10 @@ fn bool? supports_stub_resource_agnostic_texture_sync(
     return configured_resource_agnostic_texture_sync_support;
 }
 
-fn bool? supports_stub_dynamic_color_state(
-    void* backend_state,
+fn bool? vk_supports_dynamic_color_state(
+    VkRuntimeState* state,
     uint adapter_index,
 ) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
     if (state == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
@@ -256,43 +253,30 @@ fn bool? supports_stub_dynamic_color_state(
 }
 
 const gpu::internal::RuntimeBackendVTable STUB_RUNTIME_VTABLE @private = {
-    .destroy_runtime         = &destroy_stub_runtime,
-    .get_adapter_info        = &get_stub_adapter_info,
-    .get_adapter_diagnostics = &get_stub_adapter_diagnostics,
     .create_win32_surface    = &create_stub_win32_surface,
     .create_wayland_surface  = &create_stub_wayland_surface,
     .create_x11_surface      = &create_stub_x11_surface,
     .destroy_surface         = &destroy_stub_surface,
     .supports_presentation   = &supports_stub_presentation,
-    .supports_queue_requirements = &supports_stub_queue_requirements,
-    .supports_resource_agnostic_texture_sync = &supports_stub_resource_agnostic_texture_sync,
-    .supports_dynamic_color_state = &supports_stub_dynamic_color_state,
 };
 
 const gpu::internal::RuntimeBackendVTable STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY @private = {
-    .destroy_runtime         = &destroy_stub_runtime,
-    .get_adapter_info        = &get_stub_adapter_info,
-    .get_adapter_diagnostics = &get_stub_adapter_diagnostics,
     .create_win32_surface    = &create_stub_win32_surface,
     .create_wayland_surface  = &create_stub_wayland_surface,
     .create_x11_surface      = &create_stub_x11_surface,
     .supports_presentation   = &supports_stub_presentation,
-    .supports_queue_requirements = &supports_stub_queue_requirements,
-    .supports_resource_agnostic_texture_sync = &supports_stub_resource_agnostic_texture_sync,
-    .supports_dynamic_color_state = &supports_stub_dynamic_color_state,
 };
 
 fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
-    StubRuntimeState* state = mem::new(StubRuntimeState);
+    VkRuntimeState* state = mem::new(VkRuntimeState);
     state.adapter_count = configured_adapter_count;
     runtime_creates++;
-    defer catch destroy_stub_runtime(state);
+    defer catch destroy_vk_runtime_state(state);
     gpu::Runtime runtime = gpu::internal::register_runtime(
-        backend:       gpu::internal::BackendKind.VULKAN,
+        state:         state,
         vtable:        surface_destroy_available
             ? &STUB_RUNTIME_VTABLE
             : &STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY,
-        backend_state: state,
         adapter_count: state.adapter_count,
     )!;
     state.runtime = runtime;

@@ -34,6 +34,12 @@ SURFACE_TYPES = {
     "win32": (("InstanceHandle", "void*"), ("WindowHandle", "void*")),
     "x11": (("DisplayHandle", "void*"), ("WindowHandle", "ulong")),
 }
+SHARED_PRIVATE_BACKEND_TYPES = {
+    "VkRuntimeState",
+    "VkDeviceState",
+    "CommandRecord",
+    "CommandOps",
+}
 
 FORBIDDEN_TEXT = {
     "devicedesc": "retired transitional DeviceDesc",
@@ -517,6 +523,11 @@ def validate_generated_backend_privacy(document: dict) -> list[str]:
                 if not isinstance(entry, dict):
                     continue
                 if entry.get("visibility") in ("private", "local"):
+                    continue
+                if (
+                    module_name == "gpu::internal::vk"
+                    and entry.get("name") in SHARED_PRIVATE_BACKEND_TYPES
+                ):
                     continue
                 identity = entry.get("uid") or (
                     f"{module_name}::{entry.get('name', '<anonymous>')}"
@@ -2186,10 +2197,15 @@ def validate_private_backend_source(relative: Path, source: str) -> list[str]:
 
     for line_number, line in enumerate(normalized.splitlines(), start=1):
         stripped = line.strip()
+        shared_private_type = any(
+            stripped.startswith(f"struct {name} ")
+            for name in SHARED_PRIVATE_BACKEND_TYPES
+        )
         if (
             "@public" in stripped
             and not stripped.startswith("import ")
             and not stripped.startswith("module ")
+            and not shared_private_type
         ):
             failures.append(
                 f"{relative.as_posix()}:{line_number} "

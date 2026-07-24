@@ -215,26 +215,23 @@ fn void? enumerate_vk_adapters(VkRuntimeState* state) {
     }
 }
 
-fn gpu::AdapterInfo? vk_get_adapter_info(void* backend_state, uint index) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
+fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
     if (state == null || index >= state.adapters.len) return gpu::INVALID_HANDLE~;
     return state.adapters[index].info;
 }
 
 fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
-    void* backend_state,
+    VkRuntimeState* state,
     uint index,
 ) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || index >= state.adapters.len) return gpu::INVALID_HANDLE~;
     return state.adapters[index].diagnostics;
 }
 
 fn bool? vk_supports_resource_agnostic_texture_sync(
-    void* backend_state,
+    VkRuntimeState* state,
     uint index,
 ) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || index >= state.adapters.len) return gpu::INVALID_HANDLE~;
     return resource_agnostic_texture_sync_supported(
         state.adapters[index].resource_agnostic_texture_sync,
@@ -242,10 +239,9 @@ fn bool? vk_supports_resource_agnostic_texture_sync(
 }
 
 fn bool? vk_supports_dynamic_color_state(
-    void* backend_state,
+    VkRuntimeState* state,
     uint adapter_index,
 ) {
-    VkRuntimeState* state = (VkRuntimeState*)backend_state;
     if (state == null || adapter_index >= state.adapters.len) {
         return gpu::INVALID_HANDLE~;
     }

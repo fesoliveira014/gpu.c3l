@@ -23,12 +23,12 @@ fn gpu::Surface? create_surface(
     }
 
     void* backend_surface = runtime_data.vtable.create_x11_surface(
-        runtime_data.backend_state,
+        runtime_data.state,
         native_display,
         native_window,
     )!;
     defer catch runtime_data.vtable.destroy_surface(
-        runtime_data.backend_state,
+        runtime_data.state,
         backend_surface,
     );
     return gpu::internal::register_surface(runtime, backend_surface);

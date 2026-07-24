@@ -195,7 +195,8 @@ and Vulkan validation on (or the helper); `false` or omission maps to
 `TRUSTED`, tracking off, and Vulkan validation off. The retired field is not
 part of `RuntimeDesc` and intentionally fails to compile.
 
-Creating a runtime is the first operation that may initialize backend discovery. Enumeration returns an allocation-free view:
+Creating a runtime is the first operation that may initialize Vulkan discovery
+behind the backend-neutral API. Enumeration returns an allocation-free view:
 
 ```c3
 gpu::RuntimeDesc runtime_desc = {};
