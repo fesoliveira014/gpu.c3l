@@ -1007,6 +1007,8 @@ struct CommandList {
 $assert CommandList::size <= ulong::size * 3;
 $assert !$feature(DIRECT_COMMAND_TOKENS)
     || CommandList::size == void*::size;
+$assert $feature(DIRECT_COMMAND_TOKENS)
+    || CommandList::size == Device::size + CommandListHandle::size;
 
 <* A one-shot executable command token. Submit or discard consumes it. *>
 struct ExecutableCommandList {
@@ -1017,6 +1019,8 @@ struct ExecutableCommandList {
 $assert ExecutableCommandList::size <= ulong::size * 3;
 $assert !$feature(DIRECT_COMMAND_TOKENS)
     || ExecutableCommandList::size == void*::size;
+$assert $feature(DIRECT_COMMAND_TOKENS)
+    || ExecutableCommandList::size == Device::size + CommandListHandle::size;
 
 <* Cold reservation for one generated-work pipeline and command kind on one
    allocator. Count bounds each call; buffer count bounds concurrent use. *>

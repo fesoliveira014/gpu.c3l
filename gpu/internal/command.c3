@@ -73,23 +73,18 @@ fn gpu::internal::CommandRecord*? recording_command(
     $if $feature(DIRECT_COMMAND_TOKENS):
         if (commands.record == null) return gpu::INVALID_HANDLE~;
         record = (gpu::internal::CommandRecord*)commands.record;
-        if (record.state != gpu::internal::CommandState.RECORDING
-            && record.state
-                != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-            return gpu::COMMAND_RECORDING_ERROR~;
-        }
     $else
         record = bounded_command_record(
             commands.device,
             commands.handle,
             allow_lost,
         )!;
-        if (record.state != gpu::internal::CommandState.RECORDING
-            && record.state
-                != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-            return gpu::COMMAND_RECORDING_ERROR~;
-        }
     $endif
+    if (record.state != gpu::internal::CommandState.RECORDING
+        && record.state
+            != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
     if (count_command) gpu::internal::note_command_recording_call();
     return record;
 }
@@ -99,25 +94,21 @@ fn gpu::internal::CommandRecord*? executable_command(
     bool allow_lost = false,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
+    gpu::internal::CommandRecord* record;
     $if $feature(DIRECT_COMMAND_TOKENS):
         if (commands.record == null) return gpu::INVALID_HANDLE~;
-        gpu::internal::CommandRecord* record =
-            (gpu::internal::CommandRecord*)commands.record;
-        if (record.state != gpu::internal::CommandState.EXECUTABLE) {
-            return gpu::COMMAND_RECORDING_ERROR~;
-        }
-        return record;
+        record = (gpu::internal::CommandRecord*)commands.record;
     $else
-        gpu::internal::CommandRecord* record = bounded_command_record(
+        record = bounded_command_record(
             commands.device,
             commands.handle,
             allow_lost,
         )!;
-        if (record.state != gpu::internal::CommandState.EXECUTABLE) {
-            return gpu::COMMAND_RECORDING_ERROR~;
-        }
-        return record;
     $endif
+    if (record.state != gpu::internal::CommandState.EXECUTABLE) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    return record;
 }
 
 fn void publish_command_list(

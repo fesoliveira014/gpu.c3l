@@ -259,13 +259,14 @@ fn void release_submitted_command_batch(
     return_allocator_buffer_locked(slot, backend.allocator_buffer);
     slot.in_flight_buffers--;
     gpu::CommandListHandle identity = record.identity;
+    gpu::internal::CommandRecord ownership = *record;
     state.submitted_command_count--;
     *batch = state.submitted_commands[state.submitted_command_count];
     state.submitted_commands[state.submitted_command_count] = {};
-    gpu::internal::release_command_record_ownership(record);
     state.command_mutex.lock()!!;
     (void)state.commands.free(identity);
     state.command_mutex.unlock();
+    gpu::internal::release_command_record_ownership(&ownership);
 }
 
 fn void release_completed_submitted_commands_locked(
