@@ -485,12 +485,41 @@ required capabilities are present
 no unexpected descriptor sets are declared
 ```
 
+These checks have two different roles:
+
+```text
+physical ABI:
+    block offset and size
+    complete compute/graphics member coverage and order
+    member offsets and sizes
+    64-bit address width
+
+canonical authoring policy:
+    unsigned integer address members
+    one flat scalar member per generated root field
+    no vector, matrix, array, nested, boolean, or reference member shape
+```
+
+The second group is deliberate policy, not a claim that Vulkan gives signed
+integers or physical-buffer references a different eight-byte representation.
+The bounded root audit demonstrates Vulkan-valid compute execution for signed
+and direct-reference forms under a test-only evidence seam, including nonzero
+address dereference/readback and zero. They remain rejected in normal pipeline
+creation so compute, vertex, and fragment shaders share one predictable
+cross-frontend convention. The supported GLSL spelling is the flat unsigned
+form shown above.
+
 SPIR-V member and block names are not ABI. Reflection failures, including a
 missing selected entry or a stage mismatch, return `SHADER_INVALID`. A caller
 that places otherwise valid shader code in the wrong pipeline role receives
 `INVALID_ARGUMENT`. Validation completes before native shader-module creation,
 pipeline cache insertion, or output publication, and a deduplicated `ShaderId`
 is reflected once per preparation batch.
+
+When a debug diagnostic is emitted, its invariant identifies the mismatched
+property: block count/offset/size, member count/offset/size, scalar width,
+signedness/kind, or aggregate shape. The public fault remains
+`SHADER_INVALID`.
 
 Do not use reflection to create arbitrary per-shader public descriptor layouts. That moves the API back toward descriptor-set-driven design.
 

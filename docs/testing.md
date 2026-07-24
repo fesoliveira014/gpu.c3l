@@ -706,10 +706,12 @@ report either as unavailable.
 
 `vk_shader_reflection` covers selected-entry isolation, absent blocks, exact
 compute and graphics roots, wrong stage and entry, and malformed block/member
-shapes. Test-only counters prove a rejected deduplicated `ShaderId` is reflected
-once and reaches neither native shader creation nor cache/output publication;
-`vk_pipeline_cache` proves the same once-per-identity behavior for successful
-batches. `scripts/build_shaders.py` compiles sorted `.glsl` fixtures with
+shapes. It also verifies property-specific block/member diagnostics while
+preserving `SHADER_INVALID`. Test-only counters prove a rejected deduplicated
+`ShaderId` is reflected once and reaches neither native shader creation nor
+cache/output publication; `vk_pipeline_cache` proves the same once-per-identity
+behavior for successful batches. `scripts/build_shaders.py` compiles sorted
+`.glsl` fixtures with
 `glslc` and assembles sorted `.spvasm` fixtures with `spirv-as`. The latter make
 multi-entry, offset, member-order, and multiple-block reflection shapes
 deterministic. Run the policy and mutation gate with:
@@ -718,6 +720,23 @@ deterministic. Run the policy and mutation gate with:
 python3 -B -m unittest scripts.test_check_shader_reflection_policy
 python3 -B scripts/check_shader_reflection_policy.py
 ```
+
+`test/shaders/root_abi_audit.json` is the bounded predicate/fixture inventory.
+The audit rebuilds its inputs, runs `spirv-val --target-env vulkan1.3`, and
+reports exact compiler/tool versions plus SPIR-V/disassembly hashes:
+
+```sh
+python3 -B scripts/audit_root_abi.py
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
+  c3c test vk_root_pointer --path test
+```
+
+The root-pointer target exercises canonical execution and, through an internal
+test-only evidence seam, signed and direct-reference compute forms with
+distinctive nonzero address bits, real dereference/readback, and zero-root
+dispatch. Normal pipeline preparation continues to reject those alternate
+forms. HLSL and Slang are not supported or blocking audit toolchains; add one
+only when the project adopts a real frontend path that emits a distinct shape.
 
 Distinct-adapter ownership is gated deterministically by the CPU stub suite.
 `vk_device_request` also uses two physical adapters when both support the strict
