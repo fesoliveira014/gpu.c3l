@@ -91,7 +91,6 @@ fn gpu::Device make_review_validation_device(
     ReviewValidationCapture* capture,
 ) {
     gpu::RuntimeDesc desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -157,7 +156,6 @@ fn DynamicStateFixture make_dynamic_state_fixture_before_pass(
     void* user_data = null,
 ) {
     gpu::RuntimeDesc runtime_desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = contract,
         .track_resource_lifetimes = true,
         .application_name         = "gpu_dynamic_state_contract_test",

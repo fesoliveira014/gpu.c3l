@@ -5,7 +5,6 @@ import gpu::internal::vk @public;
 
 fn gpu::Device make_transition_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

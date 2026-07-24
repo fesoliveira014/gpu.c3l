@@ -998,10 +998,6 @@ def valid_document() -> dict:
                         "kind": "struct",
                         "members": [
                             {
-                                "name": "backend",
-                                "type": {"name": "BackendKind"},
-                            },
-                            {
                                 "name": "contract_validation",
                                 "type": {"name": "ContractValidation"},
                             },

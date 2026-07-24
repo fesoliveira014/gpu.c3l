@@ -93,7 +93,6 @@ fn void measure_submit_batch(
 
 fn int main() {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_submit_batch_bench",
     };
     gpu::Device device = create_bench_device(&desc)!!;

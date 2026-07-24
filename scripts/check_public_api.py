@@ -916,7 +916,6 @@ def validate_document(document: dict) -> list[str]:
             failures.append(failure)
 
     runtime_desc_schema = (
-        ("backend", "BackendKind"),
         ("contract_validation", "ContractValidation"),
         ("track_resource_lifetimes", "bool"),
         ("enable_vulkan_validation", "bool"),

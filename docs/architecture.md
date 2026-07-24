@@ -124,7 +124,6 @@ Public shape:
 
 ```text
 RuntimeDesc
-    BackendKind backend
     ContractValidation contract_validation
     bool track_resource_lifetimes
     bool enable_vulkan_validation
@@ -212,7 +211,6 @@ Public shape:
 Device                         (slot | generation | reserved)
 request_resource_agnostic_texture_sync(DeviceRequest) -> DeviceRequest?
 request_dynamic_color_state(DeviceRequest) -> DeviceRequest?
-get_device_backend(Device*)    -> BackendKind?
 get_device_caps(Device*)       -> DeviceCaps?
 ```
 

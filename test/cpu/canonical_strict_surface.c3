@@ -4,7 +4,6 @@ import gpu;
 
 fn void pin_runtime_adapter_device() {
     gpu::RuntimeDesc runtime_desc = {
-        .backend = gpu::BackendKind.VULKAN,
     };
     gpu::Runtime runtime = {};
     gpu::AdapterList adapters = {};
@@ -28,7 +27,6 @@ fn void pin_runtime_adapter_device() {
     (void)gpu::request_queues(request, queues);
     (void)gpu::supports_device_request(&adapter, &request);
     (void)gpu::create_device(&adapter, &request);
-    (void)gpu::get_device_backend(&device);
     (void)gpu::get_device_caps(&device);
     (void)gpu::get_queue_counts(&device);
     (void)gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);

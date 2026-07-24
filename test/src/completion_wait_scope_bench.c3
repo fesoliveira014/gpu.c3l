@@ -135,7 +135,6 @@ fn int main() {
         WAIT_SCOPE_REPETITIONS,
     );
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_completion_wait_scope_bench",
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;

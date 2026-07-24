@@ -142,7 +142,6 @@ fn int main() {
         BENCH_BATCH_ROUNDS,
     );
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .pipeline_capacity = BENCH_RASTER_PERMUTATION_COUNT + BENCH_BATCH_SIZE,
         .application_name  = "gpu_pipeline_cache_bench",
     };

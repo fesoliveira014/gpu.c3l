@@ -57,7 +57,6 @@ fn void device_destroy_readiness_never_waits() @test {
 
 fn void device_create_destroy() @test {
     gpu::RuntimeDesc desc = {
-        .backend            = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -67,7 +66,6 @@ fn void device_create_destroy() @test {
 
     gpu::Device device = create_test_device(&desc)!!;
 
-    assert(gpu::get_device_backend(&device)!! == gpu::BackendKind.VULKAN, "backend recorded");
     assert(gpu::internal::device_backend_state(device) != null, "backend state allocated");
     assert(gpu::get_device_caps(&device)!!.buffer_device_address, "buffer_device_address cap true");
     assert(gpu::get_device_caps(&device)!!.synchronization2, "synchronization2 cap true");
@@ -133,7 +131,6 @@ fn void device_create_destroy() @test {
 
 fn void device_heap_capacities() @test {
     gpu::RuntimeDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -151,7 +148,6 @@ fn void device_heap_capacities() @test {
 
 fn void device_capacity_over_ceiling_rejected() @test {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_vk_capacity_test",
     };
     uint over_ceiling = gpu::MAX_SHADER_HEAP_CAPACITY + 1;
@@ -180,7 +176,3 @@ fn void device_capacity_over_ceiling_rejected() @test {
         "pipeline capacity above the limit fails with INVALID_ARGUMENT"
     );
 }
-
-// Note: the UNSUPPORTED_BACKEND default arm is unreachable while BackendKind has
-// only one value — C3 safe-mode panics on any invalid-ordinal cast — so it is
-// not unit-tested here. It gains coverage when a second backend is added.

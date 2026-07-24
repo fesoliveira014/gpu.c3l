@@ -6,7 +6,6 @@ import gpu::internal::vk @public;
 
 fn RuntimeDesc device_support_runtime_desc() {
     return {
-        .backend          = BackendKind.VULKAN,
         .application_name = "gpu_device_request_support_test",
     };
 }

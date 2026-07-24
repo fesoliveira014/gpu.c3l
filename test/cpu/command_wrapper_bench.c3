@@ -448,7 +448,7 @@ fn int main() {
     WrapperBenchState state;
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!!;
     Device device = gpu::internal::register_device(
-        backend:        BackendKind.VULKAN,
+        backend:        gpu::internal::BackendKind.VULKAN,
         caps:           {},
         vtable:         &wrapper_bench_vtable,
         backend_state:  &state,

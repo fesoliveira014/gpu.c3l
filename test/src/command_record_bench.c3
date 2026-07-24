@@ -241,7 +241,6 @@ fn double command_median(double[COMMAND_RECORD_REPETITIONS] values) {
 fn int main() {
     CommandBenchPolicy policy = command_bench_policy()!!;
     gpu::RuntimeDesc desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = policy.contract,
         .track_resource_lifetimes = policy.track_lifetimes,
         .enable_vulkan_validation = policy.vulkan_layers,

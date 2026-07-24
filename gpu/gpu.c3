@@ -82,7 +82,6 @@ fn bool Runtime.is_valid(self) => (ulong)self != 0;
 <* Return FULL contract diagnostics with lifetime tracking and Vulkan
    validation layers enabled. *>
 fn RuntimeDesc full_validation_runtime_desc() => {
-    .backend                  = BackendKind.VULKAN,
     .contract_validation      = ContractValidation.FULL,
     .track_resource_lifetimes = true,
     .enable_vulkan_validation = true,
@@ -91,23 +90,7 @@ fn RuntimeDesc full_validation_runtime_desc() => {
 <* Initialize backend discovery. Importing gpu performs no initialization. *>
 fn Runtime? create_runtime(RuntimeDesc* desc) {
     gpu::internal::validate_runtime_desc(desc)!;
-    switch (desc.backend) {
-        case BackendKind.VULKAN:
-            return gpu::internal::vk::create_vk_runtime(desc);
-        default:
-            DebugMessage message = {
-                .severity       = DebugMessageSeverity.ERROR,
-                .category       = { .public_contract },
-                .operation      = "create_runtime",
-                .has_fault      = true,
-                .public_fault   = UNSUPPORTED_BACKEND,
-                .rejected_field = "RuntimeDesc.backend",
-                .invariant      = "backend must be supported",
-                .backend_text   = "unsupported GPU backend",
-            };
-            gpu::internal::dispatch_debug_message(desc.debug_callback, desc.debug_user_data, &message);
-            return UNSUPPORTED_BACKEND~;
-    }
+    return gpu::internal::vk::create_vk_runtime(desc);
 }
 
 <* Destroy a runtime.
@@ -440,13 +423,6 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
     };
 }
 
-<* Return the backend selected for the live device. *>
-fn BackendKind? get_device_backend(Device* device) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
-    defer gpu::internal::end_device_operation(&operation);
-    return operation.data.backend;
-}
-
 <* Snapshot the selected device's capabilities. *>
 fn DeviceCaps? get_device_caps(Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -483,7 +459,7 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
     }
 
     switch (runtime_data.backend) {
-        case BackendKind.VULKAN:
+        case gpu::internal::BackendKind.VULKAN:
             device = gpu::internal::vk::create_vk_device(adapter, request, &runtime)!;
         default:
             return UNSUPPORTED_BACKEND~;

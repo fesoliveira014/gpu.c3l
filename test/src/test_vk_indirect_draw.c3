@@ -49,7 +49,6 @@ fn void capture_generated_requirements(
 
 fn gpu::Device make_ind_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -60,7 +59,6 @@ fn gpu::Device make_ind_device() {
 
 fn gpu::Device make_generated_work_device() {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_generated_work_test",
     };
     return create_test_device(&desc)!!;
@@ -315,7 +313,6 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
 
 fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

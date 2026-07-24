@@ -477,7 +477,6 @@ fn void extent_clamp_rules() @test {
 
 fn void swapchain_requires_a_presentation_request() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -618,7 +617,6 @@ fn void swapchain_present_guard_lifecycle() @test {
 fn void present_path_guards_precede_native_mutation() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -824,7 +822,7 @@ fn void acquire_timeout_values_reach_native_unchanged() @test {
 fn void public_acquire_default_reaches_backend_as_zero() @test {
     uint backend_state;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          {},
         vtable:        &capture_public_acquire_vtable,
         backend_state: &backend_state,
@@ -1227,7 +1225,6 @@ fn void swapchain_release_ownership_work_tracks_examined_images() @test {
 
 fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -1670,7 +1667,6 @@ fn void acquired_image_reports_prior_state() @test {
 
 fn void swapchain_info_query_rejects_invalid_handle() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

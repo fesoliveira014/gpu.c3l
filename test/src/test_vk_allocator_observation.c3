@@ -14,7 +14,6 @@ struct WarmCommandContext {
 
 fn gpu::Device make_allocator_observation_device() {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_allocator_observation",
     };
     return create_test_device(&desc)!!;

@@ -233,7 +233,7 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
 
     enumerate_vk_adapters(state)!;
     return gpu::internal::register_runtime(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         vtable:        &VK_RUNTIME_VTABLE,
         backend_state: state,
         adapter_count: (uint)state.adapters.len,

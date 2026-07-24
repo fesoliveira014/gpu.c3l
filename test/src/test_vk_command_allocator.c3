@@ -504,7 +504,6 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
 
 fn void command_allocator_defaults_preallocate_exact_storage() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend = gpu::BackendKind.VULKAN,
         .application_name = "command_allocator_defaults_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -552,7 +551,6 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
 
 fn void command_allocator_capacity_and_destroy_are_non_waiting() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend = gpu::BackendKind.VULKAN,
         .application_name = "command_allocator_capacity_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -604,7 +602,6 @@ fn void command_allocator_capacity_and_destroy_are_non_waiting() @test {
 
 fn void command_allocator_destroy_never_waits_for_an_active_operation() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "command_allocator_nonblocking_destroy_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -639,7 +636,6 @@ fn void command_allocator_destroy_never_waits_for_an_active_operation() @test {
 
 fn void command_table_exhaustion_restores_allocator_claim() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend = gpu::BackendKind.VULKAN,
         .application_name = "command_table_exhaustion_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -698,7 +694,6 @@ fn void command_table_exhaustion_restores_allocator_claim() @test {
 
 fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "command_reset_failure_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -772,7 +767,6 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
 
 fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "command_begin_failure_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -846,7 +840,6 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
 
 fn void native_end_failure_preserves_recording_for_retry() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "command_end_failure_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -929,7 +922,6 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
 
 fn void tracking_allocator_wires_non_overlapping_reference_slices() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .application_name         = "command_allocator_tracking_test",

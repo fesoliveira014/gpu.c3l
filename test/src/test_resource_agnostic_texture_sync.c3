@@ -58,7 +58,6 @@ fn vk::Result create_selected_native_device(
 
 fn gpu::Device? create_selected_device() {
     gpu::RuntimeDesc desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

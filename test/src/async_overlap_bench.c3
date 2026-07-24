@@ -150,7 +150,6 @@ fn int main() {
         REPS,
     );
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation = validation_enabled()
             ? gpu::ContractValidation.FULL
             : gpu::ContractValidation.TRUSTED,

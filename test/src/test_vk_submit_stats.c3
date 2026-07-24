@@ -247,7 +247,6 @@ fn void assert_allocator_submission_state(
 
 fn gpu::Device make_submit_stats_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -312,7 +311,6 @@ fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
 
 fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -482,7 +480,6 @@ fn void failed_submit_records_nothing() @test {
 
 fn void different_queue_submit_preserves_executable_allocator_unit_when_available() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -1558,7 +1555,6 @@ fn void completion_wait_infos_emit_every_exact_native_stage() @test {
 
 fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend                   = gpu::BackendKind.VULKAN,
         .contract_validation       = gpu::ContractValidation.FULL,
         .track_resource_lifetimes  = true,
         .enable_vulkan_validation  = true,

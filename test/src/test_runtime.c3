@@ -6,7 +6,6 @@ import gpu::internal::vk @public;
 
 fn RuntimeDesc runtime_desc() {
     return {
-        .backend          = BackendKind.VULKAN,
         .application_name = "gpu_runtime_test",
     };
 }
@@ -24,7 +23,6 @@ fn void contract_validation_defaults_to_trusted() @test {
 
 fn void full_validation_runtime_desc_enables_every_policy() @test {
     RuntimeDesc desc = gpu::full_validation_runtime_desc();
-    assert(desc.backend == BackendKind.VULKAN);
     assert(desc.contract_validation == ContractValidation.FULL);
     assert(desc.track_resource_lifetimes);
     assert(desc.enable_vulkan_validation);

@@ -6,7 +6,6 @@ import gpu::internal::vk @public;
 
 fn RuntimeDesc queue_runtime_desc() {
     return {
-        .backend          = BackendKind.VULKAN,
         .application_name = "gpu_queue_test",
     };
 }
@@ -92,7 +91,7 @@ fn void queue_queries_preserve_distinct_compute_identity() @test {
     );
 
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          { .async_compute = true },
         vtable:        &queue_test_vtable,
         backend_state: &backend_state,
@@ -161,7 +160,7 @@ fn void selected_queue_counts_round_trip_stored_identities() @test {
         transfer:     transfer[..],
     )!!;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          {},
         vtable:        &queue_test_vtable,
         backend_state: &backend_state,
@@ -213,7 +212,7 @@ fn void selected_queue_counts_reach_encoded_capacity() @test {
         transfer:     transfer[..],
     )!!;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          {},
         vtable:        &queue_test_vtable,
         backend_state: &backend_state,
@@ -253,7 +252,7 @@ fn void queue_registration_rejects_duplicate_role_identity() @test {
 
     assert(
         @catch(gpu::internal::register_device(
-            backend:       gpu::BackendKind.VULKAN,
+            backend:       gpu::internal::BackendKind.VULKAN,
             caps:          {},
             vtable:        &queue_test_vtable,
             backend_state: &backend_state,

@@ -21,6 +21,10 @@ const uint MAX_RUNTIMES @private = 16;
 const uint MAX_ADAPTERS_PER_RUNTIME @private = (uint)ushort::max + 1;
 const uint MAX_RUNTIME_GENERATION @private = 0x00FF_FFFF;
 
+enum BackendKind @private {
+    VULKAN,
+}
+
 
 struct RuntimeBackendVTable @private {
     DestroyRuntimeBackendFn        destroy_runtime;

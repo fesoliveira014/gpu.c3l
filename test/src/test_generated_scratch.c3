@@ -44,7 +44,6 @@ fn void capture_zero_generated_execute(
 
 fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "generated_scratch_reservation_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -187,7 +186,6 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
 
 fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "generated_scratch_allocator_ownership_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -400,7 +398,6 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
 
 fn void zero_size_generated_scratch_still_requires_reservation() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "zero_size_generated_scratch_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;

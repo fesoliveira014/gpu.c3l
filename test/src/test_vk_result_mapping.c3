@@ -20,7 +20,7 @@ fn void destroy_device_loss_fixture(void* backend_state) {
 
 fn gpu::Device device_loss_fixture(gpu::internal::vk::VkDeviceState* state) {
     return gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          { .strict_enabled = true },
         vtable:        &DEVICE_LOSS_VTABLE,
         backend_state: state,

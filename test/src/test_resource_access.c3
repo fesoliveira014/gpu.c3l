@@ -59,7 +59,7 @@ fn gpu::Device create_compute_only_resource_access_device(int* state) {
         transfer_aliases_compute:  false,
     )!!;
     return gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          {},
         vtable:        &resource_access_vtable,
         backend_state: state,

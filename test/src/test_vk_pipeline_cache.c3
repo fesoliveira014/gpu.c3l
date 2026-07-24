@@ -31,7 +31,6 @@ const usz[3] PIPELINE_IDENTITY_SCALE_BYTES = {
 
 fn gpu::Device make_cache_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -42,7 +41,6 @@ fn gpu::Device make_cache_test_device() {
 
 fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -54,7 +52,6 @@ fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
 
 fn gpu::Device make_generated_work_cache_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .pipeline_capacity = 2,
         .application_name  = "gpu_generated_work_cache_test",
     };
@@ -2414,7 +2411,6 @@ fn void unrequested_dynamic_pipeline_stops_before_backend_work() @test {
 
 fn void dynamic_color_packets_share_one_live_pipeline_identity() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend                   = gpu::BackendKind.VULKAN,
         .contract_validation       = gpu::ContractValidation.FULL,
         .track_resource_lifetimes  = true,
         .enable_vulkan_validation  = true,

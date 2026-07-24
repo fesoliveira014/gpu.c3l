@@ -270,7 +270,6 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
 
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::RuntimeDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

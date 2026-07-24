@@ -30,7 +30,6 @@ fn gpu::RuntimeDesc policy_runtime_desc(
     PolicyDiagnosticCapture* capture,
 ) {
     return {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = contract,
         .track_resource_lifetimes = track_lifetimes,
         .enable_vulkan_validation = vulkan_layers,

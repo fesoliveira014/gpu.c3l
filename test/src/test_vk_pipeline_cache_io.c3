@@ -84,7 +84,6 @@ fn void capture_cache_diagnostic(gpu::DebugMessage* message, void* user_data) {
 
 fn gpu::Device make_cache_io_device(char[] blob = {}, CacheBackendCapture* capture = null) {
     gpu::RuntimeDesc desc = {
-        .backend             = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

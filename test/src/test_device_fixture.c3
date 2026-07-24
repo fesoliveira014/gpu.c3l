@@ -18,7 +18,7 @@ gpu::internal::BackendVTable device_fixture_vtable = {
 
 fn gpu::Device fixture_device(DeviceFixture* fixture) {
     return gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          {},
         vtable:        &device_fixture_vtable,
         backend_state: fixture,

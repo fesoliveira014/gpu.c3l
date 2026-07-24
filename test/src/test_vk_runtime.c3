@@ -4,7 +4,6 @@ import gpu;
 
 fn void runtimes_enumerate_vulkan_adapters_independently() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

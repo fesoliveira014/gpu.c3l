@@ -40,7 +40,6 @@ fn gpu::Device make_offscreen_test_device(
     VulkanValidationCapture* capture = null,
 ) {
     gpu::RuntimeDesc desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -677,7 +676,6 @@ fn void dynamic_viewport_scissor_pixels() @test {
 
 fn void dynamic_color_output_matches_immutable_output() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend                   = gpu::BackendKind.VULKAN,
         .contract_validation       = gpu::ContractValidation.FULL,
         .track_resource_lifetimes  = true,
         .enable_vulkan_validation  = true,

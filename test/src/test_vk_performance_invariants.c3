@@ -19,7 +19,6 @@ const ulong PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
 
 fn gpu::Device make_performance_invariant_device() {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_performance_invariants",
     };
     return create_test_device(&desc)!!;

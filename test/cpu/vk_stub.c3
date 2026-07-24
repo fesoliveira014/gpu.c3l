@@ -288,7 +288,7 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     runtime_creates++;
     defer catch destroy_stub_runtime(state);
     gpu::Runtime runtime = gpu::internal::register_runtime(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         vtable:        surface_destroy_available
             ? &STUB_RUNTIME_VTABLE
             : &STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY,
@@ -567,7 +567,7 @@ fn gpu::Device? stub_create_strict_disabled_device() {
     defer catch mem::free(state);
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     return gpu::internal::register_device(
-        backend:        gpu::BackendKind.VULKAN,
+        backend:        gpu::internal::BackendKind.VULKAN,
         caps:           { .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT },
         vtable:         &STUB_DEVICE_VTABLE,
         backend_state:  state,
@@ -580,7 +580,7 @@ fn gpu::Device? stub_create_anisotropy_disabled_device() {
     defer catch mem::free(state);
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     return gpu::internal::register_device(
-        backend: gpu::BackendKind.VULKAN,
+        backend: gpu::internal::BackendKind.VULKAN,
         caps: {
             .strict_enabled       = true,
             .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
@@ -625,7 +625,7 @@ fn gpu::Device? create_vk_device(
         .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
     };
     return gpu::internal::register_device(
-        backend:              gpu::BackendKind.VULKAN,
+        backend:              gpu::internal::BackendKind.VULKAN,
         caps:                 caps,
         vtable:               &STUB_DEVICE_VTABLE,
         backend_state:        state,

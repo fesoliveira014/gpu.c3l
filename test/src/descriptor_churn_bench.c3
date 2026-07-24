@@ -277,7 +277,6 @@ fn void run_bench_suite(gpu::RuntimeDesc* desc, ZString label) {
 fn int main() {
     io::printfn("iterations=%d/worker units=ns/descriptor,ns/op", BENCH_ITERS_PER_WORKER);
     gpu::RuntimeDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
         .texture_heap_capacity = 65_536,
         .application_name      = "gpu_descriptor_churn_bench",
     };

@@ -124,7 +124,7 @@ fn void completion_sequences_are_monotonic_and_stop_before_wrap() @test {
 fn void completion_points_poll_and_wait_without_consumption() @test {
     CompletionFixture fixture = { .current = 6 };
     Device device = gpu::internal::register_device(
-        backend:       BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          {},
         vtable:        &completion_fixture_vtable,
         backend_state: &fixture,
@@ -165,13 +165,13 @@ fn void completion_points_reject_stale_and_foreign_ownership() @test {
     CompletionFixture first_fixture;
     CompletionFixture second_fixture;
     Device first = gpu::internal::register_device(
-        backend:       BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          {},
         vtable:        &completion_fixture_vtable,
         backend_state: &first_fixture,
     )!!;
     Device second = gpu::internal::register_device(
-        backend:       BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          {},
         vtable:        &completion_fixture_vtable,
         backend_state: &second_fixture,
@@ -206,7 +206,7 @@ fn void completion_points_reject_stale_and_foreign_ownership() @test {
 fn void completion_point_creation_allocates_no_public_object() @test {
     CompletionFixture fixture;
     Device device = gpu::internal::register_device(
-        backend:       BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         caps:          {},
         vtable:        &completion_fixture_vtable,
         backend_state: &fixture,

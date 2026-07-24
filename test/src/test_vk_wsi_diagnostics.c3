@@ -18,7 +18,6 @@ fn void capture_wsi_diagnostic(gpu::DebugMessage* message, void* user_data) {
 fn void wsi_presentation_gate_diagnostic() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -84,7 +83,6 @@ fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
 fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

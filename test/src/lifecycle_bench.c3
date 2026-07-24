@@ -114,7 +114,6 @@ fn double measure_texture_destruction(
 
 fn int main() {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_lifecycle_bench",
     };
     gpu::Device device = create_bench_device(&desc)!!;

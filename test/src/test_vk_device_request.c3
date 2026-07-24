@@ -205,7 +205,6 @@ fn void resource_agnostic_texture_sync_support_hook_uses_cached_availability() @
 
 fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactional() @test {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_vk_resource_agnostic_texture_sync_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
@@ -672,7 +671,6 @@ fn void descriptor_buffer_capability_query_distinguishes_absence_and_failure() @
 fn void runtime_copies_device_creation_defaults() @test {
     char[4] cache_data = { 1, 2, 3, 4 };
     gpu::RuntimeDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
         .enable_debug_names    = true,
         .texture_heap_capacity = 17,
         .sampler_heap_capacity = 19,
@@ -724,7 +722,6 @@ fn void runtime_copies_device_creation_defaults() @test {
 
 fn void adapter_support_inherits_runtime_device_config() @test {
     gpu::RuntimeDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
         .texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY,
         .sampler_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY,
         .application_name      = "gpu_vk_adapter_support_config_test",
@@ -785,7 +782,6 @@ fn void adapter_support_inherits_runtime_device_config() @test {
 
 fn void adapter_request_creation_reuses_runtime_discovery() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -923,7 +919,6 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
 
 fn void malformed_native_request_preserves_runtime_state() @test {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_vk_device_request_failure_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
@@ -952,7 +947,7 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
         .adapters = adapter_states[..],
     };
     gpu::Runtime runtime = gpu::internal::register_runtime(
-        backend:       gpu::BackendKind.VULKAN,
+        backend:       gpu::internal::BackendKind.VULKAN,
         vtable:        &PRESENTATION_INSTANCE_GATE_VTABLE,
         backend_state: &runtime_state,
         adapter_count: 1,
@@ -1086,7 +1081,6 @@ fn void command_policy_selection_covers_every_contract_and_tracking_mode() @test
 
 fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "gpu_vk_device_request_rollback_test",
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
@@ -1145,7 +1139,6 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
 
 fn void dynamic_color_activation_rejects_missing_support_and_rolls_back() @test {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_vk_dynamic_color_activation_rollback_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
@@ -1224,7 +1217,6 @@ fn void dynamic_color_activation_rejects_missing_support_and_rolls_back() @test 
 
 fn void supported_dynamic_color_request_publishes_complete_activation() @test {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_vk_dynamic_color_activation_success_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
@@ -1254,7 +1246,6 @@ fn void supported_dynamic_color_request_publishes_complete_activation() @test {
 
 fn void publication_failure_rolls_back_native_state() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .application_name  = "gpu_vk_publication_rollback_test",
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
@@ -1278,7 +1269,7 @@ fn void publication_failure_rolls_back_native_state() @test {
         defer destroy_registry_blockers(blockers[..]);
         foreach (&blocker : blockers) {
             *blocker = gpu::internal::register_device(
-                backend:       gpu::BackendKind.VULKAN,
+                backend:       gpu::internal::BackendKind.VULKAN,
                 caps:          {},
                 vtable:        &REGISTRY_BLOCKER_VTABLE,
                 backend_state: &blocker_state,
@@ -1335,7 +1326,6 @@ fn void publication_failure_rolls_back_native_state() @test {
 
 fn void runtime_devices_destroy_independently() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

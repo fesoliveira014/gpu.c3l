@@ -226,7 +226,7 @@ fn Device create_allocation_stub_device(AllocationStubState* state) {
         transfer_aliases_compute:  false,
     )!!;
     return gpu::internal::register_device(
-        backend:        BackendKind.VULKAN,
+        backend:        gpu::internal::BackendKind.VULKAN,
         caps:           {},
         vtable:         &allocation_stub_vtable,
         backend_state:  state,

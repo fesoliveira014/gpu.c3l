@@ -127,7 +127,6 @@ fn int completion_mutex_holder(void* raw_args) {
 
 fn gpu::Device create_completion_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_completion_test",
     };
     return create_test_device(&desc)!!;

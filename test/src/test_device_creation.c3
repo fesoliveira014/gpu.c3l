@@ -6,7 +6,6 @@ import gpu::internal::vk @public;
 
 fn RuntimeDesc device_creation_runtime_desc() {
     return {
-        .backend          = BackendKind.VULKAN,
         .application_name = "gpu_adapter_device_test",
     };
 }
@@ -267,7 +266,7 @@ fn void invalid_retained_runtime_metadata_is_rejected_before_publication() @test
 
     gpu::internal::runtime_retain_device(&runtime)!!;
     Device? result = gpu::internal::register_device(
-        backend:          BackendKind.VULKAN,
+        backend:          gpu::internal::BackendKind.VULKAN,
         caps:             {},
         vtable:           &device_fixture_vtable,
         backend_state:    &fixture,

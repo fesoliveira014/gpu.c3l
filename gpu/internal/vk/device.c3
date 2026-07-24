@@ -1386,7 +1386,7 @@ fn gpu::Device? create_vk_device_from_runtime(
 
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
     return gpu::internal::register_device(
-        backend:              gpu::BackendKind.VULKAN,
+        backend:              gpu::internal::BackendKind.VULKAN,
         caps:                 state.caps,
         vtable:               &VK_VTABLE,
         backend_state:        (void*)state,

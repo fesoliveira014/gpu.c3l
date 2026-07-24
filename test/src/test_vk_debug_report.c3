@@ -373,7 +373,6 @@ fn void vulkan_debug_message_handles_null_callback_data() @test {
 fn void barrier_mask_diagnostic_preserves_fault() @test {
     DebugCapture capture;
     gpu::RuntimeDesc device_desc = {
-        .backend             = gpu::BackendKind.VULKAN,
         .contract_validation = gpu::ContractValidation.FULL,
         .debug_callback      = &capture_debug_message,
         .debug_user_data     = &capture,
@@ -462,7 +461,6 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
 
 fn void debug_names_do_not_require_validation() @test {
     gpu::RuntimeDesc desc = {
-        .backend            = gpu::BackendKind.VULKAN,
         .enable_debug_names = true,
         .application_name   = "gpu_debug_names_test",
     };
@@ -485,7 +483,6 @@ fn void debug_names_do_not_require_validation() @test {
 
 fn void interned_sampler_keeps_first_debug_name() @test {
     gpu::RuntimeDesc device_desc = {
-        .backend            = gpu::BackendKind.VULKAN,
         .enable_debug_names = true,
         .application_name   = "gpu_sampler_name_test",
     };
@@ -518,7 +515,6 @@ fn void interned_sampler_keeps_first_debug_name() @test {
 
 fn gpu::Device make_dbg_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -813,7 +809,6 @@ fn void callback_reports_leaks_without_validation() @test {
         .named_resources_valid = true,
     };
     gpu::RuntimeDesc device_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .debug_callback   = &capture_leak_message,
         .debug_user_data  = &capture,
         .application_name = "gpu_callback_leak_test",

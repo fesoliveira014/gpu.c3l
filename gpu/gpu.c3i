@@ -230,11 +230,6 @@ $assert $reflect(GeneratedDispatchRecord.arguments).offset == 8;
 $assert $reflect(GeneratedDispatchRecord._pad0).offset == 20;
 // END GENERATED SHADER ABI
 
-<* Graphics API a device is created against. *>
-enum BackendKind : int {
-    VULKAN,
-}
-
 <* Queue a command list records for and submits on. *>
 enum QueueKind : int {
     GRAPHICS,
@@ -376,7 +371,6 @@ const Runtime RUNTIME_INVALID = {};
    lifetime tracking off, and Vulkan validation layers off; each axis is
    independent. *>
 struct RuntimeDesc {
-    BackendKind           backend;
     ContractValidation   contract_validation;
     bool                 track_resource_lifetimes;
     bool                 enable_vulkan_validation;

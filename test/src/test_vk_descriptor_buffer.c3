@@ -159,7 +159,6 @@ fn gpu::PipelineHandle create_descriptor_buffer_binding_graphics_pipeline(
 
 fn void descriptor_buffer_device_and_heap() @test {
     gpu::RuntimeDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -219,7 +218,6 @@ fn void descriptor_buffer_device_and_heap() @test {
 fn void descriptor_buffer_binding_is_cached_per_command_and_bind_point() @test {
     DescriptorBufferValidationCapture capture = {};
     gpu::RuntimeDesc desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -371,7 +369,6 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     const usz TARGET_BYTES = TARGET_SIZE * TARGET_SIZE * 4;
     const usz VERTEX_BYTES = 3 * 16;
     gpu::RuntimeDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -714,7 +711,6 @@ fn void descriptor_buffer_write_then_sample() @test {
 
     const uint TEX = 16;
     gpu::RuntimeDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

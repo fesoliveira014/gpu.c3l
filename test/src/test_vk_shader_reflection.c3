@@ -112,7 +112,6 @@ fn void assert_shader_rejection(
 
 fn gpu::Device make_diagnostic_reflection_test_device(ShaderDiagnosticCapture* capture) {
     gpu::RuntimeDesc desc = {
-        .backend         = gpu::BackendKind.VULKAN,
         .debug_callback  = capture == null ? null : &capture_shader_diagnostic,
         .debug_user_data = capture,
     };
@@ -121,7 +120,6 @@ fn gpu::Device make_diagnostic_reflection_test_device(ShaderDiagnosticCapture* c
 
 fn gpu::Device make_reflection_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

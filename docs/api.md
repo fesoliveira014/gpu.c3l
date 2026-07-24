@@ -70,16 +70,12 @@ Methods are acceptable only for operations that clearly operate on an existing `
 ### Backend, runtime, adapters, and device
 
 ```text
-BackendKind
-    VULKAN
-
 ContractValidation
     TRUSTED
     OBJECT_BOUNDARIES
     FULL
 
 RuntimeDesc
-    BackendKind backend
     ContractValidation contract_validation
     bool track_resource_lifetimes
     bool enable_vulkan_validation
@@ -202,7 +198,7 @@ part of `RuntimeDesc` and intentionally fails to compile.
 Creating a runtime is the first operation that may initialize backend discovery. Enumeration returns an allocation-free view:
 
 ```c3
-gpu::RuntimeDesc runtime_desc = { .backend = gpu::BackendKind.VULKAN };
+gpu::RuntimeDesc runtime_desc = {};
 gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
 gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
 for (uint i = 0; i < adapters.count; i++) {
@@ -318,7 +314,6 @@ DeviceCaps
     bool resource_agnostic_texture_sync
 
 Device                           (slot | generation | reserved)
-get_device_backend(Device*)      -> BackendKind?
 get_device_caps(Device*)         -> DeviceCaps?
 ```
 
