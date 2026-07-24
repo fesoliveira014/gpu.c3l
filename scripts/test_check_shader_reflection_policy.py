@@ -46,37 +46,45 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
     def test_rejects_native_creation_before_exact_root_check(self) -> None:
         errors = self.mutate(
             "gpu/internal/vk/shader.c3",
-            "if (catch push_fault = check_root_push_abi(",
+            "RootAbiMismatch root_mismatch = root_push_abi_mismatch(",
             "create_pipeline_shader_module_native(state, null, null);\n"
-            "    if (catch push_fault = check_root_push_abi(",
+            "    RootAbiMismatch root_mismatch = root_push_abi_mismatch(",
         )
         self.assertTrue(any("before native creation" in error for error in errors))
 
     def test_requires_no_push_block_acceptance(self) -> None:
         errors = self.mutate(
             "gpu/internal/vk/shader.c3",
-            "if (count == 0) return;\n"
-            "    if (count != 1) return gpu::SHADER_INVALID~;",
-            "if (count == 0) return gpu::SHADER_INVALID~;\n"
-            "    if (count != 1) return gpu::SHADER_INVALID~;",
+            "if (count == 0) return RootAbiMismatch.NONE;\n"
+            "    if (count != 1) return RootAbiMismatch.BLOCK_COUNT;",
+            "if (count == 0) return RootAbiMismatch.BLOCK_COUNT;\n"
+            "    if (count != 1) return RootAbiMismatch.BLOCK_COUNT;",
         )
         self.assertTrue(any("count == 0" in error for error in errors))
 
     def test_requires_integer_numeric_kind(self) -> None:
         errors = self.mutate(
             "gpu/internal/vk/shader.c3",
-            "integer == expected.integer",
-            "integer == integer",
+            "integer != expected.integer",
+            "integer != integer",
         )
-        self.assertTrue(any("integer == expected.integer" in error for error in errors))
+        self.assertTrue(any("integer != expected.integer" in error for error in errors))
 
     def test_requires_float_numeric_kind(self) -> None:
         errors = self.mutate(
             "gpu/internal/vk/shader.c3",
-            "float_scalar != expected.integer",
+            "float_scalar == expected.integer",
             "float_scalar == float_scalar",
         )
-        self.assertTrue(any("float_scalar != expected.integer" in error for error in errors))
+        self.assertTrue(any("float_scalar == expected.integer" in error for error in errors))
+
+    def test_requires_property_specific_root_diagnostic(self) -> None:
+        errors = self.mutate(
+            "gpu/internal/vk/shader.c3",
+            "invariant:      root_abi_mismatch_invariant(root_mismatch)",
+            'invariant:      "selected-entry push constants must match"',
+        )
+        self.assertTrue(any("exact root mismatch" in error for error in errors))
 
     def test_requires_reflection_fault_mapping(self) -> None:
         errors = self.mutate(

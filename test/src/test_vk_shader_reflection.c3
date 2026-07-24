@@ -141,6 +141,43 @@ fn gpu::PipelineHandle? create_reflection_compute_pipeline(
     return gpu::create_compute_pipeline(device, &pipeline_desc);
 }
 
+fn void assert_root_mismatch_reported(
+    gpu::Device* device,
+    ShaderDiagnosticCapture* capture,
+    char[] spirv,
+    gpu::ShaderStage stage,
+    ZString invariant,
+) {
+    gpu::ShaderDesc desc = {
+        .stage       = stage,
+        .spirv       = spirv,
+        .entry_point = "main",
+        .debug_name  = "root_mismatch",
+    };
+    gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+    uint before = capture.calls;
+    fault mismatch_fault = @catch(vk::create_pipeline_shader_module(
+        state:          state,
+        code:           &code,
+        expected_stage: stage,
+        operation:      "test_root_mismatch",
+        rejected_field: "ShaderCode",
+    ));
+    assert(mismatch_fault == gpu::SHADER_INVALID,
+        "root mismatch preserves SHADER_INVALID");
+    assert_shader_rejection(
+        capture:       capture,
+        before:        before,
+        returned:      mismatch_fault,
+        operation:     "test_root_mismatch",
+        field:         "ShaderCode",
+        invariant:     invariant,
+        resource_kind: gpu::DebugResourceKind.SHADER,
+    );
+}
+
 fn void assert_shader_interface_rejected(
     gpu::Device* device,
     char[] spirv,
@@ -709,8 +746,64 @@ fn void shader_contract_rejections_report_exact_context() @test {
         returned:      abi_fault,
         operation:     "create_compute_pipeline",
         field:         "ComputePipelineDesc.shader",
-        invariant:     "selected-entry push constants must exactly match the root ABI",
+        invariant:     "selected-entry push block size must match the root ABI",
         resource_kind: gpu::DebugResourceKind.SHADER,
+    );
+}
+
+fn void root_mismatch_diagnostics_identify_properties() @test {
+    ShaderDiagnosticCapture capture;
+    gpu::Device device = make_diagnostic_reflection_test_device(&capture);
+    defer destroy_test_device(&device)!!;
+
+    assert_root_mismatch_reported(
+        device:    &device,
+        capture:   &capture,
+        spirv:     REFLECT_MULTIPLE_BLOCKS_SPIRV[..],
+        stage:     gpu::ShaderStage.COMPUTE,
+        invariant: "selected-entry push block count must be zero or one",
+    );
+    assert_root_mismatch_reported(
+        device:    &device,
+        capture:   &capture,
+        spirv:     REFLECT_WRONG_OFFSET_SPIRV[..],
+        stage:     gpu::ShaderStage.COMPUTE,
+        invariant: "selected-entry push block offset must be zero",
+    );
+    assert_root_mismatch_reported(
+        device:    &device,
+        capture:   &capture,
+        spirv:     REFLECT_MEMBER_COUNT_SPIRV[..],
+        stage:     gpu::ShaderStage.COMPUTE,
+        invariant: "selected-entry push member count must match the root ABI",
+    );
+    assert_root_mismatch_reported(
+        device:    &device,
+        capture:   &capture,
+        spirv:     REFLECT_REVERSED_GRAPHICS_SPIRV[..],
+        stage:     gpu::ShaderStage.VERTEX,
+        invariant: "selected-entry push member offset must match the root ABI",
+    );
+    assert_root_mismatch_reported(
+        device:    &device,
+        capture:   &capture,
+        spirv:     REFLECT_SIGNED_SPIRV[..],
+        stage:     gpu::ShaderStage.COMPUTE,
+        invariant: "selected-entry push member signedness must match the root ABI",
+    );
+    assert_root_mismatch_reported(
+        device:    &device,
+        capture:   &capture,
+        spirv:     REFLECT_FLOAT64_SPIRV[..],
+        stage:     gpu::ShaderStage.COMPUTE,
+        invariant: "selected-entry push member scalar kind must match the root ABI",
+    );
+    assert_root_mismatch_reported(
+        device:    &device,
+        capture:   &capture,
+        spirv:     REFLECT_REF_SPIRV[..],
+        stage:     gpu::ShaderStage.COMPUTE,
+        invariant: "selected-entry push member must be a flat scalar",
     );
 }
 

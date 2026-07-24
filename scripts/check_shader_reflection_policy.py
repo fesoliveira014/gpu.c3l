@@ -167,7 +167,7 @@ def check(root: Path = ROOT) -> list[str]:
     order = (
         "get_entry_point(",
         "check_heap_convention(",
-        "check_root_push_abi(",
+        "root_push_abi_mismatch(",
         "create_pipeline_shader_module_native(",
     )
     positions = [creation.find(fragment) for fragment in order]
@@ -176,10 +176,10 @@ def check(root: Path = ROOT) -> list[str]:
     elif positions != sorted(positions):
         errors.append("shader preparation does not validate selected entry before native creation")
 
-    root_check = function_body(shader, "check_root_push_abi")
-    member_check = function_body(shader, "root_member_shape_matches")
+    root_check = function_body(shader, "root_push_abi_mismatch")
+    member_check = function_body(shader, "root_member_mismatch")
     for fragment in (
-        "if (count == 0) return;",
+        "if (count == 0) return RootAbiMismatch.NONE;",
         "count != 1",
         "block.byte_offset() != 0",
         "block.byte_size() != expected.block_size",
@@ -191,8 +191,8 @@ def check(root: Path = ROOT) -> list[str]:
         "member.byte_size() != expected.size",
         "member.scalar_width() != expected.scalar_width",
         "member.scalar_is_signed() != expected.scalar_signed",
-        "integer == expected.integer",
-        "float_scalar != expected.integer",
+        "integer != expected.integer",
+        "float_scalar == expected.integer",
         "TYPE_FLAG_VECTOR",
         "TYPE_FLAG_MATRIX",
         "TYPE_FLAG_ARRAY",
@@ -201,7 +201,32 @@ def check(root: Path = ROOT) -> list[str]:
         "TYPE_FLAG_REF",
     ):
         require(member_check, fragment, f"exact root member check missing: {fragment}", errors)
-    if creation.count("public_fault:   gpu::SHADER_INVALID") != 4:
+    mismatch_invariant = function_body(shader, "root_abi_mismatch_invariant")
+    for fragment in (
+        "RootAbiMismatch.BLOCK_COUNT",
+        "RootAbiMismatch.BLOCK_OFFSET",
+        "RootAbiMismatch.BLOCK_SIZE",
+        "RootAbiMismatch.MEMBER_COUNT",
+        "RootAbiMismatch.MEMBER_OFFSET",
+        "RootAbiMismatch.MEMBER_SIZE",
+        "RootAbiMismatch.MEMBER_WIDTH",
+        "RootAbiMismatch.MEMBER_SIGNEDNESS",
+        "RootAbiMismatch.MEMBER_KIND",
+        "RootAbiMismatch.MEMBER_AGGREGATE",
+    ):
+        require(
+            mismatch_invariant,
+            fragment,
+            f"root mismatch diagnostic category missing: {fragment}",
+            errors,
+        )
+    require(
+        creation,
+        "invariant:      root_abi_mismatch_invariant(root_mismatch)",
+        "pipeline diagnostics do not report the exact root mismatch",
+        errors,
+    )
+    if creation.count("public_fault:   gpu::SHADER_INVALID") != 5:
         errors.append("reflected shader failures must map to SHADER_INVALID")
     require(
         masked_shader,

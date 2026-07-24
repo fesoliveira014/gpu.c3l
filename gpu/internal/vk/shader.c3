@@ -462,35 +462,152 @@ fn bool has_type_flag(
     return ((uint)flags & (uint)flag) != 0;
 }
 
-fn bool root_member_shape_matches(
+enum RootAbiMismatch : int {
+    NONE,
+    REFLECTION,
+    BLOCK_COUNT,
+    BLOCK_MISSING,
+    BLOCK_OFFSET,
+    BLOCK_SIZE,
+    MEMBER_COUNT,
+    MEMBER_MISSING,
+    MEMBER_OFFSET,
+    MEMBER_SIZE,
+    MEMBER_WIDTH,
+    MEMBER_SIGNEDNESS,
+    MEMBER_KIND,
+    MEMBER_AGGREGATE,
+}
+
+fn RootAbiMismatch root_member_mismatch(
     spvreflect::BlockVariable* member,
     gpu::internal::RootAbiMemberSpec* expected,
 ) @private {
-    if (member == null
-        || member.byte_offset() != expected.offset
-        || member.byte_size() != expected.size
-        || member.scalar_width() != expected.scalar_width
-        || member.scalar_is_signed() != expected.scalar_signed) return false;
+    if (member == null) return RootAbiMismatch.MEMBER_MISSING;
+    if (member.byte_offset() != expected.offset) {
+        return RootAbiMismatch.MEMBER_OFFSET;
+    }
+    if (member.byte_size() != expected.size) {
+        return RootAbiMismatch.MEMBER_SIZE;
+    }
     spvreflect::TypeFlags flags = member.type_flags();
+    bool aggregate = has_type_flag(
+        flags,
+        spvreflect::TypeFlags.TYPE_FLAG_VECTOR,
+    )
+        || has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_MATRIX)
+        || has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_ARRAY)
+        || has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_STRUCT)
+        || has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_BOOL)
+        || has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_REF)
+        || member.vector_component_count() != 0
+        || member.matrix_column_count() != 0
+        || member.matrix_row_count() != 0
+        || member.array_dimension_count() != 0
+        || member.member_count() != 0;
+    if (aggregate) return RootAbiMismatch.MEMBER_AGGREGATE;
+    if (member.scalar_width() != expected.scalar_width) {
+        return RootAbiMismatch.MEMBER_WIDTH;
+    }
+    if (member.scalar_is_signed() != expected.scalar_signed) {
+        return RootAbiMismatch.MEMBER_SIGNEDNESS;
+    }
     bool integer = has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_INT);
     bool float_scalar = has_type_flag(
         flags,
         spvreflect::TypeFlags.TYPE_FLAG_FLOAT,
     );
-    bool scalar = !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_VECTOR)
-        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_MATRIX)
-        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_ARRAY)
-        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_STRUCT)
-        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_BOOL)
-        && !has_type_flag(flags, spvreflect::TypeFlags.TYPE_FLAG_REF);
-    return scalar
-        && integer == expected.integer
-        && float_scalar != expected.integer
-        && member.vector_component_count() == 0
-        && member.matrix_column_count() == 0
-        && member.matrix_row_count() == 0
-        && member.array_dimension_count() == 0
-        && member.member_count() == 0;
+    if (integer != expected.integer
+        || float_scalar == expected.integer) {
+        return RootAbiMismatch.MEMBER_KIND;
+    }
+    return RootAbiMismatch.NONE;
+}
+
+fn bool root_member_shape_matches(
+    spvreflect::BlockVariable* member,
+    gpu::internal::RootAbiMemberSpec* expected,
+) @private {
+    return root_member_mismatch(member, expected) == RootAbiMismatch.NONE;
+}
+
+fn ZString root_abi_mismatch_invariant(
+    RootAbiMismatch mismatch,
+) @private {
+    switch (mismatch) {
+        case RootAbiMismatch.REFLECTION:
+            return "selected-entry push-constant reflection must succeed";
+        case RootAbiMismatch.BLOCK_COUNT:
+            return "selected-entry push block count must be zero or one";
+        case RootAbiMismatch.BLOCK_MISSING:
+            return "selected-entry push block must be present";
+        case RootAbiMismatch.BLOCK_OFFSET:
+            return "selected-entry push block offset must be zero";
+        case RootAbiMismatch.BLOCK_SIZE:
+            return "selected-entry push block size must match the root ABI";
+        case RootAbiMismatch.MEMBER_COUNT:
+            return "selected-entry push member count must match the root ABI";
+        case RootAbiMismatch.MEMBER_MISSING:
+            return "selected-entry push member must be present";
+        case RootAbiMismatch.MEMBER_OFFSET:
+            return "selected-entry push member offset must match the root ABI";
+        case RootAbiMismatch.MEMBER_SIZE:
+            return "selected-entry push member size must match the root ABI";
+        case RootAbiMismatch.MEMBER_WIDTH:
+            return "selected-entry push member scalar width must match the root ABI";
+        case RootAbiMismatch.MEMBER_SIGNEDNESS:
+            return "selected-entry push member signedness must match the root ABI";
+        case RootAbiMismatch.MEMBER_KIND:
+            return "selected-entry push member scalar kind must match the root ABI";
+        case RootAbiMismatch.MEMBER_AGGREGATE:
+            return "selected-entry push member must be a flat scalar";
+        case RootAbiMismatch.NONE:
+            return "selected-entry push constants must match the root ABI";
+    }
+}
+
+fn RootAbiMismatch root_push_abi_mismatch(
+    spvreflect::ShaderModule* reflect_module,
+    ZString entry_point,
+    gpu::ShaderStage stage,
+) {
+    gpu::internal::RootAbiSpec expected = root_abi_for_stage(stage);
+    uint count = 0;
+    if (reflect_module.enumerate_entry_point_push_constant_blocks(
+        entry_point,
+        &count,
+        null,
+    )
+        != spvreflect::ReflectResult.RESULT_SUCCESS) {
+        return RootAbiMismatch.REFLECTION;
+    }
+    if (count == 0) return RootAbiMismatch.NONE;
+    if (count != 1) return RootAbiMismatch.BLOCK_COUNT;
+
+    spvreflect::BlockVariable*[1] blocks;
+    if (reflect_module.enumerate_entry_point_push_constant_blocks(
+        entry_point,
+        &count,
+        &blocks[0],
+    )
+        != spvreflect::ReflectResult.RESULT_SUCCESS) {
+        return RootAbiMismatch.REFLECTION;
+    }
+    spvreflect::BlockVariable* block = blocks[0];
+    if (block == null) return RootAbiMismatch.BLOCK_MISSING;
+    if (block.byte_offset() != 0) return RootAbiMismatch.BLOCK_OFFSET;
+    if (block.byte_size() != expected.block_size) {
+        return RootAbiMismatch.BLOCK_SIZE;
+    }
+    if (block.member_count() != expected.member_count) {
+        return RootAbiMismatch.MEMBER_COUNT;
+    }
+    for (uint i = 0; i < expected.member_count; i++) {
+        RootAbiMismatch mismatch =
+            root_member_mismatch(block.member(i), &expected.members[i]);
+        if (mismatch != RootAbiMismatch.NONE) return mismatch;
+    }
+    return RootAbiMismatch.NONE;
 }
 
 <* Fault SHADER_INVALID unless the selected entry declares no push block or
@@ -500,40 +617,11 @@ fn void? check_root_push_abi(
     ZString entry_point,
     gpu::ShaderStage stage,
 ) @private {
-    gpu::internal::RootAbiSpec expected = root_abi_for_stage(stage);
-    uint count = 0;
-    if (reflect_module.enumerate_entry_point_push_constant_blocks(
+    if (root_push_abi_mismatch(
+        reflect_module,
         entry_point,
-        &count,
-        null,
-    )
-        != spvreflect::ReflectResult.RESULT_SUCCESS) {
-        return gpu::SHADER_INVALID~;
-    }
-    if (count == 0) return;
-    if (count != 1) return gpu::SHADER_INVALID~;
-
-    spvreflect::BlockVariable*[1] blocks;
-    if (reflect_module.enumerate_entry_point_push_constant_blocks(
-        entry_point,
-        &count,
-        &blocks[0],
-    )
-        != spvreflect::ReflectResult.RESULT_SUCCESS) {
-        return gpu::SHADER_INVALID~;
-    }
-    spvreflect::BlockVariable* block = blocks[0];
-    if (block == null
-        || block.byte_offset() != 0
-        || block.byte_size() != expected.block_size
-        || block.member_count() != expected.member_count) {
-        return gpu::SHADER_INVALID~;
-    }
-    for (uint i = 0; i < expected.member_count; i++) {
-        if (!root_member_shape_matches(block.member(i), &expected.members[i])) {
-            return gpu::SHADER_INVALID~;
-        }
-    }
+        stage,
+    ) != RootAbiMismatch.NONE) return gpu::SHADER_INVALID~;
 }
 
 fn void? copy_entry_point(char* dst, ZString source) @private {
@@ -717,18 +805,19 @@ fn PipelineShaderModule? create_pipeline_shader_module(
             invariant:      "selected-entry descriptor bindings must match the gpu heap convention",
         )~;
     }
-    if (catch push_fault = check_root_push_abi(
+    RootAbiMismatch root_mismatch = root_push_abi_mismatch(
         reflect_module,
         selected_entry_point,
         code.stage,
-    )) {
+    );
+    if (root_mismatch != RootAbiMismatch.NONE) {
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
-            public_fault:   push_fault,
+            public_fault:   gpu::SHADER_INVALID,
             debug_name:     code.debug_name,
             rejected_field: rejected_field,
-            invariant:      "selected-entry push constants must exactly match the root ABI",
+            invariant:      root_abi_mismatch_invariant(root_mismatch),
         )~;
     }
 
