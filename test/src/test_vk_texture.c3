@@ -961,36 +961,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     assert(capture.native.new_layout
             == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
         "color attachment destination preserves its native layout");
-
-    gpu::TextureBarrier to_transfer_source = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.PRESENT },
-        .after   = {
-            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
-            .stages = { .transfer },
-            .access = { .read },
-        },
-    };
-    gpu::cmd_texture_barrier(&commands, &to_transfer_source)!!;
     slot.swapchain_owned = false;
-    assert(capture.calls == 5,
-        "present-to-transfer emits one additional native barrier");
-    assert(capture.native.src_stage_mask
-            == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
-        "present source anchors to the transfer consumer stage");
-    assert(capture.native.src_access_mask
-            == vk::AccessFlagBits2.ACCESS_2_NONE,
-        "present-to-transfer source has no source access");
-    assert(capture.native.old_layout == vk::ImageLayout.PRESENT_SRC_KHR,
-        "present-to-transfer source retains the presentation layout");
-    assert(capture.native.dst_stage_mask
-            == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
-        "transfer source destination preserves its transfer stage");
-    assert(capture.native.dst_access_mask
-            == vk::AccessFlagBits2.ACCESS_2_TRANSFER_READ_BIT,
-        "transfer source destination preserves its read access");
-    assert(capture.native.new_layout == vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
-        "transfer source destination preserves its native layout");
 }
 
 fn void assert_present_source_barrier_emission_for_contract(

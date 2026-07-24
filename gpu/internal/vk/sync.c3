@@ -196,6 +196,7 @@ fn TextureStateScope texture_state_to_vk(
             };
         case gpu::TextureLayout.PRESENT:
             return {
+                // Pair the consumer stage to link the transition with readiness_before's stage-limited acquire wait.
                 .stages = side == TextureStateSide.BEFORE
                     ? barrier_before_stages_to_vk(paired_stages)
                     : vk::PipelineStageFlagBits2.STAGE_2_NONE,
