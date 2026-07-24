@@ -356,6 +356,7 @@ fn void pin_commands_and_completion() {
 fn void pin_presentation() {
     gpu::DeviceRequest request = gpu::strict_device_request();
     (void)gpu::request_resource_agnostic_texture_sync(request);
+    (void)gpu::request_dynamic_color_state(request);
     gpu::Surface surface = {};
     gpu::Adapter adapter = {};
     gpu::Device device = {};

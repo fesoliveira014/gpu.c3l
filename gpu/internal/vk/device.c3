@@ -1559,6 +1559,30 @@ query_dynamic_raster_properties(vk::PhysicalDevice physical_device) {
     return dynamic_properties;
 }
 
+fn bool dynamic_color_state_features_supported(
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT* features,
+) {
+    return features != null
+        && features.extended_dynamic_state3color_blend_enable != 0
+        && features.extended_dynamic_state3color_blend_equation != 0
+        && features.extended_dynamic_state3color_write_mask != 0;
+}
+
+fn bool query_dynamic_color_state_support(
+    vk::PhysicalDevice physical_device,
+) {
+    if (!device_supports_extension(
+        physical_device,
+        DYNAMIC_STATE_3_EXTENSION,
+    )) return false;
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT features =
+        vk::physical_device_extended_dynamic_state3features_ext();
+    vk::PhysicalDeviceFeatures2 features2 =
+        vk::physical_device_features2().set_next(&features);
+    vk::get_physical_device_features2(physical_device, &features2);
+    return dynamic_color_state_features_supported(&features);
+}
+
 <* Optional non-solid polygon rasterization support. Pure. *>
 fn bool line_polygon_mode_supported(vk::PhysicalDeviceFeatures* base) {
     return base.fill_mode_non_solid != 0;

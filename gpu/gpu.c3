@@ -211,6 +211,14 @@ fn DeviceRequest? request_resource_agnostic_texture_sync(
     );
 }
 
+<* Return a new request that requires command-time color blend state. *>
+fn DeviceRequest? request_dynamic_color_state(DeviceRequest request) {
+    return gpu::internal::compose_device_request(
+        request,
+        gpu::internal::DeviceCapability.DYNAMIC_COLOR_STATE,
+    );
+}
+
 <* Return a new request with one explicit semantic queue group. *>
 fn DeviceRequest? request_queues(
     DeviceRequest request,
@@ -261,6 +269,18 @@ fn DeviceRequestSupport? supports_device_request(
         return {
             .supported         = false,
             .unmet_requirement = "resource-agnostic texture synchronization",
+        };
+    }
+
+    if (gpu::internal::requests_dynamic_color_state(*request)
+        && (data.vtable.supports_dynamic_color_state == null
+            || !data.vtable.supports_dynamic_color_state(
+                data.backend_state,
+                adapter.adapter_index,
+            )!)) {
+        return {
+            .supported         = false,
+            .unmet_requirement = "dynamic color state",
         };
     }
 

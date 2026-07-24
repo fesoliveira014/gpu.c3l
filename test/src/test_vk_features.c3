@@ -33,6 +33,33 @@ dynamic_properties_with_required() {
         .set_dynamic_primitive_topology_unrestricted(vk::TRUE);
 }
 
+fn vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT
+dynamic_color_features_with_required() {
+    return vk::physical_device_extended_dynamic_state3features_ext()
+        .set_extended_dynamic_state3color_blend_enable(vk::TRUE)
+        .set_extended_dynamic_state3color_blend_equation(vk::TRUE)
+        .set_extended_dynamic_state3color_write_mask(vk::TRUE);
+}
+
+fn void dynamic_color_features_require_the_complete_set() @test {
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT features =
+        dynamic_color_features_with_required();
+    assert(
+        gpu::internal::vk::dynamic_color_state_features_supported(&features),
+        "all three color features support the semantic capability"
+    );
+
+    features.extended_dynamic_state3color_blend_enable = vk::FALSE;
+    assert(!gpu::internal::vk::dynamic_color_state_features_supported(&features));
+    features = dynamic_color_features_with_required();
+    features.extended_dynamic_state3color_blend_equation = vk::FALSE;
+    assert(!gpu::internal::vk::dynamic_color_state_features_supported(&features));
+    features = dynamic_color_features_with_required();
+    features.extended_dynamic_state3color_write_mask = vk::FALSE;
+    assert(!gpu::internal::vk::dynamic_color_state_features_supported(&features));
+    assert(!gpu::internal::vk::dynamic_color_state_features_supported(null));
+}
+
 fn void required_features_present_ok() @test {
     vk::PhysicalDeviceFeatures base = base_with_required();
     vk::PhysicalDeviceVulkan11Features v11 = v11_with_required();

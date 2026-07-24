@@ -192,6 +192,7 @@ function gpu::prepare_shader_code
 function gpu::present
 function gpu::release_generated_scratch
 function gpu::request_presentation
+function gpu::request_dynamic_color_state
 function gpu::request_queues
 function gpu::request_resource_agnostic_texture_sync
 function gpu::reserve_generated_scratch

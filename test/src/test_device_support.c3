@@ -71,6 +71,43 @@ fn void resource_agnostic_texture_sync_support_uses_the_backend_query() @test {
     );
 }
 
+fn void dynamic_color_state_support_uses_the_backend_query() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_dynamic_color_state_support(false);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceRequest classic = gpu::strict_device_request();
+
+    assert(gpu::supports_device_request(&adapter, &classic)!!.supported);
+    assert(
+        gpu::internal::vk::stub_dynamic_color_state_support_query_count() == 0,
+        "an unrequested capability does not query backend support"
+    );
+
+    DeviceRequest requested = gpu::request_dynamic_color_state(classic)!!;
+    DeviceRequestSupport unsupported =
+        gpu::supports_device_request(&adapter, &requested)!!;
+    assert(!unsupported.supported);
+    assert(
+        unsupported.unmet_requirement == "dynamic color state",
+        "the unmet label remains backend-neutral"
+    );
+    assert(
+        gpu::internal::vk::stub_dynamic_color_state_support_query_count() == 1,
+        "a requested capability queries backend support once"
+    );
+
+    gpu::internal::vk::stub_set_dynamic_color_state_support(true);
+    assert(gpu::supports_device_request(&adapter, &requested)!!.supported);
+    assert(
+        gpu::internal::vk::stub_dynamic_color_state_support_query_count() == 2,
+        "a supported request follows the same backend query path"
+    );
+}
+
 fn void supported_but_unrequested_device_remains_classic() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
     gpu::internal::vk::stub_set_resource_agnostic_texture_sync_support(true);
@@ -87,6 +124,25 @@ fn void supported_but_unrequested_device_remains_classic() @test {
     assert(
         !caps.resource_agnostic_texture_sync,
         "hardware support alone does not select the capability"
+    );
+}
+
+fn void supported_but_unrequested_device_has_immutable_color_state() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_dynamic_color_state_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceRequest request = gpu::strict_device_request();
+    Device device = gpu::create_device(&adapter, &request)!!;
+    defer gpu::destroy_device(&device)!!;
+
+    DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    assert(
+        !caps.dynamic_color_state,
+        "hardware support alone does not enable dynamic color state"
     );
 }
 

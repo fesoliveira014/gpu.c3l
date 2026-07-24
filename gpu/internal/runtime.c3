@@ -15,6 +15,7 @@ alias DestroySurfaceBackendFn @private = fn void (void*, void*);
 alias SupportsPresentationBackendFn @private = fn bool? (void*, uint, void*);
 alias SupportsQueueRequirementsBackendFn @private = fn bool? (void*, uint, QueueRequirements*, void*);
 alias SupportsResourceAgnosticTextureSyncBackendFn @private = fn bool? (void*, uint);
+alias SupportsDynamicColorStateBackendFn @private = fn bool? (void*, uint);
 
 const uint MAX_RUNTIMES @private = 16;
 const uint MAX_ADAPTERS_PER_RUNTIME @private = (uint)ushort::max + 1;
@@ -32,6 +33,7 @@ struct RuntimeBackendVTable @private {
     SupportsPresentationBackendFn   supports_presentation;
     SupportsQueueRequirementsBackendFn supports_queue_requirements;
     SupportsResourceAgnosticTextureSyncBackendFn supports_resource_agnostic_texture_sync;
+    SupportsDynamicColorStateBackendFn supports_dynamic_color_state;
 }
 
 struct RuntimeData @private {
