@@ -1,7 +1,8 @@
 # Threading model
 
 Every public entry point belongs to one of three tiers. Anything not sanctioned
-here is misuse; results and validation verdicts are undefined. The library's
+here is a caller precondition violation; only `ContractValidation.FULL`
+promises detailed threading-misuse diagnostics where documented. The library's
 own state remains memory-safe except when concurrent use of the same Tier C
 token races its consumption or retirement: aliases refer to one authoritative
 record, and the library deliberately adds no synchronization that would make
@@ -229,11 +230,13 @@ multiple callbacks may run concurrently, with no cross-thread ordering or
 library serialization.
 
 Callback presence changes delivery only. `ContractValidation.TRUSTED` does not
-gain detailed misuse checks, lifetime tracking stays controlled by
+gain detailed misuse checks. `OBJECT_BOUNDARIES` uses the same trusted command
+tables and adds structured reporting only at explicitly routed public
+boundaries plus teardown leak scans. `FULL` selects checked command semantic
+diagnostics. Lifetime tracking stays controlled by
 `track_resource_lifetimes`, and Vulkan layers stay controlled by
-`enable_vulkan_validation`. `FULL` contract diagnostics can therefore be
-delivered with Vulkan layers disabled. Teardown leak scans run under
-`OBJECT_BOUNDARIES`/`FULL` or whenever a callback is present.
+`enable_vulkan_validation`, so `FULL` works with layers disabled. Teardown leak
+scans also run whenever a callback is present.
 
 The callback must be nonblocking and must not call gpu.c3l. Delivery can occur
 while internal resource or queue locks are held, so reentry may deadlock. Copy

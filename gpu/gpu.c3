@@ -81,7 +81,8 @@ fn bool SamplerIndex.is_valid(self) => (uint)self != 0;
 <* True when the token is not the invalid zero value. *>
 fn bool Runtime.is_valid(self) => (ulong)self != 0;
 
-<* Return the former all-validation-enabled runtime configuration. *>
+<* Return FULL contract diagnostics with lifetime tracking and Vulkan
+   validation layers enabled. *>
 fn RuntimeDesc full_validation_runtime_desc() => {
     .backend                  = BackendKind.VULKAN,
     .contract_validation      = ContractValidation.FULL,
@@ -111,7 +112,10 @@ fn Runtime? create_runtime(RuntimeDesc* desc) {
     }
 }
 
-<* Destroy a runtime after its surfaces and devices have been destroyed. *>
+<* Destroy a runtime.
+   Preconditions: every surface and device owned by it is destroyed.
+   Always checked: live identity and dependent counts.
+   Runtime failures: RESOURCE_IN_USE preserves the runtime for retry. *>
 fn void? destroy_runtime(Runtime* runtime) {
     gpu::internal::RuntimeData* data = gpu::internal::resolve_runtime(runtime);
     if (data == null) return INVALID_HANDLE~;
@@ -303,7 +307,10 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
     );
 }
 
-<* Destroy a surface after all swapchains that borrow it. *>
+<* Destroy a surface.
+   Preconditions: every borrowing swapchain is destroyed.
+   Always checked: live identity, runtime ownership, and dependent count.
+   Runtime failures: RESOURCE_IN_USE preserves the surface for retry. *>
 fn void? destroy_surface(Surface* surface) {
     gpu::internal::SurfaceData* data = gpu::internal::resolve_surface(surface);
     if (data == null) return INVALID_HANDLE~;
@@ -444,8 +451,10 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
     return device;
 }
 
-<* Destroy a quiescent device. Live children fault RESOURCE_IN_USE; active
-   host or queue work faults DEVICE_BUSY without consuming the token. *>
+<* Destroy a quiescent device.
+   Preconditions: no live children, host operations, or incomplete queue work.
+   Always checked: device identity, children, pins, closing state, and progress.
+   Runtime failures: RESOURCE_IN_USE or DEVICE_BUSY preserves the token. *>
 fn void? destroy_device(Device* device) {
     if (device == null || !device.is_valid()) return INVALID_HANDLE~;
     if (device.reserved != 0 || device.index >= gpu::internal::MAX_DEVICES) return INVALID_HANDLE~;
@@ -533,16 +542,18 @@ fn String? build_memory_report(Device* device, bool detailed) {
     return operation.vtable.build_memory_report(device, detailed);
 }
 
-<* Open a debug-utils label region; a no-op when the extension is absent.
-   Valid while recording, including inside render passes; balance is the
-   caller's responsibility. *>
+<* Open a debug-utils label region; a no-op without debug utils.
+   Preconditions: calls are balanced while recording.
+   Always checked: bounded identity, authoritative phase, and non-null label. *>
 fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (label == null) return INVALID_ARGUMENT~;
     return record.ops.begin_label(record, label, color);
 }
 
-<* Counterpart of cmd_begin_label. *>
+<* Close a debug-utils label region.
+   Preconditions: a matching label region is open.
+   Always checked: bounded identity and authoritative recording phase. *>
 fn void? cmd_end_label(CommandList* commands) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.end_label(record);
@@ -567,7 +578,10 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     return allocation;
 }
 
-<* Free quiescent storage; faults preserve the owning token. *>
+<* Free quiescent storage.
+   Preconditions: no command, texture, or descriptor still uses the allocation.
+   Always checked: live identity, ownership, and detected dependents.
+   Runtime failures: faults preserve the owning token. *>
 fn void? free_allocation(Device* device, GpuAllocation* allocation) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -782,7 +796,9 @@ fn DedicatedTexture? create_dedicated_texture(
     return created;
 }
 
-<* Destroy a texture after its descriptors. Placed storage remains caller-owned. *>
+<* Destroy a texture after its descriptors and command use complete.
+   Always checked: live identity, ownership, and detected dependents.
+   Runtime failures: faults preserve the handle; placed storage stays caller-owned. *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -822,7 +838,9 @@ fn TextureView? create_texture_view(
 }
 
 <* Release one texture view and recycle its shader-visible index immediately.
-   GPU references to the index must already be complete. *>
+   Preconditions: GPU references to the index are complete.
+   Always checked: live identity and ownership.
+   Runtime failures: faults preserve the view. *>
 fn void? destroy_texture_view(Device* device, TextureView view) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -973,8 +991,10 @@ fn void? create_graphics_pipelines(
     for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
 }
 
-<* Release one returned handle. Descriptions sharing one backend pipeline are
-   refcounted. *>
+<* Release one returned pipeline handle.
+   Preconditions: recorded and submitted use of this handle is complete.
+   Always checked: live identity, ownership, and detected command use.
+   Runtime failures: faults preserve this alias; shared backend state is refcounted. *>
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1072,8 +1092,10 @@ fn CommandAllocator? create_command_allocator(
     return allocator;
 }
 
-<* Destroy a quiescent allocator. RESOURCE_IN_USE or DEVICE_BUSY leaves the
-   allocator token unchanged and retryable. *>
+<* Destroy a quiescent allocator.
+   Preconditions: all recording, executable, and submitted units are retired.
+   Always checked: identity, ownership, and allocator lifecycle.
+   Runtime failures: RESOURCE_IN_USE or DEVICE_BUSY preserves the token. *>
 fn void? destroy_command_allocator(CommandAllocator* allocator) {
     if (allocator == null || !allocator.handle.is_valid()) {
         return INVALID_HANDLE~;
@@ -1147,9 +1169,10 @@ fn void? release_generated_scratch(
     );
 }
 
-<* Begin recording through an explicit allocator. The token retains its device until
-   successful end followed by submit, or until discard. DEVICE_BUSY leaves the
-   allocator unchanged when every preallocated command buffer is unavailable. *>
+<* Begin recording through an explicit allocator.
+   Preconditions: allocator use follows its threading and queue contract.
+   Always checked: live identity, ownership, and fixed-unit availability.
+   Runtime failures: DEVICE_BUSY preserves the allocator; success retains its device. *>
 fn CommandList? begin_commands(CommandAllocator* allocator) {
     if (allocator == null) return INVALID_HANDLE~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
@@ -1165,7 +1188,10 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
     return commands;
 }
 
-<* Finish and consume a recording token. Failure leaves it recording. *>
+<* Finish and consume a recording token.
+   Preconditions: the command list is recording outside a render pass.
+   Always checked: bounded identity and authoritative phase.
+   Runtime failures: failure leaves the token recording. *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     gpu::internal::DeviceOperation operation =
@@ -1179,7 +1205,10 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
     return executable;
 }
 
-<* Consume an unfinished recording, including after device loss. *>
+<* Consume an unfinished recording, including after device loss.
+   Preconditions: aliases are thread-confined and have not been consumed.
+   Always checked: bounded identity and authoritative recording phase.
+   Runtime failures: failure preserves the token. *>
 fn void? discard_commands(CommandList* commands) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(
         commands,
@@ -1199,7 +1228,10 @@ fn void? discard_commands(CommandList* commands) {
     (void)gpu::internal::release_retained_device_pins(&operation);
 }
 
-<* Consume an executable token without submitting it. *>
+<* Consume an executable token without submitting it.
+   Preconditions: aliases are thread-confined and have not been consumed.
+   Always checked: bounded identity and authoritative executable phase.
+   Runtime failures: failure preserves the token. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
     gpu::internal::CommandRecord* record =
         gpu::internal::executable_command(commands, allow_lost: true)!;
@@ -1216,100 +1248,136 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
     (void)gpu::internal::release_retained_device_pins(&operation);
 }
 
-<* Record a buffer-to-buffer copy; transfer-side barriers are the caller's. *>
+<* Record a buffer-to-buffer copy; surrounding barriers are caller-owned.
+   Preconditions: usage and queue access are valid.
+   Always checked: token phase, required pointer, identity, bounds, and safe lowering.
+   FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return record.ops.copy_buffer(record, desc);
 }
 
-<* Record a 32-bit-pattern fill over dst; its offset and size must be 4-byte
-   multiples. *>
+<* Record a 32-bit-pattern fill over dst.
+   Preconditions: usage, queue access, and surrounding barriers are valid.
+   Always checked: token phase, identity, bounds, alignment, and safe lowering.
+   FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.fill_buffer(record, dst, value);
 }
 
-<* The texture's effective layout must be TRANSFER_DST; the caller records
-   the surrounding barriers. *>
+<* Record a buffer-to-texture copy; the effective layout is TRANSFER_DST.
+   Preconditions: descriptor resources, usage, queue access, and barriers are valid.
+   Always checked: token phase, required pointer, identities, format support,
+   subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
+   FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return record.ops.copy_buffer_to_texture(record, desc);
 }
 
-<* The texture's effective layout must be TRANSFER_SRC. *>
+<* Record a texture-to-buffer copy; the effective layout is TRANSFER_SRC.
+   Preconditions: descriptor resources, usage, queue access, and barriers are valid.
+   Always checked: token phase, required pointer, identities, format support,
+   subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
+   FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return record.ops.copy_texture_to_buffer(record, desc);
 }
 
-<* Record a global semantic execution and memory barrier. *>
+<* Record a global semantic execution and memory barrier.
+   Preconditions: stages and hazards are known, consistent, and queue-supported.
+   Always checked: bounded identity, authoritative phase, and required pointer.
+   FULL diagnostics: stage, hazard, and queue-support misuse. *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return record.ops.barrier(record, barrier);
 }
 
-<* Record an explicit semantic texture transition. *>
+<* Record an explicit semantic texture transition.
+   Preconditions: the texture, range, states, usage, and queue access are valid.
+   Always checked: token phase, required pointer, texture identity, range, and safe lowering.
+   FULL diagnostics: state, usage, queue, format, and presentation misuse. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return record.ops.texture_barrier(record, barrier);
 }
 
-<* Bind the active compute or graphics pipeline for later execution commands.
-   A failed bind leaves the previous active pipeline unchanged. *>
+<* Bind the active compute or graphics pipeline for later commands.
+   Preconditions: the pipeline is live and valid for later use on this queue.
+   Always checked: token phase, pipeline identity, ownership, descriptor-heap
+   binding prerequisites, and a safe native snapshot.
+   FULL diagnostics: render-pass compatibility when binding during a pass;
+   failure preserves the prior logical bind. *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.bind_pipeline(record, pipeline);
 }
 
-<* Dispatch the active compute pipeline with a single nonzero root GPU address
-   pushed at offset 0. Every allocation reachable from the root must admit the
-   recording queue's role. Counts may be zero and may not exceed
-   DeviceCaps.max_compute_work_group_count on any axis. *>
+<* Dispatch with one root passed unchanged at offset 0; zero is valid.
+   Preconditions: a compute pipeline is active, group counts fit DeviceCaps,
+   root-reachable allocations admit the queue, and shaders branch before
+   dereferencing zero unless relying on defined robustness.
+   Always checked: bounded identity, authoritative recording phase, and a
+   usable bound-pipeline snapshot.
+   FULL diagnostics: active-kind and group-limit misuse. *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch(record, root, groups);
 }
 
-<* Set dynamic depth state on a graphics command list before or during a pass.
-   A failed update leaves the previous state unchanged. *>
+<* Set dynamic depth state before or during a pass.
+   Preconditions: the command list is graphics-capable and the enum is valid.
+   Always checked: token phase and required pointer.
+   FULL diagnostics: queue and enum misuse; failure preserves prior state. *>
 fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (depth == null) return INVALID_ARGUMENT~;
     return record.ops.set_depth_state(record, depth);
 }
 
-<* Set raster state on a graphics command list before or during a pass.
-   A failed update leaves the previous state unchanged. *>
+<* Set raster state before or during a pass.
+   Preconditions: the queue, enums, polygon mode, and depth-bias values are valid.
+   Always checked: token phase and required pointer.
+   FULL diagnostics: queue, enum, feature, and finite-value misuse. *>
 fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (raster == null) return INVALID_ARGUMENT~;
     return record.ops.set_raster_state(record, raster);
 }
 
-<* Set one dynamic viewport on a graphics command list before or during a pass.
-   Device-unrepresentable or non-finite values and zero height fault. *>
+<* Set one dynamic viewport before or during a pass.
+   Preconditions: values are finite, representable, within device bounds, and height is nonzero.
+   Always checked: token phase and required pointer.
+   FULL diagnostics: queue and viewport-value misuse. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
     return record.ops.set_viewport(record, viewport);
 }
 
-<* Set one dynamic scissor on a graphics command list before or during a pass.
-   Negative or signed-overflowing fields fault; overscan is valid. *>
+<* Set one dynamic scissor before or during a pass; overscan is valid.
+   Preconditions: origin and extent are nonnegative and signed-representable.
+   Always checked: token phase and required pointer.
+   FULL diagnostics: queue and scissor-value misuse. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
     return record.ops.set_scissor(record, scissor);
 }
 
-<* Draw inside a render pass, pushing the vertex and fragment root addresses.
-   Every allocation reachable from either root must admit the recording queue's
-   role. *>
+<* Draw with vertex and fragment roots passed unchanged; either may be zero.
+   Preconditions: a compatible graphics pipeline, render pass, complete state,
+   and queue-admitted root data; shaders make zero dereference safe.
+   Always checked: bounded identity, authoritative render-pass phase, and a
+   usable bound-pipeline snapshot.
+   FULL diagnostics: pipeline-kind and state misuse. *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw(
@@ -1321,9 +1389,12 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
     );
 }
 
-<* Draw indexed geometry; indices are read from the start of index_span.
-   Every allocation reachable from either root must admit the recording queue's
-   role. *>
+<* Draw indexed geometry with both roots passed unchanged; either may be zero.
+   Preconditions: graphics state is valid, index_span and root data admit the
+   queue, and shaders make zero dereference safe.
+   Always checked: token phase, identities, index bounds, a usable bound-pipeline
+   snapshot, and safe lowering.
+   FULL diagnostics: pipeline-kind, state, usage, queue, and index-type misuse. *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed(
@@ -1337,12 +1408,12 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
     );
 }
 
-<* Draw from GPU-written DrawIndirectCommand arguments at the span's offset.
-   The args span must support indirect-command reads. The root pair applies to
-   every draw in the multi-draw (per-draw variation via gl_DrawID). Ordering
-   against argument writes is the caller's barrier. Every allocation reachable
-   from either root must admit the recording queue's role. draw_count may not
-   exceed DeviceCaps.max_draw_indirect_count. *>
+<* Draw indirectly with one root pair passed unchanged to every draw; zero is valid.
+   Preconditions: graphics state, args, count, queue access, and barriers are valid;
+   root data admits the queue and shaders make zero dereference safe.
+   Always checked: token phase, identities, bounds, overflow, a usable
+   bound-pipeline snapshot, and safe lowering.
+   FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse. *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indirect(
@@ -1354,11 +1425,12 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
     );
 }
 
-<* Indexed variant over DrawIndexedIndirectCommand arguments. Index-range
-   bounds are read from GPU memory at execution time and are not validated;
-   out-of-bounds indices follow device robustness. draw_count may not exceed
-   DeviceCaps.max_draw_indirect_count. Every allocation reachable from either
-   root must admit the recording queue's role. *>
+<* Indexed indirect draw with one unchanged root pair; zero is valid.
+   Preconditions: graphics state, spans, count, queue access, and barriers are
+   valid; shader zero paths and GPU-written index bounds are caller-owned.
+   Always checked: token phase, identities, host-visible bounds, overflow, a
+   usable bound-pipeline snapshot, and safe lowering.
+   FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse. *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed_indirect(
@@ -1372,11 +1444,13 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
     );
 }
 
-<* Count-buffer variant: the GPU-written uint at count_span limits execution
-   to max_draw_count and may not exceed DeviceCaps.max_draw_indirect_count.
-   The args span must hold max_draw_count entries. Requires
-   DeviceCaps.draw_indirect_count. Every allocation reachable from either root
-   must admit the recording queue's role. *>
+<* Count-buffer indexed draw with one unchanged root pair; zero is valid.
+   Preconditions: graphics state, spans, counts, queue access, barriers, shader
+   zero paths, and GPU-written index bounds are valid.
+   Always checked: token phase, identities, host-visible bounds, overflow, a
+   usable bound-pipeline snapshot, and safe lowering.
+   FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
+   Runtime failures: unsupported count execution faults UNSUPPORTED_FEATURE. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed_indirect_count(
@@ -1391,18 +1465,26 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
     );
 }
 
-<* Dispatch from GPU-written DispatchIndirectCommand arguments. Each group
-   count must not exceed the corresponding
-   DeviceCaps.max_compute_work_group_count component. Every allocation
-   reachable from the root must admit the recording queue's role. *>
+<* Dispatch indirectly with the root passed unchanged; zero is valid.
+   Preconditions: compute state, args, queue access, barriers, and GPU-written
+   group counts are valid; shaders make zero dereference safe.
+   Always checked: token phase, identities, bounds, a usable bound-pipeline
+   snapshot, and safe lowering.
+   FULL diagnostics: pipeline kind, usage, queue, and span misuse. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch_indirect(record, root, args);
 }
 
-<* Execute up to max_draw_count GPU-written draw records. The GPU-written uint
-   at count_span selects the actual count. Ordering against producer writes is
-   the caller's barrier with hazards.draw_arguments set. *>
+<* Execute GPU-written draw records, forwarding every embedded root unchanged;
+   zero roots are valid.
+   Preconditions: graphics state, spans, count, queue access, barriers, and
+   shader zero paths are valid.
+   Always checked: token phase, identities, bounds, capacity, a usable
+   bound-pipeline snapshot, and safe lowering.
+   FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse.
+   Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
+   reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_generated(
@@ -1413,7 +1495,15 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
     );
 }
 
-<* Indexed generated-work variant. Index bounds remain GPU execution-time data. *>
+<* Execute indexed GPU-written records, forwarding every embedded root unchanged;
+   zero roots are valid.
+   Preconditions: graphics state, spans, count, queue access, barriers, shader
+   zero paths, and GPU-written index bounds are valid.
+   Always checked: token phase, identities, bounds, capacity, a usable
+   bound-pipeline snapshot, and safe lowering.
+   FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
+   Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
+   reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed_generated(
@@ -1426,7 +1516,15 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
     );
 }
 
-<* Execute up to max_dispatch_count GPU-written dispatch records. *>
+<* Execute GPU-written dispatch records, forwarding every embedded root unchanged;
+   zero roots are valid.
+   Preconditions: compute state, spans, count, queue access, barriers, and
+   shader zero paths are valid.
+   Always checked: token phase, identities, bounds, capacity, a usable
+   bound-pipeline snapshot, and safe lowering.
+   FULL diagnostics: pipeline-kind, usage, queue, and count misuse.
+   Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
+   reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch_generated(
@@ -1459,7 +1557,10 @@ fn AttachmentViewHandle? create_attachment_view(
     return view;
 }
 
-<* Destroy an attachment view after every recorded and submitted use completes. *>
+<* Destroy an attachment view.
+   Preconditions: every recorded and submitted use is complete.
+   Always checked: live identity, ownership, and detected command use.
+   Runtime failures: faults preserve the view. *>
 fn void? destroy_attachment_view(
     Device* device,
     AttachmentViewHandle view,
@@ -1497,14 +1598,20 @@ fn GraphicsState? full_render_graphics_state(uint width, uint height) {
     };
 }
 
-<* Begin a render pass without changing command-buffer graphics state. *>
+<* Begin a render pass without changing command-buffer graphics state.
+   Preconditions: attachments, layouts, queue access, dimensions, and pass phase are valid.
+   Always checked: token phase, host-safe descriptor shape, identities, and safe lowering.
+   FULL diagnostics: attachment, usage, queue, compatibility, and render-area misuse. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
     return record.ops.begin_render_pass(record, desc);
 }
 
-<* Begin a render pass and set complete graphics state atomically. *>
+<* Begin a render pass and set complete graphics state atomically.
+   Preconditions: the pass and all dynamic graphics state are valid.
+   Always checked: token phase, host-safe inputs, identities, and safe lowering.
+   FULL diagnostics: pass, queue, attachment, and graphics-state misuse. *>
 fn void? cmd_begin_render_pass_with_state(
     CommandList* commands,
     RenderPassDesc* desc,
@@ -1518,7 +1625,10 @@ fn void? cmd_begin_render_pass_with_state(
     return record.ops.begin_render_pass_with_state(record, desc, state);
 }
 
-<* Replace complete state on a graphics command list before or during a pass. *>
+<* Replace complete graphics state before or during a pass.
+   Preconditions: queue capability and all dynamic values are valid.
+   Always checked: token phase, required host-safe input, and safe lowering.
+   FULL diagnostics: queue, enum, feature, and dynamic-value misuse. *>
 fn void? cmd_set_graphics_state(
     CommandList* commands,
     GraphicsState* state,
@@ -1528,7 +1638,9 @@ fn void? cmd_set_graphics_state(
     return record.ops.set_graphics_state(record, state);
 }
 
-<* End the active render pass without adding synchronization. *>
+<* End the active render pass without adding synchronization.
+   Preconditions: a render pass is active.
+   Always checked: bounded identity and authoritative render-pass phase. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
     gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.end_render_pass(record);
@@ -1596,7 +1708,10 @@ fn TextureBarrier? texture_transition(
     );
 }
 
-<* Return whether the queue has completed this point. *>
+<* Return whether the queue has completed this point.
+   Preconditions: the owning device remains live.
+   Always checked: point identity, ownership, publication, and device state.
+   Runtime failures: device loss or backend failure preserves the point. *>
 fn bool? poll_completion(CompletionPoint point) {
     Device device = point.device;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
@@ -1610,8 +1725,10 @@ fn bool? poll_completion(CompletionPoint point) {
     );
 }
 
-<* Wait up to timeout_ns for the queue to complete this point. A timeout leaves
-   the point unchanged and faults WAIT_TIMEOUT, so the wait may be retried. *>
+<* Wait up to timeout_ns for the queue to complete this point.
+   Preconditions: the owning device remains live.
+   Always checked: point identity, ownership, publication, and device state.
+   Runtime failures: WAIT_TIMEOUT, device loss, or backend failure preserves the point. *>
 fn void? wait_completion(
     CompletionPoint point,
     ulong timeout_ns = TIMEOUT_INFINITE,
@@ -1670,8 +1787,13 @@ fn QueueInfo? get_queue_info(Device* device, Queue queue) {
     };
 }
 
-<* Submit executable command lists to `queue` and return reusable progress.
-   Successful submission consumes every list. *>
+<* Submit executable command lists and return reusable queue progress.
+   Preconditions: externally synchronize the queue; every list targets it and
+   waits/readiness name valid scopes and live same-device values.
+   Always checked: queue/point identity, limits, wait scopes, exact record queue,
+   authoritative executable phase, duplicates, and all-or-nothing claim/rollback.
+   Runtime failures: capacity, busy, device-loss, and backend faults preserve inputs;
+   success consumes every list. *>
 fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     Device device = queue.device;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
@@ -1746,8 +1868,10 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
     return swapchain;
 }
 
-<* Counterpart of create_swapchain. Immediate: pending acquisition,
-   presentation, command, or view use faults without consuming the handle. *>
+<* Destroy a swapchain without waiting.
+   Preconditions: no pending acquisition, presentation, command, or view use.
+   Always checked: live identity, ownership, and lifecycle state.
+   Runtime failures: detected use faults without consuming the handle. *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1755,11 +1879,11 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     gpu::internal::release_device_children(&operation);
 }
 
-<* Recreate under the same handle at a new extent. A zero clamped extent or
-   a failed rebuild leaves the swapchain dormant (acquire faults
-   SWAPCHAIN_OUT_OF_DATE) until a successful resize. Prior acquired-image
-   handles become stale. Pending acquisition, presentation, command, or view
-   use faults immediately and leaves the swapchain unchanged. *>
+<* Recreate a quiescent swapchain under the same handle at a new extent.
+   Preconditions: no pending acquisition, presentation, command, or view use.
+   Always checked: live identity, ownership, lifecycle state, and extent safety.
+   Runtime failures: failed or zero-clamped rebuild leaves it dormant; other
+   faults preserve it, and successful resize stales prior image handles. *>
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1774,9 +1898,11 @@ fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) 
     return operation.vtable.get_swapchain_info(device, swapchain);
 }
 
-<* Acquire with a nonblocking default. Finite values are nanoseconds;
-   TIMEOUT_INFINITE requires platform-guaranteed presentation progress.
-   WAIT_TIMEOUT preserves the swapchain for retry. *>
+<* Acquire with a nonblocking default; finite values are nanoseconds.
+   Preconditions: externally synchronize the swapchain and ensure platform
+   progress before using TIMEOUT_INFINITE.
+   Always checked: live identity, ownership, and acquisition lifecycle.
+   Runtime failures: WAIT_TIMEOUT and surface/swapchain faults preserve it. *>
 fn AcquiredImage? acquire_next_image(
     Device* device,
     SwapchainHandle swapchain,
@@ -1787,9 +1913,10 @@ fn AcquiredImage? acquire_next_image(
     return operation.vtable.acquire_next_image(device, swapchain, timeout_ns);
 }
 
-<* Present and consume an acquired image after its readiness-consuming submit.
-   `render_completion` must be the point returned by that submit. WAIT_TIMEOUT
-   preserves the image for retry when private present completion is still busy. *>
+<* Present an acquired image after its readiness-consuming submit.
+   Preconditions: externally synchronize the image and pass that submit's point.
+   Always checked: image/point identity, ownership, publication, and lifecycle.
+   Runtime failures: WAIT_TIMEOUT preserves the image; success consumes it. *>
 fn void? present(
     Device* device,
     AcquiredImage* image,

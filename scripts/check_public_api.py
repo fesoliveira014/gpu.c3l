@@ -314,6 +314,122 @@ def public_entries(module: dict) -> dict:
     }
 
 
+def normalized_documentation(entry: dict) -> str:
+    text = entry.get("docs", {}).get("text", "").lower()
+    return " ".join(re.findall(r"[a-z0-9_]+", text))
+
+
+NEGATION_CUE = re.compile(r"\b(?:not|never|neither|without)\b")
+
+
+def has_nonnegated_match(
+    source: str,
+    pattern: str | re.Pattern[str],
+    *,
+    prefix: int = 24,
+) -> bool:
+    for match in re.finditer(pattern, source):
+        window = source[max(0, match.start() - prefix):match.end()]
+        if NEGATION_CUE.search(window) is None:
+            return True
+    return False
+
+
+def generated_root_operations(public_surface: dict) -> set[str]:
+    functions = {
+        entry.get("name"): entry
+        for entry in public_surface.get("functions", [])
+        if entry.get("name")
+    }
+    operations = {
+        name
+        for name, entry in functions.items()
+        if name.startswith("cmd_")
+        and any(
+            member.get("type", {}).get("name") == "GpuAddress"
+            for member in entry.get("members", [])
+        )
+    }
+    for record in public_surface.get("types", []):
+        name = record.get("name", "")
+        if (
+            not name.startswith("Generated")
+            or not name.endswith("Record")
+            or not any(
+                member.get("type", {}).get("name") == "GpuAddress"
+                for member in record.get("members", [])
+            )
+        ):
+            continue
+        stem = name[len("Generated"):-len("Record")]
+        words = re.sub(r"(?<!^)(?=[A-Z])", "_", stem).lower()
+        operation = f"cmd_{words}_generated"
+        if operation in functions:
+            operations.add(operation)
+    return operations
+
+
+def rejects_zero_root(text: str) -> bool:
+    explicit = re.search(
+        r"\b(?:roots? (?:is|are) not zero|zero roots? (?:is|are) "
+        r"(?:not valid|invalid|rejected|forbidden))\b",
+        text,
+    )
+    return bool(explicit) or has_nonnegated_match(
+        text,
+        r"\b(?:nonzero roots?|roots? (?:must|shall|needs? to) be nonzero)\b",
+    )
+
+
+def documents_valid_zero_root(text: str) -> bool:
+    return re.search(
+        r"\b(?:zero (?:is|remains) (?:a )?valid (?:root|root value)?|"
+        r"zero roots? (?:is|are) (?:valid|not (?:invalid|rejected|forbidden))|"
+        r"either may be zero|roots? (?:may|can) be zero|accepts? zero roots?|"
+        r"including zero.{0,40}valid|does not require (?:a )?nonzero roots?)\b",
+        text,
+    ) is not None
+
+
+def documents_unchanged_root_forwarding(text: str) -> bool:
+    root = r"(?:roots?|root values?|root addresses?)"
+    action = r"(?:passed|forwarded|forwarding|preserved|pushed)"
+    return has_nonnegated_match(
+        text,
+        rf"\b(?:{root}.{{0,80}}{action} unchanged|"
+        rf"{action}.{{0,80}}{root}.{{0,40}}unchanged|"
+        r"unchanged root(?:s| pair| values| addresses)?)\b",
+    )
+
+
+def validate_generated_semantic_contracts(document: dict) -> list[str]:
+    module = document.get("modules", {}).get("gpu")
+    if module is None:
+        return []
+    public_surface = public_entries(module)
+    functions = {
+        entry.get("name"): entry
+        for entry in public_surface.get("functions", [])
+        if entry.get("name")
+    }
+    failures = []
+    for name in sorted(generated_root_operations(public_surface)):
+        text = normalized_documentation(functions[name])
+        if rejects_zero_root(text):
+            failures.append(f"gpu::{name} documentation requires a nonzero root")
+            continue
+        if not documents_valid_zero_root(text):
+            failures.append(
+                f"gpu::{name} documentation must state that zero roots are valid"
+            )
+        if not documents_unchanged_root_forwarding(text):
+            failures.append(
+                f"gpu::{name} documentation must state that roots are "
+                f"forwarded unchanged"
+            )
+    return failures
+
+
 def validate_canonical_function_fixture(
     document: dict,
     source: str,
@@ -2269,6 +2385,7 @@ def main() -> int:
 
     document = json.loads(result.stdout)
     failures = validate_document(document)
+    failures.extend(validate_generated_semantic_contracts(document))
     failures.extend(
         validate_canonical_function_fixture(
             document,

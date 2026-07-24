@@ -9,6 +9,20 @@ import scripts.check_docs as check_docs
 
 
 class DocumentationCheckTests(unittest.TestCase):
+    def test_rejects_semantic_contract_overstatements(self) -> None:
+        for path, claim, expected in (
+            ("docs/api.md", "A zero-initialized RuntimeDesc selects FULL.", "TRUSTED"),
+            ("docs/overview.md", "OBJECT_BOUNDARIES adds command validation.", "OBJECT_BOUNDARIES"),
+            ("docs/overview.md", "Every policy validates viewport values.", "every policy"),
+        ):
+            with self.subTest(claim=claim):
+                actual = check_docs.validate_semantic_markdown({Path(path): claim})
+                self.assertTrue(any(expected in failure for failure in actual))
+
+    def test_semantic_guards_ignore_specs(self) -> None:
+        sources = {Path("docs/specs/history.md"): "Every policy validates viewport."}
+        self.assertEqual(check_docs.validate_semantic_markdown(sources), [])
+
     def test_rejects_missing_relative_markdown_link(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
