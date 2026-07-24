@@ -18,6 +18,7 @@ struct CommandPolicyExpectation {
     ulong reference_increments;
     ulong reference_releases;
     ulong recording_commands;
+    ulong command_table_dispatches;
     ulong native_commands;
     ulong generated_dispatch_emissions;
     ulong generated_draw_emissions;
@@ -57,9 +58,9 @@ fn bool command_policy_observation_matches(
     vk::CommandRecordingStats recording_before = observation.recording_before;
     vk::CommandRecordingStats recording_after = observation.recording_after;
     gpu::CommandResolutionStats resolution = observation.resolution;
-    ulong command_table_lookups = gpu::FAST_COMMAND_PROFILE
+    ulong command_table_lookups = $feature(GPU_FAST_COMMANDS)
         ? 0
-        : expectation.recording_commands;
+        : expectation.command_table_dispatches;
     ulong generated_acquires = expectation.generated_dispatch_emissions
         + expectation.generated_draw_emissions
         + expectation.generated_indexed_draw_emissions;
@@ -152,6 +153,7 @@ fn CommandPolicyExpectation policy_matrix_expectation(
         .reference_increments  = tracking ? unique_references : 0,
         .reference_releases    = tracking ? unique_references : 0,
         .recording_commands    = recording_commands,
+        .command_table_dispatches = recording_commands,
         .native_commands       = native_commands,
     };
 }
@@ -832,6 +834,7 @@ fn void full_tracking_off_invalid_barrier_emits_no_native_work() @test {
         recording_commands:   1,
         native_commands:      0,
     );
+    expectation.command_table_dispatches = 0;
     expectation.rejected = true;
     assert_command_policy_observation(
         &observation,
@@ -954,11 +957,14 @@ fn void command_policy_matcher_rejects_each_forbidden_mutation() @test {
     CommandPolicyObservation mutation = passing;
     CommandPolicyExpectation private_budget = expected;
     private_budget.recording_commands = 1;
+    private_budget.command_table_dispatches = 1;
     CommandPolicyObservation lower_private_work = passing;
     lower_private_work.resolution.recording_commands = 1;
-    if (!gpu::DIRECT_COMMAND_TOKENS) {
+    $if !$feature(GPU_FAST_COMMANDS):
         lower_private_work.resolution.command_table_lookups = 1;
-    }
+        lower_private_work.resolution.command_table_indirect_loads = 1;
+        lower_private_work.resolution.command_table_indirect_calls = 1;
+    $endif
     assert(command_policy_observation_matches(
         &lower_private_work,
         &private_budget,
