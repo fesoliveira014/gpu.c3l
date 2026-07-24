@@ -251,6 +251,12 @@ fn void descriptor_buffer_binding_is_cached_per_command_and_bind_point() @test {
             DB_WRITE_SPIRV[..],
         );
     defer gpu::destroy_pipeline(&device, first_compute)!!;
+    gpu::PipelineHandle compute_alias =
+        create_descriptor_buffer_binding_compute_pipeline(
+            &device,
+            DB_WRITE_SPIRV[..],
+        );
+    defer gpu::destroy_pipeline(&device, compute_alias)!!;
     gpu::PipelineHandle second_compute =
         create_descriptor_buffer_binding_compute_pipeline(
             &device,
@@ -293,10 +299,35 @@ fn void descriptor_buffer_binding_is_cached_per_command_and_bind_point() @test {
         && stats.strict_heap_buffer_bind_commands == 0
         && stats.strict_heap_offset_commands == 0,
         "descriptor-buffer publication preserves cached heap binding");
+
+    gpu::Barrier descriptor_hazard = {
+        .before  = { .compute = true },
+        .after   = { .compute = true },
+        .hazards = { .descriptors = true },
+    };
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_barrier(&commands, &descriptor_hazard)!!;
+    gpu::cmd_bind_pipeline(&commands, second_compute)!!;
+    stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 0
+        && stats.strict_heap_set_bind_commands == 0
+        && stats.strict_heap_buffer_bind_commands == 0
+        && stats.strict_heap_offset_commands == 0,
+        "a descriptor hazard barrier preserves cached buffer binding");
+
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::invalidate_strict_heap_binding(record);
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, second_compute)!!;
+    stats = gpu::command_resolution_stats();
+    assert(stats.pipeline_bind_commands == 0
+        && stats.strict_heap_set_bind_commands == 0
+        && stats.strict_heap_buffer_bind_commands == 1
+        && stats.strict_heap_offset_commands == 1,
+        "full invalidation restores the buffer and active bind-point offset");
     discard_test_commands(&commands)!!;
 
     commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
     gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, first_compute)!!;
     gpu::cmd_bind_pipeline(&commands, graphics)!!;
@@ -304,6 +335,27 @@ fn void descriptor_buffer_binding_is_cached_per_command_and_bind_point() @test {
     assert(stats.strict_heap_buffer_bind_commands == 1
         && stats.strict_heap_offset_commands == 2,
         "a reused command buffer starts with fresh descriptor binding state");
+    discard_test_commands(&commands)!!;
+
+    uint[3] switch_counts = { 16, 256, 4096 };
+    foreach (switch_count : switch_counts) {
+        commands = gpu::begin_commands(&allocator)!!;
+        gpu::reset_command_resolution_stats();
+        for (uint i = 0; i < switch_count; i++) {
+            gpu::PipelineHandle selected = i % 3 == 0
+                ? first_compute
+                : i % 3 == 1
+                    ? compute_alias
+                    : second_compute;
+            gpu::cmd_bind_pipeline(&commands, selected)!!;
+        }
+        stats = gpu::command_resolution_stats();
+        assert(stats.strict_heap_set_bind_commands == 0
+            && stats.strict_heap_buffer_bind_commands == 1
+            && stats.strict_heap_offset_commands == 1,
+            "scaled distinct and alias switches bind the strict buffer once");
+        discard_test_commands(&commands)!!;
+    }
     assert(capture.errors == 0,
         "descriptor-buffer binding cache records no Vulkan validation errors");
 }

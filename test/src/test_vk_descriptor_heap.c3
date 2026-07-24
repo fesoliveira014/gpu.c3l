@@ -249,6 +249,19 @@ fn gpu::TextureHandle make_heap_view_texture(gpu::Device* device) {
     return gpu::create_texture(device, &desc)!!;
 }
 
+fn void strict_pipeline_layouts_share_heap_set_zero() @test {
+    gpu::Device device = make_heap_test_device(1, 1);
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+
+    assert(state.graphics_layout != null && state.compute_layout != null,
+        "strict devices create both shared pipeline layouts");
+    assert(state.strict_pipeline_set_layout
+            == state.strict_heap.descriptors.set_layout,
+        "strict graphics and compute layouts share the heap set-zero layout");
+}
+
 fn void sampler_lookup_scale_empty_bucket_miss_has_zero_work() @test {
     gpu::Device device = make_heap_test_device(1, 1);
     defer destroy_test_device(&device)!!;

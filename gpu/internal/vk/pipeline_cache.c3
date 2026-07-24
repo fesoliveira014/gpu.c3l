@@ -449,9 +449,24 @@ fn bool cache_blob_compatible(VkDeviceState* state, char[] blob) @private {
     return mem::equals(blob[16:16], (char[])props.pipeline_cache_uuid[0:16]);
 }
 
+fn void? validate_strict_pipeline_layout_domain(VkDeviceState* state) @private {
+    if (state.strict_pipeline_set_layout == null
+        || state.strict_pipeline_set_layout
+            != state.strict_heap.descriptors.set_layout
+        || state.graphics_layout == null
+        || state.compute_layout == null) {
+        return gpu::BACKEND_ERROR~;
+    }
+}
+
 <* Shared layouts, cache entry storage, and the driver VkPipelineCache. Requires
    the descriptor heap (set layout) to exist. *>
 fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data, uint capacity) {
+    state.strict_pipeline_set_layout =
+        state.strict_heap.descriptors.set_layout;
+    if (state.strict_pipeline_set_layout == null) {
+        return gpu::BACKEND_ERROR~;
+    }
     uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     vk::PushConstantRange range = {
         .stage_flags = (vk::ShaderStageFlags)push_stages,
@@ -459,7 +474,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         .size        = GRAPHICS_ROOT_PUSH_SIZE,
     };
     vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
-        .set_set_layouts((&state.strict_heap.descriptors.set_layout)[:1])
+        .set_set_layouts((&state.strict_pipeline_set_layout)[:1])
         .set_push_constant_ranges((&range)[:1]);
     check_backend_result(
         state:     state,
@@ -480,7 +495,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
     };
     vk::PipelineLayoutCreateInfo compute_layout_info =
         vk::pipeline_layout_create_info()
-            .set_set_layouts((&state.strict_heap.descriptors.set_layout)[:1])
+            .set_set_layouts((&state.strict_pipeline_set_layout)[:1])
             .set_push_constant_ranges((&compute_root)[:1]);
     check_backend_result(
         state:     state,
@@ -498,6 +513,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         object_handle: (ulong)state.compute_layout,
         name:          "gpu_compute_layout",
     );
+    validate_strict_pipeline_layout_domain(state)!;
     if (state.generated_work.enabled) {
         state.generated_dispatch_layout = create_generated_work_layout(
             state:           state,
@@ -629,6 +645,7 @@ fn void destroy_pipeline_shared(VkDeviceState* state) {
         vk::destroy_pipeline_layout(state.device, state.graphics_layout, null);
         state.graphics_layout = (vk::PipelineLayout)null;
     }
+    state.strict_pipeline_set_layout = (vk::DescriptorSetLayout)null;
     if (state.driver_cache != null) {
         vk::destroy_pipeline_cache(state.device, state.driver_cache, null);
         state.driver_cache = (vk::PipelineCache)null;
