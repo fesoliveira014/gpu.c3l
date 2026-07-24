@@ -90,6 +90,12 @@ fn void accumulate_resolution_stats(
     total.encoder_lease_comparisons += sample.encoder_lease_comparisons;
     total.recording_commands += sample.recording_commands;
     total.native_commands += sample.native_commands;
+    total.pipeline_bind_commands += sample.pipeline_bind_commands;
+    total.strict_heap_set_bind_commands += sample.strict_heap_set_bind_commands;
+    total.strict_heap_buffer_bind_commands +=
+        sample.strict_heap_buffer_bind_commands;
+    total.strict_heap_offset_commands +=
+        sample.strict_heap_offset_commands;
 }
 
 fn double record_barriers(
@@ -440,6 +446,11 @@ fn int main() {
         "warm recording does not resolve the pipeline table after bind");
     assert(resolution.pipeline_cache_lookups == 0,
         "warm recording does not resolve the pipeline cache after bind");
+    assert(resolution.pipeline_bind_commands == 0
+        && resolution.strict_heap_set_bind_commands == 0
+        && resolution.strict_heap_buffer_bind_commands == 0
+        && resolution.strict_heap_offset_commands == 0,
+        "post-bind recording emits no pipeline or descriptor heap binds");
     assert(resolution.command_policy_selections == 0,
         "warm recording does not select a validation policy");
     assert(resolution.encoder_cell_computations == expected_recording_commands,
@@ -508,9 +519,13 @@ fn int main() {
         preprocess_allocations,
     );
     io::printfn(
-        "resolution: recording_commands=%d native_commands=%d device_registry=%d retained_pins=%d lifecycle_vtable=%d command_table=%d pipeline_table=%d pipeline_cache=%d policy=%d encoder_cells=%d encoder_leases=%d",
+        "resolution: recording_commands=%d native_commands=%d pipeline_binds=%d descriptor_set_binds=%d descriptor_buffer_binds=%d descriptor_buffer_offsets=%d device_registry=%d retained_pins=%d lifecycle_vtable=%d command_table=%d pipeline_table=%d pipeline_cache=%d policy=%d encoder_cells=%d encoder_leases=%d",
         resolution.recording_commands,
         resolution.native_commands,
+        resolution.pipeline_bind_commands,
+        resolution.strict_heap_set_bind_commands,
+        resolution.strict_heap_buffer_bind_commands,
+        resolution.strict_heap_offset_commands,
         resolution.device_registry_resolutions,
         resolution.retained_pin_operations,
         resolution.lifecycle_vtable_dispatches,

@@ -509,12 +509,15 @@ snapshots begin before pipeline binding: binding the opaque pipeline handle
 performs exactly one pipeline-table and one pipeline-cache lookup and records
 one `pipeline_bind_commands` increment for the selected bind point, while
 registry, retained-pin, lifecycle-vtable, command-table, and policy work remain
-zero. Dispatch and draw add no further resolution and each emits exactly one
-root push plus its native execution command. The dispatch test also replaces
-the bound handle's backing slot with invalid, different pipeline state after
-binding and requires the recorded layout snapshot to remain unchanged. A
-compile-time exact member-shape guard rejects adding or substituting a hidden
-slot pointer or index/generation back-reference without an explicit gate update.
+zero. Exact heap counters require one indexing set bind or descriptor-buffer
+offset per used bind point and one descriptor-buffer bind per command record;
+later compatible pipeline changes add none. Dispatch and draw add no further
+resolution and each emits exactly one root push plus its native execution
+command. The dispatch test also replaces the bound handle's backing slot with
+invalid, different pipeline state after binding and requires the recorded
+layout snapshot to remain unchanged. A compile-time exact member-shape guard
+rejects adding or substituting a hidden slot pointer or index/generation
+back-reference without an explicit gate update.
 
 The benchmark runner builds thirteen executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,

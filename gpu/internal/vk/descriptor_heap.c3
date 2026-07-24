@@ -836,11 +836,38 @@ fn void? validate_descriptor_heap_binding(VkDeviceState* state) {
     if (!state.strict_heap.enabled) return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::PipelineLayout layout, vk::PipelineBindPoint bind_point) {
+fn void invalidate_strict_heap_binding(CommandRecord* record) {
+    record.strict_heap_binding = {};
+}
+
+fn void invalidate_strict_heap_bind_point(
+    CommandRecord* record,
+    vk::PipelineBindPoint bind_point,
+) {
+    if (bind_point == vk::PipelineBindPoint.COMPUTE) {
+        record.strict_heap_binding.compute_offsets_set = false;
+        record.strict_heap_binding.compute_set_bound = false;
+        return;
+    }
+    record.strict_heap_binding.graphics_offsets_set = false;
+    record.strict_heap_binding.graphics_set_bound = false;
+}
+
+fn void? bind_descriptor_heap(
+    VkDeviceState* state,
+    CommandRecord* record,
+    vk::PipelineLayout layout,
+    vk::PipelineBindPoint bind_point,
+) {
     validate_descriptor_heap_binding(state)!;
+    StrictHeapCommandBinding* binding = &record.strict_heap_binding;
     if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
+        bool set_bound = bind_point == vk::PipelineBindPoint.COMPUTE
+            ? binding.compute_set_bound
+            : binding.graphics_set_bound;
+        if (set_bound) return;
         vk::cmd_bind_descriptor_sets(
-            command_buffer:        cb,
+            command_buffer:        record.command_buffer,
             pipeline_bind_point:   bind_point,
             layout:                layout,
             first_set:             HEAP_SET,
@@ -849,23 +876,42 @@ fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pi
             dynamic_offset_count:  0,
             p_dynamic_offsets:     null,
         );
+        gpu::internal::note_command_strict_heap_set_bind();
         gpu::internal::note_command_native_call();
+        if (bind_point == vk::PipelineBindPoint.COMPUTE) {
+            binding.compute_set_bound = true;
+        } else {
+            binding.graphics_set_bound = true;
+        }
         return;
     }
 
-    uint usage = (uint)vk::BufferUsageFlagBits.RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT
-        | (uint)vk::BufferUsageFlagBits.SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
-        | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
-    vk::DescriptorBufferBindingInfoEXT binding_info = vk::descriptor_buffer_binding_info_ext();
-    binding_info.address = state.strict_heap.descriptors.descriptor_buffer_gpu;
-    binding_info.usage   = (vk::BufferUsageFlags)usage;
-    state.device_dispatch.descriptor_buffer.cmd_bind_descriptor_buffers(cb, 1, &binding_info);
-    gpu::internal::note_command_native_call();
+    if (!binding.descriptor_buffer_bound) {
+        uint usage = (uint)vk::BufferUsageFlagBits.RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT
+            | (uint)vk::BufferUsageFlagBits.SAMPLER_DESCRIPTOR_BUFFER_BIT_EXT
+            | (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT;
+        vk::DescriptorBufferBindingInfoEXT binding_info =
+            vk::descriptor_buffer_binding_info_ext();
+        binding_info.address = state.strict_heap.descriptors.descriptor_buffer_gpu;
+        binding_info.usage   = (vk::BufferUsageFlags)usage;
+        state.device_dispatch.descriptor_buffer.cmd_bind_descriptor_buffers(
+            record.command_buffer,
+            1,
+            &binding_info,
+        );
+        gpu::internal::note_command_strict_heap_buffer_bind();
+        gpu::internal::note_command_native_call();
+        binding.descriptor_buffer_bound = true;
+    }
 
+    bool offsets_set = bind_point == vk::PipelineBindPoint.COMPUTE
+        ? binding.compute_offsets_set
+        : binding.graphics_offsets_set;
+    if (offsets_set) return;
     uint buffer_index = 0;
     vk::DeviceSize offset = 0;
     state.device_dispatch.descriptor_buffer.cmd_set_descriptor_buffer_offsets(
-        cb,
+        record.command_buffer,
         bind_point,
         layout,
         HEAP_SET,
@@ -873,7 +919,13 @@ fn void? bind_descriptor_heap(VkDeviceState* state, vk::CommandBuffer cb, vk::Pi
         &buffer_index,
         &offset,
     );
+    gpu::internal::note_command_strict_heap_offset();
     gpu::internal::note_command_native_call();
+    if (bind_point == vk::PipelineBindPoint.COMPUTE) {
+        binding.compute_offsets_set = true;
+    } else {
+        binding.graphics_offsets_set = true;
+    }
 }
 
 fn TextureSlot*? resolve_descriptor_texture(

@@ -133,7 +133,9 @@ COMMAND_RECORD_INVARIANTS = re.compile(
 )
 COMMAND_RECORD_RESOLUTION = re.compile(
     r"^resolution: recording_commands=(?P<recording_commands>[1-9][0-9]*) "
-    r"native_commands=[1-9][0-9]* device_registry=0 "
+    r"native_commands=[1-9][0-9]* pipeline_binds=0 "
+    r"descriptor_set_binds=0 descriptor_buffer_binds=0 "
+    r"descriptor_buffer_offsets=0 device_registry=0 "
     r"retained_pins=0 lifecycle_vtable=0 command_table=0 "
     r"pipeline_table=0 pipeline_cache=0 policy=0 "
     r"encoder_cells=(?P=recording_commands) "

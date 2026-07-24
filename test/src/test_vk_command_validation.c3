@@ -1096,6 +1096,58 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::CommandResolutionStats bind_stats = gpu::command_resolution_stats();
     assert(bind_stats.pipeline_bind_commands == 2,
         "repeated binds and aliases emit once per selected bind point");
+    assert_strict_heap_bind_work(state, bind_stats, 2);
+
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::invalidate_strict_heap_bind_point(
+        record,
+        vk::PipelineBindPoint.COMPUTE,
+    );
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
+    gpu::CommandResolutionStats point_rebind =
+        gpu::command_resolution_stats();
+    assert(point_rebind.pipeline_bind_commands == 0,
+        "bind-point heap invalidation preserves the native pipeline cache");
+    assert_strict_heap_bind_work(state, point_rebind, 1, 0);
+
+    vk::invalidate_strict_heap_binding(record);
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
+    gpu::CommandResolutionStats full_rebind =
+        gpu::command_resolution_stats();
+    assert(full_rebind.pipeline_bind_commands == 0,
+        "full heap invalidation preserves the native pipeline cache");
+    assert_strict_heap_bind_work(state, full_rebind, 1);
+
+    gpu::SamplerDesc sampler_desc = {};
+    (void)gpu::intern_sampler(&device, &sampler_desc)!!;
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
+    gpu::CommandResolutionStats publication_stats =
+        gpu::command_resolution_stats();
+    assert(publication_stats.pipeline_bind_commands == 0
+        && publication_stats.strict_heap_set_bind_commands == 0
+        && publication_stats.strict_heap_buffer_bind_commands == 0
+        && publication_stats.strict_heap_offset_commands == 0,
+        "descriptor publication preserves cached heap binding");
+
+    gpu::Barrier descriptor_hazard = {
+        .before  = { .compute = true },
+        .after   = { .compute = true },
+        .hazards = { .descriptors = true },
+    };
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_barrier(&commands, &descriptor_hazard)!!;
+    gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
+    gpu::CommandResolutionStats hazard_stats =
+        gpu::command_resolution_stats();
+    assert(hazard_stats.pipeline_bind_commands == 0
+        && hazard_stats.strict_heap_set_bind_commands == 0
+        && hazard_stats.strict_heap_buffer_bind_commands == 0
+        && hazard_stats.strict_heap_offset_commands == 0,
+        "a descriptor hazard barrier does not invalidate heap binding");
+
     gpu::reset_command_resolution_stats();
     gpu::internal::vk::reset_root_push_observation();
     gpu::cmd_dispatch(
@@ -1118,8 +1170,21 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     ValComputeCtx stale = make_val_compute_ctx(&device);
     gpu::PipelineHandle stale_handle = stale.pipeline;
     gpu::destroy_pipeline(&device, stale_handle)!!;
+    vk::StrictHeapCommandBinding heap_binding_before =
+        record.strict_heap_binding;
     fault stale_bind = @catch(gpu::cmd_bind_pipeline(&commands, stale_handle));
     assert(stale_bind == gpu::INVALID_HANDLE, "binding a stale pipeline faults INVALID_HANDLE");
+    assert(record.strict_heap_binding.descriptor_buffer_bound
+            == heap_binding_before.descriptor_buffer_bound
+        && record.strict_heap_binding.graphics_offsets_set
+            == heap_binding_before.graphics_offsets_set
+        && record.strict_heap_binding.compute_offsets_set
+            == heap_binding_before.compute_offsets_set
+        && record.strict_heap_binding.graphics_set_bound
+            == heap_binding_before.graphics_set_bound
+        && record.strict_heap_binding.compute_set_bound
+            == heap_binding_before.compute_set_bound,
+        "failed pipeline validation preserves strict heap state");
     gpu::cmd_dispatch(
         commands: &commands,
         root:     root,
