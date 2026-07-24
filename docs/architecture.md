@@ -755,6 +755,14 @@ while `FULL` adds semantic layout, stage, access, usage, queue, and presentation
 diagnostics. Each accepted barrier resolves its texture and range once, lowers
 its two states once, and emits one native barrier.
 
+Presentation barriers separate external WSI ordering from queue-side access.
+Leaving `PRESENT` uses no source access and anchors the layout transition to
+the paired first consumer stage covered by the acquire readiness wait. Entering
+`PRESENT` preserves the last queue producer and uses destination `NONE`/`NONE`;
+the existing presentation semaphore orders the external consumer. Public
+`PRESENT` stages/access remain empty, and swapchain sharing and queue-family
+rules are unchanged.
+
 Render pass boundaries do not imply shader-read or transfer-read readiness.
 
 ## 9. Descriptor heap model

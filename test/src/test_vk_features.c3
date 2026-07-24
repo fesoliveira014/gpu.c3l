@@ -425,7 +425,7 @@ fn void compositional_texture_states_map_exactly() @test {
     ulong depth_access =
         (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    TextureStateMapping[9] cases = {
+    TextureStateMapping[8] cases = {
         {
             { .layout = gpu::TextureLayout.UNDEFINED },
             vk::PipelineStageFlagBits2.STAGE_2_NONE,
@@ -493,29 +493,71 @@ fn void compositional_texture_states_map_exactly() @test {
             (vk::AccessFlags2)depth_access,
             vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         },
-        {
-            { .layout = gpu::TextureLayout.PRESENT },
-            vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            vk::AccessFlagBits2.ACCESS_2_NONE,
-            vk::ImageLayout.PRESENT_SRC_KHR,
-        },
     };
 
     foreach (&expected : cases) {
         gpu::internal::vk::TextureStateScope actual = gpu::internal::vk::texture_state_to_vk(
-            expected.state,
-            gpu::Format.RGBA8_UNORM,
+            state:         expected.state,
+            format:        gpu::Format.RGBA8_UNORM,
+            side:          gpu::internal::vk::TextureStateSide.BEFORE,
+            paired_stages: {},
         );
         assert(actual.stages == expected.stages, "texture state stage scope maps exactly");
         assert(actual.access == expected.access, "texture state access scope maps exactly");
         assert(actual.layout == expected.layout, "texture state layout maps exactly");
     }
+
+    gpu::internal::vk::TextureStateScope ordinary_after =
+        gpu::internal::vk::texture_state_to_vk(
+            state:         gpu::storage_at({ .compute }, { .read, .write }),
+            format:        gpu::Format.RGBA8_UNORM,
+            side:          gpu::internal::vk::TextureStateSide.AFTER,
+            paired_stages: { .color_output },
+        );
+    assert(ordinary_after.stages
+            == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+        "ordinary destination stages ignore paired presentation context");
+    assert(ordinary_after.access == (vk::AccessFlags2)shader_storage_access,
+        "ordinary destination access remains unchanged");
+    assert(ordinary_after.layout == vk::ImageLayout.GENERAL,
+        "ordinary destination layout remains unchanged");
+
+    gpu::internal::vk::TextureStateScope present_before =
+        gpu::internal::vk::texture_state_to_vk(
+            state:         { .layout = gpu::TextureLayout.PRESENT },
+            format:        gpu::Format.RGBA8_UNORM,
+            side:          gpu::internal::vk::TextureStateSide.BEFORE,
+            paired_stages: { .transfer },
+        );
+    assert(present_before.stages
+            == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        "present source anchors to the paired first-consumer stage");
+    assert(present_before.access == vk::AccessFlagBits2.ACCESS_2_NONE,
+        "present source has no native access");
+    assert(present_before.layout == vk::ImageLayout.PRESENT_SRC_KHR,
+        "present source retains the presentation layout");
+
+    gpu::internal::vk::TextureStateScope present_after =
+        gpu::internal::vk::texture_state_to_vk(
+            state:         { .layout = gpu::TextureLayout.PRESENT },
+            format:        gpu::Format.RGBA8_UNORM,
+            side:          gpu::internal::vk::TextureStateSide.AFTER,
+            paired_stages: { .color_output },
+        );
+    assert(present_after.stages == vk::PipelineStageFlagBits2.STAGE_2_NONE,
+        "present destination has no native stage");
+    assert(present_after.access == vk::AccessFlagBits2.ACCESS_2_NONE,
+        "present destination has no native access");
+    assert(present_after.layout == vk::ImageLayout.PRESENT_SRC_KHR,
+        "present destination retains the presentation layout");
 }
 
 fn void sampled_depth_state_chooses_depth_read_only_layout() @test {
     gpu::internal::vk::TextureStateScope sampled = gpu::internal::vk::texture_state_to_vk(
-        gpu::sampled_at({ .fragment_shader }),
-        gpu::Format.D32_FLOAT,
+        state:         gpu::sampled_at({ .fragment_shader }),
+        format:        gpu::Format.D32_FLOAT,
+        side:          gpu::internal::vk::TextureStateSide.AFTER,
+        paired_stages: {},
     );
     assert(sampled.layout == vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL,
         "sampled depth textures use the read-only layout");
