@@ -14,6 +14,12 @@ const gpu::internal::RuntimeBackendVTable PRESENTATION_INSTANCE_GATE_VTABLE @pri
     .destroy_runtime = &destroy_presentation_instance_gate_runtime,
     .destroy_surface = &destroy_presentation_instance_gate_surface,
 };
+
+struct ResourceAgnosticCreateObservation {
+    bool selected;
+    uint calls;
+}
+
 fn uint live_device_slot_count() @private {
     uint live_count;
     for (uint i = 0; i < gpu::internal::MAX_DEVICES; i++) {
@@ -43,6 +49,59 @@ fn fault run_injected_resource_agnostic_texture_sync_create(
     );
     gpu::internal::runtime_release_device(&retained_runtime)!!;
     return creation_fault;
+}
+
+fn vk::Result observe_resource_agnostic_texture_sync_create(
+    void* user_data,
+    vk::PhysicalDevice physical_device,
+    vk::DeviceCreateInfo* requested_info,
+    vk::Device* device,
+) @private {
+    (void)physical_device;
+    (void)device;
+    ResourceAgnosticCreateObservation* observation =
+        (ResourceAgnosticCreateObservation*)user_data;
+    observation.calls++;
+
+    bool extension_enabled;
+    for (uint i = 0; i < requested_info.enabled_extension_count; i++) {
+        ZString extension =
+            (ZString)requested_info.pp_enabled_extension_names[i];
+        if (extension.str_view()
+            == gpu::internal::vk::RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION
+                .str_view()) {
+            extension_enabled = true;
+            break;
+        }
+    }
+    vk::PhysicalDeviceFeatures2* features =
+        (vk::PhysicalDeviceFeatures2*)requested_info.p_next;
+    if (!observation.selected) {
+        vk::BaseOutStructure* first =
+            (vk::BaseOutStructure*)features.p_next;
+        assert(
+            !extension_enabled
+                && first != null
+                && first.s_type
+                    != vk::StructureType
+                        .PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR,
+            "unrequested creation omits the unified-layout extension and feature"
+        );
+        return vk::Result.ERROR_INITIALIZATION_FAILED;
+    }
+
+    vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR* unified =
+        (vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR*)features.p_next;
+    assert(
+        extension_enabled
+            && unified.s_type
+                == vk::StructureType
+                    .PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR
+            && unified.unified_image_layouts == vk::TRUE
+            && unified.unified_image_layouts_video == vk::FALSE,
+        "requested creation enables one exact unified feature and no video"
+    );
+    return vk::Result.ERROR_INITIALIZATION_FAILED;
 }
 
 fn void resource_agnostic_texture_sync_support_requires_extension_and_feature() @test {
@@ -196,8 +255,7 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
             "creation rechecks and rejects a missing extension"
         );
         assert(
-            missing_extension.resource_agnostic_texture_sync_requested
-                && !missing_extension.resource_agnostic_texture_sync_selected
+            !missing_extension.resource_agnostic_texture_sync_selected
                 && missing_extension.reached
                     == gpu::internal::vk::DeviceCreationCheckpoint.NONE
                 && missing_extension.rollback_count == 0,
@@ -218,8 +276,7 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
             "creation rechecks and rejects a missing feature"
         );
         assert(
-            missing_feature.resource_agnostic_texture_sync_requested
-                && !missing_feature.resource_agnostic_texture_sync_selected
+            !missing_feature.resource_agnostic_texture_sync_selected
                 && missing_feature.reached
                     == gpu::internal::vk::DeviceCreationCheckpoint.NONE
                 && missing_feature.rollback_count == 0,
@@ -227,13 +284,14 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
         );
 
         uint live_slots_before = live_device_slot_count();
+        ResourceAgnosticCreateObservation unrequested_observation;
         gpu::internal::vk::DeviceCreationProbe unrequested = {
             .resource_agnostic_texture_sync_override = true,
             .resource_agnostic_texture_sync_extension_available = true,
             .resource_agnostic_texture_sync_feature_available = true,
-            .native_device_create_override = true,
-            .native_device_create_result =
-                vk::Result.ERROR_INITIALIZATION_FAILED,
+            .native_device_create_hook =
+                &observe_resource_agnostic_texture_sync_create,
+            .native_device_create_user_data = &unrequested_observation,
         };
         assert(
             run_injected_resource_agnostic_texture_sync_create(
@@ -245,15 +303,8 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
             "the injected native failure maps through device creation"
         );
         assert(
-            !unrequested.resource_agnostic_texture_sync_requested
-                && !unrequested.resource_agnostic_texture_sync_selected
-                && !unrequested.resource_agnostic_texture_sync_extension_enabled
-                && unrequested.resource_agnostic_texture_sync_feature_struct_count
-                    == 0
-                && unrequested.resource_agnostic_texture_sync_feature_enabled
-                    == vk::FALSE
-                && unrequested.resource_agnostic_texture_sync_video_enabled
-                    == vk::FALSE,
+            !unrequested.resource_agnostic_texture_sync_selected
+                && unrequested_observation.calls == 1,
             "capable unrequested creation omits the extension and feature"
         );
         assert(
@@ -262,13 +313,16 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
             "unrequested native failure rolls back without publication"
         );
 
+        ResourceAgnosticCreateObservation requested_observation = {
+            .selected = true,
+        };
         gpu::internal::vk::DeviceCreationProbe requested = {
             .resource_agnostic_texture_sync_override = true,
             .resource_agnostic_texture_sync_extension_available = true,
             .resource_agnostic_texture_sync_feature_available = true,
-            .native_device_create_override = true,
-            .native_device_create_result =
-                vk::Result.ERROR_INITIALIZATION_FAILED,
+            .native_device_create_hook =
+                &observe_resource_agnostic_texture_sync_create,
+            .native_device_create_user_data = &requested_observation,
         };
         assert(
             run_injected_resource_agnostic_texture_sync_create(
@@ -280,18 +334,9 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
             "requested support reaches the injected native create"
         );
         assert(
-            requested.resource_agnostic_texture_sync_requested
-                && requested.resource_agnostic_texture_sync_selected
-                && requested.resource_agnostic_texture_sync_extension_enabled
-                && requested.resource_agnostic_texture_sync_feature_struct_count
-                    == 1
-                && requested.resource_agnostic_texture_sync_feature_structure_type
-                    == vk::StructureType.PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR
-                && requested.resource_agnostic_texture_sync_feature_enabled
-                    == vk::TRUE
-                && requested.resource_agnostic_texture_sync_video_enabled
-                    == vk::FALSE,
-            "requested creation enables one exact unified feature and no video"
+            requested.resource_agnostic_texture_sync_selected
+                && requested_observation.calls == 1,
+            "requested support reaches the exact selected native path"
         );
         assert(
             requested.rollback_count == 1

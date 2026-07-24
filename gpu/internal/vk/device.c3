@@ -122,15 +122,7 @@ struct DeviceCreationProbe {
     bool                     resource_agnostic_texture_sync_override;
     bool                     resource_agnostic_texture_sync_extension_available;
     bool                     resource_agnostic_texture_sync_feature_available;
-    bool                     resource_agnostic_texture_sync_requested;
     bool                     resource_agnostic_texture_sync_selected;
-    bool                     resource_agnostic_texture_sync_extension_enabled;
-    uint                     resource_agnostic_texture_sync_feature_struct_count;
-    vk::StructureType        resource_agnostic_texture_sync_feature_structure_type;
-    uint                     resource_agnostic_texture_sync_feature_enabled;
-    uint                     resource_agnostic_texture_sync_video_enabled;
-    bool                     native_device_create_override;
-    vk::Result               native_device_create_result;
     DeviceCreateHook         native_device_create_hook @if(env::TESTING);
     void*                    native_device_create_user_data @if(env::TESTING);
     bool                     descriptor_buffer_override;
@@ -981,10 +973,6 @@ fn gpu::Device? create_vk_device_with_probe(
             adapter_state.physical_device,
             probe,
         );
-    }
-    if (probe != null) {
-        probe.resource_agnostic_texture_sync_requested =
-            resource_agnostic_texture_sync_requested;
     }
     bool resource_agnostic_texture_sync_selected =
         select_resource_agnostic_texture_sync(
@@ -2063,29 +2051,6 @@ fn void? create_logical_device_with_queue_infos(
         device_info = device_info.set_enabled_extension_names(extensions[:extension_count]);
     }
 
-    if (probe != null) {
-        bool resource_agnostic_texture_sync_extension_enabled;
-        foreach (extension : extensions[:extension_count]) {
-            if (extension.str_view()
-                == RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION.str_view()) {
-                resource_agnostic_texture_sync_extension_enabled = true;
-                break;
-            }
-        }
-        probe.resource_agnostic_texture_sync_extension_enabled =
-            resource_agnostic_texture_sync_extension_enabled;
-        probe.resource_agnostic_texture_sync_feature_struct_count =
-            features2.p_next == &resource_agnostic_texture_sync_features
-                ? 1
-                : 0;
-        probe.resource_agnostic_texture_sync_feature_structure_type =
-            resource_agnostic_texture_sync_features.s_type;
-        probe.resource_agnostic_texture_sync_feature_enabled =
-            resource_agnostic_texture_sync_features.unified_image_layouts;
-        probe.resource_agnostic_texture_sync_video_enabled =
-            resource_agnostic_texture_sync_features.unified_image_layouts_video;
-    }
-
     vk::Result create_result;
     $if env::TESTING:
         if (probe != null && probe.native_device_create_hook != null) {
@@ -2099,16 +2064,12 @@ fn void? create_logical_device_with_queue_infos(
             return;
         }
     $endif
-    if (probe != null && probe.native_device_create_override) {
-        create_result = probe.native_device_create_result;
-    } else {
-        create_result = vk::create_device(
-            physical_device: state.physical_device,
-            p_create_info:   &device_info,
-            p_allocator:     null,
-            p_device:        &state.device,
-        );
-    }
+    create_result = vk::create_device(
+        physical_device: state.physical_device,
+        p_create_info:   &device_info,
+        p_allocator:     null,
+        p_device:        &state.device,
+    );
     check_backend_create_result(create_result)!;
 }
 

@@ -255,7 +255,6 @@ enum QueueKind : int {
 struct DeviceCaps {
     bool strict_enabled;
     bool presentation_enabled;
-    bool resource_agnostic_texture_sync;
     bool buffer_device_address;
     bool synchronization2;
     bool dynamic_rendering;
@@ -289,6 +288,7 @@ struct DeviceCaps {
     float max_sampler_lod_bias;
     // 0 means anisotropic filtering is unsupported.
     float max_sampler_anisotropy;
+    bool resource_agnostic_texture_sync;
 }
 
 alias DebugMessageCallback = fn void (DebugMessage*, void*);

@@ -292,7 +292,6 @@ by every device created from that runtime. Destroy each device before its runtim
 DeviceCaps
     bool strict_enabled
     bool presentation_enabled
-    bool resource_agnostic_texture_sync
     bool buffer_device_address
     bool synchronization2
     bool dynamic_rendering
@@ -314,6 +313,7 @@ DeviceCaps
     usz min_texel_buffer_alignment
     float max_sampler_lod_bias
     float max_sampler_anisotropy
+    bool resource_agnostic_texture_sync
 
 Device                           (slot | generation | reserved)
 get_device_backend(Device*)      -> BackendKind?
