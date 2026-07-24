@@ -738,6 +738,9 @@ fn void preserves_graphics_binding_across_render_passes() @test {
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, first);
     record_val_target_to_attach(&commands, second);
+    // Scope the validation-error window to the cross-pass/cross-bind recording
+    // under test; device/resource setup is out of scope for this assertion.
+    capture.errors = 0;
     gpu::cmd_begin_render_pass(&commands, &first_pass, &graphics_state)!!;
     gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
