@@ -40,6 +40,8 @@ struct SyncDiagnosticCapture {
 
 struct BarrierEmitCapture {
     uint calls;
+    uint memory_barriers;
+    uint image_barriers;
 }
 
 fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
@@ -66,11 +68,12 @@ fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
 
 fn void capture_barrier_emit(
     void* user_data,
-    vk::MemoryBarrier2* native,
+    vk::DependencyInfo* dependency,
 ) {
-    (void)native;
     BarrierEmitCapture* capture = (BarrierEmitCapture*)user_data;
     capture.calls++;
+    capture.memory_barriers = dependency.memory_barrier_count;
+    capture.image_barriers = dependency.image_memory_barrier_count;
 }
 
 fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
@@ -134,9 +137,11 @@ fn void global_barrier_emits_no_texture_barrier() @test {
 
     assert(
         capture.calls == 1
+            && capture.memory_barriers == 1
+            && capture.image_barriers == 0
             && counters.native_memory_emissions == 1
             && counters.native_image_emissions == 0,
-        "one global barrier emits one memory barrier and no image barrier"
+        "the submitted dependency contains one memory barrier and no image barrier"
     );
     assert(
         counters.texture_helper_calls == 0

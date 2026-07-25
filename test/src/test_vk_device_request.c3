@@ -123,15 +123,20 @@ fn fault run_injected_device_create(
 ) @private {
     gpu::Runtime retained_runtime = *runtime;
     gpu::internal::runtime_retain_device(&retained_runtime)!!;
-    fault creation_fault = @catch(
+    gpu::Device? creation_result =
         gpu::internal::vk::create_vk_device_with_probe(
             adapter:          adapter,
             request:          request,
             retained_runtime: &retained_runtime,
             probe:            probe,
-        )
-    );
-    gpu::internal::runtime_release_device(&retained_runtime)!!;
+        );
+    fault creation_fault = @catch(creation_result);
+    if (creation_fault) {
+        gpu::internal::runtime_release_device(&retained_runtime)!!;
+        return creation_fault;
+    }
+    gpu::Device device = creation_result!!;
+    gpu::destroy_device(&device)!!;
     return creation_fault;
 }
 
@@ -799,21 +804,18 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
         ) {
             gpu::internal::vk::DeviceCreationCheckpoint checkpoint =
                 (gpu::internal::vk::DeviceCreationCheckpoint)checkpoint_ordinal;
-            gpu::Runtime retained_runtime = runtime;
-            gpu::internal::runtime_retain_device(&retained_runtime)!!;
             gpu::internal::vk::DeviceCreationProbe probe = { .fail_at = checkpoint };
             uint live_slots_before = live_device_slot_count();
 
             assert(
-                @catch(gpu::internal::vk::create_vk_device_with_probe(
-                    adapter:          &adapter,
-                    request:          &request,
-                    retained_runtime: &retained_runtime,
-                    probe:            &probe,
-                )) == gpu::BACKEND_ERROR,
+                run_injected_device_create(
+                    runtime: &runtime,
+                    adapter: &adapter,
+                    request: &request,
+                    probe:   &probe,
+                ) == gpu::BACKEND_ERROR,
                 "a checkpoint failure returns the backend fault"
             );
-            gpu::internal::runtime_release_device(&retained_runtime)!!;
             assert(probe.reached == checkpoint, "creation reaches the requested checkpoint");
             assert(probe.rollback_count == 1, "creation rolls back exactly once");
             assert(
@@ -864,9 +866,9 @@ fn void required_dynamic_color_features_are_enabled_transactionally() @test {
         assert(
             missing_support.reached
                     == gpu::internal::vk::DeviceCreationCheckpoint.NONE
-                && missing_support.rollback_count == 0
+                && missing_support.rollback_count == 1
                 && live_device_slot_count() == live_slots_before,
-            "missing color support rejects before state mutation or publication"
+            "the real feature gate rolls back once and publishes no device"
         );
 
         gpu::internal::vk::DeviceCreationProbe failure_probe = {

@@ -226,6 +226,8 @@ and both buffer-image copy directions. Tests cover
 `VK_IMAGE_LAYOUT_UNDEFINED`, both transfer-optimal layouts, color and
 depth/stencil sampled-read layouts, `VK_IMAGE_LAYOUT_GENERAL`, both
 attachment-optimal layouts, and `VK_IMAGE_LAYOUT_PRESENT_SRC_KHR`.
+Global barrier coverage separately proves the submitted dependency contains
+one memory barrier and no image barriers or texture-handle resolution.
 Invalid-input rollback must occur before native emission, and no test may
 depend on global backend layout history or an automatically inserted repair
 transition.
