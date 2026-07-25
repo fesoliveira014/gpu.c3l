@@ -118,6 +118,27 @@ fn bool? dynamic_state3_extension_absent(
     return extension.str_view() != "VK_EXT_extended_dynamic_state3";
 }
 
+fn bool? dynamic_state3_extension_query_host_oom(
+    vk::PhysicalDevice physical_device,
+    ZString extension,
+) {
+    return vk::ERROR_OUT_OF_HOST_MEMORY~;
+}
+
+fn bool? dynamic_state3_extension_query_device_oom(
+    vk::PhysicalDevice physical_device,
+    ZString extension,
+) {
+    return vk::ERROR_OUT_OF_DEVICE_MEMORY~;
+}
+
+fn bool? dynamic_state3_extension_query_layer_missing(
+    vk::PhysicalDevice physical_device,
+    ZString extension,
+) {
+    return vk::ERROR_LAYER_NOT_PRESENT~;
+}
+
 fn void required_dynamic_state3_extension_absence_is_mocked() @test {
     vk::PhysicalDevice physical_device = (vk::PhysicalDevice)(uptr)0xA0;
     assert(@catch(gpu::internal::vk::check_required_dynamic_state3_extension_with_query(
@@ -126,6 +147,31 @@ fn void required_dynamic_state3_extension_absence_is_mocked() @test {
     ))
         == gpu::UNSUPPORTED_FEATURE,
         "mocked EDS3 absence deterministically rejects adapter admission");
+}
+
+fn void required_dynamic_state3_extension_query_faults_are_mapped() @test {
+    vk::PhysicalDevice physical_device = (vk::PhysicalDevice)(uptr)0xA0;
+    assert(
+        @catch(gpu::internal::vk::check_required_dynamic_state3_extension_with_query(
+            physical_device,
+            &dynamic_state3_extension_query_host_oom,
+        )) == gpu::OUT_OF_HOST_MEMORY,
+        "extension-query host OOM maps into the public fault taxonomy"
+    );
+    assert(
+        @catch(gpu::internal::vk::check_required_dynamic_state3_extension_with_query(
+            physical_device,
+            &dynamic_state3_extension_query_device_oom,
+        )) == gpu::OUT_OF_DEVICE_MEMORY,
+        "extension-query device OOM maps into the public fault taxonomy"
+    );
+    assert(
+        @catch(gpu::internal::vk::check_required_dynamic_state3_extension_with_query(
+            physical_device,
+            &dynamic_state3_extension_query_layer_missing,
+        )) == gpu::UNSUPPORTED_FEATURE,
+        "a missing extension layer maps through the public unsupported-feature taxonomy"
+    );
 }
 
 fn void missing_feature_rejected() @test {

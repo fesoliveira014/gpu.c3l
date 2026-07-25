@@ -831,6 +831,22 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
         adapter_count: state.adapter_count,
     )!;
     state.runtime = runtime;
+    if (desc.debug_callback != null) {
+        gpu::DebugMessage message = {
+            .severity     = gpu::DebugMessageSeverity.INFO,
+            .category     = {
+                .backend = true,
+                .general = true,
+            },
+            .operation    = "create_runtime",
+            .backend_text = "stub runtime initialized",
+        };
+        gpu::internal::dispatch_debug_message(
+            desc.debug_callback,
+            desc.debug_user_data,
+            &message,
+        );
+    }
     return runtime;
 }
 
@@ -1357,9 +1373,8 @@ fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
 ) {
-    if (runtime_state == null || adapter_index >= runtime_state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+    if (adapter_index >= runtime_state.adapter_count) return gpu::INVALID_HANDLE~;
     if (!configured_device_baseline_support) return gpu::UNSUPPORTED_FEATURE~;
 }
 

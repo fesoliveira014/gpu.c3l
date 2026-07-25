@@ -1758,13 +1758,20 @@ method gpu::Runtime.is_valid
                     "uid": "gpu::internal::vk::VkRuntimeState",
                     "visibility": "public",
                 },
+                {
+                    "name": "VkRuntimeState",
+                    "uid": "gpu::internal::vk::testing::VkRuntimeState",
+                    "visibility": "public",
+                },
             ],
         }
         self.assertEqual(
             check_public_api.validate_generated_backend_privacy(document),
             [
                 "generated gpu::internal::vk::create_native_device "
-                "must remain private"
+                "must remain private",
+                "generated gpu::internal::vk::testing::VkRuntimeState "
+                "must remain private",
             ],
         )
 

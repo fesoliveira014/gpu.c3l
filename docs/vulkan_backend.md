@@ -18,6 +18,16 @@ Runtime and device registry entries store typed `VkRuntimeState*` and
 `VkDeviceState*` values. Public implementations pin or resolve those entries
 and call the corresponding private Vulkan functions directly.
 
+C3 0.8.0 has no package-private visibility. The four state declarations shared
+across `gpu::internal`, `gpu::internal::vk`, and the root implementation
+therefore use declaration-level `@public`: `VkRuntimeState`, `VkDeviceState`,
+`CommandRecord`, and `CommandOps`. Generated metadata can name these types and
+the library-owned command-token record pointer, but they are unsupported
+implementation details. Consumers must not import or name internal modules.
+
+There is no runtime backend plugin interface. Adding another backend is future
+source work, not a current stable private ABI.
+
 It imports:
 
 ```c3
@@ -817,9 +827,9 @@ cmd_texture_barrier -> vk::ImageMemoryBarrier2
 its producer and consumer stages; draw-argument and depth/stencil cache paths
 are enabled only by their hazard flags. Invalid,
 contradictory, consumer-incompatible, or queue-unsupported scopes fault before
-recording. Trusted entries retain safe lowering and command-state checks but
-treat detailed stage/hazard/queue misuse as a caller contract. Cross-queue
-ordering remains a submission completion-wait concern.
+recording under every policy. `FULL` additionally emits the detailed public
+contract diagnostic; `TRUSTED` returns the same fault without diagnostic work.
+Cross-queue ordering remains a submission completion-wait concern.
 
 A global barrier emits one `VkMemoryBarrier2` and no
 `VkImageMemoryBarrier2`. Because it has no texture identity or subresource
@@ -1109,5 +1119,5 @@ all native texture-layout consumers share the one explicit classic mapping
 offscreen dynamic rendering works
 SDL3 swapchain sample presents and resizes
 live resource leaks are reported
-no vk:: or vma:: type appears in public API signatures
+no vk:: or vma:: binding type appears in caller-supplied descriptors or callable signatures
 ```

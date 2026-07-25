@@ -167,7 +167,7 @@ fn void full_copy_capacity_rejection_is_transactional() @test {
         && destination_slot.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == destination_references_before,
-        "rejected copy performs no transient retain or release");
+        "rejected copy leaves both retained counters unchanged");
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
     assert(resolution.recording_commands == 1
@@ -436,7 +436,14 @@ fn void exercise_policy_matrix_render(
     gpu::DynamicRasterState raster;
     gpu::cmd_set_raster_state(&commands, &raster)!!;
     gpu::ColorState color = { .targets = color_targets[..] };
+    ulong native_before_color =
+        gpu::command_resolution_stats().native_commands;
     gpu::cmd_set_color_state(&commands, &color)!!;
+    ulong color_native_commands =
+        gpu::command_resolution_stats().native_commands
+        - native_before_color;
+    assert(color_native_commands == 3,
+        "required dynamic color emits exact native work");
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
@@ -467,6 +474,8 @@ fn void exercise_policy_matrix_render(
         draw_count:    1,
         index_span:    indices.span,
     )!!;
+    ulong native_before_indirect_count =
+        gpu::command_resolution_stats().native_commands;
     if (state.draw_indirect_count) {
         gpu::cmd_draw_indexed_indirect_count(
             commands:       &commands,
@@ -489,6 +498,12 @@ fn void exercise_policy_matrix_render(
         )) == gpu::UNSUPPORTED_FEATURE,
             "unsupported indirect-count draw still dispatches through the selected table");
     }
+    ulong indirect_count_native_commands =
+        gpu::command_resolution_stats().native_commands
+        - native_before_indirect_count;
+    assert(indirect_count_native_commands
+            == (ulong)(state.draw_indirect_count ? 3 : 0),
+        "indirect-count draw emits exact feature-dependent native work");
     gpu::cmd_draw_generated(
         commands:      &commands,
         records:       {},
@@ -503,8 +518,9 @@ fn void exercise_policy_matrix_render(
         index_span:    {},
     )!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    ulong native_commands = 38;
-    if (state.draw_indirect_count) native_commands += 2;
+    ulong native_commands = 34
+        + color_native_commands
+        + indirect_count_native_commands;
     finish_and_assert_command_family_observation(
         state:                              state,
         commands:                           &commands,
@@ -548,7 +564,7 @@ fn void exercise_command_families(
     gpu::RuntimeDesc desc = policy_runtime_desc(
         contract:      contract,
         vulkan_layers: vulkan_layers,
-        callback:      false,
+        callback:      true,
         debug_names:   true,
         capture:       &capture,
     );
@@ -613,6 +629,7 @@ fn void exercise_command_families(
         .height = 8,
     };
 
+    capture.calls = 0;
     exercise_policy_matrix_transfer(
         allocator:   &allocator,
         state:       state,
@@ -636,9 +653,11 @@ fn void exercise_command_families(
         indirect:  &indirect,
     );
     exercise_policy_matrix_labels(&allocator, state);
+    assert(capture.calls == 0,
+        "recorded command families raise no recording diagnostic");
 }
 
-fn void command_families_run_under_both_contract_modes() @test {
+fn void command_families_run_under_each_contract_and_layer_mode() @test {
     gpu::ContractValidation[2] contracts = {
         gpu::ContractValidation.TRUSTED,
         gpu::ContractValidation.FULL,

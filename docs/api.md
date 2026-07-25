@@ -468,7 +468,7 @@ both always-checked and `FULL`-only causes.
 
 | Fault | Cause category | Fired by | Typical cause |
 |---|---|---|---|
-| `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the selected backend is unavailable |
+| `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the Vulkan loader, driver, or required backend initialization path is unavailable |
 | `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; device descriptor validation; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
 | `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource handle; or a zero, stale, consumed, or wrong-phase valid-origin direct command token; submit also rejects a token recorded for another device |
@@ -1124,7 +1124,7 @@ and all fixed host bookkeeping. Zero fields select these public defaults:
 | Capacity | Default | Maximum | Scaling |
 |---|---:|---:|---|
 | `command_buffer_capacity` | `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` = 8 | `MAX_COMMAND_ALLOCATOR_CAPACITY` = 4096 | native command buffers, scratch records, and available-index storage |
-| `max_resource_references_per_list` | `DEFAULT_COMMAND_REFERENCES_PER_LIST` = 64 | `MAX_COMMAND_REFERENCES_PER_LIST` = 4096 | one fixed sequential reference list per command buffer under FULL; zero storage under TRUSTED |
+| `max_resource_references_per_list` | `DEFAULT_COMMAND_REFERENCES_PER_LIST` = 64 | `MAX_COMMAND_REFERENCES_PER_LIST` = 4096 | one fixed sequential reference list per command buffer under FULL; zero storage under TRUSTED; see `docs/performance.md` for the linear-scan cost at each bound |
 | `max_generated_preprocess_buffers_per_list` | `DEFAULT_COMMAND_PREPROCESS_PER_LIST` = 4 | `MAX_COMMAND_PREPROCESS_PER_LIST` = 64 | generated-reservation indices per command buffer and reservation-table entries multiplied by command-buffer capacity |
 
 `generated_preprocess_bytes` has no nonzero default: zero disables generated

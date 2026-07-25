@@ -1087,10 +1087,10 @@ fn void? release_generated_scratch(
     )!;
     if (!gpu::internal::generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_release_generated_scratch(
-        operation.state,
-        allocator,
-        pipeline,
-        kind,
+        state:     operation.state,
+        allocator: allocator,
+        pipeline:  pipeline,
+        kind:      kind,
     );
 }
 
@@ -1664,10 +1664,10 @@ fn void? wait_completion(
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, &device, point)!;
     return gpu::internal::vk::vk_wait_completion(
-        operation.state,
-        gpu::internal::completion_point_queue_id(point),
-        gpu::internal::completion_point_sequence(point),
-        timeout_ns,
+        state:      operation.state,
+        queue_id:   gpu::internal::completion_point_queue_id(point),
+        sequence:   gpu::internal::completion_point_sequence(point),
+        timeout_ns: timeout_ns,
     );
 }
 

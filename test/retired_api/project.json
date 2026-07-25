@@ -711,6 +711,24 @@
         "full_render_graphics_state.c3"
       ]
     },
+    "backend_kind": {
+      "type": "object-files",
+      "sources": [
+        "backend_kind.c3"
+      ]
+    },
+    "runtime_backend": {
+      "type": "object-files",
+      "sources": [
+        "runtime_backend.c3"
+      ]
+    },
+    "get_device_backend": {
+      "type": "object-files",
+      "sources": [
+        "get_device_backend.c3"
+      ]
+    },
     "runtime_enable_validation": {
       "type": "object-files",
       "sources": [
