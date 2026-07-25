@@ -61,7 +61,7 @@ fn void measure_submit_batch(
         assert(host_allocations == 0,
             "warm submission must not allocate host storage");
         foreach (list : lists[:batch_size]) {
-            assert(!list.handle.is_valid(),
+            assert(!list.is_valid(),
                 "successful submission consumes every executable token");
         }
         gpu::wait_completion(completion)!!;

@@ -57,7 +57,6 @@ fn bool command_policy_observation_matches(
     vk::CommandRecordingStats recording_before = observation.recording_before;
     vk::CommandRecordingStats recording_after = observation.recording_after;
     gpu::CommandResolutionStats resolution = observation.resolution;
-    ulong command_table_lookups = expectation.recording_commands;
     return policy.semantic_checks == expectation.semantic_checks
         && policy.tracking_calls == expectation.tracking_calls
         && policy.reference_allocations == expectation.reference_allocations
@@ -87,7 +86,7 @@ fn bool command_policy_observation_matches(
         && resolution.device_registry_resolutions == 0
         && resolution.retained_pin_operations == 0
         && resolution.lifecycle_vtable_dispatches == 0
-        && resolution.command_table_lookups == command_table_lookups
+        && resolution.command_table_lookups == 0
         && resolution.pipeline_table_lookups == 0
         && resolution.pipeline_cache_lookups == 0
         && resolution.command_policy_selections == 0
@@ -906,7 +905,7 @@ fn void full_tracking_copy_capacity_rejection_is_transactional() @test {
         && reference_work.rollback_rebuild_publications == 0
         && reference_work.rollover_cells_cleared == 0,
         "rejected copy performs exact preflight work without retain or rollback publication");
-    assert(commands.handle.is_valid()
+    assert(commands.is_valid()
         && slot.live_recordings == 1
         && slot.available_count == 0
         && record.scratch.in_use,
@@ -946,7 +945,6 @@ fn void command_policy_matcher_rejects_each_forbidden_mutation() @test {
     private_budget.recording_commands = 1;
     CommandPolicyObservation lower_private_work = passing;
     lower_private_work.resolution.recording_commands = 1;
-    lower_private_work.resolution.command_table_lookups = 1;
     assert(command_policy_observation_matches(
         &lower_private_work,
         &private_budget,
@@ -1030,6 +1028,38 @@ fn void command_policy_matcher_rejects_each_forbidden_mutation() @test {
         &mutation,
         &expected,
         "policy reselection",
+    );
+
+    mutation = passing;
+    mutation.resolution.device_registry_resolutions = 1;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &expected,
+        "device registry resolution",
+    );
+
+    mutation = passing;
+    mutation.resolution.retained_pin_operations = 1;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &expected,
+        "retained pin operation",
+    );
+
+    mutation = passing;
+    mutation.resolution.lifecycle_vtable_dispatches = 1;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &expected,
+        "lifecycle dispatch",
+    );
+
+    mutation = passing;
+    mutation.resolution.command_table_lookups = 1;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &expected,
+        "command table resolution",
     );
 
     mutation = passing;

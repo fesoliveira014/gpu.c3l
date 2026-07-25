@@ -56,9 +56,9 @@ concurrent aliases valid.
 Most public device operations take a short-lived atomic pin. `begin_commands`
 transfers its pin to one stable device-table command record paired with the
 originating allocator unit and publishes `RECORDING` last. Recording calls
-resolve the bounded device plus owner/slot/generation identity and authoritative
-phase before obtaining that record; they do not borrow another registry pin or
-load device-loss state. End, submit, and other lifecycle boundaries report
+load that record from the direct token and compare its generation and
+authoritative phase; they do not borrow another registry pin, resolve a command
+table, or load device-loss state. End, submit, and other lifecycle boundaries report
 loss, while discard remains available. Successful end transfers the same
 record and retained ownership to the executable phase. Executable discard
 releases that ownership immediately. Successful submission consumes the public
@@ -122,7 +122,7 @@ allocators may be recorded in parallel. Tier S allocation and
 span operations may overlap, but callers synchronize writes to mapped storage
 and keep every allocation live through its last submitted use.
 
-Submission resolves and claims the complete bounded-token batch once inside the
+Submission validates and claims the complete direct-token batch once inside the
 backend, using the exact queue stored by each authoritative record. It consumes
 executable command tokens only after native acceptance, pending-record append,
 and completion-sequence publication, then returns a reusable
@@ -183,15 +183,16 @@ ownership transfers.
   only through your synchronization. That hand-off is the happens-before edge.
 - Command records live at stable addresses in the fixed device command table
   and are paired with fixed allocator-owned native buffer/scratch units.
-  The token carries bounded device, owner, slot, and generation identity;
-  resolution validates every bound and the authoritative phase before
-  obtaining the record. Publication, recording-to-executable transfer,
-  submission, discard, and retirement mutate the record's sole state under
-  Tier C confinement. Passing a live token through caller synchronization is
-  the required hand-off and makes the initialized record visible. Copies remain
-  one-shot aliases and must neither be used concurrently nor used after another
-  alias consumes or retires the record; bounded resolution rejects fabricated,
-  stale, and consumed identities before native mutation.
+  The token carries a library-owned typed record pointer, reuse generation, and
+  packed static device-slot identity. Recording checks slot liveness and
+  generation before dereferencing the record, then compares the record
+  generation and authoritative phase. Publication,
+  recording-to-executable transfer, submission, discard, and retirement mutate
+  the record's sole state under Tier C confinement. Passing a live token through
+  caller synchronization is the required hand-off and makes the initialized
+  record visible. Copies remain one-shot aliases and must neither be used
+  concurrently nor used after another alias consumes or retires the record.
+  Callers must not construct, mutate, persist, or serialize token fields.
 - Allocator slots and all fixed scratch live in a nonmoving generational table.
   The allocator mutex publishes returned buffer indices and recording-owner
   changes. Application synchronization is the happens-before edge for allocator
@@ -266,9 +267,10 @@ completion and after every covered record through N has moved to `INACTIVE`,
 released tracked references and generated scratch, returned its buffer/scratch
 index to its exact allocator, released retained device/backend ownership,
 cleared its embedded pending link, and invalidated or generation-advanced its
-bounded identity. A first successful observation queries every represented
-pending queue before publishing any retired prefix, then locks and drains those
-queues one at a time. It never holds two retirement mutexes simultaneously.
+private command-record identity. A first successful observation queries every
+represented pending queue before publishing any retired prefix, then locks and
+drains those queues one at a time. It never holds two retirement mutexes
+simultaneously.
 Submit threshold and headroom handling remain target-queue-only. An
 already-retired point can therefore use the zero-work cached path safely. Poll
 and wait acquire-load that prefix after point validation; an already-retired

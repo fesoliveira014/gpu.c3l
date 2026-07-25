@@ -75,8 +75,10 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 - Each begin pairs one fixed allocator unit with one address-stable record from
   the device command table. That record owns the sole lifecycle state through
   discard or completion retirement.
-- Command tokens carry one compact bounded identity. Resolution validates the
-  device, allocator, owner, slot, generation, and authoritative phase before
+- Command tokens carry a library-owned typed pointer to one address-stable
+  record, its reuse generation, and a packed static device-slot identity.
+  Recording verifies static-slot liveness and generation before dereferencing
+  the record, then compares its generation and authoritative phase before
   native mutation under every contract policy.
 - Recording is thread-confined per token and allocator owner; distinct
   allocator records may be recorded concurrently without a device-wide
@@ -127,9 +129,9 @@ descriptors, silently change binding models, or provide a Vulkan 1.2 fallback.
 - Device creation either enables the complete request or publishes no device.
 - Native pipeline compilation never occurs implicitly during draw or dispatch.
 - Public synchronization does not require resource lists for generic GPU memory.
-- Command-token aliases are one-shot and thread-confined; bounded resolution
-  rejects fabricated, stale, consumed, and wrong-phase identities
-  deterministically.
+- Command-token aliases are one-shot and thread-confined. Direct generation and
+  phase checks reject stale, consumed, and wrong-phase aliases while record
+  storage remains alive; token storage must not be fabricated.
 - Non-WSI resource and device destruction never hide waits or deferred release; strict presentation extends that rule to swapchain destruction and resize.
 - Strict completion and readback require no root-level work lifecycle or public synchronization objects.
 - Public documentation and generated API references remain backend-neutral.

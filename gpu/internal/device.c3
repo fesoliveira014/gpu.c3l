@@ -42,10 +42,6 @@ alias BeginCommandsFn @private = fn void? (
     CommandAllocator* allocator,
     CommandList* out_commands,
 );
-alias ResolveCommandFn @private = fn CommandRecord*? (
-    void* backend_state,
-    CommandListHandle handle,
-);
 alias ReserveGeneratedScratchFn @private = fn void? (
     CommandAllocator*,
     GeneratedScratchDesc*,
@@ -197,6 +193,8 @@ const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
 const uint MAX_DEVICE_OPERATION_PINS @private = 0x3FFF_FFFF;
 const uint MAX_DEVICE_OPERATION_PIN_ATTEMPTS @private = 64;
 const uint MAX_DEVICE_COMMANDS @private = 4096;
+const uint COMMAND_TOKEN_DEVICE_INDEX_BITS @private = 6;
+const uint COMMAND_TOKEN_DEVICE_GENERATION_BITS @private = 24;
 
 const uint DEVICE_SLOT_FREE @private = 0;
 const uint DEVICE_SLOT_LIVE @private = 1;
@@ -228,13 +226,28 @@ enum ResourceOwnerKind @private {
 $assert (ulong)ResourceOwnerKind.COMPLETION_POINT + 1
     == gpu::RESOURCE_OWNER_KIND_COUNT;
 
-
 bitstruct DeviceSlotControl : ulong @private {
     uint state      : 0..1;
     uint pins       : 2..31;
     uint generation : 32..55;
     uint reserved   : 56..63;
 }
+
+bitstruct CommandTokenDeviceIdentity : uint @private {
+    uint index      : 0..5;
+    uint generation : 6..29;
+    uint reserved   : 30..31;
+}
+$assert MAX_DEVICES == 1 << COMMAND_TOKEN_DEVICE_INDEX_BITS;
+$assert MAX_DEVICE_GENERATION
+    == (1 << COMMAND_TOKEN_DEVICE_GENERATION_BITS) - 1;
+
+struct CommandListHandle @private {
+    ulong owner;
+    uint  index;
+    uint  generation;
+}
+$assert CommandListHandle::size <= ulong::size * 2;
 
 struct CommandRecord @private {
     CommandOps*       ops;
@@ -297,7 +310,6 @@ struct BackendVTable @private {
     ReserveGeneratedScratchFn reserve_generated_scratch;
     ReleaseGeneratedScratchFn release_generated_scratch;
     BeginCommandsFn           begin_commands;
-    ResolveCommandFn         resolve_command;
     EndCommandsFn             end_commands;
     DiscardCommandsFn         discard_commands;
     SubmitFn                  submit;
@@ -399,6 +411,26 @@ Atomic{ulong} command_pipeline_bind_commands @private @if(env::TESTING || $featu
 Atomic{ulong} command_strict_heap_set_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_strict_heap_buffer_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_strict_heap_offset_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+
+fn bool CommandListHandle.is_valid(self) =>
+    self.owner != 0 && self.generation != 0;
+
+fn bool CommandListHandle.equals(
+    self,
+    CommandListHandle other,
+) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+
+fn uint command_token_device_identity(Device device) @private {
+    CommandTokenDeviceIdentity identity = {
+        .index      = device.index,
+        .generation = device.generation,
+    };
+    return (uint)identity;
+}
 
 fn void note_command_device_registry_resolution() @private {
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
@@ -587,6 +619,8 @@ fn DeviceOperation? borrow_retained_device_operation(
     Device* device,
     bool allow_lost = false,
 ) @private {
+    note_command_device_registry_resolution();
+    note_command_retained_pin_operation();
     if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
     if (device.reserved != 0 || device.index >= MAX_DEVICES) return gpu::INVALID_HANDLE~;
 

@@ -1314,9 +1314,12 @@ fn VkCommandRecord*? begin_commands_with_injected_ops(
         out_commands: out_commands,
         ops:          ops,
     )!;
-    VkDeviceState* state = (VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&out_commands.device);
-    return state.commands.get(out_commands.handle);
+    gpu::internal::CommandRecord* record =
+        gpu::internal::recording_command(
+            out_commands,
+            count_command: false,
+        )!;
+    return backend_command(record);
 }
 
 fn void? end_commands_with_injected_ops(
@@ -1336,7 +1339,7 @@ fn void? vk_discard_commands(
     bool executable,
 ) @private {
     VkDeviceState* state = command_device_state(command);
-    gpu::CommandListHandle handle = command.identity;
+    gpu::internal::CommandListHandle handle = command.identity;
     gpu::CommandAllocatorHandle allocator_handle;
     {
         state.command_mutex.lock()!!;

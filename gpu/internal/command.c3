@@ -28,36 +28,37 @@ fn usz? generated_work_bytes(
     return indirect_argument_bytes(record_size, count, max_count);
 }
 
-fn gpu::internal::CommandRecord*? bounded_command_record(
-    Device device,
-    CommandListHandle handle,
-    bool allow_lost = false,
+fn gpu::internal::CommandRecord*? direct_command_record(
+    gpu::internal::CommandRecord* record,
+    uint generation,
+    uint device_identity,
 ) @private {
-    if (!device.is_valid() || device.reserved != 0 || !handle.is_valid()) {
+    if (record == null || generation == 0) return gpu::INVALID_HANDLE~;
+    gpu::internal::CommandTokenDeviceIdentity identity =
+        (gpu::internal::CommandTokenDeviceIdentity)device_identity;
+    if (identity.reserved != 0
+        || identity.generation == 0
+        || identity.index >= gpu::internal::MAX_DEVICES) {
         return gpu::INVALID_HANDLE~;
     }
-    if (device.index >= gpu::internal::MAX_DEVICES
-        || handle.index >= gpu::internal::MAX_DEVICE_COMMANDS) {
+
+    gpu::internal::DeviceSlot* slot =
+        &gpu::internal::device_slots[identity.index];
+    gpu::internal::DeviceSlotControl control =
+        (gpu::internal::DeviceSlotControl)slot.control.load(
+            AtomicOrdering.ACQUIRE,
+        );
+    if (control.state != gpu::internal::DEVICE_SLOT_LIVE
+        || control.generation != identity.generation) {
         return gpu::INVALID_HANDLE~;
     }
-    gpu::internal::DeviceOperation operation =
-        gpu::internal::borrow_retained_device_operation(
-            &device,
-            allow_lost,
-        )!;
-    defer gpu::internal::end_device_operation(&operation);
-    if (handle.owner != gpu::internal::resource_owner_tag(
-        operation.data.resource_owner,
-        gpu::internal::ResourceOwnerKind.COMMAND,
-    )) {
-        return gpu::INVALID_HANDLE~;
-    }
-    if (operation.vtable.resolve_command == null) return gpu::BACKEND_ERROR~;
-    gpu::internal::CommandRecord* record = operation.vtable.resolve_command(
-        operation.data.backend_state,
-        handle,
-    )!;
-    if (record.device != device || record.identity != handle) {
+
+    Device device = {
+        .index      = identity.index,
+        .generation = identity.generation,
+    };
+    if (record.device != device
+        || record.identity.generation != generation) {
         return gpu::INVALID_HANDLE~;
     }
     return record;
@@ -66,13 +67,12 @@ fn gpu::internal::CommandRecord*? bounded_command_record(
 fn gpu::internal::CommandRecord*? recording_command(
     CommandList* commands,
     bool count_command = true,
-    bool allow_lost = true,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
-    gpu::internal::CommandRecord* record = bounded_command_record(
-        commands.device,
-        commands.handle,
-        allow_lost,
+    gpu::internal::CommandRecord* record = direct_command_record(
+        commands.record,
+        commands.generation,
+        commands.device_identity,
     )!;
     if (record.state != gpu::internal::CommandState.RECORDING
         && record.state
@@ -85,13 +85,12 @@ fn gpu::internal::CommandRecord*? recording_command(
 
 fn gpu::internal::CommandRecord*? executable_command(
     ExecutableCommandList* commands,
-    bool allow_lost = false,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
-    gpu::internal::CommandRecord* record = bounded_command_record(
-        commands.device,
-        commands.handle,
-        allow_lost,
+    gpu::internal::CommandRecord* record = direct_command_record(
+        commands.record,
+        commands.generation,
+        commands.device_identity,
     )!;
     if (record.state != gpu::internal::CommandState.EXECUTABLE) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -103,24 +102,26 @@ fn void publish_command_list(
     gpu::internal::CommandRecord* record,
     CommandList* commands,
 ) @private {
-    commands.device = record.device;
-    commands.handle = record.identity;
+    commands.record = record;
+    commands.generation = record.identity.generation;
+    commands.device_identity =
+        gpu::internal::command_token_device_identity(record.device);
 }
 
 fn void publish_executable_command_list(
     gpu::internal::CommandRecord* record,
     ExecutableCommandList* commands,
 ) @private {
-    commands.device = record.device;
-    commands.handle = record.identity;
+    commands.record = record;
+    commands.generation = record.identity.generation;
+    commands.device_identity =
+        gpu::internal::command_token_device_identity(record.device);
 }
 
 fn gpu::internal::DeviceOperation? command_operation(
     gpu::internal::CommandRecord* record,
     bool allow_lost = false,
 ) @private {
-    gpu::internal::note_command_device_registry_resolution();
-    gpu::internal::note_command_retained_pin_operation();
     if (record == null) return gpu::INVALID_HANDLE~;
     return gpu::internal::borrow_retained_device_operation(
         &record.device,

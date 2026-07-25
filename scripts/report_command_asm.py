@@ -391,7 +391,7 @@ def main() -> int:
     mode = "blocking" if pinned else "advisory"
     print(
         f"asm_expectation version={EXPECTATION_VERSION} mode={mode} "
-        "representation=bounded"
+        "representation=direct"
     )
     if pinned:
         print(

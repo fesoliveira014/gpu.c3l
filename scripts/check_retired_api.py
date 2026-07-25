@@ -106,6 +106,12 @@ FIXTURES = {
     "retired_begin_commands_queue": "queue",
     "retired_reserve_generated_scratch_queue": "queue",
     "retired_release_generated_scratch_queue": "queue",
+    "command_list_handle": "CommandListHandle",
+    "command_list_handle_invalid": "COMMAND_LIST_HANDLE_INVALID",
+    "command_list_device": "device",
+    "command_list_handle_member": "handle",
+    "executable_command_list_device": "device",
+    "executable_command_list_handle": "handle",
 }
 
 ERROR_DIAGNOSTIC = re.compile(
@@ -142,6 +148,10 @@ FIELD_OR_METHODS = {
     "descriptor_indexing_caps": "DeviceCaps.descriptor_indexing",
     "max_texture_descriptors_caps": "DeviceCaps.max_texture_descriptors",
     "max_sampler_descriptors_caps": "DeviceCaps.max_sampler_descriptors",
+    "command_list_device": "CommandList.device",
+    "command_list_handle_member": "CommandList.handle",
+    "executable_command_list_device": "ExecutableCommandList.device",
+    "executable_command_list_handle": "ExecutableCommandList.handle",
 }
 
 MACRO_SYMBOLS = {

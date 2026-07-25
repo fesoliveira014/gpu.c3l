@@ -57,11 +57,11 @@ fn bool submit_work_matches(
 }
 
 
-fn void command_tokens_are_small_owner_values() @test {
-    assert(gpu::CommandList::size <= 32,
-        "recording token stays within four machine words");
-    assert(gpu::ExecutableCommandList::size <= 32,
-        "executable token stays within four machine words");
+fn void direct_command_tokens_fit_two_machine_words() @test {
+    assert(gpu::CommandList::size == ulong::size * 2,
+        "recording token is exactly two words on supported x64 targets");
+    assert(gpu::ExecutableCommandList::size == ulong::size * 2,
+        "executable token is exactly two words on supported x64 targets");
 }
 
 fn void discard_consumes_recording_and_executable_lists() @test {
@@ -75,7 +75,7 @@ fn void discard_consumes_recording_and_executable_lists() @test {
     assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
         "a recording command list blocks device destruction");
     gpu::discard_commands(&recording)!!;
-    assert(!recording.handle.is_valid(), "discard consumes a recording list");
+    assert(!recording.is_valid(), "discard consumes a recording list");
 
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
@@ -85,7 +85,7 @@ fn void discard_consumes_recording_and_executable_lists() @test {
         "an executable command list blocks device destruction");
     gpu::ExecutableCommandList stale = executable;
     gpu::discard_executable_commands(&executable)!!;
-    assert(!executable.handle.is_valid(), "discard consumes an executable list");
+    assert(!executable.is_valid(), "discard consumes an executable list");
     assert(@catch(gpu::discard_executable_commands(&stale)) == gpu::INVALID_HANDLE,
         "a consumed executable-list alias is stale");
 
@@ -178,7 +178,7 @@ fn void empty_command_list_submits() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void command_list_owns_its_device_token_value() @test {
+fn void command_record_owns_its_device_token_value() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
@@ -199,7 +199,7 @@ fn void command_list_owns_its_device_token_value() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void stale_command_owner_faults_invalid_handle() @test {
+fn void stale_command_generation_faults_invalid_handle() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
@@ -212,7 +212,7 @@ fn void stale_command_owner_faults_invalid_handle() @test {
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
     gpu::ExecutableCommandList live_commands = commands_executable;
-    commands_executable.device = {};
+    commands_executable.generation++;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
         gpu::internal::device_backend_state(device);
 
@@ -220,7 +220,8 @@ fn void stale_command_owner_faults_invalid_handle() @test {
     gpu::SubmitDesc stale_submit = { .command_lists = stale_lists[..] };
     vk::reset_submit_work_counters(state);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &stale_submit));
-    assert(rejected == gpu::INVALID_HANDLE, "stale command owner faults INVALID_HANDLE");
+    assert(rejected == gpu::INVALID_HANDLE,
+        "stale command generation faults INVALID_HANDLE");
     assert(submit_work_matches_exact(
         work:                        vk::submit_work_counters(state),
         resolutions:                 1,
@@ -228,7 +229,7 @@ fn void stale_command_owner_faults_invalid_handle() @test {
         command_mutex_acquisitions:  1,
         rollback_mutex_acquisitions: 0,
         native_submissions:          0,
-    ), "stale ownership stops at the first authoritative resolution");
+    ), "stale generation stops at the first authoritative resolution");
 
     gpu::ExecutableCommandList[1] live_lists = { live_commands };
     gpu::SubmitDesc live_submit = { .command_lists = live_lists[..] };
@@ -236,7 +237,7 @@ fn void stale_command_owner_faults_invalid_handle() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void foreign_command_owner_faults_before_record_lookup() @test {
+fn void foreign_device_command_faults_before_claim() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device target = create_test_device(&desc)!!;
     defer destroy_test_device(&target)!!;
@@ -260,7 +261,7 @@ fn void foreign_command_owner_faults_before_record_lookup() @test {
 
     assert(@catch(gpu::submit(target_queue, &submit)) == gpu::INVALID_HANDLE,
         "a live command owned by another device faults INVALID_HANDLE");
-    assert(lists[0].handle.is_valid()
+    assert(lists[0].is_valid()
             && submit_work_matches_exact(
                 work:                        vk::submit_work_counters(target_state),
                 resolutions:                 1,
@@ -269,7 +270,7 @@ fn void foreign_command_owner_faults_before_record_lookup() @test {
                 rollback_mutex_acquisitions: 0,
                 native_submissions:          0,
             ),
-        "foreign ownership stops before target-table lookup and preserves the token");
+        "foreign device ownership stops before command claim and preserves the token");
 
     gpu::CompletionPoint completion = gpu::submit(foreign_queue, &submit)!!;
     gpu::wait_completion(completion, ulong::max)!!;
@@ -331,8 +332,7 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     defer discard_test_commands(&replacement)!!;
     gpu::ExecutableCommandList replacement_executable = gpu::end_commands(&replacement)!!;
     defer discard_test_executable(&replacement_executable)!!;
-    assert(replacement_executable.handle.index
-            != original_executable.handle.index,
+    assert(replacement_executable.record != original_executable.record,
         "a submitted command record is not reused before retirement");
 
 
@@ -355,6 +355,20 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
         native_submissions:          0,
     ), "a submitted public alias stops at the authoritative phase");
     gpu::wait_completion(original_completion)!!;
+
+    gpu::CommandList reused = gpu::begin_commands(&allocator)!!;
+    gpu::ExecutableCommandList reused_executable = gpu::end_commands(&reused)!!;
+    defer discard_test_executable(&reused_executable)!!;
+    assert(reused_executable.record == original_executable.record
+            && reused_executable.generation
+                != original_executable.generation,
+        "completion retirement reuses the record with a new generation");
+    gpu::ExecutableCommandList[1] retired_alias = { original_executable };
+    gpu::SubmitDesc retired_submit = { .command_lists = retired_alias[..] };
+    assert(@catch(gpu::submit(queue, &retired_submit)) == gpu::INVALID_HANDLE,
+        "a retired alias cannot name the reused command record");
+    gpu::discard_executable_commands(&reused_executable)!!;
+
     gpu::ExecutableCommandList[1] replacement_lists = { replacement_executable };
     gpu::SubmitDesc replacement_submit = { .command_lists = replacement_lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &replacement_submit)!!;
@@ -375,12 +389,12 @@ fn void command_generation_exhaustion_retires_slot() @test {
     gpu::ExecutableCommandList final_generation_executable = gpu::end_commands(&final_generation)!!;
     defer discard_test_executable(&final_generation_executable)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    state.commands.slots[final_generation_executable.handle.index].generation =
-        vk::HANDLE_GENERATION_MAX - 1;
-    final_generation_executable.handle.generation = vk::HANDLE_GENERATION_MAX - 1;
-    state.commands.slots[
-        final_generation_executable.handle.index
-    ].record.identity = final_generation_executable.handle;
+    gpu::internal::CommandRecord* final_record =
+        final_generation_executable.record;
+    uint final_index = final_record.identity.index;
+    state.commands.slots[final_index].generation = vk::HANDLE_GENERATION_MAX - 1;
+    final_generation_executable.generation = vk::HANDLE_GENERATION_MAX - 1;
+    final_record.identity.generation = vk::HANDLE_GENERATION_MAX - 1;
 
     gpu::ExecutableCommandList[1] first_lists = { final_generation_executable };
     gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
@@ -393,9 +407,10 @@ fn void command_generation_exhaustion_retires_slot() @test {
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
-    assert(next.handle.index != final_generation_executable.handle.index,
+    gpu::internal::CommandRecord* next_record = next.record;
+    assert(next_record.identity.index != final_index,
         "exhausted command slot is retired");
-    assert(next.handle.generation == 1,
+    assert(next.generation == 1,
         "replacement uses a different slot's first generation");
     gpu::ExecutableCommandList next_executable = gpu::end_commands(&next)!!;
     defer discard_test_executable(&next_executable)!!;
@@ -434,7 +449,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
         command_mutex_acquisitions:  1,
         rollback_mutex_acquisitions: 0,
         native_submissions:          0,
-    ), "a two-token duplicate faults after one bounded linear claim");
+    ), "a two-token duplicate faults after one direct linear claim");
 
     gpu::ExecutableCommandList[1] one = { cmd_executable };
     gpu::SubmitDesc good = { .command_lists = one[..] };
@@ -522,7 +537,7 @@ fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
     assert(command_submit_count(&device) == submits_before,
         "all duplicate positions reject before native submit");
     foreach (list : unique) {
-        assert(state.commands.get(list.handle)!!.root.state
+        assert(list.record.state
                 == gpu::internal::CommandState.EXECUTABLE,
             "duplicate faults preserve every command record as executable");
     }
@@ -616,7 +631,7 @@ fn void submit_valid_batch_sizes_visit_each_record_once() @test {
             command_mutex_acquisitions:  1,
             rollback_mutex_acquisitions: 0,
             native_submissions:          1,
-        ), "a valid batch performs one bounded claim and one native submit");
+        ), "a valid batch performs one direct claim and one native submit");
         assert(command_submit_count(&device) == submits_before + 1,
             "a valid batch performs one native queue submit");
         gpu::wait_completion(completion)!!;
@@ -635,14 +650,16 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::ExecutableCommandList[3] lists;
     record_empty_executables(&allocator, lists[..]);
-    gpu::CommandListHandle discarded_handle = lists[2].handle;
+    gpu::internal::CommandListHandle discarded_handle =
+        lists[2].record.identity;
     gpu::discard_executable_commands(&lists[2])!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandCell* unused =
         &state.commands.slots[discarded_handle.index];
     uint unused_generation = unused.generation;
-    vk::VkCommandRecord* unvisited_live = state.commands.get(lists[1].handle)!!;
+    vk::VkCommandRecord* unvisited_live =
+        vk::backend_command(lists[1].record);
     unvisited_live.submit_visit_epoch = ulong::max;
     gpu::ExecutableCommandList[2] duplicate = { lists[0], lists[0] };
     gpu::SubmitDesc submit = { .command_lists = duplicate[..] };
@@ -1236,7 +1253,7 @@ fn void submit_uses_record_queue_without_allocator_queue_reproof() @test {
     defer discard_test_executable(&executable)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
         gpu::internal::device_backend_state_ptr(&device);
-    vk::VkCommandRecord* record = state.commands.get(executable.handle)!!;
+    vk::VkCommandRecord* record = vk::backend_command(executable.record);
     vk::CommandAllocatorSlot* slot =
         state.command_allocators.get(record.allocator)!!;
     gpu::Queue original_queue = slot.queue;
