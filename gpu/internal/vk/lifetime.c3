@@ -175,22 +175,21 @@ fn void release_tracked_command_references(
 fn void publish_pending_commands_locked(
     VkDeviceState* state,
     QueueCompletionState* completion,
-    gpu::internal::CommandRecord*[] records,
+    CommandRecord*[] records,
     gpu::CompletionPoint point,
 ) {
     foreach (record : records) {
-        VkCommandRecord* backend = backend_command(record);
-        backend.submitted_completion = point;
-        backend.next_submitted = null;
+        record.submitted_completion = point;
+        record.next_submitted = null;
         if (completion.submitted_tail == null) {
             completion.submitted_head = record;
         } else {
-            backend_command(completion.submitted_tail).next_submitted = record;
+            completion.submitted_tail.next_submitted = record;
         }
         completion.submitted_tail = record;
         completion.submitted_count++;
         CommandAllocatorSlot* slot = state.command_allocators.get(
-            backend.allocator,
+            record.allocator,
         )!!;
         slot.mutex.lock()!!;
         slot.live_executables--;
@@ -199,20 +198,19 @@ fn void publish_pending_commands_locked(
     }
 }
 
-fn gpu::internal::CommandRecord* release_pending_command_locked(
+fn CommandRecord* release_pending_command_locked(
     VkDeviceState* state,
     QueueCompletionState* completion,
-    gpu::internal::CommandRecord* record,
+    CommandRecord* record,
 ) {
-    VkCommandRecord* backend = backend_command(record);
-    gpu::internal::CommandRecord* next = backend.next_submitted;
+    CommandRecord* next = record.next_submitted;
     CommandAllocatorSlot* slot = state.command_allocators.get(
-        backend.allocator,
+        record.allocator,
     )!!;
     slot.mutex.lock()!!;
     record.state = gpu::internal::CommandState.INACTIVE;
     // Reference gates plus retirement/destroy serialization make resource_mutex unnecessary.
-    CommandScratch* scratch = backend.scratch;
+    CommandScratch* scratch = record.scratch;
     clear_command_scratch_references(state, scratch);
     recycle_generated_preprocess_indices_locked(
         state,
@@ -220,18 +218,18 @@ fn gpu::internal::CommandRecord* release_pending_command_locked(
         scratch.generated_preprocess_indices,
         scratch.generated_preprocess_count,
     );
-    return_allocator_buffer_locked(slot, backend.allocator_buffer);
+    return_allocator_buffer_locked(slot, record.allocator_buffer);
     slot.in_flight_buffers--;
     slot.mutex.unlock();
     gpu::internal::CommandListHandle identity = record.identity;
-    gpu::internal::CommandRecord ownership = *record;
-    backend.submitted_completion = {};
-    backend.next_submitted = null;
+    gpu::Device owner = record.device;
+    record.submitted_completion = {};
+    record.next_submitted = null;
     completion.submitted_count--;
     state.command_mutex.lock()!!;
     (void)state.commands.free(identity);
     state.command_mutex.unlock();
-    gpu::internal::release_command_record_ownership(&ownership);
+    gpu::internal::release_command_record_ownership(owner);
     return next;
 }
 
@@ -306,10 +304,9 @@ fn void retire_queue_through_locked(
 
     note_completion_retirement_pass(state);
     while (completion.submitted_head != null) {
-        gpu::internal::CommandRecord* record = completion.submitted_head;
-        VkCommandRecord* backend = backend_command(record);
+        CommandRecord* record = completion.submitted_head;
         if (gpu::internal::completion_point_sequence(
-            backend.submitted_completion,
+            record.submitted_completion,
         ) > target) {
             break;
         }

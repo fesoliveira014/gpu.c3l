@@ -41,12 +41,12 @@ fn double mask_and_scale(ulong raw, uint valid_bits, float period) {
 }
 
 fn vk::CommandBuffer command_buffer(gpu::CommandList* commands) {
-    gpu::internal::CommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(
             commands,
             count_command: false,
         )!!;
-    return gpu::internal::vk::backend_command(record).command_buffer;
+    return record.command_buffer;
 }
 
 <* Read and normalize one timestamp pair. *>

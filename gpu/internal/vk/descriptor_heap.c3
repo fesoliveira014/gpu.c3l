@@ -848,12 +848,12 @@ fn void? validate_descriptor_heap_binding(VkDeviceState* state) {
     if (!state.strict_heap.enabled) return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void invalidate_strict_heap_binding(VkCommandRecord* record) {
+fn void invalidate_strict_heap_binding(CommandRecord* record) {
     record.strict_heap_binding = {};
 }
 
 fn void invalidate_strict_heap_bind_point(
-    VkCommandRecord* record,
+    CommandRecord* record,
     vk::PipelineBindPoint bind_point,
 ) {
     if (bind_point == vk::PipelineBindPoint.COMPUTE) {
@@ -867,7 +867,7 @@ fn void invalidate_strict_heap_bind_point(
 
 fn void? bind_descriptor_heap(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     vk::PipelineLayout layout,
     vk::PipelineBindPoint bind_point,
 ) {

@@ -141,7 +141,7 @@ fn void? validate_texture_queue_access(
 
 fn void? validate_texture_recording_access_only(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     TextureSlot* slot,
     gpu::TextureHandle handle,
     ZString operation,
@@ -157,7 +157,7 @@ fn void? validate_texture_recording_access_only(
 
 fn void? track_texture_command_reference(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     gpu::TextureHandle handle,
 ) @private {
     return track_command_reference(
@@ -219,7 +219,7 @@ fn void? validate_span_queue_access(
 
 fn void? validate_span_recording_access_only(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     ResolvedSpan* resolved,
     gpu::GpuSpan* span,
     ZString operation,
@@ -235,7 +235,7 @@ fn void? validate_span_recording_access_only(
 
 fn void? track_span_command_reference(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     gpu::GpuSpan* span,
 ) @private {
     return track_command_reference(
@@ -360,7 +360,7 @@ fn ResolvedSpan? lower_index_span(
    `required` is zero when GPU-written arguments provide the index count. *>
 fn ResolvedSpan? validate_and_lower_index_span(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     gpu::GpuSpan* span,
     gpu::IndexType index_type,
     usz required,

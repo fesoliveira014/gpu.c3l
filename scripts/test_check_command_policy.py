@@ -8,7 +8,7 @@ from scripts import check_command_policy
 
 
 STRUCT_SOURCE = """
-module gpu::internal;
+module gpu::internal::vk;
 
 struct CommandOps @private {
     CopyFn copy;
@@ -30,7 +30,7 @@ def table_source(
     draw: str = "&draw_command",
 ) -> str:
     return f"""
-const gpu::internal::CommandOps {name} @private = {{
+const CommandOps {name} @private = {{
     .copy = {copy},
     .draw = {draw},
 }};
@@ -60,7 +60,11 @@ class CommandPolicyCheckTests(unittest.TestCase):
         tables: str | None = None,
         helpers: str = "",
     ) -> None:
-        self.write_source(root, "gpu/internal/device.c3", STRUCT_SOURCE)
+        self.write_source(
+            root,
+            "gpu/internal/vk/command_state.c3",
+            STRUCT_SOURCE,
+        )
         self.write_source(
             root,
             "gpu/internal/vk/device.c3",
@@ -69,11 +73,32 @@ class CommandPolicyCheckTests(unittest.TestCase):
 
     def test_current_sources_satisfy_contract(self) -> None:
         self.assertEqual(check_command_policy.check(), [])
+        self.assertEqual(
+            tuple(
+                table.name
+                for table in check_command_policy.command_tables(
+                    check_command_policy.ROOT,
+                )
+            ),
+            TABLE_NAMES,
+        )
 
     def test_accepts_complete_direct_tables(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.write_fixture(root)
+            self.assertEqual(check_command_policy.check(root), [])
+
+    def test_accepts_qualified_table_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_fixture(
+                root,
+                all_tables_source().replace(
+                    "const CommandOps",
+                    "const gpu::internal::vk::CommandOps",
+                ),
+            )
             self.assertEqual(check_command_policy.check(root), [])
 
     def test_accepts_fewer_runtime_tables(self) -> None:
@@ -128,7 +153,11 @@ class CommandPolicyCheckTests(unittest.TestCase):
                 "    CopyFn copy;\n",
                 "    CopyFn copy;\n    OtherCopyFn copy;\n",
             )
-            self.write_source(root, "gpu/internal/device.c3", struct_source)
+            self.write_source(
+                root,
+                "gpu/internal/vk/command_state.c3",
+                struct_source,
+            )
             self.write_source(
                 root,
                 "gpu/internal/vk/device.c3",
@@ -146,7 +175,11 @@ class CommandPolicyCheckTests(unittest.TestCase):
                 "    CopyFn copy;\n",
                 "    CopyFn copy @deprecated;\n",
             )
-            self.write_source(root, "gpu/internal/device.c3", struct_source)
+            self.write_source(
+                root,
+                "gpu/internal/vk/command_state.c3",
+                struct_source,
+            )
             self.write_source(
                 root,
                 "gpu/internal/vk/device.c3",
@@ -219,7 +252,7 @@ class CommandPolicyCheckTests(unittest.TestCase):
                 root,
                 (
                     "module gpu::internal::vk;\n"
-                    "const gpu::internal::CommandOps COMBINED = make_ops();\n"
+                    "const gpu::internal::vk::CommandOps COMBINED = make_ops();\n"
                 ),
             )
             self.assertEqual(check_command_policy.check(root), [])
@@ -303,9 +336,9 @@ fn void extracted_copy_helper() {}
                 helpers=r'''
 fn void copy_command() {
     io::printn("@pool() tlocal mem::new_array vk::allocate_command_buffers");
-    io::printn("const gpu::internal::CommandOps STRING_TABLE = {");
+    io::printn("const gpu::internal::vk::CommandOps STRING_TABLE = {");
     // validation_policy track_command_reference scratch.reference_count
-    // const gpu::internal::CommandOps COMMENT_TABLE = {
+    // const gpu::internal::vk::CommandOps COMMENT_TABLE = {
     /* vk_cmd_copy_buffer RecordingContextTable */
 }
 ''',

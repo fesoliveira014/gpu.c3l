@@ -416,7 +416,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::track_command_reference(
         state:      state,
         record:     record,

@@ -106,8 +106,8 @@ struct QueueCompletionState {
     Mutex                         submission_mutex;
     Mutex                         retirement_mutex;
     QueueSubmitScratch*           submit_scratch;
-    gpu::internal::CommandRecord* submitted_head;
-    gpu::internal::CommandRecord* submitted_tail;
+    CommandRecord* submitted_head;
+    CommandRecord* submitted_tail;
     uint                          submitted_count;
     gpu::QueueRoles               roles;
     QueueFamilyFlags              queue_flags;
@@ -127,7 +127,7 @@ struct ResolvedCompletionWait {
 struct QueueSubmitScratch {
     ResolvedCompletionWait[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS]
         completion_waits;
-    gpu::internal::CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
+    CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
         records;
     vk::CommandBufferSubmitInfo[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
         command_buffer_infos;
@@ -136,7 +136,7 @@ struct QueueSubmitScratch {
 }
 
 struct SubmitInputs {
-    gpu::internal::CommandRecord*[] records;
+    CommandRecord*[] records;
     ResolvedCompletionWait[]        completion_waits;
     SwapchainSlot*                  swapchain;
     vk::PipelineStageFlags2         readiness_stages;
@@ -2126,7 +2126,7 @@ fn ulong next_submit_visit_epoch_locked(VkDeviceState* state) @private {
     if (state.next_submit_visit_epoch == ulong::max) {
         foreach (&cell : state.commands.slots[:state.commands.next_new]) {
             note_submit_epoch_reset_cell(state);
-            if (cell.used) cell.value.submit_visit_epoch = 0;
+            if (cell.used) cell.record.submit_visit_epoch = 0;
         }
         state.next_submit_visit_epoch = 1;
         return 1;
@@ -2135,32 +2135,32 @@ fn ulong next_submit_visit_epoch_locked(VkDeviceState* state) @private {
     return state.next_submit_visit_epoch;
 }
 
-fn gpu::internal::CommandRecord*[]? claim_submit_records_locked(
+fn CommandRecord*[]? claim_submit_records_locked(
     VkDeviceState* state,
     gpu::Queue queue,
     gpu::ExecutableCommandList[] tokens,
-    gpu::internal::CommandRecord*[] storage,
+    CommandRecord*[] storage,
 ) @private {
-    gpu::internal::CommandRecord*[] records = storage[:tokens.len];
+    CommandRecord*[] records = storage[:tokens.len];
     if (tokens.len == 0) return records;
 
     ulong epoch = next_submit_visit_epoch_locked(state);
     foreach (i, &token : tokens) {
         note_submit_authoritative_resolution(state);
-        gpu::internal::CommandRecord* record =
+        CommandRecord* record =
             gpu::internal::direct_command_record(
                 token.record,
                 token.generation,
                 token.device_identity,
             )!;
         if (record.device != queue.device
-            || record.backend_state != state) {
+            || record.device_state != state) {
             return gpu::INVALID_HANDLE~;
         }
         if (record.state != gpu::internal::CommandState.EXECUTABLE) {
             return gpu::COMMAND_RECORDING_ERROR~;
         }
-        VkCommandRecord* backend = backend_command(record);
+        CommandRecord* backend = record;
         if (backend.queue != queue) return gpu::INVALID_ARGUMENT~;
         note_submit_duplicate_token_visit(state);
         if (backend.submit_visit_epoch == epoch) {
@@ -2177,7 +2177,7 @@ fn gpu::internal::CommandRecord*[]? claim_submit_records_locked(
 
 fn void rollback_submit_claim(
     VkDeviceState* state,
-    gpu::internal::CommandRecord*[] records,
+    CommandRecord*[] records,
 ) @private {
     note_submit_rollback_mutex_acquisition(state);
     state.command_mutex.lock()!!;
@@ -2195,7 +2195,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
     gpu::SubmitDesc* desc,
     QueueCompletionState* target,
     ResolvedCompletionWait[] completion_wait_storage,
-    gpu::internal::CommandRecord*[] record_storage,
+    CommandRecord*[] record_storage,
 ) {
     SubmitInputs inputs;
     gpu::Device device = queue.device;
@@ -2319,7 +2319,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         record_storage:          scratch.records[..],
     )!;
     vk::SubmitInfo2 submit = vk::submit_info2();
-    gpu::internal::CommandRecord*[] records = inputs.records;
+    CommandRecord*[] records = inputs.records;
     bool claimed = records.len > 0;
     defer catch {
         if (claimed) rollback_submit_claim(state, records);
@@ -2329,7 +2329,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         foreach (i, record : records) {
             scratch.command_buffer_infos[i] = vk::command_buffer_submit_info()
                 .set_command_buffer(
-                    backend_command(record).command_buffer,
+                    record.command_buffer,
                 );
         }
         submit = submit.set_command_buffer_infos(

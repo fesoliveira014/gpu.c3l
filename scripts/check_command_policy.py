@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 IDENTIFIER = r"[A-Za-z_][A-Za-z0-9_]*"
 COMMAND_OPS_DECLARATION = re.compile(r"\bstruct\s+CommandOps\b[^{;]*\{")
 TABLE_DECLARATION = re.compile(
-    rf"\bconst\s+gpu::internal::CommandOps\s+({IDENTIFIER})\b[^=;{{]*=\s*\{{",
+    rf"\bconst\s+(?:gpu::internal::vk::)?CommandOps\s+"
+    rf"({IDENTIFIER})\b[^=;{{]*=\s*\{{",
 )
 TABLE_FIELD = re.compile(rf"\s*\.({IDENTIFIER})\s*=")
 COMMAND_OPS_FIELD = re.compile(
@@ -130,12 +131,13 @@ def top_level_segments(source: str, delimiter: str) -> list[str]:
 
 
 def command_ops_fields(root: Path) -> tuple[str, ...]:
-    path = root / "gpu" / "internal" / "device.c3"
+    path = root / "gpu" / "internal" / "vk" / "command_state.c3"
     source = mask_non_code(path.read_text(encoding="utf-8"))
     declarations = list(COMMAND_OPS_DECLARATION.finditer(source))
     if len(declarations) != 1:
         raise ValueError(
-            "expected exactly one CommandOps struct in gpu/internal/device.c3"
+            "expected exactly one CommandOps struct in "
+            "gpu/internal/vk/command_state.c3"
         )
 
     start = source.find("{", declarations[0].start())

@@ -195,7 +195,7 @@ struct VkDeviceState @public {
     ulong                      max_timeline_semaphore_value_difference;
     usz                        non_coherent_atom_size;
     DeviceValidationPolicy     validation_policy;
-    gpu::internal::CommandOps*           command_ops;
+    CommandOps*           command_ops;
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;
@@ -462,7 +462,7 @@ fn void? reach_device_creation_checkpoint(
     if (probe.fail_at == checkpoint) return gpu::BACKEND_ERROR~;
 }
 
-const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
+const CommandOps TRUSTED_COMMAND_OPS @private = {
     .copy_buffer                 = &trusted_copy_buffer,
     .fill_buffer                 = &trusted_fill_buffer,
     .copy_buffer_to_texture      = &trusted_copy_buffer_to_texture,
@@ -493,7 +493,7 @@ const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
+const CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .copy_buffer                 = &trusted_tracking_copy_buffer,
     .fill_buffer                 = &trusted_tracking_fill_buffer,
     .copy_buffer_to_texture      = &trusted_tracking_copy_buffer_to_texture,
@@ -524,7 +524,7 @@ const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
+const CommandOps CHECKED_COMMAND_OPS @private = {
     .copy_buffer                 = &checked_copy_buffer,
     .fill_buffer                 = &checked_fill_buffer,
     .copy_buffer_to_texture      = &checked_copy_buffer_to_texture,
@@ -555,7 +555,7 @@ const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
+const CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .copy_buffer                 = &checked_tracking_copy_buffer,
     .fill_buffer                 = &checked_tracking_fill_buffer,
     .copy_buffer_to_texture      = &checked_tracking_copy_buffer_to_texture,
@@ -586,7 +586,7 @@ const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-fn gpu::internal::CommandOps* select_command_ops(DeviceValidationPolicy policy) {
+fn CommandOps* select_command_ops(DeviceValidationPolicy policy) {
     switch (policy.contract) {
         case gpu::ContractValidation.TRUSTED:
         case gpu::ContractValidation.OBJECT_BOUNDARIES:
@@ -604,7 +604,7 @@ fn gpu::internal::CommandOps* select_command_ops(DeviceValidationPolicy policy) 
     }
 }
 
-fn bool command_ops_are_complete(gpu::internal::CommandOps* ops) {
+fn bool command_ops_are_complete(CommandOps* ops) {
     return ops != null
         && ops.copy_buffer != null
         && ops.fill_buffer != null
@@ -881,13 +881,9 @@ fn CommandReferenceWorkCounters command_reference_work_counters(
 
 // Transitional dispatch for device subsystems not yet routed directly.
 const gpu::internal::BackendVTable VK_VTABLE @private = {
-    .begin_commands              = &vk_begin_commands,
-    .end_commands                = &vk_end_commands,
-    .discard_commands            = &vk_discard_commands,
     .submit                      = &vk_submit,
     .poll_completion             = &vk_poll_completion,
     .wait_completion             = &vk_wait_completion,
-    .command_ops                 = &CHECKED_TRACKING_COMMAND_OPS,
     .create_swapchain            = &vk_create_swapchain,
     .destroy_swapchain           = &vk_destroy_swapchain,
     .resize_swapchain            = &vk_resize_swapchain,
@@ -1350,7 +1346,6 @@ fn gpu::Device? create_vk_device_from_runtime(
         state:                state,
         caps:                 state.caps,
         vtable:               &VK_VTABLE,
-        command_ops:          state.command_ops,
         resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
         adapter:              adapter,

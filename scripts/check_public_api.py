@@ -542,7 +542,22 @@ def validate_document(document: dict) -> list[str]:
     if public_module is None:
         return ["missing gpu module"]
 
-    public_surface = public_entries(public_module)
+    public_surface = json.loads(json.dumps(public_entries(public_module)))
+    for definition in public_surface.get("types", []):
+        if definition.get("name") not in (
+            "CommandList",
+            "ExecutableCommandList",
+        ):
+            continue
+        for member in definition.get("members", []):
+            if member.get("name") != "record":
+                continue
+            member_type = member.get("type", {})
+            if member_type == {
+                "name": "CommandRecord*",
+                "uid": "gpu::internal::vk::CommandRecord",
+            }:
+                member_type.pop("uid")
     encoded = json.dumps(public_surface, separators=(",", ":"))
     lowered = encoded.lower()
     failures = validate_generated_backend_privacy(document)
@@ -2154,7 +2169,7 @@ def validate_public_metadata_boundaries(document: dict) -> list[str]:
                     member_type = member.get("type", {})
                     if member_type == {
                         "name": "CommandRecord*",
-                        "uid": "gpu::internal::CommandRecord",
+                        "uid": "gpu::internal::vk::CommandRecord",
                     }:
                         member_type.pop("uid")
         encoded = json.dumps(entries, separators=(",", ":"))

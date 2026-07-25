@@ -7,102 +7,9 @@ import std::atomic::types;
 import std::thread;
 import std::core::mem;
 
-// Transitional dispatch for device subsystems not yet routed directly.
-// Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
-alias BeginCommandsFn @private = fn void? (
-    CommandAllocator* allocator,
-    CommandList* out_commands,
-);
-alias EndCommandsFn @private     = fn void? (CommandRecord*);
-alias DiscardCommandsFn @private = fn void? (
-    CommandRecord*,
-    bool executable,
-);
 alias SubmitFn @private          = fn CompletionPoint? (Queue, SubmitDesc*);
 alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
 alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
-alias CmdCopyBufferFn @private       = fn void? (CommandRecord*, BufferCopyDesc*);
-alias CmdFillBufferFn @private       = fn void? (CommandRecord*, GpuSpan, uint);
-alias CmdCopyBufferToTextureFn @private = fn void? (CommandRecord*, BufferTextureCopyDesc*);
-alias CmdCopyTextureToBufferFn @private = fn void? (CommandRecord*, TextureBufferCopyDesc*);
-alias CmdBarrierFn @private          = fn void? (CommandRecord*, Barrier*);
-alias CmdTextureBarrierFn @private   = fn void? (CommandRecord*, TextureBarrier*);
-alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, PipelineHandle);
-alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, DepthState*);
-alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, DynamicRasterState*);
-alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, GraphicsState*);
-alias CmdSetColorStateFn @private            = fn void? (CommandRecord*, ColorState*);
-alias CmdDispatchFn @private                 = fn void? (CommandRecord*, GpuAddress, Vec3u);
-alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, RenderPassDesc*);
-alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandRecord*, RenderPassDesc*, GraphicsState*);
-alias CmdSetViewportFn @private              = fn void? (CommandRecord*, Viewport*);
-alias CmdSetScissorFn @private               = fn void? (CommandRecord*, ScissorRect*);
-alias CmdEndRenderPassFn @private            = fn void? (CommandRecord*);
-alias CmdDrawFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    uint vertex_count,
-    uint instance_count,
-);
-alias CmdDrawIndexedFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    GpuSpan index_span,
-    uint index_count,
-    uint instance_count,
-    IndexType index_type,
-);
-alias CmdDrawIndirectFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    GpuSpan args,
-    uint draw_count,
-);
-alias CmdDrawIndexedIndirectFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    GpuSpan args,
-    uint draw_count,
-    GpuSpan index_span,
-    IndexType index_type,
-);
-alias CmdDrawIndexedIndirectCountFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    GpuSpan args,
-    GpuSpan count_span,
-    uint max_draw_count,
-    GpuSpan index_span,
-    IndexType index_type,
-);
-alias CmdDispatchIndirectFn @private         = fn void? (CommandRecord*, GpuAddress, GpuSpan);
-alias CmdDrawGeneratedFn @private = fn void? (
-    CommandRecord* record,
-    GpuSpan records,
-    GpuSpan count_span,
-    uint max_draw_count,
-);
-alias CmdDrawIndexedGeneratedFn @private = fn void? (
-    CommandRecord* record,
-    GpuSpan records,
-    GpuSpan count_span,
-    uint max_draw_count,
-    GpuSpan index_span,
-    IndexType index_type,
-);
-alias CmdDispatchGeneratedFn @private = fn void? (
-    CommandRecord* record,
-    GpuSpan records,
-    GpuSpan count_span,
-    uint max_dispatch_count,
-);
-alias CmdBeginLabelFn @private               = fn void? (CommandRecord*, ZString, float[4]);
-alias CmdEndLabelFn @private                 = fn void? (CommandRecord*);
 alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
@@ -172,55 +79,10 @@ struct CommandListHandle @private {
 }
 $assert CommandListHandle::size <= ulong::size * 2;
 
-struct CommandRecord @private {
-    CommandOps*       ops;
-    void*             backend_state;
-    void*             backend_command;
-    Device            device;
-    CommandListHandle identity;
-    CommandState      state;
-}
-$assert CommandRecord::size <= ulong::size * 8;
-
-struct CommandOps @private {
-    CmdCopyBufferFn               copy_buffer;
-    CmdFillBufferFn               fill_buffer;
-    CmdCopyBufferToTextureFn      copy_buffer_to_texture;
-    CmdCopyTextureToBufferFn      copy_texture_to_buffer;
-    CmdBarrierFn                  barrier;
-    CmdTextureBarrierFn           texture_barrier;
-    CmdBindPipelineFn             bind_pipeline;
-    CmdSetDepthStateFn            set_depth_state;
-    CmdSetRasterStateFn           set_raster_state;
-    CmdSetGraphicsStateFn         set_graphics_state;
-    CmdSetColorStateFn            set_color_state;
-    CmdDispatchFn                 dispatch;
-    CmdBeginRenderPassFn          begin_render_pass;
-    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
-    CmdSetViewportFn              set_viewport;
-    CmdSetScissorFn               set_scissor;
-    CmdEndRenderPassFn            end_render_pass;
-    CmdDrawFn                     draw;
-    CmdDrawIndexedFn              draw_indexed;
-    CmdDrawIndirectFn             draw_indirect;
-    CmdDrawIndexedIndirectFn      draw_indexed_indirect;
-    CmdDrawIndexedIndirectCountFn draw_indexed_indirect_count;
-    CmdDispatchIndirectFn         dispatch_indirect;
-    CmdDrawGeneratedFn            draw_generated;
-    CmdDrawIndexedGeneratedFn     draw_indexed_generated;
-    CmdDispatchGeneratedFn        dispatch_generated;
-    CmdBeginLabelFn               begin_label;
-    CmdEndLabelFn                 end_label;
-}
-
 struct BackendVTable @private {
-    BeginCommandsFn           begin_commands;
-    EndCommandsFn             end_commands;
-    DiscardCommandsFn         discard_commands;
     SubmitFn                  submit;
     PollCompletionFn          poll_completion;
     WaitCompletionFn          wait_completion;
-    CommandOps*               command_ops;
     CreateSwapchainFn         create_swapchain;
     DestroySwapchainFn        destroy_swapchain;
     ResizeSwapchainFn         resize_swapchain;
@@ -235,7 +97,6 @@ struct DeviceData @private {
     DeviceCaps                       caps;
     QueueSelection                   queues;
     BackendVTable*                   vtable;
-    CommandOps*                      command_ops;
     ulong                            resource_owner;
     Runtime                          runtime;
     Adapter                          adapter;
@@ -576,14 +437,11 @@ fn bool release_retained_device_pins(
     }
 }
 
-fn void release_command_record_ownership(
-    CommandRecord* record,
-) @private {
-    if (record == null || !record.device.is_valid()
-        || record.device.index >= MAX_DEVICES) {
+fn void release_command_record_ownership(Device device) @private {
+    if (!device.is_valid() || device.index >= MAX_DEVICES) {
         return;
     }
-    DeviceSlot* slot = &device_slots[record.device.index];
+    DeviceSlot* slot = &device_slots[device.index];
     (void)slot.live_children.sub(1, AtomicOrdering.RELEASE);
     DeviceOperation operation = {
         .slot   = slot,
@@ -678,7 +536,6 @@ fn Device? register_device(
     gpu::internal::vk::VkDeviceState* state,
     DeviceCaps caps,
     BackendVTable* vtable,
-    CommandOps* command_ops = null,
     ulong resource_owner = 0,
     Runtime* retained_runtime = null,
     Adapter* adapter = null,
@@ -687,9 +544,6 @@ fn Device? register_device(
     Device* owner = null,
 ) @private {
     if (state == null || vtable == null) return gpu::INVALID_ARGUMENT~;
-    CommandOps* selected_ops = command_ops == null
-        ? vtable.command_ops
-        : command_ops;
     if (resource_owner == 0) resource_owner = allocate_device_resource_owner()!;
     bool has_runtime = retained_runtime != null;
     if (has_runtime != (adapter != null)) return gpu::INVALID_ARGUMENT~;
@@ -748,7 +602,6 @@ fn Device? register_device(
             .caps                 = caps,
             .queues               = queues,
             .vtable               = vtable,
-            .command_ops          = selected_ops,
             .resource_owner       = resource_owner,
             .runtime              = runtime,
             .adapter              = registered_adapter,

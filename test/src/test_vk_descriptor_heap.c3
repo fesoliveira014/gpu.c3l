@@ -186,7 +186,7 @@ fn void descriptor_buffer_create_info_uses_only_graphics_and_compute_families() 
 
 fn void disabled_descriptor_heap_bind_returns_unsupported_feature() @test {
     gpu::internal::vk::VkDeviceState state = {};
-    gpu::internal::vk::VkCommandRecord record = {};
+    gpu::internal::vk::CommandRecord record = {};
     fault bind_fault = @catch(gpu::internal::vk::bind_descriptor_heap(
         state:      &state,
         record:     &record,
@@ -198,7 +198,7 @@ fn void disabled_descriptor_heap_bind_returns_unsupported_feature() @test {
 }
 
 fn void strict_heap_binding_invalidation_is_scoped() @test {
-    gpu::internal::vk::VkCommandRecord record = {
+    gpu::internal::vk::CommandRecord record = {
         .strict_heap_binding = {
             .descriptor_buffer_bound = true,
             .graphics_offsets_set    = true,
@@ -234,7 +234,9 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
     gpu::internal::vk::VkDeviceState state = {};
     gpu::PipelineHandle cached = { .index = 7, .generation = 3 };
     gpu::PipelineHandle requested = { .index = 11, .generation = 5 };
-    gpu::internal::vk::VkCommandRecord record = {
+    gpu::internal::vk::CommandRecord record = {
+        .device_state = &state,
+        .state        = gpu::internal::CommandState.RECORDING,
         .logical_pipeline = {
             .handle      = cached,
             .cache_entry = 19,
@@ -245,15 +247,9 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
             .graphics_set_bound      = true,
         },
     };
-    gpu::internal::CommandRecord root = {
-        .backend_state   = &state,
-        .backend_command = &record,
-        .state           = gpu::internal::CommandState.RECORDING,
-    };
-    record.root = &root;
 
     fault bind_fault = @catch(gpu::internal::vk::checked_bind_pipeline(
-        &root,
+        &record,
         requested,
     ));
     assert(bind_fault == gpu::UNSUPPORTED_FEATURE,

@@ -6,9 +6,188 @@ import std::atomic;
 import std::core::mem;
 import std::thread;
 
+alias CmdCopyBufferFn @private = fn void? (
+    CommandRecord*,
+    gpu::BufferCopyDesc*,
+);
+alias CmdFillBufferFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuSpan,
+    uint,
+);
+alias CmdCopyBufferToTextureFn @private = fn void? (
+    CommandRecord*,
+    gpu::BufferTextureCopyDesc*,
+);
+alias CmdCopyTextureToBufferFn @private = fn void? (
+    CommandRecord*,
+    gpu::TextureBufferCopyDesc*,
+);
+alias CmdBarrierFn @private = fn void? (CommandRecord*, gpu::Barrier*);
+alias CmdTextureBarrierFn @private = fn void? (
+    CommandRecord*,
+    gpu::TextureBarrier*,
+);
+alias CmdBindPipelineFn @private = fn void? (
+    CommandRecord*,
+    gpu::PipelineHandle,
+);
+alias CmdSetDepthStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::DepthState*,
+);
+alias CmdSetRasterStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::DynamicRasterState*,
+);
+alias CmdSetGraphicsStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::GraphicsState*,
+);
+alias CmdSetColorStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::ColorState*,
+);
+alias CmdDispatchFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::Vec3u,
+);
+alias CmdBeginRenderPassFn @private = fn void? (
+    CommandRecord*,
+    gpu::RenderPassDesc*,
+);
+alias CmdBeginRenderPassWithStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::RenderPassDesc*,
+    gpu::GraphicsState*,
+);
+alias CmdSetViewportFn @private = fn void? (
+    CommandRecord*,
+    gpu::Viewport*,
+);
+alias CmdSetScissorFn @private = fn void? (
+    CommandRecord*,
+    gpu::ScissorRect*,
+);
+alias CmdEndRenderPassFn @private = fn void? (CommandRecord*);
+alias CmdDrawFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+);
+alias CmdDrawIndexedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    gpu::IndexType index_type,
+);
+alias CmdDrawIndirectFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+);
+alias CmdDrawIndexedIndirectFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+);
+alias CmdDrawIndexedIndirectCountFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+);
+alias CmdDispatchIndirectFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::GpuSpan,
+);
+alias CmdDrawGeneratedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+);
+alias CmdDrawIndexedGeneratedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+);
+alias CmdDispatchGeneratedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+);
+alias CmdBeginLabelFn @private = fn void? (
+    CommandRecord*,
+    ZString,
+    float[4],
+);
+alias CmdEndLabelFn @private = fn void? (CommandRecord*);
+
 const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
 const float STUB_SAMPLER_ANISOTROPY_LIMIT @private = 16.0f;
+const uint STUB_COMMAND_CAPACITY @private = 64;
+
+struct CommandRecord @public {
+    CommandOps*                         ops;
+    VkDeviceState*                      device_state;
+    gpu::Device                         device;
+    gpu::internal::CommandListHandle    identity;
+    gpu::internal::CommandState         state;
+}
+
+struct CommandOps @public {
+    CmdCopyBufferFn               copy_buffer;
+    CmdFillBufferFn               fill_buffer;
+    CmdCopyBufferToTextureFn      copy_buffer_to_texture;
+    CmdCopyTextureToBufferFn      copy_texture_to_buffer;
+    CmdBarrierFn                  barrier;
+    CmdTextureBarrierFn           texture_barrier;
+    CmdBindPipelineFn             bind_pipeline;
+    CmdSetDepthStateFn            set_depth_state;
+    CmdSetRasterStateFn           set_raster_state;
+    CmdSetGraphicsStateFn         set_graphics_state;
+    CmdSetColorStateFn            set_color_state;
+    CmdDispatchFn                 dispatch;
+    CmdBeginRenderPassFn          begin_render_pass;
+    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
+    CmdSetViewportFn              set_viewport;
+    CmdSetScissorFn               set_scissor;
+    CmdEndRenderPassFn            end_render_pass;
+    CmdDrawFn                     draw;
+    CmdDrawIndexedFn              draw_indexed;
+    CmdDrawIndirectFn             draw_indirect;
+    CmdDrawIndexedIndirectFn      draw_indexed_indirect;
+    CmdDrawIndexedIndirectCountFn draw_indexed_indirect_count;
+    CmdDispatchIndirectFn         dispatch_indirect;
+    CmdDrawGeneratedFn            draw_generated;
+    CmdDrawIndexedGeneratedFn     draw_indexed_generated;
+    CmdDispatchGeneratedFn        dispatch_generated;
+    CmdBeginLabelFn               begin_label;
+    CmdEndLabelFn                 end_label;
+}
 
 struct VkRuntimeState @public {
     gpu::Runtime runtime;
@@ -26,6 +205,8 @@ struct VkDeviceState @public {
     gpu::Device          owner;
     gpu::Queue           allocator_queue;
     gpu::CommandAllocatorDesc allocator_desc;
+    CommandOps*          command_ops;
+    CommandRecord[STUB_COMMAND_CAPACITY] command_records;
     gpu::GpuAllocation   allocation;
     gpu::AllocationDesc  allocation_desc;
     gpu::TextureHandle   texture;
@@ -39,6 +220,8 @@ struct VkDeviceState @public {
     uint                 sampler_native_creates;
     uint                 allocator_creates;
     uint                 allocator_destroy_calls;
+    uint[STUB_COMMAND_CAPACITY] command_generations;
+    uint                 next_command;
     uint                 allocation_attempts;
     uint                 allocation_free_calls;
     uint                 allocation_flush_calls;
@@ -61,6 +244,8 @@ struct VkDeviceState @public {
     Atomic{bool}         check_release;
     Atomic{uint}         check_calls;
     Atomic{uint}         destroy_calls;
+    Atomic{bool}         discard_entered;
+    Atomic{bool}         discard_release;
     Atomic{bool}         memory_stats_entered;
     Atomic{bool}         memory_stats_release;
     bool                 allocation_live;
@@ -80,6 +265,11 @@ struct VkDeviceState @public {
     bool                 reject_allocator_destroy;
     bool                 return_invalid_allocator;
     bool                 return_foreign_allocator;
+    bool[STUB_COMMAND_CAPACITY] command_used;
+    bool                 reject_discard;
+    bool                 reject_end;
+    bool                 block_discard;
+    bool                 reuse_command_index;
 }
 
 uint configured_adapter_count @private = 1;
@@ -114,6 +304,99 @@ fn void lock_stub_samplers(VkDeviceState* state) @private {
 
 fn void unlock_stub_samplers(VkDeviceState* state) @private {
     (void)state.sampler_lock.clear(AtomicOrdering.RELEASE);
+}
+
+fn void? vk_begin_commands(
+    VkDeviceState* state,
+    gpu::CommandAllocator* allocator,
+    gpu::CommandList* out_commands,
+) {
+    if (state == null || allocator == null || out_commands == null) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.command_ops == null) return gpu::BACKEND_ERROR~;
+    gpu::Device device = allocator.device;
+    gpu::internal::DeviceData* data =
+        gpu::internal::resolve_pinned_device(&device);
+    if (data == null || data.state != state) return gpu::INVALID_HANDLE~;
+
+    state.next_command++;
+    uint index = state.reuse_command_index ? 1 : state.next_command;
+    if (index >= state.command_records.len) return gpu::SLOT_TABLE_FULL~;
+    if (state.command_used[index]) return gpu::DEVICE_BUSY~;
+    state.command_generations[index]++;
+    if (state.command_generations[index] == 0) {
+        state.command_generations[index] = 1;
+    }
+    gpu::internal::CommandListHandle identity = {
+        .owner = gpu::internal::resource_owner_tag(
+            data.resource_owner,
+            gpu::internal::ResourceOwnerKind.COMMAND,
+        ),
+        .index = index,
+        .generation = state.command_generations[index],
+    };
+    state.command_records[index] = {
+        .ops          = state.command_ops,
+        .device_state = state,
+        .device       = device,
+        .identity     = identity,
+        .state        = gpu::internal::CommandState.RECORDING,
+    };
+    state.command_used[index] = true;
+    gpu::internal::publish_command_list(
+        &state.command_records[index],
+        out_commands,
+    );
+}
+
+fn void? vk_end_commands(
+    VkDeviceState* state,
+    CommandRecord* record,
+) {
+    if (state == null || record == null || record.device_state != state) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.reject_end) return gpu::DEVICE_BUSY~;
+    if (record.state != gpu::internal::CommandState.RECORDING) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    record.state = gpu::internal::CommandState.EXECUTABLE;
+}
+
+fn void? vk_discard_commands(
+    VkDeviceState* state,
+    CommandRecord* record,
+    bool executable,
+) {
+    if (state == null
+        || record == null
+        || record.device_state != state
+        || !record.identity.is_valid()) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.reject_discard) return gpu::DEVICE_BUSY~;
+    bool state_matches = executable
+        ? record.state == gpu::internal::CommandState.EXECUTABLE
+        : record.state == gpu::internal::CommandState.RECORDING
+            || record.state
+                == gpu::internal::CommandState.RECORDING_RENDER_PASS;
+    if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
+    uint index = record.identity.index;
+    if (index >= state.command_records.len
+        || !state.command_used[index]
+        || record != &state.command_records[index]) {
+        return gpu::INVALID_HANDLE~;
+    }
+
+    record.state = gpu::internal::CommandState.INACTIVE;
+    state.discard_entered.store(true, AtomicOrdering.RELEASE);
+    while (state.block_discard
+        && !state.discard_release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    state.command_records[index] = {};
+    state.command_used[index] = false;
 }
 
 fn gpu::CommandAllocatorHandle? vk_create_command_allocator(

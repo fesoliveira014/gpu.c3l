@@ -7,6 +7,97 @@ import std::core::mem;
 import std::core::env;
 import std::hash::fnv64a;
 
+alias CmdCopyBufferFn @private       = fn void? (CommandRecord*, gpu::BufferCopyDesc*);
+alias CmdFillBufferFn @private       = fn void? (CommandRecord*, gpu::GpuSpan, uint);
+alias CmdCopyBufferToTextureFn @private = fn void? (CommandRecord*, gpu::BufferTextureCopyDesc*);
+alias CmdCopyTextureToBufferFn @private = fn void? (CommandRecord*, gpu::TextureBufferCopyDesc*);
+alias CmdBarrierFn @private          = fn void? (CommandRecord*, gpu::Barrier*);
+alias CmdTextureBarrierFn @private   = fn void? (CommandRecord*, gpu::TextureBarrier*);
+alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, gpu::PipelineHandle);
+alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, gpu::DepthState*);
+alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, gpu::DynamicRasterState*);
+alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, gpu::GraphicsState*);
+alias CmdSetColorStateFn @private            = fn void? (CommandRecord*, gpu::ColorState*);
+alias CmdDispatchFn @private                 = fn void? (CommandRecord*, gpu::GpuAddress, gpu::Vec3u);
+alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, gpu::RenderPassDesc*);
+alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandRecord*, gpu::RenderPassDesc*, gpu::GraphicsState*);
+alias CmdSetViewportFn @private              = fn void? (CommandRecord*, gpu::Viewport*);
+alias CmdSetScissorFn @private               = fn void? (CommandRecord*, gpu::ScissorRect*);
+alias CmdEndRenderPassFn @private            = fn void? (CommandRecord*);
+alias CmdDrawFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+);
+alias CmdDrawIndexedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    gpu::IndexType index_type,
+);
+alias CmdDrawIndirectFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+);
+alias CmdDrawIndexedIndirectFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+);
+alias CmdDrawIndexedIndirectCountFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+);
+alias CmdDispatchIndirectFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::GpuSpan,
+);
+alias CmdDrawGeneratedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+);
+alias CmdDrawIndexedGeneratedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+);
+alias CmdDispatchGeneratedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+);
+alias CmdBeginLabelFn @private = fn void? (
+    CommandRecord*,
+    ZString,
+    float[4],
+);
+alias CmdEndLabelFn @private = fn void? (CommandRecord*);
+
 const uint MAX_COMMAND_LISTS = gpu::internal::MAX_DEVICE_COMMANDS;
 const uint COMMAND_FREE_NONE = 0;
 
@@ -51,15 +142,19 @@ struct StrictHeapCommandBinding {
     bool compute_set_bound;
 }
 
-struct VkCommandRecord {
-    gpu::internal::CommandRecord* root;
+struct CommandRecord @public {
+    CommandOps*                  ops;
+    VkDeviceState*               device_state;
+    gpu::Device                  device;
+    gpu::internal::CommandListHandle identity;
+    gpu::internal::CommandState  state;
     vk::CommandBuffer            command_buffer;
     gpu::CommandAllocatorHandle  allocator;
     uint                         allocator_buffer;
     gpu::Queue                   queue;
     ulong                        submit_visit_epoch;
     gpu::CompletionPoint         submitted_completion;
-    gpu::internal::CommandRecord* next_submitted;
+    CommandRecord*               next_submitted;
     RenderCompatibility          active_render;
     bool                         graphics_state_initialized;
     bool                         color_state_initialized;
@@ -71,12 +166,42 @@ struct VkCommandRecord {
     CommandScratch*              scratch;
 }
 
+struct CommandOps @public {
+    CmdCopyBufferFn               copy_buffer;
+    CmdFillBufferFn               fill_buffer;
+    CmdCopyBufferToTextureFn      copy_buffer_to_texture;
+    CmdCopyTextureToBufferFn      copy_texture_to_buffer;
+    CmdBarrierFn                  barrier;
+    CmdTextureBarrierFn           texture_barrier;
+    CmdBindPipelineFn             bind_pipeline;
+    CmdSetDepthStateFn            set_depth_state;
+    CmdSetRasterStateFn           set_raster_state;
+    CmdSetGraphicsStateFn         set_graphics_state;
+    CmdSetColorStateFn            set_color_state;
+    CmdDispatchFn                 dispatch;
+    CmdBeginRenderPassFn          begin_render_pass;
+    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
+    CmdSetViewportFn              set_viewport;
+    CmdSetScissorFn               set_scissor;
+    CmdEndRenderPassFn            end_render_pass;
+    CmdDrawFn                     draw;
+    CmdDrawIndexedFn              draw_indexed;
+    CmdDrawIndirectFn             draw_indirect;
+    CmdDrawIndexedIndirectFn      draw_indexed_indirect;
+    CmdDrawIndexedIndirectCountFn draw_indexed_indirect_count;
+    CmdDispatchIndirectFn         dispatch_indirect;
+    CmdDrawGeneratedFn            draw_generated;
+    CmdDrawIndexedGeneratedFn     draw_indexed_generated;
+    CmdDispatchGeneratedFn        dispatch_generated;
+    CmdBeginLabelFn               begin_label;
+    CmdEndLabelFn                 end_label;
+}
+
 struct CommandCell {
-    gpu::internal::CommandRecord record;
-    VkCommandRecord              value;
-    uint                         generation;
-    uint                         next_free;
-    bool                         used;
+    CommandRecord record;
+    uint          generation;
+    uint          next_free;
+    bool          used;
 }
 
 struct CommandTable {
@@ -92,12 +217,12 @@ struct CommandReferenceProbe {
     bool found;
 }
 
-fn gpu::internal::CommandRecord*? CommandTable.claim(
+fn CommandRecord*? CommandTable.claim(
     &self,
     gpu::Device device,
-    gpu::internal::CommandOps* ops,
-    void* backend_state,
-    VkCommandRecord value,
+    CommandOps* ops,
+    VkDeviceState* device_state,
+    CommandRecord value,
 ) {
     uint idx;
     bool found = false;
@@ -115,7 +240,6 @@ fn gpu::internal::CommandRecord*? CommandTable.claim(
         idx = self.next_new++;
         self.slots[idx].generation = 0;
     }
-    self.slots[idx].value = value;
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
     self.slots[idx].used = true;
     gpu::internal::CommandListHandle identity = {
@@ -123,19 +247,17 @@ fn gpu::internal::CommandRecord*? CommandTable.claim(
         .index = idx,
         .generation = self.slots[idx].generation,
     };
-    self.slots[idx].record = {
-        .ops             = ops,
-        .backend_state   = backend_state,
-        .backend_command = &self.slots[idx].value,
-        .device          = device,
-        .identity        = identity,
-        .state           = gpu::internal::CommandState.INACTIVE,
-    };
-    self.slots[idx].value.root = &self.slots[idx].record;
+    self.slots[idx].record = value;
+    self.slots[idx].record.ops = ops;
+    self.slots[idx].record.device_state = device_state;
+    self.slots[idx].record.device = device;
+    self.slots[idx].record.identity = identity;
+    self.slots[idx].record.state =
+        gpu::internal::CommandState.INACTIVE;
     return &self.slots[idx].record;
 }
 
-fn gpu::internal::CommandRecord*? CommandTable.get_record(
+fn CommandRecord*? CommandTable.get(
     &self,
     gpu::internal::CommandListHandle handle,
 ) {
@@ -147,19 +269,10 @@ fn gpu::internal::CommandRecord*? CommandTable.get_record(
     return &self.slots[idx].record;
 }
 
-fn VkCommandRecord*? CommandTable.get(
-    &self,
-    gpu::internal::CommandListHandle handle,
-) {
-    gpu::internal::CommandRecord* record = self.get_record(handle)!;
-    return (VkCommandRecord*)record.backend_command;
-}
-
 fn void? CommandTable.free(&self, gpu::internal::CommandListHandle handle) {
     self.get(handle)!;
     uint idx = handle.index;
     self.slots[idx].record = {};
-    self.slots[idx].value = {};
     self.slots[idx].used = false;
     if (!should_recycle_handle_generation(self.slots[idx].generation)) {
         self.slots[idx].generation = HANDLE_GENERATION_MAX;
@@ -178,31 +291,19 @@ fn void? CommandTable.cancel_claim(
     return self.free(handle);
 }
 
-fn VkCommandRecord*? resolve_command(
+fn CommandRecord*? resolve_command(
     gpu::CommandList* token,
 ) @if(env::TESTING) {
-    gpu::internal::CommandRecord* record =
+    CommandRecord* record =
         gpu::internal::recording_command(
             token,
             count_command: false,
         )!;
-    return backend_command(record);
-}
-
-fn VkDeviceState* command_device_state(
-    gpu::internal::CommandRecord* record,
-) {
-    return (VkDeviceState*)record.backend_state;
-}
-
-fn VkCommandRecord* backend_command(
-    gpu::internal::CommandRecord* record,
-) {
-    return (VkCommandRecord*)record.backend_command;
+    return record;
 }
 
 fn void? ensure_command_reference_capacity(
-    VkCommandRecord* record,
+    CommandRecord* record,
     uint additional,
 ) {
     if (additional
@@ -304,7 +405,7 @@ fn void reset_command_reference_index(
 
 fn void? preflight_command_references(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     CommandResourceReference[] candidates,
 ) {
     uint additional = 0;
@@ -328,7 +429,7 @@ fn void? preflight_command_references(
 
 fn void? track_command_reference(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     ulong owner,
     uint index,
     uint generation,
@@ -369,7 +470,7 @@ fn void? track_command_reference(
 
 fn TextureSlot*? resolve_tracked_texture_command_reference(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     gpu::TextureHandle handle,
 ) {
     note_command_tracking_call(state);
@@ -425,14 +526,14 @@ fn void clear_command_scratch_references(
 
 fn void clear_command_references(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
 ) {
     clear_command_scratch_references(state, record.scratch);
 }
 
 fn void rollback_command_references(
     VkDeviceState* state,
-    VkCommandRecord* record,
+    CommandRecord* record,
     uint checkpoint,
 ) {
     if (record.scratch.reference_count == checkpoint) return;
@@ -475,7 +576,7 @@ fn void destroy_command_table(VkDeviceState* state) {
     if (state.commands.slots.ptr == null) return;
     foreach (&cell : state.commands.slots[:state.commands.next_new]) {
         if (cell.used) {
-            clear_command_references(state, &cell.value);
+            clear_command_references(state, &cell.record);
         }
     }
     mem::free(state.commands.slots.ptr);

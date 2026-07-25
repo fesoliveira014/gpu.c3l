@@ -218,8 +218,8 @@ fn DynamicStateFixture make_dynamic_state_fixture(
 fn void destroy_dynamic_state_fixture(
     DynamicStateFixture* fixture,
 ) {
-    vk::VkCommandRecord* record = vk::resolve_command(&fixture.commands)!!;
-    if (record.root.state == gpu::internal::CommandState.RECORDING_RENDER_PASS) {
+    vk::CommandRecord* record = vk::resolve_command(&fixture.commands)!!;
+    if (record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         gpu::cmd_end_render_pass(&fixture.commands)!!;
     }
     discard_test_commands(&fixture.commands)!!;
@@ -324,11 +324,11 @@ fn void assert_unrequested_color_state_rejected(
     DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
         contract,
     );
-    vk::VkCommandRecord* record =
+    vk::CommandRecord* record =
         vk::resolve_command(&fixture.commands)!!;
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     select_dynamic_color_pipeline(record, formats[..]);
-    gpu::internal::CommandState phase_before = record.root.state;
+    gpu::internal::CommandState phase_before = record.state;
     vk::BoundPipeline pipeline_before = record.logical_pipeline;
     gpu::ColorTargetBlendState[1] targets = {
         gpu::alpha_blend(),
@@ -346,7 +346,7 @@ fn void assert_unrequested_color_state_rejected(
         "an unrequested device rejects dynamic color deterministically");
     assert(stats.native_commands == 0,
         "unsupported color state emits no native command");
-    assert(record.root.state == phase_before
+    assert(record.state == phase_before
             && record.logical_pipeline.handle == pipeline_before.handle
             && record.logical_pipeline.kind == pipeline_before.kind
             && record.logical_pipeline.color_profile
@@ -357,7 +357,7 @@ fn void assert_unrequested_color_state_rejected(
 }
 
 fn void select_dynamic_color_pipeline(
-    vk::VkCommandRecord* record,
+    vk::CommandRecord* record,
     gpu::Format[] formats,
 ) {
     record.logical_pipeline = {
@@ -723,7 +723,7 @@ fn void render_pass_rejects_mixed_samples_before_mutation() @test {
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, first);
     record_val_target_to_attach(&commands, second);
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
     gpu::ColorTargetDesc[2] colors = {
         { .view = first_view },
@@ -744,7 +744,7 @@ fn void render_pass_rejects_mixed_samples_before_mutation() @test {
     ))
         == gpu::INVALID_ARGUMENT,
         "all render attachments must use the same sample count");
-    assert(record.root.state == gpu::internal::CommandState.RECORDING,
+    assert(record.state == gpu::internal::CommandState.RECORDING,
         "sample mismatch records no native render pass");
     assert(record.scratch.reference_count == references_before,
         "sample mismatch retains no attachment references");
@@ -783,7 +783,7 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, source);
     record_val_target_to_attach(&commands, resolve);
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
     gpu::ColorTargetDesc[1] colors = {{
         .view         = source_view,
@@ -804,7 +804,7 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
     ))
         == gpu::INVALID_ARGUMENT,
         "a single-sample color attachment cannot have a resolve target");
-    assert(record.root.state == gpu::internal::CommandState.RECORDING,
+    assert(record.state == gpu::internal::CommandState.RECORDING,
         "invalid resolve records no native render pass");
     assert(record.scratch.reference_count == references_before,
         "invalid resolve retains no attachment references");
@@ -879,7 +879,7 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     record_val_target_to_attach(&prebound, target);
     gpu::cmd_bind_pipeline(&prebound, compute.pipeline)!!;
     gpu::cmd_bind_pipeline(&prebound, draw.graphics)!!;
-    vk::VkCommandRecord* prebound_record = vk::resolve_command(&prebound)!!;
+    vk::CommandRecord* prebound_record = vk::resolve_command(&prebound)!!;
     uint prebound_references = prebound_record.scratch.reference_count;
     vk::NativePipelineBinding native_graphics_before =
         prebound_record.native_graphics_pipeline;
@@ -892,7 +892,7 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     ))
         == gpu::INVALID_ARGUMENT,
         "begin rejects a prebound pipeline with incompatible color formats");
-    assert(prebound_record.root.state == gpu::internal::CommandState.RECORDING,
+    assert(prebound_record.state == gpu::internal::CommandState.RECORDING,
         "prebound incompatibility records no native render pass");
     assert(prebound_record.scratch.reference_count == prebound_references,
         "prebound incompatibility retains no attachment references");
@@ -911,7 +911,7 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     defer discard_test_commands(&in_pass)!!;
     record_val_target_to_attach(&in_pass, target);
     gpu::cmd_begin_render_pass_with_state(&in_pass, &pass, &graphics_state)!!;
-    vk::VkCommandRecord* in_pass_record = vk::resolve_command(&in_pass)!!;
+    vk::CommandRecord* in_pass_record = vk::resolve_command(&in_pass)!!;
     uint in_pass_references = in_pass_record.scratch.reference_count;
     assert(@catch(gpu::cmd_bind_pipeline(&in_pass, draw.graphics))
         == gpu::INVALID_ARGUMENT,
@@ -983,7 +983,7 @@ fn void preserves_graphics_binding_across_render_passes() @test {
     gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     assert(record.logical_pipeline.handle == draw.graphics,
         "ending a render pass preserves the logical graphics binding");
     assert(record.native_graphics_pipeline.pipeline != null,
@@ -1181,7 +1181,7 @@ fn void graphics_alias_updates_logical_handle_without_rebinding() @test {
     gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_bind_pipeline(&commands, alias_pipeline)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.pipeline_bind_commands == 1,
         "graphics aliases sharing one cache entry emit one native bind");
@@ -1226,7 +1226,7 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
     gpu::cmd_bind_pipeline(&first, compute.pipeline)!!;
     gpu::cmd_bind_pipeline(&first, draw.graphics)!!;
     gpu::cmd_set_graphics_state(&first, &graphics)!!;
-    vk::VkCommandRecord* first_record = vk::resolve_command(&first)!!;
+    vk::CommandRecord* first_record = vk::resolve_command(&first)!!;
     first_record.color_state_initialized = true;
     first_record.color_state.count = 1;
     first_record.color_state.formats[0] = gpu::Format.RGBA8_UNORM;
@@ -1236,7 +1236,7 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
 
     gpu::CommandList reused = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&reused)!!;
-    vk::VkCommandRecord* reused_record = vk::resolve_command(&reused)!!;
+    vk::CommandRecord* reused_record = vk::resolve_command(&reused)!!;
     assert(!reused_record.graphics_state_initialized
         && !reused_record.color_state_initialized
         && reused_record.color_state.count == 0,
@@ -1296,7 +1296,7 @@ fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, target);
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
 
     assert(@catch(gpu::cmd_begin_render_pass_with_state(
@@ -1306,7 +1306,7 @@ fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
     ))
         == gpu::INVALID_ARGUMENT,
         "pipeline and render attachments must use the same sample count");
-    assert(record.root.state == gpu::internal::CommandState.RECORDING,
+    assert(record.state == gpu::internal::CommandState.RECORDING,
         "pipeline sample mismatch records no native render pass");
     assert(record.scratch.reference_count == references_before,
         "pipeline sample mismatch retains no attachment references");
@@ -1358,7 +1358,7 @@ fn void graphics_state_packet_emission_is_exact() @test {
         gpu::command_resolution_stats();
     vk::DynamicStateObservation partial =
         vk::dynamic_state_observation(fixture.state);
-    vk::VkCommandRecord* record = vk::resolve_command(&fixture.commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&fixture.commands)!!;
     assert(partial_stats.native_commands == 1
         && partial.viewport_emissions == 1
         && partial.scissor_emissions == 0
@@ -1471,7 +1471,7 @@ fn void invalid_graphics_state_packet_is_transactional() @test {
         &invalid_compare,
         int::size,
     );
-    vk::VkCommandRecord* record = vk::resolve_command(&fixture.commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&fixture.commands)!!;
     uint references_before = record.scratch.reference_count;
 
     reset_sync_diagnostic(
@@ -1497,7 +1497,7 @@ fn void invalid_graphics_state_packet_is_transactional() @test {
         "invalid initial state emits no native command");
     assert(observation_has_no_emissions(&begin_observation),
         "invalid initial state emits no partial packet");
-    assert(record.root.state == gpu::internal::CommandState.RECORDING,
+    assert(record.state == gpu::internal::CommandState.RECORDING,
         "invalid initial state leaves the command outside a pass");
     assert(record.scratch.reference_count == references_before,
         "invalid initial state retains no attachment reference");
@@ -1545,7 +1545,7 @@ fn void invalid_graphics_state_packet_is_transactional() @test {
         "invalid replacement emits no native command");
     assert(observation_has_no_emissions(&replacement_observation),
         "invalid replacement emits no partial state");
-    assert(record.root.state == gpu::internal::CommandState.RECORDING_RENDER_PASS,
+    assert(record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS,
         "invalid replacement preserves the active pass");
     assert(record.graphics_state_initialized,
         "invalid replacement preserves prior complete initialization");
@@ -1941,7 +1941,7 @@ fn void dynamic_color_packet_emits_three_heterogeneous_arrays() @test {
         fixture.state.device_dispatch.dynamic_color = original;
         dynamic_color_capture = null;
     }
-    vk::VkCommandRecord* record =
+    vk::CommandRecord* record =
         vk::resolve_command(&fixture.commands)!!;
     gpu::Format[2] formats = {
         gpu::Format.RGBA8_UNORM,
@@ -2098,7 +2098,7 @@ fn void full_color_validation_rejects_before_mutation() @test {
         fixture.state.device_dispatch.dynamic_color = original;
         dynamic_color_capture = null;
     }
-    vk::VkCommandRecord* record =
+    vk::CommandRecord* record =
         vk::resolve_command(&fixture.commands)!!;
     gpu::Format[2] formats = {
         gpu::Format.RGBA8_UNORM,
@@ -2106,7 +2106,7 @@ fn void full_color_validation_rejects_before_mutation() @test {
     };
     select_dynamic_color_pipeline(record, formats[..]);
     vk::BoundPipeline pipeline_before = record.logical_pipeline;
-    gpu::internal::CommandState phase_before = record.root.state;
+    gpu::internal::CommandState phase_before = record.state;
     gpu::ColorTargetBlendState[2] targets = {
         gpu::color_blend_disabled(),
         gpu::alpha_blend(),
@@ -2124,7 +2124,7 @@ fn void full_color_validation_rejects_before_mutation() @test {
         && capture.write_mask_calls == 0
         && gpu::command_resolution_stats().native_commands == 0,
         "late-target validation completes before the first native call");
-    assert(record.root.state == phase_before
+    assert(record.state == phase_before
         && record.logical_pipeline.handle == pipeline_before.handle
         && record.logical_pipeline.kind == pipeline_before.kind
         && record.logical_pipeline.color_profile
@@ -2162,7 +2162,7 @@ fn void dynamic_color_domain_persists_until_incompatible_bind() @test {
         fixture.state.device_dispatch.dynamic_color = original;
         dynamic_color_capture = null;
     }
-    vk::VkCommandRecord* record =
+    vk::CommandRecord* record =
         vk::resolve_command(&fixture.commands)!!;
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     select_dynamic_color_pipeline(record, formats[..]);
@@ -2235,7 +2235,7 @@ fn void dynamic_color_initialization_gates_direct_and_generated_draws() @test {
         fixture.state.device_dispatch.dynamic_color = original;
         dynamic_color_capture = null;
     }
-    vk::VkCommandRecord* record =
+    vk::CommandRecord* record =
         vk::resolve_command(&fixture.commands)!!;
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
     select_dynamic_color_pipeline(record, formats[..]);

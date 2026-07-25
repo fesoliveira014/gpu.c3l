@@ -440,13 +440,13 @@ fn void failed_submit_records_nothing() @test {
     defer discard_test_commands(&unfinished)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::VkCommandRecord* record = vk::resolve_command(&unfinished)!!;
+    vk::CommandRecord* record = vk::resolve_command(&unfinished)!!;
     vk::CommandAllocatorSlot* allocator_slot =
         state.command_allocators.get(command_allocator.handle)!!;
     uint available_before = allocator_slot.available_count;
     gpu::ExecutableCommandList[1] not_executable;
     gpu::internal::publish_executable_command_list(
-        record.root,
+        record,
         &not_executable[0],
     );
     gpu::SubmitDesc bad_submit = { .command_lists = not_executable[..] };
@@ -524,7 +524,7 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
         )!!;
         defer gpu::destroy_command_allocator(&allocator)!!;
         gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-        vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+        vk::CommandRecord* record = vk::resolve_command(&commands)!!;
         uint allocator_buffer = record.allocator_buffer;
         gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
         defer discard_test_executable(&executable)!!;
@@ -539,7 +539,7 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
             "an executable faults before native submit on a different queue");
         assert(stats_of(&device).queue_submits == submits_before
                 && lists[0].is_valid()
-                && record.root.state == gpu::internal::CommandState.EXECUTABLE,
+                && record.state == gpu::internal::CommandState.EXECUTABLE,
             "different-queue rejection preserves the token before native work");
         assert(submit_stats_work_matches_exact(
             work:                        vk::submit_work_counters(state),
@@ -699,7 +699,7 @@ fn void prove_submission_publication_gap(
     )!!;
 
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint allocator_buffer = record.allocator_buffer;
     vk::CommandAllocatorSlot* allocator_slot =
         state.command_allocators.get(allocator.handle)!!;
@@ -784,8 +784,8 @@ fn void prove_submission_publication_gap(
     assert(completion.submitted_count == expected_batches,
         "the checkpoint exposes only its intended batch-publication phase");
     if (checkpoint != vk::SubmissionCheckpoint.NATIVE_ACCEPTED) {
-        vk::VkCommandRecord* submitted =
-            vk::backend_command(completion.submitted_head);
+        vk::CommandRecord* submitted =
+            completion.submitted_head;
         vk::CommandAllocatorSlot* submitted_allocator_slot =
             state.command_allocators.get(submitted.allocator)!!;
         vk::CommandResourceReference* reference =
@@ -886,7 +886,7 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint allocator_buffer = record.allocator_buffer;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
@@ -1232,7 +1232,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint allocator_buffer = record.allocator_buffer;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
@@ -1399,7 +1399,7 @@ fn void native_device_loss_rolls_back_and_allows_discard() @test {
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint allocator_buffer = record.allocator_buffer;
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;

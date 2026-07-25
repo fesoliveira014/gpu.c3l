@@ -7,13 +7,6 @@ import std::atomic;
 import std::thread;
 
 const uint DEVICE_REGISTRY_THREAD_COUNT = 8;
-const uint COMMAND_PIN_RECORD_CAPACITY = 64;
-
-struct CommandPinRecordCell {
-    gpu::internal::CommandRecord record;
-    uint                         generation;
-    bool                         used;
-}
 
 struct DeviceRegistryWorkerArgs {
     Atomic{uint}* ready;
@@ -35,23 +28,13 @@ struct CommandPinFixture {
     gpu::internal::vk::VkDeviceState state;
     Atomic{bool} command_entered;
     Atomic{bool} command_release;
-    Atomic{bool} discard_entered;
-    Atomic{bool} discard_release;
     uint         pins_during_command;
     uint         pins_during_submit;
-    uint         next_command;
     gpu::Device  device;
-    CommandPinRecordCell[COMMAND_PIN_RECORD_CAPACITY] records;
     bool         block_command;
-    bool         reject_discard;
-    bool         reject_end;
     bool         reject_command;
-    bool         block_discard;
-    bool         reuse_command_index;
     bool         submit_busy;
     bool         lose_during_submit;
-    bool         return_null_backend_state;
-    bool         return_null_backend_command;
 }
 
 struct StaleCommandWorkerArgs {
@@ -83,84 +66,6 @@ struct RuntimeRetainWorkerArgs {
     bool          failed;
 }
 
-fn void? command_pin_begin(
-    gpu::CommandAllocator* allocator,
-    gpu::CommandList* out_commands,
-) {
-    gpu::Device device = allocator.device;
-    gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(&device);
-    if (data == null || out_commands == null) return gpu::INVALID_HANDLE~;
-    CommandPinFixture* fixture = (CommandPinFixture*)data.state;
-    if (data.command_ops == null
-        || fixture.return_null_backend_state
-        || fixture.return_null_backend_command) {
-        return gpu::BACKEND_ERROR~;
-    }
-    fixture.device = device;
-    fixture.next_command++;
-    uint index = fixture.reuse_command_index ? 1 : fixture.next_command;
-    if (index >= fixture.records.len) return gpu::SLOT_TABLE_FULL~;
-    CommandPinRecordCell* cell = &fixture.records[index];
-    if (cell.used) return gpu::DEVICE_BUSY~;
-    cell.generation++;
-    if (cell.generation == 0) cell.generation = 1;
-    gpu::internal::CommandListHandle identity = {
-        .owner      = gpu::internal::resource_owner_tag(
-            data.resource_owner,
-            gpu::internal::ResourceOwnerKind.COMMAND,
-        ),
-        .index      = index,
-        .generation = cell.generation,
-    };
-    cell.record = {
-        .ops             = data.command_ops,
-        .backend_state   = fixture,
-        .backend_command = fixture,
-        .device          = device,
-        .identity        = identity,
-        .state           = gpu::internal::CommandState.RECORDING,
-    };
-    cell.used = true;
-    gpu::internal::publish_command_list(&cell.record, out_commands);
-}
-
-fn void? command_pin_end(gpu::internal::CommandRecord* record) {
-    CommandPinFixture* fixture =
-        (CommandPinFixture*)record.backend_state;
-    if (fixture.reject_end) return gpu::DEVICE_BUSY~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    record.state = gpu::internal::CommandState.EXECUTABLE;
-}
-
-fn void? command_pin_discard(
-    gpu::internal::CommandRecord* record,
-    bool executable,
-) {
-    if (record == null || !record.identity.is_valid()) {
-        return gpu::INVALID_HANDLE~;
-    }
-    CommandPinFixture* fixture = (CommandPinFixture*)record.backend_state;
-    if (fixture == null) return gpu::INVALID_HANDLE~;
-    if (fixture.reject_discard) return gpu::DEVICE_BUSY~;
-    bool state_matches = executable
-        ? record.state == gpu::internal::CommandState.EXECUTABLE
-        : record.state == gpu::internal::CommandState.RECORDING
-            || record.state
-                == gpu::internal::CommandState.RECORDING_RENDER_PASS;
-    if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
-    uint index = record.identity.index;
-    record.state = gpu::internal::CommandState.INACTIVE;
-    fixture.discard_entered.store(true, AtomicOrdering.RELEASE);
-    while (fixture.block_discard
-        && !fixture.discard_release.load(AtomicOrdering.ACQUIRE)) {
-        thread::yield();
-    }
-    fixture.records[index].record = {};
-    fixture.records[index].used = false;
-}
-
 fn int discard_command_worker(void* raw_args) {
     DiscardCommandWorkerArgs* args = (DiscardCommandWorkerArgs*)raw_args;
     if (catch result = gpu::discard_commands(&args.commands)) {
@@ -171,11 +76,11 @@ fn int discard_command_worker(void* raw_args) {
 }
 
 fn void? command_pin_barrier(
-    gpu::internal::CommandRecord* commands,
+    gpu::internal::vk::CommandRecord* commands,
     gpu::Barrier* barrier,
 ) {
     CommandPinFixture* fixture =
-        (CommandPinFixture*)commands.backend_state;
+        (CommandPinFixture*)commands.device_state;
     if (fixture == null) return gpu::INVALID_HANDLE~;
     gpu::internal::DeviceSlotControl control =
         (gpu::internal::DeviceSlotControl)gpu::internal::device_slots[fixture.device.index].control.load(
@@ -191,7 +96,7 @@ fn void? command_pin_barrier(
 }
 
 fn void? command_pin_copy_buffer(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::BufferCopyDesc* desc,
 ) {
     (void)record;
@@ -200,7 +105,7 @@ fn void? command_pin_copy_buffer(
 }
 
 fn void? command_pin_fill_buffer(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuSpan span,
     uint value,
 ) {
@@ -211,7 +116,7 @@ fn void? command_pin_fill_buffer(
 }
 
 fn void? command_pin_copy_buffer_to_texture(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::BufferTextureCopyDesc* desc,
 ) {
     (void)record;
@@ -220,7 +125,7 @@ fn void? command_pin_copy_buffer_to_texture(
 }
 
 fn void? command_pin_copy_texture_to_buffer(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     (void)record;
@@ -229,7 +134,7 @@ fn void? command_pin_copy_texture_to_buffer(
 }
 
 fn void? command_pin_texture_barrier(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::TextureBarrier* barrier,
 ) {
     (void)record;
@@ -238,7 +143,7 @@ fn void? command_pin_texture_barrier(
 }
 
 fn void? command_pin_bind_pipeline(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::PipelineHandle pipeline,
 ) {
     (void)record;
@@ -247,7 +152,7 @@ fn void? command_pin_bind_pipeline(
 }
 
 fn void? command_pin_set_depth_state(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::DepthState* depth,
 ) {
     (void)record;
@@ -256,7 +161,7 @@ fn void? command_pin_set_depth_state(
 }
 
 fn void? command_pin_set_raster_state(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::DynamicRasterState* raster,
 ) {
     (void)record;
@@ -265,7 +170,7 @@ fn void? command_pin_set_raster_state(
 }
 
 fn void? command_pin_set_graphics_state(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GraphicsState* state,
 ) {
     (void)record;
@@ -274,7 +179,7 @@ fn void? command_pin_set_graphics_state(
 }
 
 fn void? command_pin_dispatch(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) {
@@ -285,7 +190,7 @@ fn void? command_pin_dispatch(
 }
 
 fn void? command_pin_begin_render_pass(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::RenderPassDesc* desc,
 ) {
     (void)record;
@@ -294,7 +199,7 @@ fn void? command_pin_begin_render_pass(
 }
 
 fn void? command_pin_begin_render_pass_with_state(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::RenderPassDesc* desc,
     gpu::GraphicsState* state,
 ) {
@@ -305,7 +210,7 @@ fn void? command_pin_begin_render_pass_with_state(
 }
 
 fn void? command_pin_set_viewport(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::Viewport* viewport,
 ) {
     (void)record;
@@ -314,7 +219,7 @@ fn void? command_pin_set_viewport(
 }
 
 fn void? command_pin_set_scissor(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::ScissorRect* scissor,
 ) {
     (void)record;
@@ -322,13 +227,13 @@ fn void? command_pin_set_scissor(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? command_pin_end_render_pass(gpu::internal::CommandRecord* record) {
+fn void? command_pin_end_render_pass(gpu::internal::vk::CommandRecord* record) {
     (void)record;
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
 fn void? command_pin_draw(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     uint vertex_count,
@@ -343,7 +248,7 @@ fn void? command_pin_draw(
 }
 
 fn void? command_pin_draw_indexed(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan index_span,
@@ -362,7 +267,7 @@ fn void? command_pin_draw_indexed(
 }
 
 fn void? command_pin_draw_indirect(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -377,7 +282,7 @@ fn void? command_pin_draw_indirect(
 }
 
 fn void? command_pin_draw_indexed_indirect(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -396,7 +301,7 @@ fn void? command_pin_draw_indexed_indirect(
 }
 
 fn void? command_pin_draw_indexed_indirect_count(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
@@ -417,7 +322,7 @@ fn void? command_pin_draw_indexed_indirect_count(
 }
 
 fn void? command_pin_dispatch_indirect(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
@@ -428,7 +333,7 @@ fn void? command_pin_dispatch_indirect(
 }
 
 fn void? command_pin_draw_generated(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -441,7 +346,7 @@ fn void? command_pin_draw_generated(
 }
 
 fn void? command_pin_draw_indexed_generated(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
@@ -458,7 +363,7 @@ fn void? command_pin_draw_indexed_generated(
 }
 
 fn void? command_pin_dispatch_generated(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
@@ -471,7 +376,7 @@ fn void? command_pin_dispatch_generated(
 }
 
 fn void? command_pin_begin_label(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     ZString label,
     float[4] color,
 ) {
@@ -481,7 +386,7 @@ fn void? command_pin_begin_label(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? command_pin_end_label(gpu::internal::CommandRecord* record) {
+fn void? command_pin_end_label(gpu::internal::vk::CommandRecord* record) {
     (void)record;
     return gpu::UNSUPPORTED_FEATURE~;
 }
@@ -500,14 +405,14 @@ fn gpu::CompletionPoint? command_pin_submit(
         );
     fixture.pins_during_submit = control.pins;
     if (fixture.submit_busy) return gpu::DEVICE_BUSY~;
-    gpu::internal::CommandRecord*[gpu::internal::MAX_DEVICE_COMMANDS] records;
+    gpu::internal::vk::CommandRecord*[gpu::internal::MAX_DEVICE_COMMANDS] records;
     foreach (i, &commands : desc.command_lists) {
         records[i] = gpu::internal::executable_command(commands)!;
     }
     if (fixture.lose_during_submit) gpu::internal::mark_device_lost(&device);
     foreach (record : records[:desc.command_lists.len]) {
         record.state = gpu::internal::CommandState.SUBMITTED;
-        fixture.records[record.identity.index].used = false;
+        fixture.state.command_used[record.identity.index] = false;
         record.state = gpu::internal::CommandState.INACTIVE;
     }
     gpu::internal::DeviceOperation operation =
@@ -533,7 +438,7 @@ gpu::internal::BackendVTable blocking_device_vtable = {
 gpu::internal::BackendVTable blocking_operation_vtable = {
 };
 
-gpu::internal::CommandOps command_pin_ops = {
+gpu::internal::vk::CommandOps command_pin_ops = {
     .copy_buffer                 = &command_pin_copy_buffer,
     .fill_buffer                 = &command_pin_fill_buffer,
     .copy_buffer_to_texture      = &command_pin_copy_buffer_to_texture,
@@ -564,17 +469,14 @@ gpu::internal::CommandOps command_pin_ops = {
 };
 
 gpu::internal::BackendVTable command_pin_vtable = {
-    .begin_commands            = &command_pin_begin,
-    .end_commands              = &command_pin_end,
-    .discard_commands          = &command_pin_discard,
     .submit                    = &command_pin_submit,
-    .command_ops               = &command_pin_ops,
 };
 
 fn gpu::CommandList? begin_command_pin(gpu::Device* device) {
     if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
     gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(device);
     if (data == null) return gpu::INVALID_HANDLE~;
+    data.state.command_ops = &command_pin_ops;
     gpu::CommandAllocator allocator = {
         .device = *device,
         .queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!,
@@ -800,7 +702,7 @@ fn void command_calls_use_the_retained_lifetime_pin() @test {
         vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
-    gpu::internal::CommandRecord* record = commands.record;
+    gpu::internal::vk::CommandRecord* record = commands.record;
     uint record_index = record.identity.index;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::internal::DeviceSlotControl after_begin =
@@ -833,7 +735,7 @@ fn void command_calls_use_the_retained_lifetime_pin() @test {
     assert(after_discard.pins == 0,
         "discard releases the command lifetime pin exactly once");
     assert(record.state == gpu::internal::CommandState.INACTIVE
-        && !fixture.records[record_index].used,
+        && !fixture.state.command_used[record_index],
         "successful discard invalidates the record before lifetime release");
     assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
         "discard releases the command child exactly once");
@@ -954,8 +856,10 @@ fn void recording_alias_is_rejected_after_end_phase_transition() @test {
 
 fn void failed_command_lifecycle_preserves_record_state() @test {
     CommandPinFixture fixture = {
-        .reject_discard = true,
-        .reject_end     = true,
+        .state = {
+            .reject_discard = true,
+            .reject_end     = true,
+        },
     };
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
@@ -964,7 +868,7 @@ fn void failed_command_lifecycle_preserves_record_state() @test {
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::CommandList original = commands;
-    gpu::internal::CommandRecord* record = commands.record;
+    gpu::internal::vk::CommandRecord* record = commands.record;
 
     fault end_fault = @catch(gpu::end_commands(&commands));
     fault discard_fault = @catch(gpu::discard_commands(&commands));
@@ -978,8 +882,8 @@ fn void failed_command_lifecycle_preserves_record_state() @test {
     assert(record.state == gpu::internal::CommandState.RECORDING,
         "failed lifecycle calls leave the record recording");
 
-    fixture.reject_end = false;
-    fixture.reject_discard = false;
+    fixture.state.reject_end = false;
+    fixture.state.reject_discard = false;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::discard_executable_commands(&executable)!!;
     gpu::destroy_device(&device)!!;
@@ -1003,84 +907,6 @@ fn void executable_alias_of_recording_token_faults_command_state() @test {
         == gpu::COMMAND_RECORDING_ERROR,
         "an executable alias of a recording token faults command state");
     gpu::discard_commands(&commands)!!;
-    gpu::destroy_device(&device)!!;
-}
-
-fn void failed_record_publication_rolls_back_begin() @test {
-    CommandPinFixture fixture;
-    gpu::internal::BackendVTable missing_ops = command_pin_vtable;
-    missing_ops.command_ops = null;
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-        vtable: &missing_ops,
-    )!!;
-    gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-
-    fault begin_fault = @catch(begin_command_pin(&device));
-    gpu::internal::DeviceSlotControl control =
-        (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-
-    assert(begin_fault == gpu::BACKEND_ERROR,
-        "missing command operations prevent record publication");
-    assert(control.pins == 0
-        && slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
-        "failed publication rolls back its record, child, and retained pin");
-    assert(fixture.next_command == 0,
-        "failed publication exposes no command record");
-    gpu::destroy_device(&device)!!;
-}
-
-fn void missing_backend_publication_pointers_roll_back_begin() @test {
-    for (uint i = 0; i < 2; i++) {
-        CommandPinFixture fixture = {
-            .return_null_backend_state   = i == 0,
-            .return_null_backend_command = i == 1,
-        };
-        gpu::Device device = gpu::internal::register_device(
-            state:  &fixture.state,
-            caps:   {},
-            vtable: &command_pin_vtable,
-        )!!;
-        gpu::internal::DeviceSlot* slot =
-            &gpu::internal::device_slots[device.index];
-
-        fault begin_fault = @catch(begin_command_pin(&device));
-        gpu::internal::DeviceSlotControl control =
-            (gpu::internal::DeviceSlotControl)slot.control.load(
-                AtomicOrdering.ACQUIRE,
-            );
-
-        assert(begin_fault == gpu::BACKEND_ERROR,
-            "missing backend publication pointers fail begin");
-        assert(control.pins == 0
-            && slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
-            "partial publication rolls back record, child, and retained pin");
-        assert(fixture.next_command == 0,
-            "partial publication exposes no active record");
-        gpu::destroy_device(&device)!!;
-    }
-}
-
-fn void registration_accepts_per_device_command_operations() @test {
-    CommandPinFixture fixture;
-    gpu::internal::BackendVTable missing_ops = command_pin_vtable;
-    missing_ops.command_ops = null;
-    gpu::Device device = gpu::internal::register_device(
-        state:       &fixture.state,
-        caps:        {},
-        vtable:      &missing_ops,
-        command_ops: &command_pin_ops,
-    )!!;
-    gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
-    assert(
-        slot.data.command_ops == &command_pin_ops,
-        "the per-device table overrides the backend default"
-    );
     gpu::destroy_device(&device)!!;
 }
 
@@ -1189,8 +1015,10 @@ fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
 
 fn void command_record_is_not_reused_before_discard_returns() @test {
     CommandPinFixture fixture = {
-        .block_discard       = true,
-        .reuse_command_index = true,
+        .state = {
+            .block_discard       = true,
+            .reuse_command_index = true,
+        },
     };
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
@@ -1205,12 +1033,12 @@ fn void command_record_is_not_reused_before_discard_returns() @test {
     DiscardCommandWorkerArgs worker_args = { .commands = first };
     Thread worker;
     worker.create(&discard_command_worker, &worker_args)!!;
-    while (!fixture.discard_entered.load(AtomicOrdering.ACQUIRE)) {
+    while (!fixture.state.discard_entered.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
 
     fault busy = @catch(begin_command_pin(&device));
-    fixture.discard_release.store(true, AtomicOrdering.RELEASE);
+    fixture.state.discard_release.store(true, AtomicOrdering.RELEASE);
     assert(worker.join()!! == 0 && !worker_args.failed,
         "the prior discard completes before record reuse");
     gpu::CommandList next = begin_command_pin(&device)!!;
@@ -1346,7 +1174,7 @@ fn void stale_command_faults_before_reused_device_callback() @test {
         .after  = { .compute = true },
     };
     gpu::CommandList poisoned = stale;
-    poisoned.record = (gpu::internal::CommandRecord*)(uptr)1;
+    poisoned.record = (gpu::internal::vk::CommandRecord*)(uptr)1;
     fault poisoned_fault = @catch(gpu::cmd_barrier(&poisoned, &barrier));
     fault stale_fault = @catch(gpu::cmd_barrier(&stale, &barrier));
 
@@ -1367,8 +1195,10 @@ fn void stale_command_faults_before_reused_device_callback() @test {
 
 fn void stale_command_generation_does_not_use_reused_slot_pin() @test {
     CommandPinFixture fixture = {
-        .reject_command      = true,
-        .reuse_command_index = true,
+        .state = {
+            .reuse_command_index = true,
+        },
+        .reject_command = true,
     };
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,

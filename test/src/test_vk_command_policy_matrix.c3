@@ -866,7 +866,7 @@ fn void full_tracking_copy_capacity_rejection_is_transactional() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     vk::VkDeviceState* state = policy_device_state(&device);
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;

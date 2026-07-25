@@ -515,7 +515,7 @@ fn int main() {
         "command_tokens: representation=direct recording_token_bytes=%d executable_token_bytes=%d record_bytes=%d cell_bytes=%d fixed_storage_bytes=%d commands_per_list=1,16,256,4096",
         gpu::CommandList::size,
         gpu::ExecutableCommandList::size,
-        gpu::internal::CommandRecord::size,
+        gpu::internal::vk::CommandRecord::size,
         vk::CommandCell::size,
         state.commands.slots.len * vk::CommandCell::size,
     );

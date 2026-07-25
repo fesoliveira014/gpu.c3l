@@ -551,7 +551,7 @@ fn String? build_memory_report(Device* device, bool detailed) {
    Preconditions: calls are balanced while recording.
    Always checked: token identity, authoritative phase, and non-null label. *>
 fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (label == null) return INVALID_ARGUMENT~;
     return record.ops.begin_label(record, label, color);
 }
@@ -560,7 +560,7 @@ fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = 
    Preconditions: a matching label region is open.
    Always checked: token identity and authoritative recording phase. *>
 fn void? cmd_end_label(CommandList* commands) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.end_label(record);
 }
 
@@ -1296,11 +1296,12 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator)!;
-    gpu::internal::BackendVTable* vtable = operation.vtable;
-    if (vtable.begin_commands == null) return BACKEND_ERROR~;
     CommandList commands;
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    vtable.begin_commands(allocator, &commands)!;
+    gpu::internal::vk::vk_begin_commands(
+        operation.state,
+        allocator,
+        &commands,
+    )!;
     gpu::internal::retain_device_children(&operation);
     gpu::internal::transfer_device_operation_pin(&operation);
     return commands;
@@ -1311,12 +1312,11 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
    Always checked: token identity and authoritative phase.
    Runtime failures: failure leaves the token recording. *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     gpu::internal::DeviceOperation operation =
         gpu::internal::command_operation(record)!;
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    operation.vtable.end_commands(record)!;
+    gpu::internal::vk::vk_end_commands(operation.state, record)!;
     ExecutableCommandList executable;
     gpu::internal::publish_executable_command_list(record, &executable);
     *commands = {};
@@ -1328,16 +1328,18 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
    Always checked: token identity and authoritative recording phase.
    Runtime failures: failure preserves the token. *>
 fn void? discard_commands(CommandList* commands) {
-    gpu::internal::CommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands, count_command: false)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
         allow_lost: true,
     )!;
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::BackendVTable* vtable = operation.vtable;
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    vtable.discard_commands(record, false)!;
+    gpu::internal::vk::vk_discard_commands(
+        operation.state,
+        record,
+        false,
+    )!;
     *commands = {};
     gpu::internal::release_device_children(&operation);
     (void)gpu::internal::release_retained_device_pins(&operation);
@@ -1348,16 +1350,18 @@ fn void? discard_commands(CommandList* commands) {
    Always checked: token identity and authoritative executable phase.
    Runtime failures: failure preserves the token. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
-    gpu::internal::CommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::executable_command(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
         allow_lost: true,
     )!;
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::BackendVTable* vtable = operation.vtable;
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    vtable.discard_commands(record, true)!;
+    gpu::internal::vk::vk_discard_commands(
+        operation.state,
+        record,
+        true,
+    )!;
     *commands = {};
     gpu::internal::release_device_children(&operation);
     (void)gpu::internal::release_retained_device_pins(&operation);
@@ -1368,7 +1372,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
    Always checked: token phase, required pointer, identity, bounds, and safe lowering.
    FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return record.ops.copy_buffer(record, desc);
 }
@@ -1378,7 +1382,7 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
    Always checked: token phase, identity, bounds, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.fill_buffer(record, dst, value);
 }
 
@@ -1388,7 +1392,7 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
    subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return record.ops.copy_buffer_to_texture(record, desc);
 }
@@ -1399,7 +1403,7 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
    subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return record.ops.copy_texture_to_buffer(record, desc);
 }
@@ -1409,7 +1413,7 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
    Always checked: token identity, authoritative phase, and required pointer.
    FULL diagnostics: stage, hazard, and queue-support misuse. *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return record.ops.barrier(record, barrier);
 }
@@ -1419,7 +1423,7 @@ fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
    Always checked: token phase, required pointer, texture identity, range, and safe lowering.
    FULL diagnostics: state, usage, queue, format, and presentation misuse. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return record.ops.texture_barrier(record, barrier);
 }
@@ -1431,7 +1435,7 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
    FULL diagnostics: render-pass compatibility when binding during a pass;
    failure preserves the prior logical bind. *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.bind_pipeline(record, pipeline);
 }
 
@@ -1443,7 +1447,7 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    usable bound-pipeline snapshot.
    FULL diagnostics: active-kind and group-limit misuse. *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch(record, root, groups);
 }
 
@@ -1452,7 +1456,7 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
    Always checked: token phase and required pointer.
    FULL diagnostics: queue and enum misuse; failure preserves prior state. *>
 fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (depth == null) return INVALID_ARGUMENT~;
     return record.ops.set_depth_state(record, depth);
 }
@@ -1462,7 +1466,7 @@ fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
    Always checked: token phase and required pointer.
    FULL diagnostics: queue, enum, feature, and finite-value misuse. *>
 fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (raster == null) return INVALID_ARGUMENT~;
     return record.ops.set_raster_state(record, raster);
 }
@@ -1472,7 +1476,7 @@ fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster)
    Always checked: token phase and required pointer.
    FULL diagnostics: queue and viewport-value misuse. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
     return record.ops.set_viewport(record, viewport);
 }
@@ -1482,7 +1486,7 @@ fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
    Always checked: token phase and required pointer.
    FULL diagnostics: queue and scissor-value misuse. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
     return record.ops.set_scissor(record, scissor);
 }
@@ -1494,7 +1498,7 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    usable bound-pipeline snapshot.
    FULL diagnostics: pipeline-kind and state misuse. *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw(
         record:        record,
         vertex_root:    vertex_root,
@@ -1511,7 +1515,7 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, and index-type misuse. *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed(
         record:        record,
         vertex_root:    vertex_root,
@@ -1530,7 +1534,7 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse. *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indirect(
         record:       record,
         vertex_root:   vertex_root,
@@ -1547,7 +1551,7 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    usable bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse. *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed_indirect(
         record:       record,
         vertex_root:   vertex_root,
@@ -1567,7 +1571,7 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
    Runtime failures: unsupported count execution faults UNSUPPORTED_FEATURE. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed_indirect_count(
         record:        record,
         vertex_root:    vertex_root,
@@ -1587,7 +1591,7 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    snapshot, and safe lowering.
    FULL diagnostics: pipeline kind, usage, queue, and span misuse. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch_indirect(record, root, args);
 }
 
@@ -1601,7 +1605,7 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_generated(
         record:        record,
         records:        records,
@@ -1620,7 +1624,7 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed_generated(
         record:        record,
         records:        records,
@@ -1641,7 +1645,7 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch_generated(
         record:            record,
         records:            records,
@@ -1718,7 +1722,7 @@ fn GraphicsState? full_render_graphics_state(uint width, uint height) {
    Always checked: token phase, host-safe descriptor shape, identities, and safe lowering.
    FULL diagnostics: attachment, usage, queue, compatibility, and render-area misuse. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
     return record.ops.begin_render_pass(record, desc);
 }
@@ -1732,7 +1736,7 @@ fn void? cmd_begin_render_pass_with_state(
     RenderPassDesc* desc,
     GraphicsState* state,
 ) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)
         || !gpu::internal::graphics_state_host_safe(state)) {
         return INVALID_ARGUMENT~;
@@ -1748,7 +1752,7 @@ fn void? cmd_set_graphics_state(
     CommandList* commands,
     GraphicsState* state,
 ) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
     return record.ops.set_graphics_state(record, state);
 }
@@ -1761,7 +1765,7 @@ fn void? cmd_set_color_state(
     CommandList* commands,
     ColorState* state,
 ) {
-    gpu::internal::CommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     if (!gpu::internal::color_state_host_safe(state)) {
         return INVALID_ARGUMENT~;
@@ -1773,7 +1777,7 @@ fn void? cmd_set_color_state(
    Preconditions: a render pass is active.
    Always checked: token identity and authoritative render-pass phase. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.end_render_pass(record);
 }
 

@@ -406,7 +406,7 @@ fn int generated_scratch_worker(void* raw_args) {
         gpu::CommandList commands = gpu::begin_commands(args.allocator)!!;
         vk::VkDeviceState* state =
             (vk::VkDeviceState*)gpu::internal::device_backend_state(*args.device);
-        vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+        vk::CommandRecord* record = vk::resolve_command(&commands)!!;
         if (catch acquire_fault = vk::acquire_generated_preprocess_buffer(
             state:        state,
             record:       record,

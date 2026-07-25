@@ -388,7 +388,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
     gpu::ExecutableCommandList final_generation_executable = gpu::end_commands(&final_generation)!!;
     defer discard_test_executable(&final_generation_executable)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    gpu::internal::CommandRecord* final_record =
+    gpu::internal::vk::CommandRecord* final_record =
         final_generation_executable.record;
     uint final_index = final_record.identity.index;
     state.commands.slots[final_index].generation = vk::HANDLE_GENERATION_MAX - 1;
@@ -406,7 +406,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
-    gpu::internal::CommandRecord* next_record = next.record;
+    gpu::internal::vk::CommandRecord* next_record = next.record;
     assert(next_record.identity.index != final_index,
         "exhausted command slot is retired");
     assert(next.generation == 1,
@@ -657,8 +657,7 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
     vk::CommandCell* unused =
         &state.commands.slots[discarded_handle.index];
     uint unused_generation = unused.generation;
-    vk::VkCommandRecord* unvisited_live =
-        vk::backend_command(lists[1].record);
+    vk::CommandRecord* unvisited_live = lists[1].record;
     unvisited_live.submit_visit_epoch = ulong::max;
     gpu::ExecutableCommandList[2] duplicate = { lists[0], lists[0] };
     gpu::SubmitDesc submit = { .command_lists = duplicate[..] };
@@ -1249,7 +1248,7 @@ fn void submit_uses_record_queue_without_allocator_queue_reproof() @test {
     defer discard_test_executable(&executable)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
         gpu::internal::device_backend_state_ptr(&device);
-    vk::VkCommandRecord* record = vk::backend_command(executable.record);
+    vk::CommandRecord* record = executable.record;
     vk::CommandAllocatorSlot* slot =
         state.command_allocators.get(record.allocator)!!;
     gpu::Queue original_queue = slot.queue;

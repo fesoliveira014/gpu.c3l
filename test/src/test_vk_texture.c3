@@ -1239,7 +1239,7 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     vk::TextureSlot* slot = state.textures.get(texture)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
     uint tracked_references_before = slot.tracked_command_references.load(
         AtomicOrdering.RELAXED,
@@ -1351,7 +1351,7 @@ fn void texture_barrier_stale_handle_rejected() @test {
     defer discard_test_commands(&cmd)!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
-    vk::VkCommandRecord* record = vk::resolve_command(&cmd)!!;
+    vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
     uint references_before = record.scratch.reference_count;
     TextureBarrierEmitCapture emission;
     vk::set_texture_barrier_emit_hook(

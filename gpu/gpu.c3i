@@ -1031,9 +1031,9 @@ struct CommandAllocatorDesc {
 <* A recording token whose fields are library-owned. Never construct, mutate,
    persist, or serialize it. Successful end consumes it and every alias. *>
 struct CommandList {
-    gpu::internal::CommandRecord* record;
-    uint                          generation;
-    uint                          device_identity;
+    gpu::internal::vk::CommandRecord* record;
+    uint                              generation;
+    uint                              device_identity;
 }
 // gpu.c3l supports linux-x64 and windows-x64; this is an exact 16-byte ABI.
 $assert CommandList::size == ulong::size * 2;
@@ -1041,9 +1041,9 @@ $assert CommandList::size == ulong::size * 2;
 <* An executable token whose fields are library-owned. Never construct,
    mutate, persist, or serialize it. Submit or discard consumes every alias. *>
 struct ExecutableCommandList {
-    gpu::internal::CommandRecord* record;
-    uint                          generation;
-    uint                          device_identity;
+    gpu::internal::vk::CommandRecord* record;
+    uint                              generation;
+    uint                              device_identity;
 }
 $assert ExecutableCommandList::size == ulong::size * 2;
 

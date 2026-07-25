@@ -2876,7 +2876,7 @@ method gpu::Runtime.is_valid
                     "name": "record",
                     "type": {
                         "name": "CommandRecord*",
-                        "uid": "gpu::internal::CommandRecord",
+                        "uid": "gpu::internal::vk::CommandRecord",
                     },
                 }],
             }
