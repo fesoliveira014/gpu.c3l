@@ -92,6 +92,8 @@ fn SamplerKey canonical_sampler_key(gpu::SamplerDesc* desc) {
 }
 
 fn HeapDescriptorTotals descriptor_heap_totals(uint tex_capacity, uint smp_capacity) {
+    // Heap-local checks cannot reserve device-wide capacity used by other
+    // update-after-bind pools or pipeline layouts.
     return {
         .per_stage_resources   = (ulong)tex_capacity * 2,
         .all_pools_descriptors = (ulong)tex_capacity * 2 + (ulong)smp_capacity,

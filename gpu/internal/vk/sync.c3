@@ -8,7 +8,7 @@ alias TextureBarrierEmitHook @if(env::TESTING) = fn void (
     void*, vk::ImageMemoryBarrier2*
 );
 alias BarrierEmitHook @if(env::TESTING) = fn void (
-    void*, vk::MemoryBarrier2*
+    void*, vk::DependencyInfo*
 );
 alias SemaphoreWaitFn @private = fn vk::Result (
     vk::Device,
@@ -824,7 +824,7 @@ fn void emit_barrier(
         if (state.barrier_emit_hook != null) {
             state.barrier_emit_hook(
                 state.barrier_emit_user_data,
-                native_barrier,
+                &dependency,
             );
         }
     $endif

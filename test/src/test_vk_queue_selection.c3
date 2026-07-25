@@ -365,36 +365,6 @@ fn void requested_queue_count_covers_the_highest_selected_index() @test {
     assert(vk::requested_queue_count(&picked, 0, false) == 2);
 }
 
-fn void shader_heap_families_alias_without_transfer() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute },
-        .graphics_family      = 4,
-        .compute_family       = 4,
-        .transfer_family      = 7,
-    };
-    uint[2] families;
-
-    uint count = vk::shader_heap_queue_families(&state, families[..]);
-
-    assert(count == 1);
-    assert(families[0] == 4);
-}
-
-fn void shader_heap_families_are_graphics_compute_only() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute },
-        .graphics_family      = 4,
-        .compute_family       = 5,
-        .transfer_family      = 7,
-    };
-    uint[2] families;
-
-    uint count = vk::shader_heap_queue_families(&state, families[..]);
-
-    assert(count == 2);
-    assert(families[0] == 4 && families[1] == 5);
-}
-
 fn void resource_access_families_include_only_admitted_roles() @test {
     vk::VkDeviceState state = {
         .selected_queue_roles = { .graphics, .compute, .transfer },

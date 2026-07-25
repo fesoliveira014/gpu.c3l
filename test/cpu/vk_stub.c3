@@ -1379,9 +1379,8 @@ fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
 ) {
-    if (runtime_state == null || adapter_index >= runtime_state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+    if (adapter_index >= runtime_state.adapter_count) return gpu::INVALID_HANDLE~;
     if (!configured_device_baseline_support) return gpu::UNSUPPORTED_FEATURE~;
 }
 

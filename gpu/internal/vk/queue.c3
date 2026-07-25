@@ -766,21 +766,6 @@ fn uint used_queue_families(VkDeviceState* state, uint[] out_families) {
     return count;
 }
 
-<* Selected shader-heap families, or transfer when it is the only admitted role. *>
-fn uint shader_heap_queue_families(VkDeviceState* state, uint[] out_families) @private {
-    uint count;
-    if (state.selected_queue_roles.graphics) {
-        count = append_queue_family(out_families, count, state.graphics_family);
-    }
-    if (state.selected_queue_roles.compute) {
-        count = append_queue_family(out_families, count, state.compute_family);
-    }
-    if (count == 0 && state.selected_queue_roles.transfer) {
-        count = append_queue_family(out_families, count, state.transfer_family);
-    }
-    return count;
-}
-
 <* Selected graphics and private presentation families for swapchain sharing. *>
 fn uint swapchain_queue_families(
     VkDeviceState* state,

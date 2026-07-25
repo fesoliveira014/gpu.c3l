@@ -216,6 +216,7 @@ fn void destroy_descriptor_heap(VkDeviceState* state) {
         vk::destroy_descriptor_pool(state.device, heap.descriptor_pool, null);
         heap.descriptor_pool = (vk::DescriptorPool)null;
     }
+    heap.descriptor_set = (vk::DescriptorSet)null;
     if (heap.set_layout != null) {
         vk::destroy_descriptor_set_layout(state.device, heap.set_layout, null);
         heap.set_layout = (vk::DescriptorSetLayout)null;
@@ -431,21 +432,6 @@ fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sa
 
 fn void? validate_descriptor_heap_binding(VkDeviceState* state) {
     if (state == null) return gpu::INVALID_ARGUMENT~;
-}
-
-fn void invalidate_descriptor_heap_binding(CommandRecord* record) {
-    record.descriptor_heap_binding = {};
-}
-
-fn void invalidate_descriptor_heap_bind_point(
-    CommandRecord* record,
-    vk::PipelineBindPoint bind_point,
-) {
-    if (bind_point == vk::PipelineBindPoint.COMPUTE) {
-        record.descriptor_heap_binding.compute_set_bound = false;
-        return;
-    }
-    record.descriptor_heap_binding.graphics_set_bound = false;
 }
 
 fn void? bind_descriptor_heap(
