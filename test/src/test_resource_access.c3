@@ -8,10 +8,6 @@ uint resource_access_allocations;
 uint resource_access_texture_queries;
 uint resource_access_texture_creates;
 
-fn void destroy_resource_access_device(void* backend_state) {
-    (void)backend_state;
-}
-
 fn gpu::GpuAllocation? allocate_resource_access_memory(
     gpu::Device* device,
     gpu::AllocationDesc* desc,
@@ -43,13 +39,14 @@ fn gpu::TextureHandle? create_resource_access_texture(
 }
 
 gpu::internal::BackendVTable resource_access_vtable = {
-    .destroy_device        = &destroy_resource_access_device,
     .allocate_memory       = &allocate_resource_access_memory,
     .supports_texture_desc = &supports_resource_access_texture,
     .create_texture        = &create_resource_access_texture,
 };
 
-fn gpu::Device create_compute_only_resource_access_device(int* state) {
+fn gpu::Device create_compute_only_resource_access_device(
+    gpu::internal::vk::VkDeviceState* state,
+) {
     gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_requirements(
         requirements: {
             .counts = { .compute = 1 },
@@ -59,11 +56,10 @@ fn gpu::Device create_compute_only_resource_access_device(int* state) {
         transfer_aliases_compute:  false,
     )!!;
     return gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &resource_access_vtable,
-        backend_state: state,
-        queues:        queues,
+        state:  state,
+        caps:   {},
+        vtable: &resource_access_vtable,
+        queues: queues,
     )!!;
 }
 
@@ -87,7 +83,7 @@ fn gpu::TextureDesc resource_access_texture_desc(gpu::QueueRoles access) {
 }
 
 fn void resource_access_rejects_invalid_allocation_domains_before_backend() @test {
-    int state;
+    gpu::internal::vk::VkDeviceState state;
     gpu::Device device = create_compute_only_resource_access_device(&state);
     resource_access_allocations = 0;
 
@@ -109,7 +105,7 @@ fn void resource_access_rejects_invalid_allocation_domains_before_backend() @tes
 }
 
 fn void resource_access_rejects_invalid_texture_domains_before_backend() @test {
-    int state;
+    gpu::internal::vk::VkDeviceState state;
     gpu::Device device = create_compute_only_resource_access_device(&state);
     resource_access_texture_queries = 0;
     resource_access_texture_creates = 0;

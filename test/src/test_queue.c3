@@ -16,13 +16,7 @@ fn Device create_queue_test_device(Runtime* runtime) {
     return gpu::create_device(&adapter, &request)!!;
 }
 
-fn void queue_test_destroy(void* backend_state) {
-    (void)backend_state;
-}
-
-gpu::internal::BackendVTable queue_test_vtable = {
-    .destroy_device = &queue_test_destroy,
-};
+gpu::internal::BackendVTable queue_test_vtable;
 
 fn bool queue_roles_are_all(gpu::QueueRoles roles) {
     return roles.graphics && roles.compute && roles.transfer;
@@ -83,7 +77,7 @@ fn void queue_queries_return_device_owned_identities() @test {
 }
 
 fn void queue_queries_preserve_distinct_compute_identity() @test {
-    int backend_state;
+    gpu::internal::vk::VkDeviceState state;
     gpu::internal::QueueSelection selection = gpu::internal::queue_selection_for_aliases(
         compute_aliases_graphics:  false,
         transfer_aliases_graphics: true,
@@ -91,11 +85,10 @@ fn void queue_queries_preserve_distinct_compute_identity() @test {
     );
 
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          { .async_compute = true },
-        vtable:        &queue_test_vtable,
-        backend_state: &backend_state,
-        queues:        selection,
+        state:  &state,
+        caps:   { .async_compute = true },
+        vtable: &queue_test_vtable,
+        queues: selection,
     )!!;
 
     gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS, 0)!!;
@@ -142,7 +135,7 @@ fn void queue_queries_reject_stale_devices() @test {
 }
 
 fn void selected_queue_counts_round_trip_stored_identities() @test {
-    int backend_state;
+    gpu::internal::vk::VkDeviceState state;
     gpu::QueueRequirements requirements = {
         .counts = {
             .graphics = 2,
@@ -160,11 +153,10 @@ fn void selected_queue_counts_round_trip_stored_identities() @test {
         transfer:     transfer[..],
     )!!;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &queue_test_vtable,
-        backend_state: &backend_state,
-        queues:        selection,
+        state:  &state,
+        caps:   {},
+        vtable: &queue_test_vtable,
+        queues: selection,
     )!!;
     defer gpu::destroy_device(&device)!!;
 
@@ -189,7 +181,7 @@ fn void selected_queue_counts_round_trip_stored_identities() @test {
 }
 
 fn void selected_queue_counts_reach_encoded_capacity() @test {
-    int backend_state;
+    gpu::internal::vk::VkDeviceState state;
     gpu::QueueRequirements requirements = {
         .counts = {
             .graphics = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
@@ -212,11 +204,10 @@ fn void selected_queue_counts_reach_encoded_capacity() @test {
         transfer:     transfer[..],
     )!!;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &queue_test_vtable,
-        backend_state: &backend_state,
-        queues:        selection,
+        state:  &state,
+        caps:   {},
+        vtable: &queue_test_vtable,
+        queues: selection,
     )!!;
     defer gpu::destroy_device(&device)!!;
 
@@ -239,7 +230,7 @@ fn void selected_queue_counts_reach_encoded_capacity() @test {
 }
 
 fn void queue_registration_rejects_duplicate_role_identity() @test {
-    int backend_state;
+    gpu::internal::vk::VkDeviceState state;
     gpu::QueueRequirements requirements = { .counts = { .graphics = 2 } };
     ulong[2] graphics = { 10, 20 };
     gpu::internal::QueueSelection selection = gpu::internal::queue_selection_from_native_ids(
@@ -252,11 +243,10 @@ fn void queue_registration_rejects_duplicate_role_identity() @test {
 
     assert(
         @catch(gpu::internal::register_device(
-            backend:       gpu::internal::BackendKind.VULKAN,
-            caps:          {},
-            vtable:        &queue_test_vtable,
-            backend_state: &backend_state,
-            queues:        selection,
+            state:  &state,
+            caps:   {},
+            vtable: &queue_test_vtable,
+            queues: selection,
         )) == gpu::INVALID_ARGUMENT,
         "one role cannot publish the same identity twice"
     );

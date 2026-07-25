@@ -4,27 +4,21 @@ import gpu::internal @public;
 import gpu;
 import gpu::internal::vk @public;
 import vk;
+import std::core::mem;
 
-const gpu::internal::BackendVTable DEVICE_LOSS_VTABLE = {
-    .destroy_device = &destroy_device_loss_fixture,
-};
+const gpu::internal::BackendVTable DEVICE_LOSS_VTABLE = {};
 
 struct BackendResultCapture {
     uint calls;
     bool fields_match;
 }
 
-fn void destroy_device_loss_fixture(void* backend_state) {
-    (void)backend_state;
-}
-
 fn gpu::Device device_loss_fixture(gpu::internal::vk::VkDeviceState* state) {
     return gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          { .strict_enabled = true },
-        vtable:        &DEVICE_LOSS_VTABLE,
-        backend_state: state,
-        owner:         &state.owner,
+        state:  state,
+        caps:   { .strict_enabled = true },
+        vtable: &DEVICE_LOSS_VTABLE,
+        owner:  &state.owner,
     )!!;
 }
 
@@ -69,14 +63,16 @@ fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
 }
 
 fn void explicit_device_loss_invalidates_only_its_owner() @test {
-    gpu::internal::vk::VkDeviceState first_state;
-    gpu::internal::vk::VkDeviceState second_state;
-    gpu::Device first = device_loss_fixture(&first_state);
-    gpu::Device second = device_loss_fixture(&second_state);
+    gpu::internal::vk::VkDeviceState* first_state =
+        mem::new(gpu::internal::vk::VkDeviceState);
+    gpu::internal::vk::VkDeviceState* second_state =
+        mem::new(gpu::internal::vk::VkDeviceState);
+    gpu::Device first = device_loss_fixture(first_state);
+    gpu::Device second = device_loss_fixture(second_state);
 
     assert(
         @catch(gpu::internal::vk::check_backend_result(
-            state:     &first_state,
+            state:     first_state,
             operation: "submit",
             result:    (vk::Result)-999,
         )) == gpu::BACKEND_ERROR,
@@ -87,7 +83,7 @@ fn void explicit_device_loss_invalidates_only_its_owner() @test {
 
     assert(
         @catch(gpu::internal::vk::check_backend_result(
-            state:     &first_state,
+            state:     first_state,
             operation: "submit",
             result:    vk::Result.ERROR_DEVICE_LOST,
         )) == gpu::DEVICE_LOST,
@@ -104,12 +100,13 @@ fn void explicit_device_loss_invalidates_only_its_owner() @test {
 }
 
 fn void custom_result_routes_mark_the_reporting_device() @test {
-    gpu::internal::vk::VkDeviceState texture_state;
-    gpu::Device texture_device = device_loss_fixture(&texture_state);
+    gpu::internal::vk::VkDeviceState* texture_state =
+        mem::new(gpu::internal::vk::VkDeviceState);
+    gpu::Device texture_device = device_loss_fixture(texture_state);
     gpu::internal::vk::TextureSlot texture_slot;
     assert(
         @catch(gpu::internal::vk::check_texture_view_backend_result(
-            state:     &texture_state,
+            state:     texture_state,
             operation: null,
             texture:   {},
             slot:      &texture_slot,
@@ -120,10 +117,11 @@ fn void custom_result_routes_mark_the_reporting_device() @test {
     assert(@catch(gpu::get_device_caps(&texture_device)) == gpu::DEVICE_LOST, "texture-view loss marks its owner");
     gpu::destroy_device(&texture_device)!!;
 
-    gpu::internal::vk::VkDeviceState wsi_state;
-    gpu::Device wsi_device = device_loss_fixture(&wsi_state);
+    gpu::internal::vk::VkDeviceState* wsi_state =
+        mem::new(gpu::internal::vk::VkDeviceState);
+    gpu::Device wsi_device = device_loss_fixture(wsi_state);
     gpu::internal::vk::WsiDiagnosticContext context = {
-        .state     = &wsi_state,
+        .state     = wsi_state,
         .operation = "present",
     };
     assert(

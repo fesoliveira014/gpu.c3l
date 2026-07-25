@@ -1,23 +1,13 @@
 module gpu::internal @private;
 
 import gpu;
+import gpu::internal::vk @public;
 import std::atomic;
 import std::atomic::types;
 import std::thread;
 import std::core::mem;
 
-// Backend dispatch functions. Lifecycle entries take validated public tokens;
-// recording entries take the authoritative record resolved at begin.
-alias CheckDeviceDestroyFn @private  = fn void? (void*);
-alias DestroyDeviceFn @private       = fn void (void*);
-alias ReportContractFailureFn @private = fn fault (
-    void* backend_state,
-    ZString operation,
-    fault public_fault,
-    DebugResourceKind resource_kind,
-    ZString rejected_field,
-    ZString invariant,
-);
+// Transitional dispatch for device subsystems not yet routed directly.
 alias GetMemoryStatsFn @private      = fn MemoryStats? (Device*);
 alias BuildMemoryReportFn @private   = fn String? (Device*, bool detailed);
 alias AllocateMemoryFn @private      = fn GpuAllocation? (Device*, AllocationDesc*);
@@ -290,11 +280,7 @@ struct CommandOps @private {
     CmdEndLabelFn                 end_label;
 }
 
-// One immutable table per backend.
 struct BackendVTable @private {
-    CheckDeviceDestroyFn      check_device_destroy;
-    DestroyDeviceFn           destroy_device;
-    ReportContractFailureFn   report_contract_failure;
     GetMemoryStatsFn          get_memory_stats;
     BuildMemoryReportFn       build_memory_report;
     AllocateMemoryFn          allocate_memory;
@@ -348,17 +334,16 @@ struct BackendVTable @private {
 }
 
 struct DeviceData @private {
-    BackendKind    backend;
-    DeviceCaps     caps;
-    QueueSelection queues;
-    BackendVTable* vtable;
-    CommandOps*    command_ops;
-    void*          backend_state;
-    ulong          resource_owner;
-    Runtime        runtime;
-    Adapter        adapter;
-    Surface        presentation_surface;
-    bool           runtime_retained;
+    gpu::internal::vk::VkDeviceState* state;
+    DeviceCaps                       caps;
+    QueueSelection                   queues;
+    BackendVTable*                   vtable;
+    CommandOps*                      command_ops;
+    ulong                            resource_owner;
+    Runtime                          runtime;
+    Adapter                          adapter;
+    Surface                          presentation_surface;
+    bool                             runtime_retained;
 }
 
 struct DeviceSlot @private {
@@ -369,11 +354,12 @@ struct DeviceSlot @private {
 }
 
 struct DeviceOperation @private {
-    DeviceSlot*    slot;
-    DeviceData*    data;
-    BackendVTable* vtable;
-    bool           active;
-    bool           owns_pin;
+    DeviceSlot*                       slot;
+    DeviceData*                       data;
+    gpu::internal::vk::VkDeviceState* state;
+    BackendVTable*                    vtable;
+    bool                              active;
+    bool                              owns_pin;
 }
 
 
@@ -607,6 +593,7 @@ fn DeviceOperation? begin_device_operation(
         return {
             .slot     = slot,
             .data     = &slot.data,
+            .state    = slot.data.state,
             .vtable   = slot.data.vtable,
             .active   = true,
             .owns_pin = true,
@@ -638,6 +625,7 @@ fn DeviceOperation? borrow_retained_device_operation(
     return {
         .slot   = slot,
         .data   = &slot.data,
+        .state  = slot.data.state,
         .vtable = slot.data.vtable,
         .active = true,
     };
@@ -730,10 +718,9 @@ fn fault report_device_contract_failure(
     ZString rejected_field,
     ZString invariant,
 ) @private {
-    if (operation != null && operation.active
-        && operation.vtable.report_contract_failure != null) {
-        return operation.vtable.report_contract_failure(
-            backend_state:  operation.data.backend_state,
+    if (operation != null && operation.active) {
+        return gpu::internal::vk::vk_report_root_contract_failure(
+            state:          operation.state,
             operation:      operation_name,
             public_fault:   public_fault,
             resource_kind:  resource_kind,
@@ -791,10 +778,9 @@ fn bool device_slot_available() @private {
 }
 
 fn Device? register_device(
-    BackendKind backend,
+    gpu::internal::vk::VkDeviceState* state,
     DeviceCaps caps,
     BackendVTable* vtable,
-    void* backend_state,
     CommandOps* command_ops = null,
     ulong resource_owner = 0,
     Runtime* retained_runtime = null,
@@ -803,7 +789,7 @@ fn Device? register_device(
     QueueSelection queues = {},
     Device* owner = null,
 ) @private {
-    if (vtable == null || backend_state == null || vtable.destroy_device == null) return gpu::INVALID_ARGUMENT~;
+    if (state == null || vtable == null) return gpu::INVALID_ARGUMENT~;
     CommandOps* selected_ops = command_ops == null
         ? vtable.command_ops
         : command_ops;
@@ -861,12 +847,11 @@ fn Device? register_device(
         slot.live_children.store(0, AtomicOrdering.RELAXED);
         slot.lost.store(false, AtomicOrdering.RELAXED);
         slot.data = {
-            .backend              = backend,
+            .state                = state,
             .caps                 = caps,
             .queues               = queues,
             .vtable               = vtable,
             .command_ops          = selected_ops,
-            .backend_state        = backend_state,
             .resource_owner       = resource_owner,
             .runtime              = runtime,
             .adapter              = registered_adapter,
@@ -880,11 +865,15 @@ fn Device? register_device(
     return gpu::SLOT_TABLE_FULL~;
 }
 
-fn void* device_backend_state_ptr(Device* device) @private {
+fn gpu::internal::vk::VkDeviceState* device_backend_state_ptr(
+    Device* device,
+) @private {
     DeviceData* data = resolve_pinned_device(device);
-    return data == null ? null : data.backend_state;
+    return data == null ? null : data.state;
 }
 
-fn void* device_backend_state(Device device) @private {
+fn gpu::internal::vk::VkDeviceState* device_backend_state(
+    Device device,
+) @private {
     return device_backend_state_ptr(&device);
 }

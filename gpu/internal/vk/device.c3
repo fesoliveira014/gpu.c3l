@@ -165,7 +165,7 @@ struct ViewportLimits {
     float max_bound;
 }
 
-struct VkDeviceState {
+struct VkDeviceState @public {
     gpu::Device                 owner;
     ulong                       resource_owner;
     vk::Instance               instance;
@@ -879,11 +879,8 @@ fn CommandReferenceWorkCounters command_reference_work_counters(
     };
 }
 
-// One static lifecycle table shared by every Vulkan device.
+// Transitional dispatch for device subsystems not yet routed directly.
 const gpu::internal::BackendVTable VK_VTABLE @private = {
-    .check_device_destroy        = &vk_check_device_destroy,
-    .destroy_device              = &vk_destroy_device,
-    .report_contract_failure     = &vk_report_root_contract_failure,
     .get_memory_stats            = &vk_get_memory_stats,
     .build_memory_report         = &vk_build_memory_report,
     .allocate_memory             = &vk_allocate_memory,
@@ -1386,10 +1383,9 @@ fn gpu::Device? create_vk_device_from_runtime(
 
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
     return gpu::internal::register_device(
-        backend:              gpu::internal::BackendKind.VULKAN,
+        state:                state,
         caps:                 state.caps,
         vtable:               &VK_VTABLE,
-        backend_state:        (void*)state,
         command_ops:          state.command_ops,
         resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
@@ -1431,14 +1427,13 @@ fn bool? device_destroy_ready_with_query(
 }
 
 fn fault vk_report_root_contract_failure(
-    void* backend_state,
+    VkDeviceState* state,
     ZString operation,
     fault public_fault,
     gpu::DebugResourceKind resource_kind,
     ZString rejected_field,
     ZString invariant,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)backend_state;
+) {
     if (state.validation_policy.contract
         == gpu::ContractValidation.TRUSTED) return public_fault;
     return report_contract_failure(
@@ -1456,15 +1451,14 @@ fn fault vk_report_root_contract_failure(
     );
 }
 
-fn void? vk_check_device_destroy(void* backend_state) @private {
-    VkDeviceState* state = (VkDeviceState*)backend_state;
+fn void? vk_check_device_destroy(VkDeviceState* state) {
     if (!device_destroy_ready_with_query(state, &real_semaphore_counter_query)!) {
         return gpu::DEVICE_BUSY~;
     }
 }
 
-fn void vk_destroy_device(void* backend_state) @private {
-    destroy_state((VkDeviceState*)backend_state);
+fn void vk_destroy_device(VkDeviceState* state) {
+    destroy_state(state);
 }
 
 fn bool report_teardown_leaks(VkDeviceState* state) =>

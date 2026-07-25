@@ -1,7 +1,10 @@
 module gpu;
 
 import gpu::internal @public;
+import gpu::internal::vk @public;
+
 struct CompletionFixture {
+    gpu::internal::vk::VkDeviceState state;
     ulong current;
     fault wait_fault;
     uint  poll_calls;
@@ -9,10 +12,6 @@ struct CompletionFixture {
     uint  last_queue_id;
     ulong last_sequence;
     ulong last_timeout_ns;
-}
-
-fn void completion_fixture_destroy(void* backend_state) {
-    (void)backend_state;
 }
 
 fn bool? completion_fixture_poll(
@@ -46,7 +45,6 @@ fn void? completion_fixture_wait(
 }
 
 gpu::internal::BackendVTable completion_fixture_vtable = {
-    .destroy_device  = &completion_fixture_destroy,
     .poll_completion = &completion_fixture_poll,
     .wait_completion = &completion_fixture_wait,
 };
@@ -124,10 +122,9 @@ fn void completion_sequences_are_monotonic_and_stop_before_wrap() @test {
 fn void completion_points_poll_and_wait_without_consumption() @test {
     CompletionFixture fixture = { .current = 6 };
     Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &completion_fixture_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &completion_fixture_vtable,
     )!!;
     Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
     CompletionPoint point = gpu::internal::make_completion_point(queue, 7)!!;
@@ -165,16 +162,14 @@ fn void completion_points_reject_stale_and_foreign_ownership() @test {
     CompletionFixture first_fixture;
     CompletionFixture second_fixture;
     Device first = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &completion_fixture_vtable,
-        backend_state: &first_fixture,
+        state:  &first_fixture.state,
+        caps:   {},
+        vtable: &completion_fixture_vtable,
     )!!;
     Device second = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &completion_fixture_vtable,
-        backend_state: &second_fixture,
+        state:  &second_fixture.state,
+        caps:   {},
+        vtable: &completion_fixture_vtable,
     )!!;
     Queue first_queue = get_queue(&first, QueueKind.GRAPHICS)!!;
     CompletionPoint point = gpu::internal::make_completion_point(first_queue, 1)!!;
@@ -206,10 +201,9 @@ fn void completion_points_reject_stale_and_foreign_ownership() @test {
 fn void completion_point_creation_allocates_no_public_object() @test {
     CompletionFixture fixture;
     Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &completion_fixture_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &completion_fixture_vtable,
     )!!;
     Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];

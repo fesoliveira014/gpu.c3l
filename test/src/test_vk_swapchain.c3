@@ -72,10 +72,6 @@ fn void reset_acquire_capture(vk::Result result, uint image_index = 0) {
     captured_acquire_image_index = image_index;
 }
 
-fn void capture_public_acquire_destroy(void* backend_state) {
-    (void)backend_state;
-}
-
 fn gpu::AcquiredImage? capture_public_acquire(
     gpu::Device* device,
     gpu::SwapchainHandle swapchain,
@@ -88,7 +84,6 @@ fn gpu::AcquiredImage? capture_public_acquire(
 }
 
 gpu::internal::BackendVTable capture_public_acquire_vtable = {
-    .destroy_device     = &capture_public_acquire_destroy,
     .acquire_next_image = &capture_public_acquire,
 };
 
@@ -820,12 +815,12 @@ fn void acquire_timeout_values_reach_native_unchanged() @test {
 }
 
 fn void public_acquire_default_reaches_backend_as_zero() @test {
-    uint backend_state;
+    gpu::internal::vk::VkDeviceState* state =
+        mem::new(gpu::internal::vk::VkDeviceState);
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &capture_public_acquire_vtable,
-        backend_state: &backend_state,
+        state:  state,
+        caps:   {},
+        vtable: &capture_public_acquire_vtable,
     )!!;
     defer gpu::destroy_device(&device)!!;
 

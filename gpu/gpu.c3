@@ -493,10 +493,9 @@ fn void? destroy_device(Device* device) {
             (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
             return RESOURCE_IN_USE~;
         }
-        if (!lost && slot.data.vtable.check_device_destroy != null) {
-            if (catch readiness_fault = slot.data.vtable.check_device_destroy(
-                slot.data.backend_state,
-            )) {
+        if (!lost) {
+            if (catch readiness_fault =
+                gpu::internal::vk::vk_check_device_destroy(slot.data.state)) {
                 (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
                 return readiness_fault~;
             }
@@ -510,7 +509,7 @@ fn void? destroy_device(Device* device) {
         data = slot.data;
     }
 
-    data.vtable.destroy_device(data.backend_state);
+    gpu::internal::vk::vk_destroy_device(data.state);
 
     {
         gpu::internal::lock_device_registry();

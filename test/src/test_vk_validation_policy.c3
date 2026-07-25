@@ -575,7 +575,7 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
 
     state.validation_policy.contract = gpu::ContractValidation.TRUSTED;
     fault returned = vk::vk_report_root_contract_failure(
-        backend_state:  &state,
+        state:          &state,
         operation:      "free_allocation",
         public_fault:   gpu::INVALID_HANDLE,
         resource_kind:  gpu::DebugResourceKind.ALLOCATION,
@@ -588,7 +588,7 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
     state.validation_policy.contract =
         gpu::ContractValidation.OBJECT_BOUNDARIES;
     returned = vk::vk_report_root_contract_failure(
-        backend_state:  &state,
+        state:          &state,
         operation:      "free_allocation",
         public_fault:   gpu::INVALID_HANDLE,
         resource_kind:  gpu::DebugResourceKind.ALLOCATION,
@@ -601,7 +601,7 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
     state.debug_callback = null;
     state.validation_policy.contract = gpu::ContractValidation.FULL;
     returned = vk::vk_report_root_contract_failure(
-        backend_state:  &state,
+        state:          &state,
         operation:      "free_allocation",
         public_fault:   gpu::INVALID_HANDLE,
         resource_kind:  gpu::DebugResourceKind.ALLOCATION,

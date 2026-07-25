@@ -8,9 +8,7 @@ import std::atomic;
 import std::core::mem;
 import std::io;
 
-const gpu::internal::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {
-    .destroy_device = &destroy_registry_blocker,
-};
+const gpu::internal::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {};
 struct ResourceAgnosticCreateObservation {
     bool selected;
     uint calls;
@@ -345,10 +343,6 @@ fn void strict_disabled_state_owns_no_sampler_table() @test {
 
     assert(state.samplers.slots.ptr == null,
         "a strict-disabled state allocates no sampler table");
-}
-
-fn void destroy_registry_blocker(void* backend_state) @private {
-    (void)backend_state;
 }
 
 fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
@@ -1241,15 +1235,15 @@ fn void publication_failure_rolls_back_native_state() @test {
         if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
         exercised = true;
 
-        uint blocker_state;
         gpu::Device[gpu::internal::MAX_DEVICES] blockers;
         defer destroy_registry_blockers(blockers[..]);
         foreach (&blocker : blockers) {
+            gpu::internal::vk::VkDeviceState* blocker_state =
+                mem::new(gpu::internal::vk::VkDeviceState);
             *blocker = gpu::internal::register_device(
-                backend:       gpu::internal::BackendKind.VULKAN,
-                caps:          {},
-                vtable:        &REGISTRY_BLOCKER_VTABLE,
-                backend_state: &blocker_state,
+                state:  blocker_state,
+                caps:   {},
+                vtable: &REGISTRY_BLOCKER_VTABLE,
             )!!;
         }
 

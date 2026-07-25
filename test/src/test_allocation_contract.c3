@@ -1,9 +1,11 @@
 module gpu_test;
 
 import gpu::internal @public;
+import gpu::internal::vk @public;
 import gpu @public;
 
 struct AllocationStubState {
+    gpu::internal::vk::VkDeviceState state;
     ulong          owner;
     GpuAllocation  allocation;
     AllocationDesc seen_desc;
@@ -24,10 +26,6 @@ struct AllocationStubState {
 
 fn TextureCompatibility test_texture_compatibility(ulong owner, uint value) {
     return (TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
-}
-
-fn void destroy_allocation_stub(void* backend_state) {
-    (void)backend_state;
 }
 
 fn GpuAllocation? allocate_stub_memory(Device* device, AllocationDesc* desc) {
@@ -200,7 +198,6 @@ fn void? destroy_stub_texture(Device* device, TextureHandle texture) {
 }
 
 gpu::internal::BackendVTable allocation_stub_vtable = {
-    .destroy_device      = &destroy_allocation_stub,
     .allocate_memory     = &allocate_stub_memory,
     .free_allocation     = &free_stub_allocation,
     .get_allocation_info = &get_stub_allocation_info,
@@ -226,10 +223,9 @@ fn Device create_allocation_stub_device(AllocationStubState* state) {
         transfer_aliases_compute:  false,
     )!!;
     return gpu::internal::register_device(
-        backend:        gpu::internal::BackendKind.VULKAN,
+        state:          &state.state,
         caps:           {},
         vtable:         &allocation_stub_vtable,
-        backend_state:  state,
         resource_owner: state.owner,
         queues:         queues,
     )!!;

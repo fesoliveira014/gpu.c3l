@@ -1,6 +1,7 @@
 module gpu_test;
 
 import gpu::internal @public;
+import gpu::internal::vk @public;
 import gpu @public;
 
 fn gpu::TextureDesc valid_texture_desc() {
@@ -67,9 +68,30 @@ fn void texture_view_publication_requires_strict_capability() @test {
     gpu::TextureViewCreateDesc[1] descs = { { .texture = texture } };
     gpu::TextureView[1] views;
     gpu::TextureView[] no_views;
-    assert(@catch(gpu::create_texture_views(&device, descs[..], no_views))
-        == gpu::INVALID_ARGUMENT,
+    fault mismatch_fault =
+        @catch(gpu::create_texture_views(&device, descs[..], no_views));
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_backend_state_ptr(&device);
+    assert(mismatch_fault == gpu::INVALID_ARGUMENT,
         "batch length mismatch precedes strict capability validation");
+    assert(state.root_diagnostic_calls == 1,
+        "batch length mismatch reaches the direct Vulkan diagnostic route once");
+    assert(state.root_diagnostic_operation.str_view() == "create_texture_views",
+        "the direct diagnostic route preserves the operation");
+    assert(state.root_diagnostic_fault == gpu::INVALID_ARGUMENT,
+        "the direct diagnostic route preserves the public fault");
+    assert(
+        state.root_diagnostic_resource_kind
+            == gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
+        "the direct diagnostic route preserves the resource kind"
+    );
+    assert(state.root_diagnostic_rejected_field.str_view() == "out_views",
+        "the direct diagnostic route preserves the rejected field");
+    assert(
+        state.root_diagnostic_invariant.str_view()
+            == "output count must match descriptor count",
+        "the direct diagnostic route preserves the invariant"
+    );
     assert(@catch(gpu::create_texture_views(&device, descs[..], views[..]))
         == gpu::UNSUPPORTED_FEATURE,
         "batch texture-view publication requires strict capability");

@@ -1,6 +1,7 @@
 module gpu;
 
 import gpu::internal @public;
+import gpu::internal::vk @public;
 import std::io;
 import std::time;
 
@@ -13,6 +14,7 @@ const ulong VIEWPORT_OBSERVATION = 11;
 const ulong COPY_BUFFER_OBSERVATION = 13;
 
 struct WrapperBenchState {
+    gpu::internal::vk::VkDeviceState state;
     ulong                        resource_owner;
     ulong                        command_marker;
     gpu::internal::CommandRecord record;
@@ -39,10 +41,6 @@ fn void observe_barrier() @noinline => observe(BARRIER_OBSERVATION);
 fn void observe_viewport() @noinline => observe(VIEWPORT_OBSERVATION);
 
 fn void observe_copy_buffer() @noinline => observe(COPY_BUFFER_OBSERVATION);
-
-fn void destroy_wrapper_bench_device(void* backend_state) {
-    (void)backend_state;
-}
 
 fn CommandAllocatorHandle? create_wrapper_bench_allocator(
     Device* device,
@@ -176,7 +174,6 @@ gpu::internal::CommandOps wrapper_bench_command_ops @private = {
 };
 
 gpu::internal::BackendVTable wrapper_bench_vtable @private = {
-    .destroy_device            = &destroy_wrapper_bench_device,
     .create_command_allocator  = &create_wrapper_bench_allocator,
     .destroy_command_allocator = &destroy_wrapper_bench_allocator,
     .begin_commands            = &begin_wrapper_bench_commands,
@@ -448,10 +445,9 @@ fn int main() {
     WrapperBenchState state;
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!!;
     Device device = gpu::internal::register_device(
-        backend:        gpu::internal::BackendKind.VULKAN,
+        state:          &state.state,
         caps:           {},
         vtable:         &wrapper_bench_vtable,
-        backend_state:  &state,
         command_ops:    &wrapper_bench_command_ops,
         resource_owner: state.resource_owner,
     )!!;

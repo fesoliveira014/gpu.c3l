@@ -1,6 +1,7 @@
 module gpu_test;
 
 import gpu::internal @public;
+import gpu::internal::vk @public;
 import gpu @public;
 import std::atomic;
 import std::thread;
@@ -23,29 +24,21 @@ struct DeviceRegistryWorkerArgs {
 }
 
 struct BlockingDestroyFixture {
-    Atomic{bool} entered;
-    Atomic{bool} release;
+    gpu::internal::vk::VkDeviceState state;
 }
 
 struct BlockingOperationFixture {
+    gpu::internal::vk::VkDeviceState state;
     Atomic{bool} entered;
     Atomic{bool} release;
-    Atomic{bool} check_entered;
-    Atomic{bool} check_release;
-    Atomic{uint} check_calls;
-    Atomic{uint} destroy_calls;
-    gpu::Device  device;
-    bool         block_check;
-    bool         destroy_busy;
-    bool         publish_child_on_check;
 }
 
 struct CommandPinFixture {
+    gpu::internal::vk::VkDeviceState state;
     Atomic{bool} command_entered;
     Atomic{bool} command_release;
     Atomic{bool} discard_entered;
     Atomic{bool} discard_release;
-    Atomic{uint} destroy_calls;
     uint         pins_during_command;
     uint         pins_during_submit;
     uint         next_command;
@@ -100,41 +93,6 @@ struct RuntimeRetainWorkerArgs {
     bool          failed;
 }
 
-fn void blocking_device_destroy(void* backend_state) {
-    BlockingDestroyFixture* fixture = (BlockingDestroyFixture*)backend_state;
-    fixture.entered.store(true, AtomicOrdering.RELEASE);
-    while (!fixture.release.load(AtomicOrdering.ACQUIRE)) {
-        thread::yield();
-    }
-}
-
-fn void? check_counted_device_destroy(void* backend_state) {
-    BlockingOperationFixture* fixture = (BlockingOperationFixture*)backend_state;
-    (void)fixture.check_calls.add(1, AtomicOrdering.RELEASE);
-    fixture.check_entered.store(true, AtomicOrdering.RELEASE);
-    while (fixture.block_check
-        && !fixture.check_release.load(AtomicOrdering.ACQUIRE)) {
-        thread::yield();
-    }
-    if (fixture.publish_child_on_check) {
-        (void)gpu::internal::device_slots[fixture.device.index].live_children.add(
-            1,
-            AtomicOrdering.RELEASE,
-        );
-    }
-    if (fixture.destroy_busy) return gpu::DEVICE_BUSY~;
-}
-
-fn void counted_device_destroy(void* backend_state) {
-    BlockingOperationFixture* fixture = (BlockingOperationFixture*)backend_state;
-    (void)fixture.destroy_calls.add(1, AtomicOrdering.RELEASE);
-}
-
-fn void command_pin_device_destroy(void* backend_state) {
-    CommandPinFixture* fixture = (CommandPinFixture*)backend_state;
-    (void)fixture.destroy_calls.add(1, AtomicOrdering.RELEASE);
-}
-
 fn gpu::CommandAllocatorHandle? command_pin_create_allocator(
     gpu::Device* device,
     gpu::Queue queue,
@@ -142,7 +100,7 @@ fn gpu::CommandAllocatorHandle? command_pin_create_allocator(
 ) {
     gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(device);
     if (data == null || desc == null) return gpu::INVALID_HANDLE~;
-    CommandPinFixture* fixture = (CommandPinFixture*)data.backend_state;
+    CommandPinFixture* fixture = (CommandPinFixture*)data.state;
     fixture.allocator_creates++;
     fixture.allocator_queue = queue;
     fixture.allocator_desc = *desc;
@@ -166,7 +124,7 @@ fn void? command_pin_destroy_allocator(
 ) {
     gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(device);
     if (data == null) return gpu::INVALID_HANDLE~;
-    CommandPinFixture* fixture = (CommandPinFixture*)data.backend_state;
+    CommandPinFixture* fixture = (CommandPinFixture*)data.state;
     fixture.allocator_destroy_calls++;
     if (!handle.is_valid()) return gpu::INVALID_HANDLE~;
     if (fixture.reject_allocator_destroy) return gpu::RESOURCE_IN_USE~;
@@ -197,7 +155,7 @@ fn void? command_pin_begin(
     gpu::Device device = allocator.device;
     gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(&device);
     if (data == null || out_commands == null) return gpu::INVALID_HANDLE~;
-    CommandPinFixture* fixture = (CommandPinFixture*)data.backend_state;
+    CommandPinFixture* fixture = (CommandPinFixture*)data.state;
     if (data.command_ops == null
         || fixture.return_null_backend_state
         || fixture.return_null_backend_command) {
@@ -645,13 +603,10 @@ fn gpu::MemoryStats? blocking_get_memory_stats(gpu::Device* device) {
 }
 
 gpu::internal::BackendVTable blocking_device_vtable = {
-    .destroy_device = &blocking_device_destroy,
 };
 
 gpu::internal::BackendVTable blocking_operation_vtable = {
-    .check_device_destroy = &check_counted_device_destroy,
-    .destroy_device       = &counted_device_destroy,
-    .get_memory_stats     = &blocking_get_memory_stats,
+    .get_memory_stats = &blocking_get_memory_stats,
 };
 
 gpu::internal::CommandOps command_pin_ops = {
@@ -685,7 +640,6 @@ gpu::internal::CommandOps command_pin_ops = {
 };
 
 gpu::internal::BackendVTable command_pin_vtable = {
-    .destroy_device            = &command_pin_device_destroy,
     .create_command_allocator  = &command_pin_create_allocator,
     .destroy_command_allocator = &command_pin_destroy_allocator,
     .reserve_generated_scratch = &command_pin_reserve_generated_scratch,
@@ -775,10 +729,9 @@ fn int runtime_retain_worker(void* raw_args) {
 fn int device_registry_worker(void* raw_args) {
     DeviceRegistryWorkerArgs* args = (DeviceRegistryWorkerArgs*)raw_args;
     gpu::Device? registered = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &device_fixture_vtable,
-        backend_state: &args.fixture,
+        state:  &args.fixture.state,
+        caps:   {},
+        vtable: &device_fixture_vtable,
     );
     if (catch registration_fault = registered) {
         (void)registration_fault;
@@ -801,10 +754,9 @@ fn int device_registry_worker(void* raw_args) {
 fn void command_allocator_public_lifecycle_is_transactional() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -850,16 +802,14 @@ fn void command_allocator_creation_rejects_before_publication() @test {
     CommandPinFixture first_fixture;
     CommandPinFixture second_fixture;
     gpu::Device first = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &first_fixture,
+        state:  &first_fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::Device second = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &second_fixture,
+        state:  &second_fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::Queue foreign = gpu::get_queue(
         &second,
@@ -921,10 +871,9 @@ fn void incomplete_command_allocator_vtable_fails_safely() @test {
     gpu::internal::BackendVTable vtable = command_pin_vtable;
     vtable.create_command_allocator = null;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          { .max_generated_work_count = 1 },
-        vtable:        &vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   { .max_generated_work_count = 1 },
+        vtable: &vtable,
     )!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -979,10 +928,9 @@ fn void incomplete_command_allocator_vtable_fails_safely() @test {
 fn void command_calls_use_the_retained_lifetime_pin() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::internal::CommandRecord* record = commands.record;
@@ -1028,10 +976,9 @@ fn void command_calls_use_the_retained_lifetime_pin() @test {
 fn void warm_command_dispatch_skips_resolution_paths() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::reset_command_resolution_stats();
@@ -1070,10 +1017,9 @@ fn void warm_command_dispatch_skips_resolution_paths() @test {
 fn void null_and_stale_direct_command_tokens_are_rejected() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::Barrier barrier = {
@@ -1120,10 +1066,9 @@ fn void null_and_stale_direct_command_tokens_are_rejected() @test {
 fn void recording_alias_is_rejected_after_end_phase_transition() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::CommandList recording_alias = commands;
@@ -1146,10 +1091,9 @@ fn void failed_command_lifecycle_preserves_record_state() @test {
         .reject_end     = true,
     };
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::CommandList original = commands;
@@ -1177,10 +1121,9 @@ fn void failed_command_lifecycle_preserves_record_state() @test {
 fn void executable_alias_of_recording_token_faults_command_state() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::ExecutableCommandList forged = {
@@ -1201,10 +1144,9 @@ fn void failed_record_publication_rolls_back_begin() @test {
     gpu::internal::BackendVTable missing_ops = command_pin_vtable;
     missing_ops.command_ops = null;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &missing_ops,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &missing_ops,
     )!!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::Queue queue = gpu::get_queue(
@@ -1233,10 +1175,9 @@ fn void missing_backend_publication_pointers_roll_back_begin() @test {
             .return_null_backend_command = i == 1,
         };
         gpu::Device device = gpu::internal::register_device(
-            backend:       gpu::internal::BackendKind.VULKAN,
-            caps:          {},
-            vtable:        &command_pin_vtable,
-            backend_state: &fixture,
+            state:  &fixture.state,
+            caps:   {},
+            vtable: &command_pin_vtable,
         )!!;
         gpu::internal::DeviceSlot* slot =
             &gpu::internal::device_slots[device.index];
@@ -1263,11 +1204,10 @@ fn void registration_accepts_per_device_command_operations() @test {
     gpu::internal::BackendVTable missing_ops = command_pin_vtable;
     missing_ops.command_ops = null;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &missing_ops,
-        backend_state: &fixture,
-        command_ops:    &command_pin_ops,
+        state:       &fixture.state,
+        caps:        {},
+        vtable:      &missing_ops,
+        command_ops: &command_pin_ops,
     )!!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     assert(
@@ -1280,10 +1220,9 @@ fn void registration_accepts_per_device_command_operations() @test {
 fn void failed_submit_preserves_command_lifetime_pins() @test {
     CommandPinFixture fixture = { .submit_busy = true };
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList first = begin_command_pin(&device)!!;
     gpu::CommandList second = begin_command_pin(&device)!!;
@@ -1325,10 +1264,9 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
 fn void device_loss_after_backend_submit_still_consumes_every_token() @test {
     CommandPinFixture fixture = { .lose_during_submit = true };
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList first = begin_command_pin(&device)!!;
     gpu::CommandList second = begin_command_pin(&device)!!;
@@ -1360,10 +1298,9 @@ fn void device_loss_after_backend_submit_still_consumes_every_token() @test {
 fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::CommandList duplicate = commands;
@@ -1389,10 +1326,9 @@ fn void command_record_is_not_reused_before_discard_returns() @test {
         .reuse_command_index = true,
     };
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -1424,10 +1360,9 @@ fn void command_record_is_not_reused_before_discard_returns() @test {
 fn void lost_commands_can_be_discarded() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::internal::mark_device_lost(&device);
@@ -1440,7 +1375,7 @@ fn void lost_commands_can_be_discarded() @test {
     fault end_fault = @catch(gpu::end_commands(&commands));
     fault destroy_fault = @catch(gpu::destroy_device(&device));
     uint destroy_calls_before_discard =
-        fixture.destroy_calls.load(AtomicOrdering.ACQUIRE);
+        fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE);
     gpu::discard_commands(&commands)!!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::internal::DeviceSlotControl after_discard =
@@ -1464,10 +1399,9 @@ fn void lost_commands_can_be_discarded() @test {
 fn void lost_executable_commands_can_be_discarded() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
@@ -1493,10 +1427,9 @@ fn void stale_commands_do_not_use_unrelated_lifetime_pins() @test {
         .reject_command = true,
     };
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList discarded = begin_command_pin(&device)!!;
     gpu::CommandList stale = discarded;
@@ -1518,17 +1451,16 @@ fn void stale_commands_do_not_use_unrelated_lifetime_pins() @test {
         "the stale command reports its root validation fault");
     assert(worker_args.result == gpu::INVALID_HANDLE,
         "the stale command remains invalid");
-    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
+    assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
         "a stale alias retains no device lifetime pin");
 }
 
 fn void stale_command_faults_before_reused_device_callback() @test {
     CommandPinFixture retired_fixture;
     gpu::Device retired = gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &retired_fixture,
+        state:  &retired_fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&retired)!!;
     gpu::CommandList stale = commands;
@@ -1538,10 +1470,9 @@ fn void stale_command_faults_before_reused_device_callback() @test {
 
     CommandPinFixture replacement_fixture;
     gpu::Device replacement = gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &replacement_fixture,
+        state:  &replacement_fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::Barrier barrier = {
         .before = { .compute = true },
@@ -1573,10 +1504,9 @@ fn void stale_command_generation_does_not_use_reused_slot_pin() @test {
         .reuse_command_index = true,
     };
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &command_pin_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList first = begin_command_pin(&device)!!;
     gpu::CommandList stale = first;
@@ -1743,11 +1673,12 @@ fn void concurrent_registry_mutation_keeps_devices_distinct() @test {
 
 fn void registration_proceeds_while_another_device_is_closing() @test {
     BlockingDestroyFixture blocking_fixture;
+    blocking_fixture.state.block_destroy = true;
     gpu::Device closing = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &blocking_device_vtable,
-        backend_state: &blocking_fixture,
+        state:  &blocking_fixture.state,
+        caps:   {},
+        vtable: &blocking_device_vtable,
+        owner:  &blocking_fixture.state.owner,
     )!!;
     gpu::Device stale = closing;
     gpu::Queue closing_queue = {
@@ -1763,7 +1694,7 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
     DestroyWorkerArgs destroy_args = { .device = closing };
     Thread destroyer;
     destroyer.create(&destroy_device_worker, &destroy_args)!!;
-    while (!blocking_fixture.entered.load(AtomicOrdering.ACQUIRE)) {
+    while (!blocking_fixture.state.destroy_entered.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
     fault closing_fault = @catch(gpu::get_device_caps(&stale));
@@ -1777,10 +1708,9 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
     gpu::Device survivor;
     bool survivor_created = true;
     gpu::Device? registered = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &device_fixture_vtable,
-        backend_state: &survivor_fixture,
+        state:  &survivor_fixture.state,
+        caps:   {},
+        vtable: &device_fixture_vtable,
     );
     if (catch registration_fault = registered) {
         (void)registration_fault;
@@ -1789,7 +1719,7 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
         survivor = registered;
     }
 
-    blocking_fixture.release.store(true, AtomicOrdering.RELEASE);
+    blocking_fixture.state.destroy_release.store(true, AtomicOrdering.RELEASE);
     int destroy_result = destroyer.join()!!;
 
     assert(survivor_created, "registration succeeds while another slot is closing");
@@ -1813,10 +1743,9 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
 fn void active_operations_make_device_destruction_retryable() @test {
     BlockingOperationFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &blocking_operation_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &blocking_operation_vtable,
     )!!;
 
     DeviceOperationWorkerArgs operation_args = { .device = device };
@@ -1828,7 +1757,8 @@ fn void active_operations_make_device_destruction_retryable() @test {
 
     fault destroy_fault = @catch(gpu::destroy_device(&device));
     bool handle_preserved = device.is_valid();
-    uint calls_before_retry = fixture.destroy_calls.load(AtomicOrdering.ACQUIRE);
+    uint calls_before_retry =
+        fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE);
 
     fixture.release.store(true, AtomicOrdering.RELEASE);
     int operation_result = operation_thread.join()!!;
@@ -1847,16 +1777,15 @@ fn void active_operations_make_device_destruction_retryable() @test {
     assert(calls_before_retry == 0, "a busy destruction attempt does not tear down the backend");
     assert(operation_result == 0 && !operation_args.failed, "the pinned operation completes normally");
     assert(retry_succeeded, "destruction succeeds after the active operation releases its pin");
-    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the successful retry tears down the backend");
+    assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the successful retry tears down the backend");
 }
 
 fn void live_children_take_precedence_over_active_operations() @test {
     BlockingOperationFixture fixture;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &blocking_operation_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &blocking_operation_vtable,
     )!!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     slot.live_children.store(1, AtomicOrdering.RELEASE);
@@ -1881,12 +1810,12 @@ fn void live_children_take_precedence_over_active_operations() @test {
 }
 
 fn void backend_busy_device_destruction_is_retryable() @test {
-    BlockingOperationFixture fixture = { .destroy_busy = true };
+    BlockingOperationFixture fixture;
+    fixture.state.destroy_busy = true;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &blocking_operation_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &blocking_operation_vtable,
     )!!;
     gpu::Device original = device;
 
@@ -1897,53 +1826,53 @@ fn void backend_busy_device_destruction_is_retryable() @test {
     assert(device == original, "backend busy preserves the device token");
     assert(control.state == gpu::internal::DEVICE_SLOT_LIVE, "backend busy never publishes closing state");
     assert(control.generation == original.generation, "backend busy preserves generation");
-    assert(fixture.check_calls.load(AtomicOrdering.ACQUIRE) == 1, "the readiness check runs once");
-    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 0, "backend busy prevents teardown");
+    assert(fixture.state.check_calls.load(AtomicOrdering.ACQUIRE) == 1, "the readiness check runs once");
+    assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 0, "backend busy prevents teardown");
 
-    fixture.destroy_busy = false;
+    fixture.state.destroy_busy = false;
     gpu::destroy_device(&device)!!;
-    assert(fixture.check_calls.load(AtomicOrdering.ACQUIRE) == 2, "the retry checks readiness again");
-    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the ready retry tears down the backend");
+    assert(fixture.state.check_calls.load(AtomicOrdering.ACQUIRE) == 2, "the retry checks readiness again");
+    assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the ready retry tears down the backend");
 }
 
 fn void readiness_check_runs_after_new_operations_are_closed() @test {
-    BlockingOperationFixture fixture = { .block_check = true };
+    BlockingOperationFixture fixture;
+    fixture.state.block_check = true;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &blocking_operation_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &blocking_operation_vtable,
     )!!;
     gpu::Device stale = device;
 
     DestroyWorkerArgs destroy_args = { .device = device };
     Thread destroyer;
     destroyer.create(&destroy_device_worker, &destroy_args)!!;
-    while (!fixture.check_entered.load(AtomicOrdering.ACQUIRE)) {
+    while (!fixture.state.check_entered.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
 
     fault operation_fault = @catch(gpu::get_device_caps(&stale));
-    fixture.check_release.store(true, AtomicOrdering.RELEASE);
+    fixture.state.check_release.store(true, AtomicOrdering.RELEASE);
     int destroy_result = destroyer.join()!!;
 
     assert(operation_fault == gpu::DEVICE_BUSY,
         "the readiness check runs only after new operations are closed");
     assert(destroy_result == 0 && !destroy_args.failed,
         "destruction completes after the readiness check");
-    assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
+    assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
         "the backend tears down once after readiness succeeds");
 }
 
 fn void child_published_while_closing_blocks_destruction() @test {
-    BlockingOperationFixture fixture = { .publish_child_on_check = true };
+    BlockingOperationFixture fixture;
+    fixture.state.publish_child_on_check = true;
     gpu::Device device = gpu::internal::register_device(
-        backend:       gpu::internal::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &blocking_operation_vtable,
-        backend_state: &fixture,
+        state:  &fixture.state,
+        caps:   {},
+        vtable: &blocking_operation_vtable,
+        owner:  &fixture.state.owner,
     )!!;
-    fixture.device = device;
     gpu::Device original = device;
 
     fault destroy_fault = @catch(gpu::destroy_device(&device));
@@ -1955,7 +1884,7 @@ fn void child_published_while_closing_blocks_destruction() @test {
 
     if (destroy_fault == gpu::RESOURCE_IN_USE) {
         (void)slot.live_children.sub(1, AtomicOrdering.RELEASE);
-        fixture.publish_child_on_check = false;
+        fixture.state.publish_child_on_check = false;
         gpu::destroy_device(&device)!!;
     }
 
