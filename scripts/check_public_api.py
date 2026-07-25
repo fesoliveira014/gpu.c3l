@@ -220,6 +220,7 @@ DEBUG_RESOURCE_KINDS = (
 )
 
 RETIRED_SOURCE_SYMBOLS = (
+    "full_render_graphics_state(",
     "BackendKind",
     "get_device_backend(",
     "DeviceDesc",
