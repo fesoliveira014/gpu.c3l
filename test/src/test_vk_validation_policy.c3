@@ -221,9 +221,7 @@ fn void tracking_off_keeps_reference_storage_empty_through_retirement() @test {
     assert_zero_tracking_work(state);
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    record = vk::backend_command(
-        (gpu::internal::CommandRecord*)executable.record,
-    );
+    record = vk::backend_command(executable.record);
     assert(record.scratch.references.ptr == null
         && record.scratch.reference_count == 0,
         "tracking-off executable owns no reference storage");

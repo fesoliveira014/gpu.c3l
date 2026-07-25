@@ -2861,6 +2861,39 @@ method gpu::Runtime.is_valid
             failures,
         )
 
+    def test_allows_typed_private_record_only_in_command_tokens(self) -> None:
+        document = valid_document()
+        document["modules"]["gpu"]["types"] = [
+            {
+                "name": token,
+                "kind": "struct",
+                "members": [{
+                    "name": "record",
+                    "type": {
+                        "name": "CommandRecord*",
+                        "uid": "gpu::internal::CommandRecord",
+                    },
+                }],
+            }
+            for token in ("CommandList", "ExecutableCommandList")
+        ]
+        self.assertEqual(
+            check_public_api.validate_public_metadata_boundaries(document),
+            [],
+        )
+
+        document["modules"]["gpu"]["types"][0]["members"].append({
+            "name": "leak",
+            "type": {
+                "name": "DeviceData*",
+                "uid": "gpu::internal::DeviceData",
+            },
+        })
+        self.assertIn(
+            "gpu public metadata contains internal gpu type",
+            check_public_api.validate_public_metadata_boundaries(document),
+        )
+
     def test_rejects_nested_internal_and_backend_sources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

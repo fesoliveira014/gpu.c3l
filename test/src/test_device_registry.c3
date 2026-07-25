@@ -976,7 +976,7 @@ fn void incomplete_command_allocator_vtable_fails_safely() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void command_calls_borrow_the_lifetime_pin() @test {
+fn void command_calls_use_the_retained_lifetime_pin() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         backend:       gpu::BackendKind.VULKAN,
@@ -985,8 +985,7 @@ fn void command_calls_borrow_the_lifetime_pin() @test {
         backend_state: &fixture,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
-    gpu::internal::CommandRecord* record =
-        (gpu::internal::CommandRecord*)commands.record;
+    gpu::internal::CommandRecord* record = commands.record;
     uint record_index = record.identity.index;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::internal::DeviceSlotControl after_begin =
@@ -1086,6 +1085,10 @@ fn void null_and_stale_direct_command_tokens_are_rejected() @test {
     null_record.record = null;
     gpu::CommandList zero_generation = commands;
     zero_generation.generation = 0;
+    gpu::CommandList zero_device_identity = commands;
+    zero_device_identity.device_identity = 0;
+    gpu::CommandList reserved_device_identity = commands;
+    reserved_device_identity.device_identity |= 0x4000_0000;
     gpu::CommandList stale_generation = commands;
     stale_generation.generation++;
 
@@ -1095,6 +1098,16 @@ fn void null_and_stale_direct_command_tokens_are_rejected() @test {
     assert(@catch(gpu::cmd_barrier(&zero_generation, &barrier))
         == gpu::INVALID_HANDLE,
         "a zero direct generation is rejected");
+    assert(!zero_generation.is_valid(),
+        "zero generation is part of the invalid token sentinel");
+    assert(@catch(gpu::cmd_barrier(&zero_device_identity, &barrier))
+        == gpu::INVALID_HANDLE,
+        "a zero device identity is rejected");
+    assert(!zero_device_identity.is_valid(),
+        "zero device identity is part of the invalid token sentinel");
+    assert(@catch(gpu::cmd_barrier(&reserved_device_identity, &barrier))
+        == gpu::INVALID_HANDLE,
+        "reserved device identity bits are rejected");
     assert(@catch(gpu::cmd_barrier(&stale_generation, &barrier))
         == gpu::INVALID_HANDLE,
         "a stale direct generation is rejected");
@@ -1140,8 +1153,7 @@ fn void failed_command_lifecycle_preserves_record_state() @test {
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::CommandList original = commands;
-    gpu::internal::CommandRecord* record =
-        (gpu::internal::CommandRecord*)commands.record;
+    gpu::internal::CommandRecord* record = commands.record;
 
     fault end_fault = @catch(gpu::end_commands(&commands));
     fault discard_fault = @catch(gpu::discard_commands(&commands));
@@ -1172,8 +1184,9 @@ fn void executable_alias_of_recording_token_faults_command_state() @test {
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::ExecutableCommandList forged = {
-        .record     = commands.record,
-        .generation = commands.generation,
+        .record          = commands.record,
+        .generation      = commands.generation,
+        .device_identity = commands.device_identity,
     };
 
     assert(@catch(gpu::discard_executable_commands(&forged))
@@ -1475,7 +1488,7 @@ fn void lost_executable_commands_can_be_discarded() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void stale_commands_cannot_borrow_unrelated_lifetime_pins() @test {
+fn void stale_commands_do_not_use_unrelated_lifetime_pins() @test {
     CommandPinFixture fixture = {
         .reject_command = true,
     };
@@ -1507,6 +1520,51 @@ fn void stale_commands_cannot_borrow_unrelated_lifetime_pins() @test {
         "the stale command remains invalid");
     assert(fixture.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
         "a stale alias retains no device lifetime pin");
+}
+
+fn void stale_command_faults_before_reused_device_callback() @test {
+    CommandPinFixture retired_fixture;
+    gpu::Device retired = gpu::internal::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &retired_fixture,
+    )!!;
+    gpu::CommandList commands = begin_command_pin(&retired)!!;
+    gpu::CommandList stale = commands;
+    gpu::discard_commands(&commands)!!;
+    gpu::Device retired_identity = retired;
+    gpu::destroy_device(&retired)!!;
+
+    CommandPinFixture replacement_fixture;
+    gpu::Device replacement = gpu::internal::register_device(
+        backend:       gpu::BackendKind.VULKAN,
+        caps:          {},
+        vtable:        &command_pin_vtable,
+        backend_state: &replacement_fixture,
+    )!!;
+    gpu::Barrier barrier = {
+        .before = { .compute = true },
+        .after  = { .compute = true },
+    };
+    gpu::CommandList poisoned = stale;
+    poisoned.record = (gpu::internal::CommandRecord*)(uptr)1;
+    fault poisoned_fault = @catch(gpu::cmd_barrier(&poisoned, &barrier));
+    fault stale_fault = @catch(gpu::cmd_barrier(&stale, &barrier));
+
+    assert(stale.is_valid(),
+        "a copied valid-origin token remains distinct from the zero sentinel");
+    assert(replacement.index == retired_identity.index
+        && replacement.generation != retired_identity.generation,
+        "the replacement device reuses the retired static slot generation");
+    assert(stale_fault == gpu::INVALID_HANDLE,
+        "the retired device identity invalidates the copied token");
+    assert(poisoned_fault == gpu::INVALID_HANDLE,
+        "the stale device identity faults before record pointer dereference");
+    assert(!retired_fixture.command_entered.load(AtomicOrdering.ACQUIRE)
+        && !replacement_fixture.command_entered.load(AtomicOrdering.ACQUIRE),
+        "stale validation faults before either recording callback");
+    gpu::destroy_device(&replacement)!!;
 }
 
 fn void stale_command_generation_cannot_borrow_reused_slot_pin() @test {

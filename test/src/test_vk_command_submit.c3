@@ -58,10 +58,10 @@ fn bool submit_work_matches(
 
 
 fn void direct_command_tokens_fit_two_machine_words() @test {
-    assert(gpu::CommandList::size <= ulong::size * 2,
-        "recording token stays within two machine words");
-    assert(gpu::ExecutableCommandList::size <= ulong::size * 2,
-        "executable token stays within two machine words");
+    assert(gpu::CommandList::size == ulong::size * 2,
+        "recording token is exactly two words on supported x64 targets");
+    assert(gpu::ExecutableCommandList::size == ulong::size * 2,
+        "executable token is exactly two words on supported x64 targets");
 }
 
 fn void discard_consumes_recording_and_executable_lists() @test {
@@ -237,7 +237,7 @@ fn void stale_command_generation_faults_invalid_handle() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void foreign_command_owner_faults_before_record_lookup() @test {
+fn void foreign_device_command_faults_before_claim() @test {
     gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
     gpu::Device target = create_test_device(&desc)!!;
     defer destroy_test_device(&target)!!;
@@ -270,7 +270,7 @@ fn void foreign_command_owner_faults_before_record_lookup() @test {
                 rollback_mutex_acquisitions: 0,
                 native_submissions:          0,
             ),
-        "foreign ownership stops before target-table lookup and preserves the token");
+        "foreign device ownership stops before command claim and preserves the token");
 
     gpu::CompletionPoint completion = gpu::submit(foreign_queue, &submit)!!;
     gpu::wait_completion(completion, ulong::max)!!;
@@ -390,7 +390,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
     defer discard_test_executable(&final_generation_executable)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     gpu::internal::CommandRecord* final_record =
-        (gpu::internal::CommandRecord*)final_generation_executable.record;
+        final_generation_executable.record;
     uint final_index = final_record.identity.index;
     state.commands.slots[final_index].generation = vk::HANDLE_GENERATION_MAX - 1;
     final_generation_executable.generation = vk::HANDLE_GENERATION_MAX - 1;
@@ -407,8 +407,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
-    gpu::internal::CommandRecord* next_record =
-        (gpu::internal::CommandRecord*)next.record;
+    gpu::internal::CommandRecord* next_record = next.record;
     assert(next_record.identity.index != final_index,
         "exhausted command slot is retired");
     assert(next.generation == 1,
@@ -538,7 +537,7 @@ fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
     assert(command_submit_count(&device) == submits_before,
         "all duplicate positions reject before native submit");
     foreach (list : unique) {
-        assert(((gpu::internal::CommandRecord*)list.record).state
+        assert(list.record.state
                 == gpu::internal::CommandState.EXECUTABLE,
             "duplicate faults preserve every command record as executable");
     }
@@ -652,16 +651,15 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
     gpu::ExecutableCommandList[3] lists;
     record_empty_executables(&allocator, lists[..]);
     gpu::internal::CommandListHandle discarded_handle =
-        ((gpu::internal::CommandRecord*)lists[2].record).identity;
+        lists[2].record.identity;
     gpu::discard_executable_commands(&lists[2])!!;
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     vk::CommandCell* unused =
         &state.commands.slots[discarded_handle.index];
     uint unused_generation = unused.generation;
-    vk::VkCommandRecord* unvisited_live = vk::backend_command(
-        (gpu::internal::CommandRecord*)lists[1].record,
-    );
+    vk::VkCommandRecord* unvisited_live =
+        vk::backend_command(lists[1].record);
     unvisited_live.submit_visit_epoch = ulong::max;
     gpu::ExecutableCommandList[2] duplicate = { lists[0], lists[0] };
     gpu::SubmitDesc submit = { .command_lists = duplicate[..] };
@@ -1255,9 +1253,7 @@ fn void submit_uses_record_queue_without_allocator_queue_reproof() @test {
     defer discard_test_executable(&executable)!!;
     vk::VkDeviceState* state = (vk::VkDeviceState*)
         gpu::internal::device_backend_state_ptr(&device);
-    vk::VkCommandRecord* record = vk::backend_command(
-        (gpu::internal::CommandRecord*)executable.record,
-    );
+    vk::VkCommandRecord* record = vk::backend_command(executable.record);
     vk::CommandAllocatorSlot* slot =
         state.command_allocators.get(record.allocator)!!;
     gpu::Queue original_queue = slot.queue;

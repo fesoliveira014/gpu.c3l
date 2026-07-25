@@ -37,6 +37,10 @@ SURFACE_TYPES = {
 
 FORBIDDEN_TEXT = {
     "devicedesc": "retired transitional DeviceDesc",
+    "commandlisthandle": "retired CommandListHandle",
+    '"name":"command_list_handle_invalid"': (
+        "retired COMMAND_LIST_HANDLE_INVALID"
+    ),
     '"name":"create_device_from_desc"': "retired direct device creation",
     "backend_state": "backend state pointer",
     "backendvtable": "backend dispatch table",
@@ -2021,12 +2025,17 @@ def validate_root_facade_source(relative: Path, source: str) -> list[str]:
                     f"{relative.as_posix()}:{line_number} "
                     "public interface may not contain private declarations"
                 )
-        if re.search(
-            r"(?m)^\s*import\s+(?:gpu::internal(?:::[A-Za-z0-9_]+)*|vk|vma)\b",
-            masked,
-        ):
+        private_imports = tuple(
+            declaration.group("target").strip()
+            for declaration in IMPORT_DECLARATION.finditer(masked)
+            if declaration.group("target").strip().startswith(
+                ("gpu::internal", "vk", "vma")
+            )
+        )
+        if private_imports not in ((), ("gpu::internal @public",)):
             failures.append(
-                f"{relative.as_posix()} may not import private implementation modules"
+                f"{relative.as_posix()} may only import gpu::internal @public "
+                "for the typed command-token record"
             )
         return failures
 
@@ -2117,7 +2126,24 @@ def validate_public_metadata_boundaries(document: dict) -> list[str]:
             or module_name.startswith("gpu::surface::")
         ):
             continue
-        encoded = json.dumps(public_entries(module), separators=(",", ":"))
+        entries = json.loads(json.dumps(public_entries(module)))
+        if module_name == "gpu":
+            for definition in entries.get("types", []):
+                if definition.get("name") not in (
+                    "CommandList",
+                    "ExecutableCommandList",
+                ):
+                    continue
+                for member in definition.get("members", []):
+                    if member.get("name") != "record":
+                        continue
+                    member_type = member.get("type", {})
+                    if member_type == {
+                        "name": "CommandRecord*",
+                        "uid": "gpu::internal::CommandRecord",
+                    }:
+                        member_type.pop("uid")
+        encoded = json.dumps(entries, separators=(",", ":"))
         lowered = encoded.lower()
         for token, label in (
             ("gpu::internal", "internal gpu type"),

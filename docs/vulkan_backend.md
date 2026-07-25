@@ -727,9 +727,11 @@ CommandList                recording
 ExecutableCommandList      ended, one-shot
 ```
 
-Each value carries an opaque pointer to the address-stable authoritative record
-plus its reuse generation. Warm recording compares that generation and the
-authoritative phase directly on the record.
+Each value carries a library-owned typed pointer to the address-stable
+authoritative record, its reuse generation, and a packed static device-slot
+identity. Warm recording checks the static slot liveness and generation before
+dereferencing the record, then compares the record generation and
+authoritative phase.
 
 Begin claims one stable `CommandRecord` from the device's fixed command table
 and one native buffer/scratch unit from the originating allocator's fixed
@@ -738,11 +740,13 @@ immutable command-operation table, backend state and backend-command pointers,
 retained device ownership, private table identity, and the current
 recording/submission state. The linked `VkCommandRecord` identifies the
 originating allocator and fixed buffer/scratch index and holds Vulkan-specific
-pipeline snapshots and pending texture transitions. Warm recording loads the
-record directly and dispatches through its preselected operation entry without
-a device borrow, backend resolver, or command-table lookup. Trusted backend
-entries do not repeat capability null checks. Only
-lifecycle operations continue through the device vtable and report device loss.
+pipeline snapshots and pending texture transitions. Warm recording first
+acquire-loads the static device slot to verify liveness and generation, then
+loads the record directly and dispatches through its preselected operation
+entry without a retained device-operation borrow, backend resolver, or
+command-table lookup. Trusted backend entries do not repeat capability null
+checks. Only lifecycle operations continue through the device vtable and
+report device loss.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
 

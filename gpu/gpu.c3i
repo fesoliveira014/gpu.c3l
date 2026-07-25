@@ -1,5 +1,7 @@
 module gpu;
 
+import gpu::internal @public;
+
 // Public interface for consumers of gpu.c3l.
 
 // Shared-ABI vector aliases: plain SIMD vectors (element-aligned in structs;
@@ -347,8 +349,9 @@ struct DebugMessage {
 <* Selects library contract behavior; this is independent of lifetime tracking
    and Vulkan validation layers.
    Preconditions: valid callers satisfy operation contracts under every policy.
-   Always checked: direct token generation, authoritative phase, host safety,
-   safe lowering, lifecycle integrity, cold paths, and runtime results.
+   Always checked: token device identity, record generation, authoritative
+   phase, host safety, safe lowering, lifecycle integrity, cold paths, and
+   runtime results.
    FULL diagnostics: detailed command semantic misuse.
    Runtime failures: valid callers may receive documented faults in every policy. *>
 enum ContractValidation : int {
@@ -1031,19 +1034,24 @@ struct CommandAllocatorDesc {
     ZString debug_name;
 }
 
-<* An opaque recording token. Successful end consumes it and every alias. *>
+<* A recording token whose fields are library-owned. Never construct, mutate,
+   persist, or serialize it. Successful end consumes it and every alias. *>
 struct CommandList {
-    void* record;
-    uint  generation;
+    gpu::internal::CommandRecord* record;
+    uint                          generation;
+    uint                          device_identity;
 }
-$assert CommandList::size <= ulong::size * 2;
+// gpu.c3l supports linux-x64 and windows-x64; this is an exact 16-byte ABI.
+$assert CommandList::size == ulong::size * 2;
 
-<* An opaque executable token. Submit or discard consumes it and every alias. *>
+<* An executable token whose fields are library-owned. Never construct,
+   mutate, persist, or serialize it. Submit or discard consumes every alias. *>
 struct ExecutableCommandList {
-    void* record;
-    uint  generation;
+    gpu::internal::CommandRecord* record;
+    uint                          generation;
+    uint                          device_identity;
 }
-$assert ExecutableCommandList::size <= ulong::size * 2;
+$assert ExecutableCommandList::size == ulong::size * 2;
 
 <* Cold reservation for one generated-work pipeline and command kind on one
    allocator. Count bounds each call; buffer count bounds concurrent use. *>

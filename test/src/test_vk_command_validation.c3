@@ -491,9 +491,7 @@ fn void submit_requires_exact_recording_queue_token() @test {
 
     vk::VkDeviceState* state =
         (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::VkCommandRecord* record = vk::backend_command(
-        (gpu::internal::CommandRecord*)executable.record,
-    );
+    vk::VkCommandRecord* record = vk::backend_command(executable.record);
     gpu::Queue recorded_queue = record.queue;
     record.queue.id++;
 
@@ -617,9 +615,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
         "allocation subspans preserve immutable access");
     assert(multi_access_span.access.graphics && multi_access_span.access.compute,
         "allocation subspans preserve every immutable role");
-    vk::VkCommandRecord* record = vk::backend_command(
-        (gpu::internal::CommandRecord*)commands.record,
-    );
+    vk::VkCommandRecord* record = vk::backend_command(commands.record);
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics, .compute };
 
@@ -3105,9 +3101,7 @@ fn void buffer_to_texture_access_diagnostic_precedes_recording() @test {
         .height  = 1,
     };
     vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::VkCommandRecord* record = vk::backend_command(
-        (gpu::internal::CommandRecord*)commands.record,
-    );
+    vk::VkCommandRecord* record = vk::backend_command(commands.record);
     gpu::QueueRoles selected_roles = record.queue.roles;
     // Keep diagnostic precedence independent of physical queue aliasing.
     record.queue.roles = { .transfer };
@@ -3522,8 +3516,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     );
     fault state_fault = @catch(gpu::cmd_copy_buffer(&commands, &state_copy));
     assert(state_fault == gpu::COMMAND_RECORDING_ERROR, "recording-state fault is unchanged");
-    gpu::internal::CommandRecord* command_record =
-        (gpu::internal::CommandRecord*)commands.record;
+    gpu::internal::CommandRecord* command_record = commands.record;
     assert_sync_contract_diagnostic(
         capture:             &capture,
         expected_fault:      state_fault,

@@ -584,6 +584,42 @@
       "sources": [
         "runtime_enable_validation.c3"
       ]
+    },
+    "command_list_handle": {
+      "type": "object-files",
+      "sources": [
+        "command_list_handle.c3"
+      ]
+    },
+    "command_list_handle_invalid": {
+      "type": "object-files",
+      "sources": [
+        "command_list_handle_invalid.c3"
+      ]
+    },
+    "command_list_device": {
+      "type": "object-files",
+      "sources": [
+        "command_list_device.c3"
+      ]
+    },
+    "command_list_handle_member": {
+      "type": "object-files",
+      "sources": [
+        "command_list_handle_member.c3"
+      ]
+    },
+    "executable_command_list_device": {
+      "type": "object-files",
+      "sources": [
+        "executable_command_list_device.c3"
+      ]
+    },
+    "executable_command_list_handle": {
+      "type": "object-files",
+      "sources": [
+        "executable_command_list_handle.c3"
+      ]
     }
   }
 }

@@ -1031,6 +1031,38 @@ fn void command_policy_matcher_rejects_each_forbidden_mutation() @test {
     );
 
     mutation = passing;
+    mutation.resolution.device_registry_resolutions = 1;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &expected,
+        "device registry resolution",
+    );
+
+    mutation = passing;
+    mutation.resolution.retained_pin_operations = 1;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &expected,
+        "retained pin operation",
+    );
+
+    mutation = passing;
+    mutation.resolution.lifecycle_vtable_dispatches = 1;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &expected,
+        "lifecycle dispatch",
+    );
+
+    mutation = passing;
+    mutation.resolution.command_table_lookups = 1;
+    assert_command_policy_mutation_rejected(
+        &mutation,
+        &expected,
+        "command table resolution",
+    );
+
+    mutation = passing;
     mutation.resolution.pipeline_table_lookups = 1;
     assert_command_policy_mutation_rejected(
         &mutation,

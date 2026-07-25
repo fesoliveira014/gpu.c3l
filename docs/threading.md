@@ -183,15 +183,16 @@ ownership transfers.
   only through your synchronization. That hand-off is the happens-before edge.
 - Command records live at stable addresses in the fixed device command table
   and are paired with fixed allocator-owned native buffer/scratch units.
-  The token carries an opaque record pointer and reuse generation; recording
-  compares that generation and the authoritative phase directly on the stable
-  record. Publication, recording-to-executable transfer,
-  submission, discard, and retirement mutate the record's sole state under
-  Tier C confinement. Passing a live token through caller synchronization is
-  the required hand-off and makes the initialized record visible. Copies remain
-  one-shot aliases and must neither be used concurrently nor used after another
-  alias consumes or retires the record. Token storage is opaque and must not be
-  fabricated by callers.
+  The token carries a library-owned typed record pointer, reuse generation, and
+  packed static device-slot identity. Recording checks slot liveness and
+  generation before dereferencing the record, then compares the record
+  generation and authoritative phase. Publication,
+  recording-to-executable transfer, submission, discard, and retirement mutate
+  the record's sole state under Tier C confinement. Passing a live token through
+  caller synchronization is the required hand-off and makes the initialized
+  record visible. Copies remain one-shot aliases and must neither be used
+  concurrently nor used after another alias consumes or retires the record.
+  Callers must not construct, mutate, persist, or serialize token fields.
 - Allocator slots and all fixed scratch live in a nonmoving generational table.
   The allocator mutex publishes returned buffer indices and recording-owner
   changes. Application synchronization is the happens-before edge for allocator
@@ -266,9 +267,10 @@ completion and after every covered record through N has moved to `INACTIVE`,
 released tracked references and generated scratch, returned its buffer/scratch
 index to its exact allocator, released retained device/backend ownership,
 cleared its embedded pending link, and invalidated or generation-advanced its
-bounded identity. A first successful observation queries every represented
-pending queue before publishing any retired prefix, then locks and drains those
-queues one at a time. It never holds two retirement mutexes simultaneously.
+private command-record identity. A first successful observation queries every
+represented pending queue before publishing any retired prefix, then locks and
+drains those queues one at a time. It never holds two retirement mutexes
+simultaneously.
 Submit threshold and headroom handling remain target-queue-only. An
 already-retired point can therefore use the zero-work cached path safely. Poll
 and wait acquire-load that prefix after point validation; an already-retired

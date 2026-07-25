@@ -64,9 +64,10 @@ one exact `validation policy=...` line reporting semantic checks, tracking
 calls, reference allocations/increments/releases, and layer selection. Trusted
 and object-boundary modes require every policy-work counter to be zero. Both
 full modes require semantic and tracking work, releases must equal increments,
-and allocations cannot exceed increments. Every warm interval must report zero
-device-registry, retained-pin, lifecycle-vtable, command-table,
-pipeline-table/cache, and policy-reselection work.
+and allocations cannot exceed increments. Every warm command performs one
+static device-slot liveness load. Every warm interval must report zero retained
+device-operation resolution, retained-pin borrow, lifecycle-vtable dispatch,
+command-table lookup, pipeline-table/cache lookup, and policy reselection.
 Each target creates its explicit queue-bound allocator before warmup and outside
 every measured interval. Its cold counters report allocator host allocation,
 one pool creation, and one complete native command-buffer allocation separately
@@ -180,7 +181,7 @@ exact zero. Timings and unpinned generated assembly are advisory.
 | Cold allocator creation | Host allocations, exactly one exact-family command-pool create, one complete native command-buffer allocation call, and configured buffer count |
 | Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and pre-bind `CommandResolutionStats` |
 | Warm minimal begin + state packet + draw | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, exactly one native begin per pass, exactly ten dynamic-state commands per explicit complete packet, and native draw emission |
-| Warm dynamic-color packet | Exactly three native array commands, one direct-record phase check, and zero allocation, resource locks, pipeline creation, pipeline/cache lookup, or identical-packet suppression |
+| Warm dynamic-color packet | Exactly three native array commands, one static device-slot liveness load, direct-record generation and phase checks, and zero allocation, resource locks, pipeline creation, pipeline/cache lookup, or identical-packet suppression |
 | Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
@@ -190,14 +191,15 @@ exact zero. Timings and unpinned generated assembly are advisory.
 | Shader identity | Owned clone/free balance, zero post-intern shader work, and bounded intern/compact-key work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Bounded collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
-Warm `CommandResolutionStats` require one direct-record generation and
-authoritative phase check per recorded public command, with zero command-table
-lookup, encoder-cell
-computations, packed-lease comparisons, frontend phase transitions,
-registry/pin operations, and warm allocation. The benchmark requires exact
-native emission and GPU output. Pipeline and descriptor-heap counters measure native
-emission, not public bind attempts, so compatible pipeline switches can increase
-pipeline binds without increasing heap binds.
+Warm recording performs one acquire-load of the static device slot followed by
+direct-record generation and authoritative phase checks per public command.
+`CommandResolutionStats` require zero retained device-operation resolution,
+retained-pin borrow, lifecycle-vtable dispatch, command-table lookup,
+encoder-cell computation, packed-lease comparison, frontend phase transition,
+or warm allocation. The benchmark requires exact native emission and GPU
+output. Pipeline and descriptor-heap counters measure native emission, not
+public bind attempts, so compatible pipeline switches can increase pipeline
+binds without increasing heap binds.
 
 Minimal pass begin accounts for exactly one native begin-rendering command and
 no dynamic-state commands. The convenience begin accounts for that begin plus
@@ -211,15 +213,15 @@ Warm command-buffer reset is expected reuse evidence. Warm host allocation is
 prohibited in every policy mode; tracking modes retain into fixed reference
 storage allocated with the command allocator. VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
-and registry, retained-pin, lifecycle-vtable, command-table, and policy work
-remain prohibited in warm recording. Binding an opaque pipeline handle performs
-exactly one
-pipeline-table and one pipeline-cache lookup; dispatch and draw perform no
-additional resolution and each emits exactly one root push plus its native
-execution command. The dispatch invariant mutates the bound handle's backing
-slot after binding and observes the pushed layout, proving command recording
-uses the bind-time value snapshot. Private pipeline and command-record member
-inventories are intentionally not static contracts.
+and retained device-operation resolution, retained-pin borrow,
+lifecycle-vtable dispatch, command-table lookup, and policy work remain
+prohibited in warm recording. Binding an opaque pipeline handle performs
+exactly one pipeline-table and one pipeline-cache lookup; dispatch and draw
+perform no additional resolution and each emits exactly one root push plus its
+native execution command. The dispatch invariant mutates the bound handle's
+backing slot after binding and observes the pushed layout, proving command
+recording uses the bind-time value snapshot. Private pipeline and command-record
+member inventories are intentionally not static contracts.
 
 The lifecycle benchmark first establishes full retirement for each measured
 point, then resets completion-work counters before 100,000 repeated polls. The
@@ -290,10 +292,11 @@ automatically; increases require a reason that the additional native work is
 necessary.
 
 The direct-recording gates require zero command-table lookups and exact zero
-for retired frontend proof work, registry
-resolution, retained pins, lifecycle dispatch, policy reselection, and warm
-allocation. Runtime `CommandOps` indirect dispatch and fallible recording
-signatures remain intentional.
+for retired frontend proof work, retained device-operation resolution,
+retained-pin borrow, lifecycle dispatch, policy reselection, and warm
+allocation. Each command still performs the static device-slot liveness load.
+Runtime `CommandOps` indirect dispatch and fallible recording signatures remain
+intentional.
 
 Representative dispatch, draw, barrier, viewport, and buffer-copy assembly can
 be reported locally:
@@ -312,6 +315,10 @@ python -B scripts/report_command_asm.py \
   --comparison-profile command-fastpath-o1-v1 \
   --limits scripts/command_asm_profiles/c3-0.8.0-linux-x64-o1-v1.json
 ```
+
+The profile maxima were re-measured after the static device-slot gate was
+added. They match the observed broad counts at the reviewed C3 0.8.0
+linux-x64 `-O1` head rather than retaining the looser bounded-token ceilings.
 
 The reporter invokes C3 0.8.0 with `-O1 --emit-asm` and records broad function,
 call, indirect-call, atomic, branch, load/store, and native-dispatch

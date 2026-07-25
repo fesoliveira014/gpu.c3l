@@ -722,8 +722,9 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
     uint available_index = slot.available[0];
     gpu::internal::vk::CommandScratch* scratch = &slot.scratch[available_index];
     gpu::CommandList token = {
-        .record     = (void*)(uptr)91,
-        .generation = 5,
+        .record          = (gpu::internal::CommandRecord*)(uptr)91,
+        .generation      = 5,
+        .device_identity = 11,
     };
     CommandRecordingProbe probe = {
         .reset_result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
@@ -750,7 +751,9 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
         && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0,
         "reset failure restores the exact scratch unit");
-    assert(token.record == (void*)(uptr)91 && token.generation == 5,
+    assert(token.record == (gpu::internal::CommandRecord*)(uptr)91
+        && token.generation == 5
+        && token.device_identity == 11,
         "reset failure publishes neither a command record nor a token");
 
     probe.reset_result = vk::Result.SUCCESS;
@@ -793,8 +796,9 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
     uint available_index = slot.available[0];
     gpu::internal::vk::CommandScratch* scratch = &slot.scratch[available_index];
     gpu::CommandList token = {
-        .record     = (void*)(uptr)93,
-        .generation = 7,
+        .record          = (gpu::internal::CommandRecord*)(uptr)93,
+        .generation      = 7,
+        .device_identity = 13,
     };
     CommandRecordingProbe probe = {
         .begin_result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
@@ -821,7 +825,9 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
         && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0,
         "begin failure restores the exact scratch unit");
-    assert(token.record == (void*)(uptr)93 && token.generation == 7,
+    assert(token.record == (gpu::internal::CommandRecord*)(uptr)93
+        && token.generation == 7
+        && token.device_identity == 13,
         "begin failure publishes neither a command record nor a token");
 
     probe.begin_result = vk::Result.SUCCESS;
@@ -873,7 +879,7 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
             &ops,
         )!!;
     gpu::internal::CommandListHandle handle = record.root.identity;
-    void* token_record = token.record;
+    gpu::internal::CommandRecord* token_record = token.record;
     uint token_generation = token.generation;
     uint next_new = state.commands.next_new;
     uint free_head = state.commands.free_head;

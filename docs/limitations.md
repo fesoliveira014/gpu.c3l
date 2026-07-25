@@ -91,11 +91,12 @@ page doesn't explain it, that's a bug in this page — file an issue.
   There is no default, frame-owned, or ambient per-thread recording owner. Create
   one allocator per concurrently recording worker, size it explicitly, and
   destroy it after all of its command units retire.
-- **Command tokens are direct and one-shot.** Both command token types carry an
-  opaque pointer to one address-stable record plus its reuse generation.
-  Recording compares that generation and the authoritative phase directly.
-  Callers must not fabricate token storage; aliases remain thread-confined and
-  one-shot.
+- **Command tokens are direct and one-shot.** Both command token types carry a
+  library-owned typed pointer to one address-stable record, its reuse
+  generation, and a packed static device-slot identity. Recording checks slot
+  liveness and generation before dereferencing the record, then compares its
+  generation and authoritative phase. Callers must not fabricate or mutate
+  token storage; aliases remain thread-confined and one-shot.
 - **Vendored distribution.** There is no package registry; consumers vendor
   the repo (with its binding submodules) under `lib/`. See
   `docs/getting_started.md`.

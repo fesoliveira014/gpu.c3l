@@ -149,12 +149,12 @@ full_validation_runtime_desc()     -> RuntimeDesc
 
 Runtime policy has independent axes. A zero-initialized `RuntimeDesc` selects
 `ContractValidation.TRUSTED`, lifetime tracking off, and Vulkan validation
-layers off. Every contract level retains the always-checked public-identity or
-direct-token-generation, authoritative-phase, host-safety, safe-lowering,
-lifecycle, cold-path, and runtime-result floor. `OBJECT_BOUNDARIES` uses the same trusted command tables
-as `TRUSTED` and adds structured reporting only at explicitly routed public
-boundaries plus teardown leak scans. `FULL` selects checked command tables with
-detailed semantic diagnostics.
+layers off. Every contract level retains the always-checked public and
+command-token identity, authoritative-phase, host-safety, safe-lowering,
+lifecycle, cold-path, and runtime-result floor. `OBJECT_BOUNDARIES` uses the
+same trusted command tables as `TRUSTED` and adds structured reporting only at
+explicitly routed public boundaries plus teardown leak scans. `FULL` selects
+checked command tables with detailed semantic diagnostics.
 `track_resource_lifetimes` independently selects command reference retention,
 and `enable_vulkan_validation` independently requests the Khronos layer.
 Debug names request best-effort native naming, while a callback only selects
@@ -231,8 +231,9 @@ Most public device operations pin the slot before reading backend state.
 `begin_commands` transfers its pin to one stable allocator-owned command
 record. Hot recording calls reach that record through the build-selected
 command token and dispatch through its immutable command-operation table
-without resolving the device registry, borrowing another pin, or loading the
-lifecycle vtable.
+after one acquire-load of the static device slot proves its liveness and
+generation. They do not borrow another pin, resolve a retained device
+operation, load the lifecycle vtable, or look up the command table.
 
 Destruction first rejects known live children, then closes the slot. Closing
 blocks new pins while active pins, a second child check, and queue completion
@@ -300,11 +301,12 @@ units are discarded or completion-retired.
 
 A command list is a transient token for one device-table command record paired
 with one originating allocator native buffer/scratch unit. Its fixed public
-payload carries an opaque pointer to that address-stable record plus its reuse
-generation. Recording compares the generation and authoritative phase directly
-on the record under every policy, without a device borrow or command-table
-lookup. The token must originate from `begin_commands`; callers must not inspect
-or fabricate its opaque storage.
+payload carries a library-owned typed pointer to that address-stable record,
+its reuse generation, and a packed static device-slot identity. Recording first
+checks the slot's liveness and generation, then compares the record generation
+and authoritative phase under every policy, without a retained
+device-operation borrow or command-table lookup. The token must originate from
+`begin_commands`; callers must not inspect, construct, or mutate its fields.
 
 Every preallocated command cell owns one address-stable authoritative
 `CommandRecord`. It contains the selected immutable `CommandOps`, backend state
@@ -657,9 +659,9 @@ pointer/slice/range safety, overflow protection, internal state integrity,
 public ownership, Vulkan result handling, and rollback. Detailed command misuse
 outside that floor is a caller contract violation unless `FULL` is selected.
 One-shot use, alias confinement, and non-fabricated token storage remain caller
-preconditions. Direct generation and authoritative-phase checks reject stale or
-consumed aliases before native mutation while their fixed record storage
-remains alive.
+preconditions. Static device-slot identity, record generation, and
+authoritative-phase checks reject stale or consumed aliases before native
+mutation, including after the originating device's record storage is released.
 
 The direct recording path retains the record-owned runtime `CommandOps`
 dispatch and fallible `cmd_*` signatures.

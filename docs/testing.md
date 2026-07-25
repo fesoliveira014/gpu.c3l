@@ -279,8 +279,9 @@ authoritative command phase and internal-table integrity, public device
 ownership, lifecycle/cold-path checks, Vulkan result/device-loss handling, and
 transactional creation rollback. Trusted-mode cases distinguish that floor
 from semantic misuse that is intentionally a caller precondition. Every policy
-checks direct command generation and phase before native mutation; lifecycle
-and submit coverage additionally validates device/backend ownership.
+checks static device-slot liveness, record generation, and command phase before
+native mutation. Lifecycle and submit coverage additionally validates
+device/backend ownership.
 
 Zero-root execution evidence covers direct compute, direct graphics, indirect
 work, and generated draw, indexed-draw, and dispatch records. Each family
@@ -418,7 +419,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
 | Command allocators | exact device/queue binding; default, ceiling, and overflow validation; transactional pool/buffer/host rollback; recyclable generations; begin/reference/generated capacity faults; address-stable authoritative records; fixed per-scratch reference indices; epoch reuse; no submitted-unit reuse before retirement; non-waiting destroy in recording/executable/in-flight states; device-child accounting; exact-family pools; and tracking-off zero reference/index storage. |
-| Commands | fixed direct token size and deterministic stale/foreign/wrong-phase/consumed diagnostics; one authoritative state through begin/end/submit/rollback/discard/retirement; one backend claim with exact linear direct-token visits and duplicate visits; authoritative record-queue validation without allocator reproof; retryable failure; intrusive exact-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; checked regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
+| Commands | exact 16-byte x64 direct token size and deterministic stale/wrong-phase/consumed diagnostics, including copied tokens after device-slot reuse; submit-only foreign-device rejection; one authoritative state through begin/end/submit/rollback/discard/retirement; one backend claim with exact linear direct-token visits and duplicate visits; authoritative record-queue validation without allocator reproof; retryable failure; intrusive exact-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; checked regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback; immutable/dynamic parity for opaque, alpha, premultiplied, additive, and masked writes; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; transactional convenience rejection without native or command-state mutation; exact ten-command graphics and three-command color packets; state reuse across pass boundaries and reset on command-buffer reuse; optional partial updates; checked regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; and pipeline-alias persistence. |
@@ -554,8 +555,9 @@ image-view creation, and pipeline/shader creation are required to remain zero. R
 snapshots begin before pipeline binding: binding the opaque pipeline handle
 performs exactly one pipeline-table and one pipeline-cache lookup and records
 one `pipeline_bind_commands` increment for the selected bind point, while
-registry, retained-pin, lifecycle-vtable, command-table, and policy work remain
-zero. The direct token loads the stable record for each public recording call.
+retained device-operation resolution, retained-pin borrow, lifecycle-vtable
+dispatch, command-table lookup, and policy work remain zero. Each public
+recording call checks the static device slot before loading the stable record.
 Exact heap counters require one indexing set bind or descriptor-buffer
 offset per used bind point and one descriptor-buffer bind per command record;
 later compatible pipeline changes add none. Dispatch and draw add no further
@@ -570,8 +572,9 @@ change.
 Dynamic-color work coverage selects a requested live device when available and
 otherwise reports deterministic unsupported capability. On a supported device,
 one packet and an identical replacement each require exactly three native
-calls, one direct-record phase check, and zero host/VMA allocation, resource
-lookup/lock, native pipeline creation, or pipeline/cache lookup.
+calls, one static device-slot liveness load, direct-record generation and phase
+checks, and zero host/VMA allocation, resource lookup/lock, native pipeline
+creation, or pipeline/cache lookup.
 
 The benchmark runner builds thirteen executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
@@ -651,13 +654,13 @@ followed by exactly ten state commands. A complete
 `cmd_set_graphics_state` replacement reports exactly ten, while additional
 compatible passes and draws add only their begin/end/draw commands unless
 another setter is recorded. The `{2, 16, 256}` matrix rejects hidden pass-boundary
-replay, default, or state-diff work and requires zero registry,
-retained-pin, lifecycle-vtable, command-table, pipeline-table/cache, and policy
-selections during warm recording. Warm recording requires zero command-table
-resolution and zero encoder-cell computations,
-packed-lease comparisons, frontend phase transitions, registry/pin operations,
-and warm allocation. Source helper names, call topology, and proof-note
-placement are not blocking contracts.
+replay, default, or state-diff work. Every warm command performs one static
+device-slot liveness load and requires zero retained device-operation
+resolution, retained-pin borrow, lifecycle-vtable dispatch, command-table
+lookup, pipeline-table/cache lookup, and policy selection. It also requires
+zero encoder-cell computation, packed-lease comparison, frontend phase
+transition, and warm allocation. Source helper names, call topology, and
+proof-note placement are not blocking contracts.
 These process-wide counters use relaxed atomics and are compared only across
 externally synchronized benchmark intervals. The native count covers every
 Vulkan command emitted by recording paths.
