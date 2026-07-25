@@ -1161,7 +1161,7 @@ and all fixed host bookkeeping. Zero fields select these public defaults:
 | Capacity | Default | Maximum | Scaling |
 |---|---:|---:|---|
 | `command_buffer_capacity` | `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` = 8 | `MAX_COMMAND_ALLOCATOR_CAPACITY` = 4096 | native command buffers, scratch records, and available-index storage |
-| `max_resource_references_per_list` | `DEFAULT_COMMAND_REFERENCES_PER_LIST` = 64 | `MAX_COMMAND_REFERENCES_PER_LIST` = 4096 | one fixed sequential reference list per command buffer under FULL; zero storage under TRUSTED |
+| `max_resource_references_per_list` | `DEFAULT_COMMAND_REFERENCES_PER_LIST` = 64 | `MAX_COMMAND_REFERENCES_PER_LIST` = 4096 | one fixed sequential reference list per command buffer under FULL; zero storage under TRUSTED; see `docs/performance.md` for the linear-scan cost at each bound |
 | `max_generated_preprocess_buffers_per_list` | `DEFAULT_COMMAND_PREPROCESS_PER_LIST` = 4 | `MAX_COMMAND_PREPROCESS_PER_LIST` = 64 | generated-reservation indices per command buffer and reservation-table entries multiplied by command-buffer capacity |
 
 `generated_preprocess_bytes` has no nonzero default: zero disables generated

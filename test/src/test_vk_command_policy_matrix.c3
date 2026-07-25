@@ -167,7 +167,7 @@ fn void full_copy_capacity_rejection_is_transactional() @test {
         && destination_slot.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == destination_references_before,
-        "rejected copy performs no transient retain or release");
+        "rejected copy leaves both retained counters unchanged");
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
     assert(resolution.recording_commands == 1
