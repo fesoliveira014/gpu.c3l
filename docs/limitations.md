@@ -58,7 +58,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
   corresponding classic Vulkan layouts on every device. A global barrier has
   no texture identity or subresource range and cannot establish a required
   layout. Layout changes, including `UNDEFINED` initialization and `PRESENT`
-  transitions, require explicit texture barriers.
+  transitions, require explicit texture barriers. When migrating from the
+  removed unified-layout profile, replace every global `Barrier` that stood in
+  for a texture layout change with `cmd_texture_barrier`. A texture cannot be
+  sampled and storage-accessed in the same pass; split those uses and record
+  the explicit transition between their classic layouts.
 - **Async compute is capability-gated.** A distinct compute queue is used
   when available and reported by `DeviceCaps.async_compute`. Resources declare
   their semantic access roles; distinct admitted families use private concurrent

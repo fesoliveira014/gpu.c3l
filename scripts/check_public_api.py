@@ -320,11 +320,16 @@ RETIRED_SOURCE_SYMBOLS = (
     "request_dynamic_color_state(",
     "create_dynamic_graphics_pipeline(",
     "create_dynamic_graphics_pipelines(",
-    "request_resource_agnostic_texture_sync(",
     "resource_agnostic_texture_sync",
+    "RESOURCE_AGNOSTIC_TEXTURE_SYNC",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
+    "resource_agnostic",
+    "RESOURCE_AGNOSTIC",
+    "unified_image_layout",
+    "UnifiedImageLayout",
+    "UNIFIED_IMAGE_LAYOUT",
     "ACQUIRE_TIMEOUT_NS",
     "StandaloneDeviceConfig",
     "create_standalone_device_with_probe",

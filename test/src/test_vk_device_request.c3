@@ -37,14 +37,17 @@ fn void capture_strict_support_diagnostic(
 ) {
     StrictSupportDiagnosticCapture* capture =
         (StrictSupportDiagnosticCapture*)user_data;
-    capture.calls++;
-    capture.matched = message.severity == gpu::DebugMessageSeverity.ERROR
+    bool matched = message.severity == gpu::DebugMessageSeverity.ERROR
         && message.category.public_contract
         && message.has_fault
         && message.public_fault == gpu::UNSUPPORTED_FEATURE
         && message.operation.str_view() == "create_device"
         && message.rejected_field.str_view() == capture.expected_field.str_view()
         && message.invariant.str_view() == capture.expected_invariant.str_view();
+    if (matched) {
+        capture.calls++;
+        capture.matched = true;
+    }
 }
 
 fn vk::Result count_native_device_create(
@@ -110,6 +113,39 @@ fn uint live_device_slot_count() @private {
         if (control.state == gpu::internal::DEVICE_SLOT_LIVE) live_count++;
     }
     return live_count;
+}
+
+fn fault run_injected_device_create(
+    gpu::Runtime* runtime,
+    gpu::Adapter* adapter,
+    gpu::DeviceRequest* request,
+    gpu::internal::vk::DeviceCreationProbe* probe,
+) @private {
+    gpu::Runtime retained_runtime = *runtime;
+    gpu::internal::runtime_retain_device(&retained_runtime)!!;
+    fault creation_fault = @catch(
+        gpu::internal::vk::create_vk_device_with_probe(
+            adapter:          adapter,
+            request:          request,
+            retained_runtime: &retained_runtime,
+            probe:            probe,
+        )
+    );
+    gpu::internal::runtime_release_device(&retained_runtime)!!;
+    return creation_fault;
+}
+
+fn vk::Result reject_native_device_create(
+    void* user_data,
+    vk::PhysicalDevice physical_device,
+    vk::DeviceCreateInfo* requested_info,
+    vk::Device* device,
+) @private {
+    (void)user_data;
+    (void)physical_device;
+    (void)requested_info;
+    (void)device;
+    return vk::Result.ERROR_INITIALIZATION_FAILED;
 }
 
 fn void strict_disabled_state_owns_no_sampler_table() @test {
@@ -727,6 +763,10 @@ fn void command_policy_selection_covers_both_contract_modes() @test {
         "an unknown policy falls back to full command recording"
     );
     assert(
+        gpu::internal::vk::contract_uses_full_validation(policy),
+        "an unknown policy preserves full validation and reference storage"
+    );
+    assert(
         gpu::internal::vk::TRUSTED_COMMAND_OPS.begin_label
             == gpu::internal::vk::FULL_COMMAND_OPS.begin_label,
         "both command policies share the label-begin entry"
@@ -809,21 +849,38 @@ fn void required_dynamic_color_features_are_enabled_transactionally() @test {
         if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
         uint live_slots_before = live_device_slot_count();
 
-        gpu::Runtime retained_runtime = runtime;
-        gpu::internal::runtime_retain_device(&retained_runtime)!!;
-        gpu::internal::vk::DeviceCreationProbe failure_probe = {
-            .fail_native_device_creation = true,
+        gpu::internal::vk::DeviceCreationProbe missing_support = {
+            .dynamic_color_support_override = true,
         };
         assert(
-            @catch(gpu::internal::vk::create_vk_device_with_probe(
-                adapter:          &adapter,
-                request:          &request,
-                retained_runtime: &retained_runtime,
-                probe:            &failure_probe,
-            )) == gpu::BACKEND_ERROR,
+            run_injected_device_create(
+                runtime: &runtime,
+                adapter: &adapter,
+                request: &request,
+                probe:   &missing_support,
+            ) == gpu::UNSUPPORTED_FEATURE,
+            "strict creation rechecks and rejects missing dynamic color support"
+        );
+        assert(
+            missing_support.reached
+                    == gpu::internal::vk::DeviceCreationCheckpoint.NONE
+                && missing_support.rollback_count == 0
+                && live_device_slot_count() == live_slots_before,
+            "missing color support rejects before state mutation or publication"
+        );
+
+        gpu::internal::vk::DeviceCreationProbe failure_probe = {
+            .native_device_create_hook = &reject_native_device_create,
+        };
+        assert(
+            run_injected_device_create(
+                runtime: &runtime,
+                adapter: &adapter,
+                request: &request,
+                probe:   &failure_probe,
+            ) == gpu::UNSUPPORTED_BACKEND,
             "an injected native failure aborts strict creation"
         );
-        gpu::internal::runtime_release_device(&retained_runtime)!!;
         assert(
             failure_probe.dynamic_color_feature_chained
                 && failure_probe.dynamic_color_blend_enable == vk::TRUE
