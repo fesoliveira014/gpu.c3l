@@ -130,7 +130,7 @@ struct VkDeviceState @public {
     ulong                      max_timeline_semaphore_value_difference;
     usz                        non_coherent_atom_size;
     DeviceValidationPolicy     validation_policy;
-    CommandOps*           command_ops;
+    CommandOps*                command_ops;
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;

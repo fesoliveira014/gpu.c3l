@@ -193,7 +193,7 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
         && destination_slot.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == destination_references_before,
-        "capacity preflight performs no transient retain or release");
+        "capacity preflight leaves both retained counters unchanged");
     assert(gpu::command_resolution_stats().native_commands == 0,
         "capacity preflight rejects before the native copy command");
     assert(commands.is_valid() && slot.live_recordings == 1

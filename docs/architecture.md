@@ -41,7 +41,12 @@ gpu::internal::vk Vulkan backend
         +--> spvreflect.c3l -> SPIR-V shader reflection
 ```
 
-The public API does not expose Vulkan or VMA types. SDL3 integration belongs to the separate `gpu.c3l-samples` repository and is not a backend dependency.
+Caller-supplied descriptors and callable signatures do not expose Vulkan or
+VMA binding types. SDL3 integration belongs to the separate
+`gpu.c3l-samples` repository and is not a backend dependency.
+
+There is no runtime backend plugin interface. Adding another backend is future
+source work, not a current stable private ABI.
 
 ## 3. Package structure
 
@@ -107,6 +112,12 @@ module gpu::internal::vk @private;
 Public callable implementations and platform surface implementations import
 private implementation modules with a scoped visibility override. White-box
 tests do the same; consumers should not depend on either internal module.
+C3 0.8.0 has no package-private visibility, so the state types shared across
+`gpu::internal` and `gpu::internal::vk` use declaration-level `@public`.
+Generated metadata can therefore name `VkRuntimeState`, `VkDeviceState`,
+`CommandRecord`, and `CommandOps`, including the library-owned `record` member
+of command tokens. This compiler visibility is not a supported consumer API;
+the token fields remain opaque and library-owned.
 
 Samples are standalone consumers and may declare their own sample modules.
 

@@ -20,6 +20,9 @@ FIXTURES = {
     "texture_desc_depth": "depth",
     "texture_view_desc_format": "format",
     "device_desc": "DeviceDesc",
+    "backend_kind": "BackendKind",
+    "runtime_backend": "backend",
+    "get_device_backend": "get_device_backend",
     "runtime_enable_validation": "enable_validation",
     "runtime_track_resource_lifetimes": "track_resource_lifetimes",
     "request_resource_agnostic_texture_sync": (
@@ -138,6 +141,7 @@ ERROR_DIAGNOSTIC = re.compile(
 )
 
 INVALID_MEMBER_TYPES = {
+    "runtime_backend": "RuntimeDesc",
     "runtime_enable_validation": "RuntimeDesc",
     "runtime_track_resource_lifetimes": "RuntimeDesc",
     "texture_desc_dimension": "TextureDesc",
@@ -216,6 +220,8 @@ LIVE_SCAN_ROOTS = (
 )
 LIVE_SCAN_SUFFIXES = {".c3", ".json", ".md", ".txt"}
 LIVE_RETIRED_PATTERNS = {
+    "BackendKind": re.compile(r"\bBackendKind\b"),
+    "get_device_backend": re.compile(r"\bget_device_backend\b"),
     "TextureDimension": re.compile(r"\bTextureDimension\b"),
     "D24_UNORM_S8_UINT": re.compile(r"\bD24_UNORM_S8_UINT\b"),
     "ClearDepthStencil": re.compile(r"\bClearDepthStencil\b"),
@@ -237,6 +243,12 @@ README_RETIRED_PATTERNS = {
     ),
 }
 RETIRED_DESC_FIELDS = {
+    "RuntimeDesc.backend": re.compile(
+        r"(?:\bRuntimeDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
+        r"|\bfn\s+(?:gpu::)?RuntimeDesc\b[^\r\n=]*=>\s*)\{"
+        r"(?:(?!\};).)*?\.backend\s*=",
+        re.DOTALL,
+    ),
     "RuntimeDesc.enable_validation": re.compile(
         r"(?:\bRuntimeDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
         r"|\bfn\s+(?:gpu::)?RuntimeDesc\b[^\r\n=]*=>\s*)\{"
