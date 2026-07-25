@@ -40,11 +40,7 @@ struct CommandPinFixture {
     uint         pins_during_command;
     uint         pins_during_submit;
     uint         next_command;
-    uint         allocator_creates;
-    uint         allocator_destroy_calls;
     gpu::Device  device;
-    gpu::Queue   allocator_queue;
-    gpu::CommandAllocatorDesc allocator_desc;
     CommandPinRecordCell[COMMAND_PIN_RECORD_CAPACITY] records;
     bool         block_command;
     bool         reject_discard;
@@ -54,10 +50,6 @@ struct CommandPinFixture {
     bool         reuse_command_index;
     bool         submit_busy;
     bool         lose_during_submit;
-    bool         reject_allocator_create;
-    bool         reject_allocator_destroy;
-    bool         return_invalid_allocator;
-    bool         return_foreign_allocator;
     bool         return_null_backend_state;
     bool         return_null_backend_command;
 }
@@ -89,61 +81,6 @@ struct RuntimeRetainWorkerArgs {
     Atomic{uint}* ready;
     Atomic{bool}* release;
     bool          failed;
-}
-
-fn gpu::CommandAllocatorHandle? command_pin_create_allocator(
-    gpu::Device* device,
-    gpu::Queue queue,
-    gpu::CommandAllocatorDesc* desc,
-) {
-    gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(device);
-    if (data == null || desc == null) return gpu::INVALID_HANDLE~;
-    CommandPinFixture* fixture = (CommandPinFixture*)data.state;
-    fixture.allocator_creates++;
-    fixture.allocator_queue = queue;
-    fixture.allocator_desc = *desc;
-    if (fixture.reject_allocator_create) return gpu::DEVICE_BUSY~;
-    if (fixture.return_invalid_allocator) return {};
-    gpu::CommandAllocatorHandle handle = {
-        .owner = gpu::internal::resource_owner_tag(
-            data.resource_owner,
-            gpu::internal::ResourceOwnerKind.COMMAND_ALLOCATOR,
-        ),
-        .index = 0,
-        .generation = fixture.allocator_creates,
-    };
-    if (fixture.return_foreign_allocator) handle.owner++;
-    return handle;
-}
-
-fn void? command_pin_destroy_allocator(
-    gpu::Device* device,
-    gpu::CommandAllocatorHandle handle,
-) {
-    gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(device);
-    if (data == null) return gpu::INVALID_HANDLE~;
-    CommandPinFixture* fixture = (CommandPinFixture*)data.state;
-    fixture.allocator_destroy_calls++;
-    if (!handle.is_valid()) return gpu::INVALID_HANDLE~;
-    if (fixture.reject_allocator_destroy) return gpu::RESOURCE_IN_USE~;
-}
-
-fn void? command_pin_reserve_generated_scratch(
-    gpu::CommandAllocator* allocator,
-    gpu::GeneratedScratchDesc* desc,
-) {
-    (void)allocator;
-    (void)desc;
-}
-
-fn void? command_pin_release_generated_scratch(
-    gpu::CommandAllocator* allocator,
-    gpu::PipelineHandle pipeline,
-    gpu::GeneratedWorkKind kind,
-) {
-    (void)allocator;
-    (void)pipeline;
-    (void)kind;
 }
 
 fn void? command_pin_begin(
@@ -627,10 +564,6 @@ gpu::internal::CommandOps command_pin_ops = {
 };
 
 gpu::internal::BackendVTable command_pin_vtable = {
-    .create_command_allocator  = &command_pin_create_allocator,
-    .destroy_command_allocator = &command_pin_destroy_allocator,
-    .reserve_generated_scratch = &command_pin_reserve_generated_scratch,
-    .release_generated_scratch = &command_pin_release_generated_scratch,
     .begin_commands            = &command_pin_begin,
     .end_commands              = &command_pin_end,
     .discard_commands          = &command_pin_discard,
@@ -740,10 +673,13 @@ fn int device_registry_worker(void* raw_args) {
 
 fn void command_allocator_public_lifecycle_is_transactional() @test {
     CommandPinFixture fixture;
+    fixture.state.resource_owner =
+        gpu::internal::allocate_device_resource_owner()!!;
     gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-        vtable: &command_pin_vtable,
+        state:          &fixture.state,
+        caps:           {},
+        vtable:         &command_pin_vtable,
+        resource_owner: fixture.state.resource_owner,
     )!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -757,18 +693,18 @@ fn void command_allocator_public_lifecycle_is_transactional() @test {
 
     assert(allocator.device == device && allocator.queue == queue,
         "allocator carries its exact device and queue identity");
-    assert(fixture.allocator_desc.command_buffer_capacity
+    assert(fixture.state.allocator_desc.command_buffer_capacity
             == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
-        && fixture.allocator_desc.max_resource_references_per_list
+        && fixture.state.allocator_desc.max_resource_references_per_list
             == gpu::DEFAULT_COMMAND_REFERENCES_PER_LIST
-        && fixture.allocator_desc
+        && fixture.state.allocator_desc
             .max_generated_preprocess_buffers_per_list
             == gpu::DEFAULT_COMMAND_PREPROCESS_PER_LIST,
         "zero descriptor fields normalize before backend dispatch");
     assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 1,
         "a published allocator retains one device child");
 
-    fixture.reject_allocator_destroy = true;
+    fixture.state.reject_allocator_destroy = true;
     gpu::CommandAllocator original = allocator;
     assert(@catch(gpu::destroy_command_allocator(&allocator))
         == gpu::RESOURCE_IN_USE,
@@ -777,7 +713,7 @@ fn void command_allocator_public_lifecycle_is_transactional() @test {
         && slot.live_children.load(AtomicOrdering.ACQUIRE) == 1,
         "failed destroy preserves the token and child retain");
 
-    fixture.reject_allocator_destroy = false;
+    fixture.state.reject_allocator_destroy = false;
     gpu::destroy_command_allocator(&allocator)!!;
     assert(!allocator.handle.is_valid()
         && slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
@@ -788,10 +724,13 @@ fn void command_allocator_public_lifecycle_is_transactional() @test {
 fn void command_allocator_creation_rejects_before_publication() @test {
     CommandPinFixture first_fixture;
     CommandPinFixture second_fixture;
+    first_fixture.state.resource_owner =
+        gpu::internal::allocate_device_resource_owner()!!;
     gpu::Device first = gpu::internal::register_device(
-        state:  &first_fixture.state,
-        caps:   {},
-        vtable: &command_pin_vtable,
+        state:          &first_fixture.state,
+        caps:           {},
+        vtable:         &command_pin_vtable,
+        resource_owner: first_fixture.state.resource_owner,
     )!!;
     gpu::Device second = gpu::internal::register_device(
         state:  &second_fixture.state,
@@ -819,13 +758,13 @@ fn void command_allocator_creation_rejects_before_publication() @test {
         &oversized,
     )) == gpu::INVALID_ARGUMENT,
         "an oversized descriptor is rejected before backend creation");
-    assert(first_fixture.allocator_creates == 0
+    assert(first_fixture.state.allocator_creates == 0
         && gpu::internal::device_slots[first.index].live_children.load(
             AtomicOrdering.ACQUIRE,
         ) == 0,
         "validation failures publish no backend allocator or child");
 
-    first_fixture.reject_allocator_create = true;
+    first_fixture.state.reject_allocator_create = true;
     assert(@catch(gpu::create_command_allocator(&first, queue))
         == gpu::DEVICE_BUSY,
         "backend create faults propagate exactly");
@@ -834,82 +773,23 @@ fn void command_allocator_creation_rejects_before_publication() @test {
         ) == 0,
         "backend create failure retains no child");
 
-    first_fixture.reject_allocator_create = false;
-    first_fixture.return_invalid_allocator = true;
+    first_fixture.state.reject_allocator_create = false;
+    first_fixture.state.return_invalid_allocator = true;
     assert(@catch(gpu::create_command_allocator(&first, queue))
         == gpu::BACKEND_ERROR,
         "an invalid backend handle fails publication");
-    first_fixture.return_invalid_allocator = false;
-    first_fixture.return_foreign_allocator = true;
+    first_fixture.state.return_invalid_allocator = false;
+    first_fixture.state.return_foreign_allocator = true;
     assert(@catch(gpu::create_command_allocator(&first, queue))
         == gpu::BACKEND_ERROR,
         "a foreign backend handle fails publication");
-    assert(first_fixture.allocator_destroy_calls == 2
+    assert(first_fixture.state.allocator_destroy_calls == 2
         && gpu::internal::device_slots[first.index].live_children.load(
             AtomicOrdering.ACQUIRE,
         ) == 0,
         "invalid backend publication rolls back exactly once without a child");
     gpu::destroy_device(&second)!!;
     gpu::destroy_device(&first)!!;
-}
-
-fn void incomplete_command_allocator_vtable_fails_safely() @test {
-    CommandPinFixture fixture;
-    gpu::internal::BackendVTable vtable = command_pin_vtable;
-    vtable.create_command_allocator = null;
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   { .max_generated_work_count = 1 },
-        vtable: &vtable,
-    )!!;
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    assert(@catch(gpu::create_command_allocator(&device, queue))
-        == gpu::BACKEND_ERROR,
-        "missing allocator creation dispatch fails before publication");
-
-    vtable.create_command_allocator = &command_pin_create_allocator;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-    )!!;
-    vtable.reserve_generated_scratch = null;
-    vtable.release_generated_scratch = null;
-    gpu::PipelineHandle pipeline = {
-        .owner = gpu::internal::resource_owner_tag(
-            gpu::internal::device_slots[device.index].data.resource_owner,
-            gpu::internal::ResourceOwnerKind.PIPELINE,
-        ),
-        .generation = 1,
-    };
-    gpu::GeneratedScratchDesc scratch = {
-        .pipeline                = pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-        .max_commands_per_list   = 1,
-        .preprocess_buffer_count = 1,
-    };
-    assert(@catch(gpu::reserve_generated_scratch(&allocator, &scratch))
-        == gpu::BACKEND_ERROR,
-        "missing reservation dispatch fails safely");
-    assert(@catch(gpu::release_generated_scratch(
-        &allocator,
-        pipeline,
-        gpu::GeneratedWorkKind.DISPATCH,
-    )) == gpu::BACKEND_ERROR,
-        "missing release dispatch fails safely");
-
-    vtable.destroy_command_allocator = null;
-    gpu::CommandAllocator original = allocator;
-    assert(@catch(gpu::destroy_command_allocator(&allocator))
-        == gpu::BACKEND_ERROR,
-        "missing destroy dispatch preserves the allocator");
-    assert(allocator.handle == original.handle,
-        "missing destroy dispatch does not consume the token");
-    vtable.destroy_command_allocator = &command_pin_destroy_allocator;
-    gpu::destroy_command_allocator(&allocator)!!;
-    gpu::destroy_device(&device)!!;
 }
 
 fn void command_calls_use_the_retained_lifetime_pin() @test {

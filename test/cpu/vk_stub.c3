@@ -24,6 +24,8 @@ struct VkDeviceState @public {
     gpu::Adapter         adapter;
     gpu::Surface         surface;
     gpu::Device          owner;
+    gpu::Queue           allocator_queue;
+    gpu::CommandAllocatorDesc allocator_desc;
     gpu::GpuAllocation   allocation;
     gpu::AllocationDesc  allocation_desc;
     gpu::TextureHandle   texture;
@@ -35,6 +37,8 @@ struct VkDeviceState @public {
     uint                 sampler_count;
     uint                 sampler_intern_attempts;
     uint                 sampler_native_creates;
+    uint                 allocator_creates;
+    uint                 allocator_destroy_calls;
     uint                 allocation_attempts;
     uint                 allocation_free_calls;
     uint                 allocation_flush_calls;
@@ -72,6 +76,10 @@ struct VkDeviceState @public {
     bool                 texture_out_of_memory;
     bool                 block_memory_stats;
     bool                 free_on_destroy;
+    bool                 reject_allocator_create;
+    bool                 reject_allocator_destroy;
+    bool                 return_invalid_allocator;
+    bool                 return_foreign_allocator;
 }
 
 uint configured_adapter_count @private = 1;
@@ -106,6 +114,61 @@ fn void lock_stub_samplers(VkDeviceState* state) @private {
 
 fn void unlock_stub_samplers(VkDeviceState* state) @private {
     (void)state.sampler_lock.clear(AtomicOrdering.RELEASE);
+}
+
+fn gpu::CommandAllocatorHandle? vk_create_command_allocator(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    gpu::CommandAllocatorDesc* desc,
+) {
+    if (state == null || desc == null) return gpu::INVALID_HANDLE~;
+    state.allocator_creates++;
+    state.allocator_queue = queue;
+    state.allocator_desc = *desc;
+    if (state.reject_allocator_create) return gpu::DEVICE_BUSY~;
+    if (state.return_invalid_allocator) return {};
+    gpu::CommandAllocatorHandle handle = {
+        .owner = gpu::internal::resource_owner_tag(
+            state.resource_owner,
+            gpu::internal::ResourceOwnerKind.COMMAND_ALLOCATOR,
+        ),
+        .index = 0,
+        .generation = state.allocator_creates,
+    };
+    if (state.return_foreign_allocator) handle.owner++;
+    return handle;
+}
+
+fn void? vk_destroy_command_allocator(
+    VkDeviceState* state,
+    gpu::CommandAllocatorHandle handle,
+) {
+    if (state == null) return gpu::INVALID_HANDLE~;
+    state.allocator_destroy_calls++;
+    if (!handle.is_valid()) return gpu::INVALID_HANDLE~;
+    if (state.reject_allocator_destroy) return gpu::RESOURCE_IN_USE~;
+}
+
+fn void? vk_reserve_generated_scratch(
+    VkDeviceState* state,
+    gpu::CommandAllocator* allocator,
+    gpu::GeneratedScratchDesc* desc,
+) {
+    (void)state;
+    (void)allocator;
+    (void)desc;
+}
+
+fn void? vk_release_generated_scratch(
+    VkDeviceState* state,
+    gpu::CommandAllocator* allocator,
+    gpu::PipelineHandle pipeline,
+    gpu::GeneratedWorkKind kind,
+) {
+    (void)state;
+    (void)allocator;
+    (void)pipeline;
+    (void)kind;
 }
 
 fn gpu::AttachmentViewHandle? vk_create_attachment_view(

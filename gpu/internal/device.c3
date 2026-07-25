@@ -9,27 +9,9 @@ import std::core::mem;
 
 // Transitional dispatch for device subsystems not yet routed directly.
 // Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
-alias CreateCommandAllocatorFn @private = fn CommandAllocatorHandle? (
-    Device*,
-    Queue,
-    CommandAllocatorDesc*,
-);
-alias DestroyCommandAllocatorFn @private = fn void? (
-    Device*,
-    CommandAllocatorHandle,
-);
 alias BeginCommandsFn @private = fn void? (
     CommandAllocator* allocator,
     CommandList* out_commands,
-);
-alias ReserveGeneratedScratchFn @private = fn void? (
-    CommandAllocator*,
-    GeneratedScratchDesc*,
-);
-alias ReleaseGeneratedScratchFn @private = fn void? (
-    CommandAllocator*,
-    PipelineHandle,
-    GeneratedWorkKind,
 );
 alias EndCommandsFn @private     = fn void? (CommandRecord*);
 alias DiscardCommandsFn @private = fn void? (
@@ -232,10 +214,6 @@ struct CommandOps @private {
 }
 
 struct BackendVTable @private {
-    CreateCommandAllocatorFn  create_command_allocator;
-    DestroyCommandAllocatorFn destroy_command_allocator;
-    ReserveGeneratedScratchFn reserve_generated_scratch;
-    ReleaseGeneratedScratchFn release_generated_scratch;
     BeginCommandsFn           begin_commands;
     EndCommandsFn             end_commands;
     DiscardCommandsFn         discard_commands;

@@ -1193,11 +1193,8 @@ fn CommandAllocator? create_command_allocator(
         .device = *device,
         .queue  = queue,
     };
-    if (operation.vtable.create_command_allocator == null) {
-        return BACKEND_ERROR~;
-    }
-    allocator.handle = operation.vtable.create_command_allocator(
-        device,
+    allocator.handle = gpu::internal::vk::vk_create_command_allocator(
+        operation.state,
         queue,
         &normalized,
     )!;
@@ -1207,12 +1204,10 @@ fn CommandAllocator? create_command_allocator(
     );
     if (!allocator.handle.is_valid()
         || allocator.handle.owner != expected_owner) {
-        if (operation.vtable.destroy_command_allocator != null) {
-            (void)operation.vtable.destroy_command_allocator(
-                device,
-                allocator.handle,
-            );
-        }
+        (void)gpu::internal::vk::vk_destroy_command_allocator(
+            operation.state,
+            allocator.handle,
+        );
         return BACKEND_ERROR~;
     }
     gpu::internal::retain_device_children(&operation);
@@ -1230,11 +1225,8 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device, true)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator)!;
-    if (operation.vtable.destroy_command_allocator == null) {
-        return BACKEND_ERROR~;
-    }
-    operation.vtable.destroy_command_allocator(
-        &allocator.device,
+    gpu::internal::vk::vk_destroy_command_allocator(
+        operation.state,
         allocator.handle,
     )!;
     *allocator = {};
@@ -1264,10 +1256,11 @@ fn void? reserve_generated_scratch(
             > operation.data.caps.max_generated_work_count) {
         return INVALID_ARGUMENT~;
     }
-    if (operation.vtable.reserve_generated_scratch == null) {
-        return BACKEND_ERROR~;
-    }
-    return operation.vtable.reserve_generated_scratch(allocator, desc);
+    return gpu::internal::vk::vk_reserve_generated_scratch(
+        operation.state,
+        allocator,
+        desc,
+    );
 }
 
 <* Release one generated-work reservation from a quiescent allocator. *>
@@ -1286,10 +1279,8 @@ fn void? release_generated_scratch(
         gpu::internal::ResourceOwnerKind.PIPELINE,
     )!;
     if (!gpu::internal::generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
-    if (operation.vtable.release_generated_scratch == null) {
-        return BACKEND_ERROR~;
-    }
-    return operation.vtable.release_generated_scratch(
+    return gpu::internal::vk::vk_release_generated_scratch(
+        operation.state,
         allocator,
         pipeline,
         kind,

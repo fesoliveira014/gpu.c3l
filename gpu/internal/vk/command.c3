@@ -705,11 +705,10 @@ fn void? initialize_command_allocator_slot(
 }
 
 fn gpu::CommandAllocatorHandle? vk_create_command_allocator(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::Queue queue,
     gpu::CommandAllocatorDesc* desc,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     CommandAllocatorSlot slot;
     initialize_command_allocator_slot(
         state: state,
@@ -741,10 +740,9 @@ fn gpu::CommandAllocatorHandle? vk_create_command_allocator(
 }
 
 fn void? vk_destroy_command_allocator(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::CommandAllocatorHandle handle,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     CommandAllocatorSlot removed;
     {
         state.resource_mutex.lock()!!;
@@ -984,12 +982,10 @@ fn bool generated_scratch_references_pipeline(
 }
 
 fn void? vk_reserve_generated_scratch(
+    VkDeviceState* state,
     gpu::CommandAllocator* allocator,
     gpu::GeneratedScratchDesc* desc,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(
-        &allocator.device,
-    );
+) {
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     vk::MemoryRequirements requirements;
     {
@@ -1097,13 +1093,11 @@ fn void? vk_reserve_generated_scratch(
 }
 
 fn void? vk_release_generated_scratch(
+    VkDeviceState* state,
     gpu::CommandAllocator* allocator,
     gpu::PipelineHandle pipeline,
     gpu::GeneratedWorkKind kind,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(
-        &allocator.device,
-    );
+) {
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     CommandAllocatorSlot* slot = lock_command_allocator_for_pipeline(
         state,
