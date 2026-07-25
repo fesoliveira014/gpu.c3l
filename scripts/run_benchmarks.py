@@ -57,14 +57,14 @@ BENCHMARK_METHODS = {
         "ns/submit, ns/list advisory; exact work and allocation outcomes",
     ),
     "pipeline_cache_bench": (
-        "raster=200; duplicate=200000; batch=64x2000; identity=1024,65536,1048576",
+        "raster=200; duplicate=200000; identity=1024,65536,1048576",
         "ns/create, ns/state; exact identity work",
     ),
     "async_overlap_bench": ("calibration=2; measured=5", "ms"),
 }
 
 C3_BUILD_FLAGS = ("-O1",)
-EXPECTATION_VERSION = 4
+EXPECTATION_VERSION = 5
 
 BENCHMARK_PROJECTS = {
     "command_wrapper_bench": "test/cpu",
@@ -343,7 +343,6 @@ REGRESSION_THRESHOLDS = {
     "pipeline_cache_bench": (
         ("raster-matrix pipeline aliases", re.compile(r"^phase 1 .*: (?P<value>[0-9]+(?:\.[0-9]+)?) ns/create$", re.MULTILINE), 500_000.0, True),
         ("duplicate pipeline lookup", re.compile(r"^phase 2 .*: (?P<value>[0-9]+(?:\.[0-9]+)?) ns/create$", re.MULTILINE), 20_000.0, True),
-        ("cached pipeline batch", re.compile(r"^phase 3 .*: (?P<value>[0-9]+(?:\.[0-9]+)?) ns/create$", re.MULTILINE), 20_000.0, True),
     ),
 }
 

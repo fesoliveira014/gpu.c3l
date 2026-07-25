@@ -5,7 +5,6 @@ import gpu @public;
 import vk;
 import std::thread;
 import std::atomic::types;
-import std::core::mem;
 
 // Concrete slot table avoids a c3c 0.8.0 generic-instantiation codegen failure.
 const uint PIPELINE_FREE_NONE = 0;
@@ -100,18 +99,6 @@ fn bool pipeline_handle_capacity_available(VkDeviceState* state, usz required) {
     return (usz)state.pipelines.available_count() >= required;
 }
 
-fn bool compute_pipeline_is_cached(
-    VkDeviceState* state,
-    ShaderId shader,
-) {
-    PipelineKey key = build_compute_key(shader);
-    ulong hash = hash_key(&key);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    return find_entry(state, hash, &key)
-        != PIPELINE_ENTRY_NONE;
-}
-
 fn vk::Result create_compute_pipeline_native(
     VkDeviceState* state,
     vk::ComputePipelineCreateInfo* info,
@@ -138,7 +125,6 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     VkDeviceState* state,
     gpu::ComputePipelineDesc* desc,
     PreparedShaderIdentity* prepared_shader,
-    PipelineShaderModule* batch_shader,
 ) {
     PipelineKey key = build_compute_key(prepared_shader.id);
     ulong hash = hash_key(&key);
@@ -164,25 +150,20 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         }
     }
 
-    PipelineShaderModule owned_shader;
-    defer destroy_pipeline_shader_module(state, &owned_shader);
-    PipelineShaderModule* shader = batch_shader;
-    if (shader == null) {
-        ShaderIdentityInput code;
-        shader_store_input_for_retained_id(
-            state:      state,
-            id:         prepared_shader.id,
-            debug_name: desc.shader.debug_name,
-            out_input:  &code,
-        );
-        owned_shader = create_pipeline_shader_module(
-            state:          state,
-            code:           &code,
-            operation:      "create_compute_pipeline",
-            rejected_field: "ComputePipelineDesc.shader",
-        )!;
-        shader = &owned_shader;
-    }
+    ShaderIdentityInput code;
+    shader_store_input_for_retained_id(
+        state:      state,
+        id:         prepared_shader.id,
+        debug_name: desc.shader.debug_name,
+        out_input:  &code,
+    );
+    PipelineShaderModule shader = create_pipeline_shader_module(
+        state:          state,
+        code:           &code,
+        operation:      "create_compute_pipeline",
+        rejected_field: "ComputePipelineDesc.shader",
+    )!;
+    defer destroy_pipeline_shader_module(state, &shader);
 
     vk::ComputePipelineCreateInfo pipe_info = vk::compute_pipeline_create_info();
     pipe_info.stage = vk::pipeline_shader_stage_create_info()
@@ -272,100 +253,7 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(
         state:           state,
         desc:            desc,
         prepared_shader: &prepared,
-        batch_shader:    null,
     );
-}
-
-fn void? vk_create_compute_pipelines(
-    VkDeviceState* state,
-    gpu::ComputePipelineDesc[] descs,
-    gpu::PipelineHandle[] out_pipelines,
-) {
-    if (out_pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
-    if (descs.len == 0) return;
-    state.pipeline_creation_mutex.lock()!!;
-    defer state.pipeline_creation_mutex.unlock();
-
-    if (!pipeline_handle_capacity_available(state, descs.len)) {
-        return gpu::SLOT_TABLE_FULL~;
-    }
-
-    @pool() {
-        ShaderIdentityInput[] shader_inputs =
-            mem::talloc_array(ShaderIdentityInput, descs.len);
-        foreach (i, &desc : descs) {
-            normalize_shader_input(
-                state:          state,
-                desc:           &desc.shader,
-                role:           gpu::internal::ShaderRole.COMPUTE,
-                operation:      "create_compute_pipelines",
-                rejected_field: "ComputePipelineDesc.shader",
-                out_input:      &shader_inputs[i],
-            )!;
-        }
-
-        PreparedShaderIdentity[] prepared =
-            mem::talloc_array(PreparedShaderIdentity, descs.len);
-        $if env::TESTING:
-            poison_unprepared_shader_identities(state, prepared);
-        $endif
-        usz prepared_count = 0;
-        defer release_prepared_shaders(state, prepared[:prepared_count]);
-        foreach (i, &shader_input : shader_inputs) {
-            state.resource_mutex.lock()!!;
-            defer state.resource_mutex.unlock();
-            prepared[i] = prepare_shader_identity_locked(
-                state,
-                shader_input,
-            )!;
-            prepared_count++;
-        }
-
-        PipelineBatchShader[] shaders = mem::talloc_array(PipelineBatchShader, descs.len);
-        PipelineShaderModule*[] native_shaders =
-            mem::talloc_array(PipelineShaderModule*, descs.len);
-        uint shader_count = 0;
-        defer destroy_pipeline_batch_shaders(state, shaders, shader_count);
-        foreach (i, &desc : descs) {
-            native_shaders[i] = null;
-            if (compute_pipeline_is_cached(state, prepared[i].id)) continue;
-            native_shaders[i] = get_pipeline_batch_shader(
-                state:          state,
-                id:             prepared[i].id,
-                debug_name:     desc.shader.debug_name,
-                operation:      "create_compute_pipelines",
-                rejected_field: "ComputePipelineDesc.shader",
-                shaders:        shaders,
-                shader_count:   &shader_count,
-            )!;
-        }
-
-        gpu::PipelineHandle[] created = mem::talloc_array(gpu::PipelineHandle, descs.len);
-        usz created_count = 0;
-        foreach (i, &desc : descs) {
-            if (pipeline_creation_should_fail(state, (usz)i)) {
-                for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(state, created[rollback])!!;
-                }
-                return gpu::PIPELINE_CREATE_FAILED~;
-            }
-            gpu::PipelineHandle? created_optional = create_compute_pipeline_from_module(
-                state:           state,
-                desc:            desc,
-                prepared_shader: &prepared[i],
-                batch_shader:    native_shaders[i],
-            );
-            if (catch create_fault = created_optional) {
-                for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(state, created[rollback])!!;
-                }
-                return create_fault~;
-            }
-            created[i] = created_optional;
-            created_count++;
-        }
-        foreach (i, pipeline : created) out_pipelines[i] = pipeline;
-    };
 }
 
 fn void? vk_destroy_pipeline(

@@ -13,7 +13,7 @@ const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint GENERATED_RECORD_ITERATIONS = 64;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 const uint MEASURED_COMMAND_PATH_COUNT = 3;
-const uint BENCHMARK_EXPECTATION_VERSION = 4;
+const uint BENCHMARK_EXPECTATION_VERSION = 5;
 
 struct CommandBenchPolicy {
     gpu::ContractValidation contract;

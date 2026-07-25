@@ -12,6 +12,22 @@ from scripts import check_retired_api
 
 
 class RetiredApiCheckTests(unittest.TestCase):
+    def test_live_scan_rejects_retired_pipeline_batches(self) -> None:
+        source = (
+            "gpu::create_compute_pipelines(&device, compute, outputs)!;\n"
+            "gpu::create_graphics_pipelines(&device, graphics, outputs)!;\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            path = root / "test" / "src" / "consumer.c3"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                failures = check_retired_api.find_live_retired_usages((path,))
+        self.assertEqual(len(failures), 2)
+        self.assertTrue(any("create_compute_pipelines" in item for item in failures))
+        self.assertTrue(any("create_graphics_pipelines" in item for item in failures))
+
     def test_live_scan_rejects_retired_shader_preparation_surface(self) -> None:
         source = (
             "gpu::ShaderCode code = {};\n"

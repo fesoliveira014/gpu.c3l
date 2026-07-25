@@ -63,11 +63,6 @@ struct PipelineShaderModule {
     char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
 }
 
-struct PipelineBatchShader {
-    ShaderId             id;
-    PipelineShaderModule native;
-}
-
 fn void note_shader_intern_probe(VkDeviceState* state) {
     $if env::TESTING || $feature(PIPELINE_CACHE_STATS):
         state.shader_intern_probes++;
@@ -279,34 +274,6 @@ fn void release_prepared_shaders(
     foreach (&identity : prepared) {
         release_prepared_shader_locked(state, identity)!!;
     }
-}
-
-fn void poison_unprepared_shader_identities(
-    VkDeviceState* state,
-    PreparedShaderIdentity[] prepared,
-) @if(env::TESTING) {
-    if (!state.pipeline_prepare_poison_enabled) return;
-    foreach (&identity : prepared) {
-        *identity = {
-            .id       = state.pipeline_prepare_poison_id,
-            .retained = true,
-        };
-    }
-}
-
-fn void set_pipeline_prepare_poison(
-    VkDeviceState* state,
-    ShaderId id,
-) @if(env::TESTING) {
-    state.pipeline_prepare_poison_id = id;
-    state.pipeline_prepare_poison_enabled = true;
-}
-
-fn void clear_pipeline_prepare_poison(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.pipeline_prepare_poison_enabled = false;
-    state.pipeline_prepare_poison_id = SHADER_ID_INVALID;
 }
 
 fn void shader_store_input(
@@ -933,48 +900,4 @@ fn void destroy_pipeline_shader_module(
     if (shader == null || shader.shader_module == null) return;
     vk::destroy_shader_module(state.device, shader.shader_module, null);
     shader.shader_module = (vk::ShaderModule)null;
-}
-
-fn PipelineShaderModule*? get_pipeline_batch_shader(
-    VkDeviceState* state,
-    ShaderId id,
-    ZString debug_name,
-    ZString operation,
-    ZString rejected_field,
-    PipelineBatchShader[] shaders,
-    uint* shader_count,
-) {
-    ShaderIdentityInput code;
-    shader_store_input_for_retained_id(
-        state:      state,
-        id:         id,
-        debug_name: debug_name,
-        out_input:  &code,
-    );
-    foreach (&shader : shaders[:*shader_count]) {
-        if (shader.id == id) return &shader.native;
-    }
-    PipelineShaderModule native = create_pipeline_shader_module(
-        state:          state,
-        code:           &code,
-        operation:      operation,
-        rejected_field: rejected_field,
-    )!;
-    shaders[*shader_count] = {
-        .id     = id,
-        .native = native,
-    };
-    PipelineShaderModule* result = &shaders[*shader_count].native;
-    (*shader_count)++;
-    return result;
-}
-
-fn void destroy_pipeline_batch_shaders(
-    VkDeviceState* state,
-    PipelineBatchShader[] shaders,
-    uint shader_count,
-) {
-    foreach (&shader : shaders[:shader_count]) {
-        destroy_pipeline_shader_module(state, &shader.native);
-    }
 }

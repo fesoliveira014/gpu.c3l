@@ -501,47 +501,6 @@ fn void selected_entry_interfaces_are_isolated() @test {
     );
 }
 
-fn void invalid_deduplicated_shader_is_reflected_once_transactionally() @test {
-    gpu::Device device = make_reflection_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::ShaderDesc shader_desc = {
-        .spirv       = REFLECT_SIGNED_SPIRV[..],
-        .entry_point = "main",
-    };
-    gpu::ShaderDesc shader = shader_desc;
-    gpu::ComputePipelineDesc[2] descs = {
-        { .shader = shader },
-        { .shader = shader },
-    };
-    gpu::PipelineHandle[2] outputs = {
-        { .owner = 1, .index = 2, .generation = 3 },
-        { .owner = 4, .index = 5, .generation = 6 },
-    };
-    gpu::PipelineHandle[2] before = outputs;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    ulong reflections_before = vk::shader_reflection_validation_count(state);
-    ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
-    uint cache_entries_before = vk::pipeline_cache_entry_count(state);
-
-    fault batch_fault = @catch(gpu::create_compute_pipelines(
-        &device,
-        descs[..],
-        outputs[..],
-    ));
-
-    assert(batch_fault == gpu::SHADER_INVALID,
-        "one invalid deduplicated shader identity faults SHADER_INVALID");
-    assert(outputs[0] == before[0] && outputs[1] == before[1],
-        "invalid deduplicated reflection leaves every output unchanged");
-    assert(vk::pipeline_cache_entry_count(state) == cache_entries_before,
-        "invalid deduplicated reflection publishes no cache entry");
-    assert(vk::shader_reflection_validation_count(state) == reflections_before + 1,
-        "one invalid deduplicated shader identity is reflected once");
-    assert(vk::pipeline_shader_create_attempt_count(state) == native_attempts_before,
-        "invalid deduplicated reflection performs no native shader-create attempt");
-}
-
 fn void exact_compute_vertex_and_fragment_roots_accepted() @test {
     check_fixture_root_abi(
         spirv:       REFLECT_BUFFERS_SPIRV[..],

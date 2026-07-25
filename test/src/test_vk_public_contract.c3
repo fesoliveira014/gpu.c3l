@@ -39,16 +39,6 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
             == gpu::INVALID_ARGUMENT,
         "create_graphics_pipeline rejects a null descriptor"
     );
-    gpu::GraphicsPipelineDesc[1] graphics_descs;
-    gpu::PipelineHandle[2] graphics_outputs;
-    assert(
-        @catch(gpu::create_graphics_pipelines(
-            &device,
-            graphics_descs[..],
-            graphics_outputs[..],
-        )) == gpu::INVALID_ARGUMENT,
-        "graphics pipeline batch rejects mismatched output shape"
-    );
     assert(
         @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, (gpu::SubmitDesc*)null))
             == gpu::INVALID_ARGUMENT,

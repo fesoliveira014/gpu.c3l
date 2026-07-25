@@ -88,6 +88,12 @@ FORBIDDEN_TEXT = {
     '"name":"create_dynamic_graphics_pipelines"': (
         "retired dynamic graphics pipeline batch creation"
     ),
+    '"name":"create_compute_pipelines"': (
+        "retired compute pipeline batch creation"
+    ),
+    '"name":"create_graphics_pipelines"': (
+        "retired graphics pipeline batch creation"
+    ),
     '"name":"dynamic_color_state"': (
         "retired optional dynamic color capability"
     ),
@@ -203,6 +209,8 @@ FORBIDDEN_SYMBOLS = {
     "ShaderCode",
     "ShaderStage",
     "prepare_shader_code",
+    "create_compute_pipelines",
+    "create_graphics_pipelines",
     "create_render_pass",
     "destroy_render_pass",
     "create_framebuffer",
@@ -345,6 +353,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "ShaderCode",
     "ShaderStage",
     "prepare_shader_code(",
+    "create_compute_pipelines(",
+    "create_graphics_pipelines(",
     "RESOURCE_AGNOSTIC_TEXTURE_SYNC",
     "strict_heap_buffer_bind_commands",
     "strict_heap_offset_commands",

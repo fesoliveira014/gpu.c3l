@@ -323,17 +323,6 @@ fn GraphicsPipelineNativeObservation graphics_pipeline_native_observation(
     };
 }
 
-<* Deterministic partial-batch rollback probe. *>
-fn void set_pipeline_creation_failure(VkDeviceState* state, usz index) {
-    state.pipeline_creation_failure_enabled = true;
-    state.pipeline_creation_failure_index = index;
-}
-
-fn void clear_pipeline_creation_failure(VkDeviceState* state) {
-    state.pipeline_creation_failure_enabled = false;
-    state.pipeline_creation_failure_index = 0;
-}
-
 fn void set_pipeline_shader_create_result(
     VkDeviceState* state,
     vk::Result result,
@@ -353,11 +342,6 @@ fn void set_pipeline_cache_insert_failure(
     bool enabled,
 ) @if(env::TESTING) {
     state.pipeline_cache_insert_failure = enabled;
-}
-
-fn bool pipeline_creation_should_fail(VkDeviceState* state, usz index) {
-    return state.pipeline_creation_failure_enabled
-        && state.pipeline_creation_failure_index == index;
 }
 
 <* Live entry count, exposed for dedup accounting in tests. *>

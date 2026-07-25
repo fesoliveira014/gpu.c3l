@@ -506,19 +506,18 @@ compact ID. Debug names do not participate in identity, and no surviving state
 retains caller pointers.
 
 Native shader modules are temporary pipeline-construction details, never public
-resources. Before native module creation, selected-entry reflection validates
-the field-derived role, descriptor convention, and, when a push-constant block
-is declared, its complete generated root ABI. Batch normalization covers every
-shader before store mutation, deduplicates private identities, and publishes
-nothing on failure.
+resources. After the private shader identity is retained, selected-entry
+reflection validates the field-derived role, descriptor convention, and, when
+a push-constant block is declared, its complete generated root ABI. Validation
+completes before native module creation, cache insertion, or pipeline
+publication; a fault releases the retained identity and leaves no surviving
+store mutation.
 
 Pipelines are immutable shader execution objects. Creation is split by kind:
 
 ```text
 create_compute_pipeline(device, ComputePipelineDesc)    -> PipelineHandle?
 create_graphics_pipeline(device, GraphicsPipelineDesc)  -> PipelineHandle?
-create_compute_pipelines(device, descriptions, outputs)  -> void?
-create_graphics_pipelines(device, descriptions, outputs) -> void?
 ```
 
 Graphics pipeline identity includes shaders, the ordered color-format domain,
@@ -527,9 +526,8 @@ are complete caller-owned command packets and never enter the cache key.
 Topology, cull mode, front face, depth bias, depth state, viewport, scissor,
 and color state are command-time state.
 Compute pipelines share one device-owned `RootPush` layout and, when
-generated work is available, one generated-dispatch layout. Batch creation
-reuses temporary modules by shader ID, deduplicates pipeline identity, and
-publishes every handle transactionally. Pipeline-cache entries own refcounted
+generated work is available, one generated-dispatch layout. Repeated singular
+creation deduplicates pipeline identity. Pipeline-cache entries own refcounted
 IDs, and the device recycles an identity after its last cache entry releases it.
 The pipeline cache fronts a serializable driver cache:
 `get_pipeline_cache_size` /

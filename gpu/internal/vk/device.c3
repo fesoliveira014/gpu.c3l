@@ -232,10 +232,6 @@ struct VkDeviceState @public {
     bool                       pipeline_native_color_states @if(env::TESTING);
     bool                       pipeline_native_canonical_color_attachments @if(env::TESTING);
     bool                       pipeline_cache_insert_failure @if(env::TESTING);
-    ShaderId                   pipeline_prepare_poison_id @if(env::TESTING);
-    bool                       pipeline_prepare_poison_enabled @if(env::TESTING);
-    bool                       pipeline_creation_failure_enabled;
-    usz                        pipeline_creation_failure_index;
     GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);
     void*                       generated_dispatch_layout_read_user_data @if(env::TESTING);
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);

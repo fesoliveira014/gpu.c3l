@@ -831,44 +831,6 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     return pipeline;
 }
 
-<* Create compute pipelines transactionally. Output count must match descriptor
-   count; an empty batch succeeds. A fault leaves every output unchanged. *>
-fn void? create_compute_pipelines(
-    Device* device,
-    ComputePipelineDesc[] descs,
-    PipelineHandle[] out_pipelines,
-) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
-    defer gpu::internal::end_device_operation(&operation);
-    if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
-    if (descs.len == 0) return;
-    gpu::internal::vk::vk_create_compute_pipelines(
-        operation.state,
-        descs,
-        out_pipelines,
-    )!;
-    for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
-}
-
-<* Create graphics pipelines transactionally. Output count must match descriptor
-   count; an empty batch succeeds. A fault leaves every output unchanged. *>
-fn void? create_graphics_pipelines(
-    Device* device,
-    GraphicsPipelineDesc[] descs,
-    PipelineHandle[] out_pipelines,
-) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
-    defer gpu::internal::end_device_operation(&operation);
-    if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
-    if (descs.len == 0) return;
-    gpu::internal::vk::vk_create_graphics_pipelines(
-        operation.state,
-        descs,
-        out_pipelines,
-    )!;
-    for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
-}
-
 <* Release one returned pipeline handle.
    Preconditions: recorded and submitted use of this handle is complete.
    Always checked: live identity, ownership, and detected command use.

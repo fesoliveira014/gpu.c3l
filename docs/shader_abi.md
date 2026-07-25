@@ -524,7 +524,7 @@ missing selected entry or an execution-model mismatch with the enclosing
 compute, vertex, or fragment field, return `SHADER_INVALID`. Validation
 completes before native shader-module creation, pipeline cache insertion, or
 output publication, and a deduplicated private shader identity is reflected
-once per pipeline-creation batch.
+once when its pipeline identity is first created.
 
 When a debug diagnostic is emitted, its invariant identifies the mismatched
 property: block count/offset/size, member count/offset/size, scalar width,

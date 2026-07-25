@@ -108,7 +108,7 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
   select `main`.
 - Successful creation retains exact shader identity in private owned storage;
   there is no public shader preparation object or shader-module handle.
-- Batch pipeline creation can deduplicate shared shader IR.
+- Repeated pipeline creation deduplicates shared shader IR through private identities.
 - Pipeline creation performs native compilation explicitly.
 - Pipeline binding is separate from draw and dispatch.
 - Draw and dispatch carry root addresses and execution arguments, not pipeline handles.

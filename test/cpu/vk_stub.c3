@@ -628,28 +628,6 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? vk_create_compute_pipelines(
-    VkDeviceState* state,
-    gpu::ComputePipelineDesc[] descs,
-    gpu::PipelineHandle[] out_pipelines,
-) {
-    (void)state;
-    (void)descs;
-    (void)out_pipelines;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
-
-fn void? vk_create_graphics_pipelines(
-    VkDeviceState* state,
-    gpu::GraphicsPipelineDesc[] descs,
-    gpu::PipelineHandle[] out_pipelines,
-) {
-    (void)state;
-    (void)descs;
-    (void)out_pipelines;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
-
 fn void? vk_destroy_pipeline(
     VkDeviceState* state,
     gpu::PipelineHandle pipeline,
