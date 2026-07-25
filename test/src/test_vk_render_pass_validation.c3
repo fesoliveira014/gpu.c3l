@@ -199,7 +199,7 @@ fn DynamicStateFixture make_dynamic_state_fixture(
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -549,11 +549,13 @@ fn void graphics_pipeline_key_zeroes_unused_formats() @test {
 }
 
 fn void graphics_pipeline_key_is_compact_and_format_only() @test {
-    gpu::Format[1] formats = {
+    gpu::Format[2] formats = {
         gpu::Format.RGBA8_UNORM,
+        gpu::Format.BGRA8_UNORM,
     };
     gpu::GraphicsPipelineDesc first = {
         .color_formats = formats[..],
+        .depth_format  = gpu::Format.D32_FLOAT,
         .debug_name = "first",
     };
     gpu::GraphicsPipelineDesc same_desc = first;
@@ -604,6 +606,42 @@ fn void graphics_pipeline_key_is_compact_and_format_only() @test {
         (vk::ShaderId)2,
     );
     assert(!vk::key_equals(&first_key, &format_key));
+
+    vk::PipelineKey vertex_key = vk::build_graphics_key(
+        &first,
+        (vk::ShaderId)3,
+        (vk::ShaderId)2,
+    );
+    assert(!vk::key_equals(&first_key, &vertex_key));
+
+    vk::PipelineKey fragment_key = vk::build_graphics_key(
+        &first,
+        (vk::ShaderId)1,
+        (vk::ShaderId)3,
+    );
+    assert(!vk::key_equals(&first_key, &fragment_key));
+
+    changed = first;
+    changed.depth_format = gpu::Format.UNDEFINED;
+    vk::PipelineKey depth_key = vk::build_graphics_key(
+        &changed,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    assert(!vk::key_equals(&first_key, &depth_key));
+
+    gpu::Format[2] reordered_formats = {
+        gpu::Format.BGRA8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+    };
+    changed = first;
+    changed.color_formats = reordered_formats[..];
+    vk::PipelineKey order_key = vk::build_graphics_key(
+        &changed,
+        (vk::ShaderId)1,
+        (vk::ShaderId)2,
+    );
+    assert(!vk::key_equals(&first_key, &order_key));
 }
 
 fn void render_pass_rejects_mixed_samples_before_mutation() @test {
@@ -654,7 +692,7 @@ fn void render_pass_rejects_mixed_samples_before_mutation() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[2] color_targets = {
         gpu::color_blend_disabled(),
         gpu::color_blend_disabled(),
@@ -724,7 +762,7 @@ fn void render_pass_rejects_invalid_resolve_before_mutation() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -803,7 +841,7 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -911,7 +949,7 @@ fn void preserves_graphics_binding_across_render_passes() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1021,7 +1059,7 @@ fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1172,7 +1210,7 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1185,6 +1223,12 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
     assert(first_record.graphics_state_initialized
             && first_record.color_state_initialized,
         "complete state initializes both readiness domains");
+    gpu::cmd_bind_pipeline(&first, compute.pipeline)!!;
+    assert(first_record.color_state_initialized
+            && first_record.color_state.count == 1
+            && first_record.color_state.formats[0]
+                == gpu::Format.RGBA8_UNORM,
+        "a compute bind preserves initialized graphics color state");
     discard_test_commands(&first)!!;
 
     gpu::CommandList reused = gpu::begin_commands(&allocator)!!;
@@ -1238,7 +1282,7 @@ fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1397,7 +1441,7 @@ fn void graphics_state_packet_emission_is_exact() @test {
     gpu::cmd_end_render_pass(&fixture.commands)!!;
 
     gpu::GraphicsState replacement =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     replacement.color.targets = color_targets[..];
     vk::reset_dynamic_state_observation(fixture.state);
     gpu::reset_command_resolution_stats();
@@ -1443,7 +1487,7 @@ fn void invalid_graphics_state_packet_is_transactional() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1554,7 +1598,7 @@ fn void late_invalid_color_in_complete_graphics_state_is_transactional() @test {
     };
     select_graphics_color_pipeline(record, color_formats[..]);
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::alpha_blend(),
     };
@@ -2083,6 +2127,16 @@ fn void zero_target_color_packet_emits_no_native_command() @test {
         && capture.write_mask_calls == 0
         && gpu::command_resolution_stats().native_commands == 0,
         "a depth-only dynamic domain emits no color command");
+
+    gpu::GraphicsState graphics =
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_set_graphics_state(&fixture.commands, &graphics)!!;
+    assert(gpu::command_resolution_stats().native_commands == 10
+            && capture.blend_enable_calls == 0
+            && capture.blend_equation_calls == 0
+            && capture.write_mask_calls == 0,
+        "a complete depth-only packet emits ten ordinary commands and no color commands");
 }
 
 fn void full_color_validation_rejects_before_mutation() @test {
@@ -2133,6 +2187,120 @@ fn void full_color_validation_rejects_before_mutation() @test {
         && record.logical_pipeline.render.color_formats[1]
             == pipeline_before.render.color_formats[1],
         "rejection preserves command phase and selected pipeline state");
+
+    targets[1] = gpu::color_blend_disabled();
+    uint invalid_write_mask = 1u << 8;
+    mem::copy(
+        &targets[0].write_mask,
+        &invalid_write_mask,
+        uint::size,
+    );
+    gpu::reset_command_resolution_stats();
+    assert(@catch(gpu::cmd_set_color_state(
+        &fixture.commands,
+        &color,
+    )) == gpu::INVALID_ARGUMENT,
+        "FULL rejects write-mask bits outside RGBA");
+    assert(capture.blend_enable_calls == 0
+            && capture.blend_equation_calls == 0
+            && capture.write_mask_calls == 0
+            && gpu::command_resolution_stats().native_commands == 0,
+        "invalid write masks reject before native mutation");
+
+    targets[0] = gpu::color_blend_disabled();
+    gpu::ColorState short_color = {
+        .targets = targets[:1],
+    };
+    gpu::reset_command_resolution_stats();
+    assert(@catch(gpu::cmd_set_color_state(
+        &fixture.commands,
+        &short_color,
+    )) == gpu::INVALID_ARGUMENT,
+        "FULL rejects color target counts that differ from the bound pipeline");
+    assert(capture.blend_enable_calls == 0
+            && capture.blend_equation_calls == 0
+            && capture.write_mask_calls == 0
+            && gpu::command_resolution_stats().native_commands == 0,
+        "target-count rejection occurs before native mutation");
+}
+
+fn void complete_graphics_state_requires_the_graphics_bind_point() @test {
+    SyncDiagnosticCapture capture = {};
+    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
+        contract:  gpu::ContractValidation.FULL,
+        callback:  &capture_sync_diagnostic,
+        user_data: &capture,
+    );
+    defer destroy_dynamic_state_fixture(&fixture);
+    gpu::GraphicsState graphics =
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics.color.targets = color_targets[..];
+
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_set_graphics_state",
+        debug_name:     null,
+        rejected_field: "pipeline",
+        invariant:      "the required pipeline bind point must be active",
+    );
+    assert(@catch(gpu::cmd_set_graphics_state(
+        &fixture.commands,
+        &graphics,
+    )) == gpu::INVALID_ARGUMENT,
+        "complete graphics state rejects when no pipeline is bound");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.PIPELINE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+    );
+
+    gpu::ColorTargetDesc[1] colors = {{ .view = fixture.view }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = VAL_RT,
+        .height = VAL_RT,
+    };
+    vk::CommandRecord* record =
+        vk::resolve_command(&fixture.commands)!!;
+    record.logical_pipeline = {
+        .handle = {
+            .owner      = 1,
+            .index      = 2,
+            .generation = 3,
+        },
+        .kind = vk::PipelineKind.COMPUTE,
+    };
+    uint references_before = record.scratch.reference_count;
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_begin_render_pass_with_state",
+        debug_name:     null,
+        rejected_field: "pipeline",
+        invariant:      "pipeline kind must match the GRAPHICS bind point",
+    );
+    assert(@catch(gpu::cmd_begin_render_pass_with_state(
+        &fixture.commands,
+        &pass,
+        &graphics,
+    )) == gpu::INVALID_ARGUMENT,
+        "combined begin rejects when only a compute pipeline is bound");
+    assert(record.state == gpu::internal::CommandState.RECORDING
+            && record.scratch.reference_count == references_before,
+        "wrong bind-point rejection records no pass or references");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.PIPELINE,
+        has_public_identity: true,
+        index:               2,
+        generation:          3,
+    );
 }
 
 fn void dynamic_color_domain_persists_until_incompatible_bind() @test {

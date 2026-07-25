@@ -130,7 +130,7 @@ Goal: compute culls, GPU decides the draw count.
 ```c3
 // Compute writes DrawIndirectCommand[] + a count word.
 gpu::GraphicsState state =
-    gpu::full_render_graphics_state(pass.width, pass.height)!;
+    gpu::render_geometry_state(pass.width, pass.height)!;
 gpu::ColorTargetState[1] color_targets = {
     gpu::color_blend_disabled(),
 };
@@ -331,7 +331,7 @@ gpu::SamplerIndex shadow_sampler_index =
     gpu::intern_sampler(&device, &shadow_sampler_desc)!;
 // The shadow pass has no color targets and uses D32.
 gpu::GraphicsState state =
-    gpu::full_render_graphics_state(pass.width, pass.height)!;
+    gpu::render_geometry_state(pass.width, pass.height)!;
 state.raster = {
     .depth_bias_enable   = true,
     .depth_bias_constant = 1.25f,
@@ -342,7 +342,7 @@ state.depth = {
     .write_enable = true,
     .compare      = gpu::CompareOp.LESS,
 };
-// full_render_graphics_state leaves state.color empty for this depth-only pass.
+// render_geometry_state leaves state.color empty for this depth-only pass.
 gpu::cmd_bind_pipeline(&cmd, shadow_pipeline)!;
 gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
 ```
@@ -388,7 +388,7 @@ gpu::ColorState opaque = gpu::uniform_color_state(
     gpu::color_blend_disabled(),
 );
 gpu::GraphicsState state =
-    gpu::full_render_graphics_state(render_width, render_height)!;
+    gpu::render_geometry_state(render_width, render_height)!;
 state.color = opaque;
 gpu::cmd_bind_pipeline(&cmd, pipeline)!;
 ```

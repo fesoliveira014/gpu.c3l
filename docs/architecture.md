@@ -692,7 +692,7 @@ defined robustness behavior.
 ### Graphics
 
 ```text
-full_render_graphics_state(width, height)
+render_geometry_state(width, height)
 cmd_begin_render_pass(command_list, render_pass_desc)
 cmd_begin_render_pass_with_state(command_list, render_pass_desc, graphics_state)
 cmd_bind_pipeline(command_list, pipeline)

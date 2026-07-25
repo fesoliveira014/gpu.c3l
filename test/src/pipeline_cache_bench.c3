@@ -9,7 +9,7 @@ import std::core::mem;
 
 // Advisory, not gating: request one alias for each command-time raster-state
 // permutation, then measure duplicate single and batch cache lookup. The raster
-// matrix must remain one immutable graphics pipeline identity.
+// matrix must remain one format-only graphics pipeline identity.
 
 const char[*] BENCH_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
 const char[*] BENCH_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
@@ -121,7 +121,7 @@ fn double record_raster_matrix(
         .height = 1,
     };
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -177,7 +177,7 @@ fn int main() {
     gpu::Format[1] color_formats = {
         gpu::Format.RGBA8_UNORM,
     };
-    gpu::GraphicsPipelineDesc immutable = {
+    gpu::GraphicsPipelineDesc format_only = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
         .color_formats   = color_formats[..],
@@ -191,7 +191,10 @@ fn int main() {
     gpu::PipelineHandle[BENCH_RASTER_PERMUTATION_COUNT] aliases;
     std::time::Clock cold_start = std::time::clock::now();
     foreach (&pipeline : aliases) {
-        *pipeline = gpu::create_graphics_pipeline(&device, &immutable)!!;
+        *pipeline = gpu::create_graphics_pipeline(
+            &device,
+            &format_only,
+        )!!;
     }
     long cold_elapsed_ns = (long)cold_start.to_now();
     double cold_ns_per_create = (double)cold_elapsed_ns
@@ -226,7 +229,7 @@ fn int main() {
         std::time::Clock mark = std::time::clock::now();
         gpu::PipelineHandle handle = gpu::create_graphics_pipeline(
             &device,
-            &immutable,
+            &format_only,
         )!!;
         dup_elapsed_ns += (long)mark.to_now();
         gpu::destroy_pipeline(&device, handle)!!;
@@ -240,7 +243,7 @@ fn int main() {
     );
 
     gpu::GraphicsPipelineDesc[BENCH_BATCH_SIZE] batch_descs;
-    foreach (&batch_desc : batch_descs) *batch_desc = immutable;
+    foreach (&batch_desc : batch_descs) *batch_desc = format_only;
     gpu::PipelineHandle[BENCH_BATCH_SIZE] batch_pipelines;
     long batch_elapsed_ns = 0;
     for (uint round = 0; round < BENCH_BATCH_ROUNDS; round++) {

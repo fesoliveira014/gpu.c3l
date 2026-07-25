@@ -19,8 +19,8 @@ fn gpu::RenderPassDesc valid_render_pass_desc(gpu::ColorTargetDesc[] colors) {
     };
 }
 
-fn void full_render_graphics_state_is_explicit_and_representable() @test {
-    gpu::GraphicsState state = gpu::full_render_graphics_state(320, 240)!!;
+fn void render_geometry_state_is_explicit_and_representable() @test {
+    gpu::GraphicsState state = gpu::render_geometry_state(320, 240)!!;
     assert(state.viewport.x == 0.0f && state.viewport.y == 0.0f);
     assert(state.viewport.width == 320.0f
         && state.viewport.height == 240.0f);
@@ -39,15 +39,15 @@ fn void full_render_graphics_state_is_explicit_and_representable() @test {
     assert(state.depth.compare == gpu::CompareOp.NEVER);
     assert(state.color.targets.len == 0);
 
-    assert(@catch(gpu::full_render_graphics_state(0, 1))
+    assert(@catch(gpu::render_geometry_state(0, 1))
         == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::full_render_graphics_state(1, 0))
+    assert(@catch(gpu::render_geometry_state(1, 0))
         == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::full_render_graphics_state(
+    assert(@catch(gpu::render_geometry_state(
         (uint)int::max + 1,
         1,
     )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::full_render_graphics_state(
+    assert(@catch(gpu::render_geometry_state(
         1,
         (uint)int::max + 1,
     )) == gpu::INVALID_ARGUMENT);

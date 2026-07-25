@@ -128,7 +128,6 @@ struct NativePipelineBinding {
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
     uint                          cache_entry;
     PipelineKind                  kind;
-    RenderCompatibility            render;
 }
 
 struct StrictHeapCommandBinding {

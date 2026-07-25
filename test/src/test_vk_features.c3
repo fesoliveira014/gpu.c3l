@@ -84,6 +84,33 @@ fn void required_features_present_ok() @test {
     )), "all required features present must pass the gate");
 }
 
+fn void required_features_reject_only_missing_dynamic_color() @test {
+    vk::PhysicalDeviceFeatures base = base_with_required();
+    vk::PhysicalDeviceVulkan11Features v11 = v11_with_required();
+    vk::PhysicalDeviceVulkan12Features v12 =
+        vk::physical_device_vulkan12features()
+            .set_buffer_device_address(vk::TRUE)
+            .set_timeline_semaphore(vk::TRUE);
+    vk::PhysicalDeviceVulkan13Features v13 =
+        vk::physical_device_vulkan13features()
+            .set_synchronization2(vk::TRUE)
+            .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color =
+        vk::physical_device_extended_dynamic_state3features_ext();
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT
+        dynamic_properties = dynamic_properties_with_required();
+
+    assert(@catch(gpu::internal::vk::check_required_features(
+        base:               &base,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_color:      &dynamic_color,
+        dynamic_properties: &dynamic_properties,
+    )) == gpu::UNSUPPORTED_FEATURE,
+        "the strict gate rejects an otherwise complete device without dynamic color");
+}
+
 fn bool? dynamic_state3_extension_absent(
     vk::PhysicalDevice physical_device,
     ZString extension,

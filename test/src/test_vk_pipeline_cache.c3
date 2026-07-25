@@ -367,7 +367,7 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
         .height = CACHE_RT_SIZE,
     };
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     graphics.color.targets = color_targets[..];
     bind_test_graphics_pipeline(&commands, pipeline);
     gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
@@ -1111,7 +1111,7 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
         gpu::GraphicsState graphics =
-            gpu::full_render_graphics_state(pass.width, pass.height)!!;
+            gpu::render_geometry_state(pass.width, pass.height)!!;
         gpu::ColorTargetState[1] color_targets = {
             gpu::color_blend_disabled(),
         };
@@ -1284,7 +1284,7 @@ fn void alias_survives_peer_destroy() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -2303,6 +2303,35 @@ fn void format_only_graphics_batch_aliases_one_pipeline_identity() @test {
     }
     assert(cache_entry_count(&device) == 1,
         "all aliases retain one compact format-only cache entry");
+
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::ColorWriteMask red_green = { .red, .green };
+    gpu::ColorTargetState[5] packets = {
+        gpu::color_blend_disabled(),
+        gpu::alpha_blend(),
+        gpu::premultiplied_alpha_blend(),
+        gpu::additive_blend(),
+        gpu::color_blend_disabled(red_green),
+    };
+    foreach (i, pipeline : pipelines) {
+        gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+        gpu::ColorTargetState[1] targets = { packets[i] };
+        gpu::ColorState color = { .targets = targets[..] };
+        gpu::cmd_set_color_state(&commands, &color)!!;
+    }
+    assert(vk::pipeline_native_create_count(state) - native_before == 1,
+        "five distinct command color packets create no additional native pipeline");
+    gpu::discard_commands(&commands)!!;
+
     foreach (pipeline : pipelines) {
         gpu::destroy_pipeline(&device, pipeline)!!;
     }

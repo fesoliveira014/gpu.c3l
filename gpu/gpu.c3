@@ -1618,9 +1618,10 @@ fn void? destroy_attachment_view(
     gpu::internal::release_device_children(&operation);
 }
 
-<* Construct full-area viewport/scissor with zero raster/depth state and no
-   color targets. Dimensions must be in [1, int::max]. *>
-fn GraphicsState? full_render_graphics_state(uint width, uint height) {
+<* Construct full-area viewport/scissor with zero raster/depth state.
+   The returned color packet is empty and must be supplied separately for a
+   color pipeline. Dimensions must be in [1, int::max]. *>
+fn GraphicsState? render_geometry_state(uint width, uint height) {
     if (width == 0 || height == 0
         || width > (uint)int::max || height > (uint)int::max) {
         return INVALID_ARGUMENT~;

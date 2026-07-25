@@ -372,7 +372,7 @@ def valid_document() -> dict:
                         ("state", "GraphicsState*"),
                     ),
                     api_function(
-                        "full_render_graphics_state",
+                        "render_geometry_state",
                         "GraphicsState?",
                         ("width", "uint"),
                         ("height", "uint"),
@@ -2431,17 +2431,17 @@ method gpu::Runtime.is_valid
             ),
             (
                 "full render state dimensions",
-                "full_render_graphics_state",
+                "render_geometry_state",
                 lambda function: function["members"].pop(),
-                "full_render_graphics_state has the wrong parameters",
+                "render_geometry_state has the wrong parameters",
             ),
             (
                 "full render state optional return",
-                "full_render_graphics_state",
+                "render_geometry_state",
                 lambda function: function["return_type"].update(
                     {"name": "GraphicsState"}
                 ),
-                "full_render_graphics_state has the wrong return type",
+                "render_geometry_state has the wrong return type",
             ),
         )
         for label, function_name, mutate, failure in mutations:
@@ -3223,6 +3223,40 @@ method gpu::Runtime.is_valid
             "retired backend texture_barrier_to_vk( in gpu/internal/vk/sync.c3",
             failures,
         )
+
+    def test_rejects_retired_dynamic_color_backend_symbols(self) -> None:
+        relative = Path("gpu/internal/vk/pipeline.c3")
+        source = (
+            "module gpu::internal::vk @private;\n"
+            "enum GraphicsColorProfile {}\n"
+            "struct ColorTargetKey {}\n"
+            "struct BlendKey {}\n"
+            "fn void color_profile() {}\n"
+            "fn void dynamic_color_state_enabled() {}\n"
+            "fn void requests_dynamic_color_state() {}\n"
+            "fn void vk_supports_dynamic_color_state() {}\n"
+            "fn void query_dynamic_color_state_support() {}\n"
+        )
+
+        failures = check_public_api.validate_private_backend_source(
+            relative,
+            source,
+        )
+        for symbol in (
+            "GraphicsColorProfile",
+            "ColorTargetKey",
+            "BlendKey",
+            "color_profile",
+            "dynamic_color_state_enabled",
+            "requests_dynamic_color_state",
+            "vk_supports_dynamic_color_state",
+            "query_dynamic_color_state_support",
+        ):
+            with self.subTest(symbol=symbol):
+                self.assertIn(
+                    f"retired backend {symbol} in {relative.as_posix()}",
+                    failures,
+                )
 
     def test_rejects_sibling_modules_in_public_sources(self) -> None:
         relative = Path("gpu/gpu.c3")

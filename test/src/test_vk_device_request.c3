@@ -24,7 +24,7 @@ fn uint live_device_slot_count() @private {
     return live_count;
 }
 
-fn fault run_injected_resource_agnostic_texture_sync_create(
+fn fault run_injected_device_create(
     gpu::Runtime* runtime,
     gpu::Adapter* adapter,
     gpu::DeviceRequest* request,
@@ -281,7 +281,7 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
             .native_device_create_user_data = &unrequested_observation,
         };
         assert(
-            run_injected_resource_agnostic_texture_sync_create(
+            run_injected_device_create(
                 runtime: &runtime,
                 adapter: &adapter,
                 request: &classic_request,
@@ -312,7 +312,7 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
             .native_device_create_user_data = &requested_observation,
         };
         assert(
-            run_injected_resource_agnostic_texture_sync_create(
+            run_injected_device_create(
                 runtime: &runtime,
                 adapter: &adapter,
                 request: &selected_request,
@@ -1062,6 +1062,26 @@ fn void required_dynamic_color_features_are_enabled_transactionally() @test {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
         uint live_slots_before = live_device_slot_count();
+
+        gpu::internal::vk::DeviceCreationProbe missing_support = {
+            .dynamic_color_support_override = true,
+        };
+        assert(
+            run_injected_device_create(
+                runtime: &runtime,
+                adapter: &adapter,
+                request: &request,
+                probe:   &missing_support,
+            ) == gpu::UNSUPPORTED_FEATURE,
+            "strict creation rechecks and rejects missing dynamic color support"
+        );
+        assert(
+            missing_support.reached
+                    == gpu::internal::vk::DeviceCreationCheckpoint.NONE
+                && missing_support.rollback_count == 0
+                && live_device_slot_count() == live_slots_before,
+            "missing color support rejects before state mutation or publication"
+        );
 
         gpu::Runtime retained_runtime = runtime;
         gpu::internal::runtime_retain_device(&retained_runtime)!!;

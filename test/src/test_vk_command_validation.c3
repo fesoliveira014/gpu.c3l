@@ -786,7 +786,7 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
         .height = 2,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     assert(@catch(gpu::cmd_begin_render_pass_with_state(
             &commands,
             &pass,
@@ -930,7 +930,7 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1009,7 +1009,7 @@ fn void draw_with_compute_pipeline_faults() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1195,7 +1195,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1292,7 +1292,7 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
     defer discard_test_commands(&commands)!!;
     gpu::DynamicRasterState raster = {};
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1437,7 +1437,7 @@ fn void full_graphics_state_setters_reject_non_graphics_recording_roles() @test 
     defer record.queue = recorded_queue;
 
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_graphics_state(&commands, &graphics))
             == gpu::INVALID_ARGUMENT
@@ -1570,7 +1570,7 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1706,7 +1706,7 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1792,7 +1792,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1927,7 +1927,7 @@ fn void generated_work_commands_require_capability() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -2123,7 +2123,7 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -2177,7 +2177,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -2692,7 +2692,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::ColorTargetDesc[1] large_color = { { .view = large_view } };
     gpu::RenderPassDesc oversized = { .colors = large_color[..], .width = 17, .height = 16 };
     gpu::GraphicsState oversized_state =
-        gpu::full_render_graphics_state(oversized.width, oversized.height)!!;
+        gpu::render_geometry_state(oversized.width, oversized.height)!!;
     assert(@catch(gpu::cmd_begin_render_pass_with_state(
             &cmd,
             &oversized,
@@ -2707,7 +2707,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     };
     gpu::RenderPassDesc mixed = { .colors = mixed_colors[..], .width = 16, .height = 16 };
     gpu::GraphicsState mixed_state =
-        gpu::full_render_graphics_state(mixed.width, mixed.height)!!;
+        gpu::render_geometry_state(mixed.width, mixed.height)!!;
     assert(@catch(gpu::cmd_begin_render_pass_with_state(
             &cmd,
             &mixed,
@@ -2724,7 +2724,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     };
     gpu::RenderPassDesc invalid_later_pass = { .colors = invalid_later[..], .width = 4, .height = 4 };
     gpu::GraphicsState invalid_later_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             invalid_later_pass.width,
             invalid_later_pass.height,
         )!!;
@@ -2741,7 +2741,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::ColorTargetDesc[1] mip_color = { { .view = large_mip_one } };
     gpu::RenderPassDesc mip_oversized = { .colors = mip_color[..], .width = 9, .height = 8 };
     gpu::GraphicsState mip_oversized_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             mip_oversized.width,
             mip_oversized.height,
         )!!;
@@ -2759,7 +2759,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::DepthTargetDesc depth_target = { .view = depth_view };
     gpu::RenderPassDesc depth_oversized = { .depth = &depth_target, .width = 9, .height = 8 };
     gpu::GraphicsState depth_oversized_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             depth_oversized.width,
             depth_oversized.height,
         )!!;
@@ -2794,7 +2794,7 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::ColorTargetDesc[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
     gpu::RenderPassDesc library_limit = { .colors = too_many[..], .width = 1, .height = 1 };
     gpu::GraphicsState library_limit_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             library_limit.width,
             library_limit.height,
         )!!;
@@ -2811,7 +2811,7 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::ColorTargetDesc[2] device_excess;
     gpu::RenderPassDesc selected_limit = { .colors = device_excess[..], .width = 1, .height = 1 };
     gpu::GraphicsState selected_limit_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             selected_limit.width,
             selected_limit.height,
         )!!;
@@ -3412,7 +3412,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         invariant:      "color attachment must include color_attach usage",
     );
     gpu::GraphicsState usage_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             usage_pass.width,
             usage_pass.height,
         )!!;
@@ -3472,7 +3472,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         invariant:      "render area must fit every color attachment mip",
     );
     gpu::GraphicsState too_tall_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             too_tall.width,
             too_tall.height,
         )!!;
@@ -3491,7 +3491,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         generation:          color_target.generation,
     );
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };

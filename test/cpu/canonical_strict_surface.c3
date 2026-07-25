@@ -220,7 +220,7 @@ fn void pin_commands_and_completion() {
         .height = 1,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(1, 1) ?? {};
+        gpu::render_geometry_state(1, 1) ?? {};
     gpu::ColorTargetState[1] color_targets;
     gpu::ColorState color_state = gpu::uniform_color_state(
         color_targets[..],

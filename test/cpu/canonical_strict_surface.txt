@@ -167,7 +167,7 @@ function gpu::end_commands
 function gpu::enumerate_adapters
 function gpu::flush_mapped_span
 function gpu::free_allocation
-function gpu::full_render_graphics_state
+function gpu::render_geometry_state
 function gpu::full_validation_runtime_desc
 function gpu::get_adapter_diagnostics
 function gpu::get_adapter_info

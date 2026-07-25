@@ -107,7 +107,7 @@ fn gpu::ExecutableCommandList record_graphics(gpu::CommandAllocator* allocator, 
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE };
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};

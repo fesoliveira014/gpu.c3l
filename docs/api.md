@@ -464,7 +464,7 @@ both always-checked and `FULL`-only causes.
 |---|---|---|---|
 | `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the selected backend is unavailable |
 | `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `full_render_graphics_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
+| `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
 | `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource handle; or a zero, stale, consumed, or wrong-phase valid-origin direct command token; submit also rejects a token recorded for another device |
 | `INVALID_RESOURCE_STATE` | Always checked lifecycle/safe snapshot / Runtime failures | command execution; surface and swapchain creation/lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an authoritative lifecycle transition is invalid, trusted-table command execution has no usable bound-pipeline snapshot, a borrowed view was passed for destruction, a generated-scratch key is not reserved, or Vulkan reports that the native window is already in use |
 | `OUT_OF_HOST_MEMORY` | Runtime failures | creates; mapped visibility | driver or backend cache host-allocation failure |
@@ -1363,7 +1363,7 @@ GraphicsState
     DepthState depth
     ColorState color
 
-full_render_graphics_state(uint width, uint height) -> GraphicsState?
+render_geometry_state(uint width, uint height) -> GraphicsState?
 cmd_begin_render_pass(
     CommandList* commands,
     RenderPassDesc* desc,
@@ -1445,7 +1445,7 @@ cmd_set_color_state(CommandList* commands, ColorState* color) -> void?
 A conventional starting packet can be constructed from the pass dimensions:
 
 ```c3
-gpu::GraphicsState state = gpu::full_render_graphics_state(
+gpu::GraphicsState state = gpu::render_geometry_state(
     pass.width,
     pass.height,
 )!!;
@@ -1463,6 +1463,13 @@ conventional `[0, 1]` depth range, zero raster/depth state, and an empty color
 packet. Zero depth state means disabled depth testing and writing and is valid
 for drawing. Depth-only pipelines use the empty color packet unchanged; color
 pipelines replace it with a packet matching their ordered color-format domain.
+
+Migration: `full_render_graphics_state` is retired in favor of
+`render_geometry_state`. The new name makes the boundary explicit: the helper
+constructs geometry-related state but cannot manufacture caller-owned color
+target storage. Existing color-pass callers must assign `GraphicsState.color`
+before recording. This is a valid-caller precondition under `TRUSTED` and a
+diagnosed target-count error under `FULL`.
 
 Every viewport field
 and computed axis endpoint must be finite. Width is positive, height is

@@ -255,7 +255,7 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .compare      = gpu::CompareOp.LESS,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT)!!;
     graphics_state.depth = depth_state;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,

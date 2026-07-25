@@ -1066,14 +1066,19 @@ fn LoweredGraphicsState? full_prepare_graphics_state(
     validate_scissor(device, operation, &state.scissor)!;
     validate_raster_state(device, operation, &state.raster)!;
     validate_depth_state(device, operation, &state.depth)!;
-    LoweredGraphicsState lowered = lower_graphics_state(state)!;
-    lowered.color = full_prepare_color_state(
+    LoweredColorState color = full_prepare_color_state(
         state:     device,
         record:    record,
         color:     &state.color,
         operation: operation,
     )!;
-    return lowered;
+    return {
+        .viewport = lower_viewport(&state.viewport),
+        .scissor  = lower_scissor(&state.scissor),
+        .raster   = state.raster,
+        .depth    = state.depth,
+        .color    = color,
+    };
 }
 
 fn void emit_scissor(
@@ -1233,6 +1238,21 @@ fn LoweredColorState? full_prepare_color_state(
             operation: operation,
             field:     "ColorState",
             invariant: "color state must not be null",
+        )~;
+    }
+    if (!record.logical_pipeline.handle.is_valid()) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.PIPELINE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "pipeline",
+            invariant:           "the required pipeline bind point must be active",
+            backend_text:        null,
         )~;
     }
     BoundPipeline* pipeline = active_bound_pipeline(

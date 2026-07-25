@@ -38,10 +38,12 @@ page doesn't explain it, that's a bug in this page — file an issue.
   it. Record a complete `GraphicsState` before or during the first pass, or use
   `cmd_begin_render_pass_with_state`; under `FULL`, regular and generated draws
   reject a recording that has only partial updates. Bind a compatible graphics
-  pipeline before applying a complete packet. `full_render_graphics_state`
+  pipeline before applying a complete packet. `render_geometry_state`
   supplies conventional viewport/raster/depth state and an empty color packet;
   color passes must replace `GraphicsState.color` with a packet matching the
-  pipeline's ordered color-format domain. Migrate an old three-argument
+  pipeline's ordered color-format domain. The old
+  `full_render_graphics_state` name is retired because it implied that the
+  empty color packet was complete. Migrate an old three-argument
   `cmd_begin_render_pass` call to the named convenience.
 - **Texture history is caller-owned.** `TextureBarrier.before` asserts the
   layout, stages, and access established by earlier ordering. The backend

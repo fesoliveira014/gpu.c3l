@@ -2219,7 +2219,6 @@ fn void? record_bound_pipeline(
             .generated_dispatch_layout = bound.generated_dispatch_layout,
             .cache_entry               = bound.cache_entry,
             .kind                      = bound.kind,
-            .render                    = bound.render,
         };
     }
     bind_descriptor_heap(

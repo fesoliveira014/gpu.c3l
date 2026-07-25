@@ -375,7 +375,7 @@ fn void offscreen_textured_triangle() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+        gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -558,7 +558,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
         gpu::GraphicsState graphics_state =
-            gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+            gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
         gpu::ColorTargetState[1] color_targets = {{
             .write_mask = gpu::COLOR_WRITE_ALL,
         }};
@@ -718,11 +718,16 @@ fn void combined_and_individual_color_state_output_matches() @test {
         .fragment_shader = fragment,
         .color_formats   = color_formats[..],
     };
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    ulong native_before = vk::pipeline_native_create_count(state);
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(
         &device,
         &pipeline_desc,
     )!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
+    assert(vk::pipeline_native_create_count(state) - native_before == 1,
+        "the format-only graphics identity creates one native pipeline");
     gpu::TextureHandle[10] targets;
     foreach (&target : targets) *target = make_render_target(&device);
     defer foreach (target : targets) {
@@ -798,7 +803,7 @@ fn void combined_and_individual_color_state_output_matches() @test {
             .height = RT_SIZE,
         };
         gpu::GraphicsState graphics =
-            gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+            gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
         gpu::ColorTargetState[1] color_targets = {
             packets[state_index],
         };
@@ -883,6 +888,8 @@ fn void combined_and_individual_color_state_output_matches() @test {
                 expected_value);
         }
     }
+    assert(vk::pipeline_native_create_count(state) - native_before == 1,
+        "five distinct color packets render through one native pipeline identity");
 }
 
 fn void offscreen_render_to_mip() @test {

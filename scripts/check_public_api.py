@@ -75,6 +75,9 @@ FORBIDDEN_TEXT = {
     '"name":"dynamic_color_state"': (
         "retired optional dynamic color capability"
     ),
+    '"name":"full_render_graphics_state"': (
+        "retired ambiguous graphics-state helper"
+    ),
     '"name":"device_generated_commands"': "device_generated_commands",
     '"name":"supported_indirect_commands_shader_stages"': (
         "supported_indirect_commands_shader_stages"
@@ -321,6 +324,14 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "MAX_RECORDING_CONTEXTS",
     "MAX_THREAD_DEVICE_CONTEXTS",
     "RetiredCommandBuffer",
+    "GraphicsColorProfile",
+    "ColorTargetKey",
+    "BlendKey",
+    "color_profile",
+    "dynamic_color_state_enabled",
+    "requests_dynamic_color_state",
+    "vk_supports_dynamic_color_state",
+    "query_dynamic_color_state_support",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
@@ -1248,7 +1259,7 @@ def validate_document(document: dict) -> list[str]:
             ("CommandList*", "GraphicsState*"),
             "void?",
         ),
-        "full_render_graphics_state": (
+        "render_geometry_state": (
             ("uint", "uint"),
             "GraphicsState?",
         ),
@@ -1381,7 +1392,7 @@ def validate_document(document: dict) -> list[str]:
         "cmd_set_depth_state": ("commands", "depth"),
         "cmd_set_raster_state": ("commands", "raster"),
         "cmd_set_graphics_state": ("commands", "state"),
-        "full_render_graphics_state": ("width", "height"),
+        "render_geometry_state": ("width", "height"),
         "cmd_dispatch": ("commands", "root", "groups"),
         "cmd_draw": (
             "commands",

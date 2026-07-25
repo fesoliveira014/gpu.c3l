@@ -87,6 +87,8 @@ struct DeviceCreationProbe {
     bool                     descriptor_buffer_capability_available;
     bool                     descriptor_buffer_selected;
     bool                     fail_native_device_creation @if(env::TESTING);
+    bool                     dynamic_color_support_override @if(env::TESTING);
+    bool                     dynamic_color_support_available @if(env::TESTING);
     bool                     dynamic_color_feature_chained @if(env::TESTING);
     uint                     dynamic_color_blend_enable @if(env::TESTING);
     uint                     dynamic_color_blend_equation @if(env::TESTING);
@@ -588,6 +590,13 @@ fn gpu::Device? create_vk_device_from_runtime(
     gpu::QueueRequirements* queue_requirements = null,
     DeviceCreationProbe* probe = null,
 ) @private {
+    $if env::TESTING:
+        if (probe != null
+            && probe.dynamic_color_support_override
+            && !probe.dynamic_color_support_available) {
+            return gpu::UNSUPPORTED_FEATURE~;
+        }
+    $endif
     VkDeviceState* state = mem::new(VkDeviceState);
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     defer catch {
