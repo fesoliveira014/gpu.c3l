@@ -78,6 +78,12 @@ FORBIDDEN_TEXT = {
     '"name":"full_render_graphics_state"': (
         "retired ambiguous graphics-state helper"
     ),
+    '"name":"request_resource_agnostic_texture_sync"': (
+        "retired texture layout profile request"
+    ),
+    '"name":"resource_agnostic_texture_sync"': (
+        "retired texture layout profile capability"
+    ),
     '"name":"device_generated_commands"': "device_generated_commands",
     '"name":"supported_indirect_commands_shader_stages"': (
         "supported_indirect_commands_shader_stages"
@@ -305,6 +311,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "request_dynamic_color_state(",
     "create_dynamic_graphics_pipeline(",
     "create_dynamic_graphics_pipelines(",
+    "request_resource_agnostic_texture_sync(",
+    "resource_agnostic_texture_sync",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (

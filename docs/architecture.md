@@ -213,17 +213,13 @@ Public shape:
 
 ```text
 Device                         (slot | generation | reserved)
-request_resource_agnostic_texture_sync(DeviceRequest) -> DeviceRequest?
 get_device_caps(Device*)       -> DeviceCaps?
 ```
 
-Device requests compose strict semantics with independent queue, presentation,
-and resource-agnostic texture-synchronization contributions.
-Each optional capability is selected only when explicitly requested and fully
-enabled. The texture-synchronization result is published as
-`DeviceCaps.resource_agnostic_texture_sync`. Unrequested devices retain classic
-native texture layouts. Command-time color state is part of every strict
-device's mandatory graphics-state model.
+Device requests compose strict semantics with independent queue and
+presentation contributions. Texture states use one mandatory explicit native
+layout mapping on every device. Command-time color state is part of every
+strict device's mandatory graphics-state model.
 
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
@@ -525,9 +521,8 @@ submission dependencies use consumer-scoped `SubmitDesc.completion_waits`:
 ordinary stages compose with a narrow draw-argument consumer. Same-queue order
 is implicit after point and scope validation. Swapchain readiness remains
 stage-scoped. Native timelines and swapchain semaphores remain backend-private.
-On a selected resource-agnostic device, an initialized ordinary texture may use
-the resource-free global barrier because its native representation remains
-`GENERAL`; initialization and WSI transitions remain image-specific.
+Texture layout transitions remain resource-specific because a global barrier
+carries neither texture identity nor subresource range.
 
 ### Swapchains
 
@@ -767,21 +762,25 @@ previous and next states. A `TextureState` carries an independent
 storage helpers construct common states without recording work. Cross-queue
 dependencies use completion waits.
 
-The caller owns texture history. `before` asserts the state established by
-earlier ordering; the backend never consults or updates a shared layout table.
-Identity, range, and safe-lowering checks remain active under every policy,
-while `FULL` adds semantic layout, stage, access, usage, queue, and presentation
-diagnostics. Each accepted barrier resolves its texture and range once, lowers
-its two states once, and emits one native barrier.
+The caller owns texture history. `TextureState.layout` is an operational
+recorded requirement: `before` asserts the layout established by earlier
+ordering, and `after` names the layout required by the next use. The backend
+never consults or updates a shared layout table. Identity, range, and
+safe-lowering checks remain active under every policy, while `FULL` adds
+semantic layout, stage, access, usage, queue, and presentation diagnostics.
+Each accepted barrier resolves its texture and range once, lowers its two
+states once, and emits one native barrier.
 
-Selected resource-agnostic devices keep every initialized ordinary non-WSI
-layout in one native `GENERAL` representation. Texture barriers, sampled and
-storage descriptors, rendering and resolve attachments, and buffer-image
-copies share that private layout policy. This permits an ordinary
-whole-resource dependency to use `Barrier` after explicit initialization
-without hidden texture iteration or state tracking. `UNDEFINED`, `PRESENT`,
-subresource precision, feedback loops, and video layouts are not folded into
-that contract.
+Every device uses one private native mapping: `UNDEFINED` maps to
+`VK_IMAGE_LAYOUT_UNDEFINED`; transfer source and destination map to their
+respective transfer-optimal layouts; sampled color maps to
+`VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL`; sampled depth/stencil maps to
+`VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL`; storage maps to
+`VK_IMAGE_LAYOUT_GENERAL`; color and depth attachments map to their respective
+attachment-optimal layouts; and `PRESENT` maps to
+`VK_IMAGE_LAYOUT_PRESENT_SRC_KHR`. Texture barriers, descriptors, rendering
+attachments, and buffer-image copies all use this same mapping. There is no
+device-selected alternative and no hidden state tracking.
 
 Presentation barriers separate external WSI ordering from queue-side access.
 Leaving `PRESENT` uses no source access and anchors the layout transition to

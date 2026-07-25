@@ -80,19 +80,15 @@ fn gpu::Device make_val_device() {
     return create_test_device(&desc)!!;
 }
 
-fn void texture_copy_layouts_follow_the_selected_texture_policy() @test {
+fn void texture_copies_use_transfer_optimal_layouts() @test {
     vk::TextureSlot texture = {
         .format = gpu::Format.RGBA8_UNORM,
     };
 
-    assert(vk::texture_copy_layout(&texture, true, false)
+    assert(vk::texture_copy_layout(&texture, true)
         == vk::ImageLayout.TRANSFER_DST_OPTIMAL);
-    assert(vk::texture_copy_layout(&texture, false, false)
+    assert(vk::texture_copy_layout(&texture, false)
         == vk::ImageLayout.TRANSFER_SRC_OPTIMAL);
-    assert(vk::texture_copy_layout(&texture, true, true)
-        == vk::ImageLayout.GENERAL);
-    assert(vk::texture_copy_layout(&texture, false, true)
-        == vk::ImageLayout.GENERAL);
 }
 
 fn void reference_capacity_preflight_counts_unique_identities() @test {

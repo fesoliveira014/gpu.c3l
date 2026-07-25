@@ -73,8 +73,7 @@ caller-owned allocation and completion lifetime contracts
 MemoryClass policy table completeness
 Format translation table completeness through pure tables if separated
 global barrier stage/hazard/queue validation and exact Vulkan scope mapping
-resource-agnostic texture-sync request composition, duplicate/malformed
-rejection, support routing, and supported-but-unrequested classic selection
+single-profile texture-layout mapping completeness and exact Vulkan lowering
 shader ABI scalar widths plus generated-work record sizes, offsets, and strides
 TextureView owner/generation validation and descriptor-heap free-list reuse
 null-safe, exactly-once structured debug dispatch and userdata preservation
@@ -221,16 +220,15 @@ Post-retain failures must emit nothing, preserve reference counts, and report
 the exact nested `TextureBarrier` field. No test assumes backend-tracked layout
 history.
 
-Resource-agnostic synchronization coverage runs both classic and selected
-policy modes. It pins ordinary barrier layouts, sampled/storage descriptors,
-color/resolve/depth attachments, both buffer-image copy directions,
-`UNDEFINED` and `PRESENT` exceptions, and invalid-input rollback before native
-emission. The end-to-end selected path must emit one global memory barrier and
-zero image barriers for an initialized ordinary dependency while matching the
-classic explicit-image-barrier output. A live run may report N/A only after
-proving the extension or feature absent; advertised support makes creation,
-selected-cap publication, validation-clean execution, and output equivalence
-mandatory.
+Texture synchronization coverage pins the sole native layout mapping across
+texture barriers, sampled/storage descriptors, color/resolve/depth attachments,
+and both buffer-image copy directions. Tests cover
+`VK_IMAGE_LAYOUT_UNDEFINED`, both transfer-optimal layouts, color and
+depth/stencil sampled-read layouts, `VK_IMAGE_LAYOUT_GENERAL`, both
+attachment-optimal layouts, and `VK_IMAGE_LAYOUT_PRESENT_SRC_KHR`.
+Invalid-input rollback must occur before native emission, and no test may
+depend on global backend layout history or an automatically inserted repair
+transition.
 
 Windowed tests may be manual at first. Automated windowed tests can be added only when CI/window-system support is stable.
 

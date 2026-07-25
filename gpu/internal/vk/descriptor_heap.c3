@@ -606,14 +606,12 @@ fn gpu::TextureIndex texture_index_from_slot(uint slot) @private {
 fn vk::ImageLayout texture_descriptor_layout(
     TextureSlot* texture,
     TextureDescriptorKind kind,
-    bool resource_agnostic,
 ) {
     return texture_layout_to_vk(
-        layout: kind == TextureDescriptorKind.STORAGE
+        kind == TextureDescriptorKind.STORAGE
             ? gpu::TextureLayout.STORAGE
             : gpu::TextureLayout.SAMPLED,
-        format:            texture.format,
-        resource_agnostic: resource_agnostic,
+        texture.format,
     );
 }
 
@@ -741,7 +739,6 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
                 .image_layout = texture_descriptor_layout(
                     texture,
                     TextureDescriptorKind.SAMPLED,
-                    state.caps.resource_agnostic_texture_sync,
                 ),
             };
             writes[write_count] = vk::write_descriptor_set()
@@ -758,7 +755,6 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
                 .image_layout = texture_descriptor_layout(
                     texture,
                     TextureDescriptorKind.STORAGE,
-                    state.caps.resource_agnostic_texture_sync,
                 ),
             };
             writes[write_count] = vk::write_descriptor_set()
@@ -781,7 +777,6 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
             .image_layout = texture_descriptor_layout(
                 texture,
                 TextureDescriptorKind.SAMPLED,
-                state.caps.resource_agnostic_texture_sync,
             ),
         };
         vk::DescriptorGetInfoEXT info = vk::descriptor_get_info_ext();
@@ -801,7 +796,6 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
             .image_layout = texture_descriptor_layout(
                 texture,
                 TextureDescriptorKind.STORAGE,
-                state.caps.resource_agnostic_texture_sync,
             ),
         };
         vk::DescriptorGetInfoEXT info = vk::descriptor_get_info_ext();
@@ -1158,7 +1152,6 @@ fn uint accumulate_texture_descriptor_write(
     vk::DescriptorImageInfo[] image_infos,
     vk::WriteDescriptorSet[] writes,
     uint write_count,
-    bool resource_agnostic,
 ) {
     if (texture_slot.usage.sampled) {
         image_infos[write_count] = {
@@ -1166,7 +1159,6 @@ fn uint accumulate_texture_descriptor_write(
             .image_layout = texture_descriptor_layout(
                 texture_slot,
                 TextureDescriptorKind.SAMPLED,
-                resource_agnostic,
             ),
         };
         writes[write_count] = vk::write_descriptor_set()
@@ -1183,7 +1175,6 @@ fn uint accumulate_texture_descriptor_write(
             .image_layout = texture_descriptor_layout(
                 texture_slot,
                 TextureDescriptorKind.STORAGE,
-                resource_agnostic,
             ),
         };
         writes[write_count] = vk::write_descriptor_set()
@@ -1273,8 +1264,6 @@ fn void? vk_create_texture_views(
         }
 
         if (state.strict_heap.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING) {
-            bool resource_agnostic =
-                state.caps.resource_agnostic_texture_sync;
             uint max_writes = (uint)descs.len * 2;
             vk::WriteDescriptorSet[TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP] writes_stack;
             vk::DescriptorImageInfo[TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP] image_infos_stack;
@@ -1295,7 +1284,6 @@ fn void? vk_create_texture_views(
                     image_infos:       image_infos,
                     writes:            writes,
                     write_count:       write_count,
-                    resource_agnostic: resource_agnostic,
                 );
             }
             if (write_count > 0) vk::update_descriptor_sets(state.device, write_count, &writes[0], 0, null);

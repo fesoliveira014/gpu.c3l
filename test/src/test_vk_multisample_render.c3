@@ -43,7 +43,7 @@ fn gpu::TextureHandle make_multisample_target(
     return gpu::create_texture(device, &desc)!!;
 }
 
-fn void rendering_attachment_layouts_follow_selected_policy() @test {
+fn void rendering_attachments_use_classic_layouts() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle color = make_multisample_target(
@@ -82,28 +82,16 @@ fn void rendering_attachment_layouts_follow_selected_policy() @test {
         .width  = DP_RT,
         .height = DP_RT,
     };
-    gpu::internal::vk::VkDeviceState* backend =
-        gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(&commands, false)!!;
 
-    gpu::internal::vk::PreparedRenderPass classic =
+    gpu::internal::vk::PreparedRenderPass prepared =
         gpu::internal::vk::lower_render_pass(record, &pass)!!;
-    assert(classic.attachments[0].image_layout
+    assert(prepared.attachments[0].image_layout
             == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL
-        && classic.depth_attachment.image_layout
+        && prepared.depth_attachment.image_layout
             == vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        "classic rendering retains distinct color and depth layouts");
-
-    backend.caps.resource_agnostic_texture_sync = true;
-    gpu::internal::vk::PreparedRenderPass selected =
-        gpu::internal::vk::lower_render_pass(record, &pass)!!;
-    assert(selected.attachments[0].image_layout
-            == vk::ImageLayout.GENERAL
-        && selected.depth_attachment.image_layout
-            == vk::ImageLayout.GENERAL,
-        "selected rendering uses GENERAL for color and depth");
-    backend.caps.resource_agnostic_texture_sync = false;
+        "rendering uses distinct classic color and depth layouts");
 }
 
 fn void multisample_color_depth_resolves_to_readback() @test {
@@ -232,22 +220,13 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .width  = DP_RT,
         .height = DP_RT,
     };
-    gpu::internal::vk::VkDeviceState* backend =
-        gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(&commands, false)!!;
-    gpu::internal::vk::PreparedRenderPass classic =
+    gpu::internal::vk::PreparedRenderPass prepared =
         gpu::internal::vk::lower_render_pass(record, &pass)!!;
-    assert(classic.attachments[0].resolve_image_layout
+    assert(prepared.attachments[0].resolve_image_layout
             == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
-        "classic resolve retains the color-attachment layout");
-    backend.caps.resource_agnostic_texture_sync = true;
-    gpu::internal::vk::PreparedRenderPass selected =
-        gpu::internal::vk::lower_render_pass(record, &pass)!!;
-    assert(selected.attachments[0].resolve_image_layout
-            == vk::ImageLayout.GENERAL,
-        "selected resolve uses GENERAL");
-    backend.caps.resource_agnostic_texture_sync = false;
+        "resolve uses the classic color-attachment layout");
 
     gpu::DepthState depth_state = {
         .test_enable  = true,

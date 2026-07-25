@@ -277,7 +277,6 @@ struct DeviceCaps {
     float max_sampler_lod_bias;
     // 0 means anisotropic filtering is unsupported.
     float max_sampler_anisotropy;
-    bool resource_agnostic_texture_sync;
 }
 
 alias DebugMessageCallback = fn void (DebugMessage*, void*);

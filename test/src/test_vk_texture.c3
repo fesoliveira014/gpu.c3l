@@ -545,7 +545,7 @@ fn void texture_attachment_and_present_state_matrix_enforces_texture_kind() @tes
     );
 }
 
-fn void texture_layout_policy_preserves_classic_and_unifies_ordinary_states() @test {
+fn void texture_layouts_use_the_classic_mapping() @test {
     gpu::TextureLayout[8] layouts = {
         gpu::TextureLayout.UNDEFINED,
         gpu::TextureLayout.TRANSFER_SOURCE,
@@ -556,7 +556,7 @@ fn void texture_layout_policy_preserves_classic_and_unifies_ordinary_states() @t
         gpu::TextureLayout.DEPTH_ATTACHMENT,
         gpu::TextureLayout.PRESENT,
     };
-    vk::ImageLayout[8] classic = {
+    vk::ImageLayout[8] expected = {
         vk::ImageLayout.UNDEFINED,
         vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
         vk::ImageLayout.TRANSFER_DST_OPTIMAL,
@@ -570,42 +570,19 @@ fn void texture_layout_policy_preserves_classic_and_unifies_ordinary_states() @t
     foreach (i, layout : layouts) {
         assert(
             vk::texture_layout_to_vk(
-                layout:            layout,
-                format:            gpu::Format.RGBA8_UNORM,
-                resource_agnostic: false,
-            ) == classic[i],
-            "classic texture layout mapping remains exact"
-        );
-        vk::ImageLayout selected = i == 0
-            ? vk::ImageLayout.UNDEFINED
-            : i == layouts.len - 1
-                ? vk::ImageLayout.PRESENT_SRC_KHR
-                : vk::ImageLayout.GENERAL;
-        assert(
-            vk::texture_layout_to_vk(
-                layout:            layout,
-                format:            gpu::Format.RGBA8_UNORM,
-                resource_agnostic: true,
-            ) == selected,
-            "selected ordinary states use GENERAL with explicit exceptions"
+                layout: layout,
+                format: gpu::Format.RGBA8_UNORM,
+            ) == expected[i],
+            "texture layout mapping remains exact"
         );
     }
 
     assert(
         vk::texture_layout_to_vk(
-            layout:            gpu::TextureLayout.SAMPLED,
-            format:            gpu::Format.D32_FLOAT,
-            resource_agnostic: false,
+            layout: gpu::TextureLayout.SAMPLED,
+            format: gpu::Format.D32_FLOAT,
         ) == vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-        "classic sampled depth retains its depth read-only layout"
-    );
-    assert(
-        vk::texture_layout_to_vk(
-            layout:            gpu::TextureLayout.SAMPLED,
-            format:            gpu::Format.D32_FLOAT,
-            resource_agnostic: true,
-        ) == vk::ImageLayout.GENERAL,
-        "selected sampled depth uses GENERAL"
+        "sampled depth retains its depth read-only layout"
     );
 }
 
@@ -1024,70 +1001,8 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     slot.swapchain_owned = false;
 }
 
-fn void selected_texture_barriers_use_unified_layout_policy() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::TextureDesc desc = {
-        .access = { .graphics },
-        .width  = 16,
-        .height = 16,
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .sampled, .color_attach },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator =
-        gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    state.caps.resource_agnostic_texture_sync = true;
-    TextureBarrierEmitCapture capture;
-    vk::set_texture_barrier_emit_hook(
-        state,
-        &capture_texture_barrier_emit,
-        &capture,
-    );
-    defer vk::set_texture_barrier_emit_hook(state, null, null);
-
-    gpu::TextureBarrier initialize = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after   = gpu::sampled_at({ .fragment_shader }),
-    };
-    gpu::cmd_texture_barrier(&commands, &initialize)!!;
-    assert(capture.calls == 1);
-    assert(capture.native.old_layout == vk::ImageLayout.UNDEFINED
-        && capture.native.new_layout == vk::ImageLayout.GENERAL,
-        "selected initialization remains an explicit UNDEFINED-to-GENERAL image barrier");
-
-    gpu::TextureBarrier ordinary = {
-        .texture = texture,
-        .before  = gpu::sampled_at({ .fragment_shader }),
-        .after   = {
-            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
-            .stages = { .color_output },
-            .access = { .write },
-        },
-    };
-    gpu::cmd_texture_barrier(&commands, &ordinary)!!;
-    assert(capture.calls == 2);
-    assert(capture.native.old_layout == vk::ImageLayout.GENERAL
-        && capture.native.new_layout == vk::ImageLayout.GENERAL,
-        "an explicit selected ordinary barrier retains resource and scope precision");
-    assert(capture.native.src_access_mask
-            == vk::AccessFlagBits2.ACCESS_2_SHADER_SAMPLED_READ_BIT
-        && capture.native.dst_access_mask
-            == vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        "unified layouts do not change semantic access scopes");
-}
-
 fn void assert_present_barrier_emission_for_contract(
     gpu::ContractValidation contract,
-    bool resource_agnostic,
 ) {
     gpu::Device device = make_texture_test_device_with_contract(contract);
     defer destroy_test_device(&device)!!;
@@ -1109,7 +1024,6 @@ fn void assert_present_barrier_emission_for_contract(
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    state.caps.resource_agnostic_texture_sync = resource_agnostic;
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     slot.swapchain_owned = true;
     TextureBarrierEmitCapture capture;
@@ -1150,9 +1064,7 @@ fn void assert_present_barrier_emission_for_contract(
             == vk::AccessFlagBits2.ACCESS_2_TRANSFER_READ_BIT,
         "transfer destination preserves its native access");
     assert(capture.native.old_layout == vk::ImageLayout.PRESENT_SRC_KHR
-        && capture.native.new_layout == (resource_agnostic
-            ? vk::ImageLayout.GENERAL
-            : vk::ImageLayout.TRANSFER_SRC_OPTIMAL),
+        && capture.native.new_layout == vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
         "presentation transition preserves the exact native layouts");
     assert(capture.native.src_queue_family_index == vk::QUEUE_FAMILY_IGNORED
         && capture.native.dst_queue_family_index == vk::QUEUE_FAMILY_IGNORED,
@@ -1187,9 +1099,7 @@ fn void assert_present_barrier_emission_for_contract(
     assert(capture.native.dst_access_mask
             == vk::AccessFlagBits2.ACCESS_2_NONE,
         "present destination uses no destination access");
-    assert(capture.native.old_layout == (resource_agnostic
-            ? vk::ImageLayout.GENERAL
-            : vk::ImageLayout.TRANSFER_SRC_OPTIMAL)
+    assert(capture.native.old_layout == vk::ImageLayout.TRANSFER_SRC_OPTIMAL
         && capture.native.new_layout == vk::ImageLayout.PRESENT_SRC_KHR,
         "ordinary-to-presentation preserves the exact native layouts");
     assert(capture.native.src_queue_family_index == vk::QUEUE_FAMILY_IGNORED
@@ -1197,22 +1107,12 @@ fn void assert_present_barrier_emission_for_contract(
         "ordinary-to-presentation adds no queue-family ownership transfer");
 }
 
-fn void present_barrier_emission_matches_classic_and_selected_policies() @test {
+fn void present_barrier_emission_matches_both_contract_policies() @test {
     assert_present_barrier_emission_for_contract(
         gpu::ContractValidation.TRUSTED,
-        false,
     );
     assert_present_barrier_emission_for_contract(
         gpu::ContractValidation.FULL,
-        false,
-    );
-    assert_present_barrier_emission_for_contract(
-        gpu::ContractValidation.TRUSTED,
-        true,
-    );
-    assert_present_barrier_emission_for_contract(
-        gpu::ContractValidation.FULL,
-        true,
     );
 }
 

@@ -258,8 +258,6 @@ fn PreparedRenderPass? lower_render_pass(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    bool resource_agnostic =
-        state.caps.resource_agnostic_texture_sync;
     PreparedRenderPass pass = {
         .width       = desc.width,
         .height      = desc.height,
@@ -282,9 +280,8 @@ fn PreparedRenderPass? lower_render_pass(
         *attachment = vk::rendering_attachment_info();
         attachment.image_view = view.native;
         attachment.image_layout = texture_layout_to_vk(
-            layout:            gpu::TextureLayout.COLOR_ATTACHMENT,
-            format:            view.format,
-            resource_agnostic: resource_agnostic,
+            gpu::TextureLayout.COLOR_ATTACHMENT,
+            view.format,
         );
         attachment.load_op = load_op_to_vk(target.load_op);
         attachment.store_op = store_op_to_vk(target.store_op);
@@ -303,9 +300,8 @@ fn PreparedRenderPass? lower_render_pass(
             attachment.resolve_mode = color_resolve_mode(view.format);
             attachment.resolve_image_view = resolve.native;
             attachment.resolve_image_layout = texture_layout_to_vk(
-                layout:            gpu::TextureLayout.COLOR_ATTACHMENT,
-                format:            resolve.format,
-                resource_agnostic: resource_agnostic,
+                gpu::TextureLayout.COLOR_ATTACHMENT,
+                resolve.format,
             );
         }
     }
@@ -324,9 +320,8 @@ fn PreparedRenderPass? lower_render_pass(
         pass.depth_attachment = vk::rendering_attachment_info();
         pass.depth_attachment.image_view = depth.native;
         pass.depth_attachment.image_layout = texture_layout_to_vk(
-            layout:            gpu::TextureLayout.DEPTH_ATTACHMENT,
-            format:            depth.format,
-            resource_agnostic: resource_agnostic,
+            gpu::TextureLayout.DEPTH_ATTACHMENT,
+            depth.format,
         );
         pass.depth_attachment.load_op = load_op_to_vk(desc.depth.load_op);
         pass.depth_attachment.store_op = store_op_to_vk(desc.depth.store_op);

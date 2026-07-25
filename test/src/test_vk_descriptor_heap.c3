@@ -100,7 +100,7 @@ fn void expect_descriptor_diagnostic(
     };
 }
 
-fn void texture_descriptor_layouts_follow_the_selected_texture_policy() @test {
+fn void texture_descriptors_use_classic_layouts() @test {
     gpu::internal::vk::TextureSlot color = {
         .format = gpu::Format.RGBA8_UNORM,
     };
@@ -112,42 +112,18 @@ fn void texture_descriptor_layouts_follow_the_selected_texture_policy() @test {
         gpu::internal::vk::texture_descriptor_layout(
             &color,
             gpu::internal::vk::TextureDescriptorKind.SAMPLED,
-            false,
         ) == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL
     );
     assert(
         gpu::internal::vk::texture_descriptor_layout(
             &depth,
             gpu::internal::vk::TextureDescriptorKind.SAMPLED,
-            false,
         ) == vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL
     );
     assert(
         gpu::internal::vk::texture_descriptor_layout(
             &color,
             gpu::internal::vk::TextureDescriptorKind.STORAGE,
-            false,
-        ) == vk::ImageLayout.GENERAL
-    );
-    assert(
-        gpu::internal::vk::texture_descriptor_layout(
-            &color,
-            gpu::internal::vk::TextureDescriptorKind.SAMPLED,
-            true,
-        ) == vk::ImageLayout.GENERAL
-    );
-    assert(
-        gpu::internal::vk::texture_descriptor_layout(
-            &depth,
-            gpu::internal::vk::TextureDescriptorKind.SAMPLED,
-            true,
-        ) == vk::ImageLayout.GENERAL
-    );
-    assert(
-        gpu::internal::vk::texture_descriptor_layout(
-            &color,
-            gpu::internal::vk::TextureDescriptorKind.STORAGE,
-            true,
         ) == vk::ImageLayout.GENERAL
     );
 }

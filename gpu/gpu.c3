@@ -177,17 +177,6 @@ fn DeviceRequest? request_presentation(
     );
 }
 
-<* Return a new request that requires resource-agnostic ordinary texture
-   synchronization. *>
-fn DeviceRequest? request_resource_agnostic_texture_sync(
-    DeviceRequest request,
-) {
-    return gpu::internal::compose_device_request(
-        request,
-        gpu::internal::DeviceCapability.RESOURCE_AGNOSTIC_TEXTURE_SYNC,
-    );
-}
-
 <* Return a new request with one explicit semantic queue group. *>
 fn DeviceRequest? request_queues(
     DeviceRequest request,
@@ -226,17 +215,6 @@ fn DeviceRequestSupport? supports_device_request(
         return {
             .supported         = false,
             .unmet_requirement = "strict semantics",
-        };
-    }
-
-    if (gpu::internal::requests_resource_agnostic_texture_sync(*request)
-        && !gpu::internal::vk::vk_supports_resource_agnostic_texture_sync(
-            data.state,
-            adapter.adapter_index,
-        )!) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "resource-agnostic texture synchronization",
         };
     }
 

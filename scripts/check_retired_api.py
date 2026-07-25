@@ -22,6 +22,12 @@ FIXTURES = {
     "device_desc": "DeviceDesc",
     "runtime_enable_validation": "enable_validation",
     "runtime_track_resource_lifetimes": "track_resource_lifetimes",
+    "request_resource_agnostic_texture_sync": (
+        "request_resource_agnostic_texture_sync"
+    ),
+    "resource_agnostic_texture_sync_caps": (
+        "resource_agnostic_texture_sync"
+    ),
     "contract_validation_object_boundaries": "OBJECT_BOUNDARIES",
     "create_device_from_desc": "create_device_from_desc",
     "create_sampler": "create_sampler",
@@ -166,6 +172,9 @@ FIELD_OR_METHODS = {
     "max_texture_descriptors_caps": "DeviceCaps.max_texture_descriptors",
     "max_sampler_descriptors_caps": "DeviceCaps.max_sampler_descriptors",
     "dynamic_color_state_caps": "DeviceCaps.dynamic_color_state",
+    "resource_agnostic_texture_sync_caps": (
+        "DeviceCaps.resource_agnostic_texture_sync"
+    ),
     "command_list_device": "CommandList.device",
     "command_list_handle_member": "CommandList.handle",
     "executable_command_list_device": "ExecutableCommandList.device",
@@ -213,6 +222,12 @@ LIVE_RETIRED_PATTERNS = {
     ),
     "SAMPLER_INVALID": re.compile(r"\bSAMPLER_INVALID\b"),
     "publish_sampler": re.compile(r"\bpublish_sampler\b"),
+    "request_resource_agnostic_texture_sync": re.compile(
+        r"\brequest_resource_agnostic_texture_sync\b"
+    ),
+    "resource_agnostic_texture_sync": re.compile(
+        r"\bresource_agnostic_texture_sync\b"
+    ),
 }
 README_RETIRED_PATTERNS = {
     "automatic per-worker command pools": re.compile(
