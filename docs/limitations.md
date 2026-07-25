@@ -58,7 +58,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
   corresponding classic Vulkan layouts on every device. A global barrier has
   no texture identity or subresource range and cannot establish a required
   layout. Layout changes, including `UNDEFINED` initialization and `PRESENT`
-  transitions, require explicit texture barriers.
+  transitions, require explicit texture barriers. When migrating from the
+  removed unified-layout profile, replace every global `Barrier` that stood in
+  for a texture layout change with `cmd_texture_barrier`. A texture cannot be
+  sampled and storage-accessed in the same pass; split those uses and record
+  the explicit transition between their classic layouts.
 - **Async compute is capability-gated.** A distinct compute queue is used
   when available and reported by `DeviceCaps.async_compute`. Resources declare
   their semantic access roles; distinct admitted families use private concurrent
@@ -146,7 +150,13 @@ Two sizing rules that bite:
   per-stage aggregate, and all-pools update-after-bind limits. It returns
   `UNSUPPORTED_FEATURE` with an exact FULL/backend diagnostic rather than
   clamping; the caller may then try another adapter from the runtime. Values
-  above `MAX_SHADER_HEAP_CAPACITY` remain `INVALID_ARGUMENT`.
+  above `MAX_SHADER_HEAP_CAPACITY` remain `INVALID_ARGUMENT`. The 4096-texture
+  and 256-sampler defaults are retained deliberately: every relevant
+  update-after-bind limit is at least 500,000 when the required descriptor
+  indexing feature is supported, so the heap's largest checked aggregate is
+  8,448 descriptors. These checks are necessary compatibility gates, not
+  reservations of device-wide capacity shared with other update-after-bind
+  pools or pipeline layouts.
 
 - **Shader-visible indices have caller-managed lifetime.** Destroying a
   `TextureView` recycles its raw index immediately. Wait or discard every use

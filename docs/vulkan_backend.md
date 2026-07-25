@@ -830,9 +830,9 @@ cmd_texture_barrier -> vk::ImageMemoryBarrier2
 its producer and consumer stages; draw-argument and depth/stencil cache paths
 are enabled only by their hazard flags. Invalid,
 contradictory, consumer-incompatible, or queue-unsupported scopes fault before
-recording. Trusted entries retain safe lowering and command-state checks but
-treat detailed stage/hazard/queue misuse as a caller contract. Cross-queue
-ordering remains a submission completion-wait concern.
+recording under every policy. `FULL` additionally emits the detailed public
+contract diagnostic; `TRUSTED` returns the same fault without diagnostic work.
+Cross-queue ordering remains a submission completion-wait concern.
 
 A global barrier emits one `VkMemoryBarrier2` and no
 `VkImageMemoryBarrier2`. Because it has no texture identity or subresource

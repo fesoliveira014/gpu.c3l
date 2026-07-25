@@ -280,7 +280,7 @@ Samples may contain local allocator utilities until that extension exists.
 
 ## Texture and sampler access
 
-Strict devices initialize one semantic texture heap and one sampler heap. Public configuration requests capacities and shader-visible index widths. The backend chooses descriptor indexing, descriptor buffers, descriptor heaps, or another mechanism that satisfies the same contract.
+Strict devices initialize one semantic texture heap and one sampler heap. Public configuration requests capacities and shader-visible index widths. The Vulkan backend uses one update-after-bind descriptor-indexing set and rejects adapters or configured capacities that cannot satisfy it.
 
 A texture-view allocation returns:
 
@@ -426,7 +426,7 @@ Examples:
 | Public semantic | Possible Vulkan implementation |
 |---|---|
 | Root GPU addresses | Vulkan buffer device address |
-| Global texture and sampler heaps | descriptor indexing, descriptor buffers, or descriptor heaps |
+| Global texture and sampler heaps | one update-after-bind descriptor-indexing set |
 | Global memory barriers | synchronization2 |
 | Texture transitions | image memory barriers with private layouts |
 | Dynamic render passes | dynamic rendering or cached legacy render passes |

@@ -130,7 +130,11 @@ fn void initialize_adapter(
 ) {
     adapter.physical_device = physical_device;
     vk::get_physical_device_properties(physical_device, &adapter.properties);
-    adapter.shader_heap = query_shader_heap_support(physical_device);
+    if (adapter.properties.api_version >= API_VERSION_1_3) {
+        adapter.shader_heap = query_shader_heap_support(physical_device);
+    } else {
+        adapter.shader_heap = {};
+    }
     adapter.device_baseline_supported = device_baseline_supported(
         physical_device,
         config,
