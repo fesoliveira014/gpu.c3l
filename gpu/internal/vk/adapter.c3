@@ -129,7 +129,11 @@ fn void initialize_adapter(
 ) {
     adapter.physical_device = physical_device;
     vk::get_physical_device_properties(physical_device, &adapter.properties);
-    adapter.strict_heap = query_strict_heap_support(physical_device);
+    if (adapter.properties.api_version >= API_VERSION_1_3) {
+        adapter.strict_heap = query_strict_heap_support(physical_device);
+    } else {
+        adapter.strict_heap = {};
+    }
 
     bool has_driver_properties = adapter.properties.api_version >= API_VERSION_1_2
         || device_supports_extension(physical_device, "VK_KHR_driver_properties");

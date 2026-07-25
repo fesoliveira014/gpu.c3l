@@ -327,6 +327,56 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.unexpected == 0, "presentation selection loads no unrelated procedures");
 }
 
+fn void fake_color_write_mask_a(
+    vk::CommandBuffer command_buffer,
+    uint first_attachment,
+    uint attachment_count,
+    vk::ColorComponentFlags* write_masks,
+) {}
+
+fn void fake_color_write_mask_b(
+    vk::CommandBuffer command_buffer,
+    uint first_attachment,
+    uint attachment_count,
+    vk::ColorComponentFlags* write_masks,
+) {}
+
+fn vk::PFN_vkVoidFunction per_device_color_proc_loader(
+    vk::Device device,
+    char* name,
+) {
+    if (((ZString)name).str_view() != "vkCmdSetColorWriteMaskEXT") {
+        return (vk::PFN_vkVoidFunction)&fake_void_proc;
+    }
+    return (vk::PFN_vkVoidFunction)(device == (vk::Device)(uptr)1
+        ? &fake_color_write_mask_a
+        : &fake_color_write_mask_b);
+}
+
+fn void device_dispatch_loads_per_device() @test {
+    gpu::internal::vk::VkDeviceDispatchPlan plan;
+    gpu::internal::vk::VkDeviceDispatch first =
+        gpu::internal::vk::load_vk_device_dispatch(
+            (vk::Device)(uptr)1,
+            &per_device_color_proc_loader,
+            plan,
+        );
+    gpu::internal::vk::VkDeviceDispatch second =
+        gpu::internal::vk::load_vk_device_dispatch(
+            (vk::Device)(uptr)2,
+            &per_device_color_proc_loader,
+            plan,
+        );
+
+    assert(
+        first.dynamic_color.set_write_mask == &fake_color_write_mask_a
+            && second.dynamic_color.set_write_mask == &fake_color_write_mask_b
+            && first.dynamic_color.set_write_mask
+                != second.dynamic_color.set_write_mask,
+        "device dispatch values retain their own loaded entry points"
+    );
+}
+
 fn vk::Result fake_create_debug_messenger(
     vk::Instance instance,
     vk::DebugUtilsMessengerCreateInfoEXT* info,

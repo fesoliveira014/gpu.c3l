@@ -150,7 +150,13 @@ Two sizing rules that bite:
   per-stage aggregate, and all-pools update-after-bind limits. It returns
   `UNSUPPORTED_FEATURE` with an exact FULL/backend diagnostic rather than
   clamping; the caller may then try another adapter from the runtime. Values
-  above `MAX_SHADER_HEAP_CAPACITY` remain `INVALID_ARGUMENT`.
+  above `MAX_SHADER_HEAP_CAPACITY` remain `INVALID_ARGUMENT`. The 4096-texture
+  and 256-sampler defaults are retained deliberately: every relevant
+  update-after-bind limit is at least 500,000 when the required descriptor
+  indexing feature is supported, so the heap's largest checked aggregate is
+  8,448 descriptors. These checks are necessary compatibility gates, not
+  reservations of device-wide capacity shared with other update-after-bind
+  pools or pipeline layouts.
 
 - **Shader-visible indices have caller-managed lifetime.** Destroying a
   `TextureView` recycles its raw index immediately. Wait or discard every use

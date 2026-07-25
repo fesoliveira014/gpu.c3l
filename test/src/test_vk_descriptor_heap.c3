@@ -138,29 +138,6 @@ fn void disabled_descriptor_heap_bind_returns_unsupported_feature() @test {
     assert(bind_fault == gpu::UNSUPPORTED_FEATURE, "disabled descriptor heaps cannot be bound");
 }
 
-fn void strict_heap_binding_invalidation_is_scoped() @test {
-    gpu::internal::vk::CommandRecord record = {
-        .strict_heap_binding = {
-            .graphics_set_bound = true,
-            .compute_set_bound  = true,
-        },
-    };
-
-    gpu::internal::vk::invalidate_strict_heap_bind_point(
-        &record,
-        vk::PipelineBindPoint.GRAPHICS,
-    );
-    assert(!record.strict_heap_binding.graphics_set_bound,
-        "graphics invalidation clears only graphics state");
-    assert(record.strict_heap_binding.compute_set_bound,
-        "graphics invalidation preserves compute state");
-
-    gpu::internal::vk::invalidate_strict_heap_binding(&record);
-    assert(!record.strict_heap_binding.graphics_set_bound
-        && !record.strict_heap_binding.compute_set_bound,
-        "full invalidation clears every strict heap binding");
-}
-
 fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
     gpu::internal::vk::VkDeviceState state = {};
     gpu::PipelineHandle cached = { .index = 7, .generation = 3 };

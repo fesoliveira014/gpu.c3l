@@ -508,11 +508,9 @@ fn void? validate_strict_device_request_support(
     uint adapter_index,
     gpu::DeviceRequest* request,
 ) {
-    if (runtime_state == null
-        || request == null
-        || adapter_index >= runtime_state.adapters.len) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+    if (request == null) return gpu::INVALID_ARGUMENT~;
+    if (adapter_index >= runtime_state.adapters.len) return gpu::INVALID_HANDLE~;
     if (!gpu::internal::requests_strict(*request)) return;
 
     VkDeviceConfig desc = runtime_device_config(runtime_state);
@@ -1185,7 +1183,8 @@ fn void? validate_strict_heap_support(
         default:
             return gpu::BACKEND_ERROR~;
     }
-    if (device.debug_callback == null) {
+    if (device.debug_callback == null
+        && contract_uses_full_validation(device.validation_policy)) {
         HeapDescriptorTotals totals = descriptor_heap_totals(
             state.texture_capacity,
             state.sampler_capacity,
@@ -1293,7 +1292,7 @@ fn bool candidate_satisfies(
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(candidate, &props);
     if (props.api_version < API_VERSION_1_3) return false;
-    if (catch queue_fault = select_queue_families(candidate)) return false;
+    if (catch select_queue_families(candidate)) return false;
     if (catch check_required_dynamic_state3_extension(candidate)) return false;
 
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color_features =

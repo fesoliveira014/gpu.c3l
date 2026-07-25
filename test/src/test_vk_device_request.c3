@@ -206,6 +206,27 @@ fn void strict_heap_state_preserves_requested_capacities() @test {
     assert(indexing.sampler_capacity == 9, "the requested sampler capacity is preserved");
 }
 
+fn void strict_heap_defaults_fit_required_indexing_limits() @test {
+    gpu::internal::vk::IndexingHeapLimits required_limits = {
+        .max_sampled_images           = 500_000,
+        .max_storage_images           = 500_000,
+        .max_samplers                 = 500_000,
+        .max_per_stage_sampled_images = 500_000,
+        .max_per_stage_storage_images = 500_000,
+        .max_per_stage_samplers       = 500_000,
+        .max_per_stage_resources      = 500_000,
+        .max_all_pools_descriptors    = 500_000,
+    };
+    assert(
+        gpu::internal::vk::indexing_heap_limit_failure(
+            gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+            gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
+            required_limits,
+        ) == gpu::internal::vk::IndexingHeapLimitFailure.NONE,
+        "the shipped defaults fit Vulkan's required update-after-bind limits"
+    );
+}
+
 fn void strict_heap_support_reports_exact_failure() @test {
     gpu::internal::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
@@ -376,6 +397,22 @@ fn void adapter_support_inherits_runtime_device_config() @test {
         );
         assert(info.strict_supported == expected, "adapter info uses the runtime configuration");
         assert(support.supported == expected, "support and adapter info agree");
+        if (expected) {
+            gpu::internal::vk::validate_strict_device_request_support(
+                runtime_state,
+                adapter.adapter_index,
+                &request,
+            )!!;
+        } else {
+            assert(
+                @catch(gpu::internal::vk::validate_strict_device_request_support(
+                    runtime_state,
+                    adapter.adapter_index,
+                    &request,
+                )) == gpu::UNSUPPORTED_FEATURE,
+                "the creation preflight agrees with cached adapter support"
+            );
+        }
 
         gpu::internal::vk::VkDeviceConfig invalid_config = config;
         invalid_config.texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1;

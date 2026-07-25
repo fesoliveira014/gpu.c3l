@@ -1380,7 +1380,8 @@ fn void? validate_strict_device_request_support(
     uint adapter_index,
     gpu::DeviceRequest* request,
 ) {
-    if (runtime_state == null || request == null) return gpu::INVALID_ARGUMENT~;
+    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+    if (request == null) return gpu::INVALID_ARGUMENT~;
     (void)adapter_index;
 }
 

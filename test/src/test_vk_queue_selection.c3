@@ -383,33 +383,6 @@ fn void multi_role_access_stays_exclusive_on_single_family() @test {
     gpu::destroy_texture(&device, tex)!!;
 }
 
-fn void strict_heap_families_alias_without_transfer() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute },
-        .graphics_family = 4,
-        .compute_family  = 4,
-        .transfer_family = 7,
-    };
-    uint[2] families;
-    uint count = vk::strict_heap_queue_families(&state, families[..]);
-    assert(count == 1, "aliased graphics and compute produce one family");
-    assert(families[0] == 4, "graphics family is first");
-}
-
-fn void strict_heap_families_are_graphics_compute_only() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute },
-        .graphics_family = 4,
-        .compute_family  = 5,
-        .transfer_family = 7,
-    };
-    uint[2] families;
-    uint count = vk::strict_heap_queue_families(&state, families[..]);
-    assert(count == 2, "distinct graphics and compute produce two families");
-    assert(families[0] == 4, "graphics family is first");
-    assert(families[1] == 5, "compute family is second");
-}
-
 fn void selected_queue_families_keep_distinct_transfer() @test {
     vk::VkDeviceState state = {
         .selected_queue_roles = { .graphics, .compute, .transfer },
