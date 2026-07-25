@@ -18,7 +18,6 @@ BENCHMARK_TARGETS = (
     "upload_throughput_bench",
     "command_wrapper_bench",
     "command_path_baseline_bench",
-    "command_reference_bench",
     "command_record_bench",
     "lifecycle_bench",
     "submit_batch_bench",
@@ -45,10 +44,6 @@ BENCHMARK_METHODS = {
     "command_path_baseline_bench": (
         "operations=5; direct/public=20000x5; lifecycle=0,1,16,256x5",
         "ns/op; advisory ratio; exact work and equivalence",
-    ),
-    "command_reference_bench": (
-        "unique=1,8,64,256,1024,4096; repeated=100000; mixed=4096; collisions=64; near_capacity=4095",
-        "ns/reference advisory; exact semantic balance; bounded probe and mutex work",
     ),
     "command_record_bench": (
         "direct=20000/phase/repetition; generated=64 prewarm+64/repetition; repetitions=5; cold/warm work counters",
@@ -85,7 +80,7 @@ CONTEXT_FIELDS = ("adapter:", "driver:", "validation:", "queues:")
 # A unit token alone is not enough: the startup header already declares
 # units=..., so the gate demands a number carrying the unit.
 MEASURED_VALUE = re.compile(
-    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|create|submit|poll|destroy|reference)|ms)\b"
+    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|create|submit|poll|destroy)|ms)\b"
     r"|uploads_per_sec=\d[\d,.]*\b"
     r"|(?:direct|public)_median_ns=\d[\d,.]*\b"
 )
@@ -202,12 +197,7 @@ COMMAND_RECORD_EXPECTED_DIRECT_NATIVE_COMMANDS = 400_000
 COMMAND_RECORD_EXPECTED_GENERATED_COMMANDS = 320
 COMMAND_POLICY_EVIDENCE = re.compile(
     r"^validation policy=(?P<policy>trusted|full) "
-    r"layers=(?P<layers>true|false) "
-    r"reference_lookups=(?P<reference_lookups>[0-9]+) "
-    r"reference_probes=(?P<reference_probes>[0-9]+) "
-    r"reference_mutex=(?P<reference_mutex>[0-9]+) "
-    r"reference_retains=(?P<reference_retains>[0-9]+) "
-    r"reference_releases=(?P<reference_releases>[0-9]+)$"
+    r"layers=(?P<layers>true|false)$"
 )
 COMMAND_POLICY_MODES = (
     ("trusted", False),
@@ -321,30 +311,6 @@ COMMAND_PATH_VK_LIFECYCLE_WORK = re.compile(
     r"registry_lock_acquisitions=(?P<registry_lock_acquisitions>[0-9]+) "
     r"shader_module_creations=(?P<shader_module_creations>[0-9]+) "
     r"pipeline_creations=(?P<pipeline_creations>[0-9]+) status=pass$"
-)
-COMMAND_REFERENCE_UNIQUE_SIZES = (1, 8, 64, 256, 1_024, 4_096)
-COMMAND_REFERENCE_WORK = re.compile(
-    r"^reference_index (?P<kind>unique|mixed|collisions|near_capacity)="
-    r"(?P<count>[0-9]+)(?: additional=(?P<additional>[0-9]+) "
-    r"capacity_fault=(?P<capacity_fault>true|false)| unique=(?P<unique>[0-9]+))? "
-    r"lookups=(?P<lookups>[0-9]+) probes=(?P<probes>[0-9]+) "
-    r"equality=(?P<equality>[0-9]+) "
-    r"(?:duplicates=(?P<duplicates>[0-9]+) )?"
-    r"publications=(?P<publications>[0-9]+) mutex=(?P<mutex>[0-9]+) "
-    r"retains=(?P<retains>[0-9]+) releases=(?P<releases>[0-9]+) "
-    r"host_allocations=(?P<host_allocations>[0-9]+) "
-    r"probes_per_reference=(?P<probes_per_reference>[0-9]+(?:\.[0-9]+)?) "
-    r"equality_per_reference=(?P<equality_per_reference>[0-9]+(?:\.[0-9]+)?) "
-    r"ns/reference=(?P<timing>[0-9]+(?:\.[0-9]+)?)$"
-)
-COMMAND_REFERENCE_REPEATED = re.compile(
-    r"^reference_index repeated=(?P<count>[0-9]+) "
-    r"lookups=(?P<lookups>[0-9]+) probes=(?P<probes>[0-9]+) "
-    r"equality=(?P<equality>[0-9]+) duplicates=(?P<duplicates>[0-9]+) "
-    r"publications=(?P<publications>[0-9]+) mutex=(?P<mutex>[0-9]+) "
-    r"retains=(?P<retains>[0-9]+) releases=(?P<releases>[0-9]+) "
-    r"host_allocations=(?P<host_allocations>[0-9]+) "
-    r"ns/reference=(?P<timing>[0-9]+(?:\.[0-9]+)?)$"
 )
 PIPELINE_CACHE_MATRIX = re.compile(
     r"^phase 1 \(raster matrix, requested=200 native=1 "
@@ -720,155 +686,6 @@ def require_submit_batch_evidence(output):
         raise ValueError("submit_batch_bench reports live resources")
 
 
-def require_command_reference_evidence(output):
-    lines = output.splitlines()
-    if len(lines) != 12:
-        raise ValueError(
-            "command_reference_bench record count is missing or duplicated"
-        )
-    expected_header = (
-        "iterations=unique:1,8,64,256,1024,4096;mixed:4096;"
-        "near_capacity:4095;repeated:100000;collisions:64 "
-        "units=ns/reference"
-    )
-    if lines[0] != expected_header:
-        raise ValueError("command_reference_bench iteration matrix is malformed")
-
-    def require_common(
-        match,
-        expected_count,
-        expected_unique,
-        expected_lookups=None,
-    ):
-        if match is None:
-            raise ValueError("command_reference_bench work record is malformed")
-        values = {
-            field: int(match.group(field))
-            for field in (
-                "count",
-                "lookups",
-                "probes",
-                "equality",
-                "publications",
-                "mutex",
-                "retains",
-                "releases",
-                "host_allocations",
-            )
-        }
-        if values["count"] != expected_count:
-            raise ValueError("command_reference_bench workload size mismatch")
-        if expected_lookups is None:
-            expected_lookups = expected_count
-        if values["lookups"] != expected_lookups:
-            raise ValueError("command_reference_bench lookup work mismatch")
-        if values["host_allocations"] != 0:
-            raise ValueError("command_reference_bench warm allocation is nonzero")
-        for field in ("publications", "retains", "releases"):
-            if values[field] != expected_unique:
-                raise ValueError(
-                    f"command_reference_bench {field} work mismatch"
-                )
-        if values["mutex"] > expected_unique:
-            raise ValueError(
-                "command_reference_bench mutex work bound exceeded"
-            )
-        if values["equality"] > values["probes"]:
-            raise ValueError(
-                "command_reference_bench equality work bound exceeded"
-            )
-        probes_per_reference = float(match.group("probes_per_reference"))
-        equality_per_reference = float(match.group("equality_per_reference"))
-        expected_probe_ratio = values["probes"] / expected_count
-        expected_equality_ratio = values["equality"] / expected_count
-        if abs(probes_per_reference - expected_probe_ratio) > 0.001:
-            raise ValueError("command_reference_bench probe ratio mismatch")
-        if abs(equality_per_reference - expected_equality_ratio) > 0.001:
-            raise ValueError("command_reference_bench equality ratio mismatch")
-        if float(match.group("timing")) <= 0.0:
-            raise ValueError("command_reference_bench advisory timing is invalid")
-        return values
-
-    for line, expected_count in zip(
-        lines[1:7],
-        COMMAND_REFERENCE_UNIQUE_SIZES,
-    ):
-        match = COMMAND_REFERENCE_WORK.fullmatch(line)
-        if match is None or match.group("kind") != "unique":
-            raise ValueError("command_reference_bench unique record is malformed")
-        values = require_common(match, expected_count, expected_count)
-        if values["probes"] > expected_count * 8:
-            raise ValueError("command_reference_bench unique probe bound exceeded")
-
-    repeated = COMMAND_REFERENCE_REPEATED.fullmatch(lines[7])
-    if repeated is None:
-        raise ValueError("command_reference_bench repeated record is malformed")
-    repeated_count = 100_000
-    exact_repeated = {
-        "count": repeated_count,
-        "lookups": repeated_count + 1,
-        "duplicates": repeated_count,
-        "publications": 1,
-        "retains": 1,
-        "releases": 1,
-        "host_allocations": 0,
-    }
-    for field, expected in exact_repeated.items():
-        if int(repeated.group(field)) != expected:
-            raise ValueError(
-                f"command_reference_bench repeated {field} work mismatch"
-            )
-    if int(repeated.group("probes")) > repeated_count + 1:
-        raise ValueError(
-            "command_reference_bench repeated probe bound exceeded"
-        )
-    if int(repeated.group("equality")) > repeated_count:
-        raise ValueError(
-            "command_reference_bench repeated equality bound exceeded"
-        )
-    if int(repeated.group("mutex")) > 1:
-        raise ValueError(
-            "command_reference_bench repeated mutex bound exceeded"
-        )
-    if float(repeated.group("timing")) <= 0.0:
-        raise ValueError("command_reference_bench advisory timing is invalid")
-
-    mixed = COMMAND_REFERENCE_WORK.fullmatch(lines[8])
-    if (mixed is None or mixed.group("kind") != "mixed"
-            or int(mixed.group("unique") or 0) != 2_048
-            or int(mixed.group("duplicates") or 0) != 2_048):
-        raise ValueError("command_reference_bench mixed record is malformed")
-    mixed_values = require_common(mixed, 4_096, 2_048)
-    if mixed_values["probes"] > 4_096 * 8:
-        raise ValueError("command_reference_bench mixed probe bound exceeded")
-
-    collision = COMMAND_REFERENCE_WORK.fullmatch(lines[9])
-    if collision is None or collision.group("kind") != "collisions":
-        raise ValueError("command_reference_bench collision record is malformed")
-    collision_values = require_common(collision, 64, 64)
-    if collision_values["probes"] > 64 * 65 // 2:
-        raise ValueError(
-            "command_reference_bench collision probe bound exceeded"
-        )
-
-    near = COMMAND_REFERENCE_WORK.fullmatch(lines[10])
-    if (near is None or near.group("kind") != "near_capacity"
-            or int(near.group("additional") or 0) != 2
-            or near.group("capacity_fault") != "true"):
-        raise ValueError("command_reference_bench capacity record is malformed")
-    near_values = require_common(
-        near,
-        4_095,
-        4_095,
-        expected_lookups=4_097,
-    )
-    if near_values["probes"] > 4_095 * 8:
-        raise ValueError("command_reference_bench capacity probe bound exceeded")
-
-    if lines[11] != "reference_index_check status=pass":
-        raise ValueError("command_reference_bench structural check failed")
-
-
 def evaluate_regression_thresholds(output, target, enforce=False):
     advisories = []
     for label, pattern, maximum, required in REGRESSION_THRESHOLDS.get(target, ()):
@@ -949,29 +766,6 @@ def require_command_policy_evidence(output, expected=None):
         raise ValueError(
             "command_record_bench policy mode mismatch: "
             f"{actual} != {expected}"
-        )
-    reference_work = {
-        field: int(match.group(field))
-        for field in (
-            "reference_lookups",
-            "reference_probes",
-            "reference_mutex",
-            "reference_retains",
-            "reference_releases",
-        )
-    }
-    if policy == "full":
-        if (
-            reference_work["reference_retains"] == 0
-            or reference_work["reference_releases"]
-                != reference_work["reference_retains"]
-        ):
-            raise ValueError(
-                "command_record_bench full reference work is missing or unbalanced"
-            )
-    elif any(reference_work.values()):
-        raise ValueError(
-            "command_record_bench trusted policy performed forbidden reference work"
         )
     warm_lines = [
         line for line in output.splitlines()
@@ -1158,8 +952,6 @@ def require_measurement(
         require_command_wrapper_evidence(output)
     if target == "command_path_baseline_bench":
         require_command_path_vulkan_evidence(output)
-    if target == "command_reference_bench":
-        require_command_reference_evidence(output)
     if target == "allocation_bench":
         for phase, pattern in ALLOCATION_PHASES:
             if not pattern.search(output):

@@ -946,7 +946,7 @@ fn void? full_texture_barrier(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(state, record, checkpoint);
+    defer catch rollback_command_references(record, checkpoint);
     LoweredTextureBarrier lowered = validate_track_and_lower_texture_barrier(
         state:     state,
         record:    record,

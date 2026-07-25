@@ -6,7 +6,6 @@ import gpu::internal::vk @public;
 import vk;
 import std::atomic::types;
 import std::core::mem::alloc;
-import std::core::mem::allocators;
 
 struct PolicyDiagnosticCapture {
     uint calls;
@@ -214,8 +213,7 @@ fn void trusted_keeps_reference_storage_empty_through_retirement() @test {
         vk::CommandScratch* scratch =
             &allocator_slot.scratch[submitted.allocator_buffer];
         assert(scratch.references.ptr == null
-            && scratch.reference_count == 0
-            && scratch.reference_index.epoch == 0,
+            && scratch.reference_count == 0,
             "trusted submission transfers empty reference storage");
     }
     gpu::wait_completion(completion)!!;
@@ -272,35 +270,45 @@ fn void full_rejects_destruction_until_each_lifecycle_release() @test {
     vk::VkDeviceState* state = policy_device_state(&device);
 
     OwnedSpan recording = policy_span(&device, { .graphics }, "recording");
-    vk::reset_command_reference_work_counters(state);
+    Atomic{uint}* recording_counter =
+        &state.allocations.get(
+            recording.allocation,
+        )!!.tracked_command_references;
     gpu::CommandList commands = record_policy_fill(&allocator, recording.span);
+    assert(recording_counter.load(AtomicOrdering.RELAXED) == 1,
+        "recording owns one retained resource reference");
     assert(@catch(gpu::free_allocation(&device, &recording.allocation))
         == gpu::RESOURCE_IN_USE,
         "full validation rejects destruction during recording");
     gpu::discard_commands(&commands)!!;
-    vk::CommandReferenceWorkCounters work =
-        vk::command_reference_work_counters(state);
-    assert(work.retains == 1 && work.releases == 1,
+    assert(recording_counter.load(AtomicOrdering.RELAXED) == 0,
         "recording discard releases its one retained resource exactly once");
     gpu::free_allocation(&device, &recording.allocation)!!;
     recording.span = {};
 
     OwnedSpan executable = policy_span(&device, { .graphics }, "executable");
-    vk::reset_command_reference_work_counters(state);
+    Atomic{uint}* executable_counter =
+        &state.allocations.get(
+            executable.allocation,
+        )!!.tracked_command_references;
     commands = record_policy_fill(&allocator, executable.span);
     gpu::ExecutableCommandList list = gpu::end_commands(&commands)!!;
+    assert(executable_counter.load(AtomicOrdering.RELAXED) == 1,
+        "executable commands own one retained resource reference");
     assert(@catch(gpu::free_allocation(&device, &executable.allocation))
         == gpu::RESOURCE_IN_USE,
         "full validation rejects destruction while executable");
     gpu::discard_executable_commands(&list)!!;
-    work = vk::command_reference_work_counters(state);
-    assert(work.retains == 1 && work.releases == 1,
+    assert(executable_counter.load(AtomicOrdering.RELAXED) == 0,
         "executable discard releases its retained resource exactly once");
     gpu::free_allocation(&device, &executable.allocation)!!;
     executable.span = {};
 
     OwnedSpan submitted = policy_span(&device, { .graphics }, "submitted");
-    vk::reset_command_reference_work_counters(state);
+    Atomic{uint}* submitted_counter =
+        &state.allocations.get(
+            submitted.allocation,
+        )!!.tracked_command_references;
     commands = record_policy_fill(&allocator, submitted.span);
     list = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { list };
@@ -309,12 +317,13 @@ fn void full_rejects_destruction_until_each_lifecycle_release() @test {
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
         &submit,
     )!!;
+    assert(submitted_counter.load(AtomicOrdering.RELAXED) == 1,
+        "submitted commands own one retained resource reference");
     assert(@catch(gpu::free_allocation(&device, &submitted.allocation))
         == gpu::RESOURCE_IN_USE,
         "full validation rejects destruction before submitted work is retired");
     gpu::wait_completion(completion)!!;
-    work = vk::command_reference_work_counters(state);
-    assert(work.retains == 1 && work.releases == 1,
+    assert(submitted_counter.load(AtomicOrdering.RELAXED) == 0,
         "completion retirement releases its retained resource exactly once");
     gpu::free_allocation(&device, &submitted.allocation)!!;
     submitted.span = {};
@@ -604,100 +613,41 @@ fn void partial_creation_rolls_back_across_both_contract_modes() @test {
     }
 }
 
-fn void empty_and_populated_fixed_reference_storage_release_exactly() @test {
-    vk::VkDeviceState state = {
-        .host_allocator = &allocators::LIBC_ALLOCATOR,
-    };
-    state.resource_mutex.init()!!;
-    defer (void)state.resource_mutex.destroy();
-    state.command_mutex.init()!!;
-    defer (void)state.command_mutex.destroy();
-
-    vk::CommandResourceReference[] empty;
-    vk::reset_command_reference_work_counters(&state);
-    vk::release_tracked_command_references(&state, empty, 0);
-    assert(empty.len == 0,
-        "empty command reference storage remains empty during release");
-    vk::CommandReferenceWorkCounters work =
-        vk::command_reference_work_counters(&state);
-    assert(work.releases == 0,
-        "empty command reference storage performs no release work");
-
-    Atomic{uint} tracked;
-    tracked.store(1, AtomicOrdering.RELAXED);
-    vk::CommandResourceReference[1] populated = {{
-        .tracked_command_references = &tracked,
-    }};
-    vk::reset_command_reference_work_counters(&state);
-    vk::release_tracked_command_references(&state, populated[..], 1);
-    work = vk::command_reference_work_counters(&state);
-    assert(tracked.load(AtomicOrdering.RELAXED) == 0
-        && work.releases == 1,
-        "fixed populated storage decrements its retained counter exactly once");
-}
-
-fn void command_reference_clear_releases_list_and_resets_index() @test {
-    vk::VkDeviceState state;
+fn void command_reference_clear_releases_the_live_list() @test {
     Atomic{uint}[2] tracked;
     vk::CommandResourceReference[2] references;
-    vk::CommandReferenceIndexCell[4] cells;
     foreach (i, &counter : tracked) {
         counter.store(1, AtomicOrdering.RELAXED);
         references[i] = {
-            .owner                      = 19,
-            .index                      = (uint)i,
-            .generation                 = 1,
-            .tracked_command_references = counter,
+            .owner            = 19,
+            .index            = (uint)i,
+            .generation       = 1,
+            .retained_counter = counter,
         };
     }
     vk::CommandScratch scratch = {
         .references      = references[..],
-        .reference_index = {
-            .cells = cells[..],
-            .epoch = 3,
-        },
         .reference_count = 2,
     };
-    for (uint i = 0; i < scratch.reference_count; i++) {
-        vk::CommandReferenceProbe insertion = vk::probe_command_reference(
-            &state,
-            &scratch,
-            &scratch.references[i],
-        )!!;
-        vk::publish_command_reference(
-            state:           &state,
-            scratch:         &scratch,
-            reference:       &scratch.references[i],
-            probe:           &insertion,
-            reference_index: i,
-        );
-    }
-    vk::reset_command_reference_work_counters(&state);
 
-    vk::clear_command_scratch_references(&state, &scratch);
+    vk::clear_command_scratch_references(&scratch);
 
-    vk::CommandReferenceWorkCounters work =
-        vk::command_reference_work_counters(&state);
-    bool prior_epoch_only = true;
-    foreach (&cell : cells) {
-        prior_epoch_only &= cell.epoch != scratch.reference_index.epoch;
-    }
     assert(tracked[0].load(AtomicOrdering.RELAXED) == 0
         && tracked[1].load(AtomicOrdering.RELAXED) == 0
-        && scratch.reference_count == 0
-        && scratch.reference_index.epoch == 4
-        && prior_epoch_only,
-        "clear releases the recorded list and publishes an empty new epoch");
-    assert(work.releases == 2,
-        "clear reports one release for every recorded reference");
+        && scratch.reference_count == 0,
+        "clear releases every live reference exactly once");
+    tracked[0].store(1, AtomicOrdering.RELAXED);
+    tracked[1].store(1, AtomicOrdering.RELAXED);
+    vk::release_tracked_command_references({}, 0);
+    assert(tracked[0].load(AtomicOrdering.RELAXED) == 1
+        && tracked[1].load(AtomicOrdering.RELAXED) == 1,
+        "an empty release preserves every counter");
 }
 
 fn void submission_transfer_accepts_empty_and_populated_reference_storage() @test {
     vk::VkDeviceState state = {
         .host_allocator = &allocators::LIBC_ALLOCATOR,
     };
-    state.resource_mutex.init()!!;
-    defer (void)state.resource_mutex.destroy();
     state.command_mutex.init()!!;
     defer (void)state.command_mutex.destroy();
     gpu::Queue queue = {
@@ -708,7 +658,7 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
     Atomic{uint} tracked;
     tracked.store(1, AtomicOrdering.RELAXED);
     vk::CommandResourceReference[1] populated_references = {{
-        .tracked_command_references = &tracked,
+        .retained_counter = &tracked,
     }};
     vk::CommandScratch[2] scratch = {{
         .in_use = true,
@@ -724,10 +674,10 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
         .owner = 1,
     };
     gpu::CommandAllocatorHandle allocator = state.command_allocators.alloc({
-        .queue             = queue,
-        .scratch           = scratch[..],
-        .available         = available[..],
-        .live_executables  = 1,
+        .queue            = queue,
+        .scratch          = scratch[..],
+        .available        = available[..],
+        .live_executables = 1,
     })!!;
     vk::CommandAllocatorSlot* allocator_slot =
         state.command_allocators.get(allocator)!!;
@@ -748,14 +698,14 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
         .allocator_buffer = 0,
         .scratch          = &scratch[0],
     };
-    gpu::internal::vk::CommandRecord* empty_record = state.commands.claim(
-        device:        {},
-        ops:           null,
-        device_state:  &state,
-        value:         empty,
+    vk::CommandRecord* empty_record = state.commands.claim(
+        device:       {},
+        ops:          null,
+        device_state: &state,
+        value:        empty,
     )!!;
     empty_record.state = gpu::internal::CommandState.SUBMITTING;
-    gpu::internal::vk::CommandRecord*[1] empty_records = { empty_record };
+    vk::CommandRecord*[1] empty_records = { empty_record };
     completions[0].retirement_mutex.lock()!!;
     vk::publish_pending_commands_locked(
         state:      &state,
@@ -768,12 +718,9 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
     assert(completions[0].submitted_count == 1
         && scratch[0].reference_count == 0,
         "submission transfers empty reference storage without allocation");
-    vk::reset_command_reference_work_counters(&state);
     vk::destroy_submitted_commands(&state);
-    vk::CommandReferenceWorkCounters work =
-        vk::command_reference_work_counters(&state);
-    assert(work.releases == 0,
-        "empty submitted teardown performs no reference work");
+    assert(scratch[0].reference_count == 0,
+        "empty submitted teardown retains no references");
 
     allocator_slot.live_executables = 1;
     vk::CommandRecord populated = {
@@ -781,16 +728,14 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
         .allocator_buffer = 1,
         .scratch          = &scratch[1],
     };
-    gpu::internal::vk::CommandRecord* populated_record = state.commands.claim(
-        device:        {},
-        ops:           null,
-        device_state:  &state,
-        value:         populated,
+    vk::CommandRecord* populated_record = state.commands.claim(
+        device:       {},
+        ops:          null,
+        device_state: &state,
+        value:        populated,
     )!!;
     populated_record.state = gpu::internal::CommandState.SUBMITTING;
-    gpu::internal::vk::CommandRecord*[1] populated_records = {
-        populated_record,
-    };
+    vk::CommandRecord*[1] populated_records = { populated_record };
     completions[0].retirement_mutex.lock()!!;
     vk::publish_pending_commands_locked(
         state:      &state,
@@ -802,11 +747,8 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
     populated_record.state = gpu::internal::CommandState.SUBMITTED;
     assert(scratch[1].reference_count == 1,
         "submission transfers populated reference ownership exactly once");
-    vk::reset_command_reference_work_counters(&state);
     vk::destroy_submitted_commands(&state);
-    work = vk::command_reference_work_counters(&state);
-    assert(tracked.load(AtomicOrdering.RELAXED) == 0
-        && work.releases == 1,
+    assert(tracked.load(AtomicOrdering.RELAXED) == 0,
         "submitted teardown releases the transferred reference exactly once");
 }
 
@@ -829,8 +771,11 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
         gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
         OwnedSpan owned = policy_span(&device, { .graphics }, "lost_command");
         vk::VkDeviceState* state = policy_device_state(&device);
+        Atomic{uint}* retained_counter =
+            &state.allocations.get(
+                owned.allocation,
+            )!!.tracked_command_references;
         vk::CommandBufferStats before = vk::command_buffer_stats(state);
-        vk::reset_command_reference_work_counters(state);
         gpu::CommandList commands = record_policy_fill(&allocator, owned.span);
         vk::CommandRecord* record = vk::resolve_command(&commands)!!;
         vk::CommandBufferStats recorded = vk::command_buffer_stats(state);
@@ -839,16 +784,16 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
             "device-loss setup reflects the selected contract mode");
         assert((record.scratch.references.ptr != null) == full,
             "device-loss setup owns reference storage only in full mode");
+        assert(retained_counter.load(AtomicOrdering.RELAXED)
+                == (full ? (uint)1 : (uint)0),
+            "device-loss setup retains exactly the selected resource work");
         assert(recorded.allocated == before.allocated
             && recorded.freed == before.freed
             && recorded.pending == before.pending,
             "device-loss recording reuses its allocator's native buffer");
         gpu::internal::mark_device_lost(&device);
         gpu::discard_commands(&commands)!!;
-        vk::CommandReferenceWorkCounters work =
-            vk::command_reference_work_counters(state);
-        assert(work.retains == (full ? (ulong)1 : (ulong)0)
-            && work.releases == (full ? (ulong)1 : (ulong)0),
+        assert(retained_counter.load(AtomicOrdering.RELAXED) == 0,
             "device-loss cleanup releases exactly the selected reference work");
         vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
         assert(discarded.allocated == recorded.allocated
@@ -862,145 +807,95 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
     }
 }
 
-fn void command_reference_index_uses_full_identity_and_exact_probes() @test {
-    vk::VkDeviceState state;
-    vk::CommandReferenceIndexCell[8] cells;
-    vk::CommandResourceReference[4] references;
-    vk::CommandScratch scratch = {
-        .references      = references[..],
-        .reference_index = {
-            .cells = cells[..],
-            .epoch = 1,
-        },
-    };
+fn void command_reference_linear_lookup_uses_full_identity() @test {
     vk::CommandResourceReference first = {
         .owner      = 17,
         .index      = 23,
         .generation = 5,
     };
+    vk::CommandResourceReference different_owner = first;
+    different_owner.owner++;
+    vk::CommandResourceReference different_index = first;
+    different_index.index++;
+    vk::CommandResourceReference different_generation = first;
+    different_generation.generation++;
+    vk::CommandResourceReference[1] live = { first };
+    vk::CommandScratch scratch = {
+        .references      = live[..],
+        .reference_count = 1,
+    };
 
-    vk::reset_command_reference_work_counters(&state);
-    vk::CommandReferenceProbe insertion = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &first,
-    )!!;
-    assert(!insertion.found, "a fresh index reports an empty insertion cell");
-    vk::publish_command_reference(
-        state:           &state,
-        scratch:         &scratch,
-        reference:       &first,
-        probe:           &insertion,
-        reference_index: 0,
-    );
-    vk::CommandReferenceProbe duplicate = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &first,
-    )!!;
-    assert(duplicate.found && duplicate.reference_index == 0,
-        "an exact resource identity resolves to its reference slot");
-
-    vk::CommandResourceReference owner_collision = first;
-    do {
-        owner_collision.owner++;
-    } while ((vk::command_reference_hash(&owner_collision)
-            ^ (vk::command_reference_hash(&owner_collision) >> 32))
-        % cells.len != (vk::command_reference_hash(&first)
-            ^ (vk::command_reference_hash(&first) >> 32))
-        % cells.len);
-    vk::CommandResourceReference index_collision = first;
-    do {
-        index_collision.index++;
-    } while ((vk::command_reference_hash(&index_collision)
-            ^ (vk::command_reference_hash(&index_collision) >> 32))
-        % cells.len != (vk::command_reference_hash(&first)
-            ^ (vk::command_reference_hash(&first) >> 32))
-        % cells.len);
-    vk::CommandResourceReference generation_collision = first;
-    do {
-        generation_collision.generation++;
-    } while ((vk::command_reference_hash(&generation_collision)
-            ^ (vk::command_reference_hash(&generation_collision) >> 32))
-        % cells.len != (vk::command_reference_hash(&first)
-            ^ (vk::command_reference_hash(&first) >> 32))
-        % cells.len);
-    vk::CommandReferenceProbe owner_insertion = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &owner_collision,
-    )!!;
-    vk::publish_command_reference(
-        state:           &state,
-        scratch:         &scratch,
-        reference:       &owner_collision,
-        probe:           &owner_insertion,
-        reference_index: 1,
-    );
-    vk::CommandReferenceProbe index_insertion = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &index_collision,
-    )!!;
-    vk::publish_command_reference(
-        state:           &state,
-        scratch:         &scratch,
-        reference:       &index_collision,
-        probe:           &index_insertion,
-        reference_index: 2,
-    );
-    vk::CommandReferenceProbe generation_insertion =
-        vk::probe_command_reference(
-            &state,
-            &scratch,
-            &generation_collision,
-        )!!;
-    vk::publish_command_reference(
-        state:           &state,
-        scratch:         &scratch,
-        reference:       &generation_collision,
-        probe:           &generation_insertion,
-        reference_index: 3,
-    );
-    vk::CommandReferenceProbe first_again = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &first,
-    )!!;
-    vk::CommandReferenceProbe owner_again = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &owner_collision,
-    )!!;
-    vk::CommandReferenceProbe index_again = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &index_collision,
-    )!!;
-    vk::CommandReferenceProbe generation_again = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &generation_collision,
-    )!!;
-    vk::CommandReferenceWorkCounters counters =
-        vk::command_reference_work_counters(&state);
-    assert(!owner_insertion.found
-        && !index_insertion.found
-        && !generation_insertion.found
-        && first_again.found && first_again.reference_index == 0
-        && owner_again.found && owner_again.reference_index == 1
-        && index_again.found && index_again.reference_index == 2
-        && generation_again.found
-            && generation_again.reference_index == 3,
-        "colliding owner, index, and generation values remain distinct identities");
-    assert(counters.lookups == 9
-        && counters.probes == 21
-        && counters.equality_checks == 17
-        && counters.index_publications == 4,
-        "reference-index counters expose exact lookup, probe, equality, and publication work");
+    assert(vk::contains_command_reference(&scratch, &first),
+        "linear lookup finds an exact resource identity");
+    assert(!vk::contains_command_reference(&scratch, &different_owner)
+        && !vk::contains_command_reference(&scratch, &different_index)
+        && !vk::contains_command_reference(&scratch, &different_generation),
+        "linear lookup compares owner, index, and generation");
 }
 
-fn void command_reference_duplicate_avoids_mutex_and_retain_work() @test {
+fn void command_reference_maximum_capacity_is_transactional() @test {
+    PolicyDiagnosticCapture capture;
+    gpu::RuntimeDesc desc = policy_runtime_desc(
+        contract:       gpu::ContractValidation.FULL,
+        vulkan_layers:   false,
+        callback:        false,
+        debug_names:     false,
+        capture:         &capture,
+    );
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity          = 1,
+        .max_resource_references_per_list =
+            gpu::MAX_COMMAND_REFERENCES_PER_LIST,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        device: &device,
+        queue:  queue,
+        desc:   &allocator_desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    Atomic{uint}[gpu::MAX_COMMAND_REFERENCES_PER_LIST] counters;
+
+    for (uint i = 0; i < gpu::MAX_COMMAND_REFERENCES_PER_LIST; i++) {
+        counters[i].store(1, AtomicOrdering.RELAXED);
+        vk::CommandResourceReference candidate = {
+            .owner            = 41,
+            .index            = i,
+            .generation       = 1,
+            .retained_counter = &counters[i],
+        };
+        vk::CommandResourceReference[1] candidates = { candidate };
+        vk::preflight_command_references(record, candidates[..])!!;
+        vk::append_command_reference(record.scratch, candidate);
+    }
+
+    vk::CommandResourceReference overflow = {
+        .owner      = 41,
+        .index      = gpu::MAX_COMMAND_REFERENCES_PER_LIST,
+        .generation = 1,
+    };
+    vk::CommandResourceReference[1] overflow_candidates = { overflow };
+    assert(@catch(vk::preflight_command_references(
+        record,
+        overflow_candidates[..],
+    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
+        "the first distinct reference above the public maximum is rejected");
+    assert(record.scratch.reference_count
+            == gpu::MAX_COMMAND_REFERENCES_PER_LIST,
+        "maximum-capacity rejection preserves the complete retained prefix");
+
+    gpu::discard_commands(&commands)!!;
+    foreach (&counter : counters) {
+        assert(counter.load(AtomicOrdering.RELAXED) == 0,
+            "discard releases every retained maximum-capacity reference");
+    }
+}
+
+fn void command_reference_tracking_deduplicates_and_reuses_scratch() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
         contract:       gpu::ContractValidation.FULL,
@@ -1021,12 +916,12 @@ fn void command_reference_duplicate_avoids_mutex_and_retain_work() @test {
         &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    OwnedSpan owned = policy_span(&device, { .graphics }, "reference_index");
+    OwnedSpan owned = policy_span(&device, { .graphics }, "reference_list");
     defer free_owned_span(&device, &owned)!!;
     vk::VkDeviceState* state = policy_device_state(&device);
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    vk::reset_command_reference_work_counters(state);
+    vk::CommandScratch* scratch = record.scratch;
 
     vk::track_command_reference(
         state:      state,
@@ -1042,20 +937,21 @@ fn void command_reference_duplicate_avoids_mutex_and_retain_work() @test {
         index:      owned.span.index,
         generation: owned.span.generation,
     )!!;
-    vk::CommandReferenceWorkCounters counters =
-        vk::command_reference_work_counters(state);
     assert(record.scratch.reference_count == 1
-        && counters.lookups == 2
-        && counters.duplicate_hits == 1
-        && counters.resource_mutex_acquisitions == 1
-        && counters.retains == 1
-        && counters.index_publications == 1,
-        "a duplicate lookup returns before mutex, retain, and publication work");
+        && record.scratch.references[0].retained_counter.load(
+            AtomicOrdering.RELAXED,
+        ) == 1,
+        "an exact duplicate is retained and appended once");
+    Atomic{uint}* retained_counter =
+        record.scratch.references[0].retained_counter;
     gpu::discard_commands(&commands)!!;
+    assert(scratch.reference_count == 0,
+        "recording discard clears the live reference list");
 
     commands = gpu::begin_commands(&allocator)!!;
     record = vk::resolve_command(&commands)!!;
-    vk::reset_command_reference_work_counters(state);
+    assert(record.scratch == scratch,
+        "the allocator reuses its fixed scratch storage");
     vk::track_command_reference(
         state:      state,
         record:     record,
@@ -1063,12 +959,8 @@ fn void command_reference_duplicate_avoids_mutex_and_retain_work() @test {
         index:      owned.span.index,
         generation: owned.span.generation,
     )!!;
-    counters = vk::command_reference_work_counters(state);
-    assert(record.scratch.reference_count == 1
-        && counters.duplicate_hits == 0
-        && counters.resource_mutex_acquisitions == 1
-        && counters.retains == 1,
-        "discard resets the index epoch before the scratch buffer is reused");
+    assert(record.scratch.reference_count == 1,
+        "discarded scratch starts with an empty reference list when reused");
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -1077,7 +969,9 @@ fn void command_reference_duplicate_avoids_mutex_and_retain_work() @test {
 
     commands = gpu::begin_commands(&allocator)!!;
     record = vk::resolve_command(&commands)!!;
-    vk::reset_command_reference_work_counters(state);
+    assert(record.scratch.reference_count == 0
+        && retained_counter.load(AtomicOrdering.RELAXED) == 0,
+        "completion retirement clears references before scratch reuse");
     vk::track_command_reference(
         state:      state,
         record:     record,
@@ -1085,16 +979,67 @@ fn void command_reference_duplicate_avoids_mutex_and_retain_work() @test {
         index:      owned.span.index,
         generation: owned.span.generation,
     )!!;
-    counters = vk::command_reference_work_counters(state);
-    assert(record.scratch.reference_count == 1
-        && counters.duplicate_hits == 0
-        && counters.resource_mutex_acquisitions == 1
-        && counters.retains == 1,
-        "completion retirement resets the index epoch before scratch reuse");
+    assert(record.scratch.reference_count == 1,
+        "retired scratch starts with an empty reference list when reused");
     gpu::discard_commands(&commands)!!;
 }
 
-fn void texture_reference_publishes_after_retain_and_deduplicates() @test {
+fn void two_full_command_lists_retain_same_resource_independently() @test {
+    PolicyDiagnosticCapture capture;
+    gpu::RuntimeDesc desc = policy_runtime_desc(
+        contract:       gpu::ContractValidation.FULL,
+        vulkan_layers:   false,
+        callback:        false,
+        debug_names:     false,
+        capture:         &capture,
+    );
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = 2,
+    };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &allocator_desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    OwnedSpan owned = policy_span(&device, { .graphics }, "shared_reference");
+    defer free_owned_span(&device, &owned)!!;
+
+    gpu::CommandList first = record_policy_fill(&allocator, owned.span);
+    gpu::CommandList second = record_policy_fill(&allocator, owned.span);
+    vk::CommandRecord* first_record = vk::resolve_command(&first)!!;
+    vk::CommandRecord* second_record = vk::resolve_command(&second)!!;
+    Atomic{uint}* retained_counter =
+        first_record.scratch.references[0].retained_counter;
+
+    assert(first_record.scratch.reference_count == 1
+        && second_record.scratch.reference_count == 1
+        && second_record.scratch.references[0].retained_counter
+            == retained_counter
+        && retained_counter.load(AtomicOrdering.RELAXED) == 2,
+        "each simultaneous list owns one retain on the shared resource");
+    assert(@catch(gpu::free_allocation(&device, &owned.allocation))
+        == gpu::RESOURCE_IN_USE,
+        "both live command lists block premature destruction");
+
+    gpu::discard_commands(&first)!!;
+    assert(retained_counter.load(AtomicOrdering.RELAXED) == 1,
+        "discarding one list releases only its independent retain");
+    assert(@catch(gpu::free_allocation(&device, &owned.allocation))
+        == gpu::RESOURCE_IN_USE,
+        "the second live command list keeps destruction blocked");
+
+    gpu::discard_commands(&second)!!;
+    assert(retained_counter.load(AtomicOrdering.RELAXED) == 0,
+        "discarding the second list releases the final retain");
+    gpu::free_allocation(&device, &owned.allocation)!!;
+    owned.span = {};
+}
+
+fn void texture_reference_retain_is_transactional_and_deduplicated() @test {
     vk::VkDeviceState state;
     vk::TextureCell[1] texture_cells = {{
         .generation = 1,
@@ -1107,13 +1052,8 @@ fn void texture_reference_publishes_after_retain_and_deduplicates() @test {
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
     vk::CommandResourceReference[2] references;
-    vk::CommandReferenceIndexCell[4] cells;
     vk::CommandScratch scratch = {
-        .references      = references[..],
-        .reference_index = {
-            .cells = cells[..],
-            .epoch = 1,
-        },
+        .references = references[..],
     };
     vk::CommandRecord record = { .scratch = &scratch };
     gpu::TextureHandle valid = {
@@ -1123,7 +1063,6 @@ fn void texture_reference_publishes_after_retain_and_deduplicates() @test {
     };
     gpu::TextureHandle stale = valid;
     stale.generation++;
-    vk::reset_command_reference_work_counters(&state);
 
     fault retain_fault = @catch(vk::resolve_tracked_texture_command_reference(
         &state,
@@ -1147,141 +1086,56 @@ fn void texture_reference_publishes_after_retain_and_deduplicates() @test {
         &record,
         valid,
     )!!;
-    vk::CommandReferenceWorkCounters work =
-        vk::command_reference_work_counters(&state);
     assert(scratch.reference_count == 1
         && texture_cells[0].value.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == 1,
-        "a successful texture retain publishes exactly one reference");
-    assert(work.lookups == 3
-        && work.duplicate_hits == 1
-        && work.resource_mutex_acquisitions == 2
-        && work.retains == 1
-        && work.index_publications == 1,
-        "failed and duplicate texture paths cannot publish or retain extra references");
+        "a successful texture retain appends exactly one reference");
 
-    vk::clear_command_scratch_references(&state, &scratch);
+    vk::clear_command_scratch_references(&scratch);
     assert(texture_cells[0].value.tracked_command_references.load(
         AtomicOrdering.RELAXED,
     ) == 0,
         "texture reference cleanup releases the successful retain");
 }
 
-fn void command_reference_rollback_releases_suffix_and_rebuilds_epoch() @test {
-    vk::VkDeviceState state;
+fn void command_reference_rollback_releases_only_the_suffix() @test {
     Atomic{uint}[3] tracked;
     vk::CommandResourceReference[3] references;
     foreach (i, &counter : tracked) {
         counter.store(1, AtomicOrdering.RELAXED);
         references[i] = {
-            .owner                       = 31,
-            .index                       = (uint)i,
-            .generation                  = 1,
-            .tracked_command_references  = counter,
+            .owner            = 31,
+            .index            = (uint)i,
+            .generation       = 1,
+            .retained_counter = counter,
         };
     }
-    vk::CommandReferenceIndexCell[8] cells;
     vk::CommandScratch scratch = {
         .references      = references[..],
-        .reference_index = {
-            .cells = cells[..],
-            .epoch = 7,
-        },
         .reference_count = 3,
     };
-    for (uint i = 0; i < scratch.reference_count; i++) {
-        vk::CommandReferenceProbe probe = vk::probe_command_reference(
-            &state,
-            &scratch,
-            &scratch.references[i],
-        )!!;
-        vk::publish_command_reference(
-            state:           &state,
-            scratch:         &scratch,
-            reference:       &scratch.references[i],
-            probe:           &probe,
-            reference_index: i,
-        );
-    }
     vk::CommandRecord record = { .scratch = &scratch };
-    vk::reset_command_reference_work_counters(&state);
 
-    vk::rollback_command_references(&state, &record, 1);
-    vk::CommandReferenceWorkCounters counters =
-        vk::command_reference_work_counters(&state);
-    assert(scratch.reference_count == 1 && scratch.reference_index.epoch == 8,
-        "rollback advances to a fresh epoch and keeps only the prefix");
+    vk::rollback_command_references(&record, 3);
+    assert(scratch.reference_count == 3
+        && tracked[0].load(AtomicOrdering.RELAXED) == 1
+        && tracked[1].load(AtomicOrdering.RELAXED) == 1
+        && tracked[2].load(AtomicOrdering.RELAXED) == 1,
+        "rollback at the current checkpoint is a no-op");
+    vk::rollback_command_references(&record, 1);
+    assert(scratch.reference_count == 1,
+        "rollback keeps the reference prefix");
     assert(tracked[0].load(AtomicOrdering.RELAXED) == 1
         && tracked[1].load(AtomicOrdering.RELAXED) == 0
         && tracked[2].load(AtomicOrdering.RELAXED) == 0,
         "rollback releases only the discarded reference suffix");
-    assert(counters.releases == 2
-        && counters.rollback_rebuild_publications == 1
-        && counters.lookups == 1
-        && counters.index_publications == 1,
-        "rollback counters expose suffix releases and one prefix rebuild");
-    vk::CommandReferenceProbe retained = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &scratch.references[0],
-    )!!;
-    assert(retained.found && retained.reference_index == 0,
-        "the retained prefix is queryable after rollback rebuild");
+    assert(vk::contains_command_reference(&scratch, &references[0])
+        && !vk::contains_command_reference(&scratch, &references[1]),
+        "the live list contains only the retained prefix");
 }
 
-fn void command_reference_noop_rollback_preserves_epoch_and_index() @test {
-    vk::VkDeviceState state;
-    vk::CommandResourceReference[1] references;
-    references[0] = {
-        .owner      = 37,
-        .index      = 11,
-        .generation = 3,
-    };
-    vk::CommandReferenceIndexCell[4] cells;
-    vk::CommandScratch scratch = {
-        .references      = references[..],
-        .reference_index = {
-            .cells = cells[..],
-            .epoch = 9,
-        },
-        .reference_count = 1,
-    };
-    vk::CommandReferenceProbe insertion = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &scratch.references[0],
-    )!!;
-    vk::publish_command_reference(
-        state:           &state,
-        scratch:         &scratch,
-        reference:       &scratch.references[0],
-        probe:           &insertion,
-        reference_index: 0,
-    );
-    vk::CommandRecord record = { .scratch = &scratch };
-    vk::reset_command_reference_work_counters(&state);
-
-    vk::rollback_command_references(&state, &record, 1);
-    vk::CommandReferenceWorkCounters counters =
-        vk::command_reference_work_counters(&state);
-    assert(scratch.reference_count == 1 && scratch.reference_index.epoch == 9,
-        "a no-op rollback preserves the retained prefix and current epoch");
-    assert(counters.releases == 0
-        && counters.lookups == 0
-        && counters.index_publications == 0
-        && counters.rollback_rebuild_publications == 0,
-        "a no-op rollback performs no release, reset, or rebuild work");
-    vk::CommandReferenceProbe retained = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &scratch.references[0],
-    )!!;
-    assert(retained.found && retained.reference_index == 0,
-        "the retained prefix remains queryable after a no-op rollback");
-}
-
-fn void command_reference_retain_failure_rolls_back_without_publication() @test {
+fn void command_reference_retain_failure_rolls_back_prior_appends() @test {
     vk::VkDeviceState state;
     vk::BufferCell[2] buffer_cells;
     buffer_cells[0] = { .generation = 1, .used = true };
@@ -1293,16 +1147,10 @@ fn void command_reference_retain_failure_rolls_back_without_publication() @test 
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
     vk::CommandResourceReference[2] references;
-    vk::CommandReferenceIndexCell[4] cells;
     vk::CommandScratch scratch = {
-        .references      = references[..],
-        .reference_index = {
-            .cells = cells[..],
-            .epoch = 1,
-        },
+        .references = references[..],
     };
     vk::CommandRecord record = { .scratch = &scratch };
-    vk::reset_command_reference_work_counters(&state);
 
     vk::track_command_reference(
         state:      &state,
@@ -1320,74 +1168,11 @@ fn void command_reference_retain_failure_rolls_back_without_publication() @test 
     ));
     assert(retain_fault == gpu::INVALID_HANDLE,
         "the injected second retain rejects its invalid resource identity");
-    vk::rollback_command_references(&state, &record, 0);
+    vk::rollback_command_references(&record, 0);
 
-    vk::CommandReferenceWorkCounters counters =
-        vk::command_reference_work_counters(&state);
-    bool current_epoch_empty = true;
-    foreach (&cell : cells) {
-        current_epoch_empty &= cell.epoch != scratch.reference_index.epoch;
-    }
     assert(scratch.reference_count == 0
-        && scratch.reference_index.epoch == 2
-        && current_epoch_empty
         && buffer_cells[0].value.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == 0,
-        "rollback removes the retained prefix and leaves no live index entry");
-    assert(counters.lookups == 2
-        && counters.resource_mutex_acquisitions == 2
-        && counters.retains == 1
-        && counters.index_publications == 1
-        && counters.releases == 1
-        && counters.rollback_rebuild_publications == 0,
-        "a failed retain publishes nothing and rollback releases prior work once");
-}
-
-fn void command_reference_epoch_rollover_clears_each_index_cell() @test {
-    vk::VkDeviceState state;
-    vk::CommandReferenceIndexCell[4] cells;
-    foreach (&cell : cells) cell.epoch = uint::max;
-    vk::CommandScratch scratch = {
-        .reference_index = {
-            .cells = cells[..],
-            .epoch = uint::max,
-        },
-    };
-    vk::reset_command_reference_work_counters(&state);
-
-    vk::reset_command_reference_index(&state, &scratch);
-    vk::CommandReferenceWorkCounters counters =
-        vk::command_reference_work_counters(&state);
-    bool cells_cleared = true;
-    foreach (&cell : cells) cells_cleared &= cell.epoch == 0;
-    assert(scratch.reference_index.epoch == 1 && cells_cleared,
-        "epoch rollover clears stale occupancy before restarting at one");
-    assert(counters.rollover_cells_cleared == cells.len,
-        "epoch rollover reports exactly the cells it clears");
-
-    vk::CommandResourceReference reference = {
-        .owner      = 43,
-        .index      = 2,
-        .generation = 9,
-    };
-    vk::CommandReferenceProbe insertion = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &reference,
-    )!!;
-    vk::publish_command_reference(
-        state:           &state,
-        scratch:         &scratch,
-        reference:       &reference,
-        probe:           &insertion,
-        reference_index: 0,
-    );
-    vk::CommandReferenceProbe duplicate = vk::probe_command_reference(
-        &state,
-        &scratch,
-        &reference,
-    )!!;
-    assert(!insertion.found && duplicate.found,
-        "the restarted epoch accepts insertion and exact duplicate lookup");
+        "a failed later retain rolls back every earlier append");
 }

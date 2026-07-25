@@ -692,12 +692,14 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
     )!!;
     vk::AllocationSlot* slot = fixture.state.allocations.get(allocation)!!;
     vk::CommandResourceReference[1] references = {{
-        .owner                      = allocation.owner,
-        .index                      = allocation.index,
-        .generation                 = allocation.generation,
-        .tracked_command_references = &slot.tracked_command_references,
+        .owner      = allocation.owner,
+        .index      = allocation.index,
+        .generation = allocation.generation,
     }};
-    vk::retain_tracked_command_reference(&fixture.state, references[0])!!;
+    vk::retain_tracked_command_reference(
+        &fixture.state,
+        &references[0],
+    )!!;
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,

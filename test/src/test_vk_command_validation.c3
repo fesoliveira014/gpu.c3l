@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 import vk;
+import std::atomic::types;
 import std::core::mem;
 import std::io;
 
@@ -96,13 +97,8 @@ fn void texture_copy_layouts_follow_the_selected_texture_policy() @test {
 
 fn void reference_capacity_preflight_counts_unique_identities() @test {
     vk::CommandResourceReference[1] storage;
-    vk::CommandReferenceIndexCell[2] cells;
     vk::CommandScratch scratch = {
-        .references      = storage[..],
-        .reference_index = {
-            .cells = cells[..],
-            .epoch = 1,
-        },
+        .references = storage[..],
     };
     vk::CommandRecord record = {
         .scratch = &scratch,
@@ -120,9 +116,8 @@ fn void reference_capacity_preflight_counts_unique_identities() @test {
     vk::CommandResourceReference[2] duplicates = { first, first };
     vk::CommandResourceReference[2] distinct = { first, second };
 
-    vk::preflight_command_references(null, &record, duplicates[..])!!;
+    vk::preflight_command_references(&record, duplicates[..])!!;
     assert(@catch(vk::preflight_command_references(
-        null,
         &record,
         distinct[..],
     ))
@@ -131,23 +126,10 @@ fn void reference_capacity_preflight_counts_unique_identities() @test {
 
     storage[0] = first;
     scratch.reference_count = 1;
-    vk::CommandReferenceProbe insertion = vk::probe_command_reference(
-        null,
-        &scratch,
-        &first,
-    )!!;
-    vk::publish_command_reference(
-        state:           null,
-        scratch:         &scratch,
-        reference:       &first,
-        probe:           &insertion,
-        reference_index: 0,
-    );
     vk::CommandResourceReference[1] existing = { first };
-    vk::preflight_command_references(null, &record, existing[..])!!;
+    vk::preflight_command_references(&record, existing[..])!!;
     vk::CommandResourceReference[1] additional = { second };
     assert(@catch(vk::preflight_command_references(
-        null,
         &record,
         additional[..],
     ))
@@ -188,7 +170,16 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
-    vk::reset_command_reference_work_counters(state);
+    vk::AllocationSlot* source_slot =
+        state.allocations.get(source.allocation)!!;
+    vk::AllocationSlot* destination_slot =
+        state.allocations.get(destination.allocation)!!;
+    uint source_references_before =
+        source_slot.tracked_command_references.load(AtomicOrdering.RELAXED);
+    uint destination_references_before =
+        destination_slot.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        );
     gpu::reset_command_resolution_stats();
     gpu::BufferCopyDesc copy = {
         .src = source.span,
@@ -198,12 +189,15 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
     assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
         == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "two unique references fault before a one-reference scratch unit mutates");
-    vk::CommandReferenceWorkCounters work =
-        vk::command_reference_work_counters(state);
-    assert(record.scratch.reference_count == 0
-        && work.retains == 0
-        && work.releases == 0,
+    assert(record.scratch.reference_count == 0,
         "capacity preflight retains and rolls back no partial reference");
+    assert(source_slot.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == source_references_before
+        && destination_slot.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == destination_references_before,
+        "capacity preflight leaves both retained counters unchanged");
     assert(gpu::command_resolution_stats().native_commands == 0,
         "capacity preflight rejects before the native copy command");
     assert(commands.is_valid() && slot.live_recordings == 1
@@ -246,7 +240,6 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
-    uint reference_epoch_before = record.scratch.reference_index.epoch;
     assert(references_before == 1,
         "the transition occupies the allocator's sole reference slot");
     gpu::ColorTargetDesc[1] colors = {{ .view = view }};
@@ -255,7 +248,6 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    vk::reset_command_reference_work_counters(state);
     vk::reset_dynamic_state_observation(state);
     gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_begin_render_pass(
@@ -265,20 +257,12 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
         "the attachment view exceeds the occupied reference slot");
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
-    vk::CommandReferenceWorkCounters work =
-        vk::command_reference_work_counters(state);
     vk::DynamicStateObservation observation =
         vk::dynamic_state_observation(state);
     assert(record.state == gpu::internal::CommandState.RECORDING,
         "tracking rejection leaves the command outside a render pass");
-    assert(record.scratch.reference_count == references_before
-        && record.scratch.reference_index.epoch == reference_epoch_before,
-        "tracking rejection preserves the published reference checkpoint");
-    assert(work.index_publications == 0
-        && work.retains == 0
-        && work.releases == 0
-        && work.rollback_rebuild_publications == 0,
-        "tracking rejection publishes no reference-index mutation");
+    assert(record.scratch.reference_count == references_before,
+        "tracking rejection preserves the reference checkpoint");
     assert(resolution.recording_commands == 1
         && resolution.native_commands == 0,
         "tracking rejection crosses the boundary without native emission");

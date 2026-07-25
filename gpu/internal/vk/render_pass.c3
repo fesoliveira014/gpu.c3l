@@ -494,7 +494,6 @@ fn void? track_render_pass(
         };
     }
     preflight_command_references(
-        state,
         record,
         references[:reference_count],
     )!;
@@ -589,7 +588,6 @@ fn void? full_begin_render_pass(
     CommandRecord* record = commands;
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        commands.device_state,
         record,
         checkpoint,
     );
@@ -625,7 +623,6 @@ fn void? full_begin_render_pass_with_state(
     CommandRecord* record = commands;
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        commands.device_state,
         record,
         checkpoint,
     );
@@ -2059,7 +2056,7 @@ fn void? track_indexed_indirect_draw(
             .generation = draw.index_span.generation,
         },
     };
-    preflight_command_references(state, record, references[..])!;
+    preflight_command_references(record, references[..])!;
     track_span_command_reference(state, record, &draw.args_span)!;
     track_span_command_reference(state, record, &draw.index_span)!;
 }
@@ -2133,7 +2130,6 @@ fn void? full_draw_indexed_indirect(
     CommandRecord* record = commands;
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        commands.device_state,
         record,
         checkpoint,
     );
@@ -2273,7 +2269,7 @@ fn void? track_indexed_indirect_count_draw(
             .generation = draw.index_span.generation,
         },
     };
-    preflight_command_references(state, record, references[..])!;
+    preflight_command_references(record, references[..])!;
     track_span_command_reference(state, record, &draw.args_span)!;
     track_span_command_reference(state, record, &draw.count_span)!;
     track_span_command_reference(state, record, &draw.index_span)!;
@@ -2355,7 +2351,6 @@ fn void? full_draw_indexed_indirect_count(
     CommandRecord* record = commands;
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        commands.device_state,
         record,
         checkpoint,
     );
@@ -2507,7 +2502,7 @@ fn void? track_generated_draw(
             .generation = draw.count_span.generation,
         },
     };
-    preflight_command_references(state, record, references[..])!;
+    preflight_command_references(record, references[..])!;
     track_span_command_reference(state, record, &draw.records_span)!;
     track_span_command_reference(state, record, &draw.count_span)!;
 }
@@ -2561,7 +2556,6 @@ fn void? full_draw_generated(
     CommandRecord* record = commands;
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        commands.device_state,
         record,
         checkpoint,
     );
@@ -2697,7 +2691,7 @@ fn void? track_generated_indexed_draw(
             .generation = draw.index_span.generation,
         },
     };
-    preflight_command_references(state, record, references[..])!;
+    preflight_command_references(record, references[..])!;
     track_span_command_reference(state, record, &draw.records_span)!;
     track_span_command_reference(state, record, &draw.count_span)!;
     track_span_command_reference(state, record, &draw.index_span)!;
@@ -2764,7 +2758,6 @@ fn void? full_draw_indexed_generated(
     CommandRecord* record = commands;
     uint checkpoint = record.scratch.reference_count;
     defer catch rollback_command_references(
-        commands.device_state,
         record,
         checkpoint,
     );

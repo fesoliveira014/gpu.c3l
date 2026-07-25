@@ -748,13 +748,13 @@ fn void completed_submission_release_boundary_is_exact() @test {
     second_tracked_command_reference.store(1, AtomicOrdering.RELAXED);
     third_tracked_command_reference.store(1, AtomicOrdering.RELAXED);
     vk::CommandResourceReference[1] first_references = {{
-        .tracked_command_references = &first_tracked_command_reference,
+        .retained_counter = &first_tracked_command_reference,
     }};
     vk::CommandResourceReference[1] second_references = {{
-        .tracked_command_references = &second_tracked_command_reference,
+        .retained_counter = &second_tracked_command_reference,
     }};
     vk::CommandResourceReference[1] third_references = {{
-        .tracked_command_references = &third_tracked_command_reference,
+        .retained_counter = &third_tracked_command_reference,
     }};
     uint[1] first_preprocess = { 0 };
     uint[1] second_preprocess = { 0 };
@@ -936,10 +936,10 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
     first_reference.store(1, AtomicOrdering.RELAXED);
     second_reference.store(1, AtomicOrdering.RELAXED);
     vk::CommandResourceReference[1] first_references = {{
-        .tracked_command_references = &first_reference,
+        .retained_counter = &first_reference,
     }};
     vk::CommandResourceReference[1] second_references = {{
-        .tracked_command_references = &second_reference,
+        .retained_counter = &second_reference,
     }};
     uint[1] first_preprocess = { 0 };
     uint[1] second_preprocess = { 0 };

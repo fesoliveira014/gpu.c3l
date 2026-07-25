@@ -74,12 +74,12 @@ There is no permanent thread/device cache. Destroyed generational allocator
 slots are recycled, so historical worker churn consumes no device-lifetime
 context capacity.
 
-Under FULL, each scratch unit also owns a fixed
-open-addressed reference index sized from its configured hard reference limit.
-Lookup and insertion occur under the command token's confinement; the resource
-mutex is acquired only when a new exact identity must be retained. Duplicate
-hits require neither that mutex nor another retain. TRUSTED scratch owns no
-reference list or index.
+Under FULL, each scratch unit also owns one fixed sequential reference list
+sized from its configured hard reference limit. Linear exact-identity lookup
+and append occur under the command token's confinement; the resource mutex is
+acquired only when a new owner/index/generation identity must be retained.
+Duplicate hits require neither that mutex nor another retain. TRUSTED scratch
+owns no reference list.
 
 The first live recording sets the allocator's owner thread. Under `FULL`, a
 different thread attempting to begin through that allocator receives
@@ -90,8 +90,9 @@ ownership and may be handed to a synchronized submit thread. Completion or
 discard returns each fixed buffer and scratch index to its exact originating
 allocator. Generated reservations are also exact-allocator and exact-public-
 pipeline-handle state; another allocator on the same queue cannot borrow them.
-Reference-index visibility resets by epoch only after the sequential retained
-references have been released.
+Discard, transaction rollback, and completion retirement decrement the
+canonical retained counters stored in list entries; transaction rollback
+releases only the suffix appended after its checkpoint.
 
 Runtime creation and destruction must not overlap other runtime operations. After
 publication, enumeration and adapter queries may run concurrently; all such calls

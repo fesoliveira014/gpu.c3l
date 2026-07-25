@@ -5,7 +5,6 @@ import gpu @public;
 import vk;
 import std::core::mem;
 import std::core::env;
-import std::hash::fnv64a;
 
 alias CmdCopyBufferFn @private               = fn void? (CommandRecord*, gpu::BufferCopyDesc*);
 alias CmdFillBufferFn @private               = fn void? (CommandRecord*, gpu::GpuSpan, uint);
@@ -211,12 +210,6 @@ struct CommandTable {
     uint          next_new;
 }
 
-struct CommandReferenceProbe {
-    uint cell_index;
-    uint reference_index;
-    bool found;
-}
-
 fn CommandRecord*? CommandTable.claim(
     &self,
     gpu::Device device,
@@ -312,111 +305,35 @@ fn void? ensure_command_reference_capacity(
     return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
 }
 
-fn ulong command_reference_hash(CommandResourceReference* reference) {
-    CommandReferenceKey key = {
-        .owner      = reference.owner,
-        .index      = reference.index,
-        .generation = reference.generation,
-    };
-    return fnv64a::hash(((char*)&key)[:CommandReferenceKey::size]);
-}
-
-fn bool indexed_resource_reference_matches(
-    VkDeviceState* state,
-    CommandReferenceIndexCell* cell,
-    CommandResourceReference* reference,
-) {
-    note_command_reference_equality_check(state);
-    return cell.owner == reference.owner
-        && cell.index == reference.index
-        && cell.generation == reference.generation;
-}
-
-fn CommandReferenceProbe? probe_command_reference(
-    VkDeviceState* state,
+fn bool contains_command_reference(
     CommandScratch* scratch,
     CommandResourceReference* reference,
 ) {
-    CommandReferenceIndex* reference_index = &scratch.reference_index;
-    if (reference_index.cells.len == 0) {
-        return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
-    }
-    if (reference_index.epoch == 0) reference_index.epoch = 1;
-    note_command_reference_lookup(state);
-    uint cell_count = (uint)reference_index.cells.len;
-    ulong hash = command_reference_hash(reference);
-    uint cell_index = (uint)(
-        (hash ^ (hash >> 32))
-        & (ulong)(cell_count - 1)
-    );
-    for (uint probe = 0; probe < cell_count; probe++) {
-        note_command_reference_probe(state);
-        CommandReferenceIndexCell* cell = &reference_index.cells[cell_index];
-        if (cell.epoch != reference_index.epoch) {
-            return {
-                .cell_index = cell_index,
-                .found      = false,
-            };
+    for (uint i = 0; i < scratch.reference_count; i++) {
+        if (same_resource_reference(&scratch.references[i], reference)) {
+            return true;
         }
-        if (indexed_resource_reference_matches(state, cell, reference)) {
-            return {
-                .cell_index      = cell_index,
-                .reference_index = cell.reference_index,
-                .found           = true,
-            };
-        }
-        cell_index = (cell_index + 1) & (cell_count - 1);
     }
-    return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
+    return false;
 }
 
-fn void publish_command_reference(
-    VkDeviceState* state,
+<* @require scratch.reference_count < scratch.references.len : "reference capacity" *>
+fn void append_command_reference(
     CommandScratch* scratch,
-    CommandResourceReference* reference,
-    CommandReferenceProbe* probe,
-    uint reference_index,
+    CommandResourceReference reference,
 ) {
-    scratch.reference_index.cells[probe.cell_index] = {
-        .owner           = reference.owner,
-        .index           = reference.index,
-        .generation      = reference.generation,
-        .reference_index = reference_index,
-        .epoch           = scratch.reference_index.epoch,
-    };
-    note_command_reference_publication(state);
-}
-
-fn void reset_command_reference_index(
-    VkDeviceState* state,
-    CommandScratch* scratch,
-) {
-    CommandReferenceIndex* reference_index = &scratch.reference_index;
-    if (reference_index.cells.len == 0) return;
-    if (reference_index.epoch == uint::max) {
-        foreach (&cell : reference_index.cells) cell.epoch = 0;
-        note_command_reference_rollover_clear(state, reference_index.cells.len);
-        reference_index.epoch = 1;
-        return;
-    }
-    reference_index.epoch++;
-    if (reference_index.epoch == 0) reference_index.epoch = 1;
+    scratch.references[scratch.reference_count] = reference;
+    scratch.reference_count++;
 }
 
 fn void? preflight_command_references(
-    VkDeviceState* state,
     CommandRecord* record,
     CommandResourceReference[] candidates,
 ) {
     uint additional = 0;
     foreach (i, &candidate : candidates) {
-        CommandReferenceProbe probe = probe_command_reference(
-            state,
-            record.scratch,
-            candidate,
-        )!;
-        bool duplicate = probe.found;
-        if (duplicate) continue;
+        if (contains_command_reference(record.scratch, candidate)) continue;
+        bool duplicate = false;
         for (uint j = 0; j < i; j++) {
             if (!same_resource_reference(&candidates[j], candidate)) continue;
             duplicate = true;
@@ -440,30 +357,12 @@ fn void? track_command_reference(
         .generation = generation,
     };
     CommandScratch* scratch = record.scratch;
-    CommandReferenceProbe probe = probe_command_reference(
-        state,
-        scratch,
-        &reference,
-    )!;
-    if (probe.found) {
-        note_command_reference_duplicate(state);
-        return;
-    }
+    if (contains_command_reference(scratch, &reference)) return;
     ensure_command_reference_capacity(record, 1)!;
     state.resource_mutex.lock()!!;
-    note_command_reference_mutex_acquisition(state);
     defer state.resource_mutex.unlock();
-    retain_tracked_command_reference(state, reference)!;
-    note_command_reference_retain(state);
-    uint reference_index = scratch.reference_count++;
-    scratch.references[reference_index] = reference;
-    publish_command_reference(
-        state:           state,
-        scratch:         scratch,
-        reference:       &reference,
-        probe:           &probe,
-        reference_index: reference_index,
-    );
+    retain_tracked_command_reference(state, &reference)!;
+    append_command_reference(scratch, reference);
 }
 
 fn TextureSlot*? resolve_tracked_texture_command_reference(
@@ -477,58 +376,35 @@ fn TextureSlot*? resolve_tracked_texture_command_reference(
         .generation = handle.generation,
     };
     CommandScratch* scratch = record.scratch;
-    CommandReferenceProbe probe = probe_command_reference(
-        state,
-        scratch,
-        &reference,
-    )!;
-    if (probe.found) {
-        note_command_reference_duplicate(state);
+    if (contains_command_reference(scratch, &reference)) {
         return state.textures.get(handle);
     }
 
     ensure_command_reference_capacity(record, 1)!;
     state.resource_mutex.lock()!!;
-    note_command_reference_mutex_acquisition(state);
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;
-    reference.tracked_command_references = &slot.tracked_command_references;
-    reference.tracked_command_references.add(1, AtomicOrdering.RELAXED);
-    note_command_reference_retain(state);
-    uint reference_index = scratch.reference_count++;
-    scratch.references[reference_index] = reference;
-    publish_command_reference(
-        state:           state,
-        scratch:         scratch,
-        reference:       &reference,
-        probe:           &probe,
-        reference_index: reference_index,
-    );
+    reference.retained_counter = &slot.tracked_command_references;
+    reference.retained_counter.add(1, AtomicOrdering.RELAXED);
+    append_command_reference(scratch, reference);
     return slot;
 }
 
 fn void clear_command_scratch_references(
-    VkDeviceState* state,
     CommandScratch* scratch,
 ) {
     release_tracked_command_references(
-        state,
         scratch.references,
         scratch.reference_count,
     );
     scratch.reference_count = 0;
-    reset_command_reference_index(state, scratch);
 }
 
-fn void clear_command_references(
-    VkDeviceState* state,
-    CommandRecord* record,
-) {
-    clear_command_scratch_references(state, record.scratch);
+fn void clear_command_references(CommandRecord* record) {
+    clear_command_scratch_references(record.scratch);
 }
 
 fn void rollback_command_references(
-    VkDeviceState* state,
     CommandRecord* record,
     uint checkpoint,
 ) {
@@ -536,26 +412,8 @@ fn void rollback_command_references(
     while (record.scratch.reference_count > checkpoint) {
         record.scratch.reference_count--;
         release_tracked_command_reference(
-            state,
             record.scratch.references[record.scratch.reference_count],
         );
-    }
-    reset_command_reference_index(state, record.scratch);
-    for (uint i = 0; i < record.scratch.reference_count; i++) {
-        CommandResourceReference* reference = &record.scratch.references[i];
-        CommandReferenceProbe probe = probe_command_reference(
-            state,
-            record.scratch,
-            reference,
-        )!!;
-        publish_command_reference(
-            state:           state,
-            scratch:         record.scratch,
-            reference:       reference,
-            probe:           &probe,
-            reference_index: i,
-        );
-        note_command_reference_rollback_rebuild_publication(state);
     }
 }
 
@@ -572,7 +430,7 @@ fn void destroy_command_table(VkDeviceState* state) {
     if (state.commands.slots.ptr == null) return;
     foreach (&cell : state.commands.slots[:state.commands.next_new]) {
         if (cell.used) {
-            clear_command_references(state, &cell.record);
+            clear_command_references(&cell.record);
         }
     }
     mem::free(state.commands.slots.ptr);

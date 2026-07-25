@@ -3,6 +3,7 @@ module gpu_test;
 import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
+import std::atomic::types;
 
 const char[*] POLICY_MATRIX_COMP_SPIRV =
     $embed("shaders/root_pointer.comp.spv");
@@ -138,9 +139,17 @@ fn void full_copy_capacity_rejection_is_transactional() @test {
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
+    vk::AllocationSlot* source_slot =
+        state.allocations.get(source.allocation)!!;
+    vk::AllocationSlot* destination_slot =
+        state.allocations.get(destination.allocation)!!;
+    uint source_references_before =
+        source_slot.tracked_command_references.load(AtomicOrdering.RELAXED);
+    uint destination_references_before =
+        destination_slot.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        );
     uint reference_count_before = record.scratch.reference_count;
-    uint reference_epoch_before = record.scratch.reference_index.epoch;
-    vk::reset_command_reference_work_counters(state);
     gpu::reset_command_resolution_stats();
     gpu::BufferCopyDesc copy = {
         .src = source.span,
@@ -150,25 +159,15 @@ fn void full_copy_capacity_rejection_is_transactional() @test {
     assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
         == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "two unique copy references exceed one fixed reference slot");
-    uint expected_reference_epoch = reference_epoch_before == 0
-        ? 1
-        : reference_epoch_before;
-    assert(record.scratch.reference_count == reference_count_before
-        && record.scratch.reference_index.epoch == expected_reference_epoch,
-        "rejected copy preserves the reference checkpoint without publication");
-    vk::CommandReferenceWorkCounters reference_work =
-        vk::command_reference_work_counters(state);
-    assert(reference_work.lookups == 2
-        && reference_work.probes == 2
-        && reference_work.equality_checks == 0
-        && reference_work.index_publications == 0
-        && reference_work.duplicate_hits == 0
-        && reference_work.resource_mutex_acquisitions == 0
-        && reference_work.retains == 0
-        && reference_work.releases == 0
-        && reference_work.rollback_rebuild_publications == 0
-        && reference_work.rollover_cells_cleared == 0,
-        "rejected copy performs exact preflight work without retaining resources");
+    assert(record.scratch.reference_count == reference_count_before,
+        "rejected copy preserves the reference checkpoint");
+    assert(source_slot.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == source_references_before
+        && destination_slot.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == destination_references_before,
+        "rejected copy leaves both retained counters unchanged");
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
     assert(resolution.recording_commands == 1
@@ -451,6 +450,8 @@ fn void exercise_policy_matrix_render(
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     gpu::ColorState color = { .targets = color_targets[..] };
+    ulong native_before_color =
+        gpu::command_resolution_stats().native_commands;
     if (state.caps.dynamic_color_state) {
         gpu::cmd_set_color_state(&commands, &color)!!;
     } else {
@@ -458,6 +459,12 @@ fn void exercise_policy_matrix_render(
             == gpu::UNSUPPORTED_FEATURE,
             "unsupported dynamic color still dispatches through the selected table");
     }
+    ulong color_native_commands =
+        gpu::command_resolution_stats().native_commands
+        - native_before_color;
+    assert(color_native_commands
+            == (ulong)(state.caps.dynamic_color_state ? 3 : 0),
+        "dynamic color emits exact feature-dependent native work");
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
@@ -488,6 +495,8 @@ fn void exercise_policy_matrix_render(
         draw_count:    1,
         index_span:    indices.span,
     )!!;
+    ulong native_before_indirect_count =
+        gpu::command_resolution_stats().native_commands;
     if (state.draw_indirect_count) {
         gpu::cmd_draw_indexed_indirect_count(
             commands:       &commands,
@@ -510,6 +519,12 @@ fn void exercise_policy_matrix_render(
         )) == gpu::UNSUPPORTED_FEATURE,
             "unsupported indirect-count draw still dispatches through the selected table");
     }
+    ulong indirect_count_native_commands =
+        gpu::command_resolution_stats().native_commands
+        - native_before_indirect_count;
+    assert(indirect_count_native_commands
+            == (ulong)(state.draw_indirect_count ? 3 : 0),
+        "indirect-count draw emits exact feature-dependent native work");
     gpu::cmd_draw_generated(
         commands:      &commands,
         records:       {},
@@ -524,9 +539,9 @@ fn void exercise_policy_matrix_render(
         index_span:    {},
     )!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    ulong native_commands = 32;
-    if (state.caps.dynamic_color_state) native_commands += 3;
-    if (state.draw_indirect_count) native_commands += 2;
+    ulong native_commands = 31
+        + color_native_commands
+        + indirect_count_native_commands;
     finish_and_assert_command_family_observation(
         state:                              state,
         commands:                           &commands,

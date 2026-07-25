@@ -133,7 +133,7 @@ exists (else the limit is compile-time).
 | Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/internal/device.c3`) | — | `SLOT_TABLE_FULL` |
 | Live command allocators per device | 256 (`MAX_COMMAND_ALLOCATORS` in `gpu/internal/vk/command.c3`) | destroy quiescent allocators to recycle generational slots | `SLOT_TABLE_FULL` |
 | Command buffers per allocator | 8 default, 4096 max (`DEFAULT_COMMAND_ALLOCATOR_CAPACITY`, `MAX_COMMAND_ALLOCATOR_CAPACITY` in `gpu/gpu.c3i`) | `CommandAllocatorDesc.command_buffer_capacity` | `INVALID_ARGUMENT` above the maximum; `DEVICE_BUSY` while all configured units are live |
-| Tracked resource references per command list | 64 default, 4096 max (`DEFAULT_COMMAND_REFERENCES_PER_LIST`, `MAX_COMMAND_REFERENCES_PER_LIST` in `gpu/gpu.c3i`); FULL scratch also owns a `next_pow2(2 * capacity)` exact-identity index | `CommandAllocatorDesc.max_resource_references_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
+| Tracked resource references per command list | 64 default, 4096 max (`DEFAULT_COMMAND_REFERENCES_PER_LIST`, `MAX_COMMAND_REFERENCES_PER_LIST` in `gpu/gpu.c3i`); FULL scratch owns one fixed sequential list | `CommandAllocatorDesc.max_resource_references_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
 | Generated preprocess reservations retained by one list | 4 default, 64 max (`DEFAULT_COMMAND_PREPROCESS_PER_LIST`, `MAX_COMMAND_PREPROCESS_PER_LIST` in `gpu/gpu.c3i`) | `CommandAllocatorDesc.max_generated_preprocess_buffers_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
 | Generated preprocess reservation bytes per allocator | zero by default (disabled) | `CommandAllocatorDesc.generated_preprocess_bytes` | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` during reservation |
 | Swapchains | 8 (`MAX_SWAPCHAINS` in `gpu/gpu.c3i`) | — | `SLOT_TABLE_FULL` |
@@ -168,13 +168,15 @@ Two sizing rules that bite:
   completion point, and wait or poll before rewriting or freeing storage.
 - **Tracked references are fixed at allocator creation.** Under `FULL`, every
   command buffer receives exactly
-  `max_resource_references_per_list` stable sequential entries plus a fixed
-  open-addressed index at no more than 0.5 target load. Exact-key duplicate
-  lookup is expected constant-time; forced collisions remain bounded by index
-  capacity. Exceeding the unique-resource ceiling returns
+  `max_resource_references_per_list` stable sequential entries. Duplicate
+  lookup scans the retained prefix and compares the complete
+  owner/index/generation identity, so recording work grows linearly with the
+  number of already-retained unique resources. Each entry stores its canonical
+  retained counter for direct release. Compound operations preflight capacity,
+  and exceeding the unique-resource ceiling returns
   `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` without a partial retain or native
-  command. TRUSTED allocators ignore that storage setting and keep both
-  reference structures empty.
+  command. TRUSTED allocators ignore that storage setting and keep the
+  reference list empty.
 - **Generated reservation capacity has two bounds.** The reservation table has
   `command_buffer_capacity * max_generated_preprocess_buffers_per_list` entries,
   and `generated_preprocess_bytes` limits their total exact driver-reported
