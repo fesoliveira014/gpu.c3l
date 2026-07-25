@@ -81,7 +81,6 @@ struct DeviceCreationProbe {
     bool                     descriptor_buffer_capability_available;
     bool                     descriptor_buffer_selected;
     bool                     dynamic_color_support_override @if(env::TESTING);
-    bool                     dynamic_color_support_available @if(env::TESTING);
     bool                     dynamic_color_feature_chained @if(env::TESTING);
     uint                     dynamic_color_blend_enable @if(env::TESTING);
     uint                     dynamic_color_blend_equation @if(env::TESTING);
@@ -533,13 +532,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     gpu::QueueRequirements* queue_requirements = null,
     DeviceCreationProbe* probe = null,
 ) @private {
-    $if env::TESTING:
-        if (probe != null
-            && probe.dynamic_color_support_override
-            && !probe.dynamic_color_support_available) {
-            return gpu::UNSUPPORTED_FEATURE~;
-        }
-    $endif
     VkDeviceState* state = mem::new(VkDeviceState);
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     defer catch {
@@ -639,6 +631,16 @@ fn gpu::Device? create_vk_device_from_runtime(
     )!;
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         query_dynamic_raster_properties(state.physical_device);
+    $if env::TESTING:
+        if (probe != null && probe.dynamic_color_support_override) {
+            dynamic_color_features.extended_dynamic_state3color_blend_enable =
+                vk::FALSE;
+            dynamic_color_features.extended_dynamic_state3color_blend_equation =
+                vk::FALSE;
+            dynamic_color_features.extended_dynamic_state3color_write_mask =
+                vk::FALSE;
+        }
+    $endif
     check_required_features(
         base:               &features2.features,
         v11:                &features11,
