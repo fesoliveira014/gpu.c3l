@@ -287,9 +287,7 @@ struct VkDeviceState @public {
 
 uint configured_adapter_count @private = 1;
 bool configured_strict_support @private = true;
-bool configured_resource_agnostic_texture_sync_support @private = true;
 uint device_support_queries @private;
-uint resource_agnostic_texture_sync_support_queries @private;
 uint device_temporary_creates @private;
 uint device_temporary_destroys @private;
 bool fail_device_after_temporary_allocation @private;
@@ -818,17 +816,6 @@ fn bool? vk_supports_queue_requirements(
     return true;
 }
 
-fn bool? vk_supports_resource_agnostic_texture_sync(
-    VkRuntimeState* state,
-    uint adapter_index,
-) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_HANDLE~;
-    }
-    resource_agnostic_texture_sync_support_queries++;
-    return configured_resource_agnostic_texture_sync_support;
-}
-
 fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     VkRuntimeState* state = mem::new(VkRuntimeState);
     state.adapter_count = configured_adapter_count;
@@ -861,18 +848,12 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
 fn void stub_set_adapter_count(uint count) {
     configured_adapter_count = count;
     configured_strict_support = true;
-    configured_resource_agnostic_texture_sync_support = true;
 }
 
 fn void stub_set_strict_support(bool supported) => configured_strict_support = supported;
 
-fn void stub_set_resource_agnostic_texture_sync_support(bool supported) {
-    configured_resource_agnostic_texture_sync_support = supported;
-}
-
 fn void stub_reset_device_counts() {
     device_support_queries = 0;
-    resource_agnostic_texture_sync_support_queries = 0;
     device_temporary_creates = 0;
     device_temporary_destroys = 0;
     fail_device_after_temporary_allocation = false;
@@ -880,10 +861,6 @@ fn void stub_reset_device_counts() {
 }
 
 fn uint stub_device_support_query_count() => device_support_queries;
-
-fn uint stub_resource_agnostic_texture_sync_support_query_count() {
-    return resource_agnostic_texture_sync_support_queries;
-}
 
 fn uint stub_device_temporary_create_count() => device_temporary_creates;
 

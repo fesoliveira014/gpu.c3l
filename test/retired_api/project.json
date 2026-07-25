@@ -663,6 +663,18 @@
         "runtime_track_resource_lifetimes.c3"
       ]
     },
+    "request_resource_agnostic_texture_sync": {
+      "type": "object-files",
+      "sources": [
+        "request_resource_agnostic_texture_sync.c3"
+      ]
+    },
+    "resource_agnostic_texture_sync_caps": {
+      "type": "object-files",
+      "sources": [
+        "resource_agnostic_texture_sync_caps.c3"
+      ]
+    },
     "contract_validation_object_boundaries": {
       "type": "object-files",
       "sources": [

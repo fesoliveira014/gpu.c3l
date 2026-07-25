@@ -62,26 +62,34 @@ gpu::cmd_texture_barrier(&cmd, &to_sample)!;
 Running example: `textured_cube` (single texture), `pbr_materials`
 (several), `bindless_stress` (8192, batched).
 
-### Use one global dependency for an ordinary texture
+### Keep texture layout history explicit
 
-Opt in while composing the device request:
+Record the state established by each texture transition and use it as the next
+transition's `before` value:
 
 ```c3
-gpu::DeviceRequest request =
-    gpu::request_resource_agnostic_texture_sync(gpu::strict_device_request())!;
+gpu::TextureState storage_write = gpu::storage_at(
+    { .compute = true },
+    { .write = true },
+);
+gpu::TextureState sampled_read =
+    gpu::sampled_at({ .fragment_shader = true });
+
+gpu::TextureBarrier to_sampled = gpu::texture_transition(
+    texture: texture,
+    before:  storage_write,
+    after:   sampled_read,
+)!;
+gpu::cmd_texture_barrier(&commands, &to_sampled)!;
 ```
 
-Query support before creation and confirm
-`get_device_caps(&device).resource_agnostic_texture_sync`. After an explicit
-`UNDEFINED` initialization, ordinary transfer, shader, and attachment uses
-share one native representation. A whole-resource storage-write to sampled-read
-dependency may then use `cmd_barrier` with the producer and consumer stages
-instead of a layout-changing texture barrier.
-
-Keep explicit texture barriers for initialization/discard, presentation,
-subresource-specific dependencies, or resource precision. The capability does
-not track prior state, insert barriers, or cover feedback-loop and video
-layouts. An unrequested device keeps the classic path.
+This transition changes the native layout from `VK_IMAGE_LAYOUT_GENERAL` to
+`VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL` for a color texture, or to
+`VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL` for a depth/stencil texture.
+Transfer, attachment, initialization, and presentation uses likewise require
+their explicit `TextureLayout` states. The library stores no global layout
+history and inserts no repair transition, so keep separate state for
+independently transitioned mip and layer ranges.
 
 ## 3. Sample through the bindless heap
 

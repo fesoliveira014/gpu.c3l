@@ -39,8 +39,6 @@ const ZString SWAPCHAIN_MAINTENANCE_EXTENSION = "VK_EXT_swapchain_maintenance1";
 const ZString DYNAMIC_STATE_3_EXTENSION       = "VK_EXT_extended_dynamic_state3";
 const ZString GENERATED_WORK_EXTENSION        = "VK_EXT_device_generated_commands";
 const ZString GENERATED_WORK_USAGE_EXTENSION = "VK_KHR_maintenance5";
-const ZString RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION =
-    "VK_KHR_unified_image_layouts";
 const uint GENERATED_WORK_TOKEN_COUNT  = 2;
 const uint GENERATED_WORK_TOKEN_OFFSET = 16;
 const uint GENERATED_WORK_RECORD_SIZE  = 40;
@@ -76,19 +74,13 @@ struct DeviceCreationProbe {
     DeviceCreationCheckpoint fail_at;
     DeviceCreationCheckpoint reached;
     uint                     rollback_count;
-    bool                     resource_agnostic_texture_sync_override;
-    bool                     resource_agnostic_texture_sync_extension_available;
-    bool                     resource_agnostic_texture_sync_feature_available;
-    bool                     resource_agnostic_texture_sync_selected;
     DeviceCreateHook         native_device_create_hook @if(env::TESTING);
     void*                    native_device_create_user_data @if(env::TESTING);
     bool                     descriptor_buffer_override;
     bool                     descriptor_buffer_capability_checked;
     bool                     descriptor_buffer_capability_available;
     bool                     descriptor_buffer_selected;
-    bool                     fail_native_device_creation @if(env::TESTING);
     bool                     dynamic_color_support_override @if(env::TESTING);
-    bool                     dynamic_color_support_available @if(env::TESTING);
     bool                     dynamic_color_feature_chained @if(env::TESTING);
     uint                     dynamic_color_blend_enable @if(env::TESTING);
     uint                     dynamic_color_blend_equation @if(env::TESTING);
@@ -148,7 +140,6 @@ struct VkDeviceState @public {
     uint                       graphics_completion_id;
     uint                       compute_completion_id;
     uint                       transfer_completion_id;
-    bool                       resource_agnostic_texture_sync_selected;
     gpu::DeviceCaps            caps;
     ViewportLimits             viewport_limits;
     ulong                      max_timeline_semaphore_value_difference;
@@ -287,7 +278,6 @@ struct GeneratedWorkSupport {
 struct CapsInputs {
     bool                 strict_enabled;
     bool                 presentation_enabled;
-    bool                 resource_agnostic_texture_sync;
     bool                 async_compute;
     bool                 line_polygon_mode;
     uint                 texture_capacity;
@@ -300,32 +290,6 @@ fn bool presentation_maintenance_supported(
     uint feature_enabled,
 ) {
     return extension_supported && feature_enabled != 0;
-}
-
-fn bool? select_resource_agnostic_texture_sync(
-    bool requested,
-    ResourceAgnosticTextureSyncSupport support,
-) {
-    if (!requested) return false;
-    if (!resource_agnostic_texture_sync_supported(support)) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-    return true;
-}
-
-fn ResourceAgnosticTextureSyncSupport
-resource_agnostic_texture_sync_creation_support(
-    vk::PhysicalDevice physical_device,
-    DeviceCreationProbe* probe,
-) {
-    if (probe != null && probe.resource_agnostic_texture_sync_override) {
-        return {
-            .extension = probe.resource_agnostic_texture_sync_extension_available,
-            .unified_image_layouts =
-                probe.resource_agnostic_texture_sync_feature_available,
-        };
-    }
-    return query_resource_agnostic_texture_sync_support(physical_device);
 }
 
 fn bool device_supports_swapchain_maintenance(
@@ -533,25 +497,6 @@ fn gpu::Device? create_vk_device_with_probe(
         && !runtime_state.instance_capabilities.surface_maintenance) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    bool resource_agnostic_texture_sync_requested =
-        gpu::internal::requests_resource_agnostic_texture_sync(*request);
-    ResourceAgnosticTextureSyncSupport resource_agnostic_texture_sync_support;
-    if (resource_agnostic_texture_sync_requested) {
-        resource_agnostic_texture_sync_support =
-            resource_agnostic_texture_sync_creation_support(
-            adapter_state.physical_device,
-            probe,
-        );
-    }
-    bool resource_agnostic_texture_sync_selected =
-        select_resource_agnostic_texture_sync(
-            resource_agnostic_texture_sync_requested,
-            resource_agnostic_texture_sync_support,
-        )!;
-    if (probe != null) {
-        probe.resource_agnostic_texture_sync_selected =
-            resource_agnostic_texture_sync_selected;
-    }
     gpu::QueueRequirements queue_requirements =
         gpu::internal::requested_queue_requirements(*request);
     vk::SurfaceKHR presentation_surface = requested_surface.is_valid()
@@ -562,8 +507,6 @@ fn gpu::Device? create_vk_device_with_probe(
         instance:                   runtime_state.instance,
         physical_device:            adapter_state.physical_device,
         strict_requested:           gpu::internal::requests_strict(*request),
-        resource_agnostic_texture_sync_selected:
-            resource_agnostic_texture_sync_selected,
         retained_runtime:           retained_runtime,
         adapter:                    adapter,
         runtime_state:              runtime_state,
@@ -581,7 +524,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     vk::Instance instance,
     vk::PhysicalDevice physical_device,
     bool strict_requested,
-    bool resource_agnostic_texture_sync_selected = false,
     gpu::Runtime* retained_runtime = null,
     gpu::Adapter* adapter = null,
     VkRuntimeState* runtime_state = null,
@@ -590,13 +532,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     gpu::QueueRequirements* queue_requirements = null,
     DeviceCreationProbe* probe = null,
 ) @private {
-    $if env::TESTING:
-        if (probe != null
-            && probe.dynamic_color_support_override
-            && !probe.dynamic_color_support_available) {
-            return gpu::UNSUPPORTED_FEATURE~;
-        }
-    $endif
     VkDeviceState* state = mem::new(VkDeviceState);
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     defer catch {
@@ -620,8 +555,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.command_mutex.init()!;
 
     state.strict_heap = resolve_strict_heap_state(strict_requested, desc)!;
-    state.resource_agnostic_texture_sync_selected =
-        resource_agnostic_texture_sync_selected;
 
     state.presentation.enabled = presentation_surface != null;
     if (state.presentation.enabled) state.presentation.queue_mutex.init()!;
@@ -698,6 +631,16 @@ fn gpu::Device? create_vk_device_from_runtime(
     )!;
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         query_dynamic_raster_properties(state.physical_device);
+    $if env::TESTING:
+        if (probe != null && probe.dynamic_color_support_override) {
+            dynamic_color_features.extended_dynamic_state3color_blend_enable =
+                vk::FALSE;
+            dynamic_color_features.extended_dynamic_state3color_blend_equation =
+                vk::FALSE;
+            dynamic_color_features.extended_dynamic_state3color_write_mask =
+                vk::FALSE;
+        }
+    $endif
     check_required_features(
         base:               &features2.features,
         v11:                &features11,
@@ -901,15 +844,13 @@ fn gpu::Device? create_vk_device_from_runtime(
         reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PIPELINE_SHARED)!;
     }
     CapsInputs caps_inputs = {
-        .strict_enabled                  = state.strict_heap.enabled,
-        .presentation_enabled            = state.presentation.enabled,
-        .resource_agnostic_texture_sync =
-            state.resource_agnostic_texture_sync_selected,
-        .async_compute                   = state.compute_queue_distinct,
-        .line_polygon_mode               = line_polygon_mode,
-        .texture_capacity                = state.strict_heap.texture_capacity,
-        .sampler_capacity                = state.strict_heap.sampler_capacity,
-        .generated_work                  = state.generated_work,
+        .strict_enabled       = state.strict_heap.enabled,
+        .presentation_enabled = state.presentation.enabled,
+        .async_compute        = state.compute_queue_distinct,
+        .line_polygon_mode    = line_polygon_mode,
+        .texture_capacity     = state.strict_heap.texture_capacity,
+        .sampler_capacity     = state.strict_heap.sampler_capacity,
+        .generated_work       = state.generated_work,
     };
     state.caps = build_caps(
         base:                    &features2.features,
@@ -1592,19 +1533,6 @@ fn void? create_logical_device_with_queue_infos(
         .set_shader_draw_parameters(vk::TRUE)
         .set_next(&features12);
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
-    vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR
-        resource_agnostic_texture_sync_features =
-            vk::physical_device_unified_image_layouts_features_khr();
-    if (state.resource_agnostic_texture_sync_selected) {
-        resource_agnostic_texture_sync_features =
-            resource_agnostic_texture_sync_features
-                .set_unified_image_layouts(vk::TRUE)
-                .set_unified_image_layouts_video(vk::FALSE)
-                .set_next(features2.p_next);
-        features2 = features2.set_next(
-            &resource_agnostic_texture_sync_features,
-        );
-    }
     features2.features.shader_int64 = vk::TRUE;
     features2.features.independent_blend = vk::TRUE;
     features2.features.depth_bias_clamp = vk::TRUE;
@@ -1620,10 +1548,6 @@ fn void? create_logical_device_with_queue_infos(
     ZString[8] extensions;
     uint extension_count = 0;
     extensions[extension_count++] = DYNAMIC_STATE_3_EXTENSION;
-    if (state.resource_agnostic_texture_sync_selected) {
-        extensions[extension_count++] =
-            RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION;
-    }
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
     if (state.generated_work.enabled) {
         extensions[extension_count++] = GENERATED_WORK_EXTENSION;
@@ -1666,9 +1590,6 @@ fn void? create_logical_device_with_queue_infos(
                 dynamic_color_features.extended_dynamic_state3color_blend_equation;
             probe.dynamic_color_write_mask =
                 dynamic_color_features.extended_dynamic_state3color_write_mask;
-            if (probe.fail_native_device_creation) {
-                return gpu::BACKEND_ERROR~;
-            }
         }
     $endif
 
@@ -1750,10 +1671,8 @@ fn gpu::DeviceCaps build_caps(
         timeline_props.max_timeline_semaphore_value_difference;
     *non_coherent_atom_size = (usz)props.limits.non_coherent_atom_size;
     return (gpu::DeviceCaps){
-        .strict_enabled            = inputs.strict_enabled,
-        .presentation_enabled      = inputs.presentation_enabled,
-        .resource_agnostic_texture_sync =
-            inputs.resource_agnostic_texture_sync,
+        .strict_enabled             = inputs.strict_enabled,
+        .presentation_enabled       = inputs.presentation_enabled,
         .buffer_device_address      = v12.buffer_device_address != 0,
         .synchronization2           = v13.synchronization2 != 0,
         .dynamic_rendering          = v13.dynamic_rendering != 0,
