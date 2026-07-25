@@ -324,6 +324,10 @@ RETIRED_SOURCE_SYMBOLS = (
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
+    "resource_agnostic_texture_sync",
+    "ResourceAgnosticTextureSyncSupport",
+    "RESOURCE_AGNOSTIC_TEXTURE_SYNC_EXTENSION",
+    "unified_image_layout",
     "ACQUIRE_TIMEOUT_NS",
     "StandaloneDeviceConfig",
     "create_standalone_device_with_probe",

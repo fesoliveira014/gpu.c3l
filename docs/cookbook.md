@@ -69,7 +69,7 @@ transition's `before` value:
 
 ```c3
 gpu::TextureState storage_write = gpu::storage_at(
-    { .compute_shader = true },
+    { .compute = true },
     { .write = true },
 );
 gpu::TextureState sampled_read =
