@@ -844,7 +844,7 @@ fn void command_reference_maximum_capacity_is_transactional() @test {
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocatorDesc allocator_desc = {
-        .command_buffer_capacity          = 1,
+        .command_buffer_capacity          = 2,
         .max_resource_references_per_list =
             gpu::MAX_COMMAND_REFERENCES_PER_LIST,
     };
@@ -854,8 +854,35 @@ fn void command_reference_maximum_capacity_is_transactional() @test {
         desc:   &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
+    OwnedSpan overflow_owned = policy_span(
+        &device,
+        { .graphics },
+        "reference_overflow",
+    );
+    defer free_owned_span(&device, &overflow_owned)!!;
+    vk::VkDeviceState* state = policy_device_state(&device);
+    Atomic{uint}* overflow_counter =
+        &state.allocations.get(
+            overflow_owned.allocation,
+        )!!.tracked_command_references;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    gpu::CommandList neighboring_commands =
+        gpu::begin_commands(&allocator)!!;
+    vk::CommandRecord* neighboring_record =
+        vk::resolve_command(&neighboring_commands)!!;
+    Atomic{uint} neighboring_counter;
+    neighboring_counter.store(1, AtomicOrdering.RELAXED);
+    vk::CommandResourceReference neighboring_reference = {
+        .owner            = 42,
+        .index            = 0,
+        .generation       = 1,
+        .retained_counter = &neighboring_counter,
+    };
+    vk::append_command_reference(
+        neighboring_record.scratch,
+        neighboring_reference,
+    );
     Atomic{uint}[gpu::MAX_COMMAND_REFERENCES_PER_LIST] counters;
 
     for (uint i = 0; i < gpu::MAX_COMMAND_REFERENCES_PER_LIST; i++) {
@@ -871,26 +898,34 @@ fn void command_reference_maximum_capacity_is_transactional() @test {
         vk::append_command_reference(record.scratch, candidate);
     }
 
-    vk::CommandResourceReference overflow = {
-        .owner      = 41,
-        .index      = gpu::MAX_COMMAND_REFERENCES_PER_LIST,
-        .generation = 1,
-    };
-    vk::CommandResourceReference[1] overflow_candidates = { overflow };
-    assert(@catch(vk::preflight_command_references(
-        record,
-        overflow_candidates[..],
+    assert(@catch(vk::track_command_reference(
+        state:      state,
+        record:     record,
+        owner:      overflow_owned.span.owner,
+        index:      overflow_owned.span.index,
+        generation: overflow_owned.span.generation,
     )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "the first distinct reference above the public maximum is rejected");
     assert(record.scratch.reference_count
             == gpu::MAX_COMMAND_REFERENCES_PER_LIST,
         "maximum-capacity rejection preserves the complete retained prefix");
+    assert(neighboring_record.scratch.reference_count == 1
+        && vk::contains_command_reference(
+            neighboring_record.scratch,
+            &neighboring_reference,
+        ),
+        "maximum-capacity rejection leaves the neighboring buffer untouched");
+    assert(overflow_counter.load(AtomicOrdering.RELAXED) == 0,
+        "capacity rejection happens before retaining the overflow resource");
 
     gpu::discard_commands(&commands)!!;
+    gpu::discard_commands(&neighboring_commands)!!;
     foreach (&counter : counters) {
         assert(counter.load(AtomicOrdering.RELAXED) == 0,
             "discard releases every retained maximum-capacity reference");
     }
+    assert(neighboring_counter.load(AtomicOrdering.RELAXED) == 0,
+        "discard releases the neighboring buffer reference");
 }
 
 fn void command_reference_tracking_deduplicates_and_reuses_scratch() @test {
