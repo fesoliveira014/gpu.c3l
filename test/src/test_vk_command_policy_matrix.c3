@@ -11,6 +11,57 @@ const char[*] POLICY_MATRIX_VERT_SPIRV =
 const char[*] POLICY_MATRIX_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
+fn void begin_command_family_observation(vk::VkDeviceState* state) {
+    vk::reset_command_recording_work_counters(state);
+    gpu::reset_command_resolution_stats();
+}
+
+fn void assert_command_family_observation(
+    vk::VkDeviceState* state,
+    ulong recording_commands,
+    ulong native_commands,
+    ulong generated_dispatch_emissions,
+    ulong generated_draw_emissions,
+    ulong generated_indexed_draw_emissions,
+    ZString family,
+) {
+    gpu::internal::RecordingWorkCounters recording =
+        vk::command_recording_work_counters(state);
+    gpu::CommandResolutionStats resolution =
+        gpu::command_resolution_stats();
+    assert(recording.host_allocations == 0
+        && recording.command_pool_creations == 0
+        && recording.command_buffer_allocations == 0
+        && recording.command_buffer_frees == 0
+        && recording.command_buffer_resets == 0
+        && recording.image_view_creations == 0
+        && recording.vma_allocations == 0
+        && recording.registry_lock_acquisitions == 0
+        && recording.generated_scratch_misses == 0,
+        "%s command family performs no structural recording work", family);
+    assert(recording.generated_dispatch_emissions
+            == generated_dispatch_emissions
+        && recording.generated_draw_emissions
+            == generated_draw_emissions
+        && recording.generated_indexed_draw_emissions
+            == generated_indexed_draw_emissions,
+        "%s command family emits the exact generated work", family);
+    assert(resolution.device_registry_resolutions == 0
+        && resolution.retained_pin_operations == 0
+        && resolution.command_table_lookups == 0
+        && resolution.pipeline_table_lookups == 0
+        && resolution.pipeline_cache_lookups == 0,
+        "%s command family performs no frontend lookup work", family);
+    assert(resolution.recording_commands == recording_commands
+        && resolution.native_commands == native_commands,
+        "%s command family emits exact work: recording %d/%d, native %d/%d",
+        family,
+        resolution.recording_commands,
+        recording_commands,
+        resolution.native_commands,
+        native_commands);
+}
+
 fn void full_invalid_barrier_emits_no_native_work() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
@@ -192,7 +243,7 @@ fn gpu::TextureHandle create_policy_matrix_transfer_texture(
         .width  = 4,
         .height = 4,
         .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .transfer_src, .transfer_dst },
+        .usage  = { .sampled, .transfer_src, .transfer_dst },
         .access = { .graphics },
     };
     return gpu::create_texture(device, &desc)!!;
@@ -211,11 +262,13 @@ fn gpu::TextureHandle create_policy_matrix_target(gpu::Device* device) {
 
 fn void exercise_policy_matrix_transfer(
     gpu::CommandAllocator* allocator,
+    vk::VkDeviceState* state,
     OwnedSpan* source,
     OwnedSpan* destination,
     gpu::TextureHandle texture,
 ) {
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
+    begin_command_family_observation(state);
     gpu::BufferCopyDesc copy = {
         .src = source.span,
         .dst = destination.span,
@@ -231,11 +284,34 @@ fn void exercise_policy_matrix_transfer(
         .texture = texture,
     };
     gpu::cmd_copy_buffer_to_texture(&commands, &upload)!!;
+    gpu::TextureBarrier readback_barrier = {
+        .texture = texture,
+        .before  = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+        .after = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
+    };
+    gpu::cmd_texture_barrier(&commands, &readback_barrier)!!;
     gpu::TextureBufferCopyDesc readback = {
         .texture = texture,
         .dst     = source.span,
     };
     gpu::cmd_copy_texture_to_buffer(&commands, &readback)!!;
+    assert_command_family_observation(
+        state:                              state,
+        recording_commands:                 5,
+        native_commands:                    5,
+        generated_dispatch_emissions:       0,
+        generated_draw_emissions:           0,
+        generated_indexed_draw_emissions:   0,
+        family:                             "transfer",
+    );
     gpu::discard_commands(&commands)!!;
 }
 
@@ -244,6 +320,8 @@ fn void exercise_policy_matrix_synchronization(
     gpu::TextureHandle texture,
 ) {
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
+    vk::VkDeviceState* state = commands.record.device_state;
+    begin_command_family_observation(state);
     gpu::Barrier barrier = {
         .before = { .transfer },
         .after  = { .compute },
@@ -261,6 +339,15 @@ fn void exercise_policy_matrix_synchronization(
         },
     };
     gpu::cmd_texture_barrier(&commands, &texture_barrier)!!;
+    assert_command_family_observation(
+        state:                              state,
+        recording_commands:                 2,
+        native_commands:                    2,
+        generated_dispatch_emissions:       0,
+        generated_draw_emissions:           0,
+        generated_indexed_draw_emissions:   0,
+        family:                             "synchronization",
+    );
     gpu::discard_commands(&commands)!!;
 }
 
@@ -276,6 +363,7 @@ fn void exercise_policy_matrix_compute(
 
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    begin_command_family_observation(state);
     gpu::cmd_dispatch(
         commands: &commands,
         root:     (gpu::GpuAddress)1,
@@ -292,6 +380,15 @@ fn void exercise_policy_matrix_compute(
         count_span:         {},
         max_dispatch_count: 0,
     )!!;
+    assert_command_family_observation(
+        state:                              state,
+        recording_commands:                 3,
+        native_commands:                    4,
+        generated_dispatch_emissions:       0,
+        generated_draw_emissions:           0,
+        generated_indexed_draw_emissions:   0,
+        family:                             "compute",
+    );
     gpu::discard_commands(&commands)!!;
 }
 
@@ -308,8 +405,18 @@ fn void exercise_policy_matrix_render(
     defer state.generated_work.enabled = generated_work_enabled;
 
     gpu::CommandList minimal = gpu::begin_commands(allocator)!!;
+    begin_command_family_observation(state);
     gpu::cmd_begin_render_pass(&minimal, pass)!!;
     gpu::cmd_end_render_pass(&minimal)!!;
+    assert_command_family_observation(
+        state:                              state,
+        recording_commands:                 2,
+        native_commands:                    2,
+        generated_dispatch_emissions:       0,
+        generated_draw_emissions:           0,
+        generated_indexed_draw_emissions:   0,
+        family:                             "minimal render pass",
+    );
     gpu::discard_commands(&minimal)!!;
 
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
@@ -317,6 +424,7 @@ fn void exercise_policy_matrix_render(
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
     gpu::cmd_begin_render_pass_with_state(&commands, pass, &graphics)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    begin_command_family_observation(state);
     gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     gpu::Viewport viewport = {
         .width     = 8.0f,
@@ -410,21 +518,51 @@ fn void exercise_policy_matrix_render(
         index_span:    {},
     )!!;
     gpu::cmd_end_render_pass(&commands)!!;
+    ulong native_commands = 32;
+    if (state.caps.dynamic_color_state) native_commands += 3;
+    if (state.draw_indirect_count) native_commands += 2;
+    assert_command_family_observation(
+        state:                              state,
+        recording_commands:                 14,
+        native_commands:                    native_commands,
+        generated_dispatch_emissions:       0,
+        generated_draw_emissions:           0,
+        generated_indexed_draw_emissions:   0,
+        family:                             "render",
+    );
     gpu::discard_commands(&commands)!!;
 }
 
-fn void exercise_policy_matrix_labels(gpu::CommandAllocator* allocator) {
+fn void exercise_policy_matrix_labels(
+    gpu::CommandAllocator* allocator,
+    vk::VkDeviceState* state,
+) {
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
+    begin_command_family_observation(state);
     gpu::cmd_begin_label(&commands, "policy_matrix")!!;
     gpu::cmd_end_label(&commands)!!;
+    bool labels_supported = state.device_dispatch.debug.cmd_begin_label != null
+        && state.device_dispatch.debug.cmd_end_label != null;
+    assert_command_family_observation(
+        state:                              state,
+        recording_commands:                 2,
+        native_commands:                    labels_supported ? 2 : 0,
+        generated_dispatch_emissions:       0,
+        generated_draw_emissions:           0,
+        generated_indexed_draw_emissions:   0,
+        family:                             "labels",
+    );
     gpu::discard_commands(&commands)!!;
 }
 
-fn void exercise_command_families(gpu::ContractValidation contract) {
+fn void exercise_command_families(
+    gpu::ContractValidation contract,
+    bool vulkan_layers,
+) {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
         contract:      contract,
-        vulkan_layers: false,
+        vulkan_layers: vulkan_layers,
         callback:      false,
         debug_names:   true,
         capture:       &capture,
@@ -494,6 +632,7 @@ fn void exercise_command_families(gpu::ContractValidation contract) {
 
     exercise_policy_matrix_transfer(
         allocator:   &allocator,
+        state:       state,
         source:      &source,
         destination: &destination,
         texture:     transfer_texture,
@@ -513,10 +652,18 @@ fn void exercise_command_families(gpu::ContractValidation contract) {
         indices:   &indices,
         indirect:  &indirect,
     );
-    exercise_policy_matrix_labels(&allocator);
+    exercise_policy_matrix_labels(&allocator, state);
 }
 
 fn void command_families_run_under_both_contract_modes() @test {
-    exercise_command_families(gpu::ContractValidation.TRUSTED);
-    exercise_command_families(gpu::ContractValidation.FULL);
+    gpu::ContractValidation[2] contracts = {
+        gpu::ContractValidation.TRUSTED,
+        gpu::ContractValidation.FULL,
+    };
+    bool[2] layer_values = { false, true };
+    foreach (contract : contracts) {
+        foreach (vulkan_layers : layer_values) {
+            exercise_command_families(contract, vulkan_layers);
+        }
+    }
 }

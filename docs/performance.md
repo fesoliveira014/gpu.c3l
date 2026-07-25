@@ -15,14 +15,16 @@ python -B scripts/run_benchmarks.py
 
 The runner builds every target once with C3 `-O1`, uses trusted/no-layer
 defaults for release evidence, validates output schemas and zero-work
-fields, records hand-maintained `expectation_version=3`, and writes
+fields, records hand-maintained `expectation_version=4`, and writes
 `test/build/benchmark-report.md`. The direct-token `command_record_bench` executable
 and fixed workload run in this required order:
 
 | Mode | Contract | Vulkan layers |
 |---|---|---:|
 | 1 | `TRUSTED` | off |
-| 2 | `FULL` | off |
+| 2 | `TRUSTED` | on |
+| 3 | `FULL` | off |
+| 4 | `FULL` | on |
 
 Only mode 1 participates in release timing thresholds. Both elapsed times
 remain advisory. Whenever the runner is executed locally or on a self-hosted
@@ -43,7 +45,7 @@ evaluate or report their release timing thresholds, and pinned comparison flags
 are rejected. Do not compare those timings with the release baseline. The
 validation layer must recognize every enabled Vulkan extension; otherwise its
 diagnostics invalidate the timing run. `command_record_bench` always uses its
-two explicit modes, even during this separate report.
+four explicit contract/layer rows, even during this separate report.
 `command_path_baseline_bench` likewise uses the same trusted/full, layers-off
 matrix.
 
@@ -52,11 +54,14 @@ For the command-only matrix, build once and set both required variables:
 ```sh
 c3c build command_record_bench --path test -O1
 GPU_C3L_BENCH_CONTRACT=trusted GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
+GPU_C3L_BENCH_CONTRACT=trusted GPU_C3L_BENCH_LAYERS=true ./test/build/command_record_bench
 GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
+GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_LAYERS=true ./test/build/command_record_bench
 ```
 
 The executables reject missing or malformed policy variables. Each output has
-one exact `validation policy=...` line reporting contract and layer selection.
+one exact `validation policy=...` line reporting contract, layer selection,
+and command-reference lookup, probe, lock, retain, and release work.
 Functional tests establish that FULL performs semantic validation and lifetime
 tracking while TRUSTED performs neither. Every warm command performs one
 static device-slot liveness load. Every warm interval must report zero retained
@@ -204,8 +209,8 @@ Warm command-buffer reset is expected reuse evidence. Warm host allocation is
 prohibited in both policy modes; FULL retains into fixed reference storage
 allocated with the command allocator. VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
-and retained device-operation resolution, retained-pin borrow, command-table
-lookup, and policy work remain prohibited in warm recording. Binding an opaque
+and retained device-operation resolution, retained-pin borrow, and command-table
+lookup remain prohibited in warm recording. Binding an opaque
 pipeline handle performs exactly one pipeline-table and one pipeline-cache
 lookup; dispatch and draw perform no additional resolution and each emits
 exactly one root push plus its native execution command. The dispatch invariant
@@ -284,7 +289,7 @@ necessary.
 
 The direct-recording gates require zero command-table lookups and exact zero
 for retired frontend proof work, retained device-operation resolution,
-retained-pin borrow, policy reselection, and warm allocation. Each command
+retained-pin borrow, and warm allocation. Each command
 still performs the static device-slot liveness load. Runtime `CommandOps`
 indirect dispatch and fallible recording signatures remain intentional.
 

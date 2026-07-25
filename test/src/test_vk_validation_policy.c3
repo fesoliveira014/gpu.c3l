@@ -78,21 +78,29 @@ fn void policy_matrix_creates_exact_runtime_and_device_state() @test {
 
     foreach (contract : contracts) {
         foreach (layers : values) {
-            PolicyDiagnosticCapture capture;
-            gpu::RuntimeDesc desc = policy_runtime_desc(
-                contract:      contract,
-                vulkan_layers: layers,
-                callback:      false,
-                debug_names:   false,
-                capture:       &capture,
-            );
-            gpu::Device device = create_test_device(&desc)!!;
-            vk::VkDeviceState* state = policy_device_state(&device);
-            assert(state.validation_policy.contract == contract,
-                "device preserves the contract policy");
-            assert(state.validation_policy.vulkan_layers == layers,
-                "device preserves the independent layer policy");
-            destroy_test_device(&device)!!;
+            foreach (callback : values) {
+                foreach (debug_names : values) {
+                    PolicyDiagnosticCapture capture;
+                    gpu::RuntimeDesc desc = policy_runtime_desc(
+                        contract:      contract,
+                        vulkan_layers: layers,
+                        callback:      callback,
+                        debug_names:   debug_names,
+                        capture:       &capture,
+                    );
+                    gpu::Device device = create_test_device(&desc)!!;
+                    vk::VkDeviceState* state = policy_device_state(&device);
+                    assert(state.validation_policy.contract == contract,
+                        "device preserves the contract policy");
+                    assert(state.validation_policy.vulkan_layers == layers,
+                        "device preserves the independent layer policy");
+                    assert(state.debug_names == debug_names,
+                        "device preserves the debug-name policy");
+                    assert((state.debug_callback != null) == callback,
+                        "device preserves callback presence independently");
+                    destroy_test_device(&device)!!;
+                }
+            }
         }
     }
 }
@@ -261,27 +269,38 @@ fn void full_rejects_destruction_until_each_lifecycle_release() @test {
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
+    vk::VkDeviceState* state = policy_device_state(&device);
 
     OwnedSpan recording = policy_span(&device, { .graphics }, "recording");
+    vk::reset_command_reference_work_counters(state);
     gpu::CommandList commands = record_policy_fill(&allocator, recording.span);
     assert(@catch(gpu::free_allocation(&device, &recording.allocation))
         == gpu::RESOURCE_IN_USE,
         "full validation rejects destruction during recording");
     gpu::discard_commands(&commands)!!;
+    vk::CommandReferenceWorkCounters work =
+        vk::command_reference_work_counters(state);
+    assert(work.retains == 1 && work.releases == 1,
+        "recording discard releases its one retained resource exactly once");
     gpu::free_allocation(&device, &recording.allocation)!!;
     recording.span = {};
 
     OwnedSpan executable = policy_span(&device, { .graphics }, "executable");
+    vk::reset_command_reference_work_counters(state);
     commands = record_policy_fill(&allocator, executable.span);
     gpu::ExecutableCommandList list = gpu::end_commands(&commands)!!;
     assert(@catch(gpu::free_allocation(&device, &executable.allocation))
         == gpu::RESOURCE_IN_USE,
         "full validation rejects destruction while executable");
     gpu::discard_executable_commands(&list)!!;
+    work = vk::command_reference_work_counters(state);
+    assert(work.retains == 1 && work.releases == 1,
+        "executable discard releases its retained resource exactly once");
     gpu::free_allocation(&device, &executable.allocation)!!;
     executable.span = {};
 
     OwnedSpan submitted = policy_span(&device, { .graphics }, "submitted");
+    vk::reset_command_reference_work_counters(state);
     commands = record_policy_fill(&allocator, submitted.span);
     list = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { list };
@@ -294,6 +313,9 @@ fn void full_rejects_destruction_until_each_lifecycle_release() @test {
         == gpu::RESOURCE_IN_USE,
         "full validation rejects destruction before submitted work is retired");
     gpu::wait_completion(completion)!!;
+    work = vk::command_reference_work_counters(state);
+    assert(work.retains == 1 && work.releases == 1,
+        "completion retirement releases its retained resource exactly once");
     gpu::free_allocation(&device, &submitted.allocation)!!;
     submitted.span = {};
 }
@@ -592,17 +614,25 @@ fn void empty_and_populated_fixed_reference_storage_release_exactly() @test {
     defer (void)state.command_mutex.destroy();
 
     vk::CommandResourceReference[] empty;
+    vk::reset_command_reference_work_counters(&state);
     vk::release_tracked_command_references(&state, empty, 0);
     assert(empty.len == 0,
         "empty command reference storage remains empty during release");
+    vk::CommandReferenceWorkCounters work =
+        vk::command_reference_work_counters(&state);
+    assert(work.releases == 0,
+        "empty command reference storage performs no release work");
 
     Atomic{uint} tracked;
     tracked.store(1, AtomicOrdering.RELAXED);
     vk::CommandResourceReference[1] populated = {{
         .tracked_command_references = &tracked,
     }};
+    vk::reset_command_reference_work_counters(&state);
     vk::release_tracked_command_references(&state, populated[..], 1);
-    assert(tracked.load(AtomicOrdering.RELAXED) == 0,
+    work = vk::command_reference_work_counters(&state);
+    assert(tracked.load(AtomicOrdering.RELAXED) == 0
+        && work.releases == 1,
         "fixed populated storage decrements its retained counter exactly once");
 }
 
@@ -738,9 +768,12 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
     assert(completions[0].submitted_count == 1
         && scratch[0].reference_count == 0,
         "submission transfers empty reference storage without allocation");
+    vk::reset_command_reference_work_counters(&state);
     vk::destroy_submitted_commands(&state);
-    assert(scratch[0].reference_count == 0,
-        "empty submitted teardown retains no references");
+    vk::CommandReferenceWorkCounters work =
+        vk::command_reference_work_counters(&state);
+    assert(work.releases == 0,
+        "empty submitted teardown performs no reference work");
 
     allocator_slot.live_executables = 1;
     vk::CommandRecord populated = {
@@ -769,8 +802,11 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
     populated_record.state = gpu::internal::CommandState.SUBMITTED;
     assert(scratch[1].reference_count == 1,
         "submission transfers populated reference ownership exactly once");
+    vk::reset_command_reference_work_counters(&state);
     vk::destroy_submitted_commands(&state);
-    assert(tracked.load(AtomicOrdering.RELAXED) == 0,
+    work = vk::command_reference_work_counters(&state);
+    assert(tracked.load(AtomicOrdering.RELAXED) == 0
+        && work.releases == 1,
         "submitted teardown releases the transferred reference exactly once");
 }
 
@@ -794,6 +830,7 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
         OwnedSpan owned = policy_span(&device, { .graphics }, "lost_command");
         vk::VkDeviceState* state = policy_device_state(&device);
         vk::CommandBufferStats before = vk::command_buffer_stats(state);
+        vk::reset_command_reference_work_counters(state);
         gpu::CommandList commands = record_policy_fill(&allocator, owned.span);
         vk::CommandRecord* record = vk::resolve_command(&commands)!!;
         vk::CommandBufferStats recorded = vk::command_buffer_stats(state);
@@ -808,6 +845,11 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
             "device-loss recording reuses its allocator's native buffer");
         gpu::internal::mark_device_lost(&device);
         gpu::discard_commands(&commands)!!;
+        vk::CommandReferenceWorkCounters work =
+            vk::command_reference_work_counters(state);
+        assert(work.retains == (full ? (ulong)1 : (ulong)0)
+            && work.releases == (full ? (ulong)1 : (ulong)0),
+            "device-loss cleanup releases exactly the selected reference work");
         vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
         assert(discarded.allocated == recorded.allocated
             && discarded.freed == recorded.freed

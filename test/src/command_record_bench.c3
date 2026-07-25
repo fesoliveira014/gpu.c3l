@@ -13,7 +13,7 @@ const uint COMMAND_RECORD_ITERATIONS = 20_000;
 const uint GENERATED_RECORD_ITERATIONS = 64;
 const uint COMMAND_RECORD_REPETITIONS = 5;
 const uint MEASURED_COMMAND_PATH_COUNT = 3;
-const uint BENCHMARK_EXPECTATION_VERSION = 3;
+const uint BENCHMARK_EXPECTATION_VERSION = 4;
 
 struct CommandBenchPolicy {
     gpu::ContractValidation contract;
@@ -375,6 +375,7 @@ fn int main() {
     vk::CommandRecordingStats recording_before =
         vk::command_recording_stats(state);
     ulong pipelines_before = vk::pipeline_native_create_count(state);
+    vk::reset_command_reference_work_counters(state);
 
     double[COMMAND_RECORD_REPETITIONS] barrier_results;
     double[COMMAND_RECORD_REPETITIONS] hazard_results;
@@ -415,6 +416,8 @@ fn int main() {
         vk::command_recording_work_counters(state),
         warm_before,
     );
+    vk::CommandReferenceWorkCounters reference_work =
+        vk::command_reference_work_counters(state);
     ulong recording_allocations = recording_after.recording_allocations
         - recording_before.recording_allocations;
     ulong preprocess_allocations = recording_after.preprocess_allocations
@@ -468,6 +471,18 @@ fn int main() {
         "resolution evidence counts every measured recording call");
     assert(resolution.native_commands >= resolution.recording_commands,
         "measured recording calls emit native command work");
+    if (policy.contract == gpu::ContractValidation.FULL) {
+        assert(reference_work.retains > 0
+            && reference_work.releases == reference_work.retains,
+            "full recording retains and releases every command reference");
+    } else {
+        assert(reference_work.lookups == 0
+            && reference_work.probes == 0
+            && reference_work.resource_mutex_acquisitions == 0
+            && reference_work.retains == 0
+            && reference_work.releases == 0,
+            "trusted recording performs no command-reference work");
+    }
     if (caps.generated_work) {
         assert(preprocess_reuses
             >= GENERATED_RECORD_ITERATIONS * COMMAND_RECORD_REPETITIONS,
@@ -529,9 +544,14 @@ fn int main() {
         resolution.encoder_lease_comparisons,
     );
     io::printfn(
-        "validation policy=%s layers=%s",
+        "validation policy=%s layers=%s reference_lookups=%d reference_probes=%d reference_mutex=%d reference_retains=%d reference_releases=%d",
         policy.contract_name,
         policy.vulkan_layers ? "true" : "false",
+        reference_work.lookups,
+        reference_work.probes,
+        reference_work.resource_mutex_acquisitions,
+        reference_work.retains,
+        reference_work.releases,
     );
     io::printfn(
         "cold work: host_allocations=%d command_pool_creations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",

@@ -973,6 +973,10 @@ fn void command_policy_selection_covers_both_contract_modes() @test {
     assert(trusted_address != full_address);
     policy.contract = bitcast(99, gpu::ContractValidation);
     assert(
+        gpu::internal::vk::contract_uses_full_validation(policy),
+        "an unknown policy preserves full validation and reference storage"
+    );
+    assert(
         gpu::internal::vk::select_command_ops(policy)
             == &gpu::internal::vk::FULL_COMMAND_OPS,
         "an unknown policy falls back to full command recording"

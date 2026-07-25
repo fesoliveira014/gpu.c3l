@@ -347,7 +347,7 @@ Troubleshooting the two most likely faults:
 `full_validation_runtime_desc()` selects `FULL`, which includes command
 resource lifetime tracking, and enables Vulkan validation. For a production
 trusted path, a zero-initialized
-descriptor with `.backend = VULKAN` selects trusted checks, no command-resource
+descriptor selects trusted checks, no command-resource
 retention, and no Vulkan layers. In that mode you must discard commands or
 observe every covering `CompletionPoint` before destroying any referenced
 resource. Both modes still protect host pointer/slice/range access, integer

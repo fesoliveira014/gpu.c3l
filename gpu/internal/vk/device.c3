@@ -506,15 +506,13 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
+fn bool contract_uses_full_validation(DeviceValidationPolicy policy) =>
+    policy.contract != gpu::ContractValidation.TRUSTED;
+
 fn CommandOps* select_command_ops(DeviceValidationPolicy policy) {
-    switch (policy.contract) {
-        case gpu::ContractValidation.TRUSTED:
-            return &TRUSTED_COMMAND_OPS;
-        case gpu::ContractValidation.FULL:
-            return &FULL_COMMAND_OPS;
-        default:
-            return &FULL_COMMAND_OPS;
-    }
+    return contract_uses_full_validation(policy)
+        ? &FULL_COMMAND_OPS
+        : &TRUSTED_COMMAND_OPS;
 }
 
 fn void note_command_reference_lookup(VkDeviceState* state) @private {
@@ -1210,7 +1208,7 @@ fn void vk_destroy_device(VkDeviceState* state) {
 }
 
 fn bool report_teardown_leaks(VkDeviceState* state) =>
-    state.validation_policy.contract == gpu::ContractValidation.FULL;
+    contract_uses_full_validation(state.validation_policy);
 
 <* Reverse-order cleanup after accepted destruction, device loss, or partial creation. *>
 fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @private {

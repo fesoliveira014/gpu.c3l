@@ -74,7 +74,7 @@ BENCHMARK_METHODS = {
 }
 
 C3_BUILD_FLAGS = ("-O1",)
-EXPECTATION_VERSION = 3
+EXPECTATION_VERSION = 4
 
 BENCHMARK_PROJECTS = {
     "command_wrapper_bench": "test/cpu",
@@ -202,11 +202,22 @@ COMMAND_RECORD_EXPECTED_DIRECT_NATIVE_COMMANDS = 400_000
 COMMAND_RECORD_EXPECTED_GENERATED_COMMANDS = 320
 COMMAND_POLICY_EVIDENCE = re.compile(
     r"^validation policy=(?P<policy>trusted|full) "
-    r"layers=(?P<layers>true|false)$"
+    r"layers=(?P<layers>true|false) "
+    r"reference_lookups=(?P<reference_lookups>[0-9]+) "
+    r"reference_probes=(?P<reference_probes>[0-9]+) "
+    r"reference_mutex=(?P<reference_mutex>[0-9]+) "
+    r"reference_retains=(?P<reference_retains>[0-9]+) "
+    r"reference_releases=(?P<reference_releases>[0-9]+)$"
 )
 COMMAND_POLICY_MODES = (
     ("trusted", False),
     ("full", False),
+)
+COMMAND_RECORD_POLICY_MODES = (
+    ("trusted", False),
+    ("trusted", True),
+    ("full", False),
+    ("full", True),
 )
 COMMAND_PATH_OPERATIONS = (
     "dispatch",
@@ -939,6 +950,29 @@ def require_command_policy_evidence(output, expected=None):
             "command_record_bench policy mode mismatch: "
             f"{actual} != {expected}"
         )
+    reference_work = {
+        field: int(match.group(field))
+        for field in (
+            "reference_lookups",
+            "reference_probes",
+            "reference_mutex",
+            "reference_retains",
+            "reference_releases",
+        )
+    }
+    if policy == "full":
+        if (
+            reference_work["reference_retains"] == 0
+            or reference_work["reference_releases"]
+                != reference_work["reference_retains"]
+        ):
+            raise ValueError(
+                "command_record_bench full reference work is missing or unbalanced"
+            )
+    elif any(reference_work.values()):
+        raise ValueError(
+            "command_record_bench trusted policy performed forbidden reference work"
+        )
     warm_lines = [
         line for line in output.splitlines()
         if line.startswith("warm work:")
@@ -953,9 +987,9 @@ def require_command_policy_evidence(output, expected=None):
 
 
 def require_command_policy_matrix(outputs):
-    if len(outputs) != len(COMMAND_POLICY_MODES):
-        raise ValueError("command_record_bench two-mode policy matrix is incomplete")
-    for output, expected in zip(outputs, COMMAND_POLICY_MODES):
+    if len(outputs) != len(COMMAND_RECORD_POLICY_MODES):
+        raise ValueError("command_record_bench contract/layer matrix is incomplete")
+    for output, expected in zip(outputs, COMMAND_RECORD_POLICY_MODES):
         require_command_policy_evidence(output, expected)
         require_command_record_outcomes(output)
 
@@ -1291,7 +1325,7 @@ def main():
         iterations, units = BENCHMARK_METHODS[target]
         if target == "command_record_bench":
             command_outputs = []
-            for policy, layers in COMMAND_POLICY_MODES:
+            for policy, layers in COMMAND_RECORD_POLICY_MODES:
                 command_env = env.copy()
                 command_env["GPU_C3L_BENCH_CONTRACT"] = policy
                 command_env["GPU_C3L_BENCH_LAYERS"] = str(layers).lower()
@@ -1301,7 +1335,9 @@ def main():
                     command_env,
                 )
                 command_outputs.append(output)
-                trusted_release = (policy, layers) == COMMAND_POLICY_MODES[0]
+                trusted_release = (
+                    (policy, layers) == COMMAND_RECORD_POLICY_MODES[0]
+                )
                 timing_advisories.extend(require_measurement(
                     output,
                     target,

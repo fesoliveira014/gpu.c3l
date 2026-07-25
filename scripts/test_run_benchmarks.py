@@ -32,7 +32,7 @@ LIFECYCLE_OUTPUT = "\n".join(
 )
 COMMAND_OUTPUT = "\n".join(
     (
-        "expectation_version=3",
+        "expectation_version=4",
         (
             "command_tokens: representation=direct "
             "recording_token_bytes=16 executable_token_bytes=16 "
@@ -56,7 +56,11 @@ COMMAND_OUTPUT = "\n".join(
             "pipeline_table=0 pipeline_cache=0 "
             "encoder_cells=0 encoder_leases=0"
         ),
-        "validation policy=trusted layers=false",
+        (
+            "validation policy=trusted layers=false reference_lookups=0 "
+            "reference_probes=0 reference_mutex=0 reference_retains=0 "
+            "reference_releases=0"
+        ),
         (
             "cold work: host_allocations=5 command_pool_creations=1 "
             "command_buffer_allocations=1 "
@@ -77,10 +81,18 @@ COMMAND_OUTPUT = "\n".join(
 FULL_COMMAND_OUTPUT = COMMAND_OUTPUT.replace(
     "policy=trusted",
     "policy=full",
+).replace(
+    "reference_lookups=0 reference_probes=0 reference_mutex=0 "
+    "reference_retains=0 reference_releases=0",
+    "reference_lookups=400000 reference_probes=400000 "
+    "reference_mutex=100000 reference_retains=100000 "
+    "reference_releases=100000",
 )
 COMMAND_POLICY_OUTPUTS = (
     COMMAND_OUTPUT,
+    COMMAND_OUTPUT.replace("layers=false", "layers=true"),
     FULL_COMMAND_OUTPUT,
+    FULL_COMMAND_OUTPUT.replace("layers=false", "layers=true"),
 )
 COMMAND_REFERENCE_OUTPUT = "\n".join((
     "iterations=unique:1,8,64,256,1024,4096;mixed:4096;near_capacity:4095;repeated:100000;collisions:64 units=ns/reference",
@@ -1060,13 +1072,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         mutations = (
             (
-                COMMAND_OUTPUT.replace("expectation_version=3\n", ""),
+                COMMAND_OUTPUT.replace("expectation_version=4\n", ""),
                 "expectation version",
             ),
             (
                 COMMAND_OUTPUT.replace(
-                    "expectation_version=3",
                     "expectation_version=4",
+                    "expectation_version=3",
                 ),
                 "expectation version",
             ),
@@ -1158,8 +1170,8 @@ class BenchmarkRunnerTests(unittest.TestCase):
 
         layer_mismatch = list(COMMAND_POLICY_OUTPUTS)
         layer_mismatch[1] = layer_mismatch[1].replace(
-            "layers=false",
             "layers=true",
+            "layers=false",
         )
         with self.assertRaisesRegex(ValueError, "mode mismatch"):
             runner.require_command_policy_matrix(layer_mismatch)
@@ -1167,12 +1179,32 @@ class BenchmarkRunnerTests(unittest.TestCase):
     def test_command_policy_matrix_rejects_retired_counter_schema(self):
         runner = load_runner()
         retired_schema = list(COMMAND_POLICY_OUTPUTS)
-        retired_schema[1] = retired_schema[1].replace(
+        retired_schema[0] = retired_schema[0].replace(
             "layers=false",
             "layers=false semantic_checks=1",
         )
         with self.assertRaisesRegex(ValueError, "malformed"):
             runner.require_command_policy_matrix(retired_schema)
+
+    def test_command_policy_matrix_rejects_forbidden_trusted_reference_work(self):
+        runner = load_runner()
+        outputs = list(COMMAND_POLICY_OUTPUTS)
+        outputs[0] = outputs[0].replace(
+            "reference_probes=0",
+            "reference_probes=1",
+        )
+        with self.assertRaisesRegex(ValueError, "forbidden reference work"):
+            runner.require_command_policy_matrix(outputs)
+
+    def test_command_policy_matrix_rejects_unbalanced_full_reference_work(self):
+        runner = load_runner()
+        outputs = list(COMMAND_POLICY_OUTPUTS)
+        outputs[2] = outputs[2].replace(
+            "reference_releases=100000",
+            "reference_releases=99999",
+        )
+        with self.assertRaisesRegex(ValueError, "missing or unbalanced"):
+            runner.require_command_policy_matrix(outputs)
 
     def test_allocation_measurement_rejects_extra_fields(self):
         runner = load_runner()

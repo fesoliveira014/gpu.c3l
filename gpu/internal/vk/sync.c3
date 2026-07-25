@@ -701,49 +701,6 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
     return { .slot = slot, .native = native };
 }
 
-fn LoweredTextureBarrier? validate_and_lower_texture_barrier(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::TextureBarrier* barrier,
-    ZString operation,
-) {
-    note_texture_barrier_helper(state);
-    if (barrier == null) {
-        TextureBarrierRejection rejection = {
-            .field     = "TextureBarrier",
-            .invariant = "barrier must be non-null",
-        };
-        return report_texture_barrier_rejection(
-            state:     state,
-            barrier:   barrier,
-            slot:      null,
-            rejection: rejection,
-        )~;
-    }
-
-    TextureSlot*? slot_result = state.textures.get(barrier.texture);
-    if (catch handle_fault = slot_result) {
-        TextureBarrierRejection rejection = {
-            .field     = "TextureBarrier.texture",
-            .invariant = "must identify one live texture",
-        };
-        return report_texture_barrier_rejection(
-            state:        state,
-            barrier:      barrier,
-            slot:         null,
-            rejection:    rejection,
-            public_fault: handle_fault,
-        )~;
-    }
-    return validate_and_lower_resolved_texture_barrier(
-        state:     state,
-        record:    record,
-        barrier:   barrier,
-        slot:      slot_result,
-        operation: operation,
-    );
-}
-
 fn LoweredTextureBarrier? validate_track_and_lower_texture_barrier(
     VkDeviceState* state,
     CommandRecord* record,

@@ -188,6 +188,7 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
+    vk::reset_command_reference_work_counters(state);
     gpu::reset_command_resolution_stats();
     gpu::BufferCopyDesc copy = {
         .src = source.span,
@@ -197,7 +198,11 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
     assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
         == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "two unique references fault before a one-reference scratch unit mutates");
-    assert(record.scratch.reference_count == 0,
+    vk::CommandReferenceWorkCounters work =
+        vk::command_reference_work_counters(state);
+    assert(record.scratch.reference_count == 0
+        && work.retains == 0
+        && work.releases == 0,
         "capacity preflight retains and rolls back no partial reference");
     assert(gpu::command_resolution_stats().native_commands == 0,
         "capacity preflight rejects before the native copy command");

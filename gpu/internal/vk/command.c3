@@ -596,7 +596,7 @@ fn void? initialize_command_allocator_slot_with_ops(
     slot.available = available;
 
     uint reference_capacity =
-        state.validation_policy.contract == gpu::ContractValidation.FULL
+        contract_uses_full_validation(state.validation_policy)
         ? desc.max_resource_references_per_list
         : 0;
     uint reference_index_capacity =
@@ -1181,7 +1181,7 @@ fn void? vk_begin_commands_with_ops(
 
     RecordingThreadIdentity current_identity =
         current_recording_thread_identity();
-    if (state.validation_policy.contract == gpu::ContractValidation.FULL
+    if (contract_uses_full_validation(state.validation_policy)
         && slot.recording_thread_set
         && !recording_thread_identity_matches(
             slot.recording_thread_identity,

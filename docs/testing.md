@@ -538,8 +538,8 @@ image-view creation, and pipeline/shader creation are required to remain zero. R
 snapshots begin before pipeline binding: binding the opaque pipeline handle
 performs exactly one pipeline-table and one pipeline-cache lookup and records
 one `pipeline_bind_commands` increment for the selected bind point, while
-retained device-operation resolution, retained-pin borrow, command-table lookup,
-and policy work remain zero. Each public recording call checks the static
+retained device-operation resolution, retained-pin borrow, and command-table
+lookup remain zero. Each public recording call checks the static
 device slot before loading the stable record.
 Exact heap counters require one indexing set bind or descriptor-buffer
 offset per used bind point and one descriptor-buffer bind per command record;
@@ -683,10 +683,11 @@ The lifecycle output requires `cached_poll_queries=0` and
 `retirement_locks=0` across each 100,000-poll measured interval and zero native
 completion queries/waits, device waits, and deferred-release enqueues in their
 respective intervals. Run `python -B scripts/run_benchmarks.py`; one build of
-`command_record_bench` executes the two contract rows above with the same fixed
-workload. The runner enforces exact policy fields, zero warm command-table and
-other resolution/proof work, exact token/storage sizes, and exact native
-output. Only TRUSTED command timings with Vulkan layers disabled participate in
+`command_record_bench` executes all four contract/layer combinations with the
+same fixed workload. The runner enforces exact policy and reference-work
+fields, zero warm command-table and other resolution/proof work, exact
+token/storage sizes, and exact native output. Only TRUSTED command timings with
+Vulkan layers disabled participate in
 release threshold evaluation. `--validation` still supplies the separate
 all-enabled debug run for the other benchmark devices; those timings are not
 release comparisons and pinned comparison flags are rejected. Exact schemas
