@@ -603,6 +603,18 @@
         "runtime_enable_validation.c3"
       ]
     },
+    "runtime_track_resource_lifetimes": {
+      "type": "object-files",
+      "sources": [
+        "runtime_track_resource_lifetimes.c3"
+      ]
+    },
+    "contract_validation_object_boundaries": {
+      "type": "object-files",
+      "sources": [
+        "contract_validation_object_boundaries.c3"
+      ]
+    },
     "command_list_handle": {
       "type": "object-files",
       "sources": [

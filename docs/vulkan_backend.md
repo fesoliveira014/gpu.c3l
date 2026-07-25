@@ -66,7 +66,7 @@ gpu/internal/vk/recording_thread_*.c3   portable and Win32 recording-owner ident
 gpu/internal/vk/sync.c3                 barriers, timeline semaphores
 gpu/internal/vk/render_pass.c3          dynamic rendering
 gpu/internal/vk/swapchain.c3            swapchain lifecycle and presentation
-gpu/internal/vk/lifetime.c3             optional command resource lifetime tracking
+gpu/internal/vk/lifetime.c3             FULL command resource lifetime tracking
 gpu/internal/vk/debug.c3                debug names, leak reports
 gpu/internal/vk/helpers.c3              enum and flag translation helpers
 gpu/internal/vk/validate.c3             descriptor and command validation helpers
@@ -163,15 +163,16 @@ arbitrary driver/application threads. Payloads are borrowed, no diagnostic
 allocation or queue is introduced, and callback reentry into gpu.c3l is
 prohibited. Native Vulkan object handles/types never cross the public boundary.
 When no callback is configured, Vulkan layer output retains the stderr fallback.
-Accepted teardown scans private Vulkan state for `OBJECT_BOUNDARIES`/`FULL` or
-when a structured callback is active. Normal live children are rejected by the
+Accepted teardown scans private Vulkan state for `FULL`. Normal live children
+are rejected by the
 public device registry; the scan covers internal, partial-initialization, and
 device-loss leftovers.
 Callback messages use `WARNING`/`resource_lifetime` with operation
 `destroy_device`; enabled contract reporting without a callback uses stderr.
 Runtime diagnostics use the same callback contract with independent instance
 and messenger lifetimes. Callback presence changes delivery only; it does not
-enable library checks, lifetime tracking, Vulkan layers, or object naming.
+enable library checks, lifetime tracking, teardown leak scans, Vulkan layers,
+or object naming.
 
 ## 5. Adapter enumeration and device selection
 
@@ -647,8 +648,8 @@ endpoints, and representable scissor endpoints before native recording.
 Negative viewport height, device-bounded negative coordinates, reversed depth,
 off-pass overscan, and empty scissors are accepted. Zero viewport height
 remains a deliberate non-degenerate library invariant. Trusted entries retain
-only the mandatory safe-lowering and state-machine floor. Accepted trusted and
-checked values share one exact native lowering path. Checked regular and
+only the mandatory safe-lowering and state-machine floor. Accepted TRUSTED and
+FULL values share one exact native lowering path. FULL regular and
 generated draws additionally require one complete packet in the current
 recording. The initialization bit survives pass boundaries and is cleared when
 the command buffer is reset. Trusted draw paths neither read nor update that
@@ -732,7 +733,7 @@ private pool for the exact selected queue family, allocates the complete fixed
 native command-buffer set in one call, and wires stable per-buffer reference and
 generated-index slices plus a recycling stack. The backend publishes the
 generational allocator slot only after every host/native allocation succeeds.
-Tracking-off devices allocate no reference slab. The table has 256 recyclable
+TRUSTED devices allocate no reference slab. The table has 256 recyclable
 slots; destroyed slots advance generation and re-enter its free list rather than
 accumulating historical worker state.
 
@@ -764,26 +765,24 @@ report device loss.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
 
-`VkRuntimeState`, `VkDeviceConfig`, and `VkDeviceState` carry one named policy:
-contract depth, lifetime tracking, and Vulkan-layer selection. Device creation
-stores it before policy-dependent subsystems initialize and selects one of four
-immutable command tables: trusted/no-tracking, trusted/tracking,
-checked/no-tracking, or checked/tracking. `OBJECT_BOUNDARIES` shares trusted
-recording entries because its additional checks occur at public boundaries.
+`VkRuntimeState`, `VkDeviceConfig`, and `VkDeviceState` carry contract mode and
+independent Vulkan-layer selection. Device creation stores them before
+policy-dependent subsystems initialize and selects one of two immutable command
+tables: TRUSTED or FULL.
 The authoritative record stores the selected table during begin; warm recording
-performs no policy lookup or branch. Every table retains host
+performs no policy lookup or branch. Both tables retain host
 pointer/slice/range safety, overflow protection, command-state and
 internal-table integrity, public device ownership, Vulkan result/device-loss
 handling, and transactional rollback.
 
 `cmd_bind_pipeline` generation-checks the pipeline slot, resolves its cache
-entry, optionally retains tracked ownership, and stores native pipeline/layout, kind,
+entry, retains ownership under FULL, and stores native pipeline/layout, kind,
 render compatibility, cache identity, generated-command layout, and public
 diagnostic identity. Execution helpers consume only that snapshot; they do not
 retain or reread a pipeline cell and never revisit pipeline table/cache storage.
-Without lifetime tracking, the caller-owned lifetime contract requires the
-pipeline to remain live through command completion. `FULL` controls detailed
-semantic preparation independently of that retention choice.
+Under TRUSTED, the caller-owned lifetime contract requires the pipeline to
+remain live through command completion. `FULL` enables both detailed semantic
+preparation and retained pipeline ownership.
 
 Submission validates the complete batch before mutation. Direct-token
 validation rejects generation-mismatched, foreign-device, duplicate,
@@ -889,12 +888,12 @@ inside `TextureState`; unknown layout, stage, or access bits fault before
 recording. View format must be undefined or exactly match the texture. Zero
 mip/layer counts mean the remaining range and are normalized once.
 
-Checked texture barriers perform one handle resolution, one range
+FULL texture barriers perform one handle resolution, one range
 normalization, two state validations/lowerings, one native assembly, and one
-native emission. Tracking variants retain the explicit texture/allocation once
-and roll newly retained references back if later checked preparation faults.
-Trusted variants share safe range/lowering and emission without the semantic
-matrix; non-tracking variants perform no reference work. No path adds a second
+native emission. FULL retains the explicit texture/allocation once and rolls
+newly retained references back if later preparation faults. TRUSTED shares safe
+range/lowering and emission without the semantic matrix and performs no
+reference work. No path adds a second
 semantic pass or shared layout-history update after successful lowering.
 
 Presentation transitions use these synchronization2 scopes in the shown
@@ -1003,7 +1002,7 @@ publish active compatibility and retained references
 The convenience begin also rejects a host-unsafe state pointer and validates
 and lowers the complete packet before tracking or native mutation. After
 `vkCmdBeginRendering`, it emits the fixed ten-command packet and publishes
-checked graphics-state initialization. Any preparation failure leaves
+FULL graphics-state initialization. Any preparation failure leaves
 command-list state, tracked references, and the native command buffer unchanged.
 
 Render pass end:
@@ -1102,11 +1101,11 @@ Core destruction releases native objects immediately. The backend performs no
 wait and owns no deferred-release queue. Swapchain destruction and resize use
 private presentation fences to prove WSI retirement without hidden waits.
 
-When `track_resource_lifetimes` is true, command references cover explicitly
+Under `FULL`, command references cover explicitly
 named spans, textures, attachment views, allocations, and pipelines across
 recording, executable, and incomplete submitted work. Destruction drains only
 already-completed reference records with non-blocking timeline queries; a
-remaining reference returns `RESOURCE_IN_USE`. When false, recording allocates
+remaining reference returns `RESOURCE_IN_USE`. Under `TRUSTED`, recording allocates
 no reference storage and discard, retirement, device loss, and teardown perform
 no reference-release work. The backend adds no implicit wait: callers retain
 owners until the covering completion is observed. GPU addresses and shader

@@ -5,7 +5,6 @@ import gpu;
 fn void allocation_spans_expose_mapping_address_and_liveness() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_span_test",
     };
@@ -69,7 +68,6 @@ fn void live_allocations_block_device_destruction() @test {
 fn void span_range_and_alignment_validation() @test {
     gpu::RuntimeDesc device_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_range_validation_test",
     };

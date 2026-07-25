@@ -69,7 +69,6 @@ struct ScratchWorkerArgs {
 fn gpu::Device make_thr_device() {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_threading_test",
     };

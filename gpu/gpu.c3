@@ -79,11 +79,9 @@ fn bool SamplerIndex.is_valid(self) => (uint)self != 0;
 <* True when the token is not the invalid zero value. *>
 fn bool Runtime.is_valid(self) => (ulong)self != 0;
 
-<* Return FULL contract diagnostics with lifetime tracking and Vulkan
-   validation layers enabled. *>
+<* Return FULL contract diagnostics with Vulkan validation layers enabled. *>
 fn RuntimeDesc full_validation_runtime_desc() => {
-    .contract_validation      = ContractValidation.FULL,
-    .track_resource_lifetimes = true,
+    .contract_validation = ContractValidation.FULL,
     .enable_vulkan_validation = true,
 };
 
@@ -360,7 +358,6 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
     gpu::internal::command_table_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_policy_selections.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_recording_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_native_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_bind_commands.store(0, AtomicOrdering.RELAXED);
@@ -387,9 +384,6 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
             AtomicOrdering.RELAXED,
         ),
         .pipeline_cache_lookups = gpu::internal::command_pipeline_cache_lookups.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .command_policy_selections = gpu::internal::command_policy_selections.load(
             AtomicOrdering.RELAXED,
         ),
         .recording_commands = gpu::internal::command_recording_commands.load(

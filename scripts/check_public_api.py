@@ -665,7 +665,7 @@ def validate_document(document: dict) -> list[str]:
         or tuple(
             member.get("name")
             for member in contract_validation.get("members", [])
-        ) != ("TRUSTED", "OBJECT_BOUNDARIES", "FULL")
+        ) != ("TRUSTED", "FULL")
     ):
         failures.append("ContractValidation must match the strict policy order")
 
@@ -952,7 +952,6 @@ def validate_document(document: dict) -> list[str]:
 
     runtime_desc_schema = (
         ("contract_validation", "ContractValidation"),
-        ("track_resource_lifetimes", "bool"),
         ("enable_vulkan_validation", "bool"),
         ("enable_debug_names", "bool"),
         ("texture_heap_capacity", "uint"),

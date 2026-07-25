@@ -31,7 +31,6 @@ struct BenchSpan {
 
 struct CommandPathPolicy {
     gpu::ContractValidation contract;
-    bool                    track_lifetimes;
     bool                    vulkan_layers;
     ZString                 contract_name;
 }
@@ -100,9 +99,6 @@ fn CommandPathPolicy? command_path_policy() {
     if (contract_value == "trusted") {
         contract = gpu::ContractValidation.TRUSTED;
         contract_name = "trusted";
-    } else if (contract_value == "object_boundaries") {
-        contract = gpu::ContractValidation.OBJECT_BOUNDARIES;
-        contract_name = "object_boundaries";
     } else if (contract_value == "full") {
         contract = gpu::ContractValidation.FULL;
         contract_name = "full";
@@ -110,10 +106,9 @@ fn CommandPathPolicy? command_path_policy() {
         return gpu::INVALID_ARGUMENT~;
     }
     return {
-        .contract        = contract,
-        .track_lifetimes = command_path_flag("GPU_C3L_BENCH_TRACKING")!,
-        .vulkan_layers   = command_path_flag("GPU_C3L_BENCH_LAYERS")!,
-        .contract_name   = contract_name,
+        .contract      = contract,
+        .vulkan_layers = command_path_flag("GPU_C3L_BENCH_LAYERS")!,
+        .contract_name = contract_name,
     };
 }
 
@@ -1223,7 +1218,6 @@ fn int main() {
     CommandPathPolicy policy = command_path_policy()!!;
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation      = policy.contract,
-        .track_resource_lifetimes = policy.track_lifetimes,
         .enable_vulkan_validation = policy.vulkan_layers,
         .application_name         = "gpu_command_path_baseline",
     };
@@ -1233,7 +1227,6 @@ fn int main() {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     assert(state.validation_policy.contract == policy.contract);
-    assert(state.validation_policy.track_lifetimes == policy.track_lifetimes);
     assert(state.validation_policy.vulkan_layers == policy.vulkan_layers);
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -1391,9 +1384,8 @@ fn int main() {
     }
 
     io::printfn(
-        "command_path_vk_policy validation=%s tracking=%s layers=%s resolution_stats=false recording_work_stats=true",
+        "command_path_vk_policy validation=%s layers=%s resolution_stats=false recording_work_stats=true",
         policy.contract_name,
-        policy.track_lifetimes ? "true" : "false",
         policy.vulkan_layers ? "true" : "false",
     );
     print_operation("dispatch", COMMAND_PATH_DISPATCH_NATIVE_CALLS, &dispatch);

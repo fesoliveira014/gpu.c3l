@@ -50,7 +50,6 @@ fn void capture_generated_requirements(
 fn gpu::Device make_ind_device() {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_indirect_test",
     };
@@ -314,7 +313,6 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
 fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "caller_owned_reuse_cross_family",
     };

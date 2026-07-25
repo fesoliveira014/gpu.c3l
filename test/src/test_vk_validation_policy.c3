@@ -23,7 +23,6 @@ fn void capture_policy_diagnostic(
 
 fn gpu::RuntimeDesc policy_runtime_desc(
     gpu::ContractValidation contract,
-    bool track_lifetimes,
     bool vulkan_layers,
     bool callback,
     bool debug_names,
@@ -31,7 +30,6 @@ fn gpu::RuntimeDesc policy_runtime_desc(
 ) {
     return {
         .contract_validation      = contract,
-        .track_resource_lifetimes = track_lifetimes,
         .enable_vulkan_validation = vulkan_layers,
         .enable_debug_names       = debug_names,
         .application_name         = "gpu_validation_policy_test",
@@ -71,75 +69,56 @@ fn OwnedSpan policy_span(
     )!!;
 }
 
-fn void assert_zero_tracking_work(
-    vk::VkDeviceState* state,
-) {
-    vk::CommandPolicyCounters counters = vk::command_policy_counters(state);
-    assert(counters.tracking_calls == 0
-        && counters.reference_allocations == 0
-        && counters.reference_increments == 0
-        && counters.reference_releases == 0,
-        "the operation performs no lifetime-tracking work");
-}
-
 fn void policy_matrix_creates_exact_runtime_and_device_state() @test {
-    gpu::ContractValidation[3] contracts = {
+    gpu::ContractValidation[2] contracts = {
         gpu::ContractValidation.TRUSTED,
-        gpu::ContractValidation.OBJECT_BOUNDARIES,
         gpu::ContractValidation.FULL,
     };
     bool[2] values = { false, true };
 
     foreach (contract : contracts) {
-        foreach (tracking : values) {
-            foreach (layers : values) {
-                foreach (callback : values) {
-                    foreach (names : values) {
-                        PolicyDiagnosticCapture capture;
-                        gpu::RuntimeDesc desc = policy_runtime_desc(
-                            contract:       contract,
-                            track_lifetimes: tracking,
-                            vulkan_layers:   layers,
-                            callback:        callback,
-                            debug_names:     names,
-                            capture:         &capture,
-                        );
-                        gpu::Device device = create_test_device(&desc)!!;
-                        vk::VkDeviceState* state = policy_device_state(&device);
-                        assert(state.validation_policy.contract == contract,
-                            "device preserves the contract policy");
-                        assert(state.validation_policy.track_lifetimes == tracking,
-                            "device preserves the lifetime policy");
-                        assert(state.validation_policy.vulkan_layers == layers,
-                            "device preserves the layer policy");
-                        assert(state.debug_names == names,
-                            "device preserves the debug-name policy");
-                        assert((state.debug_callback != null) == callback,
-                            "device preserves callback presence independently");
-                        destroy_test_device(&device)!!;
-                    }
+        foreach (layers : values) {
+            foreach (callback : values) {
+                foreach (debug_names : values) {
+                    PolicyDiagnosticCapture capture;
+                    gpu::RuntimeDesc desc = policy_runtime_desc(
+                        contract:      contract,
+                        vulkan_layers: layers,
+                        callback:      callback,
+                        debug_names:   debug_names,
+                        capture:       &capture,
+                    );
+                    gpu::Device device = create_test_device(&desc)!!;
+                    vk::VkDeviceState* state = policy_device_state(&device);
+                    assert(state.validation_policy.contract == contract,
+                        "device preserves the contract policy");
+                    assert(state.validation_policy.vulkan_layers == layers,
+                        "device preserves the independent layer policy");
+                    assert(state.debug_names == debug_names,
+                        "device preserves the debug-name policy");
+                    assert((state.debug_callback != null) == callback,
+                        "device preserves callback presence independently");
+                    destroy_test_device(&device)!!;
                 }
             }
         }
     }
 }
 
-fn void every_policy_rejects_null_command_record() @test {
-    gpu::ContractValidation[3] contracts = {
+fn void both_modes_reject_null_command_record() @test {
+    gpu::ContractValidation[2] contracts = {
         gpu::ContractValidation.TRUSTED,
-        gpu::ContractValidation.OBJECT_BOUNDARIES,
         gpu::ContractValidation.FULL,
     };
 
     foreach (contract : contracts) {
         PolicyDiagnosticCapture capture;
         gpu::RuntimeDesc desc = policy_runtime_desc(
-            contract:       contract,
-            track_lifetimes: false,
-            vulkan_layers:   false,
-            callback:        false,
-            debug_names:     false,
-            capture:         &capture,
+            contract:      contract,
+            vulkan_layers: false,
+            callback:      false,
+            debug_names:   false,
+            capture:       &capture,
         );
         gpu::Device device = create_test_device(&desc)!!;
         gpu::CommandList fabricated = { .generation = 1 };
@@ -154,12 +133,11 @@ fn void instance_plans_callback_names_and_layers_independently() @test {
     vk::DebugUtilsMessengerCreateInfoEXT messenger_info;
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
-        contract:       gpu::ContractValidation.FULL,
-        track_lifetimes: true,
-        vulkan_layers:   false,
-        callback:        false,
-        debug_names:     false,
-        capture:         &capture,
+        contract:      gpu::ContractValidation.FULL,
+        vulkan_layers: false,
+        callback:      false,
+        debug_names:   false,
+        capture:       &capture,
     );
 
     vk::VkInstanceDesc plan = vk::runtime_instance_desc(&desc, &messenger_info);
@@ -188,11 +166,10 @@ fn void instance_plans_callback_names_and_layers_independently() @test {
         "layer planning alone chains the validation messenger");
 }
 
-fn void tracking_off_keeps_reference_storage_empty_through_retirement() @test {
+fn void trusted_keeps_reference_storage_empty_through_retirement() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
-        contract:       gpu::ContractValidation.FULL,
-        track_lifetimes: false,
+        contract:       gpu::ContractValidation.TRUSTED,
         vulkan_layers:   false,
         callback:        false,
         debug_names:     false,
@@ -207,23 +184,21 @@ fn void tracking_off_keeps_reference_storage_empty_through_retirement() @test {
     OwnedSpan owned = policy_span(
         &device,
         { .graphics },
-        "tracking_off_completion",
+        "trusted_completion",
     );
     defer free_owned_span(&device, &owned)!!;
 
-    vk::reset_command_policy_counters(state);
     gpu::CommandList commands = record_policy_fill(&allocator, owned.span);
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     assert(record.scratch.references.ptr == null
         && record.scratch.reference_count == 0,
-        "tracking-off recording owns no reference storage");
-    assert_zero_tracking_work(state);
+        "trusted recording owns no reference storage");
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     record = executable.record;
     assert(record.scratch.references.ptr == null
         && record.scratch.reference_count == 0,
-        "tracking-off executable owns no reference storage");
+        "trusted executable owns no reference storage");
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(
@@ -241,21 +216,19 @@ fn void tracking_off_keeps_reference_storage_empty_through_retirement() @test {
         assert(scratch.references.ptr == null
             && scratch.reference_count == 0
             && scratch.reference_index.epoch == 0,
-            "tracking-off submission transfers empty reference storage");
+            "trusted submission transfers empty reference storage");
     }
     gpu::wait_completion(completion)!!;
     assert(completion_state.submitted_count == 0,
-        "completion retires the tracking-off command batch");
-    assert_zero_tracking_work(state);
+        "completion retires the trusted command batch");
     gpu::free_allocation(&device, &owned.allocation)!!;
     owned.span = {};
 }
 
-fn void tracking_off_allows_early_caller_owned_destruction() @test {
+fn void trusted_allows_early_caller_owned_destruction() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
-        contract:       gpu::ContractValidation.OBJECT_BOUNDARIES,
-        track_lifetimes: false,
+        contract:       gpu::ContractValidation.TRUSTED,
         vulkan_layers:   false,
         callback:        false,
         debug_names:     false,
@@ -266,10 +239,8 @@ fn void tracking_off_allows_early_caller_owned_destruction() @test {
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::VkDeviceState* state = policy_device_state(&device);
     OwnedSpan owned = policy_span(&device, { .graphics }, "caller_owned");
 
-    vk::reset_command_policy_counters(state);
     gpu::CommandList commands = record_policy_fill(&allocator, owned.span);
     gpu::free_allocation(&device, &owned.allocation)!!;
     owned.span = {};
@@ -280,16 +251,14 @@ fn void tracking_off_allows_early_caller_owned_destruction() @test {
     vk::CommandRecord* reused = vk::resolve_command(&commands)!!;
     assert(reused.scratch.references.ptr == null
         && reused.scratch.reference_count == 0,
-        "tracking-off command reuse starts from empty reference storage");
+        "trusted command reuse starts from empty reference storage");
     gpu::discard_commands(&commands)!!;
-    assert_zero_tracking_work(state);
 }
 
-fn void tracking_on_rejects_destruction_until_each_lifecycle_release() @test {
+fn void full_rejects_destruction_until_each_lifecycle_release() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
-        contract:       gpu::ContractValidation.OBJECT_BOUNDARIES,
-        track_lifetimes: true,
+        contract:       gpu::ContractValidation.FULL,
         vulkan_layers:   false,
         callback:        false,
         debug_names:     false,
@@ -303,38 +272,35 @@ fn void tracking_on_rejects_destruction_until_each_lifecycle_release() @test {
     vk::VkDeviceState* state = policy_device_state(&device);
 
     OwnedSpan recording = policy_span(&device, { .graphics }, "recording");
-    vk::reset_command_policy_counters(state);
+    vk::reset_command_reference_work_counters(state);
     gpu::CommandList commands = record_policy_fill(&allocator, recording.span);
     assert(@catch(gpu::free_allocation(&device, &recording.allocation))
         == gpu::RESOURCE_IN_USE,
-        "tracking rejects destruction during recording");
+        "full validation rejects destruction during recording");
     gpu::discard_commands(&commands)!!;
-    vk::CommandPolicyCounters counters = vk::command_policy_counters(state);
-    assert(counters.tracking_calls == 1
-        && counters.reference_allocations == 0
-        && counters.reference_increments == 1
-        && counters.reference_releases == 1,
+    vk::CommandReferenceWorkCounters work =
+        vk::command_reference_work_counters(state);
+    assert(work.retains == 1 && work.releases == 1,
         "recording discard releases its one retained resource exactly once");
     gpu::free_allocation(&device, &recording.allocation)!!;
     recording.span = {};
 
     OwnedSpan executable = policy_span(&device, { .graphics }, "executable");
-    vk::reset_command_policy_counters(state);
+    vk::reset_command_reference_work_counters(state);
     commands = record_policy_fill(&allocator, executable.span);
     gpu::ExecutableCommandList list = gpu::end_commands(&commands)!!;
     assert(@catch(gpu::free_allocation(&device, &executable.allocation))
         == gpu::RESOURCE_IN_USE,
-        "tracking rejects destruction while executable");
+        "full validation rejects destruction while executable");
     gpu::discard_executable_commands(&list)!!;
-    counters = vk::command_policy_counters(state);
-    assert(counters.reference_increments == 1
-        && counters.reference_releases == 1,
+    work = vk::command_reference_work_counters(state);
+    assert(work.retains == 1 && work.releases == 1,
         "executable discard releases its retained resource exactly once");
     gpu::free_allocation(&device, &executable.allocation)!!;
     executable.span = {};
 
     OwnedSpan submitted = policy_span(&device, { .graphics }, "submitted");
-    vk::reset_command_policy_counters(state);
+    vk::reset_command_reference_work_counters(state);
     commands = record_policy_fill(&allocator, submitted.span);
     list = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { list };
@@ -345,11 +311,10 @@ fn void tracking_on_rejects_destruction_until_each_lifecycle_release() @test {
     )!!;
     assert(@catch(gpu::free_allocation(&device, &submitted.allocation))
         == gpu::RESOURCE_IN_USE,
-        "tracking rejects destruction before submitted work is retired");
+        "full validation rejects destruction before submitted work is retired");
     gpu::wait_completion(completion)!!;
-    counters = vk::command_policy_counters(state);
-    assert(counters.reference_increments == 1
-        && counters.reference_releases == 1,
+    work = vk::command_reference_work_counters(state);
+    assert(work.retains == 1 && work.releases == 1,
         "completion retirement releases its retained resource exactly once");
     gpu::free_allocation(&device, &submitted.allocation)!!;
     submitted.span = {};
@@ -361,7 +326,6 @@ fn void contract_diagnostics_and_callback_presence_are_independent() @test {
         PolicyDiagnosticCapture capture;
         gpu::RuntimeDesc desc = policy_runtime_desc(
             contract:       gpu::ContractValidation.FULL,
-            track_lifetimes: false,
             vulkan_layers:   false,
             callback:        callback,
             debug_names:     false,
@@ -371,7 +335,6 @@ fn void contract_diagnostics_and_callback_presence_are_independent() @test {
         capture = {};
         gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
         gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-        vk::VkDeviceState* state = policy_device_state(&device);
         gpu::TextureDesc texture_desc = {
             .access = { .graphics },
             .width  = 8,
@@ -391,17 +354,12 @@ fn void contract_diagnostics_and_callback_presence_are_independent() @test {
             before:  { .layout = gpu::TextureLayout.UNDEFINED },
             after:   gpu::sampled_at({ .fragment_shader }),
         )!!;
-        vk::reset_command_policy_counters(state);
         gpu::reset_command_resolution_stats();
         fault misuse = @catch(gpu::cmd_texture_barrier(&commands, &barrier));
         assert(misuse == gpu::INVALID_ARGUMENT,
             "full command checks are independent of callback presence");
         assert(gpu::command_resolution_stats().native_commands == 0,
             "full rejection precedes native command emission");
-        vk::CommandPolicyCounters counters = vk::command_policy_counters(state);
-        assert(counters.semantic_checks == 1
-            && counters.tracking_calls == 0,
-            "callback presence does not change policy work");
         assert(capture.calls == (callback ? 1 : 0),
             "configured callbacks observe but never enable full checks");
         gpu::discard_commands(&commands)!!;
@@ -417,7 +375,6 @@ fn void trusted_callback_and_names_enable_no_command_checks() @test {
         PolicyDiagnosticCapture capture;
         gpu::RuntimeDesc desc = policy_runtime_desc(
             contract:       gpu::ContractValidation.TRUSTED,
-            track_lifetimes: false,
             vulkan_layers:   false,
             callback:        callback,
             debug_names:     true,
@@ -427,7 +384,6 @@ fn void trusted_callback_and_names_enable_no_command_checks() @test {
         capture = {};
         gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
         gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-        vk::VkDeviceState* state = policy_device_state(&device);
         gpu::TextureDesc texture_desc = {
             .access = { .graphics },
             .width  = 8,
@@ -447,12 +403,7 @@ fn void trusted_callback_and_names_enable_no_command_checks() @test {
             before:  { .layout = gpu::TextureLayout.UNDEFINED },
             after:   gpu::sampled_at({ .fragment_shader }),
         )!!;
-        vk::reset_command_policy_counters(state);
         gpu::cmd_texture_barrier(&commands, &barrier)!!;
-        vk::CommandPolicyCounters counters = vk::command_policy_counters(state);
-        assert(counters.semantic_checks == 0
-            && counters.tracking_calls == 0,
-            "trusted callback and names settings enable no command policy work");
         assert(capture.calls == 0,
             "callback presence alone produces no contract diagnostic");
         gpu::discard_commands(&commands)!!;
@@ -466,7 +417,6 @@ fn void trusted_commands_retain_the_mandatory_safety_floor() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
         contract:       gpu::ContractValidation.TRUSTED,
-        track_lifetimes: false,
         vulkan_layers:   false,
         callback:        false,
         debug_names:     false,
@@ -477,36 +427,31 @@ fn void trusted_commands_retain_the_mandatory_safety_floor() @test {
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::VkDeviceState* state = policy_device_state(&device);
     gpu::CommandList commands = gpu::begin_commands(
         &allocator,
     )!!;
     defer discard_test_commands(&commands)!!;
 
-    vk::reset_command_policy_counters(state);
     gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_copy_buffer(&commands, null))
         == gpu::INVALID_ARGUMENT,
         "trusted commands reject null host descriptors");
     assert(gpu::command_resolution_stats().native_commands == 0,
         "mandatory safety rejection performs no native call");
-    assert_zero_tracking_work(state);
 }
 
-fn void object_boundaries_reject_foreign_and_stale_resources_without_command_checks() @test {
+fn void trusted_rejects_foreign_and_stale_resources() @test {
     PolicyDiagnosticCapture first_capture;
     PolicyDiagnosticCapture second_capture;
     gpu::RuntimeDesc first_desc = policy_runtime_desc(
-        contract:       gpu::ContractValidation.OBJECT_BOUNDARIES,
-        track_lifetimes: false,
+        contract:       gpu::ContractValidation.TRUSTED,
         vulkan_layers:   false,
         callback:        true,
         debug_names:     false,
         capture:         &first_capture,
     );
     gpu::RuntimeDesc second_desc = policy_runtime_desc(
-        contract:       gpu::ContractValidation.OBJECT_BOUNDARIES,
-        track_lifetimes: false,
+        contract:       gpu::ContractValidation.TRUSTED,
         vulkan_layers:   false,
         callback:        true,
         debug_names:     false,
@@ -518,54 +463,42 @@ fn void object_boundaries_reject_foreign_and_stale_resources_without_command_che
     defer destroy_test_device(&second)!!;
     first_capture = {};
     second_capture = {};
-    vk::VkDeviceState* first_state = policy_device_state(&first);
     gpu::Queue first_queue = gpu::get_queue(&first, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator first_allocator = gpu::create_command_allocator(&first, first_queue)!!;
     defer gpu::destroy_command_allocator(&first_allocator)!!;
     OwnedSpan owned = policy_span(&first, { .graphics }, "boundary_owned");
 
-    vk::reset_command_policy_counters(first_state);
     gpu::CommandList commands = record_policy_fill(&first_allocator, owned.span);
     gpu::discard_commands(&commands)!!;
-    vk::CommandPolicyCounters counters =
-        vk::command_policy_counters(first_state);
-    assert(counters.semantic_checks == 0,
-        "object-boundary policy performs no per-command semantic work");
 
     gpu::GpuAllocation foreign = owned.allocation;
     assert(@catch(gpu::free_allocation(&second, &foreign))
         == gpu::INVALID_HANDLE,
-        "object-boundary policy rejects foreign ownership");
+        "trusted mode rejects foreign ownership");
     gpu::GpuAllocation stale = owned.allocation;
     gpu::free_allocation(&first, &owned.allocation)!!;
     owned.span = {};
     assert(@catch(gpu::get_allocation_info(&first, stale))
         == gpu::INVALID_HANDLE,
-        "object-boundary policy rejects stale identities");
+        "trusted mode rejects stale identities");
 }
 
-fn void teardown_leak_scans_depend_only_on_contract_or_callback() @test {
+fn void teardown_leak_scans_depend_only_on_contract() @test {
     vk::VkDeviceState state;
     state.validation_policy.contract = gpu::ContractValidation.TRUSTED;
     assert(!vk::report_teardown_leaks(&state),
         "trusted teardown without a callback skips accepted leak scans");
 
     state.debug_callback = &capture_policy_diagnostic;
-    assert(vk::report_teardown_leaks(&state),
-        "callback presence enables accepted teardown leak scans");
-
-    state.debug_callback = null;
-    state.validation_policy.contract =
-        gpu::ContractValidation.OBJECT_BOUNDARIES;
-    assert(vk::report_teardown_leaks(&state),
-        "object-boundary policy enables accepted teardown leak scans");
+    assert(!vk::report_teardown_leaks(&state),
+        "callback presence does not enable trusted teardown leak scans");
 
     state.validation_policy.contract = gpu::ContractValidation.FULL;
     assert(vk::report_teardown_leaks(&state),
         "full policy enables accepted teardown leak scans");
 }
 
-fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
+fn void structured_diagnostics_follow_contract_not_callback_presence() @test {
     PolicyDiagnosticCapture capture;
     vk::VkDeviceState state = {
         .debug_callback  = &capture_policy_diagnostic,
@@ -584,8 +517,7 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
     assert(returned == gpu::INVALID_HANDLE && capture.calls == 0,
         "trusted boundaries preserve faults without detailed diagnostics");
 
-    state.validation_policy.contract =
-        gpu::ContractValidation.OBJECT_BOUNDARIES;
+    state.validation_policy.contract = gpu::ContractValidation.FULL;
     returned = vk::vk_report_root_contract_failure(
         state:          &state,
         operation:      "free_allocation",
@@ -595,10 +527,9 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
         invariant:      "must belong to the device",
     );
     assert(returned == gpu::INVALID_HANDLE && capture.calls == 1,
-        "object-boundary policy emits the configured boundary diagnostic");
+        "full mode emits the configured contract diagnostic");
 
     state.debug_callback = null;
-    state.validation_policy.contract = gpu::ContractValidation.FULL;
     returned = vk::vk_report_root_contract_failure(
         state:          &state,
         operation:      "free_allocation",
@@ -621,60 +552,55 @@ fn uint policy_live_device_count() {
     return count;
 }
 
-fn void partial_creation_rolls_back_across_contract_and_tracking_policies() @test {
-    gpu::ContractValidation[3] contracts = {
+fn void partial_creation_rolls_back_across_both_contract_modes() @test {
+    gpu::ContractValidation[2] contracts = {
         gpu::ContractValidation.TRUSTED,
-        gpu::ContractValidation.OBJECT_BOUNDARIES,
         gpu::ContractValidation.FULL,
     };
-    bool[2] tracking_values = { false, true };
 
     foreach (contract : contracts) {
-        foreach (tracking : tracking_values) {
-            PolicyDiagnosticCapture capture;
-            gpu::RuntimeDesc desc = policy_runtime_desc(
-                contract:       contract,
-                track_lifetimes: tracking,
-                vulkan_layers:   false,
-                callback:        false,
-                debug_names:     false,
-                capture:         &capture,
-            );
-            gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
-            gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-            gpu::DeviceRequest request = gpu::strict_device_request();
-            bool exercised;
-            for (uint i = 0; i < adapters.count; i++) {
-                gpu::Adapter adapter = adapters.get(i)!!;
-                if (!gpu::supports_device_request(&adapter, &request)!!
-                    .supported) continue;
-                exercised = true;
-                gpu::Runtime retained_runtime = runtime;
-                gpu::internal::runtime_retain_device(&retained_runtime)!!;
-                vk::DeviceCreationProbe probe = {
-                    .fail_at = vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
-                };
-                uint live_before = policy_live_device_count();
-                assert(@catch(vk::create_vk_device_with_probe(
-                    adapter:          &adapter,
-                    request:          &request,
-                    retained_runtime: &retained_runtime,
-                    probe:            &probe,
-                )) == gpu::BACKEND_ERROR,
-                    "partial creation returns its injected backend fault");
-                gpu::internal::runtime_release_device(&retained_runtime)!!;
-                assert(probe.reached
-                        == vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION
-                    && probe.rollback_count == 1,
-                    "partial creation reaches and rolls back exactly once");
-                assert(policy_live_device_count() == live_before,
-                    "partial creation publishes no device slot");
-                break;
-            }
-            assert(exercised,
-                "the pinned Vulkan adapter supports strict device creation");
-            gpu::destroy_runtime(&runtime)!!;
+        PolicyDiagnosticCapture capture;
+        gpu::RuntimeDesc desc = policy_runtime_desc(
+            contract:       contract,
+            vulkan_layers:   false,
+            callback:        false,
+            debug_names:     false,
+            capture:         &capture,
+        );
+        gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+        gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+        gpu::DeviceRequest request = gpu::strict_device_request();
+        bool exercised;
+        for (uint i = 0; i < adapters.count; i++) {
+            gpu::Adapter adapter = adapters.get(i)!!;
+            if (!gpu::supports_device_request(&adapter, &request)!!
+                .supported) continue;
+            exercised = true;
+            gpu::Runtime retained_runtime = runtime;
+            gpu::internal::runtime_retain_device(&retained_runtime)!!;
+            vk::DeviceCreationProbe probe = {
+                .fail_at = vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
+            };
+            uint live_before = policy_live_device_count();
+            assert(@catch(vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                request:          &request,
+                retained_runtime: &retained_runtime,
+                probe:            &probe,
+            )) == gpu::BACKEND_ERROR,
+                "partial creation returns its injected backend fault");
+            gpu::internal::runtime_release_device(&retained_runtime)!!;
+            assert(probe.reached
+                    == vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION
+                && probe.rollback_count == 1,
+                "partial creation reaches and rolls back exactly once");
+            assert(policy_live_device_count() == live_before,
+                "partial creation publishes no device slot");
+            break;
         }
+        assert(exercised,
+            "the pinned Vulkan adapter supports strict device creation");
+        gpu::destroy_runtime(&runtime)!!;
     }
 }
 
@@ -687,23 +613,26 @@ fn void empty_and_populated_fixed_reference_storage_release_exactly() @test {
     state.command_mutex.init()!!;
     defer (void)state.command_mutex.destroy();
 
-    vk::reset_command_policy_counters(&state);
     vk::CommandResourceReference[] empty;
+    vk::reset_command_reference_work_counters(&state);
     vk::release_tracked_command_references(&state, empty, 0);
     assert(empty.len == 0,
         "empty command reference storage remains empty during release");
-    assert_zero_tracking_work(&state);
+    vk::CommandReferenceWorkCounters work =
+        vk::command_reference_work_counters(&state);
+    assert(work.releases == 0,
+        "empty command reference storage performs no release work");
 
     Atomic{uint} tracked;
     tracked.store(1, AtomicOrdering.RELAXED);
     vk::CommandResourceReference[1] populated = {{
         .tracked_command_references = &tracked,
     }};
-    vk::reset_command_policy_counters(&state);
+    vk::reset_command_reference_work_counters(&state);
     vk::release_tracked_command_references(&state, populated[..], 1);
-    vk::CommandPolicyCounters counters = vk::command_policy_counters(&state);
+    work = vk::command_reference_work_counters(&state);
     assert(tracked.load(AtomicOrdering.RELAXED) == 0
-        && counters.reference_releases == 1,
+        && work.releases == 1,
         "fixed populated storage decrements its retained counter exactly once");
 }
 
@@ -743,12 +672,10 @@ fn void command_reference_clear_releases_list_and_resets_index() @test {
             reference_index: i,
         );
     }
-    vk::reset_command_policy_counters(&state);
     vk::reset_command_reference_work_counters(&state);
 
     vk::clear_command_scratch_references(&state, &scratch);
 
-    vk::CommandPolicyCounters policy = vk::command_policy_counters(&state);
     vk::CommandReferenceWorkCounters work =
         vk::command_reference_work_counters(&state);
     bool prior_epoch_only = true;
@@ -761,7 +688,7 @@ fn void command_reference_clear_releases_list_and_resets_index() @test {
         && scratch.reference_index.epoch == 4
         && prior_epoch_only,
         "clear releases the recorded list and publishes an empty new epoch");
-    assert(policy.reference_releases == 2 && work.releases == 2,
+    assert(work.releases == 2,
         "clear reports one release for every recorded reference");
 }
 
@@ -841,9 +768,12 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
     assert(completions[0].submitted_count == 1
         && scratch[0].reference_count == 0,
         "submission transfers empty reference storage without allocation");
-    vk::reset_command_policy_counters(&state);
+    vk::reset_command_reference_work_counters(&state);
     vk::destroy_submitted_commands(&state);
-    assert_zero_tracking_work(&state);
+    vk::CommandReferenceWorkCounters work =
+        vk::command_reference_work_counters(&state);
+    assert(work.releases == 0,
+        "empty submitted teardown performs no reference work");
 
     allocator_slot.live_executables = 1;
     vk::CommandRecord populated = {
@@ -872,21 +802,23 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
     populated_record.state = gpu::internal::CommandState.SUBMITTED;
     assert(scratch[1].reference_count == 1,
         "submission transfers populated reference ownership exactly once");
-    vk::reset_command_policy_counters(&state);
+    vk::reset_command_reference_work_counters(&state);
     vk::destroy_submitted_commands(&state);
-    vk::CommandPolicyCounters counters = vk::command_policy_counters(&state);
+    work = vk::command_reference_work_counters(&state);
     assert(tracked.load(AtomicOrdering.RELAXED) == 0
-        && counters.reference_releases == 1,
+        && work.releases == 1,
         "submitted teardown releases the transferred reference exactly once");
 }
 
 fn void device_loss_accepts_empty_or_populated_command_references() @test {
-    bool[2] tracking_values = { false, true };
-    foreach (tracking : tracking_values) {
+    gpu::ContractValidation[2] contracts = {
+        gpu::ContractValidation.TRUSTED,
+        gpu::ContractValidation.FULL,
+    };
+    foreach (contract : contracts) {
         PolicyDiagnosticCapture capture;
         gpu::RuntimeDesc desc = policy_runtime_desc(
-            contract:       gpu::ContractValidation.OBJECT_BOUNDARIES,
-            track_lifetimes: tracking,
+            contract:       contract,
             vulkan_layers:   false,
             callback:        false,
             debug_names:     false,
@@ -898,28 +830,27 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
         OwnedSpan owned = policy_span(&device, { .graphics }, "lost_command");
         vk::VkDeviceState* state = policy_device_state(&device);
         vk::CommandBufferStats before = vk::command_buffer_stats(state);
-        vk::reset_command_policy_counters(state);
+        vk::reset_command_reference_work_counters(state);
         gpu::CommandList commands = record_policy_fill(&allocator, owned.span);
         vk::CommandRecord* record = vk::resolve_command(&commands)!!;
         vk::CommandBufferStats recorded = vk::command_buffer_stats(state);
-        assert((record.scratch.reference_count == 1) == tracking,
-            "device-loss setup reflects the selected tracking policy");
-        assert((record.scratch.references.ptr != null) == tracking,
-            "device-loss setup owns storage only when tracking is enabled");
+        bool full = contract == gpu::ContractValidation.FULL;
+        assert((record.scratch.reference_count == 1) == full,
+            "device-loss setup reflects the selected contract mode");
+        assert((record.scratch.references.ptr != null) == full,
+            "device-loss setup owns reference storage only in full mode");
         assert(recorded.allocated == before.allocated
             && recorded.freed == before.freed
             && recorded.pending == before.pending,
             "device-loss recording reuses its allocator's native buffer");
-        vk::CommandPolicyCounters counters =
-            vk::command_policy_counters(state);
-        assert(counters.reference_allocations == 0,
-            "device-loss setup uses its allocator's fixed reference storage");
         gpu::internal::mark_device_lost(&device);
         gpu::discard_commands(&commands)!!;
+        vk::CommandReferenceWorkCounters work =
+            vk::command_reference_work_counters(state);
+        assert(work.retains == (full ? (ulong)1 : (ulong)0)
+            && work.releases == (full ? (ulong)1 : (ulong)0),
+            "device-loss cleanup releases exactly the selected reference work");
         vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
-        counters = vk::command_policy_counters(state);
-        assert((counters.reference_releases == 1) == tracking,
-            "lost-command discard releases exactly the selected reference work");
         assert(discarded.allocated == recorded.allocated
             && discarded.freed == recorded.freed
             && discarded.pending == before.pending,
@@ -927,7 +858,7 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
         gpu::destroy_command_allocator(&allocator)!!;
         destroy_test_device(&device)!!;
         assert(!device.is_valid(),
-            "device-loss teardown consumes devices with either reference shape");
+            "device-loss teardown consumes devices in either contract mode");
     }
 }
 
@@ -1072,8 +1003,7 @@ fn void command_reference_index_uses_full_identity_and_exact_probes() @test {
 fn void command_reference_duplicate_avoids_mutex_and_retain_work() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
-        contract:       gpu::ContractValidation.OBJECT_BOUNDARIES,
-        track_lifetimes: true,
+        contract:       gpu::ContractValidation.FULL,
         vulkan_layers:   false,
         callback:        false,
         debug_names:     false,
@@ -1193,7 +1123,6 @@ fn void texture_reference_publishes_after_retain_and_deduplicates() @test {
     };
     gpu::TextureHandle stale = valid;
     stale.generation++;
-    vk::reset_command_policy_counters(&state);
     vk::reset_command_reference_work_counters(&state);
 
     fault retain_fault = @catch(vk::resolve_tracked_texture_command_reference(
@@ -1218,7 +1147,6 @@ fn void texture_reference_publishes_after_retain_and_deduplicates() @test {
         &record,
         valid,
     )!!;
-    vk::CommandPolicyCounters policy = vk::command_policy_counters(&state);
     vk::CommandReferenceWorkCounters work =
         vk::command_reference_work_counters(&state);
     assert(scratch.reference_count == 1
@@ -1226,9 +1154,7 @@ fn void texture_reference_publishes_after_retain_and_deduplicates() @test {
             AtomicOrdering.RELAXED,
         ) == 1,
         "a successful texture retain publishes exactly one reference");
-    assert(policy.tracking_calls == 3
-        && policy.reference_increments == 1
-        && work.lookups == 3
+    assert(work.lookups == 3
         && work.duplicate_hits == 1
         && work.resource_mutex_acquisitions == 2
         && work.retains == 1

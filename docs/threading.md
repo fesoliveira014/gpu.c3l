@@ -74,11 +74,11 @@ There is no permanent thread/device cache. Destroyed generational allocator
 slots are recycled, so historical worker churn consumes no device-lifetime
 context capacity.
 
-When lifetime tracking is enabled, each scratch unit also owns a fixed
+Under FULL, each scratch unit also owns a fixed
 open-addressed reference index sized from its configured hard reference limit.
 Lookup and insertion occur under the command token's confinement; the resource
 mutex is acquired only when a new exact identity must be retained. Duplicate
-hits require neither that mutex nor another retain. Tracking-off scratch owns no
+hits require neither that mutex nor another retain. TRUSTED scratch owns no
 reference list or index.
 
 The first live recording sets the allocator's owner thread. Under `FULL`, a
@@ -234,13 +234,10 @@ multiple callbacks may run concurrently, with no cross-thread ordering or
 library serialization.
 
 Callback presence changes delivery only. `ContractValidation.TRUSTED` does not
-gain detailed misuse checks. `OBJECT_BOUNDARIES` uses the same trusted command
-tables and adds structured reporting only at explicitly routed public
-boundaries plus teardown leak scans. `FULL` selects checked command semantic
-diagnostics. Lifetime tracking stays controlled by
-`track_resource_lifetimes`, and Vulkan layers stay controlled by
-`enable_vulkan_validation`, so `FULL` works with layers disabled. Teardown leak
-scans also run whenever a callback is present.
+gain detailed misuse checks, command resource lifetime tracking, or teardown
+leak scans. `FULL` selects detailed command semantic diagnostics, tracking, and
+teardown leak scans. Vulkan layers stay controlled independently by
+`enable_vulkan_validation`, so `FULL` works with layers disabled.
 
 The callback must be nonblocking and must not call gpu.c3l. Delivery can occur
 while internal resource or queue locks are held, so reentry may deadlock. Copy
@@ -300,9 +297,9 @@ its use have completed.
 acquired image. Resource destruction is immediate and never waits. Discard
 recording or executable command tokens and wait for every returned
 `CompletionPoint` that may reference a resource before destroying it.
-With `track_resource_lifetimes = true`, explicit command resources are retained
+Under `FULL`, explicit command resources are retained
 through recording, executable, and incomplete-submission phases, so early
-destruction returns `RESOURCE_IN_USE`. With tracking disabled, records allocate
+destruction returns `RESOURCE_IN_USE`. Under `TRUSTED`, records allocate
 and update no reference storage and retirement performs no reference-release
 work; observing completion before destruction is solely the caller's contract.
 GPU addresses and shader-visible indices remain caller-managed in both modes.

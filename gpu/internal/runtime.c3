@@ -24,7 +24,6 @@ RuntimeData[MAX_RUNTIMES] runtime_slots @private;
 fn bool contract_validation_is_known(ContractValidation policy) @private {
     switch (policy) {
         case ContractValidation.TRUSTED:
-        case ContractValidation.OBJECT_BOUNDARIES:
         case ContractValidation.FULL:
             return true;
         default:

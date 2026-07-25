@@ -434,7 +434,6 @@ fn void? track_command_reference(
     uint index,
     uint generation,
 ) {
-    note_command_tracking_call(state);
     CommandResourceReference reference = {
         .owner      = owner,
         .index      = index,
@@ -455,7 +454,6 @@ fn void? track_command_reference(
     note_command_reference_mutex_acquisition(state);
     defer state.resource_mutex.unlock();
     retain_tracked_command_reference(state, reference)!;
-    note_command_reference_increment(state);
     note_command_reference_retain(state);
     uint reference_index = scratch.reference_count++;
     scratch.references[reference_index] = reference;
@@ -473,7 +471,6 @@ fn TextureSlot*? resolve_tracked_texture_command_reference(
     CommandRecord* record,
     gpu::TextureHandle handle,
 ) {
-    note_command_tracking_call(state);
     CommandResourceReference reference = {
         .owner      = handle.owner,
         .index      = handle.index,
@@ -497,7 +494,6 @@ fn TextureSlot*? resolve_tracked_texture_command_reference(
     TextureSlot* slot = state.textures.get(handle)!;
     reference.tracked_command_references = &slot.tracked_command_references;
     reference.tracked_command_references.add(1, AtomicOrdering.RELAXED);
-    note_command_reference_increment(state);
     note_command_reference_retain(state);
     uint reference_index = scratch.reference_count++;
     scratch.references[reference_index] = reference;

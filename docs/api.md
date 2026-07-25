@@ -72,12 +72,10 @@ Methods are acceptable only for operations that clearly operate on an existing `
 ```text
 ContractValidation
     TRUSTED
-    OBJECT_BOUNDARIES
     FULL
 
 RuntimeDesc
     ContractValidation contract_validation
-    bool track_resource_lifetimes
     bool enable_vulkan_validation
     bool enable_debug_names
     uint texture_heap_capacity      (0 = default; docs/limitations.md)
@@ -151,7 +149,7 @@ Public contracts use four cause categories:
 |---|---|
 | **Preconditions** | Facts valid callers guarantee under every policy. |
 | **Always checked** | The mandatory public and command-token identity, authoritative-phase, host-safety, safe-lowering, integrity, cold-path, lifecycle, and runtime-result floor. Violations return deterministic documented faults under every policy. |
-| **FULL diagnostics** | Detailed semantic misuse diagnosed by the checked command tables only when `contract_validation = FULL`. |
+| **FULL diagnostics** | Detailed semantic misuse diagnosed by the FULL command table only when `contract_validation = FULL`. |
 | **Runtime failures** | Capacity, allocation, timeout, device/surface loss, unsupported capability, and backend failures that valid callers may encounter under every policy. |
 
 A precondition can also be always checked: the first category states the
@@ -163,22 +161,21 @@ Runtime controls are independent:
 
 | Control | Zero/default | Effect |
 |---|---|---|
-| `contract_validation` | `TRUSTED` | Selects library contract behavior. `TRUSTED` uses trusted command recording with the always-checked floor. `OBJECT_BOUNDARIES` uses those same trusted command-operation tables and adds structured reporting only at explicitly routed public boundaries plus teardown leak scans. `FULL` selects checked command operations with detailed argument, usage, layout, queue, pipeline-kind, render-compatibility, and state diagnostics. |
-| `track_resource_lifetimes` | `false` | When true, command records retain explicitly named resources and early destruction returns `RESOURCE_IN_USE`. When false, recording allocates and updates no reference storage; the caller proves completion before destruction. |
+| `contract_validation` | `TRUSTED` | Selects library contract behavior. `TRUSTED` uses trusted command recording with the always-checked floor and no command reference storage. `FULL` adds detailed argument, usage, layout, queue, pipeline-kind, render-compatibility, and state diagnostics; retains explicitly named command resources; and emits teardown leak diagnostics. |
 | `enable_vulkan_validation` | `false` | Requests `VK_LAYER_KHRONOS_validation`. It does not select library checks or lifetime tracking. |
 | `enable_debug_names` | `false` | Requests best-effort native object naming through debug utils. It enables no checks, tracking, or layers. |
 | `debug_callback` | null | Selects structured delivery for diagnostics already produced by the contract policy or Vulkan. It does not enable checks, tracking, layers, or names. |
 
-A zero-initialized `RuntimeDesc` therefore selects `TRUSTED`, lifetime tracking
-off, Vulkan validation layers off, debug names off, and no callback. Every
-contract level retains the always-checked floor: host pointer and slice safety
+A zero-initialized `RuntimeDesc` therefore selects `TRUSTED`, Vulkan validation
+layers off, debug names off, and no callback. Every contract mode retains the
+always-checked floor: host pointer and slice safety
 before reads, integer-overflow and backing-range protection needed for safe
 lowering, authoritative command phase and internal table integrity, public
 device ownership, Vulkan result/device-loss handling, and transactional
 creation rollback. Command recording always compares the direct token
 generation and authoritative phase before backend mutation. Semantic misuse
-outside that floor remains a caller precondition under
-`TRUSTED` and `OBJECT_BOUNDARIES`; neither promises `FULL` command diagnostics.
+outside that floor remains a caller precondition under `TRUSTED`, which does
+not promise `FULL` command diagnostics.
 
 Use the helper for the former all-enabled development configuration:
 
@@ -190,10 +187,11 @@ runtime_desc.application_name = "my_app";
 `FULL` does not require Vulkan SDK layers. Set `contract_validation = FULL` and
 leave `enable_vulkan_validation = false` when detailed library diagnostics are
 needed on a machine without the Khronos layer. For migration only, a former
-`enable_validation = true` initializer maps to `FULL`, lifetime tracking on,
-and Vulkan validation on (or the helper); `false` or omission maps to
-`TRUSTED`, tracking off, and Vulkan validation off. The retired field is not
-part of `RuntimeDesc` and intentionally fails to compile.
+`enable_validation = true` initializer maps to `FULL` and Vulkan validation on
+(or the helper); `false` or omission maps to `TRUSTED` and Vulkan validation
+off. FULL always includes command resource lifetime tracking; TRUSTED never
+allocates reference storage. The retired `OBJECT_BOUNDARIES` value and
+`track_resource_lifetimes` field intentionally fail to compile.
 
 Creating a runtime is the first operation that may initialize Vulkan discovery
 behind the backend-neutral API. Enumeration returns an allocation-free view:
@@ -1163,7 +1161,7 @@ and all fixed host bookkeeping. Zero fields select these public defaults:
 | Capacity | Default | Maximum | Scaling |
 |---|---:|---:|---|
 | `command_buffer_capacity` | `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` = 8 | `MAX_COMMAND_ALLOCATOR_CAPACITY` = 4096 | native command buffers, scratch records, and available-index storage |
-| `max_resource_references_per_list` | `DEFAULT_COMMAND_REFERENCES_PER_LIST` = 64 | `MAX_COMMAND_REFERENCES_PER_LIST` = 4096 | sequential references plus a `next_pow2(2 * capacity)` exact-identity index per command buffer when lifetime tracking is enabled; zero storage when tracking is disabled |
+| `max_resource_references_per_list` | `DEFAULT_COMMAND_REFERENCES_PER_LIST` = 64 | `MAX_COMMAND_REFERENCES_PER_LIST` = 4096 | sequential references plus a `next_pow2(2 * capacity)` exact-identity index per command buffer under FULL; zero storage under TRUSTED |
 | `max_generated_preprocess_buffers_per_list` | `DEFAULT_COMMAND_PREPROCESS_PER_LIST` = 4 | `MAX_COMMAND_PREPROCESS_PER_LIST` = 64 | generated-reservation indices per command buffer and reservation-table entries multiplied by command-buffer capacity |
 
 `generated_preprocess_bytes` has no nonzero default: zero disables generated
@@ -1294,13 +1292,13 @@ cmd_dispatch(
 Pipeline binding selects the active compute or graphics pipeline without
 compiling or synthesizing a variant. A failed bind preserves the previous active
 pipeline. The live identity, owner, and bind snapshot needed for safe later
-use are always checked. A successful bind retains the
-pipeline when `track_resource_lifetimes` is enabled, and caches its native
+use are always checked. A successful FULL bind retains the pipeline and caches
+its native
 pipeline/layout, kind, render compatibility, cache-entry identity,
 generated-work layout, and public diagnostic identity. Later draws and
 dispatches use that snapshot without reading a pipeline cell, table, or cache.
-Tracked ownership prevents destruction until discard or command completion;
-without tracking, the caller must keep the pipeline live through completion.
+FULL ownership prevents destruction until discard or command completion; under
+TRUSTED, the caller must keep the pipeline live through completion.
 Execution without a usable bound-pipeline snapshot faults under every policy.
 `FULL` additionally diagnoses a compute/graphics pipeline-kind mismatch. Valid
 graphics draws also require an active render pass; its phase is always checked.
@@ -1329,10 +1327,10 @@ warm validation branch. A wrong active pipeline kind returns
 Each group count may be zero and is a caller precondition not to exceed the
 corresponding `DeviceCaps.max_compute_work_group_count` component. `FULL`
 diagnoses an over-limit call with `INVALID_ARGUMENT` before recording;
-`TRUSTED` and `OBJECT_BOUNDARIES` do not promise that semantic diagnostic.
+`TRUSTED` does not promise that semantic diagnostic.
 
 Warm recording dispatches through the immutable operation table stored in the
-authoritative record. There is currently one checked policy. Policy selection
+authoritative record. There is one FULL policy table. Policy selection
 happens at device or record setup; a warm `cmd_*` call never branches on policy
 or resolves another device operation. The direct representation retains
 `CommandOps` indirection and the fallible public signatures.
@@ -1547,7 +1545,7 @@ samples; integer formats select sample zero. Depth resolve is not exposed.
 
 A valid bound graphics pipeline exactly matches the pass color count and
 formats, depth format, and sample count. `FULL` diagnoses compatibility misuse
-before the affected checked bind or pass begin emits native work; trusted
+before the affected FULL bind or pass begin emits native work; trusted
 command recording treats it as a caller precondition.
 Graphics and compute bindings are tracked independently by bind point. Ending
 a render pass clears active attachment compatibility but does not release the
@@ -1639,7 +1637,7 @@ execution path and the library never emulates generated work with a CPU loop.
 Root semantics are uniform across this entire operation family. The root
 arguments to direct and indirect commands and every root field loaded from a
 generated record are forwarded unchanged. Zero is valid for compute, vertex,
-and fragment roots under `TRUSTED`, `OBJECT_BOUNDARIES`, and `FULL`. Shaders
+and fragment roots under `TRUSTED` and `FULL`. Shaders
 using an optional zero root must branch before dereference unless the
 application intentionally relies on defined robustness behavior.
 
@@ -1858,7 +1856,7 @@ The semantic matrix is exact:
 Known bits, legal layouts, and stage/access consistency are caller
 preconditions. Texture states cannot name the global-only `host` or `present`
 stage bits. `FULL` diagnoses those semantic violations with
-`INVALID_ARGUMENT`; `TRUSTED` and `OBJECT_BOUNDARIES` do not promise that
+`INVALID_ARGUMENT`; `TRUSTED` does not promise that
 diagnostic. Same-state transitions remain valid explicit memory dependencies.
 Sampled depth/stencil textures lower to the appropriate read-only depth/stencil
 layout.
@@ -1956,12 +1954,11 @@ native result code.
 Stored public debug names remain available in every policy;
 `enable_debug_names` controls best-effort Vulkan object naming independently.
 
-`TRUSTED` still reports backend/device failures and callback-requested teardown
-leaks, but does not promise detailed misuse diagnostics. `OBJECT_BOUNDARIES`
-uses the same trusted command-operation tables and adds structured reporting
-only at explicitly routed public boundaries plus teardown leak scans. `FULL`
-uses checked command operations and reports detailed rejected fields and
-invariants for command misuse.
+`TRUSTED` still reports backend/device failures, but does not promise detailed
+misuse diagnostics, retain command resources, or run teardown leak scans.
+`FULL` uses diagnostic command operations, retains command resources, runs teardown
+leak scans, and reports detailed rejected fields and invariants for command
+misuse.
 These library diagnostics do not require Vulkan validation layers. Backend failures preserve the public
 fault and report the public operation name, such as `submit` or
 `wait_completion`.
@@ -1980,9 +1977,9 @@ Labels group work for capture tools; they are valid while recording,
 including inside render passes, and silently succeed when debug-utils is
 absent. Balance is the caller's responsibility.
 
-Accepted destruction scans private Vulkan state under `OBJECT_BOUNDARIES` or
-`FULL`, or whenever a callback is configured. `TRUSTED` without a callback may
-remain silent. Normal live children are rejected before this scan; diagnostics
+Accepted destruction scans private Vulkan state under `FULL`. Callback
+presence only selects delivery and does not enable this scan under `TRUSTED`.
+Normal live children are rejected before this scan; diagnostics
 are a safety net for internal, partial-initialization, and device-loss leftovers.
 Callback messages use `WARNING`/`resource_lifetime` with operation
 `destroy_device`; enabled contract reporting without a callback uses stderr.

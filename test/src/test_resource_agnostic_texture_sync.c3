@@ -59,7 +59,6 @@ fn vk::Result create_selected_native_device(
 fn gpu::Device? create_selected_device() {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name         = "resource_agnostic_texture_sync_test",
     };

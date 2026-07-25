@@ -344,12 +344,13 @@ Troubleshooting the two most likely faults:
   available by selecting `ContractValidation.FULL`; Vulkan layers are an
   independent control.
 
-`full_validation_runtime_desc()` selects `FULL`, lifetime tracking on, and
-Vulkan validation on. For a production trusted path, a zero-initialized
-descriptor with `.backend = VULKAN` selects trusted checks, no command-resource
+`full_validation_runtime_desc()` selects `FULL`, which includes command
+resource lifetime tracking, and enables Vulkan validation. For a production
+trusted path, a zero-initialized
+descriptor selects trusted checks, no command-resource
 retention, and no Vulkan layers. In that mode you must discard commands or
 observe every covering `CompletionPoint` before destroying any referenced
-resource. Every policy still protects host pointer/slice/range access, integer
+resource. Both modes still protect host pointer/slice/range access, integer
 overflow, command state and internal tables, public device ownership, Vulkan
 result handling, and creation rollback. A callback or debug names can be added
 to either configuration without enabling checks, tracking, or layers.

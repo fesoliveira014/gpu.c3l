@@ -32,7 +32,7 @@ LIFECYCLE_OUTPUT = "\n".join(
 )
 COMMAND_OUTPUT = "\n".join(
     (
-        "expectation_version=3",
+        "expectation_version=4",
         (
             "command_tokens: representation=direct "
             "recording_token_bytes=16 executable_token_bytes=16 "
@@ -53,13 +53,13 @@ COMMAND_OUTPUT = "\n".join(
             "descriptor_buffer_binds=0 descriptor_buffer_offsets=0 "
             "device_registry=0 "
             "retained_pins=0 command_table=0 "
-            "pipeline_table=0 pipeline_cache=0 policy=0 "
+            "pipeline_table=0 pipeline_cache=0 "
             "encoder_cells=0 encoder_leases=0"
         ),
         (
-            "validation policy=trusted tracking=false layers=false "
-            "semantic_checks=0 tracking_calls=0 reference_allocations=0 "
-            "reference_increments=0 reference_releases=0"
+            "validation policy=trusted layers=false reference_lookups=0 "
+            "reference_probes=0 reference_mutex=0 reference_retains=0 "
+            "reference_releases=0"
         ),
         (
             "cold work: host_allocations=5 command_pool_creations=1 "
@@ -78,31 +78,21 @@ COMMAND_OUTPUT = "\n".join(
         "generated preprocess: reuse_events=320",
     )
 )
-OBJECT_BOUNDARIES_COMMAND_OUTPUT = COMMAND_OUTPUT.replace(
-    "policy=trusted",
-    "policy=object_boundaries",
-)
 FULL_COMMAND_OUTPUT = COMMAND_OUTPUT.replace(
-    (
-        "policy=trusted tracking=false layers=false semantic_checks=0 "
-        "tracking_calls=0 reference_allocations=0 reference_increments=0 "
-        "reference_releases=0"
-    ),
-    (
-        "policy=full tracking=true layers=false semantic_checks=300330 "
-        "tracking_calls=200335 reference_allocations=0 "
-        "reference_increments=25 reference_releases=25"
-    ),
-)
-FULL_LAYERS_COMMAND_OUTPUT = FULL_COMMAND_OUTPUT.replace(
-    "layers=false",
-    "layers=true",
+    "policy=trusted",
+    "policy=full",
+).replace(
+    "reference_lookups=0 reference_probes=0 reference_mutex=0 "
+    "reference_retains=0 reference_releases=0",
+    "reference_lookups=400000 reference_probes=400000 "
+    "reference_mutex=100000 reference_retains=100000 "
+    "reference_releases=100000",
 )
 COMMAND_POLICY_OUTPUTS = (
     COMMAND_OUTPUT,
-    OBJECT_BOUNDARIES_COMMAND_OUTPUT,
+    COMMAND_OUTPUT.replace("layers=false", "layers=true"),
     FULL_COMMAND_OUTPUT,
-    FULL_LAYERS_COMMAND_OUTPUT,
+    FULL_COMMAND_OUTPUT.replace("layers=false", "layers=true"),
 )
 COMMAND_REFERENCE_OUTPUT = "\n".join((
     "iterations=unique:1,8,64,256,1024,4096;mixed:4096;near_capacity:4095;repeated:100000;collisions:64 units=ns/reference",
@@ -188,7 +178,7 @@ COMMAND_WRAPPER_OUTPUT = "\n".join(
 )
 COMMAND_PATH_VK_OUTPUT = "\n".join(
     (
-        "command_path_vk_policy validation=trusted tracking=false layers=false resolution_stats=false recording_work_stats=true",
+        "command_path_vk_policy validation=trusted layers=false resolution_stats=false recording_work_stats=true",
         *tuple(
             f"command_path_vk operation={operation} iterations=20000 repetitions=5 native_calls_per_iteration={native_calls} direct_min_ns=1.000 direct_median_ns=2.000 direct_max_ns=3.000 public_min_ns=4.000 public_median_ns=5.000 public_max_ns=6.000 ratio=2.500000"
             for operation, native_calls in (
@@ -223,16 +213,13 @@ COMMAND_PATH_VK_OUTPUT = "\n".join(
 )
 COMMAND_PATH_VK_OUTPUTS = tuple(
     COMMAND_PATH_VK_OUTPUT.replace(
-        "validation=trusted tracking=false layers=false",
-        f"validation={policy} tracking={str(tracking).lower()} "
-        f"layers={str(layers).lower()}",
+        "validation=trusted layers=false",
+        f"validation={policy} layers={str(layers).lower()}",
         1,
     )
-    for policy, tracking, layers in (
-        ("trusted", False, False),
-        ("object_boundaries", False, False),
-        ("full", True, False),
-        ("full", True, True),
+    for policy, layers in (
+        ("trusted", False),
+        ("full", False),
     )
 )
 
@@ -1034,7 +1021,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "command_table",
             "pipeline_table",
             "pipeline_cache",
-            "policy",
         ):
             with self.subTest(field=field):
                 output = COMMAND_OUTPUT.replace(f"{field}=0", f"{field}=1")
@@ -1086,13 +1072,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         mutations = (
             (
-                COMMAND_OUTPUT.replace("expectation_version=3\n", ""),
+                COMMAND_OUTPUT.replace("expectation_version=4\n", ""),
                 "expectation version",
             ),
             (
                 COMMAND_OUTPUT.replace(
-                    "expectation_version=3",
                     "expectation_version=4",
+                    "expectation_version=3",
                 ),
                 "expectation version",
             ),
@@ -1182,59 +1168,43 @@ class BenchmarkRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "malformed"):
             runner.require_command_policy_matrix(malformed)
 
-        tracking_mismatch = list(COMMAND_POLICY_OUTPUTS)
-        tracking_mismatch[1] = tracking_mismatch[1].replace(
-            "tracking=false",
-            "tracking=true",
-        )
-        with self.assertRaisesRegex(ValueError, "mode mismatch"):
-            runner.require_command_policy_matrix(tracking_mismatch)
-
         layer_mismatch = list(COMMAND_POLICY_OUTPUTS)
-        layer_mismatch[2] = layer_mismatch[2].replace(
-            "layers=false",
+        layer_mismatch[1] = layer_mismatch[1].replace(
             "layers=true",
+            "layers=false",
         )
         with self.assertRaisesRegex(ValueError, "mode mismatch"):
             runner.require_command_policy_matrix(layer_mismatch)
 
-    def test_command_policy_matrix_rejects_wrong_work_relationships(self):
+    def test_command_policy_matrix_rejects_retired_counter_schema(self):
         runner = load_runner()
-        trusted_work = list(COMMAND_POLICY_OUTPUTS)
-        trusted_work[0] = trusted_work[0].replace(
-            "semantic_checks=0",
-            "semantic_checks=1",
+        retired_schema = list(COMMAND_POLICY_OUTPUTS)
+        retired_schema[0] = retired_schema[0].replace(
+            "layers=false",
+            "layers=false semantic_checks=1",
         )
-        with self.assertRaisesRegex(ValueError, "forbidden semantic work"):
-            runner.require_command_policy_matrix(trusted_work)
+        with self.assertRaisesRegex(ValueError, "malformed"):
+            runner.require_command_policy_matrix(retired_schema)
 
-        missing_full_work = list(COMMAND_POLICY_OUTPUTS)
-        missing_full_work[2] = missing_full_work[2].replace(
-            "semantic_checks=300330",
-            "semantic_checks=0",
+    def test_command_policy_matrix_rejects_forbidden_trusted_reference_work(self):
+        runner = load_runner()
+        outputs = list(COMMAND_POLICY_OUTPUTS)
+        outputs[0] = outputs[0].replace(
+            "reference_probes=0",
+            "reference_probes=1",
         )
-        with self.assertRaisesRegex(ValueError, "missing semantic work"):
-            runner.require_command_policy_matrix(missing_full_work)
+        with self.assertRaisesRegex(ValueError, "forbidden reference work"):
+            runner.require_command_policy_matrix(outputs)
 
-        reference_mismatch = list(COMMAND_POLICY_OUTPUTS)
-        reference_mismatch[2] = reference_mismatch[2].replace(
-            "reference_allocations=0",
-            "reference_allocations=1",
+    def test_command_policy_matrix_rejects_unbalanced_full_reference_work(self):
+        runner = load_runner()
+        outputs = list(COMMAND_POLICY_OUTPUTS)
+        outputs[2] = outputs[2].replace(
+            "reference_releases=100000",
+            "reference_releases=99999",
         )
-        reference_mismatch[2] = reference_mismatch[2].replace(
-            "warm work: host_allocations=0",
-            "warm work: host_allocations=1",
-        )
-        with self.assertRaisesRegex(ValueError, "reference allocation"):
-            runner.require_command_policy_matrix(reference_mismatch)
-
-        policy_reselection = list(COMMAND_POLICY_OUTPUTS)
-        policy_reselection[3] = policy_reselection[3].replace(
-            "pipeline_cache=0 policy=0",
-            "pipeline_cache=0 policy=1",
-        )
-        with self.assertRaisesRegex(ValueError, "warm path reported policy"):
-            runner.require_command_policy_matrix(policy_reselection)
+        with self.assertRaisesRegex(ValueError, "missing or unbalanced"):
+            runner.require_command_policy_matrix(outputs)
 
     def test_allocation_measurement_rejects_extra_fields(self):
         runner = load_runner()

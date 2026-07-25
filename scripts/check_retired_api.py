@@ -24,6 +24,8 @@ FIXTURES = {
     "runtime_backend": "backend",
     "get_device_backend": "get_device_backend",
     "runtime_enable_validation": "enable_validation",
+    "runtime_track_resource_lifetimes": "track_resource_lifetimes",
+    "contract_validation_object_boundaries": "OBJECT_BOUNDARIES",
     "create_device_from_desc": "create_device_from_desc",
     "create_sampler": "create_sampler",
     "destroy_sampler": "destroy_sampler",
@@ -125,6 +127,7 @@ ERROR_DIAGNOSTIC = re.compile(
 INVALID_MEMBER_TYPES = {
     "runtime_backend": "RuntimeDesc",
     "runtime_enable_validation": "RuntimeDesc",
+    "runtime_track_resource_lifetimes": "RuntimeDesc",
     "texture_desc_dimension": "TextureDesc",
     "texture_desc_depth": "TextureDesc",
     "texture_view_desc_format": "TextureViewDesc",
@@ -140,6 +143,10 @@ INVALID_MEMBER_TYPES = {
 }
 
 ENUM_VALUES = {
+    "contract_validation_object_boundaries": (
+        "ContractValidation",
+        "OBJECT_BOUNDARIES",
+    ),
     "d24_unorm_s8_uint": ("Format", "D24_UNORM_S8_UINT"),
     "debug_frame": ("DebugResourceKind", "FRAME"),
     "debug_semaphore": ("DebugResourceKind", "SEMAPHORE"),
@@ -218,6 +225,12 @@ RETIRED_DESC_FIELDS = {
         r"(?:\bRuntimeDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
         r"|\bfn\s+(?:gpu::)?RuntimeDesc\b[^\r\n=]*=>\s*)\{"
         r"(?:(?!\};).)*?\.enable_validation\s*=",
+        re.DOTALL,
+    ),
+    "RuntimeDesc.track_resource_lifetimes": re.compile(
+        r"(?:\bRuntimeDesc\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*"
+        r"|\bfn\s+(?:gpu::)?RuntimeDesc\b[^\r\n=]*=>\s*)\{"
+        r"(?:(?!\};).)*?\.track_resource_lifetimes\s*=",
         re.DOTALL,
     ),
     "TextureDesc.dimension/depth": re.compile(

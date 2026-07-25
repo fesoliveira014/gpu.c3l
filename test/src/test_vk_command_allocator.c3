@@ -430,7 +430,9 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         gpu::internal::vk::VkDeviceState state = {
             .host_allocator = &fail_allocator,
             .queue_completions = completions[..],
-            .validation_policy = { .track_lifetimes = true },
+            .validation_policy = {
+                .contract = gpu::ContractValidation.FULL,
+            },
         };
         gpu::internal::vk::CommandAllocatorSlot slot;
         CommandAllocatorCreateProbe probe;
@@ -472,7 +474,9 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
     gpu::internal::vk::VkDeviceState state = {
         .host_allocator = &success_allocator,
         .queue_completions = completions[..],
-        .validation_policy = { .track_lifetimes = true },
+        .validation_policy = {
+            .contract = gpu::ContractValidation.FULL,
+        },
     };
     gpu::internal::vk::CommandAllocatorSlot slot;
     CommandAllocatorCreateProbe probe;
@@ -537,7 +541,7 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
     assert(slot.reference_storage.len == 0
         && slot.reference_index_storage.len == 0
         && slot.scratch[0].reference_index.cells.len == 0,
-        "tracking-off allocators retain no resource-reference storage");
+        "TRUSTED allocators retain no resource-reference storage");
     assert(slot.preprocess_index_storage.len
             == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
                 * gpu::DEFAULT_COMMAND_PREPROCESS_PER_LIST
@@ -921,7 +925,6 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
 fn void tracking_allocator_wires_non_overlapping_reference_slices() @test {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .application_name         = "command_allocator_tracking_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;

@@ -157,12 +157,6 @@ def is_private_backend_source(relative: Path) -> bool:
 
 
 NEGATION_CUE = re.compile(r"\b(?:not|never|neither|without)\b")
-OBJECT_OVERSTATEMENT = re.compile(
-    r"\bobject_boundaries\b.{0,120}(?:(?:selects?|uses?|enables?|runs?|"
-    r"performs?|provides?|adds?).{0,60}(?:checked commands?|full commands?|"
-    r"command (?:semantics?|validation|checks?|diagnostics?))|"
-    r"(?:validates?|checks?|diagnoses?).{0,30}commands?)\b"
-)
 UNIVERSAL_OVERSTATEMENT = re.compile(
     r"\b(?:(?:every|all) (?:validation )?(?:polic(?:y|ies)|modes?).{0,180}"
     r"(?:diagnoses?|rejects?|checks?|faults?|validates?).{0,100}"
@@ -199,11 +193,6 @@ def validate_semantic_markdown(sources: dict[Path, str]) -> list[str]:
     ):
         failures.append("docs/api.md: zero-initialized RuntimeDesc must select TRUSTED")
     for relative, source in normalized.items():
-        if has_nonnegated_match(source, OBJECT_OVERSTATEMENT):
-            failures.append(
-                f"{relative}: OBJECT_BOUNDARIES must not select checked "
-                f"command semantics"
-            )
         if has_nonnegated_match(source, UNIVERSAL_OVERSTATEMENT):
             failures.append(
                 f"{relative}: FULL-only semantic diagnostics must not be "

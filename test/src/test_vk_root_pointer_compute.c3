@@ -52,7 +52,6 @@ fn void root_pointer_compute_readback() @test {
     const uint COUNT = 256;
     gpu::RuntimeDesc device_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_root_pointer_test",
     };
@@ -151,7 +150,6 @@ fn void direct_reference_root_runtime_evidence() @test {
     const uint XOR_VALUE = 0xa5a5_5a5a;
     gpu::RuntimeDesc device_desc = {
         .contract_validation       = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes  = true,
         .enable_vulkan_validation  = true,
         .application_name          = "gpu_root_reference_evidence",
     };
@@ -225,7 +223,6 @@ fn void signed_root_runtime_evidence() @test {
     const uint EXPECTED = 0xc3a5_f17e;
     gpu::RuntimeDesc device_desc = {
         .contract_validation       = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes  = true,
         .enable_vulkan_validation  = true,
         .application_name          = "gpu_signed_root_evidence",
     };

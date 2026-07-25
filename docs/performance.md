@@ -3,7 +3,7 @@
 Benchmarks report advisory timings alongside blocking deterministic allocation,
 work, state, fault, and native-emission observations. Compare numbers only when
 the compiler, optimization level, adapter, driver, contract policy,
-lifetime-tracking and Vulkan-layer state, and queue topology match.
+Vulkan-layer state, and queue topology match.
 
 ## Run
 
@@ -13,22 +13,22 @@ Install the native dependencies in [Testing](testing.md), then run:
 python -B scripts/run_benchmarks.py
 ```
 
-The runner builds every target once with C3 `-O1`, uses trusted/no-tracking/no-
-layer defaults for release evidence, validates output schemas and zero-work
-fields, records hand-maintained `expectation_version=3`, and writes
+The runner builds every target once with C3 `-O1`, uses trusted/no-layer
+defaults for release evidence, validates output schemas and zero-work
+fields, records hand-maintained `expectation_version=4`, and writes
 `test/build/benchmark-report.md`. The direct-token `command_record_bench` executable
 and fixed workload run in this required order:
 
-| Mode | Contract | Tracking | Vulkan layers |
-|---|---|---:|---:|
-| 1 | `TRUSTED` | off | off |
-| 2 | `OBJECT_BOUNDARIES` | off | off |
-| 3 | `FULL` | on | off |
-| 4 | `FULL` | on | on |
+| Mode | Contract | Vulkan layers |
+|---|---|---:|
+| 1 | `TRUSTED` | off |
+| 2 | `TRUSTED` | on |
+| 3 | `FULL` | off |
+| 4 | `FULL` | on |
 
 Only mode 1 participates in release timing thresholds. All four elapsed times
 remain advisory. Whenever the runner is executed locally or on a self-hosted
-machine, exact work-counter violations hard-fail the run. Hosted CI builds the
+machine, exact schema and work violations hard-fail the run. Hosted CI builds the
 benchmark targets and unit-tests their schemas but does not execute this live
 runner; its blocking equivalent is `vk_validation_policy`. To collect the
 former all-enabled debug configuration for the other benchmark devices in a
@@ -39,40 +39,39 @@ python -B scripts/run_benchmarks.py --validation \
   --output test/build/benchmark-report-validation.md
 ```
 
-`--validation` selects `FULL`, lifetime tracking on, and Vulkan validation on
+`--validation` selects `FULL` and Vulkan validation on
 for benchmark devices that do not have an explicit policy matrix. It does not
 evaluate or report their release timing thresholds, and pinned comparison flags
 are rejected. Do not compare those timings with the release baseline. The
 validation layer must recognize every enabled Vulkan extension; otherwise its
 diagnostics invalidate the timing run. `command_record_bench` always uses its
-four explicit modes, even during this separate report.
-`command_path_baseline_bench` likewise keeps its fixed trusted, tracking-off,
-layers-off policy so its native/public comparison stays on the release contract.
+four explicit contract/layer rows, even during this separate report.
+`command_path_baseline_bench` likewise uses the same trusted/full, layers-off
+matrix.
 
-For the command-only matrix, build once and set all three required variables:
+For the command-only matrix, build once and set both required variables:
 
 ```sh
 c3c build command_record_bench --path test -O1
-GPU_C3L_BENCH_CONTRACT=trusted GPU_C3L_BENCH_TRACKING=false GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
-GPU_C3L_BENCH_CONTRACT=object_boundaries GPU_C3L_BENCH_TRACKING=false GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
-GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_TRACKING=true GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
-GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_TRACKING=true GPU_C3L_BENCH_LAYERS=true ./test/build/command_record_bench
+GPU_C3L_BENCH_CONTRACT=trusted GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
+GPU_C3L_BENCH_CONTRACT=trusted GPU_C3L_BENCH_LAYERS=true ./test/build/command_record_bench
+GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_LAYERS=false ./test/build/command_record_bench
+GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_LAYERS=true ./test/build/command_record_bench
 ```
 
 The executables reject missing or malformed policy variables. Each output has
-one exact `validation policy=...` line reporting semantic checks, tracking
-calls, reference allocations/increments/releases, and layer selection. Trusted
-and object-boundary modes require every policy-work counter to be zero. Both
-full modes require semantic and tracking work, releases must equal increments,
-and allocations cannot exceed increments. Every warm command performs one
+one exact `validation policy=...` line reporting contract, layer selection,
+and command-reference lookup, probe, lock, retain, and release work.
+Functional tests establish that FULL performs semantic validation and lifetime
+tracking while TRUSTED performs neither. Every warm command performs one
 static device-slot liveness load. Every warm interval must report zero retained
 device-operation resolution, retained-pin borrow, command-table lookup,
-pipeline-table/cache lookup, and policy reselection.
+and pipeline-table/cache lookup.
 Each target creates its explicit queue-bound allocator before warmup and outside
 every measured interval. Its cold counters report allocator host allocation,
 one pool creation, and one complete native command-buffer allocation separately
-from warm recording. All four policy modes require zero warm host/native/VMA
-allocation; tracking modes use the reference slab allocated at allocator create.
+from warm recording. Both policy modes require zero warm host/native/VMA
+allocation; FULL uses the reference slab allocated at allocator create.
 The target reports the direct recording/executable token size,
 authoritative-record and cell size, total fixed command storage, and
 command-list workloads of 1, 16, 256, and 4,096 commands. Every accepted
@@ -89,8 +88,7 @@ not obscure library work:
 2. `command_path_baseline_bench` records the same five operations through
    direct Vulkan and public gpu.c3l paths, using separate warmed command lists
    from one device and alternating which path is timed first. The runner repeats
-   it for trusted/no-tracking, object-boundaries/no-tracking, full/tracking, and
-   full/tracking-with-layers policies.
+   it for trusted and full policies with layers disabled.
 3. Dispatch and buffer-copy equivalence executes both paths into distinct,
    pre-seeded outputs. Each output must match a non-zero expectation and its
    paired output.
@@ -128,13 +126,11 @@ work, equivalence, and lifecycle records. Minimum/median/maximum times and
 direct/public ratios remain advisory; schema, deterministic work/state, and
 semantic failures are blocking.
 
-Static command-policy checking verifies complete field coverage for each
-literal runtime `CommandOps` table that exists. Table names, table count,
-initializer expressions, and table-free specialization are not contracts.
-Allocation, policy selection, tracking, reference publication/release ordering,
-and performance are established by allocator operations, work/state counters,
-native emissions/faults, and ownership transitions; wall time blocks only when
-runner, driver, and comparison profile are pinned.
+Behavioral command-family tests cover both runtime `CommandOps` tables.
+Allocation, tracking, reference publication/release ordering, and performance
+are established by allocator operations, work/state counters, native
+emissions/faults, and ownership transitions; wall time blocks only when runner,
+driver, and comparison profile are pinned.
 
 ## Evidence and regression gates
 
@@ -146,7 +142,7 @@ The suite covers:
 | `command_wrapper_bench` | ICD-free direct no-op and public-wrapper floor for five command classes, with exact volatile observation |
 | `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero forbidden work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
 | `command_reference_bench` | Exact public lookup/publication/retain/release outcomes plus upper-bounded private probe, equality, and mutex work for unique, repeated, mixed, forced-collision, and capacity scenarios |
-| `command_record_bench` | Direct-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording across the validation/tracking matrix; 1/16/256/4,096 command lists; exact native output and zero forbidden warm work |
+| `command_record_bench` | Direct-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording under TRUSTED and FULL; 1/16/256/4,096 command lists; exact native output and zero forbidden warm work |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact direct-token visits, duplicate detection, claim, queue serialization, native submit, and forbidden-work evidence |
 | `pipeline_cache_bench` | Dynamic raster and five-state dynamic-color matrix aliasing, state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
@@ -169,7 +165,7 @@ Blocking records use three outcome classes:
 | Class | Blocking rule |
 |---|---|
 | Semantic invariant | Exact output, fault/state preservation, ownership balance, submission, and completion outcomes |
-| Forbidden work | Exact zero allocation, object creation, unrelated locking, policy reselection, and post-bind resolution |
+| Forbidden work | Exact zero allocation, object creation, unrelated locking, and post-bind resolution |
 | Minimal native lowering | Exact Vulkan emission count for the named scenario |
 
 Private probes, identity comparisons, and mutex decisions use documented upper
@@ -210,11 +206,11 @@ begin/end/draw commands unless the caller records another setter. The
 requires no hidden state replay, allocation, state diff, or dirty-bit work.
 
 Warm command-buffer reset is expected reuse evidence. Warm host allocation is
-prohibited in every policy mode; tracking modes retain into fixed reference
-storage allocated with the command allocator. VMA allocation,
+prohibited in both policy modes; FULL retains into fixed reference storage
+allocated with the command allocator. VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
-and retained device-operation resolution, retained-pin borrow, command-table
-lookup, and policy work remain prohibited in warm recording. Binding an opaque
+and retained device-operation resolution, retained-pin borrow, and command-table
+lookup remain prohibited in warm recording. Binding an opaque
 pipeline handle performs exactly one pipeline-table and one pipeline-cache
 lookup; dispatch and draw perform no additional resolution and each emits
 exactly one root push plus its native execution command. The dispatch invariant
@@ -246,7 +242,7 @@ miss. The 65,536-entry zero-probe observation is also enforced by the live
 
 The submit-batch benchmark submits real executable command lists in batches of
 1, 8, 32, 128, and 1,024. `SUBMIT_WORK_STATS` exposes atomic counters around an
-externally synchronized measured interval. Every ordinary tracking-off record
+externally synchronized measured interval. Every ordinary TRUSTED record
 requires `resolutions` and `duplicate_visits` equal to the batch length;
 `command_mutex=1`, `queue_submission_mutex=1`, and
 `native_submissions=1`; and these exact zeros:
@@ -293,7 +289,7 @@ necessary.
 
 The direct-recording gates require zero command-table lookups and exact zero
 for retired frontend proof work, retained device-operation resolution,
-retained-pin borrow, policy reselection, and warm allocation. Each command
+retained-pin borrow, and warm allocation. Each command
 still performs the static device-slot liveness load. Runtime `CommandOps`
 indirect dispatch and fallible recording signatures remain intentional.
 
@@ -409,7 +405,7 @@ compiler: C3 0.8.0_2
 optimization: -O1
 adapter: NVIDIA GeForce RTX 4090, Vulkan api_version=4210991
 driver: NVIDIA, id=4, version=2417000448
-validation: contract=TRUSTED tracking=false layers=false
+validation: contract=TRUSTED layers=false
 queues: graphics=0:0 compute=0:1 transfer=1:0
 ```
 

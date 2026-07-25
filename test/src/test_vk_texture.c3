@@ -213,7 +213,6 @@ fn void capture_texture_diagnostic(gpu::DebugMessage* message, void* user_data) 
 fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture) {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_texture_diagnostic_test",
         .debug_callback    = &capture_texture_diagnostic,
@@ -227,7 +226,6 @@ fn gpu::Device make_texture_test_device_with_contract(
 ) {
     gpu::RuntimeDesc desc = {
         .contract_validation      = contract,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_texture_test",
     };
@@ -1608,7 +1606,6 @@ fn void recorded_attachment_view_destruction_is_retryable() @test {
 fn void raised_texture_capacity_holds_more_than_default() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .texture_capacity  = 2048,
         .application_name  = "gpu_texture_capacity_test",

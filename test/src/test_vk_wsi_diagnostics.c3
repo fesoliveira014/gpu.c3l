@@ -19,7 +19,6 @@ fn void wsi_presentation_gate_diagnostic() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_wsi_diagnostic_gate_test",
         .debug_callback    = &capture_wsi_diagnostic,
@@ -90,7 +89,6 @@ fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_wsi_stale_handle_test",
         .debug_callback    = &capture_wsi_diagnostic,

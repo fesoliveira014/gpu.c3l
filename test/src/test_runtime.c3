@@ -35,14 +35,12 @@ fn void contract_validation_defaults_to_trusted() @test {
         "the zero runtime descriptor selects trusted contract validation"
     );
     assert(gpu::internal::contract_validation_is_known(ContractValidation.TRUSTED));
-    assert(gpu::internal::contract_validation_is_known(ContractValidation.OBJECT_BOUNDARIES));
     assert(gpu::internal::contract_validation_is_known(ContractValidation.FULL));
 }
 
-fn void full_validation_runtime_desc_enables_every_policy() @test {
+fn void full_validation_runtime_desc_enables_full_and_layers() @test {
     RuntimeDesc desc = gpu::full_validation_runtime_desc();
     assert(desc.contract_validation == ContractValidation.FULL);
-    assert(desc.track_resource_lifetimes);
     assert(desc.enable_vulkan_validation);
 }
 

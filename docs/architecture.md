@@ -139,7 +139,6 @@ Public shape:
 ```text
 RuntimeDesc
     ContractValidation contract_validation
-    bool track_resource_lifetimes
     bool enable_vulkan_validation
     bool enable_debug_names
     uint texture_heap_capacity
@@ -160,20 +159,18 @@ destroy_runtime(Runtime*)          -> void?
 full_validation_runtime_desc()     -> RuntimeDesc
 ```
 
-Runtime policy has independent axes. A zero-initialized `RuntimeDesc` selects
-`ContractValidation.TRUSTED`, lifetime tracking off, and Vulkan validation
-layers off. Every contract level retains the always-checked public and
+Runtime policy has two coherent contract modes. A zero-initialized
+`RuntimeDesc` selects `ContractValidation.TRUSTED`, which performs no command
+resource lifetime tracking, with Vulkan validation layers off. Every contract
+mode retains the always-checked public and
 command-token identity, authoritative-phase, host-safety, safe-lowering,
-lifecycle, cold-path, and runtime-result floor. `OBJECT_BOUNDARIES` uses the
-same trusted command tables as `TRUSTED` and adds structured reporting only at
-explicitly routed public boundaries plus teardown leak scans. `FULL` selects
-checked command tables with detailed semantic diagnostics.
-`track_resource_lifetimes` independently selects command reference retention,
-and `enable_vulkan_validation` independently requests the Khronos layer.
-Debug names request best-effort native naming, while a callback only selects
-delivery for diagnostics already produced. The all-zero descriptor is therefore
-trusted/no-tracking/no-layer. `full_validation_runtime_desc()` returns the
-former all-enabled development configuration.
+lifecycle, cold-path, and runtime-result floor. `FULL` selects diagnostic command
+tables with detailed semantic diagnostics, command reference retention, and
+teardown leak scans. `enable_vulkan_validation` independently requests the
+Khronos layer. Debug names request best-effort native naming, while a callback
+only selects delivery for diagnostics already produced and never enables FULL
+behavior. The all-zero descriptor is therefore TRUSTED with layers disabled.
+`full_validation_runtime_desc()` selects FULL and the Vulkan validation layer.
 
 `AdapterList` is an allocation-free view. Its adapters and the read-only strings in adapter query results are borrowed until their runtime is destroyed. Destroying a runtime consumes its token, invalidates its adapter views and handles, and returns `RESOURCE_IN_USE` while a dependent surface or device is live.
 
@@ -614,17 +611,17 @@ points finish, and private presentation resource retirement completes. A pending
 image returns `INVALID_RESOURCE_STATE`; detected command/view or presentation
 use returns `RESOURCE_IN_USE`; faults preserve the owning token for retry.
 
-With `track_resource_lifetimes` enabled, the backend retains explicitly named
+Under `FULL`, the backend retains explicitly named
 spans, textures, attachment views, allocations, and pipelines across recording,
 executable, and incomplete-submission phases; destruction returns
-`RESOURCE_IN_USE` until discard or retirement releases the reference. With
-tracking disabled, records contain no reference storage and destruction adds no
+`RESOURCE_IN_USE` until discard or retirement releases the reference. Under
+`TRUSTED`, records contain no reference storage and destruction adds no
 implicit wait or deferred release. The caller must observe completion before
 destroying every referenced owner. GPU addresses and shader indices are opaque
 to the command stream under either setting, so their lifetime always remains a
 caller precondition.
 
-Tracking-enabled allocators pair each fixed sequential reference list with a
+FULL allocators pair each fixed sequential reference list with a
 fixed open-addressed exact-identity index. Ordinary duplicate lookup does not
 scan the accumulated list: the hash selects a probe sequence and
 owner/index/generation equality establishes identity. The list remains the
@@ -665,14 +662,11 @@ explicit exact-queue allocator. Successful
 or explicit discard consumes the executable token. Native recording pools are
 owned by allocators, not workers or frame boundaries; see `docs/threading.md`.
 
-Vulkan device creation selects one immutable command table from contract depth
-and tracking: trusted/no-tracking, trusted/tracking, checked/no-tracking, or
-checked/tracking. `OBJECT_BOUNDARIES` uses the trusted command entries because
-it adds reporting only at explicitly routed public boundaries and teardown leak
-scans, not a command-semantic middle tier. The authoritative record
+Vulkan device creation selects one immutable command table from the contract
+mode: TRUSTED or FULL. The authoritative record
 stores the chosen pointer once; repeated `cmd_*` calls do not inspect contract,
-tracking, layer, callback, naming policy, or separate command-capability fields.
-All four tables retain mandatory host
+layer, callback, naming policy, or separate command-capability fields.
+Both tables retain mandatory host
 pointer/slice/range safety, overflow protection, internal state integrity,
 public ownership, Vulkan result handling, and rollback. Detailed command misuse
 outside that floor is a caller contract violation unless `FULL` is selected.
@@ -684,16 +678,11 @@ mutation, including after the originating device's record storage is released.
 The direct recording path retains the record-owned runtime `CommandOps`
 dispatch and fallible `cmd_*` signatures.
 
-Static command-policy checking verifies complete operation coverage for each
-literal runtime `CommandOps` table that exists. It does not require a fixed
-table count or names, direct initializer expressions, or runtime tables when a
-specialized topology is used. C3 compilation checks reference existence and
-pointer types. The checker does not infer behavior from function bodies, helper
-names, call reachability, or statement order. The six-mode command-policy matrix
-and allocator, work, resolution,
-reference-state, fault, and native-emission observations are the authority for
-warm policy and tracking behavior. Timing is blocking only for an explicitly
-pinned runner, driver, and comparison profile.
+Focused behavioral tests invoke every command family through both operation
+tables. Allocator, work, resolution, reference-state, fault, and native-emission
+observations are the authority for warm behavior; there is no source-policy
+scanner. Timing is blocking only for an explicitly pinned runner, driver, and
+comparison profile.
 
 The strict descriptor heap is device-global and bound lazily on the first
 strict pipeline selection in a command record. Descriptor indexing binds set 0
@@ -909,11 +898,10 @@ leaked backend objects
 ```
 
 `destroy_device` rejects live public resources. Accepted teardown scans report
-internal, partial-initialization, and device-loss state under
-`OBJECT_BOUNDARIES`/`FULL`, or whenever a callback is present. A callback only
-selects structured delivery; it does not change contract checks, tracking,
-layers, or naming. Vulkan layer messages remain native routing and are
-independent of library contract diagnostics.
+internal, partial-initialization, and device-loss state under `FULL`.
+A callback only selects structured delivery; it does not change contract
+checks, tracking, leak scans, layers, or naming. Vulkan layer messages remain
+native routing and are independent of library contract diagnostics.
 
 ## 12. Supported baseline
 

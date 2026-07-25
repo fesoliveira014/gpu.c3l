@@ -41,7 +41,6 @@ fn gpu::Device make_offscreen_test_device(
 ) {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_offscreen_test",
         .debug_callback           = capture == null
@@ -677,7 +676,6 @@ fn void dynamic_viewport_scissor_pixels() @test {
 fn void dynamic_color_output_matches_immutable_output() @test {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation       = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes  = true,
         .enable_vulkan_validation  = true,
         .application_name          = "gpu_dynamic_color_output_test",
     };

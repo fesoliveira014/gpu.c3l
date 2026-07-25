@@ -120,7 +120,6 @@ Atomic{ulong} command_retained_pin_operations @private @if(env::TESTING || $feat
 Atomic{ulong} command_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_policy_selections @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_recording_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_native_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
@@ -187,12 +186,6 @@ fn void note_command_pipeline_cache_lookup() @private {
             1,
             AtomicOrdering.RELAXED,
         );
-    $endif
-}
-
-fn void note_command_policy_selection() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
-        (void)command_policy_selections.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 

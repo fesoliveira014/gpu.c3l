@@ -988,7 +988,6 @@ def valid_document() -> dict:
                             }
                             for name in (
                                 "TRUSTED",
-                                "OBJECT_BOUNDARIES",
                                 "FULL",
                             )
                         ],
@@ -1000,10 +999,6 @@ def valid_document() -> dict:
                             {
                                 "name": "contract_validation",
                                 "type": {"name": "ContractValidation"},
-                            },
-                            {
-                                "name": "track_resource_lifetimes",
-                                "type": {"name": "bool"},
                             },
                             {
                                 "name": "enable_vulkan_validation",

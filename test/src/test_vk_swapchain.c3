@@ -461,7 +461,6 @@ fn void extent_clamp_rules() @test {
 fn void swapchain_requires_a_presentation_request() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_swapchain_gate_test",
     };
@@ -607,7 +606,6 @@ fn void present_path_guards_precede_native_mutation() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_present_guard_test",
         .debug_callback    = &capture_wsi_diagnostic,
@@ -1227,7 +1225,6 @@ fn void swapchain_release_ownership_work_tracks_examined_images() @test {
 fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "borrowed_swapchain_view_lifecycle_test",
     };
@@ -1669,7 +1666,6 @@ fn void acquired_image_reports_prior_state() @test {
 fn void swapchain_info_query_rejects_invalid_handle() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_swapchain_info_invalid_handle_test",
     };
