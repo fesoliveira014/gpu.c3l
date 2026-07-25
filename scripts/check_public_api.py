@@ -200,6 +200,8 @@ DEBUG_RESOURCE_KINDS = (
 )
 
 RETIRED_SOURCE_SYMBOLS = (
+    "BackendKind",
+    "get_device_backend(",
     "DeviceDesc",
     "create_device_from_desc(",
     "PlatformKind",

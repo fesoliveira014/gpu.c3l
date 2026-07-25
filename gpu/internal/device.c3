@@ -90,8 +90,8 @@ struct DeviceOperation @private {
     DeviceSlot*                       slot;
     DeviceData*                       data;
     gpu::internal::vk::VkDeviceState* state;
-    bool                               active;
-    bool                               owns_pin;
+    bool                              active;
+    bool                              owns_pin;
 }
 
 <* Private test and benchmark counters for structural recording work. Compare
