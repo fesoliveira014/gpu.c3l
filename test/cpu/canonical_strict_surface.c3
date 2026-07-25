@@ -116,13 +116,7 @@ fn void pin_shaders_and_pipelines() {
         .spirv = spirv[..],
     };
     gpu::ShaderCode shader = {};
-    gpu::ColorWriteMask write_mask = gpu::COLOR_WRITE_ALL;
-    gpu::BlendState blend = {};
-    gpu::ColorTargetState[1] colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .blend      = blend,
-        .write_mask = write_mask,
-    }};
+    gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
     gpu::ComputePipelineDesc compute_desc = {
         .shader     = shader,
         .debug_name = "compute",
@@ -131,28 +125,15 @@ fn void pin_shaders_and_pipelines() {
     gpu::GraphicsPipelineDesc graphics_desc = {
         .vertex_shader   = shader,
         .fragment_shader = shader,
-        .colors          = colors[..],
+        .color_formats   = color_formats[..],
         .depth_format    = gpu::Format.D32_FLOAT,
         .sample_count    = gpu::SampleCount.ONE,
         .polygon_mode    = gpu::PolygonMode.FILL,
         .debug_name      = "graphics",
     };
     gpu::GraphicsPipelineDesc[1] graphics_descs = { graphics_desc };
-    gpu::ColorTargetFormat[1] dynamic_colors = {{
-        .format = gpu::Format.RGBA8_UNORM,
-    }};
-    gpu::DynamicGraphicsPipelineDesc dynamic_desc = {
-        .vertex_shader   = shader,
-        .fragment_shader = shader,
-        .colors          = dynamic_colors[..],
-        .depth_format    = gpu::Format.D32_FLOAT,
-        .sample_count    = gpu::SampleCount.ONE,
-        .polygon_mode    = gpu::PolygonMode.FILL,
-        .debug_name      = "dynamic graphics",
-    };
-    gpu::DynamicGraphicsPipelineDesc[1] dynamic_descs = { dynamic_desc };
-    gpu::ColorTargetBlendState[1] color_targets;
-    gpu::ColorTargetBlendState color_target =
+    gpu::ColorTargetState[1] color_targets;
+    gpu::ColorTargetState color_target =
         gpu::color_blend_disabled();
     gpu::ColorState color_state =
         gpu::uniform_color_state(color_targets[..], color_target);
@@ -171,12 +152,6 @@ fn void pin_shaders_and_pipelines() {
     (void)gpu::create_graphics_pipelines(
         &device,
         graphics_descs[..],
-        pipelines[..],
-    );
-    (void)gpu::create_dynamic_graphics_pipeline(&device, &dynamic_desc);
-    (void)gpu::create_dynamic_graphics_pipelines(
-        &device,
-        dynamic_descs[..],
         pipelines[..],
     );
     color_target = gpu::alpha_blend();
@@ -246,9 +221,14 @@ fn void pin_commands_and_completion() {
     };
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(1, 1) ?? {};
-    gpu::ColorState color_state = {};
+    gpu::ColorTargetState[1] color_targets;
+    gpu::ColorState color_state = gpu::uniform_color_state(
+        color_targets[..],
+        gpu::color_blend_disabled(),
+    );
     graphics_state.raster = raster;
     graphics_state.depth = depth;
+    graphics_state.color = color_state;
     gpu::SubmitDesc submit = {};
     gpu::CompletionPoint completion = {};
     gpu::GeneratedScratchDesc generated_scratch = {
@@ -384,7 +364,6 @@ fn void pin_commands_and_completion() {
 fn void pin_presentation() {
     gpu::DeviceRequest request = gpu::strict_device_request();
     (void)gpu::request_resource_agnostic_texture_sync(request);
-    (void)gpu::request_dynamic_color_state(request);
     gpu::Surface surface = {};
     gpu::Adapter adapter = {};
     gpu::Device device = {};

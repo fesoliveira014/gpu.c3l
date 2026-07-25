@@ -196,7 +196,6 @@ fn gpu::PipelineHandle create_policy_matrix_compute_pipeline(
 
 fn gpu::PipelineHandle create_policy_matrix_graphics_pipeline(
     gpu::Device* device,
-    bool dynamic_color,
 ) {
     gpu::ShaderDesc vertex_desc = {
         .stage       = gpu::ShaderStage.VERTEX,
@@ -210,28 +209,13 @@ fn gpu::PipelineHandle create_policy_matrix_graphics_pipeline(
     };
     gpu::ShaderCode vertex = gpu::prepare_shader_code(&vertex_desc)!!;
     gpu::ShaderCode fragment = gpu::prepare_shader_code(&fragment_desc)!!;
-    if (dynamic_color) {
-        gpu::ColorTargetFormat[1] colors = {{
-            .format = gpu::Format.RGBA8_UNORM,
-        }};
-        gpu::DynamicGraphicsPipelineDesc pipeline_desc = {
-            .vertex_shader   = vertex,
-            .fragment_shader = fragment,
-            .colors          = colors[..],
-        };
-        return gpu::create_dynamic_graphics_pipeline(
-            device,
-            &pipeline_desc,
-        )!!;
-    }
-    gpu::ColorTargetState[1] colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader   = vertex,
         .fragment_shader = fragment,
-        .colors          = colors[..],
+        .color_formats   = color_formats[..],
     };
     return gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
 }
@@ -426,9 +410,13 @@ fn void exercise_policy_matrix_render(
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics.color = { .targets = color_targets[..] };
     begin_command_family_observation(state);
-    gpu::cmd_begin_render_pass_with_state(&commands, pass, &graphics)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, pass, &graphics)!!;
     gpu::reset_command_resolution_stats();
     gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     gpu::Viewport viewport = {
@@ -446,17 +434,8 @@ fn void exercise_policy_matrix_render(
     gpu::cmd_set_depth_state(&commands, &depth)!!;
     gpu::DynamicRasterState raster;
     gpu::cmd_set_raster_state(&commands, &raster)!!;
-    gpu::ColorTargetBlendState[1] color_targets = {{
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
     gpu::ColorState color = { .targets = color_targets[..] };
-    if (state.caps.dynamic_color_state) {
-        gpu::cmd_set_color_state(&commands, &color)!!;
-    } else {
-        assert(@catch(gpu::cmd_set_color_state(&commands, &color))
-            == gpu::UNSUPPORTED_FEATURE,
-            "unsupported dynamic color still dispatches through the selected table");
-    }
+    gpu::cmd_set_color_state(&commands, &color)!!;
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
@@ -586,10 +565,8 @@ fn void exercise_command_families(
     gpu::PipelineHandle compute =
         create_policy_matrix_compute_pipeline(&device);
     defer gpu::destroy_pipeline(&device, compute)!!;
-    gpu::PipelineHandle graphics = create_policy_matrix_graphics_pipeline(
-        &device,
-        state.caps.dynamic_color_state,
-    );
+    gpu::PipelineHandle graphics =
+        create_policy_matrix_graphics_pipeline(&device);
     defer gpu::destroy_pipeline(&device, graphics)!!;
     OwnedSpan source = policy_span(
         &device,

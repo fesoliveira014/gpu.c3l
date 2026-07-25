@@ -2129,7 +2129,7 @@ fn RenderCompatibility pipeline_render_compatibility(
     };
     for (uint i = 0; i < key.color_target_count; i++) {
         compatibility.color_formats[i] =
-            (gpu::Format)key.color_targets[i].format;
+            (gpu::Format)key.color_formats[i];
     }
     return compatibility;
 }
@@ -2160,8 +2160,6 @@ fn BoundPipeline? lower_bound_pipeline(
         .generated_dispatch_layout = slot.generated_dispatch_layout,
         .cache_entry               = slot.entry,
         .kind                      = (PipelineKind)entry.key.kind,
-        .color_profile             =
-            (GraphicsColorProfile)entry.key.color_profile,
         .render                    = pipeline_render_compatibility(&entry.key),
     };
 }
@@ -2221,7 +2219,6 @@ fn void? record_bound_pipeline(
             .generated_dispatch_layout = bound.generated_dispatch_layout,
             .cache_entry               = bound.cache_entry,
             .kind                      = bound.kind,
-            .color_profile             = bound.color_profile,
             .render                    = bound.render,
         };
     }
@@ -2239,8 +2236,7 @@ fn void update_full_color_state_for_bind(
     BoundPipeline* bound,
 ) @private {
     if (!record.color_state_initialized
-        || bound.kind != PipelineKind.GRAPHICS
-        || bound.color_profile != GraphicsColorProfile.DYNAMIC) return;
+        || bound.kind != PipelineKind.GRAPHICS) return;
     if (!color_compatibility_matches(
         &record.color_state,
         &bound.render,

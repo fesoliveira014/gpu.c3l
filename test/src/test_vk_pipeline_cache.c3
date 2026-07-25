@@ -7,7 +7,6 @@ import vk;
 import std::core::mem;
 import std::core::mem::allocators;
 import std::atomic;
-import std::io;
 import std::thread;
 
 // Headless (lavapipe): deterministic pipeline identity, transactional batches,
@@ -162,12 +161,12 @@ fn CacheShaders make_cache_shaders() {
 
 fn gpu::GraphicsPipelineDesc base_graphics_desc(
     CacheShaders* shaders,
-    gpu::ColorTargetState[] colors,
+    gpu::Format[] color_formats,
 ) {
     return {
         .vertex_shader   = shaders.vert,
         .fragment_shader = shaders.frag,
-        .colors          = colors,
+        .color_formats   = color_formats,
     };
 }
 
@@ -205,11 +204,11 @@ fn void identical_descs_alias_one_entry() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
-    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, pipeline_colors[..]);
+    gpu::Format[1] color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc desc =
+        base_graphics_desc(&shaders, color_formats[..]);
 
     gpu::PipelineHandle first = gpu::create_graphics_pipeline(&device, &desc)!!;
     gpu::PipelineHandle second = gpu::create_graphics_pipeline(&device, &desc)!!;
@@ -227,91 +226,6 @@ fn void identical_descs_alias_one_entry() @test {
     assert(cache_entry_count(&device) == 0, "last alias releases the entry");
 }
 
-fn void per_target_state_and_blend_normalization_split_entries() @test {
-    gpu::Device device = make_cache_test_device();
-    defer destroy_test_device(&device)!!;
-    CacheShaders shaders = make_cache_shaders();
-
-    gpu::ColorTargetState[1] base_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
-    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, base_colors[..]);
-    gpu::PipelineHandle base = gpu::create_graphics_pipeline(&device, &desc)!!;
-    defer gpu::destroy_pipeline(&device, base)!!;
-
-    gpu::ColorTargetState[1] garbage_colors = base_colors;
-    gpu::GraphicsPipelineDesc garbage_blend = desc;
-    garbage_blend.colors = garbage_colors[..];
-    garbage_colors[0].blend = {
-        .enable    = false,
-        .src_color = gpu::BlendFactor.DST_ALPHA,
-        .dst_color = gpu::BlendFactor.SRC_ALPHA,
-        .color_op  = gpu::BlendOp.MAX,
-    };
-    gpu::PipelineHandle normalized = gpu::create_graphics_pipeline(&device, &garbage_blend)!!;
-    defer gpu::destroy_pipeline(&device, normalized)!!;
-    assert(cache_entry_count(&device) == 1,
-        "disabled per-target blend ignores factor fields in the key");
-
-    gpu::ColorTargetState[1] blended_colors = base_colors;
-    gpu::GraphicsPipelineDesc blended = desc;
-    blended.colors = blended_colors[..];
-    blended_colors[0].blend = {
-        .enable    = true,
-        .src_color = gpu::BlendFactor.SRC_ALPHA,
-        .dst_color = gpu::BlendFactor.ONE_MINUS_SRC_ALPHA,
-        .color_op  = gpu::BlendOp.ADD,
-        .src_alpha = gpu::BlendFactor.ONE,
-        .dst_alpha = gpu::BlendFactor.ZERO,
-        .alpha_op  = gpu::BlendOp.ADD,
-    };
-    gpu::PipelineHandle distinct = gpu::create_graphics_pipeline(&device, &blended)!!;
-    defer gpu::destroy_pipeline(&device, distinct)!!;
-    assert(cache_entry_count(&device) == 2,
-        "observable per-target blend state splits the key");
-
-    gpu::ColorTargetState[1] masked_colors = blended_colors;
-    gpu::GraphicsPipelineDesc masked = blended;
-    masked.colors = masked_colors[..];
-    masked_colors[0].write_mask = {};
-    gpu::PipelineHandle masked_first =
-        gpu::create_graphics_pipeline(&device, &masked)!!;
-    defer gpu::destroy_pipeline(&device, masked_first)!!;
-    masked_colors[0].blend = {};
-    gpu::PipelineHandle masked_second =
-        gpu::create_graphics_pipeline(&device, &masked)!!;
-    defer gpu::destroy_pipeline(&device, masked_second)!!;
-    assert(cache_entry_count(&device) == 3,
-        "zero write mask erases semantically unobservable blend identity");
-}
-
-fn void integer_color_targets_reject_blending_before_native_creation() @test {
-    gpu::Device device = make_cache_test_device();
-    defer destroy_test_device(&device)!!;
-    CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] colors = {{
-        .format = gpu::Format.R8_UINT,
-        .blend = {
-            .enable = true,
-        },
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
-    gpu::GraphicsPipelineDesc desc = base_graphics_desc(
-        &shaders,
-        colors[..],
-    );
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    ulong native_before = vk::pipeline_native_create_count(state);
-
-    assert(@catch(gpu::create_graphics_pipeline(&device, &desc))
-        == gpu::INVALID_ARGUMENT,
-        "integer color targets reject enabled blending");
-    assert(vk::pipeline_native_create_count(state) == native_before,
-        "integer blend validation precedes native pipeline creation");
-}
-
 fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
@@ -323,14 +237,16 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     };
     shaders.frag = gpu::prepare_shader_code(&target_frag_desc)!!;
 
-    gpu::ColorTargetState[2] pipeline_colors = {
+    gpu::Format[2] color_formats = {
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::ColorTargetState[2] color_targets = {
         {
-            .format     = gpu::Format.RGBA8_UNORM,
             .write_mask = { .red = true },
         },
         {
-            .format = gpu::Format.RGBA8_UNORM,
-            .blend  = {
+            .blend = {
                 .enable    = true,
                 .src_color = gpu::BlendFactor.SRC_ALPHA,
                 .dst_color = gpu::BlendFactor.ONE_MINUS_SRC_ALPHA,
@@ -343,7 +259,7 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
         },
     };
     gpu::GraphicsPipelineDesc pipeline_desc =
-        base_graphics_desc(&shaders, pipeline_colors[..]);
+        base_graphics_desc(&shaders, color_formats[..]);
     gpu::PipelineHandle pipeline =
         gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
@@ -452,8 +368,9 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
+    graphics.color.targets = color_targets[..];
     bind_test_graphics_pipeline(&commands, pipeline);
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
     gpu::GpuAddress root = test_span_address(&device, vertices.span);
     gpu::cmd_draw(
         commands:       &commands,
@@ -530,19 +447,19 @@ fn void formats_split_entries_and_limits_enforced() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] rgba_targets = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
-    gpu::GraphicsPipelineDesc desc_rgba = base_graphics_desc(&shaders, rgba_targets[..]);
+    gpu::Format[1] rgba_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc desc_rgba =
+        base_graphics_desc(&shaders, rgba_formats[..]);
     gpu::PipelineHandle first = gpu::create_graphics_pipeline(&device, &desc_rgba)!!;
     defer gpu::destroy_pipeline(&device, first)!!;
 
-    gpu::ColorTargetState[1] bgra_targets = {{
-        .format     = gpu::Format.BGRA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
-    gpu::GraphicsPipelineDesc desc_bgra = base_graphics_desc(&shaders, bgra_targets[..]);
+    gpu::Format[1] bgra_formats = {
+        gpu::Format.BGRA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc desc_bgra =
+        base_graphics_desc(&shaders, bgra_formats[..]);
     gpu::PipelineHandle second = gpu::create_graphics_pipeline(&device, &desc_bgra)!!;
     defer gpu::destroy_pipeline(&device, second)!!;
     assert(cache_entry_count(&device) == 2, "different formats produce distinct pipelines");
@@ -553,31 +470,11 @@ fn void formats_split_entries_and_limits_enforced() @test {
     assert(first_layout == second_layout, "graphics pipelines share one layout");
     assert(first_layout == state.graphics_layout, "the shared layout is the device graphics layout");
 
-    gpu::ColorTargetState[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
-    foreach (&target : too_many) {
-        *target = {
-            .format     = gpu::Format.RGBA8_UNORM,
-            .write_mask = gpu::COLOR_WRITE_ALL,
-        };
-    }
+    gpu::Format[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
+    foreach (&format : too_many) *format = gpu::Format.RGBA8_UNORM;
     gpu::GraphicsPipelineDesc over_limit = base_graphics_desc(&shaders, too_many[..]);
     assert(@catch(gpu::create_graphics_pipeline(&device, &over_limit)) == gpu::INVALID_ARGUMENT,
         "more than MAX_COLOR_ATTACHMENTS color targets faults INVALID_ARGUMENT");
-
-    uint unknown_bits = 1u << 8;
-    mem::copy(
-        &rgba_targets[0].write_mask,
-        &unknown_bits,
-        uint::size,
-    );
-    ulong native_before = vk::pipeline_native_create_count(state);
-    gpu::GraphicsPipelineDesc unknown_mask =
-        base_graphics_desc(&shaders, rgba_targets[..]);
-    assert(@catch(gpu::create_graphics_pipeline(&device, &unknown_mask))
-            == gpu::INVALID_ARGUMENT,
-        "unknown color-write bits fault INVALID_ARGUMENT");
-    assert(vk::pipeline_native_create_count(state) == native_before,
-        "unknown color-write bits fault before native creation");
 }
 
 fn void compute_pipelines_dedup_and_share_layouts() @test {
@@ -830,10 +727,9 @@ fn void full_pipeline_capacity_faults_before_shader_store_mutation() @test {
     gpu::Device device = make_cache_test_device_with_capacity(1);
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc graphics =
         base_graphics_desc(&shaders, colors[..]);
     gpu::PipelineHandle live =
@@ -1096,10 +992,9 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &lines_view)!!;
 
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipeline_desc = base_graphics_desc(&shaders, pipeline_colors[..]);
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
@@ -1217,6 +1112,10 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
         gpu::GraphicsState graphics =
             gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::ColorTargetState[1] color_targets = {
+            gpu::color_blend_disabled(),
+        };
+        graphics.color.targets = color_targets[..];
         if (i == 0) {
             graphics.raster.cull_mode = gpu::CullMode.BACK;
         }
@@ -1237,8 +1136,8 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
                 .topology = gpu::PrimitiveTopology.LINES,
             };
         }
-        gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
         bind_test_graphics_pipeline(&cmd, pipeline);
+        gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
         gpu::cmd_draw(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, verts_span),
@@ -1324,10 +1223,9 @@ fn void alias_survives_peer_destroy() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, pipeline_colors[..]);
     gpu::PipelineHandle doomed = gpu::create_graphics_pipeline(&device, &desc)!!;
     gpu::PipelineHandle survivor = gpu::create_graphics_pipeline(&device, &desc)!!;
@@ -1387,8 +1285,12 @@ fn void alias_survives_peer_destroy() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics.color.targets = color_targets[..];
     bind_test_graphics_pipeline(&cmd, survivor);
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, verts_span),
@@ -1422,21 +1324,25 @@ fn void index_survives_create_alias_destroy_churn() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::Format[CHURN_CAPACITY] churn_formats = {
+        gpu::Format.R8_UNORM,
+        gpu::Format.R8_UINT,
+        gpu::Format.RG8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA8_SRGB,
+        gpu::Format.BGRA8_UNORM,
+        gpu::Format.BGRA8_SRGB,
+        gpu::Format.R16_UINT,
+    };
     uint[CHURN_CAPACITY] teardown_order = { 3, 0, 7, 1, 6, 2, 5, 4 };
 
     for (uint round = 0; round < CHURN_ROUNDS; round++) {
         gpu::PipelineHandle[CHURN_CAPACITY] handles;
         for (uint i = 0; i < CHURN_CAPACITY; i++) {
-            pipeline_colors[0].write_mask = {
-                .red   = (i & 1) != 0,
-                .green = (i & 2) != 0,
-                .blue  = (i & 4) != 0,
-                .alpha = (i & 8) != 0,
-            };
+            pipeline_colors[0] = churn_formats[i];
             gpu::GraphicsPipelineDesc variant = base_graphics_desc(&shaders, pipeline_colors[..]);
             handles[i] = gpu::create_graphics_pipeline(&device, &variant)!!;
         }
@@ -1445,10 +1351,11 @@ fn void index_survives_create_alias_destroy_churn() @test {
             "each round inserts exactly CHURN_CAPACITY distinct entries");
 
         // Alias two live entries; the refcount>0 path must not touch the index.
-        gpu::GraphicsPipelineDesc alias_desc = base_graphics_desc(&shaders, pipeline_colors[..]);
-        pipeline_colors[0].write_mask = {};
+        pipeline_colors[0] = churn_formats[0];
+        gpu::GraphicsPipelineDesc alias_desc =
+            base_graphics_desc(&shaders, pipeline_colors[..]);
         gpu::PipelineHandle alias_a = gpu::create_graphics_pipeline(&device, &alias_desc)!!;
-        pipeline_colors[0].write_mask = { .red = true, .green = true };
+        pipeline_colors[0] = churn_formats[1];
         gpu::PipelineHandle alias_b = gpu::create_graphics_pipeline(&device, &alias_desc)!!;
         assert(cache_index_consistent(&device), "index consistent after aliasing existing entries");
         assert(cache_entry_count(&device) == CHURN_CAPACITY, "aliasing does not grow the entry count");
@@ -1474,23 +1381,23 @@ fn void small_pipeline_capacity_faults_at_limit() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
 
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_colors;
+    gpu::Format[CAPACITY + 1] formats = {
+        gpu::Format.R8_UNORM,
+        gpu::Format.RG8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.BGRA8_UNORM,
+    };
     gpu::PipelineHandle[CAPACITY] handles;
     for (uint i = 0; i < CAPACITY; i++) {
-        pipeline_colors[0].write_mask = {
-            .red   = (i & 1) != 0,
-            .green = (i & 2) != 0,
-        };
+        pipeline_colors[0] = formats[i];
         gpu::GraphicsPipelineDesc variant = base_graphics_desc(&shaders, pipeline_colors[..]);
         handles[i] = gpu::create_graphics_pipeline(&device, &variant)!!;
     }
     assert(cache_entry_count(&device) == CAPACITY, "the small capacity fills exactly");
     assert(cache_index_consistent(&device), "index consistent at capacity");
 
-    pipeline_colors[0].write_mask = { .blue = true };
+    pipeline_colors[0] = formats[CAPACITY];
     gpu::GraphicsPipelineDesc over_capacity = base_graphics_desc(&shaders, pipeline_colors[..]);
     assert(@catch(gpu::create_graphics_pipeline(&device, &over_capacity)) == gpu::SLOT_TABLE_FULL,
         "the distinct pipeline past the configured capacity faults SLOT_TABLE_FULL");
@@ -1502,16 +1409,15 @@ fn void line_polygon_mode_respects_optional_feature() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     bool supported = state.caps.line_polygon_mode;
 
     state.caps.line_polygon_mode = false;
     gpu::GraphicsPipelineDesc unavailable = {
-        .colors       = pipeline_colors[..],
+        .color_formats = pipeline_colors[..],
         .polygon_mode = gpu::PolygonMode.LINE,
     };
     uint entries_before = cache_entry_count(&device);
@@ -1748,24 +1654,16 @@ fn void graphics_pipeline_batch_reuses_shared_shader_modules() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] first_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
-    gpu::ColorTargetState[1] second_colors = first_colors;
-    gpu::GraphicsPipelineDesc[2] descs;
-    descs[0] = base_graphics_desc(&shaders, first_colors[..]);
-    descs[1] = descs[0];
-    descs[1].colors = second_colors[..];
-    second_colors[0].blend = {
-        .enable    = true,
-        .src_color = gpu::BlendFactor.SRC_ALPHA,
-        .dst_color = gpu::BlendFactor.ONE_MINUS_SRC_ALPHA,
-        .color_op  = gpu::BlendOp.ADD,
-        .src_alpha = gpu::BlendFactor.ONE,
-        .dst_alpha = gpu::BlendFactor.ZERO,
-        .alpha_op  = gpu::BlendOp.ADD,
+    gpu::Format[1] first_formats = {
+        gpu::Format.RGBA8_UNORM,
     };
+    gpu::Format[1] second_formats = {
+        gpu::Format.BGRA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc[2] descs;
+    descs[0] = base_graphics_desc(&shaders, first_formats[..]);
+    descs[1] = descs[0];
+    descs[1].color_formats = second_formats[..];
     gpu::PipelineHandle[2] pipelines;
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
@@ -1776,7 +1674,8 @@ fn void graphics_pipeline_batch_reuses_shared_shader_modules() @test {
 
     gpu::create_graphics_pipelines(&device, descs[..], pipelines[..])!!;
 
-    assert(cache_entry_count(&device) == 2, "distinct blend identities publish distinct graphics pipelines");
+    assert(cache_entry_count(&device) == 2,
+        "distinct format identities publish distinct graphics pipelines");
     assert(vk::pipeline_shader_module_create_count(state) - shader_modules_before == 2,
         "shared vertex and fragment IR each create one temporary native module per batch");
     assert(vk::shader_reflection_validation_count(state) - reflections_before == 2,
@@ -1794,10 +1693,9 @@ fn void graphics_pipeline_batch_revalidates_shared_shader_roles() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc[1] descs;
     descs[0] = base_graphics_desc(&shaders, pipeline_colors[..]);
     descs[0].fragment_shader = descs[0].vertex_shader;
@@ -1999,10 +1897,9 @@ fn void graphics_pipeline_batch_shader_validation_ignores_unprepared_suffix() @t
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc[2] descs;
     descs[0] = base_graphics_desc(&shaders, pipeline_colors[..]);
     descs[1] = descs[0];
@@ -2078,10 +1975,9 @@ fn void graphics_pipeline_shader_validation_reports_contract_failure() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc desc =
         base_graphics_desc(&shaders, pipeline_colors[..]);
     desc.fragment_shader = {
@@ -2129,10 +2025,9 @@ fn void pipeline_batch_invalid_state_prevalidates_transactionally() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc[2] descs;
     descs[0] = base_graphics_desc(&shaders, pipeline_colors[..]);
     descs[1] = descs[0];
@@ -2243,71 +2138,69 @@ fn void empty_pipeline_batches_succeed_without_native_work() @test {
         "empty batches create no native pipelines");
 }
 
-fn void dynamic_color_pipeline_declares_exact_native_state() @test {
+fn void graphics_pipeline_declares_exact_native_color_state() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = cache_test_state(&device);
-    state.caps.dynamic_color_state = true;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetFormat[2] colors = {
-        { .format = gpu::Format.RGBA8_UNORM },
-        { .format = gpu::Format.BGRA8_UNORM },
+    gpu::Format[2] color_formats = {
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.BGRA8_UNORM,
     };
-    gpu::DynamicGraphicsPipelineDesc desc = {
+    gpu::GraphicsPipelineDesc desc = {
         .vertex_shader   = shaders.vert,
         .fragment_shader = shaders.frag,
-        .colors          = colors[..],
+        .color_formats   = color_formats[..],
     };
     vk::set_pipeline_native_create_result(
         state,
         vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
     );
-    fault create_fault = @catch(vk::vk_create_dynamic_graphics_pipeline(
+    fault create_fault = @catch(vk::vk_create_graphics_pipeline(
         state,
         &desc,
     ));
     vk::set_pipeline_native_create_result(state, vk::Result.SUCCESS);
 
     assert(create_fault == gpu::OUT_OF_DEVICE_MEMORY,
-        "the injected native failure reaches dynamic pipeline creation");
+        "the injected native failure reaches graphics pipeline creation");
     vk::GraphicsPipelineNativeObservation observation =
         vk::graphics_pipeline_native_observation(state);
     assert(observation.dynamic_state_count == 13,
-        "dynamic color pipelines declare the ten base and three color states");
-    assert(observation.color_target_count == colors.len,
-        "dynamic color pipelines preserve the format target count");
-    assert(observation.dynamic_color_states,
-        "dynamic color pipelines declare the complete EDS3 color subset");
+        "graphics pipelines declare the ten base and three color states");
+    assert(observation.color_target_count == color_formats.len,
+        "graphics pipelines preserve the format target count");
+    assert(observation.color_states,
+        "graphics pipelines declare the complete EDS3 color subset");
     assert(observation.canonical_color_attachments,
         "ignored static color attachments use one canonical opaque state");
     assert(cache_entry_count(&device) == 0,
-        "failed native dynamic creation publishes no pipeline cache entry");
+        "failed native creation publishes no pipeline cache entry");
     assert(vk::shader_store_live_count(state) == 0,
         "failed native dynamic creation releases prepared shader identities");
 }
 
-fn void dynamic_color_batch_prevalidates_transactionally() @test {
+fn void graphics_color_format_batch_prevalidates_transactionally() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = cache_test_state(&device);
-    state.caps.dynamic_color_state = true;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetFormat[1] valid_colors = {
-        { .format = gpu::Format.RGBA8_UNORM },
+    gpu::Format[1] valid_formats = {
+        gpu::Format.RGBA8_UNORM,
     };
-    gpu::ColorTargetFormat[1] invalid_colors = {
-        { .format = gpu::Format.D32_FLOAT },
+    gpu::Format[1] invalid_formats = {
+        gpu::Format.D32_FLOAT,
     };
-    gpu::DynamicGraphicsPipelineDesc[2] descs = {
+    gpu::GraphicsPipelineDesc[2] descs = {
         {
             .vertex_shader   = shaders.vert,
             .fragment_shader = shaders.frag,
-            .colors          = valid_colors[..],
+            .color_formats   = valid_formats[..],
         },
         {
             .vertex_shader   = shaders.vert,
             .fragment_shader = shaders.frag,
-            .colors          = invalid_colors[..],
+            .color_formats   = invalid_formats[..],
         },
     };
     gpu::PipelineHandle[2] outputs = {
@@ -2317,36 +2210,35 @@ fn void dynamic_color_batch_prevalidates_transactionally() @test {
     gpu::PipelineHandle[2] before = outputs;
     ulong native_before = vk::pipeline_native_create_count(state);
 
-    fault create_fault = @catch(vk::vk_create_dynamic_graphics_pipelines(
+    fault create_fault = @catch(vk::vk_create_graphics_pipelines(
         state,
         descs[..],
         outputs[..],
     ));
 
     assert(create_fault == gpu::INVALID_ARGUMENT,
-        "an invalid dynamic target faults before batch mutation");
+        "an invalid color format faults before batch mutation");
     assert(outputs[0] == before[0] && outputs[1] == before[1],
-        "dynamic batch validation preserves every caller output");
+        "graphics batch validation preserves every caller output");
     assert(vk::pipeline_native_create_count(state) == native_before,
-        "dynamic batch validation performs no native pipeline creation");
+        "graphics batch validation performs no native pipeline creation");
     assert(cache_entry_count(&device) == 0,
-        "dynamic batch validation publishes no cache entry");
+        "graphics batch validation publishes no cache entry");
     assert(vk::shader_store_live_count(state) == 0,
-        "dynamic batch validation retains no shader identity");
+        "graphics batch validation retains no shader identity");
 }
 
-fn void dynamic_color_formats_require_host_safe_storage() @test {
+fn void graphics_color_formats_require_host_safe_storage() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = cache_test_state(&device);
-    state.caps.dynamic_color_state = true;
-    gpu::ColorTargetFormat* missing = null;
-    gpu::ColorTargetFormat[] forged = missing[:1];
-    gpu::DynamicGraphicsPipelineDesc desc = { .colors = forged };
+    gpu::Format* missing = null;
+    gpu::Format[] forged = missing[:1];
+    gpu::GraphicsPipelineDesc desc = { .color_formats = forged };
     ulong shader_checks_before = vk::shader_reflection_validation_count(state);
     ulong native_before = vk::pipeline_native_create_count(state);
 
-    fault single_fault = @catch(vk::vk_create_dynamic_graphics_pipeline(
+    fault single_fault = @catch(vk::vk_create_graphics_pipeline(
         state,
         &desc,
     ));
@@ -2358,19 +2250,19 @@ fn void dynamic_color_formats_require_host_safe_storage() @test {
             && cache_entry_count(&device) == 0,
         "single rejection performs no shader, native, or cache work");
 
-    gpu::DynamicGraphicsPipelineDesc[1] descs = { desc };
+    gpu::GraphicsPipelineDesc[1] descs = { desc };
     gpu::PipelineHandle[1] outputs = {{
         .owner      = 7,
         .index      = 8,
         .generation = 9,
     }};
     gpu::PipelineHandle before = outputs[0];
-    assert(@catch(vk::vk_create_dynamic_graphics_pipelines(
+    assert(@catch(vk::vk_create_graphics_pipelines(
         state:         state,
         descs:         descs[..],
         out_pipelines: outputs[..],
     )) == gpu::INVALID_ARGUMENT,
-        "a dynamic batch rejects forged color storage transactionally");
+        "a graphics batch rejects forged color storage transactionally");
     assert(outputs[0] == before,
         "batch rejection preserves caller output");
     assert(vk::shader_reflection_validation_count(state) == shader_checks_before
@@ -2379,120 +2271,39 @@ fn void dynamic_color_formats_require_host_safe_storage() @test {
         "batch rejection performs no shader, native, or cache work");
 }
 
-fn void unrequested_dynamic_pipeline_stops_before_backend_work() @test {
+fn void format_only_graphics_batch_aliases_one_pipeline_identity() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
-    gpu::ColorTargetFormat[1] formats = {{
-        .format = gpu::Format.RGBA8_UNORM,
-    }};
-    gpu::DynamicGraphicsPipelineDesc desc = {
-        .vertex_shader   = shaders.vert,
-        .fragment_shader = shaders.frag,
-        .colors          = formats[..],
+    gpu::Format[1] color_formats = {
+        gpu::Format.RGBA8_UNORM,
     };
-    vk::VkDeviceState* state = cache_test_state(&device);
-    ulong shader_checks_before = vk::shader_reflection_validation_count(state);
-    ulong native_before = vk::pipeline_native_create_count(state);
-
-    assert(@catch(gpu::create_dynamic_graphics_pipeline(
-        &device,
-        &desc,
-    )) == gpu::UNSUPPORTED_FEATURE,
-        "a capable but unrequested device rejects dynamic pipeline creation");
-    assert(vk::shader_reflection_validation_count(state) == shader_checks_before
-            && vk::pipeline_native_create_count(state) == native_before
-            && cache_entry_count(&device) == 0
-            && vk::shader_store_live_count(state) == 0,
-        "unrequested creation stops before shader, native, or cache work");
-}
-
-fn void dynamic_color_packets_share_one_live_pipeline_identity() @test {
-    gpu::RuntimeDesc runtime_desc = {
-        .contract_validation       = gpu::ContractValidation.FULL,
-        .enable_vulkan_validation  = true,
-        .application_name          = "gpu_dynamic_color_identity_test",
-    };
-    gpu::Device? maybe_device = create_dynamic_color_test_device(&runtime_desc);
-    if (catch err = maybe_device) {
-        assert(err == gpu::UNSUPPORTED_FEATURE,
-            "dynamic color creation fails only when live support is absent");
-        io::eprintfn(
-            "dynamic_color_packets_share_one_live_pipeline_identity: unsupported, skipping"
-        );
-        return;
-    }
-    gpu::Device device = maybe_device;
-    defer destroy_test_device(&device)!!;
-    CacheShaders shaders = make_cache_shaders();
-    gpu::ColorWriteMask red_green = { .red, .green };
-    gpu::ColorTargetBlendState[5] packets = {
-        gpu::color_blend_disabled(),
-        gpu::alpha_blend(),
-        gpu::premultiplied_alpha_blend(),
-        gpu::additive_blend(),
-        gpu::color_blend_disabled(red_green),
-    };
-    gpu::ColorTargetState[1][5] immutable_colors;
-    gpu::GraphicsPipelineDesc[5] immutable_descs;
-    foreach (i, packet : packets) {
-        immutable_colors[i][0] = {
-            .format     = gpu::Format.RGBA8_UNORM,
-            .blend      = packet.blend,
-            .write_mask = packet.write_mask,
-        };
-        immutable_descs[i] = base_graphics_desc(
-            &shaders,
-            immutable_colors[i][..],
-        );
-    }
-    gpu::PipelineHandle[5] immutable_pipelines;
+    gpu::GraphicsPipelineDesc desc =
+        base_graphics_desc(&shaders, color_formats[..]);
+    gpu::GraphicsPipelineDesc[5] descs;
+    foreach (&item : descs) *item = desc;
+    gpu::PipelineHandle[5] pipelines;
     vk::VkDeviceState* state = cache_test_state(&device);
     ulong native_before = vk::pipeline_native_create_count(state);
 
     gpu::create_graphics_pipelines(
         device:        &device,
-        descs:         immutable_descs[..],
-        out_pipelines: immutable_pipelines[..],
-    )!!;
-
-    assert(vk::pipeline_native_create_count(state) - native_before == 5,
-        "immutable blend and write variants compile distinct native pipelines");
-    gpu::ColorTargetFormat[1] formats = {{
-        .format = gpu::Format.RGBA8_UNORM,
-    }};
-    gpu::DynamicGraphicsPipelineDesc dynamic_desc = {
-        .vertex_shader   = shaders.vert,
-        .fragment_shader = shaders.frag,
-        .colors          = formats[..],
-    };
-    gpu::DynamicGraphicsPipelineDesc[5] dynamic_descs;
-    foreach (&desc : dynamic_descs) *desc = dynamic_desc;
-    gpu::PipelineHandle[5] dynamic_pipelines;
-    native_before = vk::pipeline_native_create_count(state);
-
-    gpu::create_dynamic_graphics_pipelines(
-        device:        &device,
-        descs:         dynamic_descs[..],
-        out_pipelines: dynamic_pipelines[..],
+        descs:         descs[..],
+        out_pipelines: pipelines[..],
     )!!;
 
     assert(vk::pipeline_native_create_count(state) - native_before == 1,
-        "opaque, alpha, premultiplied, additive, and mask packets share one dynamic native pipeline");
-    foreach (i, pipeline : dynamic_pipelines) {
-        assert(pipeline.is_valid(), "every dynamic batch output is valid");
+        "identical format-only descriptors share one native pipeline");
+    foreach (i, pipeline : pipelines) {
+        assert(pipeline.is_valid(), "every graphics batch output is valid");
         if (i > 0) {
-            assert(pipeline != dynamic_pipelines[0],
-                "dynamic batch aliases publish distinct owning handles");
+            assert(pipeline != pipelines[0],
+                "graphics batch aliases publish distinct owning handles");
         }
     }
-    assert(cache_entry_count(&device) == 6,
-        "five immutable identities and one dynamic identity remain separate");
-
-    foreach (pipeline : dynamic_pipelines) {
-        gpu::destroy_pipeline(&device, pipeline)!!;
-    }
-    foreach (pipeline : immutable_pipelines) {
+    assert(cache_entry_count(&device) == 1,
+        "all aliases retain one compact format-only cache entry");
+    foreach (pipeline : pipelines) {
         gpu::destroy_pipeline(&device, pipeline)!!;
     }
 }

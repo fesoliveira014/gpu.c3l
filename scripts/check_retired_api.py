@@ -101,7 +101,7 @@ FIXTURES = {
     "retired_pipeline_topology": "topology",
     "retired_pipeline_raster": "raster",
     "retired_graphics_pipeline_blend": "blend",
-    "retired_pipeline_color_formats": "color_formats",
+    "retired_pipeline_colors": "colors",
     "retired_compute_push_constant": "push_constant_size",
     "retired_raster_state": "RasterState",
     "retired_cmd_begin_render_pass_state": "state",
@@ -133,7 +133,7 @@ INVALID_MEMBER_TYPES = {
     "retired_pipeline_topology": "GraphicsPipelineDesc",
     "retired_pipeline_raster": "GraphicsPipelineDesc",
     "retired_graphics_pipeline_blend": "GraphicsPipelineDesc",
-    "retired_pipeline_color_formats": "GraphicsPipelineDesc",
+    "retired_pipeline_colors": "GraphicsPipelineDesc",
     "retired_compute_push_constant": "ComputePipelineDesc",
     "prior_use": "AcquiredImage",
 }

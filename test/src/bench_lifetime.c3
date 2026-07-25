@@ -14,7 +14,6 @@ fn bool bench_validation_enabled() {
 fn gpu::Device? create_bench_device(
     gpu::RuntimeDesc* desc,
     bool explicit_policy = false,
-    bool dynamic_color_state = false,
 ) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
     gpu::RuntimeDesc runtime_desc = *desc;
@@ -26,9 +25,6 @@ fn gpu::Device? create_bench_device(
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
     gpu::DeviceRequest request = gpu::strict_device_request();
-    if (dynamic_color_state) {
-        request = gpu::request_dynamic_color_state(request)!;
-    }
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;
         gpu::DeviceRequestSupport support =

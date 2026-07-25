@@ -108,8 +108,12 @@ fn gpu::ExecutableCommandList record_graphics(gpu::CommandAllocator* allocator, 
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = OVERLAP_RT_SIZE, .height = OVERLAP_RT_SIZE };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics.color = { .targets = color_targets[..] };
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    vertex_root,
@@ -303,14 +307,13 @@ fn int main() {
     gpu::ShaderCode vert_shader = gpu::prepare_shader_code(&vert_sd)!!;
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OVERLAP_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag_shader = gpu::prepare_shader_code(&frag_sd)!!;
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc gfx_pipe_desc = {
         .vertex_shader   = vert_shader,
         .fragment_shader = frag_shader,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
         .debug_name      = "overlap_graphics",
     };
     gpu::PipelineHandle gfx_pipeline = gpu::create_graphics_pipeline(&device, &gfx_pipe_desc)!!;

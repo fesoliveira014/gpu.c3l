@@ -21,18 +21,19 @@ struct PreparedRenderPass {
     bool                      has_depth;
 }
 
-struct LoweredGraphicsState {
-    vk::Viewport            viewport;
-    vk::Rect2D              scissor;
-    gpu::DynamicRasterState raster;
-    gpu::DepthState         depth;
-}
-
 struct LoweredColorState {
     uint count;
     uint[gpu::MAX_COLOR_ATTACHMENTS] blend_enables;
     vk::ColorBlendEquationEXT[gpu::MAX_COLOR_ATTACHMENTS] blend_equations;
     vk::ColorComponentFlags[gpu::MAX_COLOR_ATTACHMENTS] write_masks;
+}
+
+struct LoweredGraphicsState {
+    vk::Viewport            viewport;
+    vk::Rect2D              scissor;
+    gpu::DynamicRasterState raster;
+    gpu::DepthState         depth;
+    LoweredColorState       color;
 }
 
 struct PreparedIndexedDraw {
@@ -617,6 +618,7 @@ fn void? full_begin_render_pass_with_state(
     )!;
     LoweredGraphicsState graphics = full_prepare_graphics_state(
         device:    commands.device_state,
+        record:    commands,
         operation: "cmd_begin_render_pass_with_state",
         state:     state,
     )!;
@@ -629,6 +631,9 @@ fn void? full_begin_render_pass_with_state(
     track_render_pass(commands, &pass)!;
     record_render_pass_with_state(commands, &pass, &graphics);
     record.graphics_state_initialized = true;
+    record.color_state =
+        color_compatibility(&record.logical_pipeline.render);
+    record.color_state_initialized = true;
 }
 
 fn fault report_dynamic_state_rejection(
@@ -1036,11 +1041,13 @@ fn LoweredGraphicsState? lower_graphics_state(
         .scissor  = lower_scissor(&state.scissor),
         .raster   = state.raster,
         .depth    = state.depth,
+        .color    = lower_color_state(&state.color)!,
     };
 }
 
 fn LoweredGraphicsState? full_prepare_graphics_state(
     VkDeviceState* device,
+    CommandRecord* record,
     ZString operation,
     gpu::GraphicsState* state,
 ) @private {
@@ -1059,7 +1066,14 @@ fn LoweredGraphicsState? full_prepare_graphics_state(
     validate_scissor(device, operation, &state.scissor)!;
     validate_raster_state(device, operation, &state.raster)!;
     validate_depth_state(device, operation, &state.depth)!;
-    return lower_graphics_state(state);
+    LoweredGraphicsState lowered = lower_graphics_state(state)!;
+    lowered.color = full_prepare_color_state(
+        state:     device,
+        record:    record,
+        color:     &state.color,
+        operation: operation,
+    )!;
+    return lowered;
 }
 
 fn void emit_scissor(
@@ -1086,6 +1100,7 @@ fn void emit_graphics_state(
     emit_scissor(commands, &state.scissor);
     emit_raster_state(commands, &state.raster);
     emit_depth_state(commands, &state.depth);
+    emit_color_state(commands, &state.color);
 }
 
 fn ColorCompatibility color_compatibility(
@@ -1191,6 +1206,7 @@ fn void emit_color_state(
 
 fn fault color_state_rejection(
     VkDeviceState* state,
+    ZString operation,
     ZString field,
     ZString invariant,
 ) @private {
@@ -1200,40 +1216,37 @@ fn fault color_state_rejection(
     };
     return report_dynamic_state_rejection(
         state,
-        "cmd_set_color_state",
+        operation,
         rejection,
     );
-}
-
-fn bool dynamic_color_state_enabled(VkDeviceState* state) @private {
-    return state != null
-        && state.caps.dynamic_color_state
-        && device_dispatch_supports_dynamic_color(&state.device_dispatch);
 }
 
 fn LoweredColorState? full_prepare_color_state(
     VkDeviceState* state,
     CommandRecord* record,
     gpu::ColorState* color,
+    ZString operation,
 ) @private {
+    if (color == null) {
+        return color_state_rejection(
+            state:     state,
+            operation: operation,
+            field:     "ColorState",
+            invariant: "color state must not be null",
+        )~;
+    }
     BoundPipeline* pipeline = active_bound_pipeline(
         state:         state,
         record:        record,
         expected_kind: PipelineKind.GRAPHICS,
-        operation:     "cmd_set_color_state",
+        operation:     operation,
     )!;
-    if (pipeline.color_profile != GraphicsColorProfile.DYNAMIC) {
-        return color_state_rejection(
-            state,
-            "pipeline",
-            "selected graphics pipeline must use dynamic color state",
-        )~;
-    }
     if (color.targets.len != pipeline.render.color_count) {
         return color_state_rejection(
-            state,
-            "ColorState.targets",
-            "target count must match the selected dynamic pipeline",
+            state:     state,
+            operation: operation,
+            field:     "ColorState.targets",
+            invariant: "target count must match the selected graphics pipeline",
         )~;
     }
     if (record.state
@@ -1244,25 +1257,28 @@ fn LoweredColorState? full_prepare_color_state(
                 &record.active_render,
             )) {
             return color_state_rejection(
-                state,
-                "pipeline",
-                "selected pipeline formats must match the active render pass",
+                state:     state,
+                operation: operation,
+                field:     "pipeline",
+                invariant: "selected pipeline formats must match the active render pass",
             )~;
         }
     }
     foreach (i, &target : color.targets) {
         if (!blend_state_valid(&target.blend)) {
             return color_state_rejection(
-                state,
-                "ColorState.targets.blend",
-                "enabled blend factors and operations must be defined",
+                state:     state,
+                operation: operation,
+                field:     "ColorState.targets.blend",
+                invariant: "enabled blend factors and operations must be defined",
             )~;
         }
         if (!color_write_mask_valid(target.write_mask)) {
             return color_state_rejection(
-                state,
-                "ColorState.targets.write_mask",
-                "write mask may contain only RGBA channel bits",
+                state:     state,
+                operation: operation,
+                field:     "ColorState.targets.write_mask",
+                invariant: "write mask may contain only RGBA channel bits",
             )~;
         }
         if (target.blend.enable
@@ -1270,9 +1286,10 @@ fn LoweredColorState? full_prepare_color_state(
                 pipeline.render.color_formats[i],
             )) {
             return color_state_rejection(
-                state,
-                "ColorState.targets.blend.enable",
-                "integer color targets do not support blending",
+                state:     state,
+                operation: operation,
+                field:     "ColorState.targets.blend.enable",
+                invariant: "integer color targets do not support blending",
             )~;
         }
     }
@@ -1284,10 +1301,6 @@ fn void? trusted_set_color_state(
     gpu::ColorState* state,
 ) {
     if (state == null) return gpu::INVALID_ARGUMENT~;
-    VkDeviceState* device = commands.device_state;
-    if (!dynamic_color_state_enabled(device)) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
     CommandRecord* record = commands;
     if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1302,16 +1315,18 @@ fn void? full_set_color_state(
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     VkDeviceState* device = commands.device_state;
-    if (!dynamic_color_state_enabled(device)) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
     CommandRecord* record = commands;
     if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     validate_graphics_state_queue(record)!;
     LoweredColorState color =
-        full_prepare_color_state(device, record, state)!;
+        full_prepare_color_state(
+            state:     device,
+            record:    record,
+            color:     state,
+            operation: "cmd_set_color_state",
+        )!;
     emit_color_state(commands, &color);
     record.color_state =
         color_compatibility(&record.logical_pipeline.render);
@@ -1343,12 +1358,16 @@ fn void? full_set_graphics_state(
     }
     validate_graphics_state_queue(record)!;
     LoweredGraphicsState graphics = full_prepare_graphics_state(
-        device,
-        "cmd_set_graphics_state",
-        state,
+        device:    device,
+        record:    record,
+        operation: "cmd_set_graphics_state",
+        state:     state,
     )!;
     emit_graphics_state(commands, &graphics);
     record.graphics_state_initialized = true;
+    record.color_state =
+        color_compatibility(&record.logical_pipeline.render);
+    record.color_state_initialized = true;
 }
 
 fn void reset_dynamic_state_observation(
@@ -1507,12 +1526,11 @@ fn void? full_set_raster_state(
     return vk_cmd_set_raster_state(commands, raster);
 }
 
-fn void? validate_dynamic_color_execution_state(
+fn void? validate_color_execution_state(
     CommandRecord* record,
     BoundPipeline* pipeline,
 ) @private {
-    if (pipeline.color_profile != GraphicsColorProfile.DYNAMIC
-        || pipeline.render.color_count == 0) return;
+    if (pipeline.render.color_count == 0) return;
     if (!record.color_state_initialized
         || !color_compatibility_matches(
             &record.color_state,
@@ -1538,7 +1556,7 @@ fn BoundPipeline*? validate_graphics_execution_state(
     if (!record.graphics_state_initialized) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    validate_dynamic_color_execution_state(record, pipeline)!;
+    validate_color_execution_state(record, pipeline)!;
     return pipeline;
 }
 
@@ -2372,7 +2390,7 @@ fn BoundPipeline*? validate_generated_graphics_execution_state(
     if (!record.graphics_state_initialized) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    validate_dynamic_color_execution_state(record, pipeline)!;
+    validate_color_execution_state(record, pipeline)!;
     return pipeline;
 }
 

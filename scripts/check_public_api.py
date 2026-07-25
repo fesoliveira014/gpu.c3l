@@ -58,6 +58,23 @@ FORBIDDEN_TEXT = {
     '"name":"sampler_descriptor_capacity"': "backend-shaped sampler capacity",
     '"name":"max_texture_descriptors"': "backend-shaped texture limit",
     '"name":"max_sampler_descriptors"': "backend-shaped sampler limit",
+    '"name":"dynamicgraphicspipelinedesc"': (
+        "retired dynamic graphics pipeline descriptor"
+    ),
+    '"name":"colortargetformat"': "retired color target format wrapper",
+    '"name":"colortargetblendstate"': "retired color target blend state",
+    '"name":"request_dynamic_color_state"': (
+        "retired dynamic color device request"
+    ),
+    '"name":"create_dynamic_graphics_pipeline"': (
+        "retired dynamic graphics pipeline creation"
+    ),
+    '"name":"create_dynamic_graphics_pipelines"': (
+        "retired dynamic graphics pipeline batch creation"
+    ),
+    '"name":"dynamic_color_state"': (
+        "retired optional dynamic color capability"
+    ),
     '"name":"device_generated_commands"': "device_generated_commands",
     '"name":"supported_indirect_commands_shader_stages"': (
         "supported_indirect_commands_shader_stages"
@@ -279,6 +296,12 @@ RETIRED_SOURCE_SYMBOLS = (
     "ClearDepthStencil",
     "SAMPLER_INVALID",
     "publish_sampler(",
+    "DynamicGraphicsPipelineDesc",
+    "ColorTargetFormat",
+    "ColorTargetBlendState",
+    "request_dynamic_color_state(",
+    "create_dynamic_graphics_pipeline(",
+    "create_dynamic_graphics_pipelines(",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -678,9 +701,15 @@ def validate_document(document: dict) -> list[str]:
             "ColorTargetState",
             "struct",
             (
-                ("format", "Format"),
                 ("blend", "BlendState"),
                 ("write_mask", "ColorWriteMask"),
+            ),
+        ),
+        (
+            "ColorState",
+            "struct",
+            (
+                ("targets", "ColorTargetState[]"),
             ),
         ),
         (
@@ -735,6 +764,7 @@ def validate_document(document: dict) -> list[str]:
                 ("scissor", "ScissorRect"),
                 ("raster", "DynamicRasterState"),
                 ("depth", "DepthState"),
+                ("color", "ColorState"),
             ),
         ),
         (
@@ -751,7 +781,7 @@ def validate_document(document: dict) -> list[str]:
             (
                 ("vertex_shader", "ShaderCode"),
                 ("fragment_shader", "ShaderCode"),
-                ("colors", "ColorTargetState[]"),
+                ("color_formats", "Format[]"),
                 ("depth_format", "Format"),
                 ("sample_count", "SampleCount"),
                 ("polygon_mode", "PolygonMode"),

@@ -37,6 +37,7 @@ fn void full_render_graphics_state_is_explicit_and_representable() @test {
     assert(state.raster.depth_bias_clamp == 0.0f);
     assert(!state.depth.test_enable && !state.depth.write_enable);
     assert(state.depth.compare == gpu::CompareOp.NEVER);
+    assert(state.color.targets.len == 0);
 
     assert(@catch(gpu::full_render_graphics_state(0, 1))
         == gpu::INVALID_ARGUMENT);
@@ -54,12 +55,12 @@ fn void full_render_graphics_state_is_explicit_and_representable() @test {
 
 fn void common_color_states_are_exact_and_caller_owned() @test {
     gpu::ColorWriteMask alpha_only = { .alpha };
-    gpu::ColorTargetBlendState disabled =
+    gpu::ColorTargetState disabled =
         gpu::color_blend_disabled(alpha_only);
     assert(!disabled.blend.enable);
     assert(disabled.write_mask.alpha && (uint)disabled.write_mask == 8);
 
-    gpu::ColorTargetBlendState alpha = gpu::alpha_blend();
+    gpu::ColorTargetState alpha = gpu::alpha_blend();
     assert(alpha.blend.enable);
     assert(alpha.blend.src_color == gpu::BlendFactor.SRC_ALPHA);
     assert(alpha.blend.dst_color == gpu::BlendFactor.ONE_MINUS_SRC_ALPHA);
@@ -67,7 +68,7 @@ fn void common_color_states_are_exact_and_caller_owned() @test {
     assert(alpha.blend.dst_alpha == gpu::BlendFactor.ONE_MINUS_SRC_ALPHA);
     assert((uint)alpha.write_mask == (uint)gpu::COLOR_WRITE_ALL);
 
-    gpu::ColorTargetBlendState premultiplied =
+    gpu::ColorTargetState premultiplied =
         gpu::premultiplied_alpha_blend();
     assert(premultiplied.blend.src_color == gpu::BlendFactor.ONE);
     assert(
@@ -75,13 +76,13 @@ fn void common_color_states_are_exact_and_caller_owned() @test {
             == gpu::BlendFactor.ONE_MINUS_SRC_ALPHA
     );
 
-    gpu::ColorTargetBlendState additive = gpu::additive_blend();
+    gpu::ColorTargetState additive = gpu::additive_blend();
     assert(additive.blend.src_color == gpu::BlendFactor.ONE);
     assert(additive.blend.dst_color == gpu::BlendFactor.ONE);
     assert(additive.blend.src_alpha == gpu::BlendFactor.ONE);
     assert(additive.blend.dst_alpha == gpu::BlendFactor.ONE);
 
-    gpu::ColorTargetBlendState[3] targets;
+    gpu::ColorTargetState[3] targets;
     gpu::ColorState packet =
         gpu::uniform_color_state(targets[..], additive);
     assert(packet.targets.ptr == targets[..].ptr && packet.targets.len == 3);

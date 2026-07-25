@@ -302,14 +302,13 @@ fn void storage_write_then_fragment_sample() @test {
         .entry_point = "main",
     };
     gpu::ShaderCode fragment_shader = gpu::prepare_shader_code(&fragment_shader_desc)!!;
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc graphics_pipeline_desc = {
         .vertex_shader   = vertex_shader,
         .fragment_shader = fragment_shader,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
         .debug_name      = "storage_fragment_sample",
     };
     gpu::PipelineHandle graphics_pipeline =
@@ -430,8 +429,12 @@ fn void storage_write_then_fragment_sample() @test {
     };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics.color = { .targets = color_targets[..] };
     bind_test_graphics_pipeline(&commands, graphics_pipeline);
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    test_span_address(&device, vertices_span),

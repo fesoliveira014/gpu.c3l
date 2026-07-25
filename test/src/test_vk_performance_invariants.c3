@@ -15,7 +15,7 @@ const char[*] PERFORMANCE_FRAG_SPIRV =
 const uint PERFORMANCE_PIPELINE_CHURN_COUNT = 16;
 const uint PERFORMANCE_DRAW_COUNT = 4;
 const ulong PERFORMANCE_BEGIN_NATIVE_COMMANDS = 1;
-const ulong PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
+const ulong PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS = 13;
 
 fn gpu::Device make_performance_invariant_device() {
     gpu::RuntimeDesc desc = {
@@ -73,16 +73,15 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
         .spirv       = PERFORMANCE_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ColorTargetState[1] alternate_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] alternate_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc alternate_desc = {
         .vertex_shader = gpu::prepare_shader_code(&alternate_vertex_desc)!!,
         .fragment_shader = gpu::prepare_shader_code(
             &alternate_fragment_desc,
         )!!,
-        .colors = alternate_colors[..],
+        .color_formats = alternate_color_formats[..],
     };
     gpu::PipelineHandle alternate_pipeline = gpu::create_graphics_pipeline(
         &device,
@@ -262,14 +261,13 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         .spirv       = PERFORMANCE_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader = gpu::prepare_shader_code(&vertex_desc)!!,
         .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
-        .colors = pipeline_colors[..],
+        .color_formats = pipeline_color_formats[..],
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(
         &device,
@@ -302,6 +300,10 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics.color = { .targets = color_targets[..] };
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -349,7 +351,7 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     assert_warm_command_resolution(after_state, 1);
     assert(after_state.native_commands
             == PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS,
-        "complete graphics state emits exactly ten native commands");
+        "complete graphics state emits exactly thirteen native commands");
     gpu::reset_command_resolution_stats();
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::CommandResolutionStats after_begin =

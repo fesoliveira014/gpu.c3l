@@ -547,7 +547,6 @@ def valid_document() -> dict:
                         "name": "ColorTargetState",
                         "kind": "struct",
                         "members": [
-                            {"name": "format", "type": {"name": "Format"}},
                             {
                                 "name": "blend",
                                 "type": {"name": "BlendState"},
@@ -555,6 +554,16 @@ def valid_document() -> dict:
                             {
                                 "name": "write_mask",
                                 "type": {"name": "ColorWriteMask"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "ColorState",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "targets",
+                                "type": {"name": "ColorTargetState[]"},
                             },
                         ],
                     },
@@ -670,6 +679,10 @@ def valid_document() -> dict:
                                 "name": "depth",
                                 "type": {"name": "DepthState"},
                             },
+                            {
+                                "name": "color",
+                                "type": {"name": "ColorState"},
+                            },
                         ],
                     },
                     {
@@ -699,8 +712,8 @@ def valid_document() -> dict:
                                 "type": {"name": "ShaderCode"},
                             },
                             {
-                                "name": "colors",
-                                "type": {"name": "ColorTargetState[]"},
+                                "name": "color_formats",
+                                "type": {"name": "Format[]"},
                             },
                             {
                                 "name": "depth_format",
@@ -1760,6 +1773,41 @@ method gpu::Runtime.is_valid
         self.assertIn("retired wait_queue_idle", failures)
         self.assertIn("retired timeline capability", failures)
 
+    def test_rejects_retired_optional_color_surface(self) -> None:
+        document = valid_document()
+        gpu_module = document["modules"]["gpu"]
+        gpu_module["types"].extend([
+            {"name": "DynamicGraphicsPipelineDesc"},
+            {"name": "ColorTargetFormat"},
+            {"name": "ColorTargetBlendState"},
+        ])
+        gpu_module["functions"].extend([
+            {"name": "request_dynamic_color_state"},
+            {"name": "create_dynamic_graphics_pipeline"},
+            {"name": "create_dynamic_graphics_pipelines"},
+        ])
+        caps = next(
+            entry for entry in gpu_module["types"]
+            if entry["name"] == "DeviceCaps"
+        )
+        caps["members"].append({
+            "name": "dynamic_color_state",
+            "type": {"name": "bool"},
+        })
+
+        failures = check_public_api.validate_document(document)
+        for failure in (
+            "retired dynamic graphics pipeline descriptor",
+            "retired color target format wrapper",
+            "retired color target blend state",
+            "retired dynamic color device request",
+            "retired dynamic graphics pipeline creation",
+            "retired dynamic graphics pipeline batch creation",
+            "retired optional dynamic color capability",
+        ):
+            with self.subTest(failure=failure):
+                self.assertIn(failure, failures)
+
     def test_rejects_each_retired_frame_policy_symbol(self) -> None:
         cases = (
             (
@@ -2121,6 +2169,7 @@ method gpu::Runtime.is_valid
         for type_name in (
             "BlendState",
             "ColorTargetState",
+            "ColorState",
             "DynamicRasterState",
             "ComputePipelineDesc",
             "GraphicsPipelineDesc",
@@ -2336,7 +2385,7 @@ method gpu::Runtime.is_valid
                     )
 
     def test_requires_complete_graphics_state_schema(self) -> None:
-        for member_name in ("viewport", "scissor", "raster", "depth"):
+        for member_name in ("viewport", "scissor", "raster", "depth", "color"):
             with self.subTest(member_name=member_name):
                 document = valid_document()
                 state = next(

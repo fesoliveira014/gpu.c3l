@@ -131,8 +131,12 @@ Goal: compute culls, GPU decides the draw count.
 // Compute writes DrawIndirectCommand[] + a count word.
 gpu::GraphicsState state =
     gpu::full_render_graphics_state(pass.width, pass.height)!;
-gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
+gpu::ColorTargetState[1] color_targets = {
+    gpu::color_blend_disabled(),
+};
+state.color = { .targets = color_targets[..] };
 gpu::cmd_bind_pipeline(&cmd, pipeline)!;
+gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
 gpu::cmd_draw_indirect(
     commands:      &cmd,
     vertex_root:   vroot,
@@ -338,8 +342,9 @@ state.depth = {
     .write_enable = true,
     .compare      = gpu::CompareOp.LESS,
 };
-gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
+// full_render_graphics_state leaves state.color empty for this depth-only pass.
 gpu::cmd_bind_pipeline(&cmd, shadow_pipeline)!;
+gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
 ```
 
 ```glsl
@@ -353,45 +358,46 @@ Running example: `shadow_mapping` (3×3 PCF).
 
 Goal: G-buffer in one pass.
 
-Keep `GraphicsPipelineDesc` as the default when blend/write state is stable. To
-reuse one format-compatible pipeline across explicit color packets, opt in
-before device creation:
+`GraphicsPipelineDesc.color_formats` defines the ordered attachment-format
+domain. Blend equations and write masks are supplied as command state after
+binding a compatible pipeline:
 
 ```c3
-gpu::DeviceRequest request = gpu::request_dynamic_color_state(
-    gpu::strict_device_request(),
-)!;
+gpu::DeviceRequest request = gpu::strict_device_request();
 gpu::DeviceRequestSupport support =
     gpu::supports_device_request(&adapter, &request)!;
-if (!support.supported) { /* keep the immutable path */ }
+if (!support.supported) { /* select another adapter */ }
 gpu::Device device = gpu::create_device(&adapter, &request)!;
 
-gpu::ColorTargetFormat[3] formats = {
-    { .format = albedo_format },
-    { .format = normal_format },
-    { .format = position_format },
+gpu::Format[3] color_formats = {
+    albedo_format,
+    normal_format,
+    position_format,
 };
-gpu::DynamicGraphicsPipelineDesc pipeline_desc = {
+gpu::GraphicsPipelineDesc pipeline_desc = {
     .vertex_shader   = vertex,
     .fragment_shader = fragment,
-    .colors          = formats[..],
+    .color_formats   = color_formats[..],
 };
 gpu::PipelineHandle pipeline =
-    gpu::create_dynamic_graphics_pipeline(&device, &pipeline_desc)!;
+    gpu::create_graphics_pipeline(&device, &pipeline_desc)!;
 
-gpu::ColorTargetBlendState[3] targets;
+gpu::ColorTargetState[3] targets;
 gpu::ColorState opaque = gpu::uniform_color_state(
     targets[..],
     gpu::color_blend_disabled(),
 );
+gpu::GraphicsState state =
+    gpu::full_render_graphics_state(render_width, render_height)!;
+state.color = opaque;
 gpu::cmd_bind_pipeline(&cmd, pipeline)!;
-gpu::cmd_set_color_state(&cmd, &opaque)!;
 ```
 
 The target array is caller-owned and may be reused after the call. Record a
-complete packet after selecting a compatible dynamic pipeline and before its
-first draw. Compatible pass boundaries preserve it; record again only when the
-application wants a new state.
+complete packet after selecting a compatible pipeline and before its first
+draw. Compatible pipeline switches and pass boundaries preserve it; record
+again only when the application wants a new state. Use
+`cmd_set_color_state` when changing only the color portion.
 
 ```c3
 gpu::AttachmentViewHandle albedo_view = gpu::create_attachment_view(
@@ -412,8 +418,10 @@ gpu::ColorTargetDesc[3] colors = {
     { .view = position_view },
 };
 gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, ... };
-// pipeline: .colors lists each target's format, blend, and write mask;
+// pipeline: .color_formats lists each target's format in the same order;
+// state.color supplies the matching blend equation and write mask;
 // frag writes locations 0..2.
+gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
 ```
 
 Create the depth attachment view the same way. After the covering completion
@@ -453,10 +461,9 @@ if (support.mailbox) { /* recreate swapchain with PresentMode.MAILBOX */ }
 gpu::SwapchainInfo info = gpu::get_swapchain_info(&device, swapchain)!;
 if (info.dormant) { /* wait for a non-zero resize */ }
 
-gpu::ColorTargetState[1] pipeline_colors = {{
-    .format     = info.format,
-    .write_mask = gpu::COLOR_WRITE_ALL,
-}};
+gpu::Format[1] pipeline_color_formats = {
+    info.format,
+};
 
 gpu::AcquiredImage acquired = gpu::acquire_next_image(
     &device,

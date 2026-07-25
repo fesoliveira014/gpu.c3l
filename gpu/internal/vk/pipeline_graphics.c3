@@ -198,49 +198,9 @@ fn void? validate_graphics_pipeline_desc(
     VkDeviceState* state,
     gpu::GraphicsPipelineDesc* desc,
 ) {
-    if (desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
-        || !gpu::internal::sample_count_valid(desc.sample_count)
-        || !polygon_mode_valid(desc.polygon_mode)) return gpu::INVALID_ARGUMENT~;
-    if (desc.depth_format != gpu::Format.UNDEFINED
-        && desc.depth_format != gpu::Format.D32_FLOAT) return gpu::INVALID_ARGUMENT~;
-    if (desc.colors.len == 0
-        && desc.depth_format == gpu::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
-    gpu::TextureUsage color_usage = { .color_attach };
-    foreach (&target : desc.colors) {
-        if (!blend_state_valid(&target.blend)
-            || !color_write_mask_valid(target.write_mask)
-            || (target.blend.enable && color_format_is_integer(target.format))
-            || target.format == gpu::Format.UNDEFINED
-            || target.format == gpu::Format.D32_FLOAT
-            || format_to_vk(target.format) == vk::Format.UNDEFINED) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        if (!format_supports_sample_count(
-            state,
-            target.format,
-            color_usage,
-            desc.sample_count,
-        )!) return gpu::UNSUPPORTED_FEATURE~;
-    }
-    if (desc.depth_format != gpu::Format.UNDEFINED) {
-        gpu::TextureUsage depth_usage = { .depth_attach };
-        if (!format_supports_sample_count(
-            state,
-            desc.depth_format,
-            depth_usage,
-            desc.sample_count,
-        )!) return gpu::UNSUPPORTED_FEATURE~;
-    }
-    check_polygon_mode_support(desc.polygon_mode, state.caps.line_polygon_mode)!;
-}
-
-fn void? validate_dynamic_graphics_pipeline_desc(
-    VkDeviceState* state,
-    gpu::DynamicGraphicsPipelineDesc* desc,
-) {
     if (desc == null
-        || desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
-        || (desc.colors.len > 0 && desc.colors.ptr == null)
+        || desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS
+        || (desc.color_formats.len > 0 && desc.color_formats.ptr == null)
         || !gpu::internal::sample_count_valid(desc.sample_count)
         || !polygon_mode_valid(desc.polygon_mode)) {
         return gpu::INVALID_ARGUMENT~;
@@ -249,20 +209,20 @@ fn void? validate_dynamic_graphics_pipeline_desc(
         && desc.depth_format != gpu::Format.D32_FLOAT) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (desc.colors.len == 0
+    if (desc.color_formats.len == 0
         && desc.depth_format == gpu::Format.UNDEFINED) {
         return gpu::INVALID_ARGUMENT~;
     }
     gpu::TextureUsage color_usage = { .color_attach };
-    foreach (&target : desc.colors) {
-        if (target.format == gpu::Format.UNDEFINED
-            || target.format == gpu::Format.D32_FLOAT
-            || format_to_vk(target.format) == vk::Format.UNDEFINED) {
+    foreach (format : desc.color_formats) {
+        if (format == gpu::Format.UNDEFINED
+            || format == gpu::Format.D32_FLOAT
+            || format_to_vk(format) == vk::Format.UNDEFINED) {
             return gpu::INVALID_ARGUMENT~;
         }
         if (!format_supports_sample_count(
             state,
-            target.format,
+            format,
             color_usage,
             desc.sample_count,
         )!) return gpu::UNSUPPORTED_FEATURE~;
@@ -316,7 +276,7 @@ fn vk::Result create_graphics_pipeline_native(
                 default:
             }
         }
-        state.pipeline_native_dynamic_color_states =
+        state.pipeline_native_color_states =
             blend_enable && blend_equation && write_mask;
         state.pipeline_native_canonical_color_attachments =
             info.p_color_blend_state.attachment_count > 0;
@@ -443,7 +403,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
             );
             foreach (i, &format : color_formats) {
                 vk::Format vk_format = format_to_vk(
-                    (gpu::Format)key.color_targets[i].format,
+                    key.color_formats[i],
                 );
                 if (vk_format == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
                 *format = vk_format;
@@ -463,9 +423,9 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         vk::PipelineRenderingCreateInfo rendering_info = vk::pipeline_rendering_create_info();
         rendering_info.color_attachment_count = (uint)color_formats.len;
         rendering_info.p_color_attachment_formats = color_formats.ptr;
-        if (key.depth_format != (int)gpu::Format.UNDEFINED) {
+        if (key.depth_format != gpu::Format.UNDEFINED) {
             rendering_info.depth_attachment_format = format_to_vk(
-                (gpu::Format)key.depth_format,
+                key.depth_format,
             );
         }
 
@@ -479,7 +439,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         viewport_state.scissor_count = 1;
 
         vk::PipelineRasterizationStateCreateInfo raster = vk::pipeline_rasterization_state_create_info();
-        raster.polygon_mode = key.polygon_mode == (int)gpu::PolygonMode.LINE
+        raster.polygon_mode = key.polygon_mode == gpu::PolygonMode.LINE
             ? vk::PolygonMode.LINE
             : vk::PolygonMode.FILL;
         raster.cull_mode  = vk::CullModeFlagBits.NONE;
@@ -488,7 +448,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
 
         vk::PipelineMultisampleStateCreateInfo multisample = vk::pipeline_multisample_state_create_info();
         multisample.rasterization_samples = sample_count_to_vk(
-            (gpu::SampleCount)key.sample_count,
+            key.sample_count,
         );
 
         vk::PipelineDepthStencilStateCreateInfo depth_stencil = vk::pipeline_depth_stencil_state_create_info();
@@ -496,47 +456,19 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         vk::PipelineColorBlendStateCreateInfo blend_state = vk::pipeline_color_blend_state_create_info();
         if (color_formats.len > 0) {
             vk::PipelineColorBlendAttachmentState[] blend_attachments = mem::talloc_array(vk::PipelineColorBlendAttachmentState, color_formats.len);
-            foreach (i, &attachment : blend_attachments) {
-                ColorTargetKey* target = &key.color_targets[i];
-                if (key.color_profile == (int)GraphicsColorProfile.DYNAMIC) {
-                    *attachment = {
-                        .blend_enable           = vk::FALSE,
-                        .src_color_blend_factor = vk::BlendFactor.ONE,
-                        .dst_color_blend_factor = vk::BlendFactor.ZERO,
-                        .color_blend_op          = vk::BlendOp.ADD,
-                        .src_alpha_blend_factor = vk::BlendFactor.ONE,
-                        .dst_alpha_blend_factor = vk::BlendFactor.ZERO,
-                        .alpha_blend_op          = vk::BlendOp.ADD,
-                        .color_write_mask        = color_write_mask_to_vk(
-                            gpu::COLOR_WRITE_ALL,
-                        ),
-                    };
-                } else {
-                    *attachment = {
-                        .blend_enable           = target.blend_enable != 0 ? vk::TRUE : vk::FALSE,
-                        .src_color_blend_factor = blend_factor_to_vk(
-                            (gpu::BlendFactor)target.blend.src_color,
-                        ),
-                        .dst_color_blend_factor = blend_factor_to_vk(
-                            (gpu::BlendFactor)target.blend.dst_color,
-                        ),
-                        .color_blend_op = blend_op_to_vk(
-                            (gpu::BlendOp)target.blend.color_op,
-                        ),
-                        .src_alpha_blend_factor = blend_factor_to_vk(
-                            (gpu::BlendFactor)target.blend.src_alpha,
-                        ),
-                        .dst_alpha_blend_factor = blend_factor_to_vk(
-                            (gpu::BlendFactor)target.blend.dst_alpha,
-                        ),
-                        .alpha_blend_op = blend_op_to_vk(
-                            (gpu::BlendOp)target.blend.alpha_op,
-                        ),
-                        .color_write_mask = color_write_mask_to_vk(
-                            target.write_mask,
-                        ),
-                    };
-                }
+            foreach (&attachment : blend_attachments) {
+                *attachment = {
+                    .blend_enable           = vk::FALSE,
+                    .src_color_blend_factor = vk::BlendFactor.ONE,
+                    .dst_color_blend_factor = vk::BlendFactor.ZERO,
+                    .color_blend_op          = vk::BlendOp.ADD,
+                    .src_alpha_blend_factor = vk::BlendFactor.ONE,
+                    .dst_alpha_blend_factor = vk::BlendFactor.ZERO,
+                    .alpha_blend_op          = vk::BlendOp.ADD,
+                    .color_write_mask        = color_write_mask_to_vk(
+                        gpu::COLOR_WRITE_ALL,
+                    ),
+                };
             }
             blend_state.attachment_count = (uint)blend_attachments.len;
             blend_state.p_attachments = blend_attachments.ptr;
@@ -553,17 +485,11 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         dynamic_states[7] = vk::DynamicState.DEPTH_TEST_ENABLE;
         dynamic_states[8] = vk::DynamicState.DEPTH_WRITE_ENABLE;
         dynamic_states[9] = vk::DynamicState.DEPTH_COMPARE_OP;
-        usz dynamic_state_count = 10;
-        if (key.color_profile == (int)GraphicsColorProfile.DYNAMIC) {
-            dynamic_states[dynamic_state_count++] =
-                vk::DynamicState.COLOR_BLEND_ENABLE_EXT;
-            dynamic_states[dynamic_state_count++] =
-                vk::DynamicState.COLOR_BLEND_EQUATION_EXT;
-            dynamic_states[dynamic_state_count++] =
-                vk::DynamicState.COLOR_WRITE_MASK_EXT;
-        }
+        dynamic_states[10] = vk::DynamicState.COLOR_BLEND_ENABLE_EXT;
+        dynamic_states[11] = vk::DynamicState.COLOR_BLEND_EQUATION_EXT;
+        dynamic_states[12] = vk::DynamicState.COLOR_WRITE_MASK_EXT;
         vk::PipelineDynamicStateCreateInfo dynamic_state = vk::pipeline_dynamic_state_create_info();
-        dynamic_state.dynamic_state_count = (uint)dynamic_state_count;
+        dynamic_state.dynamic_state_count = (uint)dynamic_states.len;
         dynamic_state.p_dynamic_states = &dynamic_states[0];
 
         vk::GraphicsPipelineCreateInfo pipe_info = vk::graphics_pipeline_create_info();
@@ -645,176 +571,6 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         }
         release_entry(state, entry_index);
         return gpu::SLOT_TABLE_FULL~;
-    };
-}
-
-fn gpu::PipelineHandle? vk_create_dynamic_graphics_pipeline(
-    VkDeviceState* state,
-    gpu::DynamicGraphicsPipelineDesc* desc,
-) {
-    state.pipeline_creation_mutex.lock()!!;
-    defer state.pipeline_creation_mutex.unlock();
-    if (!state.caps.dynamic_color_state) return gpu::UNSUPPORTED_FEATURE~;
-    validate_dynamic_graphics_pipeline_desc(state, desc)!;
-    validate_pipeline_shader_code(
-        state:          state,
-        code:           &desc.vertex_shader,
-        operation:      "create_dynamic_graphics_pipeline",
-        rejected_field: "DynamicGraphicsPipelineDesc.vertex_shader",
-    )!;
-    validate_pipeline_shader_code(
-        state:          state,
-        code:           &desc.fragment_shader,
-        operation:      "create_dynamic_graphics_pipeline",
-        rejected_field: "DynamicGraphicsPipelineDesc.fragment_shader",
-    )!;
-    if (!pipeline_handle_capacity_available(state, 1)) {
-        return gpu::SLOT_TABLE_FULL~;
-    }
-    PreparedShaderIdentity[2] prepared;
-    usz prepared_count = 0;
-    defer release_prepared_shaders(state, prepared[:prepared_count]);
-    {
-        state.resource_mutex.lock()!!;
-        defer state.resource_mutex.unlock();
-        prepared[0] = prepare_shader_identity_locked(
-            state,
-            &desc.vertex_shader,
-        )!;
-        prepared_count++;
-        prepared[1] = prepare_shader_identity_locked(
-            state,
-            &desc.fragment_shader,
-        )!;
-        prepared_count++;
-    }
-    PipelineKey key = build_dynamic_graphics_key(
-        desc,
-        prepared[0].id,
-        prepared[1].id,
-    );
-    return create_graphics_pipeline_from_modules(
-        state:                    state,
-        requested_key:            &key,
-        vertex_code:              &desc.vertex_shader,
-        fragment_code:            &desc.fragment_shader,
-        operation:                "create_dynamic_graphics_pipeline",
-        vertex_field:             "DynamicGraphicsPipelineDesc.vertex_shader",
-        fragment_field:           "DynamicGraphicsPipelineDesc.fragment_shader",
-        debug_name:               desc.debug_name,
-        prepared_vertex_shader:   &prepared[0],
-        prepared_fragment_shader: &prepared[1],
-        batch_vertex_shader:      null,
-        batch_fragment_shader:    null,
-    );
-}
-
-fn void? vk_create_dynamic_graphics_pipelines(
-    VkDeviceState* state,
-    gpu::DynamicGraphicsPipelineDesc[] descs,
-    gpu::PipelineHandle[] out_pipelines,
-) {
-    if (out_pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
-    if (descs.len == 0) return;
-    state.pipeline_creation_mutex.lock()!!;
-    defer state.pipeline_creation_mutex.unlock();
-    if (!state.caps.dynamic_color_state) return gpu::UNSUPPORTED_FEATURE~;
-
-    foreach (&desc : descs) {
-        validate_dynamic_graphics_pipeline_desc(state, desc)!;
-        validate_pipeline_shader_code(
-            state:          state,
-            code:           &desc.vertex_shader,
-            operation:      "create_dynamic_graphics_pipelines",
-            rejected_field: "DynamicGraphicsPipelineDesc.vertex_shader",
-        )!;
-        validate_pipeline_shader_code(
-            state:          state,
-            code:           &desc.fragment_shader,
-            operation:      "create_dynamic_graphics_pipelines",
-            rejected_field: "DynamicGraphicsPipelineDesc.fragment_shader",
-        )!;
-    }
-    if (!pipeline_handle_capacity_available(state, descs.len)) {
-        return gpu::SLOT_TABLE_FULL~;
-    }
-
-    @pool() {
-        PreparedShaderIdentity[] prepared_vertex =
-            mem::talloc_array(PreparedShaderIdentity, descs.len);
-        PreparedShaderIdentity[] prepared_fragment =
-            mem::talloc_array(PreparedShaderIdentity, descs.len);
-        $if env::TESTING:
-            poison_unprepared_shader_identities(state, prepared_vertex);
-            poison_unprepared_shader_identities(state, prepared_fragment);
-        $endif
-        usz prepared_vertex_count = 0;
-        usz prepared_fragment_count = 0;
-        defer release_prepared_shaders(
-            state,
-            prepared_fragment[:prepared_fragment_count],
-        );
-        defer release_prepared_shaders(
-            state,
-            prepared_vertex[:prepared_vertex_count],
-        );
-        {
-            state.resource_mutex.lock()!!;
-            defer state.resource_mutex.unlock();
-            foreach (i, &desc : descs) {
-                prepared_vertex[i] = prepare_shader_identity_locked(
-                    state,
-                    &desc.vertex_shader,
-                )!;
-                prepared_vertex_count++;
-                prepared_fragment[i] = prepare_shader_identity_locked(
-                    state,
-                    &desc.fragment_shader,
-                )!;
-                prepared_fragment_count++;
-            }
-        }
-
-        gpu::PipelineHandle[] created =
-            mem::talloc_array(gpu::PipelineHandle, descs.len);
-        usz created_count = 0;
-        foreach (i, &desc : descs) {
-            if (pipeline_creation_should_fail(state, (usz)i)) {
-                for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(state, created[rollback])!!;
-                }
-                return gpu::PIPELINE_CREATE_FAILED~;
-            }
-            PipelineKey key = build_dynamic_graphics_key(
-                desc,
-                prepared_vertex[i].id,
-                prepared_fragment[i].id,
-            );
-            gpu::PipelineHandle? created_optional =
-                create_graphics_pipeline_from_modules(
-                    state:                    state,
-                    requested_key:            &key,
-                    vertex_code:              &desc.vertex_shader,
-                    fragment_code:            &desc.fragment_shader,
-                    operation:                "create_dynamic_graphics_pipelines",
-                    vertex_field:             "DynamicGraphicsPipelineDesc.vertex_shader",
-                    fragment_field:           "DynamicGraphicsPipelineDesc.fragment_shader",
-                    debug_name:               desc.debug_name,
-                    prepared_vertex_shader:   &prepared_vertex[i],
-                    prepared_fragment_shader: &prepared_fragment[i],
-                    batch_vertex_shader:      null,
-                    batch_fragment_shader:    null,
-                );
-            if (catch create_fault = created_optional) {
-                for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(state, created[rollback])!!;
-                }
-                return create_fault~;
-            }
-            created[i] = created_optional;
-            created_count++;
-        }
-        foreach (i, pipeline : created) out_pipelines[i] = pipeline;
     };
 }
 

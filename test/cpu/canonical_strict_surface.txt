@@ -144,8 +144,6 @@ function gpu::create_compute_pipeline
 function gpu::create_compute_pipelines
 function gpu::create_dedicated_texture
 function gpu::create_device
-function gpu::create_dynamic_graphics_pipeline
-function gpu::create_dynamic_graphics_pipelines
 function gpu::create_graphics_pipeline
 function gpu::create_graphics_pipelines
 function gpu::create_placed_texture
@@ -195,7 +193,6 @@ function gpu::premultiplied_alpha_blend
 function gpu::prepare_shader_code
 function gpu::present
 function gpu::release_generated_scratch
-function gpu::request_dynamic_color_state
 function gpu::request_presentation
 function gpu::request_queues
 function gpu::request_resource_agnostic_texture_sync
@@ -264,9 +261,7 @@ struct gpu::BufferCopyDesc
 struct gpu::BufferTextureCopyDesc
 struct gpu::ClearDepth
 struct gpu::ColorState
-struct gpu::ColorTargetBlendState
 struct gpu::ColorTargetDesc
-struct gpu::ColorTargetFormat
 struct gpu::ColorTargetState
 struct gpu::CommandAllocator
 struct gpu::CommandAllocatorDesc
@@ -285,7 +280,6 @@ struct gpu::DeviceRequestSupport
 struct gpu::DispatchIndirectCommand
 struct gpu::DrawIndexedIndirectCommand
 struct gpu::DrawIndirectCommand
-struct gpu::DynamicGraphicsPipelineDesc
 struct gpu::DynamicRasterState
 struct gpu::ExecutableCommandList
 struct gpu::GeneratedDispatchRecord

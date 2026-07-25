@@ -122,8 +122,12 @@ fn double record_raster_matrix(
     };
     gpu::GraphicsState graphics =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics.color = { .targets = color_targets[..] };
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
     std::time::Clock start = std::time::clock::now();
     foreach (&raster : rasters) gpu::cmd_set_raster_state(&commands, raster)!!;
     long elapsed_ns = (long)start.to_now();
@@ -170,14 +174,13 @@ fn int main() {
     gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::ColorTargetState[1] colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc immutable = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .colors          = colors[..],
+        .color_formats   = color_formats[..],
     };
     gpu::DynamicRasterState[BENCH_RASTER_PERMUTATION_COUNT] rasters;
     foreach (i, &raster : rasters) *raster = raster_permutation((uint)i);

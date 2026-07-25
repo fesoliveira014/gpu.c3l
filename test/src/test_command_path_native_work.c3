@@ -14,7 +14,7 @@ const char[*] COMMAND_PATH_WORK_FRAG_SPIRV =
 
 const ulong COMMAND_PATH_BEGIN_NATIVE_COMMANDS = 1;
 const ulong COMMAND_PATH_COLOR_STATE_NATIVE_COMMANDS = 3;
-const ulong COMMAND_PATH_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
+const ulong COMMAND_PATH_GRAPHICS_STATE_NATIVE_COMMANDS = 13;
 const uint COMMAND_PATH_DRAW_COUNT = 4;
 
 fn gpu::PipelineHandle command_path_work_compute_pipeline(
@@ -44,19 +44,18 @@ fn gpu::PipelineHandle command_path_work_graphics_pipeline(
         .spirv       = COMMAND_PATH_WORK_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ColorTargetState[1] colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader   = gpu::prepare_shader_code(&vertex_desc)!!,
         .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
-        .colors          = colors[..],
+        .color_formats   = color_formats[..],
     };
     return gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
 }
 
-fn gpu::PipelineHandle command_path_work_dynamic_graphics_pipeline(
+fn gpu::PipelineHandle command_path_work_color_graphics_pipeline(
     gpu::Device* device,
 ) {
     gpu::ShaderDesc vertex_desc = {
@@ -69,15 +68,15 @@ fn gpu::PipelineHandle command_path_work_dynamic_graphics_pipeline(
         .spirv       = COMMAND_PATH_WORK_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ColorTargetFormat[1] colors = {{
-        .format = gpu::Format.RGBA8_UNORM,
-    }};
-    gpu::DynamicGraphicsPipelineDesc pipeline_desc = {
+    gpu::Format[1] color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader   = gpu::prepare_shader_code(&vertex_desc)!!,
         .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
-        .colors          = colors[..],
+        .color_formats   = color_formats[..],
     };
-    return gpu::create_dynamic_graphics_pipeline(device, &pipeline_desc)!!;
+    return gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
 }
 
 fn void require_native_work(ulong expected) {
@@ -199,6 +198,10 @@ fn void public_command_native_work_is_exact() @test {
     };
     gpu::GraphicsState graphics_state =
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics_state.color = { .targets = color_targets[..] };
     commands = gpu::begin_commands(&allocator)!!;
     gpu::cmd_bind_pipeline(&commands, graphics)!!;
     gpu::reset_command_resolution_stats();
@@ -257,17 +260,17 @@ fn void public_command_native_work_is_exact() @test {
     gpu::discard_executable_commands(&executable)!!;
 }
 
-fn void dynamic_color_command_warm_work_is_exact() @test {
+fn void color_command_warm_work_is_exact() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation       = gpu::ContractValidation.FULL,
         .enable_vulkan_validation  = true,
-        .application_name          = "gpu_dynamic_color_work",
+        .application_name          = "gpu_color_work",
     };
-    gpu::Device? maybe_device = create_dynamic_color_test_device(&desc);
+    gpu::Device? maybe_device = create_test_device(&desc);
     if (catch err = maybe_device) {
         assert(err == gpu::UNSUPPORTED_FEATURE,
-            "dynamic color work fails only when live support is absent");
-        io::eprintfn("dynamic_color_command_warm_work_is_exact: unsupported, skipping");
+            "color work fails only when live support is absent");
+        io::eprintfn("color_command_warm_work_is_exact: unsupported, skipping");
         return;
     }
     gpu::Device device = maybe_device;
@@ -279,9 +282,9 @@ fn void dynamic_color_command_warm_work_is_exact() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::PipelineHandle pipeline =
-        command_path_work_dynamic_graphics_pipeline(&device);
+        command_path_work_color_graphics_pipeline(&device);
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-    gpu::ColorTargetBlendState[1] targets = {
+    gpu::ColorTargetState[1] targets = {
         gpu::alpha_blend(),
     };
     gpu::ColorState color = { .targets = targets[..] };

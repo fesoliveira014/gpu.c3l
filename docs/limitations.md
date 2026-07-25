@@ -37,8 +37,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
   and survives render-pass boundaries. Minimal begin does not change or replay
   it. Record a complete `GraphicsState` before or during the first pass, or use
   `cmd_begin_render_pass_with_state`; under `FULL`, regular and generated draws
-  reject a recording that has only partial updates. `full_render_graphics_state`
-  supplies a conventional full-area packet. Migrate an old three-argument
+  reject a recording that has only partial updates. Bind a compatible graphics
+  pipeline before applying a complete packet. `full_render_graphics_state`
+  supplies conventional viewport/raster/depth state and an empty color packet;
+  color passes must replace `GraphicsState.color` with a packet matching the
+  pipeline's ordered color-format domain. Migrate an old three-argument
   `cmd_begin_render_pass` call to the named convenience.
 - **Texture history is caller-owned.** `TextureBarrier.before` asserts the
   layout, stages, and access established by earlier ordering. The backend
@@ -69,17 +72,12 @@ page doesn't explain it, that's a bug in this page — file an issue.
   `PrimitiveTopology.LINES` remain available.
 - **Dynamic raster state raises the intentional minimum device profile.** The
   minimum is Vulkan 1.3 plus `VK_EXT_extended_dynamic_state3` and requires
-  `dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. Device creation
-  also requires independent blending and depth-bias clamp. An adapter missing
+  `dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. Device creation also
+  requires the EDS3 color blend-enable, blend-equation, and write-mask features
+  and commands, independent blending, and depth-bias clamp. An adapter missing
   any requirement is rejected with `UNSUPPORTED_FEATURE`; the backend does not
-  synthesize raster-specific pipeline variants.
-- **Dynamic color state is opt-in and all-or-nothing.** Add
-  `request_dynamic_color_state` before support query and device creation, then
-  require `DeviceCaps.dynamic_color_state`. The selected adapter must expose
-  all three blend-enable, blend-equation, and write-mask EDS3 features and
-  commands. Unsupported or unrequested devices keep the immutable graphics
-  profile and return `UNSUPPORTED_FEATURE`; the library does not synthesize
-  color-state pipeline variants or replay hidden defaults.
+  synthesize raster- or color-state pipeline variants or replay hidden
+  defaults.
 - **GPU-generated roots are optional.** `DeviceCaps.generated_work` requires
   one Vulkan facility that supports the draw, indexed-draw, and dispatch
   record layouts together. Unsupported devices retain the shared-root indirect

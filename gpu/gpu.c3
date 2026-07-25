@@ -188,14 +188,6 @@ fn DeviceRequest? request_resource_agnostic_texture_sync(
     );
 }
 
-<* Return a new request that requires command-time color blend state. *>
-fn DeviceRequest? request_dynamic_color_state(DeviceRequest request) {
-    return gpu::internal::compose_device_request(
-        request,
-        gpu::internal::DeviceCapability.DYNAMIC_COLOR_STATE,
-    );
-}
-
 <* Return a new request with one explicit semantic queue group. *>
 fn DeviceRequest? request_queues(
     DeviceRequest request,
@@ -245,17 +237,6 @@ fn DeviceRequestSupport? supports_device_request(
         return {
             .supported         = false,
             .unmet_requirement = "resource-agnostic texture synchronization",
-        };
-    }
-
-    if (gpu::internal::requests_dynamic_color_state(*request)
-        && !gpu::internal::vk::vk_supports_dynamic_color_state(
-            data.state,
-            adapter.adapter_index,
-        )!) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "dynamic color state",
         };
     }
 
@@ -930,14 +911,14 @@ fn ShaderCode? prepare_shader_code(ShaderDesc* desc) {
 }
 
 <* Construct disabled blending with the selected write mask. *>
-fn ColorTargetBlendState color_blend_disabled(
+fn ColorTargetState color_blend_disabled(
     ColorWriteMask write_mask = COLOR_WRITE_ALL,
 ) {
     return { .write_mask = write_mask };
 }
 
 <* Construct conventional source-alpha blending with RGBA writes. *>
-fn ColorTargetBlendState alpha_blend() {
+fn ColorTargetState alpha_blend() {
     return {
         .blend = {
             .enable    = true,
@@ -953,7 +934,7 @@ fn ColorTargetBlendState alpha_blend() {
 }
 
 <* Construct premultiplied-alpha blending with RGBA writes. *>
-fn ColorTargetBlendState premultiplied_alpha_blend() {
+fn ColorTargetState premultiplied_alpha_blend() {
     return {
         .blend = {
             .enable    = true,
@@ -969,7 +950,7 @@ fn ColorTargetBlendState premultiplied_alpha_blend() {
 }
 
 <* Construct additive blending with RGBA writes. *>
-fn ColorTargetBlendState additive_blend() {
+fn ColorTargetState additive_blend() {
     return {
         .blend = {
             .enable    = true,
@@ -986,8 +967,8 @@ fn ColorTargetBlendState additive_blend() {
 
 <* Fill caller-owned targets with one state and return a borrowed packet. *>
 fn ColorState uniform_color_state(
-    ColorTargetBlendState[] targets,
-    ColorTargetBlendState state,
+    ColorTargetState[] targets,
+    ColorTargetState state,
 ) {
     foreach (&target : targets) *target = state;
     return { .targets = targets };
@@ -1018,28 +999,6 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
         gpu::internal::vk::vk_create_graphics_pipeline(operation.state, desc)!;
-    gpu::internal::retain_device_children(&operation);
-    return pipeline;
-}
-
-<* Create a format-only graphics pipeline whose blend and write-mask state is
-   supplied with cmd_set_color_state. Requires DeviceCaps.dynamic_color_state.
-   Ownership: release with destroy_pipeline, once per create. *>
-fn PipelineHandle? create_dynamic_graphics_pipeline(
-    Device* device,
-    DynamicGraphicsPipelineDesc* desc,
-) {
-    gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
-    defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    if (!operation.data.caps.dynamic_color_state) {
-        return UNSUPPORTED_FEATURE~;
-    }
-    PipelineHandle pipeline = gpu::internal::vk::vk_create_dynamic_graphics_pipeline(
-        operation.state,
-        desc,
-    )!;
     gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
@@ -1080,32 +1039,6 @@ fn void? create_graphics_pipelines(
         out_pipelines,
     )!;
     for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
-}
-
-<* Create format-only dynamic-color graphics pipelines transactionally. Output
-   count must match descriptor count; an empty batch succeeds. A fault leaves
-   every output unchanged. Requires DeviceCaps.dynamic_color_state. *>
-fn void? create_dynamic_graphics_pipelines(
-    Device* device,
-    DynamicGraphicsPipelineDesc[] descs,
-    PipelineHandle[] out_pipelines,
-) {
-    gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
-    defer gpu::internal::end_device_operation(&operation);
-    if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
-    if (descs.len == 0) return;
-    if (!operation.data.caps.dynamic_color_state) {
-        return UNSUPPORTED_FEATURE~;
-    }
-    gpu::internal::vk::vk_create_dynamic_graphics_pipelines(
-        operation.state,
-        descs,
-        out_pipelines,
-    )!;
-    for (usz i = 0; i < descs.len; i++) {
-        gpu::internal::retain_device_children(&operation);
-    }
 }
 
 <* Release one returned pipeline handle.
@@ -1685,8 +1618,8 @@ fn void? destroy_attachment_view(
     gpu::internal::release_device_children(&operation);
 }
 
-<* Construct full-area viewport/scissor with zero raster and depth state.
-   Dimensions must be in [1, int::max]. *>
+<* Construct full-area viewport/scissor with zero raster/depth state and no
+   color targets. Dimensions must be in [1, int::max]. *>
 fn GraphicsState? full_render_graphics_state(uint width, uint height) {
     if (width == 0 || height == 0
         || width > (uint)int::max || height > (uint)int::max) {
@@ -1718,9 +1651,10 @@ fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
 }
 
 <* Begin a render pass and set complete graphics state atomically.
-   Preconditions: the pass and all dynamic graphics state are valid.
+   Preconditions: a compatible graphics pipeline is bound, and the pass and
+   complete graphics state are valid.
    Always checked: token phase, host-safe inputs, identities, and safe lowering.
-   FULL diagnostics: pass, queue, attachment, and graphics-state misuse. *>
+   FULL diagnostics: pipeline, pass, queue, attachment, and graphics-state misuse. *>
 fn void? cmd_begin_render_pass_with_state(
     CommandList* commands,
     RenderPassDesc* desc,
@@ -1735,9 +1669,10 @@ fn void? cmd_begin_render_pass_with_state(
 }
 
 <* Replace complete graphics state before or during a pass.
-   Preconditions: queue capability and all dynamic values are valid.
+   Preconditions: a compatible graphics pipeline is bound, the queue is
+   graphics-capable, and all state values are valid.
    Always checked: token phase, required host-safe input, and safe lowering.
-   FULL diagnostics: queue, enum, feature, and dynamic-value misuse. *>
+   FULL diagnostics: pipeline, queue, enum, feature, and state-value misuse. *>
 fn void? cmd_set_graphics_state(
     CommandList* commands,
     GraphicsState* state,
@@ -1747,8 +1682,8 @@ fn void? cmd_set_graphics_state(
     return record.ops.set_graphics_state(record, state);
 }
 
-<* Replace complete blend and write-mask state for a dynamic-color pipeline.
-   Preconditions: a compatible dynamic pipeline is selected and values are valid.
+<* Replace complete blend and write-mask state for the bound graphics pipeline.
+   Preconditions: a compatible graphics pipeline is selected and values are valid.
    Always checked: token phase, host-safe input, and safe lowering.
    FULL diagnostics: pipeline, target-domain, enum, and blend misuse. *>
 fn void? cmd_set_color_state(

@@ -537,10 +537,10 @@
         "retired_graphics_pipeline_blend.c3"
       ]
     },
-    "retired_pipeline_color_formats": {
+    "retired_pipeline_colors": {
       "type": "object-files",
       "sources": [
-        "retired_pipeline_color_formats.c3"
+        "retired_pipeline_colors.c3"
       ]
     },
     "retired_compute_push_constant": {

@@ -19,7 +19,6 @@ struct VkDeviceDispatchPlan {
     bool presentation;
     bool descriptor_buffer;
     bool generated_work;
-    bool dynamic_color;
 }
 
 struct VkInstanceDebugDispatch {
@@ -237,22 +236,20 @@ fn VkDeviceDispatch load_vk_device_dispatch(
             ),
         };
     }
-    if (plan.dynamic_color) {
-        dispatch.dynamic_color = {
-            .set_blend_enable = (vk::PFN_vkCmdSetColorBlendEnableEXT)loader(
-                device,
-                "vkCmdSetColorBlendEnableEXT",
-            ),
-            .set_blend_equation = (vk::PFN_vkCmdSetColorBlendEquationEXT)loader(
-                device,
-                "vkCmdSetColorBlendEquationEXT",
-            ),
-            .set_write_mask = (vk::PFN_vkCmdSetColorWriteMaskEXT)loader(
-                device,
-                "vkCmdSetColorWriteMaskEXT",
-            ),
-        };
-    }
+    dispatch.dynamic_color = {
+        .set_blend_enable = (vk::PFN_vkCmdSetColorBlendEnableEXT)loader(
+            device,
+            "vkCmdSetColorBlendEnableEXT",
+        ),
+        .set_blend_equation = (vk::PFN_vkCmdSetColorBlendEquationEXT)loader(
+            device,
+            "vkCmdSetColorBlendEquationEXT",
+        ),
+        .set_write_mask = (vk::PFN_vkCmdSetColorWriteMaskEXT)loader(
+            device,
+            "vkCmdSetColorWriteMaskEXT",
+        ),
+    };
     return dispatch;
 }
 
