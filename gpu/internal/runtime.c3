@@ -11,16 +11,15 @@ const uint MAX_ADAPTERS_PER_RUNTIME @private = (uint)ushort::max + 1;
 const uint MAX_RUNTIME_GENERATION @private = 0x00FF_FFFF;
 
 struct RuntimeData @private {
-    uint                              generation;
+    uint                               generation;
     gpu::internal::vk::VkRuntimeState* state;
-    uint                              adapter_count;
-    uint                              live_surface_count;
-    Atomic{uint}                      live_device_count;
-    bool                              used;
+    uint                               adapter_count;
+    uint                               live_surface_count;
+    Atomic{uint}                       live_device_count;
+    bool                               used;
 }
 
 RuntimeData[MAX_RUNTIMES] runtime_slots @private;
-
 
 fn bool contract_validation_is_known(ContractValidation policy) @private {
     switch (policy) {

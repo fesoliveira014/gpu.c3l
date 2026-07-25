@@ -636,9 +636,11 @@ fn void command_reference_clear_releases_the_live_list() @test {
         && tracked[1].load(AtomicOrdering.RELAXED) == 0
         && scratch.reference_count == 0,
         "clear releases every live reference exactly once");
+    tracked[0].store(1, AtomicOrdering.RELAXED);
+    tracked[1].store(1, AtomicOrdering.RELAXED);
     vk::release_tracked_command_references({}, 0);
-    assert(tracked[0].load(AtomicOrdering.RELAXED) == 0
-        && tracked[1].load(AtomicOrdering.RELAXED) == 0,
+    assert(tracked[0].load(AtomicOrdering.RELAXED) == 1
+        && tracked[1].load(AtomicOrdering.RELAXED) == 1,
         "an empty release preserves every counter");
 }
 

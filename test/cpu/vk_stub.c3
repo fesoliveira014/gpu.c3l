@@ -839,6 +839,22 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
         adapter_count: state.adapter_count,
     )!;
     state.runtime = runtime;
+    if (desc.debug_callback != null) {
+        gpu::DebugMessage message = {
+            .severity     = gpu::DebugMessageSeverity.INFO,
+            .category     = {
+                .backend = true,
+                .general = true,
+            },
+            .operation    = "create_runtime",
+            .backend_text = "stub runtime initialized",
+        };
+        gpu::internal::dispatch_debug_message(
+            desc.debug_callback,
+            desc.debug_user_data,
+            &message,
+        );
+    }
     return runtime;
 }
 
