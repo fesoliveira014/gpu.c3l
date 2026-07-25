@@ -17,7 +17,6 @@ const uint BENCHMARK_EXPECTATION_VERSION = 3;
 
 struct CommandBenchPolicy {
     gpu::ContractValidation contract;
-    bool                    track_lifetimes;
     bool                    vulkan_layers;
     ZString                 contract_name;
 }
@@ -37,9 +36,6 @@ fn CommandBenchPolicy? command_bench_policy() {
     if (contract_value == "trusted") {
         contract = gpu::ContractValidation.TRUSTED;
         contract_name = "trusted";
-    } else if (contract_value == "object_boundaries") {
-        contract = gpu::ContractValidation.OBJECT_BOUNDARIES;
-        contract_name = "object_boundaries";
     } else if (contract_value == "full") {
         contract = gpu::ContractValidation.FULL;
         contract_name = "full";
@@ -47,10 +43,9 @@ fn CommandBenchPolicy? command_bench_policy() {
         return gpu::INVALID_ARGUMENT~;
     }
     return {
-        .contract        = contract,
-        .track_lifetimes = command_bench_flag("GPU_C3L_BENCH_TRACKING")!,
-        .vulkan_layers    = command_bench_flag("GPU_C3L_BENCH_LAYERS")!,
-        .contract_name    = contract_name,
+        .contract      = contract,
+        .vulkan_layers = command_bench_flag("GPU_C3L_BENCH_LAYERS")!,
+        .contract_name = contract_name,
     };
 }
 
@@ -85,7 +80,6 @@ fn void accumulate_resolution_stats(
     total.command_table_lookups += sample.command_table_lookups;
     total.pipeline_table_lookups += sample.pipeline_table_lookups;
     total.pipeline_cache_lookups += sample.pipeline_cache_lookups;
-    total.command_policy_selections += sample.command_policy_selections;
     total.encoder_cell_computations += sample.encoder_cell_computations;
     total.encoder_lease_comparisons += sample.encoder_lease_comparisons;
     total.recording_commands += sample.recording_commands;
@@ -241,7 +235,6 @@ fn int main() {
     CommandBenchPolicy policy = command_bench_policy()!!;
     gpu::RuntimeDesc desc = {
         .contract_validation      = policy.contract,
-        .track_resource_lifetimes = policy.track_lifetimes,
         .enable_vulkan_validation = policy.vulkan_layers,
         .application_name         = "gpu_command_record_bench",
     };
@@ -388,7 +381,6 @@ fn int main() {
     double[COMMAND_RECORD_REPETITIONS] indirect_results;
     double[COMMAND_RECORD_REPETITIONS] generated_results;
     gpu::CommandResolutionStats resolution;
-    vk::reset_command_policy_counters(state);
     for (uint i = 0; i < COMMAND_RECORD_REPETITIONS; i++) {
         barrier_results[i] = record_barriers(&allocator, &resolution);
         hazard_results[i] = record_hazard_barriers(&allocator, &resolution);
@@ -423,8 +415,6 @@ fn int main() {
         vk::command_recording_work_counters(state),
         warm_before,
     );
-    vk::CommandPolicyCounters policy_counters =
-        vk::command_policy_counters(state);
     ulong recording_allocations = recording_after.recording_allocations
         - recording_before.recording_allocations;
     ulong preprocess_allocations = recording_after.preprocess_allocations
@@ -470,8 +460,6 @@ fn int main() {
         && resolution.strict_heap_buffer_bind_commands == 0
         && resolution.strict_heap_offset_commands == 0,
         "post-bind recording emits no pipeline or descriptor heap binds");
-    assert(resolution.command_policy_selections == 0,
-        "warm recording does not select a validation policy");
     assert(resolution.encoder_cell_computations == 0,
         "warm recording performs no frontend encoder-cell computation");
     assert(resolution.encoder_lease_comparisons == 0,
@@ -480,27 +468,6 @@ fn int main() {
         "resolution evidence counts every measured recording call");
     assert(resolution.native_commands >= resolution.recording_commands,
         "measured recording calls emit native command work");
-    if (policy.contract == gpu::ContractValidation.FULL) {
-        assert(policy_counters.semantic_checks > 0,
-            "full validation performs semantic checks");
-    } else {
-        assert(policy_counters.semantic_checks == 0,
-            "trusted lowering performs no detailed semantic checks");
-    }
-    if (policy.track_lifetimes) {
-        assert(policy_counters.tracking_calls > 0
-            && policy_counters.reference_allocations == 0
-            && policy_counters.reference_increments > 0
-            && policy_counters.reference_releases
-                == policy_counters.reference_increments,
-            "tracking reuses storage and retains/releases references exactly");
-    } else {
-        assert(policy_counters.tracking_calls == 0
-            && policy_counters.reference_allocations == 0
-            && policy_counters.reference_increments == 0
-            && policy_counters.reference_releases == 0,
-            "tracking-off recording performs no reference work");
-    }
     if (caps.generated_work) {
         assert(preprocess_reuses
             >= GENERATED_RECORD_ITERATIONS * COMMAND_RECORD_REPETITIONS,
@@ -546,7 +513,7 @@ fn int main() {
         preprocess_allocations,
     );
     io::printfn(
-        "resolution: recording_commands=%d native_commands=%d pipeline_binds=%d descriptor_set_binds=%d descriptor_buffer_binds=%d descriptor_buffer_offsets=%d device_registry=%d retained_pins=%d command_table=%d pipeline_table=%d pipeline_cache=%d policy=%d encoder_cells=%d encoder_leases=%d",
+        "resolution: recording_commands=%d native_commands=%d pipeline_binds=%d descriptor_set_binds=%d descriptor_buffer_binds=%d descriptor_buffer_offsets=%d device_registry=%d retained_pins=%d command_table=%d pipeline_table=%d pipeline_cache=%d encoder_cells=%d encoder_leases=%d",
         resolution.recording_commands,
         resolution.native_commands,
         resolution.pipeline_bind_commands,
@@ -558,20 +525,13 @@ fn int main() {
         resolution.command_table_lookups,
         resolution.pipeline_table_lookups,
         resolution.pipeline_cache_lookups,
-        resolution.command_policy_selections,
         resolution.encoder_cell_computations,
         resolution.encoder_lease_comparisons,
     );
     io::printfn(
-        "validation policy=%s tracking=%s layers=%s semantic_checks=%d tracking_calls=%d reference_allocations=%d reference_increments=%d reference_releases=%d",
+        "validation policy=%s layers=%s",
         policy.contract_name,
-        policy.track_lifetimes ? "true" : "false",
         policy.vulkan_layers ? "true" : "false",
-        policy_counters.semantic_checks,
-        policy_counters.tracking_calls,
-        policy_counters.reference_allocations,
-        policy_counters.reference_increments,
-        policy_counters.reference_releases,
     );
     io::printfn(
         "cold work: host_allocations=%d command_pool_creations=%d command_buffer_allocations=%d command_buffer_frees=%d command_buffer_resets=%d image_view_creations=%d vma_allocations=%d generated_scratch_misses=%d",

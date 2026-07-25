@@ -274,7 +274,6 @@ fn void descriptor_buffer_capacity_is_checked_per_adapter() @test {
 fn gpu::Device make_queue_test_device() {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_queue_selection_test",
     };
@@ -335,7 +334,6 @@ fn void cross_queue_timeline_chain_validates() @test {
 fn void distinct_transfer_compute_graphics_completion_chain() @test {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_distinct_completion_chain_test",
     };

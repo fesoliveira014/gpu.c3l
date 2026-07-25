@@ -1099,7 +1099,6 @@ fn void allocation_table_teardown_destroys_each_live_pair_once() @test {
 fn gpu::Device create_allocation_test_device(ZString name) {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = name,
     };

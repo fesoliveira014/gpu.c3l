@@ -375,8 +375,6 @@ fn void assert_warm_command_resolution(
         "warm commands perform the expected pipeline table lookups");
     assert(stats.pipeline_cache_lookups == expected_pipeline_lookups,
         "warm commands perform the expected pipeline cache lookups");
-    assert(stats.command_policy_selections == 0,
-        "warm commands do not select a command policy");
     assert(stats.encoder_cell_computations == 0,
         "warm commands perform no frontend encoder-cell computation");
     assert(stats.encoder_lease_comparisons == 0,

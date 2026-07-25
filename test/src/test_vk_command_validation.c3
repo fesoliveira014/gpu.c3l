@@ -62,7 +62,6 @@ fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
 fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_sync_diagnostic_test",
         .debug_callback    = &capture_sync_diagnostic,
@@ -74,7 +73,6 @@ fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
 fn gpu::Device make_val_device() {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_command_validation_test",
     };
@@ -190,7 +188,6 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
-    vk::reset_command_policy_counters(state);
     gpu::reset_command_resolution_stats();
     gpu::BufferCopyDesc copy = {
         .src = source.span,
@@ -200,10 +197,7 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
     assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
         == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "two unique references fault before a one-reference scratch unit mutates");
-    vk::CommandPolicyCounters counters = vk::command_policy_counters(state);
-    assert(record.scratch.reference_count == 0
-        && counters.reference_increments == 0
-        && counters.reference_releases == 0,
+    assert(record.scratch.reference_count == 0,
         "capacity preflight retains and rolls back no partial reference");
     assert(gpu::command_resolution_stats().native_commands == 0,
         "capacity preflight rejects before the native copy command");
@@ -256,7 +250,6 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    vk::reset_command_policy_counters(state);
     vk::reset_command_reference_work_counters(state);
     vk::reset_dynamic_state_observation(state);
     gpu::reset_command_resolution_stats();
@@ -267,7 +260,6 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
         "the attachment view exceeds the occupied reference slot");
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
-    vk::CommandPolicyCounters policy = vk::command_policy_counters(state);
     vk::CommandReferenceWorkCounters work =
         vk::command_reference_work_counters(state);
     vk::DynamicStateObservation observation =
@@ -277,9 +269,6 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
     assert(record.scratch.reference_count == references_before
         && record.scratch.reference_index.epoch == reference_epoch_before,
         "tracking rejection preserves the published reference checkpoint");
-    assert(policy.reference_increments == 0
-        && policy.reference_releases == 0,
-        "tracking rejection retains and releases no provisional reference");
     assert(work.index_publications == 0
         && work.retains == 0
         && work.releases == 0

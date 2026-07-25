@@ -73,7 +73,6 @@ fn vk::Result distinct_upstream_counter_query(
 fn gpu::Device make_lifetime_test_device() {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_immediate_lifetime_test",
     };
@@ -556,8 +555,7 @@ fn void failed_command_validation_retains_no_resource_reference() @test {
 fn void incomplete_reference_drain_is_deterministic() @test {
     vk::VkDeviceState state = {
         .validation_policy = {
-            .contract        = gpu::ContractValidation.FULL,
-            .track_lifetimes = true,
+            .contract = gpu::ContractValidation.FULL,
         },
         .host_allocator = &allocators::LIBC_ALLOCATOR,
     };

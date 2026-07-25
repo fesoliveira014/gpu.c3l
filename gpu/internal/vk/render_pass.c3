@@ -347,7 +347,7 @@ fn void? validate_render_pass_desc_fields(
     }
 }
 
-fn PreparedRenderPass? checked_prepare_render_pass(
+fn PreparedRenderPass? full_prepare_render_pass(
     CommandRecord* commands,
     gpu::RenderPassDesc* desc,
     ZString operation,
@@ -358,7 +358,6 @@ fn PreparedRenderPass? checked_prepare_render_pass(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     validate_render_pass_desc_fields(state, desc)!;
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
 
@@ -578,39 +577,11 @@ fn void? trusted_begin_render_pass(
     record_render_pass(commands, &pass);
 }
 
-fn void? trusted_tracking_begin_render_pass(
+fn void? full_begin_render_pass(
     CommandRecord* commands,
     gpu::RenderPassDesc* desc,
 ) {
-    PreparedRenderPass pass = lower_render_pass(commands, desc)!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_render_pass(commands, &pass)!;
-    record_render_pass(commands, &pass);
-}
-
-fn void? checked_begin_render_pass(
-    CommandRecord* commands,
-    gpu::RenderPassDesc* desc,
-) {
-    PreparedRenderPass pass = checked_prepare_render_pass(
-        commands,
-        desc,
-        "cmd_begin_render_pass",
-    )!;
-    record_render_pass(commands, &pass);
-}
-
-fn void? checked_tracking_begin_render_pass(
-    CommandRecord* commands,
-    gpu::RenderPassDesc* desc,
-) {
-    PreparedRenderPass pass = checked_prepare_render_pass(
+    PreparedRenderPass pass = full_prepare_render_pass(
         commands,
         desc,
         "cmd_begin_render_pass",
@@ -636,54 +607,17 @@ fn void? trusted_begin_render_pass_with_state(
     record_render_pass_with_state(commands, &pass, &graphics);
 }
 
-fn void? trusted_tracking_begin_render_pass_with_state(
+fn void? full_begin_render_pass_with_state(
     CommandRecord* commands,
     gpu::RenderPassDesc* desc,
     gpu::GraphicsState* state,
 ) {
-    PreparedRenderPass pass = lower_render_pass(commands, desc)!;
-    LoweredGraphicsState graphics = lower_graphics_state(state)!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_render_pass(commands, &pass)!;
-    record_render_pass_with_state(commands, &pass, &graphics);
-}
-
-fn void? checked_begin_render_pass_with_state(
-    CommandRecord* commands,
-    gpu::RenderPassDesc* desc,
-    gpu::GraphicsState* state,
-) {
-    PreparedRenderPass pass = checked_prepare_render_pass(
+    PreparedRenderPass pass = full_prepare_render_pass(
         commands,
         desc,
         "cmd_begin_render_pass_with_state",
     )!;
-    LoweredGraphicsState graphics = checked_prepare_graphics_state(
-        device:    commands.device_state,
-        operation: "cmd_begin_render_pass_with_state",
-        state:     state,
-    )!;
-    record_render_pass_with_state(commands, &pass, &graphics);
-    commands.graphics_state_initialized = true;
-}
-
-fn void? checked_tracking_begin_render_pass_with_state(
-    CommandRecord* commands,
-    gpu::RenderPassDesc* desc,
-    gpu::GraphicsState* state,
-) {
-    PreparedRenderPass pass = checked_prepare_render_pass(
-        commands,
-        desc,
-        "cmd_begin_render_pass_with_state",
-    )!;
-    LoweredGraphicsState graphics = checked_prepare_graphics_state(
+    LoweredGraphicsState graphics = full_prepare_graphics_state(
         device:    commands.device_state,
         operation: "cmd_begin_render_pass_with_state",
         state:     state,
@@ -940,13 +874,12 @@ fn void? trusted_set_viewport(
     emit_viewport(commands, &native);
 }
 
-fn void? checked_set_viewport(
+fn void? full_set_viewport(
     CommandRecord* commands,
     gpu::Viewport* viewport,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     CommandRecord* record = commands;
     if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1109,7 +1042,7 @@ fn LoweredGraphicsState? lower_graphics_state(
     };
 }
 
-fn LoweredGraphicsState? checked_prepare_graphics_state(
+fn LoweredGraphicsState? full_prepare_graphics_state(
     VkDeviceState* device,
     ZString operation,
     gpu::GraphicsState* state,
@@ -1281,7 +1214,7 @@ fn bool dynamic_color_state_enabled(VkDeviceState* state) @private {
         && device_dispatch_supports_dynamic_color(&state.device_dispatch);
 }
 
-fn LoweredColorState? checked_prepare_color_state(
+fn LoweredColorState? full_prepare_color_state(
     VkDeviceState* state,
     CommandRecord* record,
     gpu::ColorState* color,
@@ -1366,7 +1299,7 @@ fn void? trusted_set_color_state(
     emit_color_state(commands, &color);
 }
 
-fn void? checked_set_color_state(
+fn void? full_set_color_state(
     CommandRecord* commands,
     gpu::ColorState* state,
 ) {
@@ -1375,14 +1308,13 @@ fn void? checked_set_color_state(
     if (!dynamic_color_state_enabled(device)) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    note_command_semantic_check(device);
     CommandRecord* record = commands;
     if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     validate_graphics_state_queue(record)!;
     LoweredColorState color =
-        checked_prepare_color_state(device, record, state)!;
+        full_prepare_color_state(device, record, state)!;
     emit_color_state(commands, &color);
     record.color_state =
         color_compatibility(&record.logical_pipeline.render);
@@ -1402,19 +1334,18 @@ fn void? trusted_set_graphics_state(
     emit_graphics_state(commands, &graphics);
 }
 
-fn void? checked_set_graphics_state(
+fn void? full_set_graphics_state(
     CommandRecord* commands,
     gpu::GraphicsState* state,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     VkDeviceState* device = commands.device_state;
-    note_command_semantic_check(device);
     CommandRecord* record = commands;
     if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     validate_graphics_state_queue(record)!;
-    LoweredGraphicsState graphics = checked_prepare_graphics_state(
+    LoweredGraphicsState graphics = full_prepare_graphics_state(
         device,
         "cmd_set_graphics_state",
         state,
@@ -1467,13 +1398,12 @@ fn void? trusted_set_scissor(
     emit_scissor(commands, &native);
 }
 
-fn void? checked_set_scissor(
+fn void? full_set_scissor(
     CommandRecord* commands,
     gpu::ScissorRect* scissor,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     CommandRecord* record = commands;
     if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1519,12 +1449,11 @@ fn void? trusted_set_depth_state(
     emit_depth_state(commands, depth);
 }
 
-fn void? checked_set_depth_state(
+fn void? full_set_depth_state(
     CommandRecord* commands,
     gpu::DepthState* depth,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
-    note_command_semantic_check(commands.device_state);
     CommandRecord* record = commands;
     if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1568,12 +1497,11 @@ fn void? trusted_set_raster_state(
     emit_raster_state(commands, raster);
 }
 
-fn void? checked_set_raster_state(
+fn void? full_set_raster_state(
     CommandRecord* commands,
     gpu::DynamicRasterState* raster,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
-    note_command_semantic_check(commands.device_state);
     CommandRecord* record = commands;
     if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1690,7 +1618,7 @@ fn void? trusted_draw(
     );
 }
 
-fn void? checked_draw(
+fn void? full_draw(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1703,7 +1631,6 @@ fn void? checked_draw(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     BoundPipeline pipeline = *validate_graphics_execution_state(
         state:         state,
         record:        record,
@@ -1757,7 +1684,7 @@ fn PreparedIndexedDraw? lower_indexed_draw(
     };
 }
 
-fn PreparedIndexedDraw? checked_prepare_indexed_draw(
+fn PreparedIndexedDraw? full_prepare_indexed_draw(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1772,7 +1699,6 @@ fn PreparedIndexedDraw? checked_prepare_indexed_draw(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     usz index_size = index_element_size(index_type)!;
     return {
         .pipeline = *validate_graphics_execution_state(
@@ -1858,7 +1784,7 @@ fn void? trusted_draw_indexed(
     record_indexed_draw(commands, &draw);
 }
 
-fn void? trusted_tracking_draw_indexed(
+fn void? full_draw_indexed(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1867,50 +1793,7 @@ fn void? trusted_tracking_draw_indexed(
     uint instance_count,
     gpu::IndexType index_type,
 ) {
-    PreparedIndexedDraw draw = lower_indexed_draw(
-        commands:       commands,
-        vertex_root:    vertex_root,
-        fragment_root:  fragment_root,
-        index_span:     index_span,
-        index_count:    index_count,
-        instance_count: instance_count,
-        index_type:     index_type,
-    )!;
-    track_indexed_draw(commands, &draw)!;
-    record_indexed_draw(commands, &draw);
-}
-
-fn void? checked_draw_indexed(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan index_span,
-    uint index_count,
-    uint instance_count,
-    gpu::IndexType index_type,
-) {
-    PreparedIndexedDraw draw = checked_prepare_indexed_draw(
-        commands:       commands,
-        vertex_root:    vertex_root,
-        fragment_root:  fragment_root,
-        index_span:     index_span,
-        index_count:    index_count,
-        instance_count: instance_count,
-        index_type:     index_type,
-    )!;
-    record_indexed_draw(commands, &draw);
-}
-
-fn void? checked_tracking_draw_indexed(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan index_span,
-    uint index_count,
-    uint instance_count,
-    gpu::IndexType index_type,
-) {
-    PreparedIndexedDraw draw = checked_prepare_indexed_draw(
+    PreparedIndexedDraw draw = full_prepare_indexed_draw(
         commands:       commands,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
@@ -1950,7 +1833,7 @@ fn PreparedIndirectDraw? lower_indirect_draw(
     };
 }
 
-fn PreparedIndirectDraw? checked_prepare_indirect_draw(
+fn PreparedIndirectDraw? full_prepare_indirect_draw(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1963,7 +1846,6 @@ fn PreparedIndirectDraw? checked_prepare_indirect_draw(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     return {
         .pipeline = *validate_graphics_execution_state(
             state:         state,
@@ -2038,49 +1920,14 @@ fn void? trusted_draw_indirect(
     record_indirect_draw(commands, &draw);
 }
 
-fn void? trusted_tracking_draw_indirect(
+fn void? full_draw_indirect(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
     gpu::GpuSpan args,
     uint draw_count,
 ) {
-    PreparedIndirectDraw draw = lower_indirect_draw(
-        commands:       commands,
-        vertex_root:    vertex_root,
-        fragment_root:  fragment_root,
-        args:           args,
-        draw_count:     draw_count,
-    )!;
-    track_indirect_draw(commands, &draw)!;
-    record_indirect_draw(commands, &draw);
-}
-
-fn void? checked_draw_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-) {
-    PreparedIndirectDraw draw = checked_prepare_indirect_draw(
-        commands:       commands,
-        vertex_root:    vertex_root,
-        fragment_root:  fragment_root,
-        args:           args,
-        draw_count:     draw_count,
-    )!;
-    record_indirect_draw(commands, &draw);
-}
-
-fn void? checked_tracking_draw_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-) {
-    PreparedIndirectDraw draw = checked_prepare_indirect_draw(
+    PreparedIndirectDraw draw = full_prepare_indirect_draw(
         commands:       commands,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
@@ -2144,7 +1991,7 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
     };
 }
 
-fn PreparedIndexedIndirectDraw? checked_prepare_indexed_indirect_draw(
+fn PreparedIndexedIndirectDraw? full_prepare_indexed_indirect_draw(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -2159,7 +2006,6 @@ fn PreparedIndexedIndirectDraw? checked_prepare_indexed_indirect_draw(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     return {
         .pipeline = *validate_graphics_execution_state(
             state:         state,
@@ -2265,36 +2111,7 @@ fn void? trusted_draw_indexed_indirect(
     record_indexed_indirect_draw(commands, &draw);
 }
 
-fn void? trusted_tracking_draw_indexed_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    PreparedIndexedIndirectDraw draw = lower_indexed_indirect_draw(
-        commands:       commands,
-        vertex_root:    vertex_root,
-        fragment_root:  fragment_root,
-        args:           args,
-        draw_count:     draw_count,
-        index_span:     index_span,
-        index_type:     index_type,
-    )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_indexed_indirect_draw(commands, &draw)!;
-    record_indexed_indirect_draw(commands, &draw);
-}
-
-fn void? checked_draw_indexed_indirect(
+fn void? full_draw_indexed_indirect(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -2304,29 +2121,7 @@ fn void? checked_draw_indexed_indirect(
     gpu::IndexType index_type,
 ) {
     PreparedIndexedIndirectDraw draw =
-        checked_prepare_indexed_indirect_draw(
-            commands:       commands,
-            vertex_root:    vertex_root,
-            fragment_root:  fragment_root,
-            args:           args,
-            draw_count:     draw_count,
-            index_span:     index_span,
-            index_type:     index_type,
-        )!;
-    record_indexed_indirect_draw(commands, &draw);
-}
-
-fn void? checked_tracking_draw_indexed_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    PreparedIndexedIndirectDraw draw =
-        checked_prepare_indexed_indirect_draw(
+        full_prepare_indexed_indirect_draw(
             commands:       commands,
             vertex_root:    vertex_root,
             fragment_root:  fragment_root,
@@ -2394,7 +2189,7 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
     };
 }
 
-fn PreparedIndexedIndirectCountDraw? checked_prepare_indexed_indirect_count_draw(
+fn PreparedIndexedIndirectCountDraw? full_prepare_indexed_indirect_count_draw(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -2410,7 +2205,6 @@ fn PreparedIndexedIndirectCountDraw? checked_prepare_indexed_indirect_count_draw
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     return {
         .pipeline = *validate_graphics_execution_state(
@@ -2537,7 +2331,7 @@ fn void? trusted_draw_indexed_indirect_count(
     record_indexed_indirect_count_draw(commands, &draw);
 }
 
-fn void? trusted_tracking_draw_indexed_indirect_count(
+fn void? full_draw_indexed_indirect_count(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -2548,63 +2342,7 @@ fn void? trusted_tracking_draw_indexed_indirect_count(
     gpu::IndexType index_type,
 ) {
     PreparedIndexedIndirectCountDraw draw =
-        lower_indexed_indirect_count_draw(
-            commands:       commands,
-            vertex_root:    vertex_root,
-            fragment_root:  fragment_root,
-            args:           args,
-            count_span:     count_span,
-            max_draw_count: max_draw_count,
-            index_span:     index_span,
-            index_type:     index_type,
-        )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_indexed_indirect_count_draw(commands, &draw)!;
-    record_indexed_indirect_count_draw(commands, &draw);
-}
-
-fn void? checked_draw_indexed_indirect_count(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    PreparedIndexedIndirectCountDraw draw =
-        checked_prepare_indexed_indirect_count_draw(
-            commands:       commands,
-            vertex_root:    vertex_root,
-            fragment_root:  fragment_root,
-            args:           args,
-            count_span:     count_span,
-            max_draw_count: max_draw_count,
-            index_span:     index_span,
-            index_type:     index_type,
-        )!;
-    record_indexed_indirect_count_draw(commands, &draw);
-}
-
-fn void? checked_tracking_draw_indexed_indirect_count(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    PreparedIndexedIndirectCountDraw draw =
-        checked_prepare_indexed_indirect_count_draw(
+        full_prepare_indexed_indirect_count_draw(
             commands:       commands,
             vertex_root:    vertex_root,
             fragment_root:  fragment_root,
@@ -2705,7 +2443,7 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     return draw;
 }
 
-fn PreparedGeneratedDraw? checked_prepare_generated_draw(
+fn PreparedGeneratedDraw? full_prepare_generated_draw(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2717,7 +2455,6 @@ fn PreparedGeneratedDraw? checked_prepare_generated_draw(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     PreparedGeneratedDraw draw = {
         .pipeline = *validate_generated_graphics_execution_state(
             state,
@@ -2808,52 +2545,13 @@ fn void? trusted_draw_generated(
     record_generated_draw(commands, &draw)!;
 }
 
-fn void? trusted_tracking_draw_generated(
+fn void? full_draw_generated(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_draw_count,
 ) {
-    PreparedGeneratedDraw draw = lower_generated_draw(
-        commands:       commands,
-        records:        records,
-        count_span:     count_span,
-        max_draw_count: max_draw_count,
-    )!;
-    if (draw.max_count == 0) return;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_generated_draw(commands, &draw)!;
-    record_generated_draw(commands, &draw)!;
-}
-
-fn void? checked_draw_generated(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-) {
-    PreparedGeneratedDraw draw = checked_prepare_generated_draw(
-        commands:       commands,
-        records:        records,
-        count_span:     count_span,
-        max_draw_count: max_draw_count,
-    )!;
-    record_generated_draw(commands, &draw)!;
-}
-
-fn void? checked_tracking_draw_generated(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-) {
-    PreparedGeneratedDraw draw = checked_prepare_generated_draw(
+    PreparedGeneratedDraw draw = full_prepare_generated_draw(
         commands:       commands,
         records:        records,
         count_span:     count_span,
@@ -2917,7 +2615,7 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     return draw;
 }
 
-fn PreparedGeneratedIndexedDraw? checked_prepare_generated_indexed_draw(
+fn PreparedGeneratedIndexedDraw? full_prepare_generated_indexed_draw(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2931,7 +2629,6 @@ fn PreparedGeneratedIndexedDraw? checked_prepare_generated_indexed_draw(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     (void)index_element_size(index_type)!;
     PreparedGeneratedIndexedDraw draw = {
         .pipeline = *validate_generated_graphics_execution_state(
@@ -3046,35 +2743,7 @@ fn void? trusted_draw_indexed_generated(
     record_generated_indexed_draw(commands, &draw)!;
 }
 
-fn void? trusted_tracking_draw_indexed_generated(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    PreparedGeneratedIndexedDraw draw = lower_generated_indexed_draw(
-        commands:       commands,
-        records:        records,
-        count_span:     count_span,
-        max_draw_count: max_draw_count,
-        index_span:     index_span,
-        index_type:     index_type,
-    )!;
-    if (draw.max_count == 0) return;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_generated_indexed_draw(commands, &draw)!;
-    record_generated_indexed_draw(commands, &draw)!;
-}
-
-fn void? checked_draw_indexed_generated(
+fn void? full_draw_indexed_generated(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -3083,27 +2752,7 @@ fn void? checked_draw_indexed_generated(
     gpu::IndexType index_type,
 ) {
     PreparedGeneratedIndexedDraw draw =
-        checked_prepare_generated_indexed_draw(
-            commands:       commands,
-            records:        records,
-            count_span:     count_span,
-            max_draw_count: max_draw_count,
-            index_span:     index_span,
-            index_type:     index_type,
-        )!;
-    record_generated_indexed_draw(commands, &draw)!;
-}
-
-fn void? checked_tracking_draw_indexed_generated(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    PreparedGeneratedIndexedDraw draw =
-        checked_prepare_generated_indexed_draw(
+        full_prepare_generated_indexed_draw(
             commands:       commands,
             records:        records,
             count_span:     count_span,

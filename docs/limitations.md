@@ -16,13 +16,11 @@ page doesn't explain it, that's a bug in this page — file an issue.
   only during the callback. The callback must be nonblocking, synchronize its
   own userdata, and must not call gpu.c3l because internal locks may be held.
   Userdata lives through `destroy_device`; no callback occurs after it returns.
-  A configured callback also enables structured teardown diagnostics when
-  trusted policy is selected. Normal live children are rejected before
-  teardown; diagnostics cover internal, partial-initialization, and device-loss
-  state.
+  Normal live children are rejected before teardown; FULL diagnostics cover
+  internal, partial-initialization, and device-loss state.
   A null callback disables structured delivery without changing returned
-  faults; `OBJECT_BOUNDARIES`/`FULL` teardown retains stderr output. Callback
-  presence enables no checks, tracking, Vulkan layers, or names.
+  faults; `FULL` teardown retains stderr output. Callback presence enables no
+  checks, tracking, leak scans, Vulkan layers, or names.
   Descriptor/cache diagnostics are emitted by device-owned operation
   boundaries; pure lookup, range, and context-free result helpers remain
   fault-only to prevent duplicate or context-free messages.
@@ -135,7 +133,7 @@ exists (else the limit is compile-time).
 | Live command records | 4096 (`MAX_DEVICE_COMMANDS` in `gpu/internal/device.c3`) | — | `SLOT_TABLE_FULL` |
 | Live command allocators per device | 256 (`MAX_COMMAND_ALLOCATORS` in `gpu/internal/vk/command.c3`) | destroy quiescent allocators to recycle generational slots | `SLOT_TABLE_FULL` |
 | Command buffers per allocator | 8 default, 4096 max (`DEFAULT_COMMAND_ALLOCATOR_CAPACITY`, `MAX_COMMAND_ALLOCATOR_CAPACITY` in `gpu/gpu.c3i`) | `CommandAllocatorDesc.command_buffer_capacity` | `INVALID_ARGUMENT` above the maximum; `DEVICE_BUSY` while all configured units are live |
-| Tracked resource references per command list | 64 default, 4096 max (`DEFAULT_COMMAND_REFERENCES_PER_LIST`, `MAX_COMMAND_REFERENCES_PER_LIST` in `gpu/gpu.c3i`); tracking-on scratch also owns a `next_pow2(2 * capacity)` exact-identity index | `CommandAllocatorDesc.max_resource_references_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
+| Tracked resource references per command list | 64 default, 4096 max (`DEFAULT_COMMAND_REFERENCES_PER_LIST`, `MAX_COMMAND_REFERENCES_PER_LIST` in `gpu/gpu.c3i`); FULL scratch also owns a `next_pow2(2 * capacity)` exact-identity index | `CommandAllocatorDesc.max_resource_references_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
 | Generated preprocess reservations retained by one list | 4 default, 64 max (`DEFAULT_COMMAND_PREPROCESS_PER_LIST`, `MAX_COMMAND_PREPROCESS_PER_LIST` in `gpu/gpu.c3i`) | `CommandAllocatorDesc.max_generated_preprocess_buffers_per_list` | `INVALID_ARGUMENT` above the maximum; `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` while recording |
 | Generated preprocess reservation bytes per allocator | zero by default (disabled) | `CommandAllocatorDesc.generated_preprocess_bytes` | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` during reservation |
 | Swapchains | 8 (`MAX_SWAPCHAINS` in `gpu/gpu.c3i`) | — | `SLOT_TABLE_FULL` |
@@ -152,14 +150,14 @@ Two sizing rules that bite:
   `TextureView` recycles its raw index immediately. Wait or discard every use
   before releasing the view, and do not leave stale indices in GPU-visible
   data. Sampler indices remain stable until device destruction.
-- **Tracking-off resource lifetime is caller-owned.** With
-  `track_resource_lifetimes = true`, command records retain explicitly named
+- **TRUSTED resource lifetime is caller-owned.** Under `FULL`, command records
+  retain explicitly named
   allocations, spans, textures, attachment views, and pipelines; early
-  destruction returns `RESOURCE_IN_USE`. With tracking off, recording allocates
+  destruction returns `RESOURCE_IN_USE`. Under `TRUSTED`, recording allocates
   no reference storage and teardown adds no wait or deferred destruction. Keep
   every referenced owner live until commands are discarded or covering
   completion points are observed. GPU addresses and shader-visible indices
-  remain caller-owned even when tracking is on.
+  remain caller-owned even under FULL.
 - **Submission retains command allocator and device lifetime.** Successful
   submit consumes the public executable value, but its stable record, native
   buffer, fixed scratch, allocator unit, and retained device ownership
@@ -168,14 +166,14 @@ Two sizing rules that bite:
 - **Transient data is caller-owned.** Applications choose allocation reuse and
   concurrency policy. Flush CPU writes before submission, retain the covering
   completion point, and wait or poll before rewriting or freeing storage.
-- **Tracked references are fixed at allocator creation.** When lifetime
-  tracking is enabled, every command buffer receives exactly
+- **Tracked references are fixed at allocator creation.** Under `FULL`, every
+  command buffer receives exactly
   `max_resource_references_per_list` stable sequential entries plus a fixed
   open-addressed index at no more than 0.5 target load. Exact-key duplicate
   lookup is expected constant-time; forced collisions remain bounded by index
   capacity. Exceeding the unique-resource ceiling returns
   `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` without a partial retain or native
-  command. Tracking-off allocators ignore that storage setting and keep both
+  command. TRUSTED allocators ignore that storage setting and keep both
   reference structures empty.
 - **Generated reservation capacity has two bounds.** The reservation table has
   `command_buffer_capacity * max_generated_preprocess_buffers_per_list` entries,

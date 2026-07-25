@@ -709,8 +709,6 @@ fn void warm_command_dispatch_skips_resolution_paths() @test {
     assert(stats.pipeline_table_lookups == 0
         && stats.pipeline_cache_lookups == 0,
         "a warm barrier performs no pipeline resolution");
-    assert(stats.command_policy_selections == 0,
-        "warm recording does not reselect command policy");
     assert(stats.encoder_cell_computations == 0,
         "removed encoder-cell proof remains zero");
     assert(stats.encoder_lease_comparisons == 0,

@@ -100,7 +100,6 @@ fn void release_tracked_command_reference(
 ) {
     if (reference.tracked_command_references != null) {
         reference.tracked_command_references.sub(1, AtomicOrdering.RELAXED);
-        note_command_reference_release(state);
         note_command_reference_work_release(state);
         return;
     }
@@ -113,7 +112,6 @@ fn void release_tracked_command_reference(
             1,
             AtomicOrdering.RELAXED,
         );
-        note_command_reference_release(state);
         note_command_reference_work_release(state);
     } else if (reference.owner == state.allocations.owner) {
         gpu::GpuAllocation allocation = {
@@ -124,7 +122,6 @@ fn void release_tracked_command_reference(
             1,
             AtomicOrdering.RELAXED,
         );
-        note_command_reference_release(state);
         note_command_reference_work_release(state);
     } else if (reference.owner == state.textures.owner) {
         gpu::TextureHandle texture = {
@@ -135,7 +132,6 @@ fn void release_tracked_command_reference(
             1,
             AtomicOrdering.RELAXED,
         );
-        note_command_reference_release(state);
         note_command_reference_work_release(state);
     } else if (reference.owner == state.attachment_views.owner) {
         gpu::AttachmentViewHandle view = {
@@ -146,7 +142,6 @@ fn void release_tracked_command_reference(
             1,
             AtomicOrdering.RELAXED,
         );
-        note_command_reference_release(state);
         note_command_reference_work_release(state);
     } else if (reference.owner == state.pipelines.owner) {
         gpu::PipelineHandle pipeline = {
@@ -157,7 +152,6 @@ fn void release_tracked_command_reference(
             1,
             AtomicOrdering.RELAXED,
         );
-        note_command_reference_release(state);
         note_command_reference_work_release(state);
     }
 }

@@ -92,7 +92,6 @@ fn gpu::Device make_review_validation_device(
 ) {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_pipeline_binding_review_test",
         .debug_callback           = &capture_review_validation_error,
@@ -157,7 +156,6 @@ fn DynamicStateFixture make_dynamic_state_fixture_before_pass(
 ) {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation      = contract,
-        .track_resource_lifetimes = true,
         .application_name         = "gpu_dynamic_state_contract_test",
         .debug_callback           = callback,
         .debug_user_data          = user_data,
@@ -1766,35 +1764,25 @@ fn void dynamic_state_diagnostics_name_exact_rejected_fields() @test {
     );
 }
 
-fn void all_policies_lower_dynamic_state_identically() @test {
+fn void both_modes_lower_dynamic_state_identically() @test {
     DynamicStateFixture trusted = make_dynamic_state_fixture_before_pass(
         gpu::ContractValidation.TRUSTED,
     );
     defer destroy_dynamic_state_fixture(&trusted);
-    DynamicStateFixture boundaries = make_dynamic_state_fixture_before_pass(
-        gpu::ContractValidation.OBJECT_BOUNDARIES,
-    );
-    defer destroy_dynamic_state_fixture(&boundaries);
-    DynamicStateFixture checked = make_dynamic_state_fixture_before_pass(
+    DynamicStateFixture full = make_dynamic_state_fixture_before_pass(
         gpu::ContractValidation.FULL,
     );
-    defer destroy_dynamic_state_fixture(&checked);
+    defer destroy_dynamic_state_fixture(&full);
 
     gpu::ColorTargetDesc[1] trusted_colors = {{ .view = trusted.view }};
-    gpu::ColorTargetDesc[1] boundary_colors = {{ .view = boundaries.view }};
-    gpu::ColorTargetDesc[1] checked_colors = {{ .view = checked.view }};
+    gpu::ColorTargetDesc[1] full_colors = {{ .view = full.view }};
     gpu::RenderPassDesc trusted_pass = {
         .colors = trusted_colors[..],
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    gpu::RenderPassDesc boundary_pass = {
-        .colors = boundary_colors[..],
-        .width  = VAL_RT,
-        .height = VAL_RT,
-    };
-    gpu::RenderPassDesc checked_pass = {
-        .colors = checked_colors[..],
+    gpu::RenderPassDesc full_pass = {
+        .colors = full_colors[..],
         .width  = VAL_RT,
         .height = VAL_RT,
     };
@@ -1828,61 +1816,46 @@ fn void all_policies_lower_dynamic_state_identically() @test {
         &graphics,
     )!!;
     gpu::cmd_begin_render_pass_with_state(
-        &boundaries.commands,
-        &boundary_pass,
-        &graphics,
-    )!!;
-    gpu::cmd_begin_render_pass_with_state(
-        &checked.commands,
-        &checked_pass,
+        &full.commands,
+        &full_pass,
         &graphics,
     )!!;
 
     vk::DynamicStateObservation trusted_observation =
         vk::dynamic_state_observation(trusted.state);
-    vk::DynamicStateObservation boundaries_observation =
-        vk::dynamic_state_observation(boundaries.state);
-    vk::DynamicStateObservation checked_observation =
-        vk::dynamic_state_observation(checked.state);
+    vk::DynamicStateObservation full_observation =
+        vk::dynamic_state_observation(full.state);
     assert(trusted_observation.begin_rendering_emissions == 1
-        && boundaries_observation.begin_rendering_emissions == 1
-        && checked_observation.begin_rendering_emissions == 1,
-        "each policy begins rendering exactly once");
+        && full_observation.begin_rendering_emissions == 1,
+        "each mode begins rendering exactly once");
     assert(trusted_observation.viewport_emissions == 1
         && trusted_observation.scissor_emissions == 1
         && trusted_observation.raster_state_emissions == 1
         && trusted_observation.depth_state_emissions == 1
-        && boundaries_observation.viewport_emissions == 1
-        && boundaries_observation.scissor_emissions == 1
-        && boundaries_observation.raster_state_emissions == 1
-        && boundaries_observation.depth_state_emissions == 1
-        && checked_observation.viewport_emissions == 1
-        && checked_observation.scissor_emissions == 1
-        && checked_observation.raster_state_emissions == 1
-        && checked_observation.depth_state_emissions == 1,
-        "each policy emits one complete packet");
+        && full_observation.viewport_emissions == 1
+        && full_observation.scissor_emissions == 1
+        && full_observation.raster_state_emissions == 1
+        && full_observation.depth_state_emissions == 1,
+        "each mode emits one complete packet");
     assert(observation_matches_graphics_state(
         &trusted_observation,
         &graphics,
     ) && observation_matches_graphics_state(
-        &boundaries_observation,
+        &full_observation,
         &graphics,
-    ) && observation_matches_graphics_state(
-        &checked_observation,
-        &graphics,
-    ), "trusted, boundary, and checked packet lowering is identical");
+    ), "trusted and full packet lowering is identical");
 }
 
-fn void trusted_dynamic_state_bypasses_checked_device_bounds() @test {
+fn void trusted_dynamic_state_bypasses_full_device_bounds() @test {
     DynamicStateFixture trusted = make_dynamic_state_fixture(
         gpu::ContractValidation.TRUSTED,
     );
     defer destroy_dynamic_state_fixture(&trusted);
-    DynamicStateFixture checked = make_dynamic_state_fixture(
+    DynamicStateFixture full = make_dynamic_state_fixture(
         gpu::ContractValidation.FULL,
     );
-    defer destroy_dynamic_state_fixture(&checked);
-    checked.state.viewport_limits = {
+    defer destroy_dynamic_state_fixture(&full);
+    full.state.viewport_limits = {
         .max_width  = 1,
         .max_height = 1,
         .min_bound  = 0.0f,
@@ -1896,17 +1869,17 @@ fn void trusted_dynamic_state_bypasses_checked_device_bounds() @test {
     };
     gpu::cmd_set_viewport(&trusted.commands, &over_limit)!!;
     assert(@catch(gpu::cmd_set_viewport(
-        &checked.commands,
+        &full.commands,
         &over_limit,
     )) == gpu::INVALID_ARGUMENT,
         "FULL rejects a device-over-limit viewport");
 
     vk::DynamicStateObservation trusted_observation =
         vk::dynamic_state_observation(trusted.state);
-    vk::DynamicStateObservation checked_observation =
-        vk::dynamic_state_observation(checked.state);
+    vk::DynamicStateObservation full_observation =
+        vk::dynamic_state_observation(full.state);
     assert(trusted_observation.viewport_emissions == 1
-        && checked_observation.viewport_emissions == 0,
+        && full_observation.viewport_emissions == 0,
         "TRUSTED forwards while FULL rejects before emission");
     assert(native_viewport_matches(
         &trusted_observation.viewport,
@@ -1914,12 +1887,9 @@ fn void trusted_dynamic_state_bypasses_checked_device_bounds() @test {
     ), "TRUSTED preserves the over-limit native viewport");
 }
 
-fn void unrequested_color_state_rejects_under_every_policy() @test {
+fn void unrequested_color_state_rejects_under_both_modes() @test {
     assert_unrequested_color_state_rejected(
         gpu::ContractValidation.TRUSTED,
-    );
-    assert_unrequested_color_state_rejected(
-        gpu::ContractValidation.OBJECT_BOUNDARIES,
     );
     assert_unrequested_color_state_rejected(
         gpu::ContractValidation.FULL,
@@ -2006,10 +1976,10 @@ fn void trusted_and_full_color_packets_lower_identically() @test {
         gpu::ContractValidation.TRUSTED,
     );
     defer destroy_dynamic_state_fixture(&trusted);
-    DynamicStateFixture checked = make_dynamic_state_fixture_before_pass(
+    DynamicStateFixture full = make_dynamic_state_fixture_before_pass(
         gpu::ContractValidation.FULL,
     );
-    defer destroy_dynamic_state_fixture(&checked);
+    defer destroy_dynamic_state_fixture(&full);
     gpu::Format[2] formats = {
         gpu::Format.RGBA8_UNORM,
         gpu::Format.RGBA16_FLOAT,
@@ -2019,7 +1989,7 @@ fn void trusted_and_full_color_packets_lower_identically() @test {
         formats[..],
     );
     select_dynamic_color_pipeline(
-        vk::resolve_command(&checked.commands)!!,
+        vk::resolve_command(&full.commands)!!,
         formats[..],
     );
     gpu::ColorTargetBlendState[2] targets = {
@@ -2036,21 +2006,21 @@ fn void trusted_and_full_color_packets_lower_identically() @test {
     gpu::cmd_set_color_state(&trusted.commands, &color)!!;
     trusted.state.device_dispatch.dynamic_color = trusted_original;
 
-    DynamicColorCapture checked_capture;
-    vk::VkDynamicColorDispatch checked_original =
+    DynamicColorCapture full_capture;
+    vk::VkDynamicColorDispatch full_original =
         install_dynamic_color_capture(
-            checked.state,
-            &checked_capture,
+            full.state,
+            &full_capture,
         );
     defer {
-        checked.state.device_dispatch.dynamic_color = checked_original;
+        full.state.device_dispatch.dynamic_color = full_original;
         dynamic_color_capture = null;
     }
-    gpu::cmd_set_color_state(&checked.commands, &color)!!;
+    gpu::cmd_set_color_state(&full.commands, &color)!!;
 
     assert(dynamic_color_captures_match(
         &trusted_capture,
-        &checked_capture,
+        &full_capture,
     ), "TRUSTED and FULL emit identical native color arrays");
 }
 
@@ -2188,7 +2158,7 @@ fn void dynamic_color_domain_persists_until_incompatible_bind() @test {
 
     vk::BoundPipeline compatible_alias = record.logical_pipeline;
     compatible_alias.handle.index++;
-    vk::update_checked_color_state_for_bind(
+    vk::update_full_color_state_for_bind(
         record,
         &compatible_alias,
     );
@@ -2198,10 +2168,10 @@ fn void dynamic_color_domain_persists_until_incompatible_bind() @test {
     vk::BoundPipeline immutable = compatible_alias;
     immutable.color_profile = vk::GraphicsColorProfile.IMMUTABLE;
     immutable.render.color_formats[0] = gpu::Format.RGBA16_FLOAT;
-    vk::update_checked_color_state_for_bind(record, &immutable);
+    vk::update_full_color_state_for_bind(record, &immutable);
     assert(record.color_state_initialized,
         "an immutable bind does not consume reusable dynamic color state");
-    vk::update_checked_color_state_for_bind(
+    vk::update_full_color_state_for_bind(
         record,
         &compatible_alias,
     );
@@ -2210,7 +2180,7 @@ fn void dynamic_color_domain_persists_until_incompatible_bind() @test {
 
     vk::BoundPipeline incompatible = compatible_alias;
     incompatible.render.color_formats[0] = gpu::Format.R8_UNORM;
-    vk::update_checked_color_state_for_bind(record, &incompatible);
+    vk::update_full_color_state_for_bind(record, &incompatible);
     assert(!record.color_state_initialized
         && record.color_state.count == 0,
         "an incompatible dynamic domain clears initialization precisely");

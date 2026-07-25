@@ -58,8 +58,8 @@ output[i] = transform(input[i])
 ```
 
 Direct, indirect, and generated compute and graphics commands push every root
-value unchanged. Zero is a valid root under `ContractValidation.TRUSTED`,
-`OBJECT_BOUNDARIES`, and `FULL`; validation policy does not reinterpret it.
+value unchanged. Zero is a valid root under `ContractValidation.TRUSTED` and
+`FULL`; validation policy does not reinterpret it.
 Shaders must branch before dereferencing zero unless the application
 deliberately relies on defined device robustness behavior. The library does
 not define what a zero-address dereference returns.

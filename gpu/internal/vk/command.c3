@@ -595,7 +595,8 @@ fn void? initialize_command_allocator_slot_with_ops(
     if (catch available) return gpu::OUT_OF_HOST_MEMORY~;
     slot.available = available;
 
-    uint reference_capacity = state.validation_policy.track_lifetimes
+    uint reference_capacity =
+        state.validation_policy.contract == gpu::ContractValidation.FULL
         ? desc.max_resource_references_per_list
         : 0;
     uint reference_index_capacity =
@@ -1248,7 +1249,6 @@ fn void? vk_begin_commands_with_ops(
         &begin,
     ))!;
 
-    gpu::internal::note_command_policy_selection();
     record.state = gpu::internal::CommandState.RECORDING;
     gpu::internal::publish_command_list(record, out_commands);
     record_claimed = false;
@@ -1427,21 +1427,21 @@ fn PreparedBufferCopy? validate_and_lower_buffer_copy(
     CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
-    CommandRecord* checked_record = commands;
-    if (checked_record.state != gpu::internal::CommandState.RECORDING) {
-        VkDeviceState* checked_state = commands.device_state;
+    CommandRecord* full_record = commands;
+    if (full_record.state != gpu::internal::CommandState.RECORDING) {
+        VkDeviceState* full_state = commands.device_state;
         uint command_index = 0;
         uint command_generation = 0;
         bool has_public_identity = false;
-        foreach (i, &cell : checked_state.commands.slots) {
-            if (&cell.record != checked_record) continue;
+        foreach (i, &cell : full_state.commands.slots) {
+            if (&cell.record != full_record) continue;
             command_index = (uint)i;
             command_generation = cell.generation;
             has_public_identity = cell.used;
             break;
         }
         return report_contract_failure(
-            state:               checked_state,
+            state:               full_state,
             operation:           "cmd_copy_buffer",
             public_fault:        gpu::COMMAND_RECORDING_ERROR,
             resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
@@ -1457,7 +1457,6 @@ fn PreparedBufferCopy? validate_and_lower_buffer_copy(
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
-    note_command_semantic_check(state);
     validate_span_transfer_usage(
         state:     state,
         resolved:  &copy.src,
@@ -1571,32 +1570,7 @@ fn void? trusted_copy_buffer(
     record_buffer_copy(commands, &copy);
 }
 
-fn void? trusted_tracking_copy_buffer(
-    CommandRecord* commands,
-    gpu::BufferCopyDesc* desc,
-) {
-    PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
-    if (!buffer_copy_is_safe(&copy)) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_buffer_copy_references(commands, &copy)!;
-    record_buffer_copy(commands, &copy);
-}
-
-fn void? checked_copy_buffer(
-    CommandRecord* commands,
-    gpu::BufferCopyDesc* desc,
-) {
-    PreparedBufferCopy copy = validate_and_lower_buffer_copy(commands, desc)!;
-    record_buffer_copy(commands, &copy);
-}
-
-fn void? checked_tracking_copy_buffer(
+fn void? full_copy_buffer(
     CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
@@ -1644,7 +1618,6 @@ fn PreparedBufferFill? validate_and_lower_buffer_fill(
     PreparedBufferFill fill = lower_buffer_fill(commands, dst, value)!;
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
-    note_command_semantic_check(state);
     if (fill.span.offset % 4 != 0 || fill.span.size % 4 != 0) {
         bool offset_misaligned = fill.span.offset % 4 != 0;
         return report_contract_failure(
@@ -1708,44 +1681,7 @@ fn void? trusted_fill_buffer(
     record_buffer_fill(commands, &fill);
 }
 
-fn void? trusted_tracking_fill_buffer(
-    CommandRecord* commands,
-    gpu::GpuSpan dst,
-    uint value,
-) {
-    PreparedBufferFill fill = lower_buffer_fill(commands, dst, value)!;
-    if (fill.span.offset % 4 != 0 || fill.span.size % 4 != 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_span_command_reference(
-        commands.device_state,
-        record,
-        &fill.source,
-    )!;
-    record_buffer_fill(commands, &fill);
-}
-
-fn void? checked_fill_buffer(
-    CommandRecord* commands,
-    gpu::GpuSpan dst,
-    uint value,
-) {
-    PreparedBufferFill fill = validate_and_lower_buffer_fill(
-        commands,
-        dst,
-        value,
-    )!;
-    record_buffer_fill(commands, &fill);
-}
-
-fn void? checked_tracking_fill_buffer(
+fn void? full_fill_buffer(
     CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
@@ -1876,7 +1812,6 @@ fn PreparedBufferTextureCopy? validate_and_lower_buffer_to_texture_copy(
     PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
-    note_command_semantic_check(state);
     validate_span_recording_access_only(
         state:     state,
         record:    record,
@@ -1947,7 +1882,6 @@ fn PreparedBufferTextureCopy? validate_and_lower_texture_to_buffer_copy(
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
-    note_command_semantic_check(state);
     validate_texture_recording_access_only(
         state:     state,
         record:    record,
@@ -2058,28 +1992,7 @@ fn void? trusted_copy_buffer_to_texture(
     record_buffer_to_texture_copy(commands, &copy);
 }
 
-fn void? trusted_tracking_copy_buffer_to_texture(
-    CommandRecord* commands,
-    gpu::BufferTextureCopyDesc* desc,
-) {
-    PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(commands.device_state, record, checkpoint);
-    track_buffer_texture_copy_references(commands, &copy)!;
-    record_buffer_to_texture_copy(commands, &copy);
-}
-
-fn void? checked_copy_buffer_to_texture(
-    CommandRecord* commands,
-    gpu::BufferTextureCopyDesc* desc,
-) {
-    PreparedBufferTextureCopy copy =
-        validate_and_lower_buffer_to_texture_copy(commands, desc)!;
-    record_buffer_to_texture_copy(commands, &copy);
-}
-
-fn void? checked_tracking_copy_buffer_to_texture(
+fn void? full_copy_buffer_to_texture(
     CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
@@ -2100,28 +2013,7 @@ fn void? trusted_copy_texture_to_buffer(
     record_texture_to_buffer_copy(commands, &copy);
 }
 
-fn void? trusted_tracking_copy_texture_to_buffer(
-    CommandRecord* commands,
-    gpu::TextureBufferCopyDesc* desc,
-) {
-    PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(commands.device_state, record, checkpoint);
-    track_buffer_texture_copy_references(commands, &copy)!;
-    record_texture_to_buffer_copy(commands, &copy);
-}
-
-fn void? checked_copy_texture_to_buffer(
-    CommandRecord* commands,
-    gpu::TextureBufferCopyDesc* desc,
-) {
-    PreparedBufferTextureCopy copy =
-        validate_and_lower_texture_to_buffer_copy(commands, desc)!;
-    record_texture_to_buffer_copy(commands, &copy);
-}
-
-fn void? checked_tracking_copy_texture_to_buffer(
+fn void? full_copy_texture_to_buffer(
     CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
@@ -2337,7 +2229,6 @@ fn BoundPipeline? validate_and_lower_bound_pipeline(
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
-    note_command_semantic_check(state);
     if (record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         validate_pipeline_render_compatibility(
             &bound,
@@ -2399,7 +2290,7 @@ fn void? record_bound_pipeline(
     record.logical_pipeline = *bound;
 }
 
-fn void update_checked_color_state_for_bind(
+fn void update_full_color_state_for_bind(
     CommandRecord* record,
     BoundPipeline* bound,
 ) @private {
@@ -2423,35 +2314,7 @@ fn void? trusted_bind_pipeline(
     record_bound_pipeline(commands, &bound)!;
 }
 
-fn void? trusted_tracking_bind_pipeline(
-    CommandRecord* commands,
-    gpu::PipelineHandle pipeline,
-) {
-    BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_bound_pipeline(commands, &bound)!;
-    record_bound_pipeline(commands, &bound)!;
-}
-
-fn void? checked_bind_pipeline(
-    CommandRecord* commands,
-    gpu::PipelineHandle pipeline,
-) {
-    BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
-    record_bound_pipeline(commands, &bound)!;
-    update_checked_color_state_for_bind(
-        commands,
-        &bound,
-    );
-}
-
-fn void? checked_tracking_bind_pipeline(
+fn void? full_bind_pipeline(
     CommandRecord* commands,
     gpu::PipelineHandle pipeline,
 ) {
@@ -2465,7 +2328,7 @@ fn void? checked_tracking_bind_pipeline(
     );
     track_bound_pipeline(commands, &bound)!;
     record_bound_pipeline(commands, &bound)!;
-    update_checked_color_state_for_bind(record, &bound);
+    update_full_color_state_for_bind(record, &bound);
 }
 
 fn void push_compute_root(
@@ -2548,13 +2411,12 @@ fn void? trusted_dispatch(
     gpu::internal::note_command_native_call();
 }
 
-fn void? checked_dispatch(
+fn void? full_dispatch(
     CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
-    note_command_semantic_check(commands.device_state);
     return vk_cmd_dispatch(commands, root, groups);
 }
 
@@ -2581,7 +2443,7 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
     };
 }
 
-fn PreparedDispatchIndirect? checked_prepare_dispatch_indirect(
+fn PreparedDispatchIndirect? full_prepare_dispatch_indirect(
     CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
@@ -2592,7 +2454,6 @@ fn PreparedDispatchIndirect? checked_prepare_dispatch_indirect(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     BoundPipeline pipeline = *active_bound_pipeline(
         state:         state,
         record:        record,
@@ -2653,39 +2514,12 @@ fn void? trusted_dispatch_indirect(
     record_dispatch_indirect(commands, &dispatch);
 }
 
-fn void? trusted_tracking_dispatch_indirect(
+fn void? full_dispatch_indirect(
     CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
-    PreparedDispatchIndirect dispatch = lower_dispatch_indirect(
-        commands,
-        root,
-        args,
-    )!;
-    track_dispatch_indirect(commands, &dispatch)!;
-    record_dispatch_indirect(commands, &dispatch);
-}
-
-fn void? checked_dispatch_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress root,
-    gpu::GpuSpan args,
-) {
-    PreparedDispatchIndirect dispatch = checked_prepare_dispatch_indirect(
-        commands,
-        root,
-        args,
-    )!;
-    record_dispatch_indirect(commands, &dispatch);
-}
-
-fn void? checked_tracking_dispatch_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress root,
-    gpu::GpuSpan args,
-) {
-    PreparedDispatchIndirect dispatch = checked_prepare_dispatch_indirect(
+    PreparedDispatchIndirect dispatch = full_prepare_dispatch_indirect(
         commands,
         root,
         args,
@@ -2890,7 +2724,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
     return dispatch;
 }
 
-fn PreparedGeneratedDispatch? checked_prepare_generated_dispatch(
+fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2902,7 +2736,6 @@ fn PreparedGeneratedDispatch? checked_prepare_generated_dispatch(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    note_command_semantic_check(state);
     PreparedGeneratedDispatch dispatch = {
         .pipeline = *active_bound_pipeline(
             state:         state,
@@ -2999,52 +2832,13 @@ fn void? trusted_dispatch_generated(
     record_generated_dispatch(commands, &dispatch)!;
 }
 
-fn void? trusted_tracking_dispatch_generated(
+fn void? full_dispatch_generated(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
 ) {
-    PreparedGeneratedDispatch dispatch = lower_generated_dispatch(
-        commands:           commands,
-        records:            records,
-        count_span:         count_span,
-        max_dispatch_count: max_dispatch_count,
-    )!;
-    if (dispatch.max_count == 0) return;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        commands.device_state,
-        record,
-        checkpoint,
-    );
-    track_generated_dispatch(commands, &dispatch)!;
-    record_generated_dispatch(commands, &dispatch)!;
-}
-
-fn void? checked_dispatch_generated(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_dispatch_count,
-) {
-    PreparedGeneratedDispatch dispatch = checked_prepare_generated_dispatch(
-        commands:           commands,
-        records:            records,
-        count_span:         count_span,
-        max_dispatch_count: max_dispatch_count,
-    )!;
-    record_generated_dispatch(commands, &dispatch)!;
-}
-
-fn void? checked_tracking_dispatch_generated(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_dispatch_count,
-) {
-    PreparedGeneratedDispatch dispatch = checked_prepare_generated_dispatch(
+    PreparedGeneratedDispatch dispatch = full_prepare_generated_dispatch(
         commands:           commands,
         records:            records,
         count_span:         count_span,

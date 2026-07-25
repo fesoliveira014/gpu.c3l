@@ -22,7 +22,6 @@ const usz STORAGE_GRAPHICS_TARGET_BYTES =
 fn void bindless_texture_write_then_sample() @test {
     gpu::RuntimeDesc device_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_texture_heap_test",
     };
@@ -239,7 +238,6 @@ fn void bindless_texture_write_then_sample() @test {
 fn void storage_write_then_fragment_sample() @test {
     gpu::RuntimeDesc device_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_storage_fragment_test",
     };
@@ -521,7 +519,6 @@ fn uint quantize_unorm8(float value) {
 fn void anisotropic_sampler_caps_honest() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_aniso_test",
     };
@@ -557,7 +554,6 @@ fn void anisotropic_sampler_caps_honest() @test {
 fn void anisotropy_range_validated() @test {
     gpu::RuntimeDesc device_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_aniso_range_test",
     };

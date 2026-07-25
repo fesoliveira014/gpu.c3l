@@ -153,7 +153,6 @@ fn int main() {
         .contract_validation = validation_enabled()
             ? gpu::ContractValidation.FULL
             : gpu::ContractValidation.TRUSTED,
-        .track_resource_lifetimes = validation_enabled(),
         .enable_vulkan_validation = validation_enabled(),
         .application_name  = "gpu_async_overlap_bench",
     };

@@ -516,7 +516,6 @@ fn void interned_sampler_keeps_first_debug_name() @test {
 fn gpu::Device make_dbg_device() {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_debug_test",
     };

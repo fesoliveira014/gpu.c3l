@@ -63,7 +63,6 @@ fn void runtime_policies_plan_layers_and_debug_utils_independently() @test {
     assert(plan.debug_messenger_info == null, "trusted defaults omit messenger chaining");
 
     desc.contract_validation = gpu::ContractValidation.FULL;
-    desc.track_resource_lifetimes = true;
     plan = gpu::internal::vk::runtime_instance_desc(&desc, &messenger_info);
     assert(!plan.enable_validation, "contract and lifetime policies do not request layers");
     assert(!plan.enable_debug_utils, "contract and lifetime policies do not request debug utils");

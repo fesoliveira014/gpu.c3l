@@ -28,7 +28,6 @@ fn void memory_queries_reject_uninitialized_allocator() @test {
 fn void allocator_stats_and_report() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_vma_test",
     };

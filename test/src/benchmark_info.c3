@@ -44,9 +44,8 @@ fn int main() {
         properties.properties.driver_version,
     );
     io::printfn(
-        "validation: contract=%s tracking=%s layers=%s",
+        "validation: contract=%s layers=%s",
         state.validation_policy.contract,
-        state.validation_policy.track_lifetimes ? "true" : "false",
         state.validation_policy.vulkan_layers ? "true" : "false",
     );
     io::printfn(

@@ -12,7 +12,6 @@ class DocumentationCheckTests(unittest.TestCase):
     def test_rejects_semantic_contract_overstatements(self) -> None:
         for path, claim, expected in (
             ("docs/api.md", "A zero-initialized RuntimeDesc selects FULL.", "TRUSTED"),
-            ("docs/overview.md", "OBJECT_BOUNDARIES adds command validation.", "OBJECT_BOUNDARIES"),
             ("docs/overview.md", "Every policy validates viewport values.", "every policy"),
         ):
             with self.subTest(claim=claim):

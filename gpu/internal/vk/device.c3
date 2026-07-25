@@ -57,24 +57,7 @@ enum DeviceCreationCheckpoint : uint {
 
 struct DeviceValidationPolicy {
     gpu::ContractValidation contract;
-    bool                    track_lifetimes;
     bool                    vulkan_layers;
-}
-
-struct CommandPolicyCounters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
-    ulong semantic_checks;
-    ulong tracking_calls;
-    ulong reference_allocations;
-    ulong reference_increments;
-    ulong reference_releases;
-}
-
-struct CommandPolicyAtomicCounters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
-    Atomic{ulong} semantic_checks;
-    Atomic{ulong} tracking_calls;
-    Atomic{ulong} reference_allocations;
-    Atomic{ulong} reference_increments;
-    Atomic{ulong} reference_releases;
 }
 
 struct CommandReferenceWorkCounters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
@@ -250,7 +233,6 @@ struct VkDeviceState @public {
     Atomic{ulong}              generated_dispatch_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
     Atomic{ulong}              generated_indexed_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-    CommandPolicyAtomicCounters command_policy_counters @if(env::TESTING || $feature(VALIDATION_POLICY_STATS));
     CommandReferenceWorkAtomicCounters command_reference_work_counters
         @if(env::TESTING || $feature(VALIDATION_POLICY_STATS));
     Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
@@ -493,95 +475,33 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
-    .copy_buffer                 = &trusted_tracking_copy_buffer,
-    .fill_buffer                 = &trusted_tracking_fill_buffer,
-    .copy_buffer_to_texture      = &trusted_tracking_copy_buffer_to_texture,
-    .copy_texture_to_buffer      = &trusted_tracking_copy_texture_to_buffer,
-    .barrier                     = &trusted_barrier,
-    .texture_barrier             = &trusted_tracking_texture_barrier,
-    .bind_pipeline               = &trusted_tracking_bind_pipeline,
-    .set_depth_state             = &trusted_set_depth_state,
-    .set_raster_state            = &trusted_set_raster_state,
-    .set_graphics_state          = &trusted_set_graphics_state,
-    .set_color_state             = &trusted_set_color_state,
-    .dispatch                    = &trusted_dispatch,
-    .begin_render_pass           = &trusted_tracking_begin_render_pass,
-    .begin_render_pass_with_state = &trusted_tracking_begin_render_pass_with_state,
-    .set_viewport                = &trusted_set_viewport,
-    .set_scissor                 = &trusted_set_scissor,
+const CommandOps FULL_COMMAND_OPS @private = {
+    .copy_buffer                 = &full_copy_buffer,
+    .fill_buffer                 = &full_fill_buffer,
+    .copy_buffer_to_texture      = &full_copy_buffer_to_texture,
+    .copy_texture_to_buffer      = &full_copy_texture_to_buffer,
+    .barrier                     = &full_barrier,
+    .texture_barrier             = &full_texture_barrier,
+    .bind_pipeline               = &full_bind_pipeline,
+    .set_depth_state             = &full_set_depth_state,
+    .set_raster_state            = &full_set_raster_state,
+    .set_graphics_state          = &full_set_graphics_state,
+    .set_color_state             = &full_set_color_state,
+    .dispatch                    = &full_dispatch,
+    .begin_render_pass           = &full_begin_render_pass,
+    .begin_render_pass_with_state = &full_begin_render_pass_with_state,
+    .set_viewport                = &full_set_viewport,
+    .set_scissor                 = &full_set_scissor,
     .end_render_pass             = &vk_cmd_end_render_pass,
-    .draw                        = &trusted_draw,
-    .draw_indexed                = &trusted_tracking_draw_indexed,
-    .draw_indirect               = &trusted_tracking_draw_indirect,
-    .draw_indexed_indirect       = &trusted_tracking_draw_indexed_indirect,
-    .draw_indexed_indirect_count = &trusted_tracking_draw_indexed_indirect_count,
-    .dispatch_indirect           = &trusted_tracking_dispatch_indirect,
-    .draw_generated              = &trusted_tracking_draw_generated,
-    .draw_indexed_generated      = &trusted_tracking_draw_indexed_generated,
-    .dispatch_generated          = &trusted_tracking_dispatch_generated,
-    .begin_label                 = &vk_cmd_begin_label,
-    .end_label                   = &vk_cmd_end_label,
-};
-
-const CommandOps CHECKED_COMMAND_OPS @private = {
-    .copy_buffer                 = &checked_copy_buffer,
-    .fill_buffer                 = &checked_fill_buffer,
-    .copy_buffer_to_texture      = &checked_copy_buffer_to_texture,
-    .copy_texture_to_buffer      = &checked_copy_texture_to_buffer,
-    .barrier                     = &checked_barrier,
-    .texture_barrier             = &checked_texture_barrier,
-    .bind_pipeline               = &checked_bind_pipeline,
-    .set_depth_state             = &checked_set_depth_state,
-    .set_raster_state            = &checked_set_raster_state,
-    .set_graphics_state          = &checked_set_graphics_state,
-    .set_color_state             = &checked_set_color_state,
-    .dispatch                    = &checked_dispatch,
-    .begin_render_pass           = &checked_begin_render_pass,
-    .begin_render_pass_with_state = &checked_begin_render_pass_with_state,
-    .set_viewport                = &checked_set_viewport,
-    .set_scissor                 = &checked_set_scissor,
-    .end_render_pass             = &vk_cmd_end_render_pass,
-    .draw                        = &checked_draw,
-    .draw_indexed                = &checked_draw_indexed,
-    .draw_indirect               = &checked_draw_indirect,
-    .draw_indexed_indirect       = &checked_draw_indexed_indirect,
-    .draw_indexed_indirect_count = &checked_draw_indexed_indirect_count,
-    .dispatch_indirect           = &checked_dispatch_indirect,
-    .draw_generated              = &checked_draw_generated,
-    .draw_indexed_generated      = &checked_draw_indexed_generated,
-    .dispatch_generated          = &checked_dispatch_generated,
-    .begin_label                 = &vk_cmd_begin_label,
-    .end_label                   = &vk_cmd_end_label,
-};
-
-const CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
-    .copy_buffer                 = &checked_tracking_copy_buffer,
-    .fill_buffer                 = &checked_tracking_fill_buffer,
-    .copy_buffer_to_texture      = &checked_tracking_copy_buffer_to_texture,
-    .copy_texture_to_buffer      = &checked_tracking_copy_texture_to_buffer,
-    .barrier                     = &checked_barrier,
-    .texture_barrier             = &checked_tracking_texture_barrier,
-    .bind_pipeline               = &checked_tracking_bind_pipeline,
-    .set_depth_state             = &checked_set_depth_state,
-    .set_raster_state            = &checked_set_raster_state,
-    .set_graphics_state          = &checked_set_graphics_state,
-    .set_color_state             = &checked_set_color_state,
-    .dispatch                    = &checked_dispatch,
-    .begin_render_pass           = &checked_tracking_begin_render_pass,
-    .begin_render_pass_with_state = &checked_tracking_begin_render_pass_with_state,
-    .set_viewport                = &checked_set_viewport,
-    .set_scissor                 = &checked_set_scissor,
-    .end_render_pass             = &vk_cmd_end_render_pass,
-    .draw                        = &checked_draw,
-    .draw_indexed                = &checked_tracking_draw_indexed,
-    .draw_indirect               = &checked_tracking_draw_indirect,
-    .draw_indexed_indirect       = &checked_tracking_draw_indexed_indirect,
-    .draw_indexed_indirect_count = &checked_tracking_draw_indexed_indirect_count,
-    .dispatch_indirect           = &checked_tracking_dispatch_indirect,
-    .draw_generated              = &checked_tracking_draw_generated,
-    .draw_indexed_generated      = &checked_tracking_draw_indexed_generated,
-    .dispatch_generated          = &checked_tracking_dispatch_generated,
+    .draw                        = &full_draw,
+    .draw_indexed                = &full_draw_indexed,
+    .draw_indirect               = &full_draw_indirect,
+    .draw_indexed_indirect       = &full_draw_indexed_indirect,
+    .draw_indexed_indirect_count = &full_draw_indexed_indirect_count,
+    .dispatch_indirect           = &full_dispatch_indirect,
+    .draw_generated              = &full_draw_generated,
+    .draw_indexed_generated      = &full_draw_indexed_generated,
+    .dispatch_generated          = &full_dispatch_generated,
     .begin_label                 = &vk_cmd_begin_label,
     .end_label                   = &vk_cmd_end_label,
 };
@@ -589,64 +509,12 @@ const CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
 fn CommandOps* select_command_ops(DeviceValidationPolicy policy) {
     switch (policy.contract) {
         case gpu::ContractValidation.TRUSTED:
-        case gpu::ContractValidation.OBJECT_BOUNDARIES:
-            return policy.track_lifetimes
-                ? &TRUSTED_TRACKING_COMMAND_OPS
-                : &TRUSTED_COMMAND_OPS;
+            return &TRUSTED_COMMAND_OPS;
         case gpu::ContractValidation.FULL:
-            return policy.track_lifetimes
-                ? &CHECKED_TRACKING_COMMAND_OPS
-                : &CHECKED_COMMAND_OPS;
+            return &FULL_COMMAND_OPS;
         default:
-            return policy.track_lifetimes
-                ? &CHECKED_TRACKING_COMMAND_OPS
-                : &CHECKED_COMMAND_OPS;
+            return &FULL_COMMAND_OPS;
     }
-}
-
-fn void note_command_semantic_check(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
-        (void)state.command_policy_counters.semantic_checks.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_tracking_call(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
-        (void)state.command_policy_counters.tracking_calls.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_reference_allocation(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
-        (void)state.command_policy_counters.reference_allocations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_reference_increment(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
-        (void)state.command_policy_counters.reference_increments.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_reference_release(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
-        (void)state.command_policy_counters.reference_releases.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
 }
 
 fn void note_command_reference_lookup(VkDeviceState* state) @private {
@@ -752,38 +620,6 @@ fn void note_command_reference_rollover_clear(
             AtomicOrdering.RELAXED,
         );
     $endif
-}
-
-fn void reset_command_policy_counters(
-    VkDeviceState* state,
-) @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
-    state.command_policy_counters.semantic_checks.store(0, AtomicOrdering.RELAXED);
-    state.command_policy_counters.tracking_calls.store(0, AtomicOrdering.RELAXED);
-    state.command_policy_counters.reference_allocations.store(0, AtomicOrdering.RELAXED);
-    state.command_policy_counters.reference_increments.store(0, AtomicOrdering.RELAXED);
-    state.command_policy_counters.reference_releases.store(0, AtomicOrdering.RELAXED);
-}
-
-fn CommandPolicyCounters command_policy_counters(
-    VkDeviceState* state,
-) @if(env::TESTING || $feature(VALIDATION_POLICY_STATS)) {
-    return {
-        .semantic_checks = state.command_policy_counters.semantic_checks.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .tracking_calls = state.command_policy_counters.tracking_calls.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .reference_allocations = state.command_policy_counters.reference_allocations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .reference_increments = state.command_policy_counters.reference_increments.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .reference_releases = state.command_policy_counters.reference_releases.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
 }
 
 fn void reset_command_reference_work_counters(
@@ -1374,8 +1210,7 @@ fn void vk_destroy_device(VkDeviceState* state) {
 }
 
 fn bool report_teardown_leaks(VkDeviceState* state) =>
-    state.validation_policy.contract != gpu::ContractValidation.TRUSTED
-        || state.debug_callback != null;
+    state.validation_policy.contract == gpu::ContractValidation.FULL;
 
 <* Reverse-order cleanup after accepted destruction, device loss, or partial creation. *>
 fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @private {

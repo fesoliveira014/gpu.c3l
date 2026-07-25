@@ -341,21 +341,19 @@ struct DebugMessage {
     int                  validation_id_number;
 }
 
-<* Selects library contract behavior; this is independent of lifetime tracking
-   and Vulkan validation layers.
+<* Selects library contract behavior; this is independent of Vulkan validation
+   layers.
    Preconditions: valid callers satisfy operation contracts under every policy.
    Always checked: token device identity, record generation, authoritative
    phase, host safety, safe lowering, lifecycle integrity, cold paths, and
    runtime results.
-   FULL diagnostics: detailed command semantic misuse.
+   FULL diagnostics: detailed command semantic misuse and resource lifetime
+   tracking.
    Runtime failures: valid callers may receive documented faults in every policy. *>
 enum ContractValidation : int {
     // Trusted command recording with the mandatory always-checked floor.
     TRUSTED,
-    // The TRUSTED command tables plus structured reporting only at explicitly
-    // routed public boundaries and teardown leak scans.
-    OBJECT_BOUNDARIES,
-    // Checked command tables with detailed semantic diagnostics.
+    // FULL command tables with semantic diagnostics and lifetime tracking.
     FULL,
 }
 
@@ -368,11 +366,9 @@ bitstruct Runtime : ulong {
 const Runtime RUNTIME_INVALID = {};
 
 <* Runtime discovery configuration. A zero-initialized value selects TRUSTED,
-   lifetime tracking off, and Vulkan validation layers off; each axis is
-   independent. *>
+   which keeps lifetime tracking and Vulkan validation layers off. *>
 struct RuntimeDesc {
     ContractValidation   contract_validation;
-    bool                 track_resource_lifetimes;
     bool                 enable_vulkan_validation;
     bool                 enable_debug_names;
     uint                 texture_heap_capacity;
@@ -488,7 +484,6 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong command_table_lookups;
     ulong pipeline_table_lookups;
     ulong pipeline_cache_lookups;
-    ulong command_policy_selections;
     // Retired proof counters retained in benchmark schema; always zero.
     ulong encoder_cell_computations;
     ulong encoder_lease_comparisons;

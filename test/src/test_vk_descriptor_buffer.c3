@@ -160,7 +160,6 @@ fn gpu::PipelineHandle create_descriptor_buffer_binding_graphics_pipeline(
 fn void descriptor_buffer_device_and_heap() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .texture_heap_capacity = 8,
         .sampler_heap_capacity = 4,
@@ -219,7 +218,6 @@ fn void descriptor_buffer_binding_is_cached_per_command_and_bind_point() @test {
     DescriptorBufferValidationCapture capture = {};
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_descriptor_buffer_binding_cache",
         .debug_callback           = &capture_descriptor_buffer_validation_error,
@@ -370,7 +368,6 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     const usz VERTEX_BYTES = 3 * 16;
     gpu::RuntimeDesc device_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_descriptor_buffer_compute_to_graphics",
     };
@@ -712,7 +709,6 @@ fn void descriptor_buffer_write_then_sample() @test {
     const uint TEX = 16;
     gpu::RuntimeDesc device_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_descriptor_buffer_e2e",
     };

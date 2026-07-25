@@ -248,7 +248,7 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
         },
     };
 
-    fault bind_fault = @catch(gpu::internal::vk::checked_bind_pipeline(
+    fault bind_fault = @catch(gpu::internal::vk::full_bind_pipeline(
         &record,
         requested,
     ));
@@ -267,7 +267,6 @@ fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
-        .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
         .texture_heap_capacity = tex_capacity,
         .sampler_heap_capacity = smp_capacity,

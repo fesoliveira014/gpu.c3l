@@ -20,7 +20,6 @@ fn gpu::Device? create_bench_device(
     gpu::RuntimeDesc runtime_desc = *desc;
     if (bench_validation_enabled() && !explicit_policy) {
         runtime_desc.contract_validation = gpu::ContractValidation.FULL;
-        runtime_desc.track_resource_lifetimes = true;
         runtime_desc.enable_vulkan_validation = true;
     }
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;

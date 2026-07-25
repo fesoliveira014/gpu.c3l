@@ -115,6 +115,7 @@ class RetiredApiCheckTests(unittest.TestCase):
         source = (
             "gpu::RuntimeDesc desc = { .enable_validation = true };\n"
             "fn gpu::RuntimeDesc legacy() => { .enable_validation = true };\n"
+            "gpu::RuntimeDesc tracked = { .track_resource_lifetimes = true };\n"
             "vk::VkInstanceDesc backend = { .enable_validation = true };\n"
         )
         with tempfile.TemporaryDirectory() as temp_directory:
@@ -124,11 +125,18 @@ class RetiredApiCheckTests(unittest.TestCase):
             path.write_text(source, encoding="utf-8")
             with mock.patch.object(check_retired_api, "ROOT", root):
                 failures = check_retired_api.find_live_retired_usages((path,))
-            self.assertEqual(len(failures), 2)
-            self.assertTrue(all(
-                "RuntimeDesc.enable_validation" in item
-                for item in failures
-            ))
+            self.assertEqual(len(failures), 3)
+            self.assertEqual(
+                sum("RuntimeDesc.enable_validation" in item for item in failures),
+                2,
+            )
+            self.assertEqual(
+                sum(
+                    "RuntimeDesc.track_resource_lifetimes" in item
+                    for item in failures
+                ),
+                1,
+            )
 
     def test_accepts_exact_retired_pipeline_signature_diagnostic(self) -> None:
         source = (

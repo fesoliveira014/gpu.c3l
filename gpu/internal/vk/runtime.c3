@@ -158,9 +158,8 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     state.debug_callback = desc.debug_callback;
     state.debug_user_data = desc.debug_user_data;
     state.validation_policy = {
-        .contract        = desc.contract_validation,
-        .track_lifetimes = desc.track_resource_lifetimes,
-        .vulkan_layers   = desc.enable_vulkan_validation,
+        .contract      = desc.contract_validation,
+        .vulkan_layers = desc.enable_vulkan_validation,
     };
     state.debug_names = desc.enable_debug_names;
     state.texture_heap_capacity = desc.texture_heap_capacity;
