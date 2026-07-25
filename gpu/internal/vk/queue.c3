@@ -2290,13 +2290,12 @@ fn usz append_completion_wait_infos(
 <* Submit executable command lists and signal the queue-owned completion
    timeline. Preparation and native failure leave every token retryable. *>
 fn gpu::CompletionPoint? vk_submit_with_queries(
+    VkDeviceState* state,
     gpu::Queue queue,
     gpu::SubmitDesc* desc,
     QueueSubmit2Fn submit_fn,
     SemaphoreCounterQueryFn counter_query_fn,
 ) @private {
-    gpu::Device device = queue.device;
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
     gpu::CompletionPoint submitted;
     vk::SemaphoreSubmitInfo[2] signal_infos;
 
@@ -2463,11 +2462,13 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
 }
 
 fn gpu::CompletionPoint? vk_submit_with(
+    VkDeviceState* state,
     gpu::Queue queue,
     gpu::SubmitDesc* desc,
     QueueSubmit2Fn submit_fn,
 ) @private {
     return vk_submit_with_queries(
+        state:            state,
         queue:            queue,
         desc:             desc,
         submit_fn:        submit_fn,
@@ -2476,10 +2477,11 @@ fn gpu::CompletionPoint? vk_submit_with(
 }
 
 fn gpu::CompletionPoint? vk_submit(
+    VkDeviceState* state,
     gpu::Queue queue,
     gpu::SubmitDesc* desc,
-) @private {
-    return vk_submit_with(queue, desc, &real_queue_submit2);
+) {
+    return vk_submit_with(state, queue, desc, &real_queue_submit2);
 }
 
 

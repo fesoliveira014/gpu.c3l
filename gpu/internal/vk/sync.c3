@@ -1183,13 +1183,11 @@ fn bool? poll_queue_completion_with_query(
 }
 
 fn bool? vk_poll_completion_with_query(
-    gpu::Device* device,
+    VkDeviceState* state,
     uint queue_id,
     ulong sequence,
     SemaphoreCounterQueryFn query_fn,
 ) @private {
-    VkDeviceState* state =
-        (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     QueueCompletionState* completion = published_queue_completion_state(
         state,
         queue_id,
@@ -1205,12 +1203,12 @@ fn bool? vk_poll_completion_with_query(
 }
 
 fn bool? vk_poll_completion(
-    gpu::Device* device,
+    VkDeviceState* state,
     uint queue_id,
     ulong sequence,
-) @private {
+) {
     return vk_poll_completion_with_query(
-        device:   device,
+        state:    state,
         queue_id: queue_id,
         sequence: sequence,
         query_fn: &real_semaphore_counter_query,
@@ -1226,14 +1224,12 @@ fn vk::Result real_semaphore_wait(
 }
 
 fn void? vk_wait_completion_with_wait(
-    gpu::Device* device,
+    VkDeviceState* state,
     uint queue_id,
     ulong sequence,
     ulong timeout_ns,
     SemaphoreWaitFn wait_fn,
 ) @private {
-    VkDeviceState* state =
-        (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     (void)state.submit_completion_wait_calls.add(1, AtomicOrdering.RELAXED);
     QueueCompletionState* completion = published_queue_completion_state(
         state,
@@ -1267,13 +1263,13 @@ fn void? vk_wait_completion_with_wait(
 }
 
 fn void? vk_wait_completion(
-    gpu::Device* device,
+    VkDeviceState* state,
     uint queue_id,
     ulong sequence,
     ulong timeout_ns,
-) @private {
+) {
     return vk_wait_completion_with_wait(
-        device:     device,
+        state:      state,
         queue_id:   queue_id,
         sequence:   sequence,
         timeout_ns: timeout_ns,

@@ -151,11 +151,12 @@ const float STUB_SAMPLER_ANISOTROPY_LIMIT @private = 16.0f;
 const uint STUB_COMMAND_CAPACITY @private = 64;
 
 struct CommandRecord @public {
-    CommandOps*                         ops;
-    VkDeviceState*                      device_state;
-    gpu::Device                         device;
-    gpu::internal::CommandListHandle    identity;
-    gpu::internal::CommandState         state;
+    CommandOps*                      ops;
+    VkDeviceState*                   device_state;
+    gpu::Device                      device;
+    gpu::internal::CommandListHandle identity;
+    gpu::internal::CommandState      state;
+    gpu::Queue                       queue;
 }
 
 struct CommandOps @public {
@@ -222,6 +223,14 @@ struct VkDeviceState @public {
     uint                 allocator_destroy_calls;
     uint[STUB_COMMAND_CAPACITY] command_generations;
     uint                 next_command;
+    uint                 completion_poll_calls;
+    uint                 completion_wait_calls;
+    uint                 completion_last_queue_id;
+    uint                 pins_during_submit;
+    ulong                completion_current;
+    ulong                completion_last_sequence;
+    ulong                completion_last_timeout_ns;
+    ulong                completion_sequence;
     uint                 allocation_attempts;
     uint                 allocation_free_calls;
     uint                 allocation_flush_calls;
@@ -235,6 +244,7 @@ struct VkDeviceState @public {
     uint                 root_diagnostic_calls;
     ZString              root_diagnostic_operation;
     fault                root_diagnostic_fault;
+    fault                completion_wait_fault;
     gpu::DebugResourceKind root_diagnostic_resource_kind;
     ZString              root_diagnostic_rejected_field;
     ZString              root_diagnostic_invariant;
@@ -270,6 +280,8 @@ struct VkDeviceState @public {
     bool                 reject_end;
     bool                 block_discard;
     bool                 reuse_command_index;
+    bool                 submit_busy;
+    bool                 lose_during_submit;
 }
 
 uint configured_adapter_count @private = 1;
@@ -342,6 +354,7 @@ fn void? vk_begin_commands(
         .device       = device,
         .identity     = identity,
         .state        = gpu::internal::CommandState.RECORDING,
+        .queue        = allocator.queue,
     };
     state.command_used[index] = true;
     gpu::internal::publish_command_list(
@@ -397,6 +410,84 @@ fn void? vk_discard_commands(
     }
     state.command_records[index] = {};
     state.command_used[index] = false;
+}
+
+fn bool? vk_poll_completion(
+    VkDeviceState* state,
+    uint queue_id,
+    ulong sequence,
+) {
+    if (state == null) return gpu::INVALID_HANDLE~;
+    state.completion_poll_calls++;
+    state.completion_last_queue_id = queue_id;
+    state.completion_last_sequence = sequence;
+    return state.completion_current >= sequence;
+}
+
+fn void? vk_wait_completion(
+    VkDeviceState* state,
+    uint queue_id,
+    ulong sequence,
+    ulong timeout_ns,
+) {
+    if (state == null) return gpu::INVALID_HANDLE~;
+    state.completion_wait_calls++;
+    state.completion_last_queue_id = queue_id;
+    state.completion_last_sequence = sequence;
+    state.completion_last_timeout_ns = timeout_ns;
+    if (state.completion_wait_fault) {
+        return state.completion_wait_fault~;
+    }
+}
+
+fn gpu::CompletionPoint? vk_submit(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    gpu::SubmitDesc* desc,
+) {
+    if (state == null || desc == null) return gpu::INVALID_HANDLE~;
+    gpu::internal::DeviceData* data =
+        gpu::internal::resolve_pinned_device(&queue.device);
+    if (data == null || data.state != state) return gpu::INVALID_HANDLE~;
+    gpu::internal::DeviceSlotControl control =
+        (gpu::internal::DeviceSlotControl)
+            gpu::internal::device_slots[queue.device.index]
+                .control.load(AtomicOrdering.ACQUIRE);
+    state.pins_during_submit = control.pins;
+    if (state.submit_busy) return gpu::DEVICE_BUSY~;
+    if (state.completion_sequence == gpu::internal::MAX_COMPLETION_SEQUENCE) {
+        return gpu::SLOT_TABLE_FULL~;
+    }
+
+    CommandRecord*[gpu::internal::MAX_DEVICE_COMMANDS] records;
+    foreach (i, &commands : desc.command_lists) {
+        CommandRecord* record =
+            gpu::internal::executable_command(commands)!;
+        if (record.device_state != state || record.queue != queue) {
+            return gpu::INVALID_HANDLE~;
+        }
+        for (sz previous = 0; previous < i; previous++) {
+            if (records[previous] == record) {
+                return gpu::COMMAND_RECORDING_ERROR~;
+            }
+        }
+        records[i] = record;
+    }
+
+    state.completion_sequence++;
+    gpu::CompletionPoint point = gpu::internal::make_completion_point(
+        queue,
+        state.completion_sequence,
+    )!;
+    if (state.lose_during_submit) {
+        gpu::internal::mark_device_lost(&queue.device);
+    }
+    foreach (record : records[:desc.command_lists.len]) {
+        record.state = gpu::internal::CommandState.INACTIVE;
+        state.command_used[record.identity.index] = false;
+        gpu::internal::release_command_record_ownership(record.device);
+    }
+    return point;
 }
 
 fn gpu::CommandAllocatorHandle? vk_create_command_allocator(

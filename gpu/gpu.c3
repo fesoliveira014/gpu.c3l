@@ -1852,9 +1852,8 @@ fn bool? poll_completion(CompletionPoint point) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, &device, point)!;
-    if (operation.vtable.poll_completion == null) return UNSUPPORTED_FEATURE~;
-    return operation.vtable.poll_completion(
-        &device,
+    return gpu::internal::vk::vk_poll_completion(
+        operation.state,
         gpu::internal::completion_point_queue_id(point),
         gpu::internal::completion_point_sequence(point),
     );
@@ -1872,9 +1871,8 @@ fn void? wait_completion(
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, &device, point)!;
-    if (operation.vtable.wait_completion == null) return UNSUPPORTED_FEATURE~;
-    return operation.vtable.wait_completion(
-        &device,
+    return gpu::internal::vk::vk_wait_completion(
+        operation.state,
         gpu::internal::completion_point_queue_id(point),
         gpu::internal::completion_point_sequence(point),
         timeout_ns,
@@ -1962,8 +1960,11 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     } else if ((uint)desc.readiness_before != 0) {
         return INVALID_ARGUMENT~;
     }
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    CompletionPoint point = operation.vtable.submit(queue, desc)!;
+    CompletionPoint point = gpu::internal::vk::vk_submit(
+        operation.state,
+        queue,
+        desc,
+    )!;
     foreach (&commands : desc.command_lists) {
         *commands = {};
     }

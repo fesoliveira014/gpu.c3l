@@ -18,17 +18,17 @@ Atomic{uint} completion_retirement_arrived;
 Atomic{bool} completion_retirement_release;
 
 struct CompletionPollWorkerArgs {
-    gpu::Device* device;
-    uint         queue_id;
-    ulong        sequence;
-    bool         result;
+    vk::VkDeviceState* state;
+    uint               queue_id;
+    ulong              sequence;
+    bool               result;
 }
 
 struct CompletionWaitWorkerArgs {
-    gpu::Device* device;
-    uint         queue_id;
-    ulong        sequence;
-    bool         completed;
+    vk::VkDeviceState* state;
+    uint               queue_id;
+    ulong              sequence;
+    bool               completed;
 }
 
 struct CompletionMutexHolderArgs {
@@ -91,7 +91,7 @@ fn int completion_poll_worker(void* raw_args) {
     CompletionPollWorkerArgs* args = (CompletionPollWorkerArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
         args.result = vk::vk_poll_completion_with_query(
-            device:   args.device,
+            state:    args.state,
             queue_id: args.queue_id,
             sequence: args.sequence,
             query_fn: &query_completion_rendezvous,
@@ -104,7 +104,7 @@ fn int completion_wait_worker(void* raw_args) {
     CompletionWaitWorkerArgs* args = (CompletionWaitWorkerArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
         vk::vk_wait_completion_with_wait(
-            device:     args.device,
+            state:      args.state,
             queue_id:   args.queue_id,
             sequence:   args.sequence,
             timeout_ns: 0,
@@ -286,7 +286,7 @@ fn void completion_cache_skips_native_and_locked_work() @test {
     completion_injected_counter = sequence;
     completion_injected_query_calls = 0;
     assert(vk::vk_poll_completion_with_query(
-        device:   &device,
+        state:    state,
         queue_id: queue.id,
         sequence: sequence,
         query_fn: &query_injected_completion,
@@ -308,14 +308,14 @@ fn void completion_cache_skips_native_and_locked_work() @test {
     while (!holder_args.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
     for (uint i = 0; i < 100_000; i++) {
         assert(vk::vk_poll_completion_with_query(
-            device:   &device,
+            state:    state,
             queue_id: queue.id,
             sequence: sequence,
             query_fn: &query_injected_completion,
         )!!, "the cached point stays complete");
     }
     vk::vk_wait_completion_with_wait(
-        device:     &device,
+        state:      state,
         queue_id:   queue.id,
         sequence:   sequence,
         timeout_ns: 0,
@@ -353,7 +353,7 @@ fn void concurrent_cached_waits_update_atomic_stats() @test {
     ulong sequence = gpu::internal::completion_point_sequence(point);
     completion_injected_counter = sequence;
     assert(vk::vk_poll_completion_with_query(
-        device:   &device,
+        state:    state,
         queue_id: queue.id,
         sequence: sequence,
         query_fn: &query_injected_completion,
@@ -367,7 +367,7 @@ fn void concurrent_cached_waits_update_atomic_stats() @test {
     Thread[2] workers;
     for (uint i = 0; i < 2; i++) {
         args[i] = {
-            .device   = &device,
+            .state    = state,
             .queue_id = queue.id,
             .sequence = sequence,
         };
@@ -407,7 +407,7 @@ fn void wait_retires_exact_sequence_and_timeout_preserves_state() @test {
     completion_injected_wait_calls = 0;
     completion_injected_wait_result = vk::Result.SUCCESS;
     vk::vk_wait_completion_with_wait(
-        device:     &device,
+        state:      state,
         queue_id:   queue.id,
         sequence:   gpu::internal::completion_point_sequence(first),
         timeout_ns: 0,
@@ -420,7 +420,7 @@ fn void wait_retires_exact_sequence_and_timeout_preserves_state() @test {
 
     completion_injected_wait_result = vk::Result.TIMEOUT;
     assert(@catch(vk::vk_wait_completion_with_wait(
-        device:     &device,
+        state:      state,
         queue_id:   queue.id,
         sequence:   gpu::internal::completion_point_sequence(second),
         timeout_ns: 0,
@@ -433,7 +433,7 @@ fn void wait_retires_exact_sequence_and_timeout_preserves_state() @test {
 
     completion_injected_counter = gpu::internal::completion_point_sequence(second);
     assert(vk::vk_poll_completion_with_query(
-        device:   &device,
+        state:    state,
         queue_id: queue.id,
         sequence: gpu::internal::completion_point_sequence(second),
         query_fn: &query_injected_completion,
@@ -469,7 +469,7 @@ fn void concurrent_first_observers_publish_one_retirement() @test {
     Thread[2] workers;
     for (uint i = 0; i < 2; i++) {
         args[i] = {
-            .device   = &device,
+            .state    = state,
             .queue_id = queue.id,
             .sequence = sequence,
         };

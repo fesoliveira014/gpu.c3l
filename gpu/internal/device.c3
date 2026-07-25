@@ -7,9 +7,6 @@ import std::atomic::types;
 import std::thread;
 import std::core::mem;
 
-alias SubmitFn @private          = fn CompletionPoint? (Queue, SubmitDesc*);
-alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
-alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
 alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
 alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
 alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
@@ -80,9 +77,6 @@ struct CommandListHandle @private {
 $assert CommandListHandle::size <= ulong::size * 2;
 
 struct BackendVTable @private {
-    SubmitFn                  submit;
-    PollCompletionFn          poll_completion;
-    WaitCompletionFn          wait_completion;
     CreateSwapchainFn         create_swapchain;
     DestroySwapchainFn        destroy_swapchain;
     ResizeSwapchainFn         resize_swapchain;

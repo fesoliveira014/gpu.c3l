@@ -29,12 +29,9 @@ struct CommandPinFixture {
     Atomic{bool} command_entered;
     Atomic{bool} command_release;
     uint         pins_during_command;
-    uint         pins_during_submit;
     gpu::Device  device;
     bool         block_command;
     bool         reject_command;
-    bool         submit_busy;
-    bool         lose_during_submit;
 }
 
 struct StaleCommandWorkerArgs {
@@ -391,47 +388,6 @@ fn void? command_pin_end_label(gpu::internal::vk::CommandRecord* record) {
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn gpu::CompletionPoint? command_pin_submit(
-    gpu::Queue queue,
-    gpu::SubmitDesc* desc,
-) {
-    gpu::Device device = queue.device;
-    CommandPinFixture* fixture =
-        (CommandPinFixture*)gpu::internal::device_backend_state_ptr(&device);
-    if (fixture == null) return gpu::INVALID_HANDLE~;
-    gpu::internal::DeviceSlotControl control =
-        (gpu::internal::DeviceSlotControl)gpu::internal::device_slots[device.index].control.load(
-            AtomicOrdering.ACQUIRE,
-        );
-    fixture.pins_during_submit = control.pins;
-    if (fixture.submit_busy) return gpu::DEVICE_BUSY~;
-    gpu::internal::vk::CommandRecord*[gpu::internal::MAX_DEVICE_COMMANDS] records;
-    foreach (i, &commands : desc.command_lists) {
-        records[i] = gpu::internal::executable_command(commands)!;
-    }
-    if (fixture.lose_during_submit) gpu::internal::mark_device_lost(&device);
-    foreach (record : records[:desc.command_lists.len]) {
-        record.state = gpu::internal::CommandState.SUBMITTED;
-        fixture.state.command_used[record.identity.index] = false;
-        record.state = gpu::internal::CommandState.INACTIVE;
-    }
-    gpu::internal::DeviceOperation operation =
-        gpu::internal::borrow_retained_device_operation(&device, true)!;
-    gpu::internal::release_device_children(
-        &operation,
-        (ulong)desc.command_lists.len,
-    );
-    (void)gpu::internal::release_retained_device_pins(
-        &operation,
-        (uint)desc.command_lists.len,
-    );
-    gpu::internal::end_device_operation(&operation);
-    return {
-        .device  = device,
-        .payload = 1ull << 10,
-    };
-}
-
 gpu::internal::BackendVTable blocking_device_vtable = {
 };
 
@@ -468,9 +424,7 @@ gpu::internal::vk::CommandOps command_pin_ops = {
     .end_label                   = &command_pin_end_label,
 };
 
-gpu::internal::BackendVTable command_pin_vtable = {
-    .submit                    = &command_pin_submit,
-};
+gpu::internal::BackendVTable command_pin_vtable;
 
 fn gpu::CommandList? begin_command_pin(gpu::Device* device) {
     if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
@@ -911,7 +865,9 @@ fn void executable_alias_of_recording_token_faults_command_state() @test {
 }
 
 fn void failed_submit_preserves_command_lifetime_pins() @test {
-    CommandPinFixture fixture = { .submit_busy = true };
+    CommandPinFixture fixture = {
+        .state = { .submit_busy = true },
+    };
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
@@ -934,14 +890,14 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
     ulong children_after_failure =
         slot.live_children.load(AtomicOrdering.ACQUIRE);
 
-    fixture.submit_busy = false;
+    fixture.state.submit_busy = false;
     gpu::submit(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!, &desc)!!;
     gpu::internal::DeviceSlotControl after_success =
         (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
 
     assert(submit_fault == gpu::DEVICE_BUSY,
         "retryable submit failure preserves executable tokens");
-    assert(fixture.pins_during_submit == 3,
+    assert(fixture.state.pins_during_submit == 3,
         "submit observes two command pins and its short operation pin");
     assert(after_failure.pins == 2,
         "failed submit preserves both command lifetime pins");
@@ -955,7 +911,9 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
 }
 
 fn void device_loss_after_backend_submit_still_consumes_every_token() @test {
-    CommandPinFixture fixture = { .lose_during_submit = true };
+    CommandPinFixture fixture = {
+        .state = { .lose_during_submit = true },
+    };
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},

@@ -8,7 +8,7 @@ import std::core::mem;
 import std::atomic::types;
 
 alias SwapchainCompletionPollFn = fn bool? (
-    gpu::Device*,
+    VkDeviceState*,
     gpu::CompletionPoint,
 );
 alias SwapchainAcquireFn = vk::PFN_vkAcquireNextImageKHR;
@@ -253,11 +253,11 @@ fn uint? next_swapchain_acquisition(uint acquisition) {
 }
 
 fn bool? poll_swapchain_completion(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::CompletionPoint point,
 ) @private {
     return vk_poll_completion(
-        device,
+        state,
         gpu::internal::completion_point_queue_id(point),
         gpu::internal::completion_point_sequence(point),
     );
@@ -360,7 +360,7 @@ fn void? prepare_present_fence(
 }
 
 fn uint? select_acquire_semaphore_with(
-    gpu::Device* device,
+    VkDeviceState* state,
     SwapchainSlot* slot,
     SwapchainCompletionPollFn poll_fn,
 ) {
@@ -369,7 +369,7 @@ fn uint? select_acquire_semaphore_with(
         uint index = (slot.next_acquire_semaphore + offset)
             % (uint)slot.acquire_retirements.len;
         gpu::CompletionPoint retirement = slot.acquire_retirements[index];
-        if (!retirement.is_valid() || poll_fn(device, retirement)!) {
+        if (!retirement.is_valid() || poll_fn(state, retirement)!) {
             return index;
         }
     }
@@ -1144,7 +1144,7 @@ fn SwapchainAcquisitionCandidate? prepare_swapchain_acquisition(
         )~;
     }
     uint semaphore_index = select_acquire_semaphore_with(
-        device,
+        context.state,
         slot,
         poll_fn,
     )!;

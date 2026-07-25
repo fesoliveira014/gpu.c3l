@@ -772,18 +772,18 @@ fn void present_oom_preserves_the_acquisition_for_retry() @test {
 }
 
 fn bool? poll_only_second_retirement(
-    gpu::Device* device,
+    gpu::internal::vk::VkDeviceState* state,
     gpu::CompletionPoint point,
 ) {
-    (void)device;
+    (void)state;
     return gpu::internal::completion_point_sequence(point) == 2;
 }
 
 fn bool? poll_no_retirement(
-    gpu::Device* device,
+    gpu::internal::vk::VkDeviceState* state,
     gpu::CompletionPoint point,
 ) {
-    (void)device;
+    (void)state;
     (void)point;
     return false;
 }
@@ -1018,7 +1018,7 @@ fn void acquire_semaphores_retire_before_reuse() @test {
     };
 
     uint selected = gpu::internal::vk::select_acquire_semaphore_with(
-        &device,
+        null,
         &slot,
         &poll_only_second_retirement,
     )!!;
@@ -1027,7 +1027,7 @@ fn void acquire_semaphores_retire_before_reuse() @test {
 
     retirements[0] = {};
     selected = gpu::internal::vk::select_acquire_semaphore_with(
-        &device,
+        null,
         &slot,
         &poll_no_retirement,
     )!!;
@@ -1042,7 +1042,7 @@ fn void acquire_semaphores_retire_before_reuse() @test {
         "successful submission retires the exact acquire semaphore");
 
     fault busy = @catch(gpu::internal::vk::select_acquire_semaphore_with(
-        &device,
+        null,
         &slot,
         &poll_no_retirement,
     ));

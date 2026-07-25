@@ -5,49 +5,9 @@ import gpu::internal::vk @public;
 
 struct CompletionFixture {
     gpu::internal::vk::VkDeviceState state;
-    ulong current;
-    fault wait_fault;
-    uint  poll_calls;
-    uint  wait_calls;
-    uint  last_queue_id;
-    ulong last_sequence;
-    ulong last_timeout_ns;
 }
 
-fn bool? completion_fixture_poll(
-    Device* device,
-    uint queue_id,
-    ulong sequence,
-) {
-    CompletionFixture* fixture =
-        (CompletionFixture*)gpu::internal::device_backend_state_ptr(device);
-    if (fixture == null) return INVALID_HANDLE~;
-    fixture.poll_calls++;
-    fixture.last_queue_id = queue_id;
-    fixture.last_sequence = sequence;
-    return fixture.current >= sequence;
-}
-
-fn void? completion_fixture_wait(
-    Device* device,
-    uint queue_id,
-    ulong sequence,
-    ulong timeout_ns,
-) {
-    CompletionFixture* fixture =
-        (CompletionFixture*)gpu::internal::device_backend_state_ptr(device);
-    if (fixture == null) return INVALID_HANDLE~;
-    fixture.wait_calls++;
-    fixture.last_queue_id = queue_id;
-    fixture.last_sequence = sequence;
-    fixture.last_timeout_ns = timeout_ns;
-    if (fixture.wait_fault) return fixture.wait_fault~;
-}
-
-gpu::internal::BackendVTable completion_fixture_vtable = {
-    .poll_completion = &completion_fixture_poll,
-    .wait_completion = &completion_fixture_wait,
-};
+gpu::internal::BackendVTable completion_fixture_vtable;
 
 fn void range_helper() @test {
     assert(gpu::internal::range_fits(256, 0, 256), "exact fit passes");
@@ -120,7 +80,9 @@ fn void completion_sequences_are_monotonic_and_stop_before_wrap() @test {
 }
 
 fn void completion_points_poll_and_wait_without_consumption() @test {
-    CompletionFixture fixture = { .current = 6 };
+    CompletionFixture fixture = {
+        .state = { .completion_current = 6 },
+    };
     Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
@@ -132,27 +94,27 @@ fn void completion_points_poll_and_wait_without_consumption() @test {
 
     assert(!poll_completion(point)!!,
         "poll reports an incomplete queue sequence without blocking");
-    fixture.current = 7;
+    fixture.state.completion_current = 7;
     assert(poll_completion(point)!!,
         "poll reports an already-complete queue sequence");
-    fixture.wait_fault = WAIT_TIMEOUT;
+    fixture.state.completion_wait_fault = WAIT_TIMEOUT;
     assert(@catch(wait_completion(point, 25)) == WAIT_TIMEOUT,
         "wait timeout remains retryable");
     assert(point == original,
         "poll and wait leave the reusable completion point unchanged");
-    fixture.wait_fault = {};
+    fixture.state.completion_wait_fault = {};
     wait_completion(point, 50)!!;
     wait_completion(point)!!;
 
-    assert(fixture.poll_calls == 2,
+    assert(fixture.state.completion_poll_calls == 2,
         "both polls reach the owning backend");
-    assert(fixture.wait_calls == 3,
+    assert(fixture.state.completion_wait_calls == 3,
         "a timed-out point can be waited again");
-    assert(fixture.last_queue_id == queue.id,
+    assert(fixture.state.completion_last_queue_id == queue.id,
         "host waits resolve the point's queue identity");
-    assert(fixture.last_sequence == 7,
+    assert(fixture.state.completion_last_sequence == 7,
         "host waits preserve the point's sequence");
-    assert(fixture.last_timeout_ns == ulong::max,
+    assert(fixture.state.completion_last_timeout_ns == ulong::max,
         "the default host wait has no timeout");
 
     destroy_device(&device)!!;
@@ -189,7 +151,7 @@ fn void completion_points_reject_stale_and_foreign_ownership() @test {
     }, 1)!!;
     assert(@catch(poll_completion(malformed)) == INVALID_HANDLE,
         "an unselected queue identity faults before backend work");
-    assert(first_fixture.poll_calls == 0,
+    assert(first_fixture.state.completion_poll_calls == 0,
         "malformed points do not reach the backend");
 
     destroy_device(&first)!!;

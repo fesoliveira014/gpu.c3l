@@ -881,9 +881,6 @@ fn CommandReferenceWorkCounters command_reference_work_counters(
 
 // Transitional dispatch for device subsystems not yet routed directly.
 const gpu::internal::BackendVTable VK_VTABLE @private = {
-    .submit                      = &vk_submit,
-    .poll_completion             = &vk_poll_completion,
-    .wait_completion             = &vk_wait_completion,
     .create_swapchain            = &vk_create_swapchain,
     .destroy_swapchain           = &vk_destroy_swapchain,
     .resize_swapchain            = &vk_resize_swapchain,
