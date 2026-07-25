@@ -660,6 +660,10 @@ fn void command_policy_selection_covers_both_contract_modes() @test {
         "an unknown policy falls back to full command recording"
     );
     assert(
+        gpu::internal::vk::contract_uses_full_validation(policy),
+        "an unknown policy preserves full validation and reference storage"
+    );
+    assert(
         gpu::internal::vk::TRUSTED_COMMAND_OPS.begin_label
             == gpu::internal::vk::FULL_COMMAND_OPS.begin_label,
         "both command policies share the label-begin entry"
