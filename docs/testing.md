@@ -294,10 +294,11 @@ It covers exact table selection, zero tracking storage under TRUSTED, exact
 retain/release behavior under FULL, early destruction,
 recording/executable/submitted/device-loss cleanup, callback and layer
 independence, teardown predicates, mandatory safety, and partial-create
-rollback. Tracking-index coverage additionally pins exact owner/index/generation
-identity under forced collisions, publish-after-retain ordering, duplicate hits
-without another mutex/retain, suffix rollback rebuild, scratch epoch reuse and
-rollover, and expected linear probe work through the 4,096-reference ceiling.
+rollback. Tracking-list coverage additionally pins exact owner/index/generation
+identity, linear duplicate detection without another mutex/retain, canonical
+retained-counter publication before append, direct release, compound-operation
+capacity preflight, and suffix-only rollback through the 4,096-reference
+ceiling.
 Focused behavioral tests invoke every command family through TRUSTED and FULL.
 C3 compilation verifies operation-table function existence and types; runtime
 faults, ownership/state transitions, allocator observations, and exact
@@ -401,7 +402,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | VMA allocator | allocator create/destroy, heap budget query, stats string. |
 | Private allocation backing | mapped, GPU-private, and addressable native paths. |
 | Queue access | invalid domains stop before backend work; commands enforce semantic roles before mutation; spans cannot widen backing access; native sharing stays exact. |
-| Command allocators | exact device/queue binding; default, ceiling, and overflow validation; transactional pool/buffer/host rollback; recyclable generations; begin/reference/generated capacity faults; address-stable authoritative records; fixed per-scratch reference indices; epoch reuse; no submitted-unit reuse before retirement; non-waiting destroy in recording/executable/in-flight states; device-child accounting; exact-family pools; and TRUSTED zero reference/index storage. |
+| Command allocators | exact device/queue binding; default, ceiling, and overflow validation; transactional pool/buffer/host rollback; recyclable generations; begin/reference/generated capacity faults; address-stable authoritative records; fixed per-scratch linear reference lists; exact-identity deduplication; direct retained-counter release; suffix-only rollback; no submitted-unit reuse before retirement; non-waiting destroy in recording/executable/in-flight states; device-child accounting; exact-family pools; and TRUSTED zero reference storage. |
 | Commands | exact 16-byte x64 direct token size and deterministic stale/wrong-phase/consumed diagnostics, including copied tokens after device-slot reuse; submit-only foreign-device rejection; one authoritative state through begin/end/submit/rollback/discard/retirement; one backend claim with exact linear direct-token visits and duplicate visits; authoritative record-queue validation without allocator reproof; retryable failure; intrusive exact-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; FULL regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
@@ -558,11 +559,10 @@ one packet and an identical replacement each require exactly three native
 calls and zero host/VMA allocation, resource lookup/lock, native pipeline
 creation, or pipeline/cache lookup.
 
-The benchmark runner builds thirteen executable targets with `-O1`:
+The benchmark runner builds twelve executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
 `upload_throughput_bench`, `command_wrapper_bench`,
-`command_path_baseline_bench`, `command_reference_bench`,
-`command_record_bench`, `lifecycle_bench`,
+`command_path_baseline_bench`, `command_record_bench`, `lifecycle_bench`,
 `submit_batch_bench`,
 `pipeline_cache_bench`, `async_overlap_bench`, and
 `completion_wait_scope_bench`.
@@ -578,8 +578,6 @@ c3c build command_wrapper_bench --path test/cpu -O1
 python3 scripts/build_shaders.py
 c3c build command_path_baseline_bench --path test -O1
 VK_DRIVER_FILES=/path/to/icd.json ./test/build/command_path_baseline_bench
-c3c build command_reference_bench --path test -O1
-./test/build/command_reference_bench
 ```
 
 The CPU target reports five alternating direct/public wrapper pairs with exact
@@ -593,12 +591,6 @@ deterministic work gate permits only the exact command-list allocation/reset
 work and rejects unrelated allocation, creation, and registry-lock work. All
 elapsed times and ratios are advisory, while schema, work, and equivalence
 failures are blocking.
-The command-reference target uses fixed in-process buffer slots and command
-scratch, so it needs no ICD. It gates exact public lookup and
-publication/retain/release balances for unique, repeated, mixed,
-forced-collision, near-capacity, and maximum-capacity lifetime-reference
-indexing. Private probes, equality checks, and mutex decisions use
-scenario-specific upper bounds that accept zero; `ns/reference` is advisory.
 The submit-batch target enables `SUBMIT_WORK_STATS` and submits real batches of
 1, 8, 32, 128, and 1,024 executable lists. For every ordinary TRUSTED
 batch it requires `resolutions` and `duplicate_visits` equal to the batch

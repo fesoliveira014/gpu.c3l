@@ -141,7 +141,6 @@ The suite covers:
 | `allocation_bench` | Explicit `CPU_WRITE` allocation and free |
 | `command_wrapper_bench` | ICD-free direct no-op and public-wrapper floor for five command classes, with exact volatile observation |
 | `command_path_baseline_bench` | Paired direct/public Vulkan recording, zero forbidden work, dispatch/copy readback equivalence, and 0/1/16/256 full-lifecycle cases |
-| `command_reference_bench` | Exact public lookup/publication/retain/release outcomes plus upper-bounded private probe, equality, and mutex work for unique, repeated, mixed, forced-collision, and capacity scenarios |
 | `command_record_bench` | Direct-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording under TRUSTED and FULL; 1/16/256/4,096 command lists; exact native output and zero forbidden warm work |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact direct-token visits, duplicate detection, claim, queue serialization, native submit, and forbidden-work evidence |
@@ -362,21 +361,17 @@ generated, and render-pass commands read only the cached native snapshot and
 kind/render metadata. Exact bind-time counters followed by a reset after
 pipeline-table/cache churn require zero post-bind resolution during dispatch.
 
-### Lifetime-reference index
+### Lifetime-reference list
 
-Tracking-enabled command scratch uses a fixed open-addressed index beside the
-sequential release list. Ordinary lookup/insertion is expected constant-time,
-compares the complete owner/index/generation identity after every hash hit, and
-allocates no recording memory. N unique references therefore require N lookups,
-N retains, N publications, and expected O(N) total probes rather than repeated
-scans of the accumulated list. Duplicate hits acquire no resource mutex and add
-no retain. Forced-collision timing is advisory; bounded probes, exact identity,
-and balanced retain/release counters are blocking evidence.
-`command_reference_bench` exercises unique sets of 1/8/64/256/1,024/4,096,
-100,000 duplicate hits, a 2,048-unique/2,048-duplicate mix, a 64-entry forced
-collision chain, and a two-reference preflight at 4,095 retained entries. Its
-schema requires zero warm host allocation and exact publication, mutex,
-retain, release, duplicate, probe, and equality work.
+Tracking-enabled command scratch uses one fixed sequential list allocated with
+the command allocator. Duplicate detection is a linear scan using the complete
+owner/index/generation identity, and duplicate hits add no retain. Each unique
+entry stores the resource's canonical retained counter so discard, rollback,
+and completion retirement release it directly. Compound operations preflight
+their unique candidates against the remaining fixed capacity before retaining
+anything, then use a checkpoint to release only the appended suffix if later
+validation fails. Recording performs no dynamic allocation, and capacity
+failure preserves the existing references and native command state.
 
 An advisory llvmpipe run on 2026-07-21 (Mesa 25.0.7, LLVM 15.0.7) requested
 200 dynamic raster states for one immutable graphics descriptor:

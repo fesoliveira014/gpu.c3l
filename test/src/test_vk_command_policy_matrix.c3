@@ -139,8 +139,6 @@ fn void full_copy_capacity_rejection_is_transactional() @test {
         allocator.handle,
     )!!;
     uint reference_count_before = record.scratch.reference_count;
-    uint reference_epoch_before = record.scratch.reference_index.epoch;
-    vk::reset_command_reference_work_counters(state);
     gpu::reset_command_resolution_stats();
     gpu::BufferCopyDesc copy = {
         .src = source.span,
@@ -150,25 +148,8 @@ fn void full_copy_capacity_rejection_is_transactional() @test {
     assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
         == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "two unique copy references exceed one fixed reference slot");
-    uint expected_reference_epoch = reference_epoch_before == 0
-        ? 1
-        : reference_epoch_before;
-    assert(record.scratch.reference_count == reference_count_before
-        && record.scratch.reference_index.epoch == expected_reference_epoch,
-        "rejected copy preserves the reference checkpoint without publication");
-    vk::CommandReferenceWorkCounters reference_work =
-        vk::command_reference_work_counters(state);
-    assert(reference_work.lookups == 2
-        && reference_work.probes == 2
-        && reference_work.equality_checks == 0
-        && reference_work.index_publications == 0
-        && reference_work.duplicate_hits == 0
-        && reference_work.resource_mutex_acquisitions == 0
-        && reference_work.retains == 0
-        && reference_work.releases == 0
-        && reference_work.rollback_rebuild_publications == 0
-        && reference_work.rollover_cells_cleared == 0,
-        "rejected copy performs exact preflight work without retaining resources");
+    assert(record.scratch.reference_count == reference_count_before,
+        "rejected copy preserves the reference checkpoint");
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
     assert(resolution.recording_commands == 1

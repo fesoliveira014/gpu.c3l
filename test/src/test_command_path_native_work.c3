@@ -291,7 +291,6 @@ fn void dynamic_color_command_warm_work_is_exact() @test {
     gpu::internal::RecordingWorkCounters work_before =
         vk::command_recording_work_counters(state);
     ulong pipelines_before = vk::pipeline_native_create_count(state);
-    vk::reset_command_reference_work_counters(state);
 
     gpu::reset_command_resolution_stats();
     gpu::cmd_set_color_state(&commands, &color)!!;
@@ -309,16 +308,11 @@ fn void dynamic_color_command_warm_work_is_exact() @test {
 
     gpu::internal::RecordingWorkCounters work_after =
         vk::command_recording_work_counters(state);
-    vk::CommandReferenceWorkCounters references =
-        vk::command_reference_work_counters(state);
     assert(work_after.host_allocations == work_before.host_allocations
             && work_after.vma_allocations == work_before.vma_allocations,
         "warm color packets allocate no host or VMA memory");
     assert(vk::pipeline_native_create_count(state) == pipelines_before,
         "warm color packets create no native pipeline");
-    assert(references.lookups == 0
-            && references.resource_mutex_acquisitions == 0,
-        "warm color packets perform no resource lookup or resource lock");
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::discard_executable_commands(&executable)!!;

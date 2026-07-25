@@ -610,12 +610,15 @@ destroying every referenced owner. GPU addresses and shader indices are opaque
 to the command stream under either setting, so their lifetime always remains a
 caller precondition.
 
-FULL allocators pair each fixed sequential reference list with a
-fixed open-addressed exact-identity index. Ordinary duplicate lookup does not
-scan the accumulated list: the hash selects a probe sequence and
-owner/index/generation equality establishes identity. The list remains the
-release-order authority, while an epoch makes returned scratch entries stale
-without clearing the index on ordinary reuse.
+FULL allocators give each command scratch unit one fixed sequential reference
+list sized at allocator creation. Duplicate detection scans the accumulated
+list and compares the complete owner/index/generation identity. A new unique
+entry retains the resource once and stores its canonical retained counter, so
+discard, rollback, and completion retirement release directly through that
+counter. Compound recording operations preflight their unique candidates
+against the remaining list capacity and roll back only entries appended after
+their checkpoint. Capacity failure therefore leaves prior references and
+native command state unchanged.
 
 ## 7. Work and storage lifetime model
 

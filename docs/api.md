@@ -1161,7 +1161,7 @@ and all fixed host bookkeeping. Zero fields select these public defaults:
 | Capacity | Default | Maximum | Scaling |
 |---|---:|---:|---|
 | `command_buffer_capacity` | `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` = 8 | `MAX_COMMAND_ALLOCATOR_CAPACITY` = 4096 | native command buffers, scratch records, and available-index storage |
-| `max_resource_references_per_list` | `DEFAULT_COMMAND_REFERENCES_PER_LIST` = 64 | `MAX_COMMAND_REFERENCES_PER_LIST` = 4096 | sequential references plus a `next_pow2(2 * capacity)` exact-identity index per command buffer under FULL; zero storage under TRUSTED |
+| `max_resource_references_per_list` | `DEFAULT_COMMAND_REFERENCES_PER_LIST` = 64 | `MAX_COMMAND_REFERENCES_PER_LIST` = 4096 | one fixed sequential reference list per command buffer under FULL; zero storage under TRUSTED |
 | `max_generated_preprocess_buffers_per_list` | `DEFAULT_COMMAND_PREPROCESS_PER_LIST` = 4 | `MAX_COMMAND_PREPROCESS_PER_LIST` = 64 | generated-reservation indices per command buffer and reservation-table entries multiplied by command-buffer capacity |
 
 `generated_preprocess_bytes` has no nonzero default: zero disables generated
@@ -1176,11 +1176,12 @@ memory, or C3 temporary-pool storage. If every allocator buffer is live,
 capacity exhaustion returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`; enlarge a
 quiescent allocator rather than waiting.
 
-Tracking-enabled duplicate detection uses the fixed index with expected
-constant-time lookup and full owner/index/generation equality. The sequential
-list remains authoritative for one retain/release per unique resource. Scratch
-reuse advances an index epoch without clearing the table except at bounded epoch
-rollover; no index storage grows while recording.
+Tracking-enabled duplicate detection scans the fixed sequential list and uses
+full owner/index/generation equality. Each unique entry retains the resource
+once and stores its canonical retained counter for direct release. Compound
+operations preflight their unique candidates against the remaining capacity
+and roll back only entries appended after their transaction checkpoint. No
+reference storage grows while recording.
 
 `destroy_command_allocator` never waits, polls completion, or queries a
 semaphore. Recording, executable, or incomplete submitted work returns
