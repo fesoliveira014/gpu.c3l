@@ -23,8 +23,9 @@ struct AcquisitionStateSnapshot {
 }
 
 struct AcquisitionFixture {
-    gpu::Device                                                   device;
+    // First so heap fixtures follow VkDeviceState's production ownership.
     gpu::internal::vk::VkDeviceState                                       state;
+    gpu::Device                                                   device;
     gpu::internal::vk::SwapchainCell[1]                                    swapchain_cells;
     gpu::internal::vk::TextureCell[1]                                      texture_cells;
     vk::Semaphore[gpu::internal::vk::SWAPCHAIN_ACQUIRE_SLOT_COUNT]         semaphores;
@@ -38,7 +39,6 @@ uint captured_fence_reset_calls;
 uint captured_acquire_calls;
 uint captured_acquire_image_index;
 ulong captured_acquire_timeout;
-ulong captured_public_acquire_timeout;
 vk::Result captured_acquire_result;
 vk::Semaphore captured_acquire_semaphore;
 vk::Image borrowed_view_backing_image;
@@ -72,23 +72,13 @@ fn void reset_acquire_capture(vk::Result result, uint image_index = 0) {
     captured_acquire_image_index = image_index;
 }
 
-fn gpu::AcquiredImage? capture_public_acquire(
-    gpu::Device* device,
-    gpu::SwapchainHandle swapchain,
-    ulong timeout_ns,
-) {
-    (void)device;
-    (void)swapchain;
-    captured_public_acquire_timeout = timeout_ns;
-    return gpu::WAIT_TIMEOUT~;
-}
-
-gpu::internal::BackendVTable capture_public_acquire_vtable = {
-    .acquire_next_image = &capture_public_acquire,
-};
+gpu::internal::BackendVTable public_acquire_fixture_vtable;
 
 fn void initialize_acquisition_fixture(AcquisitionFixture* fixture) {
-    fixture.device = { .index = 1, .generation = 1 };
+    if (!fixture.device.is_valid()) {
+        fixture.device = { .index = 1, .generation = 1 };
+    }
+    fixture.state.owner = fixture.device;
     fixture.state.device = (vk::Device)1;
     fixture.state.textures = {
         .slots = fixture.texture_cells[..],
@@ -193,7 +183,6 @@ fn gpu::AcquiredImage? run_captured_acquire(
     ulong timeout_ns,
 ) {
     return gpu::internal::vk::vk_acquire_next_image_with(
-        device:     &fixture.device,
         state:      &fixture.state,
         handle:     fixture.handle,
         timeout_ns: timeout_ns,
@@ -482,7 +471,14 @@ fn void swapchain_requires_a_presentation_request() @test {
 
     gpu::Surface surface;
     gpu::SwapchainDesc sc_desc = { .width = 640, .height = 480 };
-    fault gate_fault = @catch(gpu::internal::vk::vk_create_swapchain(&device, &surface, &sc_desc));
+    gpu::internal::vk::VkDeviceState* state =
+        (gpu::internal::vk::VkDeviceState*)
+            gpu::internal::device_backend_state(device);
+    fault gate_fault = @catch(gpu::internal::vk::vk_create_swapchain(
+        state,
+        &surface,
+        &sc_desc,
+    ));
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "swapchain without a presentation request faults");
 }
 
@@ -673,7 +669,7 @@ fn void present_path_guards_precede_native_mutation() @test {
     capture = {};
 
     fault completion_fault = @catch(gpu::internal::vk::vk_present_with(
-        device:            &device,
+        state:             state,
         image:             &image,
         render_completion: unrelated,
         present_fn:        &capture_present,
@@ -689,7 +685,7 @@ fn void present_path_guards_precede_native_mutation() @test {
     gpu::AcquiredImage wrong_image = image;
     wrong_image.index = 1;
     fault image_fault = @catch(gpu::internal::vk::vk_present_with(
-        device:            &device,
+        state:             state,
         image:             &wrong_image,
         render_completion: expected,
         present_fn:        &capture_present,
@@ -703,7 +699,7 @@ fn void present_path_guards_precede_native_mutation() @test {
 
     capture = {};
     gpu::internal::vk::vk_present_with(
-        device:            &device,
+        state:             state,
         image:             &image,
         render_completion: expected,
         present_fn:        &capture_present,
@@ -715,7 +711,7 @@ fn void present_path_guards_precede_native_mutation() @test {
     assert(capture.calls == 0, "valid present emits no diagnostic");
 
     fault replay_fault = @catch(gpu::internal::vk::vk_present_with(
-        device:            &device,
+        state:             state,
         image:             &replay,
         render_completion: expected,
         present_fn:        &capture_present,
@@ -815,30 +811,43 @@ fn void acquire_timeout_values_reach_native_unchanged() @test {
 }
 
 fn void public_acquire_default_reaches_backend_as_zero() @test {
-    gpu::internal::vk::VkDeviceState* state =
-        mem::new(gpu::internal::vk::VkDeviceState);
+    AcquisitionFixture* fixture = mem::new(AcquisitionFixture);
     gpu::Device device = gpu::internal::register_device(
-        state:  state,
+        state:  &fixture.state,
         caps:   {},
-        vtable: &capture_public_acquire_vtable,
+        vtable: &public_acquire_fixture_vtable,
+        owner:  &fixture.state.owner,
     )!!;
-    defer gpu::destroy_device(&device)!!;
+    fixture.device = device;
+    initialize_acquisition_fixture(fixture);
+    reset_acquisition_state(fixture);
+    fixture.state.device_dispatch.presentation.acquire_next_image =
+        &capture_acquire;
+    defer {
+        gpu::internal::mark_device_lost(&device);
+        fixture.state.device = (vk::Device)null;
+        gpu::destroy_device(&device)!!;
+    }
 
-    captured_public_acquire_timeout = gpu::TIMEOUT_INFINITE;
-    fault default_timeout = @catch(gpu::acquire_next_image(&device, {}));
+    reset_acquire_capture(vk::Result.TIMEOUT);
+    fault default_timeout = @catch(gpu::acquire_next_image(
+        &device,
+        fixture.handle,
+    ));
     assert(default_timeout == gpu::WAIT_TIMEOUT,
         "public acquire preserves the backend timeout fault");
-    assert(captured_public_acquire_timeout == 0,
+    assert(captured_acquire_timeout == 0,
         "omitting timeout_ns reaches the backend as zero");
 
+    reset_acquire_capture(vk::Result.TIMEOUT);
     fault finite_timeout = @catch(gpu::acquire_next_image(
         &device,
-        {},
+        fixture.handle,
         ACQUIRE_FINITE_TIMEOUT_NS,
     ));
     assert(finite_timeout == gpu::WAIT_TIMEOUT,
         "explicit finite acquire preserves the backend timeout fault");
-    assert(captured_public_acquire_timeout == ACQUIRE_FINITE_TIMEOUT_NS,
+    assert(captured_acquire_timeout == ACQUIRE_FINITE_TIMEOUT_NS,
         "the public wrapper forwards an explicit timeout unchanged");
 }
 
@@ -1333,7 +1342,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         state.presentation.swapchains.get(swapchain)!!;
 
     gpu::AcquiredImage acquired = gpu::internal::vk::vk_acquire_next_image(
-        &device,
+        state,
         swapchain,
         0,
     )!!;
@@ -1409,13 +1418,13 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::internal::vk::commit_present_result(live_slot, &acquired, vk::Result.SUCCESS);
 
     assert(@catch(gpu::internal::vk::vk_resize_swapchain(
-        device: &device,
+        state:  state,
         handle: swapchain,
         width:  8,
         height: 8,
     )) == gpu::RESOURCE_IN_USE,
         "resize rejects a recorded borrowed-view reference");
-    assert(@catch(gpu::internal::vk::vk_destroy_swapchain(&device, swapchain))
+    assert(@catch(gpu::internal::vk::vk_destroy_swapchain(state, swapchain))
         == gpu::RESOURCE_IN_USE,
         "destruction rejects a recorded borrowed-view reference");
     assert(view.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
@@ -1427,7 +1436,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     assert(view.tracked_command_references.load(AtomicOrdering.RELAXED) == 0,
         "discard releases the recorded borrowed-view reference");
     gpu::internal::vk::vk_resize_swapchain(
-        device: &device,
+        state:  state,
         handle: swapchain,
         width:  8,
         height: 8,
@@ -1439,7 +1448,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         && borrowed_view_swapchain_destroys == 1,
         "resize rebuilds once and destroys the retired native swapchain once");
 
-    gpu::internal::vk::vk_destroy_swapchain(&device, swapchain)!!;
+    gpu::internal::vk::vk_destroy_swapchain(state, swapchain)!!;
     assert(@catch(state.presentation.swapchains.get(swapchain))
         == gpu::INVALID_HANDLE,
         "destroy invalidates the rebuilt swapchain handle");

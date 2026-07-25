@@ -907,11 +907,10 @@ fn void? release_swapchain_images_for_lifecycle(
 }
 
 fn gpu::SwapchainHandle? vk_create_swapchain(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::Surface* surface,
     gpu::SwapchainDesc* desc,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     WsiDiagnosticContext context = {
         .state      = state,
         .operation  = "create_swapchain",
@@ -1014,10 +1013,9 @@ fn void destroy_swapchain_slot(VkDeviceState* state, SwapchainSlot* slot) @priva
 }
 
 fn void? vk_destroy_swapchain(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::SwapchainHandle handle,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     WsiDiagnosticContext context = {
         .state     = state,
         .operation = "destroy_swapchain",
@@ -1044,12 +1042,11 @@ fn void? vk_destroy_swapchain(
 }
 
 fn void? vk_resize_swapchain(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::SwapchainHandle handle,
     uint width,
     uint height,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     WsiDiagnosticContext context = {
         .state     = state,
         .operation = "resize_swapchain",
@@ -1098,21 +1095,21 @@ fn void? vk_resize_swapchain(
     }
 }
 
-fn gpu::SwapchainInfo? vk_get_swapchain_info(gpu::Device* device, gpu::SwapchainHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+fn gpu::SwapchainInfo? vk_get_swapchain_info(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+) {
     WsiDiagnosticContext context = { .state = state, .operation = "get_swapchain_info" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
     return slot.info;
 }
 
 fn gpu::AcquiredImage? vk_acquire_next_image(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::SwapchainHandle handle,
     ulong timeout_ns,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     return vk_acquire_next_image_with(
-        device:      device,
         state:       state,
         handle:      handle,
         timeout_ns:  timeout_ns,
@@ -1122,7 +1119,6 @@ fn gpu::AcquiredImage? vk_acquire_next_image(
 }
 
 fn SwapchainAcquisitionCandidate? prepare_swapchain_acquisition(
-    gpu::Device* device,
     WsiDiagnosticContext* context,
     SwapchainSlot* slot,
     gpu::SwapchainHandle handle,
@@ -1131,7 +1127,7 @@ fn SwapchainAcquisitionCandidate? prepare_swapchain_acquisition(
     check_swapchain_acquire_lifecycle(context, slot)!;
     uint acquisition = next_swapchain_acquisition(slot.acquisition)!;
     gpu::SwapchainReadiness readiness = make_swapchain_readiness(
-        *device,
+        context.state.owner,
         handle,
         acquisition,
     )!;
@@ -1216,7 +1212,6 @@ fn gpu::AcquiredImage? commit_acquired_image(
 }
 
 fn gpu::AcquiredImage? vk_acquire_next_image_with(
-    gpu::Device* device,
     VkDeviceState* state,
     gpu::SwapchainHandle handle,
     ulong timeout_ns,
@@ -1226,7 +1221,6 @@ fn gpu::AcquiredImage? vk_acquire_next_image_with(
     WsiDiagnosticContext context = { .state = state, .operation = "acquire_next_image" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
     SwapchainAcquisitionCandidate candidate = prepare_swapchain_acquisition(
-        device:   device,
         context:  &context,
         slot:     slot,
         handle:   handle,
@@ -1257,13 +1251,13 @@ fn gpu::AcquiredImage? vk_acquire_next_image_with(
 }
 
 fn void? vk_present_with(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::AcquiredImage* image,
     gpu::CompletionPoint render_completion,
     vk::PFN_vkQueuePresentKHR present_fn,
 ) {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (!image.readiness.is_valid() || image.readiness.device != *device) {
+    if (!image.readiness.is_valid()
+        || image.readiness.device != state.owner) {
         return gpu::INVALID_HANDLE~;
     }
     gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
@@ -1315,21 +1309,22 @@ fn void? vk_present_with(
 }
 
 fn void? vk_present(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::AcquiredImage* image,
     gpu::CompletionPoint render_completion,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     return vk_present_with(
-        device:            device,
+        state:             state,
         image:             image,
         render_completion: render_completion,
         present_fn:        state.device_dispatch.presentation.queue_present,
     );
 }
 
-fn gpu::PresentModeSupport? vk_get_present_mode_support(gpu::Device* device, gpu::SwapchainHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+fn gpu::PresentModeSupport? vk_get_present_mode_support(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+) {
     WsiDiagnosticContext context = { .state = state, .operation = "get_present_mode_support" };
     SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
 

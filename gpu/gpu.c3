@@ -1999,7 +1999,11 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
     if (device_runtime == null || surface_runtime != device_runtime) {
         return INVALID_HANDLE~;
     }
-    SwapchainHandle swapchain = device_data.vtable.create_swapchain(device, surface, desc)!;
+    SwapchainHandle swapchain = gpu::internal::vk::vk_create_swapchain(
+        operation.state,
+        surface,
+        desc,
+    )!;
     gpu::internal::retain_device_children(&operation);
     return swapchain;
 }
@@ -2011,7 +2015,7 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    operation.vtable.destroy_swapchain(device, swapchain)!;
+    gpu::internal::vk::vk_destroy_swapchain(operation.state, swapchain)!;
     gpu::internal::release_device_children(&operation);
 }
 
@@ -2023,7 +2027,12 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.resize_swapchain(device, swapchain, width, height);
+    return gpu::internal::vk::vk_resize_swapchain(
+        state:  operation.state,
+        handle: swapchain,
+        width:  width,
+        height: height,
+    );
 }
 
 <* Actual format, extent, image count, and present mode selected for a
@@ -2031,7 +2040,10 @@ fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width,
 fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_swapchain_info(device, swapchain);
+    return gpu::internal::vk::vk_get_swapchain_info(
+        operation.state,
+        swapchain,
+    );
 }
 
 <* Acquire with a nonblocking default; finite values are nanoseconds.
@@ -2046,7 +2058,11 @@ fn AcquiredImage? acquire_next_image(
 ) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.acquire_next_image(device, swapchain, timeout_ns);
+    return gpu::internal::vk::vk_acquire_next_image(
+        operation.state,
+        swapchain,
+        timeout_ns,
+    );
 }
 
 <* Present an acquired image after its readiness-consuming submit.
@@ -2062,7 +2078,11 @@ fn void? present(
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, device, render_completion)!;
-    operation.vtable.present(device, image, render_completion)!;
+    gpu::internal::vk::vk_present(
+        operation.state,
+        image,
+        render_completion,
+    )!;
     *image = {};
 }
 
@@ -2071,5 +2091,8 @@ fn void? present(
 fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle swapchain) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_present_mode_support(device, swapchain);
+    return gpu::internal::vk::vk_get_present_mode_support(
+        operation.state,
+        swapchain,
+    );
 }

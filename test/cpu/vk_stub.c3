@@ -212,6 +212,7 @@ struct VkDeviceState @public {
     gpu::AllocationDesc  allocation_desc;
     gpu::TextureHandle   texture;
     gpu::SwapchainHandle swapchain;
+    gpu::SwapchainInfo   swapchain_info;
     char[128]            allocation_mapping;
     StubSamplerSlot[STUB_SAMPLER_CAPACITY] samplers;
     Atomic{bool}         sampler_lock;
@@ -1294,12 +1295,11 @@ fn void? vk_destroy_texture(
     state.allocation_has_texture_placement = false;
 }
 
-fn gpu::SwapchainHandle? create_stub_swapchain(
-    gpu::Device* device,
+fn gpu::SwapchainHandle? vk_create_swapchain(
+    VkDeviceState* state,
     gpu::Surface* surface,
     gpu::SwapchainDesc* desc,
 ) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
     swapchain_create_attempts++;
     if (state == null || surface == null || desc == null) return gpu::INVALID_ARGUMENT~;
     if (state.swapchain_live) return gpu::INVALID_RESOURCE_STATE~;
@@ -1311,28 +1311,88 @@ fn gpu::SwapchainHandle? create_stub_swapchain(
         .index      = 0,
         .generation = 1,
     };
+    state.swapchain_info = {
+        .format       = desc.preferred_format,
+        .width        = desc.width,
+        .height       = desc.height,
+        .image_count  = desc.image_count,
+        .present_mode = desc.present_mode,
+    };
     state.swapchain_live = true;
     return state.swapchain;
 }
 
-fn void? destroy_stub_swapchain(
-    gpu::Device* device,
-    gpu::SwapchainHandle swapchain,
+fn void? vk_destroy_swapchain(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
 ) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
     if (state == null || !state.swapchain_live) return gpu::INVALID_HANDLE~;
-    if (state.swapchain != swapchain) return gpu::INVALID_HANDLE~;
+    if (state.swapchain != handle) return gpu::INVALID_HANDLE~;
 
     gpu::internal::surface_release_swapchain(&state.surface)!;
     state.surface = {};
     state.swapchain = {};
+    state.swapchain_info = {};
     state.swapchain_live = false;
 }
 
-const gpu::internal::BackendVTable STUB_DEVICE_VTABLE @private = {
-    .create_swapchain  = &create_stub_swapchain,
-    .destroy_swapchain = &destroy_stub_swapchain,
-};
+fn void? vk_resize_swapchain(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+    uint width,
+    uint height,
+) {
+    if (state == null || !state.swapchain_live || state.swapchain != handle) {
+        return gpu::INVALID_HANDLE~;
+    }
+    state.swapchain_info.width = width;
+    state.swapchain_info.height = height;
+}
+
+fn gpu::SwapchainInfo? vk_get_swapchain_info(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+) {
+    if (state == null || !state.swapchain_live || state.swapchain != handle) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return state.swapchain_info;
+}
+
+fn gpu::AcquiredImage? vk_acquire_next_image(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+    ulong timeout_ns,
+) {
+    (void)timeout_ns;
+    if (state == null || !state.swapchain_live || state.swapchain != handle) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_present(
+    VkDeviceState* state,
+    gpu::AcquiredImage* image,
+    gpu::CompletionPoint render_completion,
+) {
+    (void)state;
+    (void)image;
+    (void)render_completion;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::PresentModeSupport? vk_get_present_mode_support(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+) {
+    if (state == null || !state.swapchain_live || state.swapchain != handle) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return { .fifo = true };
+}
+
+const gpu::internal::BackendVTable STUB_DEVICE_VTABLE @private = {};
 
 fn gpu::Device? stub_create_strict_disabled_device() {
     VkDeviceState* state = mem::new(VkDeviceState);

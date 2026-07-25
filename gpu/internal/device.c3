@@ -7,14 +7,6 @@ import std::atomic::types;
 import std::thread;
 import std::core::mem;
 
-alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
-alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
-alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
-alias GetSwapchainInfoFn @private      = fn SwapchainInfo? (Device*, SwapchainHandle);
-alias AcquireNextImageFn @private      = fn AcquiredImage? (Device*, SwapchainHandle, ulong);
-alias PresentFn @private               = fn void? (Device*, AcquiredImage*, CompletionPoint);
-alias GetPresentModeSupportFn @private = fn PresentModeSupport? (Device*, SwapchainHandle);
-
 const uint MAX_DEVICES @private = 64;
 const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
 const uint MAX_DEVICE_OPERATION_PINS @private = 0x3FFF_FFFF;
@@ -77,13 +69,7 @@ struct CommandListHandle @private {
 $assert CommandListHandle::size <= ulong::size * 2;
 
 struct BackendVTable @private {
-    CreateSwapchainFn         create_swapchain;
-    DestroySwapchainFn        destroy_swapchain;
-    ResizeSwapchainFn         resize_swapchain;
-    GetSwapchainInfoFn        get_swapchain_info;
-    AcquireNextImageFn        acquire_next_image;
-    PresentFn                 present;
-    GetPresentModeSupportFn   get_present_mode_support;
+    bool marker;
 }
 
 struct DeviceData @private {

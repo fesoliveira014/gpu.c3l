@@ -31,7 +31,14 @@ fn void wsi_presentation_gate_diagnostic() @test {
 
     gpu::Surface surface;
     gpu::SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
-    fault gate_fault = @catch(gpu::internal::vk::vk_create_swapchain(&device, &surface, &swapchain_desc));
+    gpu::internal::vk::VkDeviceState* state =
+        (gpu::internal::vk::VkDeviceState*)
+            gpu::internal::device_backend_state(device);
+    fault gate_fault = @catch(gpu::internal::vk::vk_create_swapchain(
+        state,
+        &surface,
+        &swapchain_desc,
+    ));
 
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "presentation gate fault is unchanged");
     assert(capture.calls == 1, "presentation gate emits exactly once");
