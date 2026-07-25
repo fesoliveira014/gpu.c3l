@@ -389,13 +389,22 @@ fn bool pipeline_cache_index_consistent(VkDeviceState* state) {
 
 fn PipelineIdentityProbeResult? probe_pipeline_identity_boundary(
     VkDeviceState* state,
-    gpu::ShaderCode* code,
+    gpu::ShaderDesc* desc,
 ) @if(env::TESTING || $feature(PIPELINE_CACHE_STATS)) {
+    ShaderIdentityInput input;
+    normalize_shader_input(
+        state:          state,
+        desc:           desc,
+        role:           gpu::internal::ShaderRole.COMPUTE,
+        operation:      "probe_pipeline_identity_boundary",
+        rejected_field: "ShaderDesc",
+        out_input:      &input,
+    )!;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
 
     reset_pipeline_identity_stats(state);
-    ShaderId shader = retain_shader_identity_locked(state, code)!;
+    ShaderId shader = retain_shader_identity_locked(state, &input)!;
     PipelineIdentityStats interning = pipeline_identity_stats(state);
     PipelineKey key = build_compute_key(shader);
     ulong hash = hash_key(&key);

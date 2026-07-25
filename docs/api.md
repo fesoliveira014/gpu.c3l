@@ -470,7 +470,7 @@ both always-checked and `FULL`-only causes.
 |---|---|---|---|
 | `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the selected backend is unavailable |
 | `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; device descriptor validation; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
+| `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; device descriptor validation; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
 | `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource handle; or a zero, stale, consumed, or wrong-phase valid-origin direct command token; submit also rejects a token recorded for another device |
 | `INVALID_RESOURCE_STATE` | Always checked lifecycle/safe snapshot / Runtime failures | command execution; surface and swapchain creation/lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an authoritative lifecycle transition is invalid, trusted-table command execution has no usable bound-pipeline snapshot, a borrowed view was passed for destruction, a generated-scratch key is not reserved, or Vulkan reports that the native window is already in use |
 | `OUT_OF_HOST_MEMORY` | Runtime failures | creates; mapped visibility | driver or backend cache host-allocation failure |
@@ -483,7 +483,7 @@ both always-checked and `FULL`-only causes.
 | `GENERATED_SCRATCH_EXHAUSTED` | Runtime failures | generated draw/dispatch recording | no matching reserved preprocess slot is free for valid retained work |
 | `DESCRIPTOR_HEAP_FULL` | Runtime failures | descriptor pool creation/allocation, `create_texture_view`, `create_texture_views`, `intern_sampler` | descriptor-pool exhaustion or fragmentation, or capacity below the live descriptor count |
 | `PIPELINE_CREATE_FAILED` | Runtime failures | pipeline creates | the driver rejected the state combination, shader, or compilation |
-| `SHADER_INVALID` | Always checked cold path / Runtime failures | `prepare_shader_code`, pipeline creates | malformed or ABI-incompatible SPIR-V, or backend shader-module rejection |
+| `SHADER_INVALID` | Always checked cold path / Runtime failures | pipeline creates | malformed or ABI-incompatible SPIR-V, a selected-entry role mismatch, or backend shader-module rejection |
 | `SURFACE_LOST` | Runtime failures | surface creation/query/enumeration, swapchain create/resize, acquire, present | the native window or surface was destroyed or became unavailable |
 | `SWAPCHAIN_OUT_OF_DATE` | Runtime failures | `create_swapchain`, `resize_swapchain`, `acquire_next_image`, `present` | the swapchain no longer matches the surface |
 | `COMMAND_RECORDING_ERROR` | Always checked / FULL diagnostics | `cmd_*`, `end_commands`, `discard_commands`, `discard_executable_commands`, `submit` | always checked for authoritative command/pass phase, duplicate claims, an already-submitting token, and prerequisites needed for safe recording; `FULL` additionally diagnoses a missing logical bind, detailed pipeline/pass compatibility, and complete graphics state |
@@ -844,54 +844,42 @@ No placeholder texture-shape or view-format fields are required.
 
 ## 8. Shader and pipeline API
 
-### Shader code
+### Shader input
 
 ```text
-ShaderStage
-    COMPUTE
-    VERTEX
-    FRAGMENT
-
 ShaderDesc
-    ShaderStage stage
     char[] spirv
     ZString entry_point
     ZString debug_name
-
-ShaderCode
-    ShaderStage stage
-    char[] spirv
-    ZString entry_point
-    ZString debug_name
-    ulong digest
-
-prepare_shader_code(ShaderDesc* desc) -> ShaderCode?
 ```
 
 Shader compilation can be handled by tools or samples. The core library consumes
-borrowed SPIR-V bytes. `prepare_shader_code` validates their basic structure,
-normalizes a null entry point to `main`, and computes the library-owned identity.
-The caller keeps the bytes and strings immutable and alive whenever the value is
-used. The digest is opaque and process-local: do not inspect, modify, serialize,
-or persist it. Stage, entry point, length, and exact bytes participate in shader
-identity; `debug_name` does not. One prepared value may be reused across
-pipelines and devices. Pipeline creation reflects only the selected entry point.
+borrowed SPIR-V bytes directly through each pipeline descriptor. The enclosing
+`shader`, `vertex_shader`, or `fragment_shader` field determines the expected
+compute, vertex, or fragment role. A null entry point selects `main`. The
+descriptor, bytes, and strings need to remain valid only until the synchronous
+pipeline creation call returns; successful creation retains an owned private
+identity with no caller pointer. Role, normalized entry point, length, and exact
+bytes participate in that identity; `debug_name` does not.
+
+Pipeline creation reflects only the selected entry point.
 It permits no push-constant block, or requires one declared block to match the
-selected stage's generated root ABI exactly. Physical offset, size, complete
+selected role's generated root ABI exactly. Physical offset, size, complete
 member coverage, order, and 64-bit width are fixed. The supported authoring
 policy additionally requires flat unsigned integer root members; signed,
 aggregate, and physical-reference members remain noncanonical and rejected even
 when a particular SPIR-V form is byte-compatible. Reflected names are ignored.
 A reflection mismatch returns `SHADER_INVALID` before native shader creation or
 pipeline publication, and diagnostic-enabled runtimes identify the incompatible
-property. Supplying valid shader code in the wrong pipeline role returns
-`INVALID_ARGUMENT`. There is no public shader-module handle.
+property. A selected entry whose execution model does not match its enclosing
+pipeline field also returns `SHADER_INVALID`. There is no public shader-module
+handle or shader-preparation object.
 
 ### Compute pipelines
 
 ```text
 ComputePipelineDesc
-    ShaderCode shader
+    ShaderDesc shader
     ZString debug_name
 
 create_compute_pipeline(Device* device, ComputePipelineDesc* desc) -> PipelineHandle?
@@ -950,8 +938,8 @@ DynamicRasterState
     float depth_bias_clamp
 
 GraphicsPipelineDesc
-    ShaderCode vertex_shader
-    ShaderCode fragment_shader
+    ShaderDesc vertex_shader
+    ShaderDesc fragment_shader
     Format[] color_formats
     Format depth_format
     SampleCount sample_count
@@ -985,15 +973,16 @@ Common caller-owned packet constructors are `color_blend_disabled`,
 
 Pipeline creation deduplicates through a descriptor-keyed cache. Every create
 returns a fresh handle, but descriptors identical in immutable state (exact
-shader code identity, polygon mode, ordered color formats, depth format, and
+private shader identity, polygon mode, ordered color formats, depth format, and
 sample count) alias one backend pipeline underneath. Compute
-identity is shader identity because its `RootPush` layout is fixed. Digest collisions are
-resolved by stage, entry point, length, and exact SPIR-V bytes. Topology,
+identity is shader identity because its `RootPush` layout is fixed. Private
+hash collisions are resolved by role, normalized entry point, length, and exact
+SPIR-V bytes. Topology,
 cull/front-face, depth bias, depth test/write/compare, viewport, scissor,
 blend equations, and write masks are separate command state.
 
 Batch output length must equal descriptor count; an empty batch succeeds.
-Shared shader code creates one temporary native module per exact stage, entry
+Shared shader input creates one temporary native module per exact role, entry
 point, length, and byte sequence in the batch. Duplicate pipeline identities
 compile once. A fault leaves all output handles unchanged and publishes no
 pipeline from the batch.

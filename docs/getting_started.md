@@ -227,13 +227,11 @@ fn void? run() {
     gpu::flush_mapped_span(&device, in_span)!;
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = DOUBLER_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!;
 
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader };
+    gpu::ComputePipelineDesc pipe_desc = { .shader = shader_desc };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!;
     defer (void)gpu::destroy_pipeline(&device, pipeline);
 

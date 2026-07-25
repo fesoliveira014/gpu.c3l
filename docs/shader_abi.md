@@ -482,11 +482,11 @@ Reflection should validate the convention, not define it.
 Checks:
 
 ```text
-entry point exists and matches the declared stage
+entry point exists and matches the enclosing pipeline field's role
 only the selected entry point's interfaces participate
 zero push-constant blocks are accepted
 one declared push-constant block starts at offset zero and exactly matches the
-    selected stage's generated block size, member count, member order, offsets,
+    selected role's generated block size, member count, member order, offsets,
     sizes, scalar widths, signedness, and integer/float shape
 vectors, matrices, arrays, nested structs, booleans, and references are rejected
 descriptor heap set/binding for the selected entry matches backend convention
@@ -520,11 +520,11 @@ cross-frontend convention. The supported GLSL spelling is the flat unsigned
 form shown above.
 
 SPIR-V member and block names are not ABI. Reflection failures, including a
-missing selected entry or a stage mismatch, return `SHADER_INVALID`. A caller
-that places otherwise valid shader code in the wrong pipeline role receives
-`INVALID_ARGUMENT`. Validation completes before native shader-module creation,
-pipeline cache insertion, or output publication, and a deduplicated `ShaderId`
-is reflected once per preparation batch.
+missing selected entry or an execution-model mismatch with the enclosing
+compute, vertex, or fragment field, return `SHADER_INVALID`. Validation
+completes before native shader-module creation, pipeline cache insertion, or
+output publication, and a deduplicated private shader identity is reflected
+once per pipeline-creation batch.
 
 When a debug diagnostic is emitted, its invariant identifies the mismatched
 property: block count/offset/size, member count/offset/size, scalar width,

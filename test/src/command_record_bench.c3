@@ -259,11 +259,10 @@ fn int main() {
     gpu::GpuSpan args = gpu::get_allocation_span(&device, args_allocation)!!;
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = COMMAND_BENCH_SHADER_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader = shader,
     };

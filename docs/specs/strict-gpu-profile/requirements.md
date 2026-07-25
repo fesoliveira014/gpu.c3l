@@ -103,8 +103,11 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 - Strict textures and samplers use device-wide shader-visible heaps.
 - Heap implementation selection is private.
 - Public strict configuration contains no descriptor-indexing, descriptor-buffer, or descriptor-heap mode.
-- Shader IR may be reused through a lightweight `ShaderCode` value whose identity is computed by the library.
-- There is no public shader-module handle.
+- Pipeline descriptors embed call-scoped `ShaderDesc` values directly; the
+  enclosing field supplies the expected shader role and null entry points
+  select `main`.
+- Successful creation retains exact shader identity in private owned storage;
+  there is no public shader preparation object or shader-module handle.
 - Batch pipeline creation can deduplicate shared shader IR.
 - Pipeline creation performs native compilation explicitly.
 - Pipeline binding is separate from draw and dispatch.

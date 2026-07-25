@@ -68,7 +68,7 @@
       "features": [ "SUBMIT_WORK_STATS", "COMMAND_RECORDING_WORK_STATS" ],
       "sources": [ "src/submit_batch_bench.c3" ]
     },
-    // Advisory resource and shader-code operation timing across worker counts 1/2/4;
+    // Advisory resource operation timing across worker counts 1/2/4;
     // executable so it never gates CI. Needs an ICD — pin lavapipe via
     // VK_DRIVER_FILES.
     "resource_create_bench": {

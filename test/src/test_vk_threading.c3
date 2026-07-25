@@ -104,9 +104,6 @@ fn int creation_storm_worker(void* arg) {
         gpu::TextureView view =
             gpu::create_texture_view(args.device, texture, null)!!;
 
-        gpu::ShaderDesc shader_desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
-        gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
-
         gpu::SamplerDesc sampler_desc = {
             .min_filter = gpu::Filter.NEAREST,
             .mag_filter = gpu::Filter.NEAREST,
@@ -118,7 +115,7 @@ fn int creation_storm_worker(void* arg) {
 
         if (!buffer.allocation.is_valid() || !texture.is_valid()
             || !view.is_valid() || !view.index.is_valid()
-            || !shader.is_valid() || !sampler.is_valid()) {
+            || !sampler.is_valid()) {
             args.failed = true;
         }
         gpu::destroy_texture_view(args.device, view)!!;
@@ -345,7 +342,7 @@ fn void concurrent_sampler_interning_converges() @test {
 
 struct PipelineRaceArgs {
     gpu::Device*        device;
-    gpu::ShaderCode     shader;
+    gpu::ShaderDesc     shader;
     gpu::PipelineHandle handle;
 }
 
@@ -362,8 +359,8 @@ fn void same_descriptor_pipeline_race() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ShaderDesc comp_sd = { .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc shader = comp_sd;
 
     PipelineRaceArgs[THR_THREADS] args;
     Thread[THR_THREADS] threads;
@@ -765,11 +762,10 @@ fn void generated_scratch_reservations_are_allocator_local() @test {
     defer destroy_test_device(&device)!!;
     if (!gpu::get_device_caps(&device)!!.generated_work) return;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = THR_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader = shader,
     };
@@ -1007,8 +1003,8 @@ fn void parallel_recording_across_workers() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ShaderDesc comp_sd = { .spirv = THR_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc shader = comp_sd;
     gpu::ComputePipelineDesc pipe_desc = { .shader = shader };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;

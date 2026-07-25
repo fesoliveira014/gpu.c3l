@@ -111,19 +111,17 @@ fn void pin_shaders_and_pipelines() {
     gpu::Device device = {};
     char[4] spirv;
     gpu::ShaderDesc shader_desc = {
-        .stage = gpu::ShaderStage.COMPUTE,
         .spirv = spirv[..],
     };
-    gpu::ShaderCode shader = {};
     gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
     gpu::ComputePipelineDesc compute_desc = {
-        .shader     = shader,
+        .shader     = shader_desc,
         .debug_name = "compute",
     };
     gpu::ComputePipelineDesc[1] compute_descs = { compute_desc };
     gpu::GraphicsPipelineDesc graphics_desc = {
-        .vertex_shader   = shader,
-        .fragment_shader = shader,
+        .vertex_shader   = shader_desc,
+        .fragment_shader = shader_desc,
         .color_formats   = color_formats[..],
         .depth_format    = gpu::Format.D32_FLOAT,
         .sample_count    = gpu::SampleCount.ONE,
@@ -140,7 +138,6 @@ fn void pin_shaders_and_pipelines() {
     gpu::PipelineHandle[1] pipelines;
     char[1] pipeline_cache;
 
-    (void)gpu::prepare_shader_code(&shader_desc);
     (void)gpu::create_compute_pipeline(&device, &compute_desc);
     (void)gpu::create_compute_pipelines(
         &device,

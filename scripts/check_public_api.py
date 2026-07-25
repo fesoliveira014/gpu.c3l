@@ -191,6 +191,9 @@ FORBIDDEN_SYMBOLS = {
     "RenderPassHandle",
     "Framebuffer",
     "FramebufferHandle",
+    "ShaderCode",
+    "ShaderStage",
+    "prepare_shader_code",
     "create_render_pass",
     "destroy_render_pass",
     "create_framebuffer",
@@ -329,6 +332,9 @@ RETIRED_SOURCE_SYMBOLS = (
     "create_dynamic_graphics_pipelines(",
     "request_resource_agnostic_texture_sync(",
     "resource_agnostic_texture_sync",
+    "ShaderCode",
+    "ShaderStage",
+    "prepare_shader_code(",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -720,6 +726,15 @@ def validate_document(document: dict) -> list[str]:
 
     pipeline_schemas = (
         (
+            "ShaderDesc",
+            "struct",
+            (
+                ("spirv", "char[]"),
+                ("entry_point", "ZString"),
+                ("debug_name", "ZString"),
+            ),
+        ),
+        (
             "BlendState",
             "struct",
             (
@@ -806,7 +821,7 @@ def validate_document(document: dict) -> list[str]:
             "ComputePipelineDesc",
             "struct",
             (
-                ("shader", "ShaderCode"),
+                ("shader", "ShaderDesc"),
                 ("debug_name", "ZString"),
             ),
         ),
@@ -814,8 +829,8 @@ def validate_document(document: dict) -> list[str]:
             "GraphicsPipelineDesc",
             "struct",
             (
-                ("vertex_shader", "ShaderCode"),
-                ("fragment_shader", "ShaderCode"),
+                ("vertex_shader", "ShaderDesc"),
+                ("fragment_shader", "ShaderDesc"),
                 ("color_formats", "Format[]"),
                 ("depth_format", "Format"),
                 ("sample_count", "SampleCount"),

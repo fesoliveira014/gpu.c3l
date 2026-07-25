@@ -14,11 +14,19 @@ const ShaderId SHADER_ID_INVALID = (ShaderId)uint::max;
 const uint SHADER_FREE_NONE = 0;
 const uint SHADER_STORE_MAX_PIPELINE_CAPACITY = 0x20000000;
 
+struct ShaderIdentityInput {
+    char[]                    spirv;
+    char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
+    ZString                   debug_name;
+    ulong                     hash;
+    gpu::internal::ShaderRole role;
+}
+
 struct ShaderStoreEntry {
     ulong                             hash;
     char[]                            spirv;
     char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
-    gpu::ShaderStage                  stage;
+    gpu::internal::ShaderRole         role;
     uint                              refcount;
     uint                              next_free;
     uint                              next_in_bucket;
@@ -151,31 +159,31 @@ fn bool unlink_shader_store_entry(ShaderStore* store, uint index) {
 fn bool shader_store_entry_equals(
     VkDeviceState* state,
     ShaderStoreEntry* entry,
-    gpu::ShaderCode* code,
+    ShaderIdentityInput* input,
 ) {
-    if (entry.stage != code.stage
-        || entry.spirv.len != code.spirv.len
+    if (entry.role != input.role
+        || entry.spirv.len != input.spirv.len
         || ((ZString)&entry.entry_point[0]).str_view()
-            != code.entry_point.str_view()) return false;
-    note_shader_intern_bytes_compared(state, code.spirv.len);
-    return mem::equals(entry.spirv, code.spirv);
+            != ((ZString)&input.entry_point[0]).str_view()) return false;
+    note_shader_intern_bytes_compared(state, input.spirv.len);
+    return mem::equals(entry.spirv, input.spirv);
 }
 
 fn ShaderId? retain_shader_identity_locked(
     VkDeviceState* state,
-    gpu::ShaderCode* code,
+    ShaderIdentityInput* input,
 ) {
-    if (code == null || !code.is_valid()) return gpu::INVALID_ARGUMENT~;
+    if (input == null) return gpu::INVALID_ARGUMENT~;
     ShaderStore* store = &state.shader_store;
     uint bucket = shader_store_bucket(
-        code.digest,
+        input.hash,
         (uint)store.bucket_heads.len,
     );
     for (uint current = store.bucket_heads[bucket]; current != 0; ) {
         note_shader_intern_probe(state);
         ShaderStoreEntry* entry = &store.entries[current - 1];
-        if (entry.hash == code.digest
-            && shader_store_entry_equals(state, entry, code)) {
+        if (entry.hash == input.hash
+            && shader_store_entry_equals(state, entry, input)) {
             if (entry.refcount == uint::max) return gpu::SLOT_TABLE_FULL~;
             entry.refcount++;
             return (ShaderId)(current - 1);
@@ -196,18 +204,18 @@ fn ShaderId? retain_shader_identity_locked(
     char[] spirv = alloc::new_array(
         state.host_allocator,
         char,
-        (sz)code.spirv.len,
+        (sz)input.spirv.len,
     );
-    mem::copy(spirv.ptr, code.spirv.ptr, code.spirv.len);
-    note_shader_owned_bytes_cloned(state, code.spirv.len);
+    mem::copy(spirv.ptr, input.spirv.ptr, input.spirv.len);
+    note_shader_owned_bytes_cloned(state, input.spirv.len);
     ShaderStoreEntry entry = {
-        .hash     = code.digest,
+        .hash     = input.hash,
         .spirv    = spirv,
-        .stage    = code.stage,
+        .role     = input.role,
         .refcount = 1,
         .used     = true,
     };
-    String entry_point = code.entry_point.str_view();
+    String entry_point = ((ZString)&input.entry_point[0]).str_view();
     mem::copy(
         &entry.entry_point[0],
         entry_point.ptr,
@@ -241,10 +249,10 @@ fn void? release_shader_identity_locked(
 
 fn PreparedShaderIdentity? prepare_shader_identity_locked(
     VkDeviceState* state,
-    gpu::ShaderCode* code,
+    ShaderIdentityInput* input,
 ) {
     return {
-        .id       = retain_shader_identity_locked(state, code)!,
+        .id       = retain_shader_identity_locked(state, input)!,
         .retained = true,
     };
 }
@@ -301,26 +309,36 @@ fn void clear_pipeline_prepare_poison(
     state.pipeline_prepare_poison_id = SHADER_ID_INVALID;
 }
 
-fn gpu::ShaderCode shader_store_code(
+fn void shader_store_input(
     ShaderStoreEntry* entry,
     ZString debug_name,
+    ShaderIdentityInput* out_input,
 ) {
-    return {
-        .stage       = entry.stage,
-        .spirv       = entry.spirv,
-        .entry_point = (ZString)&entry.entry_point[0],
-        .debug_name  = debug_name,
-        .digest      = entry.hash,
+    *out_input = {
+        .spirv      = entry.spirv,
+        .debug_name = debug_name,
+        .hash       = entry.hash,
+        .role       = entry.role,
     };
+    mem::copy(
+        &out_input.entry_point[0],
+        &entry.entry_point[0],
+        out_input.entry_point.len,
+    );
 }
 
-<* The caller retains `id` for the lifetime of the returned borrowed view. *>
-fn gpu::ShaderCode shader_store_code_for_retained_id(
+<* The caller retains `id` while using the borrowed output. *>
+fn void shader_store_input_for_retained_id(
     VkDeviceState* state,
     ShaderId id,
     ZString debug_name,
+    ShaderIdentityInput* out_input,
 ) {
-    return shader_store_code(&state.shader_store.entries[(uint)id], debug_name);
+    shader_store_input(
+        entry:      &state.shader_store.entries[(uint)id],
+        debug_name: debug_name,
+        out_input:  out_input,
+    );
 }
 
 fn uint shader_store_live_count(VkDeviceState* state) {
@@ -432,25 +450,29 @@ fn void? check_heap_convention(
     };
 }
 
-fn gpu::ShaderStage? gpu_stage_from_spv(spvreflect::ShaderStage stage) @private {
+fn gpu::internal::ShaderRole? shader_role_from_spv(
+    spvreflect::ShaderStage stage,
+) @private {
     switch (stage) {
         case spvreflect::ShaderStage.SHADER_STAGE_COMPUTE:
-            return gpu::ShaderStage.COMPUTE;
+            return gpu::internal::ShaderRole.COMPUTE;
         case spvreflect::ShaderStage.SHADER_STAGE_VERTEX:
-            return gpu::ShaderStage.VERTEX;
+            return gpu::internal::ShaderRole.VERTEX;
         case spvreflect::ShaderStage.SHADER_STAGE_FRAGMENT:
-            return gpu::ShaderStage.FRAGMENT;
+            return gpu::internal::ShaderRole.FRAGMENT;
         default:
             return gpu::SHADER_INVALID~;
     }
 }
 
-fn gpu::internal::RootAbiSpec root_abi_for_stage(gpu::ShaderStage stage) @private {
-    switch (stage) {
-        case gpu::ShaderStage.COMPUTE:
+fn gpu::internal::RootAbiSpec root_abi_for_role(
+    gpu::internal::ShaderRole role,
+) @private {
+    switch (role) {
+        case gpu::internal::ShaderRole.COMPUTE:
             return gpu::internal::ROOT_PUSH_ABI;
-        case gpu::ShaderStage.VERTEX:
-        case gpu::ShaderStage.FRAGMENT:
+        case gpu::internal::ShaderRole.VERTEX:
+        case gpu::internal::ShaderRole.FRAGMENT:
             return gpu::internal::GRAPHICS_ROOT_PUSH_ABI;
     }
 }
@@ -585,10 +607,10 @@ fn ZString root_abi_mismatch_invariant(
 fn RootAbiMismatch root_push_abi_mismatch(
     spvreflect::ShaderModule* reflect_module,
     ZString entry_point,
-    gpu::ShaderStage stage,
+    gpu::internal::ShaderRole role,
     bool allow_alternate = false,
 ) @private {
-    gpu::internal::RootAbiSpec expected = root_abi_for_stage(stage);
+    gpu::internal::RootAbiSpec expected = root_abi_for_role(role);
     uint count = 0;
     if (reflect_module.enumerate_entry_point_push_constant_blocks(
         entry_point,
@@ -632,16 +654,16 @@ fn RootAbiMismatch root_push_abi_mismatch(
 }
 
 <* Fault SHADER_INVALID unless the selected entry declares no push block or
-   one exact schema-generated root block for its prepared shader stage. *>
+   one exact schema-generated root block for its pipeline role. *>
 fn void? check_root_push_abi(
     spvreflect::ShaderModule* reflect_module,
     ZString entry_point,
-    gpu::ShaderStage stage,
+    gpu::internal::ShaderRole role,
 ) @private {
     if (root_push_abi_mismatch(
         reflect_module,
         entry_point,
-        stage,
+        role,
         false,
     ) != RootAbiMismatch.NONE) return gpu::SHADER_INVALID~;
 }
@@ -655,11 +677,12 @@ fn void set_root_abi_evidence_enabled(
 
 fn void? copy_entry_point(char* dst, ZString source) @private {
     usz i = 0;
-    while (source[i] != 0) {
-        if (i >= gpu::internal::SHADER_ENTRY_POINT_CAP - 1) return gpu::INVALID_ARGUMENT~;
+    while (i < gpu::internal::SHADER_ENTRY_POINT_CAP - 1
+        && source[i] != 0) {
         dst[i] = source[i];
         i++;
     }
+    if (i == 0 || source[i] != 0) return gpu::INVALID_ARGUMENT~;
     dst[i] = 0;
 }
 
@@ -705,63 +728,85 @@ fn fault report_shader_contract_failure(
     );
 }
 
-fn void? validate_pipeline_shader_code(
+fn void? normalize_shader_input(
     VkDeviceState* state,
-    gpu::ShaderCode* code,
+    gpu::ShaderDesc* desc,
+    gpu::internal::ShaderRole role,
     ZString operation,
     ZString rejected_field,
+    ShaderIdentityInput* out_input,
 ) {
-    if (code != null && code.is_valid()) return;
-    return report_shader_contract_failure(
-        state:          state,
-        operation:      operation,
-        public_fault:   gpu::INVALID_ARGUMENT,
-        debug_name:     code == null ? null : code.debug_name,
-        rejected_field: rejected_field,
-        invariant:      "shader code must come from prepare_shader_code",
-    )~;
-}
-
-<* Validate one prepared shader and create the temporary native module used by
-   a single pipeline build. *>
-fn PipelineShaderModule? create_pipeline_shader_module(
-    VkDeviceState* state,
-    gpu::ShaderCode* code,
-    gpu::ShaderStage expected_stage,
-    ZString operation,
-    ZString rejected_field,
-) {
-    validate_pipeline_shader_code(
-        state:          state,
-        code:           code,
-        operation:      operation,
-        rejected_field: rejected_field,
-    )!;
-    if (code.stage != expected_stage) {
+    if (desc == null) {
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
             public_fault:   gpu::INVALID_ARGUMENT,
-            debug_name:     code.debug_name,
+            debug_name:     null,
             rejected_field: rejected_field,
-            invariant:      "shader stage must match its pipeline role",
+            invariant:      "shader descriptor must be present",
+        )~;
+    }
+    if (desc.spirv.ptr == null
+        || desc.spirv.len < gpu::internal::SPIRV_HEADER_SIZE
+        || desc.spirv.len % uint::size != 0) {
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   gpu::SHADER_INVALID,
+            debug_name:     desc.debug_name,
+            rejected_field: rejected_field,
+            invariant:      "SPIR-V must contain a word-aligned header",
+        )~;
+    }
+    uint magic;
+    mem::copy(&magic, desc.spirv.ptr, uint::size);
+    if (magic != gpu::internal::SPIRV_MAGIC) {
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   gpu::SHADER_INVALID,
+            debug_name:     desc.debug_name,
+            rejected_field: rejected_field,
+            invariant:      "SPIR-V magic must be valid",
         )~;
     }
 
-    PipelineShaderModule shader;
+    *out_input = {
+        .spirv      = desc.spirv,
+        .debug_name = desc.debug_name,
+        .hash       = gpu::internal::shader_identity_hash(desc.spirv),
+        .role       = role,
+    };
+    ZString entry_point =
+        desc.entry_point == null ? "main" : desc.entry_point;
     if (catch entry_fault = copy_entry_point(
-        &shader.entry_point[0],
-        code.entry_point,
+        &out_input.entry_point[0],
+        entry_point,
     )) {
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
             public_fault:   entry_fault,
-            debug_name:     code.debug_name,
+            debug_name:     desc.debug_name,
             rejected_field: rejected_field,
-            invariant:      "entry point must fit the backend name capacity",
+            invariant:      "entry point must be nonempty and fit the backend name capacity",
         )~;
     }
+}
+
+<* Reflect one normalized shader and create its temporary native module. *>
+fn PipelineShaderModule? create_pipeline_shader_module(
+    VkDeviceState* state,
+    ShaderIdentityInput* code,
+    ZString operation,
+    ZString rejected_field,
+) {
+    PipelineShaderModule shader;
+    mem::copy(
+        &shader.entry_point[0],
+        &code.entry_point[0],
+        shader.entry_point.len,
+    );
 
     ulong[spvreflect::SHADER_MODULE_SIZE / 8] module_storage;
     spvreflect::ShaderModule* reflect_module =
@@ -798,8 +843,9 @@ fn PipelineShaderModule? create_pipeline_shader_module(
             invariant:      "entry point must exist in SPIR-V module",
         )~;
     }
-    gpu::ShaderStage? reflected_stage_optional = gpu_stage_from_spv(entry.stage());
-    if (catch reflected_stage_optional) {
+    gpu::internal::ShaderRole? reflected_role_optional =
+        shader_role_from_spv(entry.stage());
+    if (catch reflected_role_optional) {
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
@@ -809,15 +855,15 @@ fn PipelineShaderModule? create_pipeline_shader_module(
             invariant:      "reflected execution model must be supported",
         )~;
     }
-    gpu::ShaderStage reflected_stage = reflected_stage_optional;
-    if (reflected_stage != code.stage) {
+    gpu::internal::ShaderRole reflected_role = reflected_role_optional;
+    if (reflected_role != code.role) {
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
             public_fault:   gpu::SHADER_INVALID,
             debug_name:     code.debug_name,
             rejected_field: rejected_field,
-            invariant:      "prepared stage must match the reflected entry point",
+            invariant:      "reflected execution model must match the pipeline field",
         )~;
     }
     ZString selected_entry_point = (ZString)&shader.entry_point[0];
@@ -841,7 +887,7 @@ fn PipelineShaderModule? create_pipeline_shader_module(
     RootAbiMismatch root_mismatch = root_push_abi_mismatch(
         reflect_module,
         selected_entry_point,
-        code.stage,
+        code.role,
         allow_alternate_root,
     );
     if (root_mismatch != RootAbiMismatch.NONE) {
@@ -893,30 +939,24 @@ fn PipelineShaderModule*? get_pipeline_batch_shader(
     VkDeviceState* state,
     ShaderId id,
     ZString debug_name,
-    gpu::ShaderStage expected_stage,
     ZString operation,
     ZString rejected_field,
     PipelineBatchShader[] shaders,
     uint* shader_count,
 ) {
-    gpu::ShaderCode code = shader_store_code_for_retained_id(state, id, debug_name);
-    if (code.stage != expected_stage) {
-        return report_shader_contract_failure(
-            state:          state,
-            operation:      operation,
-            public_fault:   gpu::INVALID_ARGUMENT,
-            debug_name:     debug_name,
-            rejected_field: rejected_field,
-            invariant:      "shader stage must match its pipeline role",
-        )~;
-    }
+    ShaderIdentityInput code;
+    shader_store_input_for_retained_id(
+        state:      state,
+        id:         id,
+        debug_name: debug_name,
+        out_input:  &code,
+    );
     foreach (&shader : shaders[:*shader_count]) {
         if (shader.id == id) return &shader.native;
     }
     PipelineShaderModule native = create_pipeline_shader_module(
         state:          state,
         code:           &code,
-        expected_stage: expected_stage,
         operation:      operation,
         rejected_field: rejected_field,
     )!;

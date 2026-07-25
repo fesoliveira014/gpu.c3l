@@ -138,10 +138,10 @@ fn void u16_and_u32_indexed_draws_match() @test {
     gpu::Device device = u16v_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = U16V_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = U16V_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
-    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
+    gpu::ShaderDesc vert_sd = { .spirv = U16V_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag_sd = { .spirv = U16V_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert = vert_sd;
+    gpu::ShaderDesc frag = frag_sd;
     gpu::Format[1] pipeline_color_formats = {
         gpu::Format.RGBA8_UNORM,
     };

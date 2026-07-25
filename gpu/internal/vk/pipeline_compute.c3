@@ -168,15 +168,16 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     defer destroy_pipeline_shader_module(state, &owned_shader);
     PipelineShaderModule* shader = batch_shader;
     if (shader == null) {
-        gpu::ShaderCode code = shader_store_code_for_retained_id(
-            state,
-            prepared_shader.id,
-            desc.shader.debug_name,
+        ShaderIdentityInput code;
+        shader_store_input_for_retained_id(
+            state:      state,
+            id:         prepared_shader.id,
+            debug_name: desc.shader.debug_name,
+            out_input:  &code,
         );
         owned_shader = create_pipeline_shader_module(
             state:          state,
             code:           &code,
-            expected_stage: gpu::ShaderStage.COMPUTE,
             operation:      "create_compute_pipeline",
             rejected_field: "ComputePipelineDesc.shader",
         )!;
@@ -248,11 +249,14 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(
 ) {
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
-    validate_pipeline_shader_code(
+    ShaderIdentityInput shader_input;
+    normalize_shader_input(
         state:          state,
-        code:           &desc.shader,
+        desc:           &desc.shader,
+        role:           gpu::internal::ShaderRole.COMPUTE,
         operation:      "create_compute_pipeline",
         rejected_field: "ComputePipelineDesc.shader",
+        out_input:      &shader_input,
     )!;
     if (!pipeline_handle_capacity_available(state, 1)) {
         return gpu::SLOT_TABLE_FULL~;
@@ -261,7 +265,7 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
-        prepared = prepare_shader_identity_locked(state, &desc.shader)!;
+        prepared = prepare_shader_identity_locked(state, &shader_input)!;
     }
     defer release_prepared_shaders(state, (&prepared)[:1]);
     return create_compute_pipeline_from_module(
@@ -287,6 +291,19 @@ fn void? vk_create_compute_pipelines(
     }
 
     @pool() {
+        ShaderIdentityInput[] shader_inputs =
+            mem::talloc_array(ShaderIdentityInput, descs.len);
+        foreach (i, &desc : descs) {
+            normalize_shader_input(
+                state:          state,
+                desc:           &desc.shader,
+                role:           gpu::internal::ShaderRole.COMPUTE,
+                operation:      "create_compute_pipelines",
+                rejected_field: "ComputePipelineDesc.shader",
+                out_input:      &shader_inputs[i],
+            )!;
+        }
+
         PreparedShaderIdentity[] prepared =
             mem::talloc_array(PreparedShaderIdentity, descs.len);
         $if env::TESTING:
@@ -294,18 +311,12 @@ fn void? vk_create_compute_pipelines(
         $endif
         usz prepared_count = 0;
         defer release_prepared_shaders(state, prepared[:prepared_count]);
-        foreach (i, &desc : descs) {
-            validate_pipeline_shader_code(
-                state:          state,
-                code:           &desc.shader,
-                operation:      "create_compute_pipelines",
-                rejected_field: "ComputePipelineDesc.shader",
-            )!;
+        foreach (i, &shader_input : shader_inputs) {
             state.resource_mutex.lock()!!;
             defer state.resource_mutex.unlock();
             prepared[i] = prepare_shader_identity_locked(
                 state,
-                &desc.shader,
+                shader_input,
             )!;
             prepared_count++;
         }
@@ -322,7 +333,6 @@ fn void? vk_create_compute_pipelines(
                 state:          state,
                 id:             prepared[i].id,
                 debug_name:     desc.shader.debug_name,
-                expected_stage: gpu::ShaderStage.COMPUTE,
                 operation:      "create_compute_pipelines",
                 rejected_field: "ComputePipelineDesc.shader",
                 shaders:        shaders,

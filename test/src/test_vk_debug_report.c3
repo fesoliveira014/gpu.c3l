@@ -557,8 +557,8 @@ fn void leak_reporters_count_leaks() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DBG_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ShaderDesc comp_sd = { .spirv = DBG_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc shader = comp_sd;
     gpu::ComputePipelineDesc pipe_desc = { .shader = shader };
     gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
@@ -611,7 +611,7 @@ fn void leak_reporters_count_leaks() @test {
         && capture.command_allocators == 1,
         "allocation, GPU span, texture, pipeline, and command allocator leak kinds are exact");
     assert(capture.shaders == 0,
-        "borrowed shader code is not a live resource");
+        "borrowed shader input is not a live resource");
     assert(capture.texture_descriptors == 1 && capture.samplers == 0,
         "device-owned samplers are not descriptor leaks");
     assert(state.textures.get(texture)!!.live_descriptor_views == 1,

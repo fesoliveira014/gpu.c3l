@@ -82,7 +82,11 @@ Shaders receive root GPU addresses and access textures and samplers through
 device-wide shader-visible heaps. The public API exposes heap semantics and
 fixed-width shader indices, never the backend descriptor mechanism.
 
-Shader IR is supplied through reusable CPU-side `ShaderCode` values. The library computes their content identity. Pipeline creation may be batched to deduplicate shared IR. There is no public shader-module handle.
+Shader IR is supplied directly through call-scoped `ShaderDesc` fields. The
+enclosing pipeline field determines the expected role, and a null entry point
+selects `main`. Pipeline creation copies the surviving identity into private
+owned storage before returning and may be batched to deduplicate shared IR.
+There is no public shader-module handle or preparation object.
 
 Pipeline creation performs compilation explicitly. Compute pipelines contain compute code. Graphics pipelines contain shader code and the raster state that affects compilation or attachment compatibility. Depth/stencil state is separate; baseline blend state remains part of the graphics pipeline. Viewport and scissor are dynamic.
 

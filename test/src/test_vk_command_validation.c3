@@ -279,10 +279,10 @@ struct ValDrawCtx {
 
 fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
     ValDrawCtx ctx;
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
+    gpu::ShaderDesc vert_sd = { .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert = vert_sd;
+    gpu::ShaderDesc frag_sd = { .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag = frag_sd;
 
     gpu::Format[1] pipeline_color_formats = {
         gpu::Format.RGBA8_UNORM,
@@ -395,8 +395,8 @@ struct ValComputeCtx {
 
 fn ValComputeCtx make_val_compute_ctx(gpu::Device* device) {
     ValComputeCtx ctx;
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = VAL_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ShaderDesc comp_sd = { .spirv = VAL_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc shader = comp_sd;
     gpu::ComputePipelineDesc comp_desc = { .shader = shader };
     ctx.pipeline = gpu::create_compute_pipeline(device, &comp_desc)!!;
     return ctx;
@@ -991,8 +991,8 @@ fn void draw_with_compute_pipeline_faults() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &target_view)!!;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = VAL_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode comp_shader = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ShaderDesc comp_sd = { .spirv = VAL_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc comp_shader = comp_sd;
     gpu::ComputePipelineDesc comp_desc = { .shader = comp_shader };
     gpu::PipelineHandle compute = gpu::create_compute_pipeline(&device, &comp_desc)!!;
     defer gpu::destroy_pipeline(&device, compute)!!;
@@ -1423,22 +1423,23 @@ fn void compute_pipeline_from_vertex_shader_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode vert_shader = gpu::prepare_shader_code(&vert_sd)!!;
+    gpu::ShaderDesc vert_sd = { .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert_shader = vert_sd;
 
     gpu::ComputePipelineDesc desc = { .shader = vert_shader };
-    fault wrong_stage = @catch(gpu::create_compute_pipeline(&device, &desc));
-    assert(wrong_stage == gpu::INVALID_ARGUMENT, "compute pipeline from a vertex-stage shader faults INVALID_ARGUMENT");
+    fault wrong_role = @catch(gpu::create_compute_pipeline(&device, &desc));
+    assert(wrong_role == gpu::SHADER_INVALID,
+        "compute pipeline from a vertex shader faults SHADER_INVALID");
 }
 
 fn void graphics_pipeline_from_swapped_shader_stages_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode vert_shader = gpu::prepare_shader_code(&vert_sd)!!;
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode frag_shader = gpu::prepare_shader_code(&frag_sd)!!;
+    gpu::ShaderDesc vert_sd = { .spirv = VAL_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert_shader = vert_sd;
+    gpu::ShaderDesc frag_sd = { .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag_shader = frag_sd;
 
     gpu::Format[1] pipeline_color_formats = {
         gpu::Format.RGBA8_UNORM,
@@ -1448,8 +1449,9 @@ fn void graphics_pipeline_from_swapped_shader_stages_faults() @test {
         .fragment_shader = vert_shader,
         .color_formats   = pipeline_color_formats[..],
     };
-    fault wrong_stage = @catch(gpu::create_graphics_pipeline(&device, &swapped));
-    assert(wrong_stage == gpu::INVALID_ARGUMENT, "graphics pipeline with swapped vertex/fragment shaders faults INVALID_ARGUMENT");
+    fault wrong_role = @catch(gpu::create_graphics_pipeline(&device, &swapped));
+    assert(wrong_role == gpu::SHADER_INVALID,
+        "graphics pipeline with swapped vertex and fragment shaders faults SHADER_INVALID");
 }
 
 fn void valid_copy_fill_and_draw_succeed() @test {

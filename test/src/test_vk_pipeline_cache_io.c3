@@ -96,9 +96,9 @@ fn gpu::Device make_cache_io_device(char[] blob = {}, CacheBackendCapture* captu
 
 fn gpu::PipelineHandle build_cache_io_pipeline(gpu::Device* device) {
     gpu::ShaderDesc shader_desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = CACHE_IO_COMP_SPIRV[..], .entry_point = "main",
+        .spirv = CACHE_IO_COMP_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipe_desc = { .shader = shader };
     return gpu::create_compute_pipeline(device, &pipe_desc)!!;
 }

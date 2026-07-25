@@ -12,6 +12,25 @@ from scripts import check_retired_api
 
 
 class RetiredApiCheckTests(unittest.TestCase):
+    def test_live_scan_rejects_retired_shader_preparation_surface(self) -> None:
+        source = (
+            "gpu::ShaderCode code = {};\n"
+            "gpu::ShaderStage role;\n"
+            "(void)gpu::prepare_shader_code(&desc);\n"
+            "spvreflect::ShaderStage reflected = entry.stage();\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            path = root / "test" / "src" / "consumer.c3"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                failures = check_retired_api.find_live_retired_usages((path,))
+        self.assertEqual(len(failures), 3)
+        for symbol in ("ShaderCode", "ShaderStage", "prepare_shader_code"):
+            with self.subTest(symbol=symbol):
+                self.assertTrue(any(symbol in item for item in failures))
+
     def test_live_scan_rejects_retired_readme_threading_claim(self) -> None:
         source = (
             "- Tiered threading: automatic per-worker command pools, "

@@ -114,19 +114,17 @@ fn gpu::PipelineHandle review_distinct_graphics_pipeline(
     gpu::Format format,
 ) {
     gpu::ShaderDesc vertex_desc = {
-        .stage       = gpu::ShaderStage.VERTEX,
         .spirv       = VAL_VERT_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc fragment_desc = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = VAL_FRAG_SPIRV[..],
         .entry_point = "main",
     };
     gpu::Format[1] color_formats = { format };
     gpu::GraphicsPipelineDesc desc = {
-        .vertex_shader   = gpu::prepare_shader_code(&vertex_desc)!!,
-        .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
+        .vertex_shader   = vertex_desc,
+        .fragment_shader = fragment_desc,
         .color_formats   = color_formats[..],
     };
     return gpu::create_graphics_pipeline(device, &desc)!!;
@@ -136,12 +134,11 @@ fn gpu::PipelineHandle review_distinct_compute_pipeline(
     gpu::Device* device,
 ) {
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = REVIEW_ALT_COMP_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ComputePipelineDesc desc = {
-        .shader = gpu::prepare_shader_code(&shader_desc)!!,
+        .shader = shader_desc,
     };
     return gpu::create_compute_pipeline(device, &desc)!!;
 }
@@ -490,9 +487,7 @@ fn void graphics_pipeline_key_distinguishes_sample_count() @test {
         gpu::Format.RGBA8_UNORM,
     };
     gpu::GraphicsPipelineDesc one = {
-        .vertex_shader   = { .digest = 1 },
-        .fragment_shader = { .digest = 2 },
-        .color_formats   = color_formats[..],
+        .color_formats = color_formats[..],
     };
     gpu::GraphicsPipelineDesc four = one;
     four.sample_count = gpu::SampleCount.FOUR;
@@ -520,10 +515,8 @@ fn void graphics_pipeline_key_zeroes_unused_formats() @test {
         gpu::Format.RGBA8_UNORM,
     };
     gpu::GraphicsPipelineDesc first = {
-        .vertex_shader   = { .digest = 1 },
-        .fragment_shader = { .digest = 2 },
-        .color_formats   = color_formats[..],
-        .debug_name      = "first",
+        .color_formats = color_formats[..],
+        .debug_name    = "first",
     };
     gpu::GraphicsPipelineDesc second = first;
     second.debug_name = "alias";

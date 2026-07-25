@@ -704,12 +704,30 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "ShaderDesc",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "spirv",
+                                "type": {"name": "char[]"},
+                            },
+                            {
+                                "name": "entry_point",
+                                "type": {"name": "ZString"},
+                            },
+                            {
+                                "name": "debug_name",
+                                "type": {"name": "ZString"},
+                            },
+                        ],
+                    },
+                    {
                         "name": "ComputePipelineDesc",
                         "kind": "struct",
                         "members": [
                             {
                                 "name": "shader",
-                                "type": {"name": "ShaderCode"},
+                                "type": {"name": "ShaderDesc"},
                             },
                             {
                                 "name": "debug_name",
@@ -723,11 +741,11 @@ def valid_document() -> dict:
                         "members": [
                             {
                                 "name": "vertex_shader",
-                                "type": {"name": "ShaderCode"},
+                                "type": {"name": "ShaderDesc"},
                             },
                             {
                                 "name": "fragment_shader",
-                                "type": {"name": "ShaderCode"},
+                                "type": {"name": "ShaderDesc"},
                             },
                             {
                                 "name": "color_formats",
@@ -1810,6 +1828,19 @@ method gpu::Runtime.is_valid
             check_public_api.validate_document(document),
         )
 
+    def test_rejects_retired_shader_preparation_surface(self) -> None:
+        document = valid_document()
+        gpu_module = document["modules"]["gpu"]
+        gpu_module["types"].extend([
+            {"name": "ShaderCode"},
+            {"name": "ShaderStage"},
+        ])
+        gpu_module["functions"].append({"name": "prepare_shader_code"})
+        failures = check_public_api.validate_document(document)
+        for symbol in ("ShaderCode", "ShaderStage", "prepare_shader_code"):
+            with self.subTest(symbol=symbol):
+                self.assertIn(symbol, failures)
+
     def test_rejects_untyped_root_surface_constructors(self) -> None:
         document = valid_document()
         document["modules"]["gpu"]["functions"].append(
@@ -2240,6 +2271,7 @@ method gpu::Runtime.is_valid
 
     def test_requires_pipeline_identity_schemas(self) -> None:
         for type_name in (
+            "ShaderDesc",
             "BlendState",
             "ColorTargetState",
             "ColorState",

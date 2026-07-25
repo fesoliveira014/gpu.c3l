@@ -100,8 +100,14 @@ class ShaderReflectionPolicyCheckTests(unittest.TestCase):
     def test_requires_reflection_fault_mapping(self) -> None:
         errors = self.mutate(
             "gpu/internal/vk/shader.c3",
-            "public_fault:   gpu::SHADER_INVALID",
-            "public_fault:   gpu::INVALID_ARGUMENT",
+            "public_fault:   gpu::SHADER_INVALID,\n"
+            "            debug_name:     code.debug_name,\n"
+            "            rejected_field: rejected_field,\n"
+            '            invariant:      "SPIR-V reflection must succeed"',
+            "public_fault:   gpu::INVALID_ARGUMENT,\n"
+            "            debug_name:     code.debug_name,\n"
+            "            rejected_field: rejected_field,\n"
+            '            invariant:      "SPIR-V reflection must succeed"',
         )
         self.assertTrue(any("map to SHADER_INVALID" in error for error in errors))
 

@@ -316,8 +316,8 @@ fn vk::Result create_graphics_pipeline_native(
 fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     VkDeviceState* state,
     PipelineKey* requested_key,
-    gpu::ShaderCode* vertex_code,
-    gpu::ShaderCode* fragment_code,
+    gpu::ShaderDesc* vertex_desc,
+    gpu::ShaderDesc* fragment_desc,
     ZString operation,
     ZString vertex_field,
     ZString fragment_field,
@@ -362,15 +362,16 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     defer destroy_pipeline_shader_module(state, &owned_vertex_shader);
     PipelineShaderModule* vertex_shader = batch_vertex_shader;
     if (vertex_shader == null) {
-        gpu::ShaderCode code = shader_store_code_for_retained_id(
-            state,
-            prepared_vertex_shader.id,
-            vertex_code.debug_name,
+        ShaderIdentityInput code;
+        shader_store_input_for_retained_id(
+            state:      state,
+            id:         prepared_vertex_shader.id,
+            debug_name: vertex_desc.debug_name,
+            out_input:  &code,
         );
         owned_vertex_shader = create_pipeline_shader_module(
             state:          state,
             code:           &code,
-            expected_stage: gpu::ShaderStage.VERTEX,
             operation:      operation,
             rejected_field: vertex_field,
         )!;
@@ -380,15 +381,16 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     defer destroy_pipeline_shader_module(state, &owned_fragment_shader);
     PipelineShaderModule* fragment_shader = batch_fragment_shader;
     if (fragment_shader == null) {
-        gpu::ShaderCode code = shader_store_code_for_retained_id(
-            state,
-            prepared_fragment_shader.id,
-            fragment_code.debug_name,
+        ShaderIdentityInput code;
+        shader_store_input_for_retained_id(
+            state:      state,
+            id:         prepared_fragment_shader.id,
+            debug_name: fragment_desc.debug_name,
+            out_input:  &code,
         );
         owned_fragment_shader = create_pipeline_shader_module(
             state:          state,
             code:           &code,
-            expected_stage: gpu::ShaderStage.FRAGMENT,
             operation:      operation,
             rejected_field: fragment_field,
         )!;
@@ -578,17 +580,22 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
     validate_graphics_pipeline_desc(state, desc)!;
-    validate_pipeline_shader_code(
+    ShaderIdentityInput[2] shader_inputs;
+    normalize_shader_input(
         state:          state,
-        code:           &desc.vertex_shader,
+        desc:           &desc.vertex_shader,
+        role:           gpu::internal::ShaderRole.VERTEX,
         operation:      "create_graphics_pipeline",
         rejected_field: "GraphicsPipelineDesc.vertex_shader",
+        out_input:      &shader_inputs[0],
     )!;
-    validate_pipeline_shader_code(
+    normalize_shader_input(
         state:          state,
-        code:           &desc.fragment_shader,
+        desc:           &desc.fragment_shader,
+        role:           gpu::internal::ShaderRole.FRAGMENT,
         operation:      "create_graphics_pipeline",
         rejected_field: "GraphicsPipelineDesc.fragment_shader",
+        out_input:      &shader_inputs[1],
     )!;
     if (!pipeline_handle_capacity_available(state, 1)) {
         return gpu::SLOT_TABLE_FULL~;
@@ -601,12 +608,12 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
         defer state.resource_mutex.unlock();
         prepared[0] = prepare_shader_identity_locked(
             state,
-            &desc.vertex_shader,
+            &shader_inputs[0],
         )!;
         prepared_count++;
         prepared[1] = prepare_shader_identity_locked(
             state,
-            &desc.fragment_shader,
+            &shader_inputs[1],
         )!;
         prepared_count++;
     }
@@ -618,8 +625,8 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
     return create_graphics_pipeline_from_modules(
         state:                    state,
         requested_key:            &key,
-        vertex_code:              &desc.vertex_shader,
-        fragment_code:            &desc.fragment_shader,
+        vertex_desc:              &desc.vertex_shader,
+        fragment_desc:            &desc.fragment_shader,
         operation:                "create_graphics_pipeline",
         vertex_field:             "GraphicsPipelineDesc.vertex_shader",
         fragment_field:           "GraphicsPipelineDesc.fragment_shader",
@@ -649,6 +656,29 @@ fn void? vk_create_graphics_pipelines(
     }
 
     @pool() {
+        ShaderIdentityInput[] vertex_inputs =
+            mem::talloc_array(ShaderIdentityInput, descs.len);
+        ShaderIdentityInput[] fragment_inputs =
+            mem::talloc_array(ShaderIdentityInput, descs.len);
+        foreach (i, &desc : descs) {
+            normalize_shader_input(
+                state:          state,
+                desc:           &desc.vertex_shader,
+                role:           gpu::internal::ShaderRole.VERTEX,
+                operation:      "create_graphics_pipelines",
+                rejected_field: "GraphicsPipelineDesc.vertex_shader",
+                out_input:      &vertex_inputs[i],
+            )!;
+            normalize_shader_input(
+                state:          state,
+                desc:           &desc.fragment_shader,
+                role:           gpu::internal::ShaderRole.FRAGMENT,
+                operation:      "create_graphics_pipelines",
+                rejected_field: "GraphicsPipelineDesc.fragment_shader",
+                out_input:      &fragment_inputs[i],
+            )!;
+        }
+
         PreparedShaderIdentity[] prepared_vertex =
             mem::talloc_array(PreparedShaderIdentity, descs.len);
         PreparedShaderIdentity[] prepared_fragment =
@@ -667,34 +697,22 @@ fn void? vk_create_graphics_pipelines(
             state,
             prepared_vertex[:prepared_vertex_count],
         );
-        foreach (i, &desc : descs) {
-            validate_pipeline_shader_code(
-                state:          state,
-                code:           &desc.vertex_shader,
-                operation:      "create_graphics_pipelines",
-                rejected_field: "GraphicsPipelineDesc.vertex_shader",
-            )!;
+        foreach (i, &vertex_input : vertex_inputs) {
             {
                 state.resource_mutex.lock()!!;
                 defer state.resource_mutex.unlock();
                 prepared_vertex[i] = prepare_shader_identity_locked(
                     state,
-                    &desc.vertex_shader,
+                    vertex_input,
                 )!;
             }
             prepared_vertex_count++;
-            validate_pipeline_shader_code(
-                state:          state,
-                code:           &desc.fragment_shader,
-                operation:      "create_graphics_pipelines",
-                rejected_field: "GraphicsPipelineDesc.fragment_shader",
-            )!;
             {
                 state.resource_mutex.lock()!!;
                 defer state.resource_mutex.unlock();
                 prepared_fragment[i] = prepare_shader_identity_locked(
                     state,
-                    &desc.fragment_shader,
+                    &fragment_inputs[i],
                 )!;
             }
             prepared_fragment_count++;
@@ -721,7 +739,6 @@ fn void? vk_create_graphics_pipelines(
                 state:          state,
                 id:             prepared_vertex[i].id,
                 debug_name:     desc.vertex_shader.debug_name,
-                expected_stage: gpu::ShaderStage.VERTEX,
                 operation:      "create_graphics_pipelines",
                 rejected_field: "GraphicsPipelineDesc.vertex_shader",
                 shaders:        shaders,
@@ -731,7 +748,6 @@ fn void? vk_create_graphics_pipelines(
                 state:          state,
                 id:             prepared_fragment[i].id,
                 debug_name:     desc.fragment_shader.debug_name,
-                expected_stage: gpu::ShaderStage.FRAGMENT,
                 operation:      "create_graphics_pipelines",
                 rejected_field: "GraphicsPipelineDesc.fragment_shader",
                 shaders:        shaders,
@@ -756,8 +772,8 @@ fn void? vk_create_graphics_pipelines(
             gpu::PipelineHandle? created_optional = create_graphics_pipeline_from_modules(
                 state:                    state,
                 requested_key:            &key,
-                vertex_code:              &desc.vertex_shader,
-                fragment_code:            &desc.fragment_shader,
+                vertex_desc:              &desc.vertex_shader,
+                fragment_desc:            &desc.fragment_shader,
                 operation:                "create_graphics_pipelines",
                 vertex_field:             "GraphicsPipelineDesc.vertex_shader",
                 fragment_field:           "GraphicsPipelineDesc.fragment_shader",

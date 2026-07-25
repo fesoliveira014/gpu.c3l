@@ -300,17 +300,23 @@ until device destruction. Compatibility-only devices create no strict sampler
 heap and reject interning before backend mutation. There is no separate public
 sampler identity or publication step.
 
-## Shader code and pipeline creation
+## Shader input and pipeline creation
 
-### Shader code
+### Shader input
 
-`ShaderCode` is a borrowed CPU-side value. `prepare_shader_code` validates the IR and computes an opaque digest. Callers do not provide the digest.
+Pipeline descriptors embed `ShaderDesc` directly. Its SPIR-V, entry point, and
+debug name are borrowed only for the synchronous creation call. The enclosing
+compute, vertex, or fragment field supplies the expected role, and a null entry
+point selects `main`.
 
-The IR remains immutable and alive while the value is used. The digest is internal, process-local metadata and has no persistence or ABI guarantee. Hash collisions are resolved by length and byte comparison.
+Creation validates the host shape, reflects the selected entry against that
+role and the strict shader ABI, and retains the exact role, normalized entry
+point, byte length, and bytes in private owned storage. Private hash collisions
+are resolved by exact comparison. Successful pipelines retain no caller-owned
+pointer.
 
-One-off creation may accept raw IR and prepare it internally. Reused shaders should be prepared once.
-
-There is no public `ShaderHandle`. Backend shader modules are temporary pipeline-creation objects.
+There is no public shader preparation object or `ShaderHandle`. Backend shader
+modules are temporary pipeline-creation objects.
 
 ### Pipeline creation
 
@@ -479,7 +485,7 @@ Diagnostic backend information may report backend name, API version, driver name
 - Completion points require no public allocation, table insertion, or caller-managed counter.
 - Non-WSI resource and device destruction perform no hidden wait or deferred-release work; strict presentation extends that rule to swapchain destruction and resize.
 - GPU allocations are explicit so applications can batch and suballocate.
-- Shader hashing can be amortized through `prepare_shader_code`.
+- Exact shader identity is interned privately during pipeline creation.
 - Pipeline creation can be batched and deduplicate shared IR.
 - Strict descriptor indices are direct shader values; CPU generation metadata is separate.
 - Compatibility descriptor arenas amortize native pool management.
@@ -492,7 +498,9 @@ Diagnostic backend information may report backend name, API version, driver name
 2. Move the backend onto per-device shared state and implement non-blocking, retryable destruction.
 3. Introduce queue-owned completion points; remove the root frame lifecycle, public semaphores, and readback tickets; migrate presentation and readback.
 4. Introduce allocations, spans, placed and dedicated textures, immediate lifetime rules, and future allocator extension points.
-5. Add strict heaps, shader-code values, explicit pipeline binding, transient commands, global barriers, and semantic texture transitions in `gpu`.
+5. Add strict heaps, direct pipeline shader input, explicit pipeline binding,
+   transient commands, global barriers, and semantic texture transitions in
+   `gpu`.
 6. Migrate tests, samples, shader ABI tooling, and benchmarks with each in-place API change.
 7. Design compatibility per-draw data, then add `gpu::compat` descriptors, pipelines, and commands on the shared backend.
 8. Add and verify Vulkan 1.2 backend fallbacks after the strict architecture and compatibility contract are coherent.

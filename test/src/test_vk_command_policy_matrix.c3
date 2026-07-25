@@ -184,12 +184,11 @@ fn gpu::PipelineHandle create_policy_matrix_compute_pipeline(
     gpu::Device* device,
 ) {
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = POLICY_MATRIX_COMP_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ComputePipelineDesc pipeline_desc = {
-        .shader = gpu::prepare_shader_code(&shader_desc)!!,
+        .shader = shader_desc,
     };
     return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
 }
@@ -198,17 +197,15 @@ fn gpu::PipelineHandle create_policy_matrix_graphics_pipeline(
     gpu::Device* device,
 ) {
     gpu::ShaderDesc vertex_desc = {
-        .stage       = gpu::ShaderStage.VERTEX,
         .spirv       = POLICY_MATRIX_VERT_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc fragment_desc = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = POLICY_MATRIX_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode vertex = gpu::prepare_shader_code(&vertex_desc)!!;
-    gpu::ShaderCode fragment = gpu::prepare_shader_code(&fragment_desc)!!;
+    gpu::ShaderDesc vertex = vertex_desc;
+    gpu::ShaderDesc fragment = fragment_desc;
     gpu::Format[1] color_formats = {
         gpu::Format.RGBA8_UNORM,
     };

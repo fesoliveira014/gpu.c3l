@@ -90,9 +90,9 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     defer free_owned_span(&device, &mip1_readback)!!;
 
     gpu::ShaderDesc sample_sd = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
+        .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_sd)!!;
+    gpu::ShaderDesc sample_shader = sample_sd;
     gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
@@ -262,9 +262,9 @@ fn void storage_write_direct_readback() @test {
     defer free_owned_span(&device, &readback)!!;
 
     gpu::ShaderDesc write_sd = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main",
+        .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderCode write_shader = gpu::prepare_shader_code(&write_sd)!!;
+    gpu::ShaderDesc write_shader = write_sd;
     gpu::ComputePipelineDesc write_pd = { .shader = write_shader };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pd)!!;
     defer gpu::destroy_pipeline(&device, write_pipe)!!;
@@ -487,9 +487,9 @@ fn void mip_subset_view_sampled() @test {
     defer free_owned_span(&device, &sample_out)!!;
 
     gpu::ShaderDesc sample_sd = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
+        .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_sd)!!;
+    gpu::ShaderDesc sample_shader = sample_sd;
     gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader };
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
