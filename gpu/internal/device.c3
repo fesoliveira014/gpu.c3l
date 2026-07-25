@@ -45,21 +45,6 @@ alias CmdCopyBufferToTextureFn @private = fn void? (CommandRecord*, BufferTextur
 alias CmdCopyTextureToBufferFn @private = fn void? (CommandRecord*, TextureBufferCopyDesc*);
 alias CmdBarrierFn @private          = fn void? (CommandRecord*, Barrier*);
 alias CmdTextureBarrierFn @private   = fn void? (CommandRecord*, TextureBarrier*);
-alias GetTextureFormatSupportFn @private = fn TextureFormatSupport? (Device*, Format);
-alias SupportsTextureDescFn @private     = fn bool? (Device*, TextureDesc*);
-alias GetTextureRequirementsFn @private  = fn TextureRequirements? (Device*, TextureDesc*);
-alias CreateTextureFn @private           = fn TextureHandle? (Device*, TextureDesc*);
-alias CreatePlacedTextureFn @private = fn TextureHandle? (
-    Device* device,
-    TextureDesc* desc,
-    GpuAllocation allocation,
-    usz offset,
-);
-alias CreateDedicatedTextureFn @private = fn DedicatedTexture? (
-    Device* device,
-    TextureDesc* desc,
-    AllocationDesc* allocation_desc,
-);
 alias CreateAttachmentViewFn @private = fn AttachmentViewHandle? (
     Device*,
     AttachmentViewDesc*,
@@ -69,7 +54,6 @@ alias DestroyAttachmentViewFn @private = fn void? (
     AttachmentViewHandle,
 );
 alias CreateTextureViewFn @private       = fn TextureView? (Device*, TextureHandle, TextureViewDesc*);
-alias DestroyTextureFn @private          = fn void? (Device*, TextureHandle);
 alias DestroyTextureViewFn @private      = fn void? (Device*, TextureView);
 alias CreateTextureViewsFn @private      = fn void? (Device*, TextureViewCreateDesc[], TextureView[]);
 alias InternSamplerFn @private            = fn SamplerIndex? (Device*, SamplerDesc*);
@@ -282,13 +266,6 @@ struct BackendVTable @private {
     PollCompletionFn          poll_completion;
     WaitCompletionFn          wait_completion;
     CommandOps*               command_ops;
-    GetTextureFormatSupportFn get_texture_format_support;
-    SupportsTextureDescFn     supports_texture_desc;
-    GetTextureRequirementsFn  get_texture_requirements;
-    CreateTextureFn           create_texture;
-    CreatePlacedTextureFn     create_placed_texture;
-    CreateDedicatedTextureFn  create_dedicated_texture;
-    DestroyTextureFn          destroy_texture;
     CreateAttachmentViewFn    create_attachment_view;
     DestroyAttachmentViewFn   destroy_attachment_view;
     CreateTextureViewFn       create_texture_view;

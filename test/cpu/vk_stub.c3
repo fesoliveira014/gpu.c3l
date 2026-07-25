@@ -40,6 +40,11 @@ struct VkDeviceState @public {
     uint                 allocation_flush_calls;
     uint                 allocation_invalidate_calls;
     uint                 allocation_visibility_entries;
+    uint                 texture_support_queries;
+    uint                 texture_requirements_calls;
+    uint                 texture_create_attempts;
+    uint                 texture_placed_calls;
+    uint                 texture_dedicated_calls;
     uint                 root_diagnostic_calls;
     ZString              root_diagnostic_operation;
     fault                root_diagnostic_fault;
@@ -64,6 +69,7 @@ struct VkDeviceState @public {
     bool                 publish_child_on_check;
     bool                 allocation_block_free;
     bool                 allocation_out_of_memory;
+    bool                 texture_out_of_memory;
     bool                 block_memory_stats;
     bool                 free_on_destroy;
 }
@@ -595,13 +601,40 @@ fn gpu::TextureCompatibility stub_texture_compatibility(ulong owner, uint value)
     return (gpu::TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
 }
 
+fn gpu::TextureFormatSupport? vk_get_texture_format_support(
+    VkDeviceState* state,
+    gpu::Format format,
+) {
+    (void)state;
+    if (format == gpu::Format.UNDEFINED) return {};
+    return {
+        .features = {
+            .sampled       = true,
+            .storage       = true,
+            .color_attach  = true,
+            .depth_attach  = true,
+            .transfer_src  = true,
+            .transfer_dst  = true,
+            .linear_filter = true,
+        },
+        .sample_counts = { .one = true },
+    };
+}
 
-fn gpu::TextureRequirements? get_stub_texture_requirements(
-    gpu::Device* device,
+fn bool? vk_supports_texture_desc(
+    VkDeviceState* state,
     gpu::TextureDesc* desc,
 ) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
-    if (state == null || !gpu::internal::texture_desc_valid(desc)) {
+    state.texture_support_queries++;
+    return gpu::internal::texture_desc_valid(desc);
+}
+
+fn gpu::TextureRequirements? vk_get_texture_requirements(
+    VkDeviceState* state,
+    gpu::TextureDesc* desc,
+) {
+    state.texture_requirements_calls++;
+    if (!gpu::internal::texture_desc_valid(desc)) {
         return gpu::INVALID_ARGUMENT~;
     }
     return {
@@ -617,12 +650,15 @@ fn gpu::TextureRequirements? get_stub_texture_requirements(
     };
 }
 
-fn gpu::TextureHandle? create_stub_texture(
-    gpu::Device* device,
+fn gpu::TextureHandle? vk_create_texture(
+    VkDeviceState* state,
     gpu::TextureDesc* desc,
 ) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
-    if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    state.texture_create_attempts++;
+    if (!gpu::internal::texture_desc_valid(desc)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (state.texture_out_of_memory) return gpu::OUT_OF_DEVICE_MEMORY~;
     if (state.texture_live) return gpu::INVALID_RESOURCE_STATE~;
     state.texture = {
         .owner      = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.TEXTURE),
@@ -633,29 +669,57 @@ fn gpu::TextureHandle? create_stub_texture(
     return state.texture;
 }
 
-fn gpu::TextureHandle? create_stub_placed_texture(
-    gpu::Device* device,
+fn gpu::TextureHandle? vk_create_placed_texture(
+    VkDeviceState* state,
     gpu::TextureDesc* desc,
-    gpu::GpuAllocation allocation,
+    gpu::GpuAllocation placement,
     usz offset,
 ) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
-    if (state == null || !state.allocation_live
-        || state.allocation != allocation || offset != 0) {
+    state.texture_placed_calls++;
+    gpu::TextureRequirements requirements =
+        vk_get_texture_requirements(state, desc)!;
+    if (!state.allocation_live
+        || state.allocation != placement
+        || state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE
+        || state.allocation_desc.size < requirements.size
+        || offset > state.allocation_desc.size - requirements.size) {
         return gpu::INVALID_ARGUMENT~;
     }
-    gpu::TextureHandle texture = create_stub_texture(device, desc)!;
+    gpu::TextureHandle texture = vk_create_texture(state, desc)!;
     state.allocation_has_texture_placement = true;
     return texture;
 }
 
-fn void? destroy_stub_texture(
-    gpu::Device* device,
+fn gpu::DedicatedTexture? vk_create_dedicated_texture(
+    VkDeviceState* state,
+    gpu::TextureDesc* desc,
+    gpu::AllocationDesc* allocation_desc,
+) {
+    state.texture_dedicated_calls++;
+    gpu::GpuAllocation allocation =
+        vk_allocate_memory(state, allocation_desc)!;
+    gpu::TextureHandle? texture = vk_create_placed_texture(
+        state:     state,
+        desc:      desc,
+        placement: allocation,
+        offset:    0,
+    );
+    if (catch err = texture) {
+        vk_free_allocation(state, allocation)!!;
+        return err~;
+    }
+    return {
+        .texture    = texture,
+        .allocation = allocation,
+    };
+}
+
+fn void? vk_destroy_texture(
+    VkDeviceState* state,
     gpu::TextureHandle texture,
 ) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
     texture_destroy_attempts++;
-    if (state == null || !state.texture_live) return gpu::INVALID_HANDLE~;
+    if (!state.texture_live) return gpu::INVALID_HANDLE~;
     if (state.texture != texture) return gpu::INVALID_HANDLE~;
     state.texture = {};
     state.texture_live = false;
@@ -698,13 +762,9 @@ fn void? destroy_stub_swapchain(
 }
 
 const gpu::internal::BackendVTable STUB_DEVICE_VTABLE @private = {
-    .get_texture_requirements = &get_stub_texture_requirements,
-    .create_texture           = &create_stub_texture,
-    .create_placed_texture    = &create_stub_placed_texture,
-    .destroy_texture          = &destroy_stub_texture,
-    .intern_sampler           = &intern_stub_sampler,
-    .create_swapchain         = &create_stub_swapchain,
-    .destroy_swapchain        = &destroy_stub_swapchain,
+    .intern_sampler    = &intern_stub_sampler,
+    .create_swapchain  = &create_stub_swapchain,
+    .destroy_swapchain = &destroy_stub_swapchain,
 };
 
 fn gpu::Device? stub_create_strict_disabled_device() {

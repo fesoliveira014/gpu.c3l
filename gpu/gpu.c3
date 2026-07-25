@@ -701,7 +701,7 @@ fn bool TextureCompatibility.is_valid(self) {
 fn TextureFormatSupport? get_texture_format_support(Device* device, Format format) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_texture_format_support(device, format);
+    return gpu::internal::vk::vk_get_texture_format_support(operation.state, format);
 }
 
 <* Return whether an exact descriptor is creatable by the backend and adapter.
@@ -711,7 +711,7 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     if (!gpu::internal::queue_access_is_valid(&operation, desc.access)) return false;
-    return operation.vtable.supports_texture_desc(device, desc);
+    return gpu::internal::vk::vk_supports_texture_desc(operation.state, desc);
 }
 
 <* Return exact storage requirements for a texture descriptor. *>
@@ -720,7 +720,7 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_queue_access(&operation, desc.access)!;
-    return operation.vtable.get_texture_requirements(device, desc);
+    return gpu::internal::vk::vk_get_texture_requirements(operation.state, desc);
 }
 
 <* The handle owns the image; shader access goes through a TextureIndex.
@@ -730,7 +730,8 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_queue_access(&operation, desc.access)!;
-    TextureHandle texture = operation.vtable.create_texture(device, desc)!;
+    TextureHandle texture =
+        gpu::internal::vk::vk_create_texture(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
     return texture;
 }
@@ -751,11 +752,11 @@ fn TextureHandle? create_placed_texture(
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    TextureHandle texture = operation.vtable.create_placed_texture(
-        device:     device,
-        desc:       desc,
-        allocation: allocation,
-        offset:     offset,
+    TextureHandle texture = gpu::internal::vk::vk_create_placed_texture(
+        state:     operation.state,
+        desc:      desc,
+        placement: allocation,
+        offset:    offset,
     )!;
     gpu::internal::retain_device_children(&operation);
     return texture;
@@ -790,8 +791,8 @@ fn DedicatedTexture? create_dedicated_texture(
         alignment:       &normalized.alignment,
         allow_dedicated: true,
     )!;
-    DedicatedTexture created = operation.vtable.create_dedicated_texture(
-        device,
+    DedicatedTexture created = gpu::internal::vk::vk_create_dedicated_texture(
+        operation.state,
         desc,
         &normalized,
     )!;
@@ -806,7 +807,7 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
-    operation.vtable.destroy_texture(device, texture)!;
+    gpu::internal::vk::vk_destroy_texture(operation.state, texture)!;
     gpu::internal::release_device_children(&operation);
 }
 
