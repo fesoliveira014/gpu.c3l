@@ -1031,10 +1031,10 @@ fn void? release_generated_scratch(
     )!;
     if (!gpu::internal::generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_release_generated_scratch(
-        operation.state,
-        allocator,
-        pipeline,
-        kind,
+        state:     operation.state,
+        allocator: allocator,
+        pipeline:  pipeline,
+        kind:      kind,
     );
 }
 
@@ -1479,24 +1479,6 @@ fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     return record.ops.begin_render_pass(record, desc);
 }
 
-<* Begin a render pass and set complete graphics state atomically.
-   Preconditions: a compatible graphics pipeline is bound, and the pass and
-   complete graphics state are valid.
-   Always checked: token phase, host-safe inputs, identities, and safe lowering.
-   FULL diagnostics: pipeline, pass, queue, attachment, and graphics-state misuse. *>
-fn void? cmd_begin_render_pass_with_state(
-    CommandList* commands,
-    RenderPassDesc* desc,
-    GraphicsState* state,
-) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    if (!gpu::internal::render_pass_desc_host_safe(desc)
-        || !gpu::internal::graphics_state_host_safe(state)) {
-        return INVALID_ARGUMENT~;
-    }
-    return record.ops.begin_render_pass_with_state(record, desc, state);
-}
-
 <* Replace complete graphics state before or during a pass.
    Preconditions: a compatible graphics pipeline is bound, the queue is
    graphics-capable, and all state values are valid.
@@ -1626,10 +1608,10 @@ fn void? wait_completion(
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, &device, point)!;
     return gpu::internal::vk::vk_wait_completion(
-        operation.state,
-        gpu::internal::completion_point_queue_id(point),
-        gpu::internal::completion_point_sequence(point),
-        timeout_ns,
+        state:      operation.state,
+        queue_id:   gpu::internal::completion_point_queue_id(point),
+        sequence:   gpu::internal::completion_point_sequence(point),
+        timeout_ns: timeout_ns,
     );
 }
 

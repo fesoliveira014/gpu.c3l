@@ -377,13 +377,6 @@ def valid_document() -> dict:
                         ("desc", "RenderPassDesc*"),
                     ),
                     api_function(
-                        "cmd_begin_render_pass_with_state",
-                        "void?",
-                        ("commands", "CommandList*"),
-                        ("desc", "RenderPassDesc*"),
-                        ("state", "GraphicsState*"),
-                    ),
-                    api_function(
                         "cmd_set_graphics_state",
                         "void?",
                         ("commands", "CommandList*"),
@@ -1783,13 +1776,20 @@ method gpu::Runtime.is_valid
                     "uid": "gpu::internal::vk::VkRuntimeState",
                     "visibility": "public",
                 },
+                {
+                    "name": "VkRuntimeState",
+                    "uid": "gpu::internal::vk::testing::VkRuntimeState",
+                    "visibility": "public",
+                },
             ],
         }
         self.assertEqual(
             check_public_api.validate_generated_backend_privacy(document),
             [
                 "generated gpu::internal::vk::create_native_device "
-                "must remain private"
+                "must remain private",
+                "generated gpu::internal::vk::testing::VkRuntimeState "
+                "must remain private",
             ],
         )
 
@@ -2457,14 +2457,13 @@ method gpu::Runtime.is_valid
             check_public_api.validate_document(document),
         )
 
+    def test_rejects_retired_combined_render_pass_state_operation(self) -> None:
         document = valid_document()
-        combined = next(
-            entry for entry in document["modules"]["gpu"]["functions"]
-            if entry["name"] == "cmd_begin_render_pass_with_state"
+        document["modules"]["gpu"]["functions"].append(
+            {"name": "cmd_begin_render_pass_with_state"}
         )
-        combined["members"][2]["name"] = "initial_state"
         self.assertIn(
-            "cmd_begin_render_pass_with_state has the wrong parameters",
+            "retired combined render-pass state operation",
             check_public_api.validate_document(document),
         )
 
@@ -2513,12 +2512,6 @@ method gpu::Runtime.is_valid
                 "cmd_begin_render_pass",
                 lambda function: function["members"].pop(),
                 "cmd_begin_render_pass has the wrong parameters",
-            ),
-            (
-                "combined begin state parameter",
-                "cmd_begin_render_pass_with_state",
-                lambda function: function["members"].pop(),
-                "cmd_begin_render_pass_with_state has the wrong parameters",
             ),
             (
                 "graphics state setter parameter",

@@ -121,25 +121,20 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
             == gpu::INVALID_ARGUMENT,
         "cmd_texture_barrier rejects a null barrier"
     );
-    gpu::GraphicsState graphics =
-        gpu::render_geometry_state(1, 1)!!;
     assert(
-        @catch(gpu::cmd_begin_render_pass_with_state(
+        @catch(gpu::cmd_begin_render_pass(
             &commands,
             (gpu::RenderPassDesc*)null,
-            &graphics,
         ))
             == gpu::INVALID_ARGUMENT,
         "cmd_begin_render_pass rejects a null descriptor"
     );
-    gpu::RenderPassDesc pass = { .width = 1, .height = 1 };
     assert(
-        @catch(gpu::cmd_begin_render_pass_with_state(
+        @catch(gpu::cmd_set_graphics_state(
             &commands,
-            &pass,
             (gpu::GraphicsState*)null,
         )) == gpu::INVALID_ARGUMENT,
-        "cmd_begin_render_pass rejects a null graphics state"
+        "cmd_set_graphics_state rejects a null graphics state"
     );
     assert(
         @catch(gpu::cmd_set_viewport(&commands, (gpu::Viewport*)null))

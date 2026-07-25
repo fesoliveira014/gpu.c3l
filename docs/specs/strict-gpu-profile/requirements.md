@@ -150,7 +150,12 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 
 ## Acceptance checks
 
-- Generated public documentation contains no `vk::`, `vma::`, Vulkan feature names, layouts, queue families, native result codes, or backend dispatch types.
+- Caller-supplied public descriptors and callable signatures contain no
+  `vk::`, `vma::`, Vulkan feature names, layouts, queue families, native result
+  codes, or backend dispatch types. Generated metadata may expose the exact
+  compiler-visible internal state declarations required for cross-module
+  implementation calls; those declarations are documented as unsupported and
+  are not consumer API.
 - `gpu::compat` extends `gpu`; it does not duplicate the runtime, device, queue, memory, texture, command, synchronization, render-pass, or swapchain APIs.
 - One private backend device serves every enabled capability group.
 - Import-only tests prove that all public modules are runtime-inert.

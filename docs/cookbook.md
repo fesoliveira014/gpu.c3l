@@ -69,7 +69,7 @@ transition's `before` value:
 
 ```c3
 gpu::TextureState storage_write = gpu::storage_at(
-    { .compute_shader = true },
+    { .compute = true },
     { .write = true },
 );
 gpu::TextureState sampled_read =
@@ -143,8 +143,9 @@ gpu::ColorTargetState[1] color_targets = {
     gpu::color_blend_disabled(),
 };
 state.color = { .targets = color_targets[..] };
+gpu::cmd_begin_render_pass(&cmd, &pass)!;
 gpu::cmd_bind_pipeline(&cmd, pipeline)!;
-gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
+gpu::cmd_set_graphics_state(&cmd, &state)!;
 gpu::cmd_draw_indirect(
     commands:      &cmd,
     vertex_root:   vroot,
@@ -351,8 +352,9 @@ state.depth = {
     .compare      = gpu::CompareOp.LESS,
 };
 // render_geometry_state leaves state.color empty for this depth-only pass.
+gpu::cmd_begin_render_pass(&cmd, &pass)!;
 gpu::cmd_bind_pipeline(&cmd, shadow_pipeline)!;
-gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
+gpu::cmd_set_graphics_state(&cmd, &state)!;
 ```
 
 ```glsl
@@ -396,7 +398,6 @@ gpu::ColorState opaque = gpu::uniform_color_state(
 gpu::GraphicsState state =
     gpu::render_geometry_state(render_width, render_height)!;
 state.color = opaque;
-gpu::cmd_bind_pipeline(&cmd, pipeline)!;
 ```
 
 The target array is caller-owned and may be reused after the call. Record a
@@ -427,7 +428,9 @@ gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, ... }
 // pipeline: .color_formats lists each target's format in the same order;
 // state.color supplies the matching blend equation and write mask;
 // frag writes locations 0..2.
-gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &state)!;
+gpu::cmd_begin_render_pass(&cmd, &pass)!;
+gpu::cmd_bind_pipeline(&cmd, pipeline)!;
+gpu::cmd_set_graphics_state(&cmd, &state)!;
 ```
 
 Create the depth attachment view the same way. After the covering completion

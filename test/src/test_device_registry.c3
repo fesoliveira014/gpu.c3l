@@ -195,17 +195,6 @@ fn void? command_pin_begin_render_pass(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? command_pin_begin_render_pass_with_state(
-    gpu::internal::vk::CommandRecord* record,
-    gpu::RenderPassDesc* desc,
-    gpu::GraphicsState* state,
-) {
-    (void)record;
-    (void)desc;
-    (void)state;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
-
 fn void? command_pin_set_viewport(
     gpu::internal::vk::CommandRecord* record,
     gpu::Viewport* viewport,
@@ -401,7 +390,6 @@ gpu::internal::vk::CommandOps command_pin_ops = {
     .set_graphics_state          = &command_pin_set_graphics_state,
     .dispatch                    = &command_pin_dispatch,
     .begin_render_pass           = &command_pin_begin_render_pass,
-    .begin_render_pass_with_state = &command_pin_begin_render_pass_with_state,
     .set_viewport                = &command_pin_set_viewport,
     .set_scissor                 = &command_pin_set_scissor,
     .end_render_pass             = &command_pin_end_render_pass,
@@ -974,6 +962,16 @@ fn void command_record_is_not_reused_before_discard_returns() @test {
     fixture.state.discard_release.store(true, AtomicOrdering.RELEASE);
     assert(worker.join()!! == 0 && !worker_args.failed,
         "the prior discard completes before record reuse");
+    gpu::internal::DeviceSlot* slot =
+        &gpu::internal::device_slots[device.index];
+    gpu::internal::DeviceSlotControl after_failed_begin =
+        (gpu::internal::DeviceSlotControl)slot.control.load(
+            AtomicOrdering.ACQUIRE,
+        );
+    assert(after_failed_begin.pins == 0,
+        "the failed begin cannot strand a device lifetime pin");
+    assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
+        "the failed begin cannot strand a command child");
     gpu::CommandList next = begin_command_pin(&device)!!;
     assert(busy == gpu::DEVICE_BUSY,
         "a discarding record remains unavailable");

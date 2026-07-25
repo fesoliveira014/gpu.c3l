@@ -89,8 +89,9 @@ fn void u16v_draw(
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     graphics.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     bind_test_graphics_pipeline(&cmd, pipeline);
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics)!!;
     gpu::cmd_draw_indexed(
         commands:       &cmd,
         vertex_root:    verts,

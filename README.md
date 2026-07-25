@@ -56,16 +56,16 @@ then free or reuse it.
   compile-time size/offset asserts) and the GLSL include, plus a CI drift gate
 - VMA-backed memory: independent `GpuAllocation` storage with checked spans,
   mapping/address queries, explicit transfers, and leak reporting
-- Explicit barrier model with tracked texture layouts; validation-clean is a
+- Explicit barrier model with caller-recorded texture layouts; validation-clean is a
   test gate across the whole suite
 - GPU-driven path: portable shared-root multi-draw indirect (+ count), plus
   capability-gated generated root records for per-work-item roots and arguments
 - Tiered threading: explicit caller-owned command allocators, thread-confined
   recording, thread-safe submission, and completion-driven command-buffer
   reclamation
-- Command-buffer graphics state: attachment-only render-pass begin, an atomic
-  begin-with-state convenience, and explicit complete/partial state that can be
-  reused across compatible pass boundaries
+- Command-buffer graphics state: attachment-only render-pass begin plus
+  explicit complete/partial state that can be reused across compatible pass
+  boundaries
 - Direct call-scoped shader descriptors with private pipeline identity,
   pipeline dedup cache + driver-cache save/load; swapchain with present-mode
   query; compare samplers, depth bias, MRT

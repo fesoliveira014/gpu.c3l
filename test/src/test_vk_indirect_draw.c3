@@ -557,8 +557,9 @@ fn void compute_generated_indexed_indirect_draw() @test {
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     graphics.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics)!!;
     gpu::cmd_draw_indexed_indirect(
         commands:      &cmd,
         vertex_root:   test_span_address(&device, verts_span),
@@ -1140,12 +1141,9 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     plain_graphics.color = { .targets = plain_color_targets[..] };
+    gpu::cmd_begin_render_pass(&commands, &plain_pass)!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
-    gpu::cmd_begin_render_pass_with_state(
-        &commands,
-        &plain_pass,
-        &plain_graphics,
-    )!!;
+    gpu::cmd_set_graphics_state(&commands, &plain_graphics)!!;
     gpu::internal::RecordingWorkCounters draw_work_before =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats draw_recording_before =
@@ -1240,12 +1238,9 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     indexed_graphics.color = { .targets = indexed_color_targets[..] };
+    gpu::cmd_begin_render_pass(&commands, &indexed_pass)!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
-    gpu::cmd_begin_render_pass_with_state(
-        &commands,
-        &indexed_pass,
-        &indexed_graphics,
-    )!!;
+    gpu::cmd_set_graphics_state(&commands, &indexed_graphics)!!;
     gpu::internal::RecordingWorkCounters indexed_work_before =
         vk::command_recording_work_counters(state);
     vk::CommandRecordingStats indexed_recording_before =
@@ -1520,8 +1515,9 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     graphics.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics)!!;
     gpu::cmd_draw_indirect(
         commands:      &cmd,
         vertex_root:   (gpu::GpuAddress)0,
@@ -1809,8 +1805,9 @@ fn void count_buffer_limits_draws() @test {
             .write_mask = gpu::COLOR_WRITE_ALL,
         }};
         graphics.color = { .targets = color_targets[..] };
+        gpu::cmd_begin_render_pass(&cmd, &pass)!!;
         bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-        gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+        gpu::cmd_set_graphics_state(&cmd, &graphics)!!;
         gpu::cmd_draw_indexed_indirect_count(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, verts_span),
@@ -1945,8 +1942,9 @@ fn void indirect_argument_validation() @test {
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     graphics.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics)!!;
     fault no_usage = @catch(gpu::cmd_draw_indirect(
         commands:      &cmd,
         vertex_root:   test_span_address(&device, verts_span),

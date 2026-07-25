@@ -18,6 +18,16 @@ Runtime and device registry entries store typed `VkRuntimeState*` and
 `VkDeviceState*` values. Public implementations pin or resolve those entries
 and call the corresponding private Vulkan functions directly.
 
+C3 0.8.0 has no package-private visibility. The four state declarations shared
+across `gpu::internal`, `gpu::internal::vk`, and the root implementation
+therefore use declaration-level `@public`: `VkRuntimeState`, `VkDeviceState`,
+`CommandRecord`, and `CommandOps`. Generated metadata can name these types and
+the library-owned command-token record pointer, but they are unsupported
+implementation details. Consumers must not import or name internal modules.
+
+There is no runtime backend plugin interface. Adding another backend is future
+source work, not a current stable private ABI.
+
 It imports:
 
 ```c3
@@ -613,13 +623,11 @@ vk::Pipeline
 ```
 
 Minimal dynamic-rendering begin emits only `vkCmdBeginRendering` and leaves
-command-buffer graphics state unchanged. The convenience begin follows it with
+command-buffer graphics state unchanged. `cmd_set_graphics_state` emits
 viewport, scissor, five raster commands, and three depth commands as one fixed
 ten-command prefix, then three color-array commands for a nonempty color
-domain. It does not compare against cached state or skip unchanged fields.
-`cmd_set_graphics_state` emits the same complete packet before or during a
-pass; the individual setters emit their corresponding subset in either
-recording phase.
+domain. It does not compare against cached state or skip unchanged fields. The
+individual setters emit their corresponding subset before or during a pass.
 
 Under `FULL`, state validation checks finite viewport values, selected-device
 viewport dimensions and coordinate bounds, independently bounded depth
@@ -825,9 +833,9 @@ cmd_texture_barrier -> vk::ImageMemoryBarrier2
 its producer and consumer stages; draw-argument and depth/stencil cache paths
 are enabled only by their hazard flags. Invalid,
 contradictory, consumer-incompatible, or queue-unsupported scopes fault before
-recording. Trusted entries retain safe lowering and command-state checks but
-treat detailed stage/hazard/queue misuse as a caller contract. Cross-queue
-ordering remains a submission completion-wait concern.
+recording under every policy. `FULL` additionally emits the detailed public
+contract diagnostic; `TRUSTED` returns the same fault without diagnostic work.
+Cross-queue ordering remains a submission completion-wait concern.
 
 A global barrier emits one `VkMemoryBarrier2` and no
 `VkImageMemoryBarrier2`. Because it has no texture identity or subresource
@@ -973,12 +981,11 @@ vkCmdBeginRendering
 publish active compatibility and retained references
 ```
 
-The convenience begin also rejects a host-unsafe state pointer and validates
-and lowers the complete packet before tracking or native mutation. After
-`vkCmdBeginRendering`, it emits the ten-command viewport/raster/depth prefix
-and three color-array commands for a nonempty color domain, then publishes FULL
-graphics-state initialization. Any preparation failure leaves command-list
-state, tracked references, and the native command buffer unchanged.
+Complete graphics state is a separate command after a compatible graphics
+pipeline is selected. If state preparation fails after
+`vkCmdBeginRendering`, the active pass and its attachment references remain
+published while no state command is emitted. The caller may retry the setter,
+end the pass, or discard the recording.
 
 Render pass end:
 
@@ -1118,5 +1125,5 @@ all native texture-layout consumers share the one explicit classic mapping
 offscreen dynamic rendering works
 SDL3 swapchain sample presents and resizes
 live resource leaks are reported
-no vk:: or vma:: type appears in public API signatures
+no vk:: or vma:: binding type appears in caller-supplied descriptors or callable signatures
 ```

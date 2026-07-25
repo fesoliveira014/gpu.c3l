@@ -125,8 +125,9 @@ fn double record_raster_matrix(
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     graphics.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     std::time::Clock start = std::time::clock::now();
     foreach (&raster : rasters) gpu::cmd_set_raster_state(&commands, raster)!!;
     long elapsed_ns = (long)start.to_now();

@@ -430,8 +430,9 @@ fn void storage_write_then_fragment_sample() @test {
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     graphics.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     bind_test_graphics_pipeline(&commands, graphics_pipeline);
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    test_span_address(&device, vertices_span),

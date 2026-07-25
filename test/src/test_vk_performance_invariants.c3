@@ -314,8 +314,9 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         },
     };
     gpu::cmd_texture_barrier(&warmup, &transition)!!;
+    gpu::cmd_begin_render_pass(&warmup, &pass)!!;
     bind_test_graphics_pipeline(&warmup, pipeline);
-    gpu::cmd_begin_render_pass_with_state(&warmup, &pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(&warmup, &graphics)!!;
     gpu::cmd_draw(
         commands:       &warmup,
         vertex_root:    (gpu::GpuAddress)1,
@@ -410,41 +411,6 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     assert(after.command_buffer_resets == before.command_buffer_resets + 1,
         "warm render recording resets its reusable command buffer");
     gpu::discard_executable_commands(&executable)!!;
-
-    gpu::internal::RecordingWorkCounters combined_before =
-        vk::command_recording_work_counters(state);
-    ulong combined_shader_modules_before =
-        vk::pipeline_shader_module_create_count(state);
-    ulong combined_pipelines_before = vk::pipeline_native_create_count(state);
-    gpu::CommandList combined = gpu::begin_commands(&allocator)!!;
-    gpu::cmd_bind_pipeline(&combined, pipeline)!!;
-    gpu::reset_command_resolution_stats();
-    gpu::cmd_begin_render_pass_with_state(
-        &combined,
-        &pass,
-        &graphics,
-    )!!;
-    gpu::CommandResolutionStats combined_stats =
-        gpu::command_resolution_stats();
-    assert_warm_command_resolution(combined_stats, 1);
-    assert(combined_stats.native_commands
-            == PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS
-                + PERFORMANCE_BEGIN_NATIVE_COMMANDS,
-        "combined begin emits exact complete-state and pass native work");
-    gpu::cmd_end_render_pass(&combined)!!;
-    gpu::ExecutableCommandList combined_executable =
-        gpu::end_commands(&combined)!!;
-    gpu::internal::RecordingWorkCounters combined_after =
-        vk::command_recording_work_counters(state);
-    assert_zero_warm_creation_work(
-        before:                combined_before,
-        after:                 combined_after,
-        shader_modules_before: combined_shader_modules_before,
-        shader_modules_after:  vk::pipeline_shader_module_create_count(state),
-        pipelines_before:      combined_pipelines_before,
-        pipelines_after:       vk::pipeline_native_create_count(state),
-    );
-    gpu::discard_executable_commands(&combined_executable)!!;
 
     uint[3] pass_counts = { 2, 16, 256 };
     foreach (pass_count : pass_counts) {

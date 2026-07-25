@@ -57,11 +57,6 @@ alias CmdBeginRenderPassFn @private = fn void? (
     CommandRecord*,
     gpu::RenderPassDesc*,
 );
-alias CmdBeginRenderPassWithStateFn @private = fn void? (
-    CommandRecord*,
-    gpu::RenderPassDesc*,
-    gpu::GraphicsState*,
-);
 alias CmdSetViewportFn @private = fn void? (
     CommandRecord*,
     gpu::Viewport*,
@@ -173,7 +168,6 @@ struct CommandOps @public {
     CmdSetColorStateFn            set_color_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
-    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;
     CmdEndRenderPassFn            end_render_pass;
@@ -837,6 +831,22 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
         adapter_count: state.adapter_count,
     )!;
     state.runtime = runtime;
+    if (desc.debug_callback != null) {
+        gpu::DebugMessage message = {
+            .severity     = gpu::DebugMessageSeverity.INFO,
+            .category     = {
+                .backend = true,
+                .general = true,
+            },
+            .operation    = "create_runtime",
+            .backend_text = "stub runtime initialized",
+        };
+        gpu::internal::dispatch_debug_message(
+            desc.debug_callback,
+            desc.debug_user_data,
+            &message,
+        );
+    }
     return runtime;
 }
 
@@ -1363,9 +1373,8 @@ fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
 ) {
-    if (runtime_state == null || adapter_index >= runtime_state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+    if (adapter_index >= runtime_state.adapter_count) return gpu::INVALID_HANDLE~;
     if (!configured_device_baseline_support) return gpu::UNSUPPORTED_FEATURE~;
 }
 

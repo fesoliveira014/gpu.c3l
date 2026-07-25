@@ -69,9 +69,7 @@ struct DeviceCreationProbe {
     uint                     rollback_count;
     DeviceCreateHook         native_device_create_hook @if(env::TESTING);
     void*                    native_device_create_user_data @if(env::TESTING);
-    bool                     fail_native_device_creation @if(env::TESTING);
     bool                     dynamic_color_support_override @if(env::TESTING);
-    bool                     dynamic_color_support_available @if(env::TESTING);
     bool                     dynamic_color_feature_chained @if(env::TESTING);
     uint                     dynamic_color_blend_enable @if(env::TESTING);
     uint                     dynamic_color_blend_equation @if(env::TESTING);
@@ -129,7 +127,7 @@ struct VkDeviceState @public {
     ulong                      max_timeline_semaphore_value_difference;
     usz                        non_coherent_atom_size;
     DeviceValidationPolicy     validation_policy;
-    CommandOps*           command_ops;
+    CommandOps*                command_ops;
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;
@@ -377,7 +375,6 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .set_color_state             = &trusted_set_color_state,
     .dispatch                    = &trusted_dispatch,
     .begin_render_pass           = &trusted_begin_render_pass,
-    .begin_render_pass_with_state = &trusted_begin_render_pass_with_state,
     .set_viewport                = &trusted_set_viewport,
     .set_scissor                 = &trusted_set_scissor,
     .end_render_pass             = &vk_cmd_end_render_pass,
@@ -408,7 +405,6 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .set_color_state             = &full_set_color_state,
     .dispatch                    = &full_dispatch,
     .begin_render_pass           = &full_begin_render_pass,
-    .begin_render_pass_with_state = &full_begin_render_pass_with_state,
     .set_viewport                = &full_set_viewport,
     .set_scissor                 = &full_set_scissor,
     .end_render_pass             = &vk_cmd_end_render_pass,
@@ -511,10 +507,8 @@ fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
 ) {
-    if (runtime_state == null
-        || adapter_index >= runtime_state.adapters.len) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+    if (adapter_index >= runtime_state.adapters.len) return gpu::INVALID_HANDLE~;
 
     VkDeviceConfig desc = runtime_device_config(runtime_state);
     VkShaderHeapState shader_heap = resolve_shader_heap_state(&desc)!;
@@ -543,13 +537,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     ShaderHeapSupport* shader_heap_support = null,
     DeviceCreationProbe* probe = null,
 ) @private {
-    $if env::TESTING:
-        if (probe != null
-            && probe.dynamic_color_support_override
-            && !probe.dynamic_color_support_available) {
-            return gpu::UNSUPPORTED_FEATURE~;
-        }
-    $endif
     VkDeviceState* state = mem::new(VkDeviceState);
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     defer catch {
@@ -648,6 +635,16 @@ fn gpu::Device? create_vk_device_from_runtime(
     )!;
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         query_dynamic_raster_properties(state.physical_device);
+    $if env::TESTING:
+        if (probe != null && probe.dynamic_color_support_override) {
+            dynamic_color_features.extended_dynamic_state3color_blend_enable =
+                vk::FALSE;
+            dynamic_color_features.extended_dynamic_state3color_blend_equation =
+                vk::FALSE;
+            dynamic_color_features.extended_dynamic_state3color_write_mask =
+                vk::FALSE;
+        }
+    $endif
     check_required_features(
         base:               &features2.features,
         v11:                &features11,
@@ -1183,7 +1180,8 @@ fn void? validate_shader_heap_support(
         default:
             return gpu::BACKEND_ERROR~;
     }
-    if (device.debug_callback == null) {
+    if (device.debug_callback == null
+        && contract_uses_full_validation(device.validation_policy)) {
         HeapDescriptorTotals totals = descriptor_heap_totals(
             state.texture_capacity,
             state.sampler_capacity,
@@ -1291,7 +1289,7 @@ fn bool candidate_satisfies(
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(candidate, &props);
     if (props.api_version < API_VERSION_1_3) return false;
-    if (catch queue_fault = select_queue_families(candidate)) return false;
+    if (catch select_queue_families(candidate)) return false;
     if (catch check_required_dynamic_state3_extension(candidate)) return false;
 
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color_features =
@@ -1505,9 +1503,6 @@ fn void? create_logical_device_with_queue_infos(
                 dynamic_color_features.extended_dynamic_state3color_blend_equation;
             probe.dynamic_color_write_mask =
                 dynamic_color_features.extended_dynamic_state3color_write_mask;
-            if (probe.fail_native_device_creation) {
-                return gpu::BACKEND_ERROR~;
-            }
         }
     $endif
 

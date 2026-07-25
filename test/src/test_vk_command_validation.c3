@@ -38,6 +38,12 @@ struct SyncDiagnosticCapture {
     bool                   invariant_matches;
 }
 
+struct BarrierEmitCapture {
+    uint calls;
+    uint memory_barriers;
+    uint image_barriers;
+}
+
 fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
     if (message.operation == null) return;
     SyncDiagnosticCapture* capture = (SyncDiagnosticCapture*)user_data;
@@ -58,6 +64,16 @@ fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
         && message.rejected_field.str_view() == capture.expected_rejected_field.str_view();
     capture.invariant_matches = message.invariant != null
         && message.invariant.str_view() == capture.expected_invariant.str_view();
+}
+
+fn void capture_barrier_emit(
+    void* user_data,
+    vk::DependencyInfo* dependency,
+) {
+    BarrierEmitCapture* capture = (BarrierEmitCapture*)user_data;
+    capture.calls++;
+    capture.memory_barriers = dependency.memory_barrier_count;
+    capture.image_barriers = dependency.image_memory_barrier_count;
 }
 
 fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
@@ -89,6 +105,49 @@ fn void texture_copies_use_transfer_optimal_layouts() @test {
         == vk::ImageLayout.TRANSFER_DST_OPTIMAL);
     assert(vk::texture_copy_layout(&texture, false)
         == vk::ImageLayout.TRANSFER_SRC_OPTIMAL);
+}
+
+fn void global_barrier_emits_no_texture_barrier() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    BarrierEmitCapture capture;
+    vk::set_barrier_emit_hook(state, &capture_barrier_emit, &capture);
+    defer vk::set_barrier_emit_hook(state, null, null);
+    vk::reset_barrier_work_counters(state);
+    gpu::Barrier dependency = {
+        .before = { .compute },
+        .after  = { .compute },
+    };
+    gpu::cmd_barrier(&commands, &dependency)!!;
+    vk::BarrierWorkCounters counters = vk::barrier_work_counters(state);
+
+    assert(
+        capture.calls == 1
+            && capture.memory_barriers == 1
+            && capture.image_barriers == 0
+            && counters.native_memory_emissions == 1
+            && counters.native_image_emissions == 0,
+        "the submitted dependency contains one memory barrier and no image barrier"
+    );
+    assert(
+        counters.texture_helper_calls == 0
+            && counters.texture_handle_resolutions == 0,
+        "a global barrier performs no texture inference or resolution"
+    );
 }
 
 fn void reference_capacity_preflight_counts_unique_identities() @test {
@@ -193,7 +252,7 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
         && destination_slot.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == destination_references_before,
-        "capacity preflight performs no transient retain or release");
+        "capacity preflight leaves both retained counters unchanged");
     assert(gpu::command_resolution_stats().native_commands == 0,
         "capacity preflight rejects before the native copy command");
     assert(commands.is_valid() && slot.live_recordings == 1
@@ -781,13 +840,7 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
         .width  = 2,
         .height = 2,
     };
-    gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
-    assert(@catch(gpu::cmd_begin_render_pass_with_state(
-            &commands,
-            &pass,
-            &graphics_state,
-        ))
+    assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
         == gpu::INVALID_ARGUMENT,
         "a later attachment outside the recording role rejects the whole pass");
     assert(record.scratch.reference_count == references_before,
@@ -931,8 +984,9 @@ fn void indexed_draw_misaligned_offset_faults() @test {
         gpu::color_blend_disabled(),
     };
     graphics_state.color.targets = color_targets[..];
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     fault misaligned_fault = @catch(gpu::cmd_draw_indexed(
         commands:      &cmd,
         vertex_root:   val_span_address(&device, verts_span),
@@ -1010,8 +1064,9 @@ fn void draw_with_compute_pipeline_faults() @test {
         gpu::color_blend_disabled(),
     };
     graphics_state.color.targets = color_targets[..];
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, draw.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     gpu::cmd_bind_pipeline(&cmd, compute)!!;
     fault wrong_kind = @catch(gpu::cmd_draw(
         commands:      &cmd,
@@ -1165,7 +1220,8 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     };
     graphics_state.color.targets = color_targets[..];
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     gpu::reset_command_resolution_stats();
 
     gpu::cmd_draw(
@@ -1221,8 +1277,9 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     assert_warm_command_resolution(gpu::command_resolution_stats(), 5);
     gpu::cmd_end_render_pass(&commands)!!;
 
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     gpu::cmd_draw(
         commands:      &commands,
         vertex_root:   root,
@@ -1541,8 +1598,9 @@ fn void valid_copy_fill_and_draw_succeed() @test {
         gpu::color_blend_disabled(),
     };
     graphics_state.color.targets = color_targets[..];
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     gpu::cmd_draw(&cmd, val_span_address(&device, verts_span), val_span_address(&device, frag_span), 3, 1)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
@@ -1679,8 +1737,9 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     graphics_state.color.targets = color_targets[..];
 
     gpu::GpuSpan index_span_stub = {};
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     fault beyond = @catch(gpu::cmd_draw_indexed_indirect_count(
         commands:       &cmd,
         vertex_root:    (gpu::GpuAddress)1,
@@ -1769,8 +1828,9 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     state.caps.max_draw_indirect_count = 1;
     defer state.caps.max_draw_indirect_count = original_limit;
 
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     gpu::cmd_draw_indirect(
         commands:      &cmd,
         vertex_root:   (gpu::GpuAddress)1,
@@ -1898,8 +1958,9 @@ fn void generated_work_commands_require_capability() @test {
         gpu::color_blend_disabled(),
     };
     graphics_state.color.targets = color_targets[..];
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     fault draw_unsupported = @catch(gpu::cmd_draw_generated(
         commands:      &commands,
         records:       records.span,
@@ -2094,8 +2155,9 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
         gpu::color_blend_disabled(),
     };
     graphics_state.color.targets = color_targets[..];
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     fault beyond = @catch(gpu::cmd_draw_indexed(
         commands:       &cmd,
         vertex_root:    (gpu::GpuAddress)1,
@@ -2148,8 +2210,9 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
         gpu::color_blend_disabled(),
     };
     graphics_state.color.targets = color_targets[..];
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     gpu::cmd_draw_indexed(
         commands:       &cmd,
         vertex_root:    (gpu::GpuAddress)1,
@@ -2650,13 +2713,8 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
 
     gpu::ColorTargetDesc[1] large_color = { { .view = large_view } };
     gpu::RenderPassDesc oversized = { .colors = large_color[..], .width = 17, .height = 16 };
-    gpu::GraphicsState oversized_state =
-        gpu::render_geometry_state(oversized.width, oversized.height)!!;
-    assert(@catch(gpu::cmd_begin_render_pass_with_state(
-            &cmd,
-            &oversized,
-            &oversized_state,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &oversized))
+        == gpu::INVALID_ARGUMENT,
         "render area wider than mip zero faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "oversized color target records no pass");
 
@@ -2665,13 +2723,8 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         { .view = small_view },
     };
     gpu::RenderPassDesc mixed = { .colors = mixed_colors[..], .width = 16, .height = 16 };
-    gpu::GraphicsState mixed_state =
-        gpu::render_geometry_state(mixed.width, mixed.height)!!;
-    assert(@catch(gpu::cmd_begin_render_pass_with_state(
-            &cmd,
-            &mixed,
-            &mixed_state,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &mixed))
+        == gpu::INVALID_ARGUMENT,
         "one mixed-size attachment that cannot cover the pass faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "mixed-size rejection records no pass");
 
@@ -2682,16 +2735,8 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         { .view = stale_view },
     };
     gpu::RenderPassDesc invalid_later_pass = { .colors = invalid_later[..], .width = 4, .height = 4 };
-    gpu::GraphicsState invalid_later_state =
-        gpu::render_geometry_state(
-            invalid_later_pass.width,
-            invalid_later_pass.height,
-        )!!;
-    assert(@catch(gpu::cmd_begin_render_pass_with_state(
-            &cmd,
-            &invalid_later_pass,
-            &invalid_later_state,
-        )) == gpu::INVALID_HANDLE,
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &invalid_later_pass))
+        == gpu::INVALID_HANDLE,
         "a stale later attachment faults INVALID_HANDLE before recording");
     assert(record.scratch.reference_count == references_before,
         "later attachment lookup failure rolls back the earlier reference");
@@ -2699,16 +2744,8 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
 
     gpu::ColorTargetDesc[1] mip_color = { { .view = large_mip_one } };
     gpu::RenderPassDesc mip_oversized = { .colors = mip_color[..], .width = 9, .height = 8 };
-    gpu::GraphicsState mip_oversized_state =
-        gpu::render_geometry_state(
-            mip_oversized.width,
-            mip_oversized.height,
-        )!!;
-    assert(@catch(gpu::cmd_begin_render_pass_with_state(
-            &cmd,
-            &mip_oversized,
-            &mip_oversized_state,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &mip_oversized))
+        == gpu::INVALID_ARGUMENT,
         "render area wider than nonzero mip faults INVALID_ARGUMENT");
 
     gpu::RenderPassDesc mip_exact = { .colors = mip_color[..], .width = 8, .height = 8 };
@@ -2717,16 +2754,8 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
 
     gpu::DepthTargetDesc depth_target = { .view = depth_view };
     gpu::RenderPassDesc depth_oversized = { .depth = &depth_target, .width = 9, .height = 8 };
-    gpu::GraphicsState depth_oversized_state =
-        gpu::render_geometry_state(
-            depth_oversized.width,
-            depth_oversized.height,
-        )!!;
-    assert(@catch(gpu::cmd_begin_render_pass_with_state(
-            &cmd,
-            &depth_oversized,
-            &depth_oversized_state,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &depth_oversized))
+        == gpu::INVALID_ARGUMENT,
         "render area wider than depth mip zero faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "oversized depth target records no pass");
 
@@ -2752,16 +2781,8 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
 
     gpu::ColorTargetDesc[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
     gpu::RenderPassDesc library_limit = { .colors = too_many[..], .width = 1, .height = 1 };
-    gpu::GraphicsState library_limit_state =
-        gpu::render_geometry_state(
-            library_limit.width,
-            library_limit.height,
-        )!!;
-    assert(@catch(gpu::cmd_begin_render_pass_with_state(
-            &cmd,
-            &library_limit,
-            &library_limit_state,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &library_limit))
+        == gpu::INVALID_ARGUMENT,
         "color count above MAX_COLOR_ATTACHMENTS faults before invalid handle lookup");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "library-limit rejection records no pass");
 
@@ -2769,16 +2790,8 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     state.caps.max_color_attachments = 1;
     gpu::ColorTargetDesc[2] device_excess;
     gpu::RenderPassDesc selected_limit = { .colors = device_excess[..], .width = 1, .height = 1 };
-    gpu::GraphicsState selected_limit_state =
-        gpu::render_geometry_state(
-            selected_limit.width,
-            selected_limit.height,
-        )!!;
-    assert(@catch(gpu::cmd_begin_render_pass_with_state(
-            &cmd,
-            &selected_limit,
-            &selected_limit_state,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &selected_limit))
+        == gpu::INVALID_ARGUMENT,
         "color count above selected device limit faults before invalid handle lookup");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "device-limit rejection records no pass");
     state.caps.max_color_attachments = device_limit;
@@ -3365,20 +3378,14 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     usage_slot.usage.color_attach = false;
     reset_sync_diagnostic(
         capture:        &capture,
-        operation:      "cmd_begin_render_pass_with_state",
+        operation:      "cmd_begin_render_pass",
         debug_name:     "usage_target",
         rejected_field: "TextureUsage.color_attach",
         invariant:      "color attachment must include color_attach usage",
     );
-    gpu::GraphicsState usage_state =
-        gpu::render_geometry_state(
-            usage_pass.width,
-            usage_pass.height,
-        )!!;
-    fault usage_fault = @catch(gpu::cmd_begin_render_pass_with_state(
+    fault usage_fault = @catch(gpu::cmd_begin_render_pass(
         &commands,
         &usage_pass,
-        &usage_state,
     ));
     assert(usage_fault == gpu::INVALID_ARGUMENT, "attachment usage fault is unchanged");
     assert_sync_contract_diagnostic(
@@ -3425,20 +3432,14 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::RenderPassDesc too_tall = { .colors = colors[..], .width = 8, .height = 9 };
     reset_sync_diagnostic(
         capture:        &capture,
-        operation:      "cmd_begin_render_pass_with_state",
+        operation:      "cmd_begin_render_pass",
         debug_name:     "color_target",
         rejected_field: "RenderPassDesc.height",
         invariant:      "render area must fit every color attachment mip",
     );
-    gpu::GraphicsState too_tall_state =
-        gpu::render_geometry_state(
-            too_tall.width,
-            too_tall.height,
-        )!!;
-    fault height_fault = @catch(gpu::cmd_begin_render_pass_with_state(
+    fault height_fault = @catch(gpu::cmd_begin_render_pass(
         &commands,
         &too_tall,
-        &too_tall_state,
     ));
     assert(height_fault == gpu::INVALID_ARGUMENT, "attachment height-only extent fault is unchanged");
     assert_sync_contract_diagnostic(
@@ -3455,12 +3456,9 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         gpu::color_blend_disabled(),
     };
     graphics_state.color.targets = color_targets[..];
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(
-        &commands,
-        &pass,
-        &graphics_state,
-    )!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     gpu::BufferCopyDesc state_copy = {
         .src = dst.span.checked_subspan(0, 16)!!,
         .dst = dst.span.checked_subspan(16, 16)!!,

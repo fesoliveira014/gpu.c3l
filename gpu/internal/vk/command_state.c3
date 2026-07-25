@@ -6,12 +6,12 @@ import vk;
 import std::core::mem;
 import std::core::env;
 
-alias CmdCopyBufferFn @private       = fn void? (CommandRecord*, gpu::BufferCopyDesc*);
-alias CmdFillBufferFn @private       = fn void? (CommandRecord*, gpu::GpuSpan, uint);
-alias CmdCopyBufferToTextureFn @private = fn void? (CommandRecord*, gpu::BufferTextureCopyDesc*);
-alias CmdCopyTextureToBufferFn @private = fn void? (CommandRecord*, gpu::TextureBufferCopyDesc*);
-alias CmdBarrierFn @private          = fn void? (CommandRecord*, gpu::Barrier*);
-alias CmdTextureBarrierFn @private   = fn void? (CommandRecord*, gpu::TextureBarrier*);
+alias CmdCopyBufferFn @private               = fn void? (CommandRecord*, gpu::BufferCopyDesc*);
+alias CmdFillBufferFn @private               = fn void? (CommandRecord*, gpu::GpuSpan, uint);
+alias CmdCopyBufferToTextureFn @private      = fn void? (CommandRecord*, gpu::BufferTextureCopyDesc*);
+alias CmdCopyTextureToBufferFn @private      = fn void? (CommandRecord*, gpu::TextureBufferCopyDesc*);
+alias CmdBarrierFn @private                  = fn void? (CommandRecord*, gpu::Barrier*);
+alias CmdTextureBarrierFn @private           = fn void? (CommandRecord*, gpu::TextureBarrier*);
 alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, gpu::PipelineHandle);
 alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, gpu::DepthState*);
 alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, gpu::DynamicRasterState*);
@@ -19,7 +19,6 @@ alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, gpu::Gr
 alias CmdSetColorStateFn @private            = fn void? (CommandRecord*, gpu::ColorState*);
 alias CmdDispatchFn @private                 = fn void? (CommandRecord*, gpu::GpuAddress, gpu::Vec3u);
 alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, gpu::RenderPassDesc*);
-alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandRecord*, gpu::RenderPassDesc*, gpu::GraphicsState*);
 alias CmdSetViewportFn @private              = fn void? (CommandRecord*, gpu::Viewport*);
 alias CmdSetScissorFn @private               = fn void? (CommandRecord*, gpu::ScissorRect*);
 alias CmdEndRenderPassFn @private            = fn void? (CommandRecord*);
@@ -136,27 +135,27 @@ struct DescriptorHeapCommandBinding {
 }
 
 struct CommandRecord @public {
-    CommandOps*                  ops;
-    VkDeviceState*               device_state;
-    gpu::Device                  device;
+    CommandOps*                      ops;
+    VkDeviceState*                   device_state;
+    gpu::Device                      device;
     gpu::internal::CommandListHandle identity;
-    gpu::internal::CommandState  state;
-    vk::CommandBuffer            command_buffer;
-    gpu::CommandAllocatorHandle  allocator;
-    uint                         allocator_buffer;
-    gpu::Queue                   queue;
-    ulong                        submit_visit_epoch;
-    gpu::CompletionPoint         submitted_completion;
-    CommandRecord*               next_submitted;
-    RenderCompatibility          active_render;
-    bool                         graphics_state_initialized;
-    bool                         color_state_initialized;
-    ColorCompatibility           color_state;
-    BoundPipeline                logical_pipeline;
-    NativePipelineBinding        native_graphics_pipeline;
-    NativePipelineBinding        native_compute_pipeline;
-    DescriptorHeapCommandBinding descriptor_heap_binding;
-    CommandScratch*              scratch;
+    gpu::internal::CommandState      state;
+    vk::CommandBuffer                command_buffer;
+    gpu::CommandAllocatorHandle      allocator;
+    uint                             allocator_buffer;
+    gpu::Queue                       queue;
+    ulong                            submit_visit_epoch;
+    gpu::CompletionPoint             submitted_completion;
+    CommandRecord*                   next_submitted;
+    RenderCompatibility              active_render;
+    bool                             graphics_state_initialized;
+    bool                             color_state_initialized;
+    ColorCompatibility               color_state;
+    BoundPipeline                    logical_pipeline;
+    NativePipelineBinding            native_graphics_pipeline;
+    NativePipelineBinding            native_compute_pipeline;
+    DescriptorHeapCommandBinding     descriptor_heap_binding;
+    CommandScratch*                  scratch;
 }
 
 struct CommandOps @public {
@@ -173,7 +172,6 @@ struct CommandOps @public {
     CmdSetColorStateFn            set_color_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
-    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;
     CmdEndRenderPassFn            end_render_pass;

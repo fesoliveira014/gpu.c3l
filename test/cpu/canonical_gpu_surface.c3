@@ -283,11 +283,6 @@ fn void pin_commands_and_completion() {
         max_dispatch_count: 1,
     );
     (void)gpu::cmd_begin_render_pass(&commands, &render_pass);
-    (void)gpu::cmd_begin_render_pass_with_state(
-        &commands,
-        &render_pass,
-        &graphics_state,
-    );
     (void)gpu::cmd_set_graphics_state(&commands, &graphics_state);
     (void)gpu::cmd_set_color_state(&commands, &color_state);
     (void)gpu::cmd_set_depth_state(&commands, &depth);

@@ -165,7 +165,7 @@ A live device slot owns:
 - its runtime and adapter identity;
 - immutable enabled capabilities and limits;
 - backend state;
-- the shared backend dispatch table;
+- typed private Vulkan state and the shared native device dispatch table;
 - optional compatibility dispatch and state;
 - queue slots;
 - queue-owned completion state;
@@ -280,7 +280,7 @@ Samples may contain local allocator utilities until that extension exists.
 
 ## Texture and sampler access
 
-Strict devices initialize one semantic texture heap and one sampler heap. Public configuration requests capacities and shader-visible index widths. The backend chooses descriptor indexing, descriptor buffers, descriptor heaps, or another mechanism that satisfies the same contract.
+Strict devices initialize one semantic texture heap and one sampler heap. Public configuration requests capacities and shader-visible index widths. The Vulkan backend uses one update-after-bind descriptor-indexing set and rejects adapters or configured capacities that cannot satisfy it.
 
 A texture-view allocation returns:
 
@@ -432,7 +432,7 @@ Examples:
 | Public semantic | Possible Vulkan implementation |
 |---|---|
 | Root GPU addresses | Vulkan buffer device address |
-| Global texture and sampler heaps | descriptor indexing, descriptor buffers, or descriptor heaps |
+| Global texture and sampler heaps | one update-after-bind descriptor-indexing set |
 | Global memory barriers | synchronization2 |
 | Texture transitions | image memory barriers with private layouts |
 | Dynamic render passes | dynamic rendering or cached legacy render passes |
@@ -442,7 +442,9 @@ Examples:
 
 No specific extension name is part of the public contract. The backend can use a promoted core feature, an extension variant, or another exact implementation.
 
-The device owns one shared backend state and common dispatch table. Compatibility adds an optional subtable and state block only when requested. It never owns a parallel backend.
+The device owns one typed private Vulkan state and shared native device
+dispatch table. Compatibility adds an optional subtable and state block only
+when requested. It never owns a parallel backend.
 
 ## Capabilities, limits, and diagnostics
 

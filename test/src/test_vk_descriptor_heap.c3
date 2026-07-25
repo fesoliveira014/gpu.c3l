@@ -125,29 +125,6 @@ fn void texture_descriptors_use_classic_layouts() @test {
     );
 }
 
-fn void descriptor_heap_binding_invalidation_is_scoped() @test {
-    gpu::internal::vk::CommandRecord record = {
-        .descriptor_heap_binding = {
-            .graphics_set_bound = true,
-            .compute_set_bound  = true,
-        },
-    };
-
-    gpu::internal::vk::invalidate_descriptor_heap_bind_point(
-        &record,
-        vk::PipelineBindPoint.GRAPHICS,
-    );
-    assert(!record.descriptor_heap_binding.graphics_set_bound,
-        "graphics invalidation clears only graphics state");
-    assert(record.descriptor_heap_binding.compute_set_bound,
-        "graphics invalidation preserves compute state");
-
-    gpu::internal::vk::invalidate_descriptor_heap_binding(&record);
-    assert(!record.descriptor_heap_binding.graphics_set_bound
-        && !record.descriptor_heap_binding.compute_set_bound,
-        "full invalidation clears every descriptor heap binding");
-}
-
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
