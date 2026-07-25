@@ -46,6 +46,10 @@ are rejected. Do not compare those timings with the release baseline. The
 validation layer must recognize every enabled Vulkan extension; otherwise its
 diagnostics invalidate the timing run. `command_record_bench` always uses its
 four explicit contract/layer rows, even during this separate report.
+Those four rows run on every invocation, so
+`VK_LAYER_KHRONOS_validation` must be installed even when `--validation` is
+omitted. The layers-on rows provide deterministic contract evidence but do not
+participate in release timing thresholds.
 `command_path_baseline_bench` likewise uses the same trusted/full, layers-off
 matrix.
 

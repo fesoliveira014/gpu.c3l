@@ -450,6 +450,8 @@ fn void exercise_policy_matrix_render(
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     gpu::ColorState color = { .targets = color_targets[..] };
+    ulong native_before_color =
+        gpu::command_resolution_stats().native_commands;
     if (state.caps.dynamic_color_state) {
         gpu::cmd_set_color_state(&commands, &color)!!;
     } else {
@@ -457,6 +459,12 @@ fn void exercise_policy_matrix_render(
             == gpu::UNSUPPORTED_FEATURE,
             "unsupported dynamic color still dispatches through the selected table");
     }
+    ulong color_native_commands =
+        gpu::command_resolution_stats().native_commands
+        - native_before_color;
+    assert(color_native_commands
+            == (ulong)(state.caps.dynamic_color_state ? 3 : 0),
+        "dynamic color emits exact feature-dependent native work");
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
@@ -487,6 +495,8 @@ fn void exercise_policy_matrix_render(
         draw_count:    1,
         index_span:    indices.span,
     )!!;
+    ulong native_before_indirect_count =
+        gpu::command_resolution_stats().native_commands;
     if (state.draw_indirect_count) {
         gpu::cmd_draw_indexed_indirect_count(
             commands:       &commands,
@@ -509,6 +519,12 @@ fn void exercise_policy_matrix_render(
         )) == gpu::UNSUPPORTED_FEATURE,
             "unsupported indirect-count draw still dispatches through the selected table");
     }
+    ulong indirect_count_native_commands =
+        gpu::command_resolution_stats().native_commands
+        - native_before_indirect_count;
+    assert(indirect_count_native_commands
+            == (ulong)(state.draw_indirect_count ? 3 : 0),
+        "indirect-count draw emits exact feature-dependent native work");
     gpu::cmd_draw_generated(
         commands:      &commands,
         records:       {},
@@ -523,9 +539,9 @@ fn void exercise_policy_matrix_render(
         index_span:    {},
     )!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    ulong native_commands = 32;
-    if (state.caps.dynamic_color_state) native_commands += 3;
-    if (state.draw_indirect_count) native_commands += 2;
+    ulong native_commands = 31
+        + color_native_commands
+        + indirect_count_native_commands;
     finish_and_assert_command_family_observation(
         state:                              state,
         commands:                           &commands,
