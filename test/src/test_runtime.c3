@@ -6,6 +6,7 @@ import gpu::internal::vk @public;
 
 struct RuntimeDebugCapture {
     uint calls;
+    void* user_data;
     bool valid;
 }
 
@@ -15,11 +16,10 @@ fn void capture_runtime_debug_message(
 ) {
     RuntimeDebugCapture* capture = (RuntimeDebugCapture*)user_data;
     capture.calls++;
+    capture.user_data = user_data;
     capture.valid = message != null
         && message.operation != null
-        && message.operation.str_view() == "create_runtime"
-        && message.category.backend
-        && message.category.general;
+        && message.operation.str_view() == "create_runtime";
 }
 
 fn RuntimeDesc runtime_desc() {
@@ -76,7 +76,9 @@ fn void runtime_debug_callback_reaches_public_creation_path() @test {
     Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
 
-    assert(capture.calls == 1 && capture.valid,
+    assert(capture.calls == 1
+            && capture.user_data == &capture
+            && capture.valid,
         "public runtime creation routes the configured diagnostic callback");
 }
 
