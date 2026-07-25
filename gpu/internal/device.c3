@@ -8,16 +8,6 @@ import std::thread;
 import std::core::mem;
 
 // Transitional dispatch for device subsystems not yet routed directly.
-alias GetMemoryStatsFn @private      = fn MemoryStats? (Device*);
-alias BuildMemoryReportFn @private   = fn String? (Device*, bool detailed);
-alias AllocateMemoryFn @private      = fn GpuAllocation? (Device*, AllocationDesc*);
-alias FreeAllocationFn @private      = fn void? (Device*, GpuAllocation);
-alias GetAllocationInfoFn @private   = fn AllocationInfo? (Device*, GpuAllocation);
-alias GetAllocationSpanFn @private   = fn GpuSpan? (Device*, GpuAllocation);
-alias GetSpanMappingFn @private      = fn char[]? (Device*, GpuSpan);
-alias GetSpanAddressFn @private      = fn GpuAddress? (Device*, GpuSpan);
-alias FlushSpanFn @private           = fn void? (Device*, GpuSpan);
-alias InvalidateSpanFn @private      = fn void? (Device*, GpuSpan);
 // Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
 alias CreateCommandAllocatorFn @private = fn CommandAllocatorHandle? (
     Device*,
@@ -281,16 +271,6 @@ struct CommandOps @private {
 }
 
 struct BackendVTable @private {
-    GetMemoryStatsFn          get_memory_stats;
-    BuildMemoryReportFn       build_memory_report;
-    AllocateMemoryFn          allocate_memory;
-    FreeAllocationFn          free_allocation;
-    GetAllocationInfoFn       get_allocation_info;
-    GetAllocationSpanFn       get_allocation_span;
-    GetSpanMappingFn          get_span_mapping;
-    GetSpanAddressFn          get_span_address;
-    FlushSpanFn               flush_mapped_span;
-    InvalidateSpanFn          invalidate_mapped_span;
     CreateCommandAllocatorFn  create_command_allocator;
     DestroyCommandAllocatorFn destroy_command_allocator;
     ReserveGeneratedScratchFn reserve_generated_scratch;

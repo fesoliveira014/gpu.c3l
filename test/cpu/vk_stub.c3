@@ -25,14 +25,21 @@ struct VkDeviceState @public {
     gpu::Surface         surface;
     gpu::Device          owner;
     gpu::GpuAllocation   allocation;
+    gpu::AllocationDesc  allocation_desc;
     gpu::TextureHandle   texture;
     gpu::SwapchainHandle swapchain;
+    char[128]            allocation_mapping;
     StubSamplerSlot[STUB_SAMPLER_CAPACITY] samplers;
     Atomic{bool}         sampler_lock;
     ulong                resource_owner;
     uint                 sampler_count;
     uint                 sampler_intern_attempts;
     uint                 sampler_native_creates;
+    uint                 allocation_attempts;
+    uint                 allocation_free_calls;
+    uint                 allocation_flush_calls;
+    uint                 allocation_invalidate_calls;
+    uint                 allocation_visibility_entries;
     uint                 root_diagnostic_calls;
     ZString              root_diagnostic_operation;
     fault                root_diagnostic_fault;
@@ -45,13 +52,19 @@ struct VkDeviceState @public {
     Atomic{bool}         check_release;
     Atomic{uint}         check_calls;
     Atomic{uint}         destroy_calls;
+    Atomic{bool}         memory_stats_entered;
+    Atomic{bool}         memory_stats_release;
     bool                 allocation_live;
+    bool                 allocation_has_texture_placement;
     bool                 texture_live;
     bool                 swapchain_live;
     bool                 block_destroy;
     bool                 block_check;
     bool                 destroy_busy;
     bool                 publish_child_on_check;
+    bool                 allocation_block_free;
+    bool                 allocation_out_of_memory;
+    bool                 block_memory_stats;
     bool                 free_on_destroy;
 }
 
@@ -431,14 +444,30 @@ fn fault vk_report_root_contract_failure(
     return public_fault;
 }
 
-fn gpu::GpuAllocation? allocate_stub_memory(
-    gpu::Device* device,
+fn gpu::MemoryStats? vk_get_memory_stats(VkDeviceState* state) {
+    state.memory_stats_entered.store(true, AtomicOrdering.RELEASE);
+    while (state.block_memory_stats
+        && !state.memory_stats_release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    return {};
+}
+
+fn String? vk_build_memory_report(VkDeviceState* state, bool detailed) {
+    (void)state;
+    (void)detailed;
+    return {};
+}
+
+fn gpu::GpuAllocation? vk_allocate_memory(
+    VkDeviceState* state,
     gpu::AllocationDesc* desc,
 ) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
     allocation_create_attempts++;
-    if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    state.allocation_attempts++;
+    if (state.allocation_out_of_memory) return gpu::OUT_OF_DEVICE_MEMORY~;
     if (state.allocation_live) return gpu::INVALID_RESOURCE_STATE~;
+    state.allocation_desc = *desc;
     state.allocation = {
         .owner      = gpu::internal::resource_owner_tag(
             state.resource_owner,
@@ -451,17 +480,117 @@ fn gpu::GpuAllocation? allocate_stub_memory(
     return state.allocation;
 }
 
-fn void? free_stub_allocation(
-    gpu::Device* device,
+fn void? vk_free_allocation(
+    VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
     allocation_free_attempts++;
-    if (state == null || !state.allocation_live) return gpu::INVALID_HANDLE~;
+    state.allocation_free_calls++;
+    if (!state.allocation_live) return gpu::INVALID_HANDLE~;
     if (state.allocation != allocation) return gpu::INVALID_HANDLE~;
+    if (state.allocation_block_free
+        || state.allocation_has_texture_placement) {
+        return gpu::RESOURCE_IN_USE~;
+    }
     state.allocation = {};
+    state.allocation_desc = {};
     state.allocation_live = false;
 }
+
+fn gpu::AllocationInfo? vk_get_allocation_info(
+    VkDeviceState* state,
+    gpu::GpuAllocation allocation,
+) {
+    if (!state.allocation_live || allocation != state.allocation) {
+        return gpu::INVALID_HANDLE~;
+    }
+    bool texture_memory =
+        state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE;
+    return {
+        .size         = state.allocation_desc.size,
+        .alignment    = state.allocation_desc.alignment,
+        .memory_class = state.allocation_desc.memory_class,
+        .access       = state.allocation_desc.access,
+        .mapped       = state.allocation_desc.memory_class
+            != gpu::MemoryClass.GPU_PRIVATE
+            && !texture_memory,
+        .coherent     = false,
+        .addressable  = !texture_memory,
+    };
+}
+
+fn gpu::GpuSpan? vk_get_allocation_span(
+    VkDeviceState* state,
+    gpu::GpuAllocation allocation,
+) {
+    if (!state.allocation_live || allocation != state.allocation) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return {
+        .owner      = allocation.owner,
+        .index      = allocation.index,
+        .generation = allocation.generation,
+        .size       = state.allocation_desc.size,
+    };
+}
+
+fn char[]? vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
+    if (!state.allocation_live || span.owner != state.allocation.owner
+        || span.index != state.allocation.index
+        || span.generation != state.allocation.generation) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (span.size == 0
+        || state.allocation_desc.memory_class == gpu::MemoryClass.GPU_PRIVATE
+        || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (!gpu::internal::range_fits(
+        state.allocation_desc.size,
+        span.offset,
+        span.size,
+    )) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return state.allocation_mapping[span.offset:span.size];
+}
+
+fn gpu::GpuAddress? vk_get_span_address(
+    VkDeviceState* state,
+    gpu::GpuSpan span,
+) {
+    if (!state.allocation_live || span.owner != state.allocation.owner
+        || span.index != state.allocation.index
+        || span.generation != state.allocation.generation) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (span.size == 0
+        || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE
+        || !gpu::internal::range_fits(
+            state.allocation_desc.size,
+            span.offset,
+            span.size,
+        )) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return (gpu::GpuAddress)(0x1000 + span.offset);
+}
+
+fn void? vk_flush_mapped_span(VkDeviceState* state, gpu::GpuSpan span) {
+    state.allocation_visibility_entries++;
+    (void)vk_get_span_mapping(state, span)!;
+    state.allocation_flush_calls++;
+}
+
+fn void? vk_invalidate_mapped_span(VkDeviceState* state, gpu::GpuSpan span) {
+    state.allocation_visibility_entries++;
+    (void)vk_get_span_mapping(state, span)!;
+    state.allocation_invalidate_calls++;
+}
+
 fn gpu::TextureCompatibility stub_texture_compatibility(ulong owner, uint value) {
     return (gpu::TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
 }
@@ -515,7 +644,9 @@ fn gpu::TextureHandle? create_stub_placed_texture(
         || state.allocation != allocation || offset != 0) {
         return gpu::INVALID_ARGUMENT~;
     }
-    return create_stub_texture(device, desc);
+    gpu::TextureHandle texture = create_stub_texture(device, desc)!;
+    state.allocation_has_texture_placement = true;
+    return texture;
 }
 
 fn void? destroy_stub_texture(
@@ -528,6 +659,7 @@ fn void? destroy_stub_texture(
     if (state.texture != texture) return gpu::INVALID_HANDLE~;
     state.texture = {};
     state.texture_live = false;
+    state.allocation_has_texture_placement = false;
 }
 
 fn gpu::SwapchainHandle? create_stub_swapchain(
@@ -566,8 +698,6 @@ fn void? destroy_stub_swapchain(
 }
 
 const gpu::internal::BackendVTable STUB_DEVICE_VTABLE @private = {
-    .allocate_memory          = &allocate_stub_memory,
-    .free_allocation          = &free_stub_allocation,
     .get_texture_requirements = &get_stub_texture_requirements,
     .create_texture           = &create_stub_texture,
     .create_placed_texture    = &create_stub_placed_texture,

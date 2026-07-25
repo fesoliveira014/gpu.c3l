@@ -536,7 +536,7 @@ fn void? destroy_device(Device* device) {
 fn MemoryStats? get_memory_stats(Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_memory_stats(device);
+    return gpu::internal::vk::vk_get_memory_stats(operation.state);
 }
 
 <* Build a human-readable memory report. Ownership: the caller frees the
@@ -544,7 +544,7 @@ fn MemoryStats? get_memory_stats(Device* device) {
 fn String? build_memory_report(Device* device, bool detailed) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.build_memory_report(device, detailed);
+    return gpu::internal::vk::vk_build_memory_report(operation.state, detailed);
 }
 
 <* Open a debug-utils label region; a no-op without debug utils.
@@ -575,10 +575,8 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     AllocationDesc normalized = *desc;
     normalized.alignment = gpu::internal::normalized_allocation_alignment(desc.alignment)!;
     gpu::internal::validate_texture_allocation(&operation, desc, &normalized.alignment)!;
-    GpuAllocation allocation = operation.vtable.allocate_memory(
-        device,
-        &normalized,
-    )!;
+    GpuAllocation allocation =
+        gpu::internal::vk::vk_allocate_memory(operation.state, &normalized)!;
     gpu::internal::retain_device_children(&operation);
     return allocation;
 }
@@ -596,7 +594,7 @@ fn void? free_allocation(Device* device, GpuAllocation* allocation) {
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    operation.vtable.free_allocation(device, *allocation)!;
+    gpu::internal::vk::vk_free_allocation(operation.state, *allocation)!;
     gpu::internal::release_device_children(&operation);
     *allocation = GPU_ALLOCATION_INVALID;
 }
@@ -613,7 +611,7 @@ fn AllocationInfo? get_allocation_info(
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    return operation.vtable.get_allocation_info(device, allocation);
+    return gpu::internal::vk::vk_get_allocation_info(operation.state, allocation);
 }
 
 <* Borrow the allocation's complete range. *>
@@ -625,21 +623,21 @@ fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    return operation.vtable.get_allocation_span(device, allocation);
+    return gpu::internal::vk::vk_get_allocation_span(operation.state, allocation);
 }
 
 <* Borrow the CPU mapping for a live host-visible span. *>
 fn char[]? get_span_mapping(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_span_mapping(device, span);
+    return gpu::internal::vk::vk_get_span_mapping(operation.state, span);
 }
 
 <* Return the stable nonzero address of a live span. *>
 fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_span_address(device, span);
+    return gpu::internal::vk::vk_get_span_address(operation.state, span);
 }
 
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
@@ -652,7 +650,7 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
         span.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    return operation.vtable.flush_mapped_span(device, span);
+    return gpu::internal::vk::vk_flush_mapped_span(operation.state, span);
 }
 
 <* After the relevant GPU completion point, make its writes visible to CPU
@@ -665,7 +663,7 @@ fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
         span.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    return operation.vtable.invalidate_mapped_span(device, span);
+    return gpu::internal::vk::vk_invalidate_mapped_span(operation.state, span);
 }
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the

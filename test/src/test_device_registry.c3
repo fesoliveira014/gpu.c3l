@@ -29,8 +29,6 @@ struct BlockingDestroyFixture {
 
 struct BlockingOperationFixture {
     gpu::internal::vk::VkDeviceState state;
-    Atomic{bool} entered;
-    Atomic{bool} release;
 }
 
 struct CommandPinFixture {
@@ -592,21 +590,10 @@ fn gpu::CompletionPoint? command_pin_submit(
     };
 }
 
-fn gpu::MemoryStats? blocking_get_memory_stats(gpu::Device* device) {
-    BlockingOperationFixture* fixture = (BlockingOperationFixture*)gpu::internal::device_backend_state_ptr(device);
-    if (fixture == null) return gpu::INVALID_HANDLE~;
-    fixture.entered.store(true, AtomicOrdering.RELEASE);
-    while (!fixture.release.load(AtomicOrdering.ACQUIRE)) {
-        thread::yield();
-    }
-    return {};
-}
-
 gpu::internal::BackendVTable blocking_device_vtable = {
 };
 
 gpu::internal::BackendVTable blocking_operation_vtable = {
-    .get_memory_stats = &blocking_get_memory_stats,
 };
 
 gpu::internal::CommandOps command_pin_ops = {
@@ -1742,6 +1729,7 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
 
 fn void active_operations_make_device_destruction_retryable() @test {
     BlockingOperationFixture fixture;
+    fixture.state.block_memory_stats = true;
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
@@ -1751,7 +1739,7 @@ fn void active_operations_make_device_destruction_retryable() @test {
     DeviceOperationWorkerArgs operation_args = { .device = device };
     Thread operation_thread;
     operation_thread.create(&device_operation_worker, &operation_args)!!;
-    while (!fixture.entered.load(AtomicOrdering.ACQUIRE)) {
+    while (!fixture.state.memory_stats_entered.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
 
@@ -1760,7 +1748,7 @@ fn void active_operations_make_device_destruction_retryable() @test {
     uint calls_before_retry =
         fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE);
 
-    fixture.release.store(true, AtomicOrdering.RELEASE);
+    fixture.state.memory_stats_release.store(true, AtomicOrdering.RELEASE);
     int operation_result = operation_thread.join()!!;
 
     bool retry_succeeded = false;
@@ -1782,6 +1770,7 @@ fn void active_operations_make_device_destruction_retryable() @test {
 
 fn void live_children_take_precedence_over_active_operations() @test {
     BlockingOperationFixture fixture;
+    fixture.state.block_memory_stats = true;
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
@@ -1793,12 +1782,12 @@ fn void live_children_take_precedence_over_active_operations() @test {
     DeviceOperationWorkerArgs operation_args = { .device = device };
     Thread operation_thread;
     operation_thread.create(&device_operation_worker, &operation_args)!!;
-    while (!fixture.entered.load(AtomicOrdering.ACQUIRE)) {
+    while (!fixture.state.memory_stats_entered.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
 
     fault destroy_fault = @catch(gpu::destroy_device(&device));
-    fixture.release.store(true, AtomicOrdering.RELEASE);
+    fixture.state.memory_stats_release.store(true, AtomicOrdering.RELEASE);
     int operation_result = operation_thread.join()!!;
     slot.live_children.store(0, AtomicOrdering.RELEASE);
     gpu::destroy_device(&device)!!;

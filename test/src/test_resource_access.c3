@@ -4,19 +4,8 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 
-uint resource_access_allocations;
 uint resource_access_texture_queries;
 uint resource_access_texture_creates;
-
-fn gpu::GpuAllocation? allocate_resource_access_memory(
-    gpu::Device* device,
-    gpu::AllocationDesc* desc,
-) {
-    (void)device;
-    (void)desc;
-    resource_access_allocations++;
-    return gpu::OUT_OF_DEVICE_MEMORY~;
-}
 
 fn bool? supports_resource_access_texture(
     gpu::Device* device,
@@ -39,7 +28,6 @@ fn gpu::TextureHandle? create_resource_access_texture(
 }
 
 gpu::internal::BackendVTable resource_access_vtable = {
-    .allocate_memory       = &allocate_resource_access_memory,
     .supports_texture_desc = &supports_resource_access_texture,
     .create_texture        = &create_resource_access_texture,
 };
@@ -47,6 +35,7 @@ gpu::internal::BackendVTable resource_access_vtable = {
 fn gpu::Device create_compute_only_resource_access_device(
     gpu::internal::vk::VkDeviceState* state,
 ) {
+    state.allocation_out_of_memory = true;
     gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_requirements(
         requirements: {
             .counts = { .compute = 1 },
@@ -85,7 +74,6 @@ fn gpu::TextureDesc resource_access_texture_desc(gpu::QueueRoles access) {
 fn void resource_access_rejects_invalid_allocation_domains_before_backend() @test {
     gpu::internal::vk::VkDeviceState state;
     gpu::Device device = create_compute_only_resource_access_device(&state);
-    resource_access_allocations = 0;
 
     gpu::AllocationDesc empty = resource_access_allocation_desc({});
     assert(@catch(gpu::allocate_memory(&device, &empty)) == gpu::INVALID_ARGUMENT);
@@ -95,11 +83,13 @@ fn void resource_access_rejects_invalid_allocation_domains_before_backend() @tes
 
     gpu::AllocationDesc unknown = resource_access_allocation_desc((gpu::QueueRoles)0x8);
     assert(@catch(gpu::allocate_memory(&device, &unknown)) == gpu::INVALID_ARGUMENT);
-    assert(resource_access_allocations == 0, "invalid domains do not reach allocation");
+    assert(state.allocation_attempts == 0,
+        "invalid domains do not reach allocation");
 
     gpu::AllocationDesc accepted = resource_access_allocation_desc({ .compute });
     assert(@catch(gpu::allocate_memory(&device, &accepted)) == gpu::OUT_OF_DEVICE_MEMORY);
-    assert(resource_access_allocations == 1, "selected compute access reaches allocation");
+    assert(state.allocation_attempts == 1,
+        "selected compute access reaches allocation");
 
     gpu::destroy_device(&device)!!;
 }
