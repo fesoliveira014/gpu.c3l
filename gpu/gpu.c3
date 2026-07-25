@@ -1010,7 +1010,8 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    PipelineHandle pipeline = operation.vtable.create_compute_pipeline(device, desc)!;
+    PipelineHandle pipeline =
+        gpu::internal::vk::vk_create_compute_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
@@ -1025,7 +1026,8 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    PipelineHandle pipeline = operation.vtable.create_graphics_pipeline(device, desc)!;
+    PipelineHandle pipeline =
+        gpu::internal::vk::vk_create_graphics_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
@@ -1041,12 +1043,13 @@ fn PipelineHandle? create_dynamic_graphics_pipeline(
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    if (!operation.data.caps.dynamic_color_state
-        || operation.vtable.create_dynamic_graphics_pipeline == null) {
+    if (!operation.data.caps.dynamic_color_state) {
         return UNSUPPORTED_FEATURE~;
     }
-    PipelineHandle pipeline =
-        operation.vtable.create_dynamic_graphics_pipeline(device, desc)!;
+    PipelineHandle pipeline = gpu::internal::vk::vk_create_dynamic_graphics_pipeline(
+        operation.state,
+        desc,
+    )!;
     gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
@@ -1062,7 +1065,11 @@ fn void? create_compute_pipelines(
     defer gpu::internal::end_device_operation(&operation);
     if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    operation.vtable.create_compute_pipelines(device, descs, out_pipelines)!;
+    gpu::internal::vk::vk_create_compute_pipelines(
+        operation.state,
+        descs,
+        out_pipelines,
+    )!;
     for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
 }
 
@@ -1077,7 +1084,11 @@ fn void? create_graphics_pipelines(
     defer gpu::internal::end_device_operation(&operation);
     if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    operation.vtable.create_graphics_pipelines(device, descs, out_pipelines)!;
+    gpu::internal::vk::vk_create_graphics_pipelines(
+        operation.state,
+        descs,
+        out_pipelines,
+    )!;
     for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
 }
 
@@ -1094,12 +1105,11 @@ fn void? create_dynamic_graphics_pipelines(
     defer gpu::internal::end_device_operation(&operation);
     if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    if (!operation.data.caps.dynamic_color_state
-        || operation.vtable.create_dynamic_graphics_pipelines == null) {
+    if (!operation.data.caps.dynamic_color_state) {
         return UNSUPPORTED_FEATURE~;
     }
-    operation.vtable.create_dynamic_graphics_pipelines(
-        device,
+    gpu::internal::vk::vk_create_dynamic_graphics_pipelines(
+        operation.state,
         descs,
         out_pipelines,
     )!;
@@ -1116,7 +1126,7 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, pipeline.owner, gpu::internal::ResourceOwnerKind.PIPELINE)!;
-    operation.vtable.destroy_pipeline(device, pipeline)!;
+    gpu::internal::vk::vk_destroy_pipeline(operation.state, pipeline)!;
     gpu::internal::release_device_children(&operation);
 }
 
@@ -1126,7 +1136,7 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
 fn usz? get_pipeline_cache_size(Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_pipeline_cache_size(device);
+    return gpu::internal::vk::vk_get_pipeline_cache_size(operation.state);
 }
 
 <* Fill `out` with the driver pipeline cache blob and return the bytes
@@ -1137,7 +1147,7 @@ fn usz? get_pipeline_cache_size(Device* device) {
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_pipeline_cache_data(device, out);
+    return gpu::internal::vk::vk_get_pipeline_cache_data(operation.state, out);
 }
 
 <* Create one fixed-capacity command allocator for an exact selected queue.

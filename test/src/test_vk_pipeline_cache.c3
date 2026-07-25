@@ -2265,7 +2265,7 @@ fn void dynamic_color_pipeline_declares_exact_native_state() @test {
         vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
     );
     fault create_fault = @catch(vk::vk_create_dynamic_graphics_pipeline(
-        &device,
+        state,
         &desc,
     ));
     vk::set_pipeline_native_create_result(state, vk::Result.SUCCESS);
@@ -2320,7 +2320,7 @@ fn void dynamic_color_batch_prevalidates_transactionally() @test {
     ulong native_before = vk::pipeline_native_create_count(state);
 
     fault create_fault = @catch(vk::vk_create_dynamic_graphics_pipelines(
-        &device,
+        state,
         descs[..],
         outputs[..],
     ));
@@ -2349,7 +2349,7 @@ fn void dynamic_color_formats_require_host_safe_storage() @test {
     ulong native_before = vk::pipeline_native_create_count(state);
 
     fault single_fault = @catch(vk::vk_create_dynamic_graphics_pipeline(
-        &device,
+        state,
         &desc,
     ));
     assert(single_fault == gpu::INVALID_ARGUMENT,
@@ -2368,7 +2368,7 @@ fn void dynamic_color_formats_require_host_safe_storage() @test {
     }};
     gpu::PipelineHandle before = outputs[0];
     assert(@catch(vk::vk_create_dynamic_graphics_pipelines(
-        device:        &device,
+        state:         state,
         descs:         descs[..],
         out_pipelines: outputs[..],
     )) == gpu::INVALID_ARGUMENT,

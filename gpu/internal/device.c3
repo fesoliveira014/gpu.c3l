@@ -45,17 +45,6 @@ alias CmdCopyBufferToTextureFn @private = fn void? (CommandRecord*, BufferTextur
 alias CmdCopyTextureToBufferFn @private = fn void? (CommandRecord*, TextureBufferCopyDesc*);
 alias CmdBarrierFn @private          = fn void? (CommandRecord*, Barrier*);
 alias CmdTextureBarrierFn @private   = fn void? (CommandRecord*, TextureBarrier*);
-alias CreateComputePipelineFn @private  = fn PipelineHandle? (Device*, ComputePipelineDesc*);
-alias CreateGraphicsPipelineFn @private = fn PipelineHandle? (Device*, GraphicsPipelineDesc*);
-alias CreateDynamicGraphicsPipelineFn @private =
-    fn PipelineHandle? (Device*, DynamicGraphicsPipelineDesc*);
-alias CreateComputePipelinesFn @private = fn void? (Device*, ComputePipelineDesc[], PipelineHandle[]);
-alias CreateGraphicsPipelinesFn @private = fn void? (Device*, GraphicsPipelineDesc[], PipelineHandle[]);
-alias CreateDynamicGraphicsPipelinesFn @private =
-    fn void? (Device*, DynamicGraphicsPipelineDesc[], PipelineHandle[]);
-alias DestroyPipelineFn @private        = fn void? (Device*, PipelineHandle);
-alias GetPipelineCacheSizeFn @private   = fn usz? (Device*);
-alias GetPipelineCacheDataFn @private   = fn usz? (Device*, char[]);
 alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, PipelineHandle);
 alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, DepthState*);
 alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, DynamicRasterState*);
@@ -254,15 +243,6 @@ struct BackendVTable @private {
     PollCompletionFn          poll_completion;
     WaitCompletionFn          wait_completion;
     CommandOps*               command_ops;
-    CreateComputePipelineFn   create_compute_pipeline;
-    CreateGraphicsPipelineFn  create_graphics_pipeline;
-    CreateDynamicGraphicsPipelineFn create_dynamic_graphics_pipeline;
-    CreateComputePipelinesFn  create_compute_pipelines;
-    CreateGraphicsPipelinesFn create_graphics_pipelines;
-    CreateDynamicGraphicsPipelinesFn create_dynamic_graphics_pipelines;
-    DestroyPipelineFn         destroy_pipeline;
-    GetPipelineCacheSizeFn    get_pipeline_cache_size;
-    GetPipelineCacheDataFn    get_pipeline_cache_data;
     CreateSwapchainFn         create_swapchain;
     DestroySwapchainFn        destroy_swapchain;
     ResizeSwapchainFn         resize_swapchain;

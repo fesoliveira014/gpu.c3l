@@ -182,6 +182,89 @@ fn gpu::SamplerIndex? vk_intern_sampler(
     return index;
 }
 
+fn gpu::PipelineHandle? vk_create_compute_pipeline(
+    VkDeviceState* state,
+    gpu::ComputePipelineDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::PipelineHandle? vk_create_graphics_pipeline(
+    VkDeviceState* state,
+    gpu::GraphicsPipelineDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::PipelineHandle? vk_create_dynamic_graphics_pipeline(
+    VkDeviceState* state,
+    gpu::DynamicGraphicsPipelineDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_create_compute_pipelines(
+    VkDeviceState* state,
+    gpu::ComputePipelineDesc[] descs,
+    gpu::PipelineHandle[] out_pipelines,
+) {
+    (void)state;
+    (void)descs;
+    (void)out_pipelines;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_create_graphics_pipelines(
+    VkDeviceState* state,
+    gpu::GraphicsPipelineDesc[] descs,
+    gpu::PipelineHandle[] out_pipelines,
+) {
+    (void)state;
+    (void)descs;
+    (void)out_pipelines;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_create_dynamic_graphics_pipelines(
+    VkDeviceState* state,
+    gpu::DynamicGraphicsPipelineDesc[] descs,
+    gpu::PipelineHandle[] out_pipelines,
+) {
+    (void)state;
+    (void)descs;
+    (void)out_pipelines;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_destroy_pipeline(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+) {
+    (void)state;
+    (void)pipeline;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn usz? vk_get_pipeline_cache_size(VkDeviceState* state) {
+    (void)state;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn usz? vk_get_pipeline_cache_data(
+    VkDeviceState* state,
+    char[] out,
+) {
+    (void)state;
+    (void)out;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn uint stub_sampler_intern_attempt_count(gpu::Device* device) {
     VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
     lock_stub_samplers(state);
