@@ -252,7 +252,7 @@ struct DeviceCaps {
     // readback or CPU-loop emulation.
     bool generated_work;
     bool async_compute;
-    QueueCounts queues;
+    QueueRoles queues;
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
     // Configured semantic heap capacity, not the hardware maximum.
@@ -402,9 +402,7 @@ struct AdapterMemoryInfo {
 }
 
 struct AdapterQueueInfo {
-    uint graphics_count;
-    uint compute_count;
-    uint transfer_count;
+    QueueRoles available;
 }
 
 struct AdapterLimits {
@@ -1217,26 +1215,18 @@ struct QueueInfo {
     QueueRoles roles;
 }
 
-<* Selected queue count under each semantic role. *>
-struct QueueCounts {
-    uint graphics;
-    uint compute;
-    uint transfer;
-}
-
-<* Semantic queues required at device creation. Each count is 0..255 and
-   requests distinct identities within that role. A marked distinct role must
-   be requested and may not alias another requested role. *>
-struct QueueRequirements {
-    QueueCounts counts;
+<* Semantic queues required at device creation. A marked distinct role must be
+   required and may not alias another required role. *>
+struct QueueRequest {
+    QueueRoles required;
     QueueRoles distinct;
 }
 
 <* Plain semantic requirements for device creation. A zero value selects the
    documented default queues and no presentation surface. *>
 struct DeviceDesc {
-    Surface           surface;
-    QueueRequirements queues;
+    Surface      surface;
+    QueueRequest queues;
 }
 
 <* Result of a read-only semantic support query. unmet_requirement is a

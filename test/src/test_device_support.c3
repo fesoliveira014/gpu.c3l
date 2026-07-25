@@ -34,7 +34,7 @@ fn void descriptor_support_is_semantic_and_does_not_enable_state() @test {
         "support detection does not mutate the descriptor"
     );
     assert(gpu::internal::device_slot_available());
-    assert(gpu::internal::vk::stub_device_support_query_count() == 1);
+    assert(gpu::internal::vk::stub_device_support_query_count() == 0);
 }
 
 fn void unsupported_baseline_names_the_semantic_requirement() @test {
@@ -61,7 +61,7 @@ fn void invalid_desc_and_stale_adapter_fault_before_backend_work() @test {
     Adapter adapter = first_support_adapter(&runtime);
     DeviceDesc invalid = {
         .queues = {
-            .counts   = { .graphics = 1 },
+            .required = { .graphics },
             .distinct = { .compute },
         },
     };
@@ -75,24 +75,6 @@ fn void invalid_desc_and_stale_adapter_fault_before_backend_work() @test {
     assert(gpu::internal::vk::stub_device_support_query_count() == 0);
 }
 
-fn void unavailable_queue_count_is_reported_semantically() @test {
-    gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_device_baseline_support(true);
-    gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc runtime_desc = device_support_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
-    defer gpu::destroy_runtime(&runtime)!!;
-    Adapter adapter = first_support_adapter(&runtime);
-    DeviceDesc desc = {
-        .queues = { .counts = { .graphics = 2 } },
-    };
-
-    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
-
-    assert(!support.supported);
-    assert(support.unmet_requirement == "graphics queues");
-}
-
 fn void unavailable_queue_topology_is_reported_semantically() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
     gpu::internal::vk::stub_set_device_baseline_support(true);
@@ -103,10 +85,7 @@ fn void unavailable_queue_topology_is_reported_semantically() @test {
     Adapter adapter = first_support_adapter(&runtime);
     DeviceDesc desc = {
         .queues = {
-            .counts   = {
-                .graphics = 1,
-                .compute  = 1,
-            },
+            .required = { .graphics, .compute },
             .distinct = { .compute },
         },
     };

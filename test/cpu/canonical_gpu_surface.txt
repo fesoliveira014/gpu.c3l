@@ -178,7 +178,6 @@ function gpu::get_pipeline_cache_data
 function gpu::get_pipeline_cache_size
 function gpu::get_present_mode_support
 function gpu::get_queue
-function gpu::get_queue_counts
 function gpu::get_queue_info
 function gpu::get_span_address
 function gpu::get_span_mapping
@@ -291,9 +290,8 @@ struct gpu::MemoryHeapBudget
 struct gpu::MemoryStats
 struct gpu::PipelineHandle
 struct gpu::Queue
-struct gpu::QueueCounts
 struct gpu::QueueInfo
-struct gpu::QueueRequirements
+struct gpu::QueueRequest
 struct gpu::RenderPassDesc
 struct gpu::RootPush
 struct gpu::RuntimeDesc

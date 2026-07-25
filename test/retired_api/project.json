@@ -99,6 +99,30 @@
         "supports_device_request.c3"
       ]
     },
+    "queue_counts": {
+      "type": "object-files",
+      "sources": [
+        "queue_counts.c3"
+      ]
+    },
+    "queue_requirements": {
+      "type": "object-files",
+      "sources": [
+        "queue_requirements.c3"
+      ]
+    },
+    "get_queue_counts": {
+      "type": "object-files",
+      "sources": [
+        "get_queue_counts.c3"
+      ]
+    },
+    "indexed_get_queue": {
+      "type": "object-files",
+      "sources": [
+        "indexed_get_queue.c3"
+      ]
+    },
     "strict_enabled_caps": {
       "type": "object-files",
       "sources": [

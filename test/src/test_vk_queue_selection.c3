@@ -4,11 +4,6 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 import vk;
-import std::atomic;
-
-// Pure selection-tier units over synthetic family tables (no device), plus
-// lavapipe integration: alias tier, caps flag, cross-queue timeline chain,
-// and semantic multi-role access on a single-family device.
 
 const uint QF_G = (uint)vk::QueueFlagBits.GRAPHICS_BIT;
 const uint QF_C = (uint)vk::QueueFlagBits.COMPUTE_BIT;
@@ -18,781 +13,38 @@ fn vk::QueueFamilyProperties family(uint flags, uint count) {
     return { .queue_flags = (vk::QueueFlags)flags, .queue_count = count };
 }
 
-fn void nvidia_like_uses_second_main_queue() @test {
+fn gpu::Device make_queue_test_device() {
+    gpu::RuntimeDesc desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_queue_selection_test",
+    };
+    return create_test_device(&desc)!!;
+}
+
+fn void default_selection_minimizes_native_identities() @test {
     vk::QueueFamilyProperties[3] table = {
         family(QF_G | QF_C | QF_T, 16),
         family(QF_C | QF_T, 8),
         family(QF_T, 2),
     };
+
     vk::QueueFamilies picked = vk::pick_queue_families(table[..])!!;
-    assert(picked.graphics == 0 && picked.compute == 0 && picked.compute_index == 1, "tier 1: second queue in the main family");
-    assert(picked.async_compute, "tier 1 reports async");
-    assert(picked.transfer == 2, "dedicated transfer family selected");
-}
 
-fn void amd_like_uses_compute_only_family() @test {
-    vk::QueueFamilyProperties[3] table = {
-        family(QF_G | QF_C | QF_T, 1),
-        family(QF_C | QF_T, 4),
-        family(QF_T, 2),
-    };
-    vk::QueueFamilies picked = vk::pick_queue_families(table[..])!!;
-    assert(picked.compute == 1 && picked.compute_index == 0, "tier 2: compute-only family");
-    assert(picked.async_compute, "tier 2 reports async");
-}
-
-fn void single_family_aliases() @test {
-    vk::QueueFamilyProperties[1] table = { family(QF_G | QF_C | QF_T, 1) };
-    vk::QueueFamilies picked = vk::pick_queue_families(table[..])!!;
-    assert(picked.compute == 0 && picked.compute_index == 0, "tier 3: alias");
-    assert(!picked.async_compute, "alias reports no async");
-    assert(picked.transfer == 0, "transfer reuses the main family");
-}
-
-fn void no_graphics_family_faults() @test {
-    vk::QueueFamilyProperties[1] table = { family(QF_C | QF_T, 4) };
-    fault f = @catch(vk::pick_queue_families(table[..]));
-    assert(f == gpu::UNSUPPORTED_FEATURE, "no graphics family faults");
-}
-
-fn void presentation_selects_a_surface_capable_main_family() @test {
-    vk::QueueFamilyProperties[3] table = {
-        family(QF_G | QF_C | QF_T, 1),
-        family(QF_G | QF_C | QF_T, 2),
-        family(QF_T, 1),
-    };
-    bool[3] present_support = { false, true, false };
-
-    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
-        table[..],
-        present_support[..],
-    )!!;
-
-    assert(picked.graphics == 1, "presentation chooses the supported graphics+compute family");
-    assert(picked.present == 1, "the main family also presents");
-    assert(picked.compute == 1 && picked.compute_index == 1, "main-family compute tier remains available");
-    assert(picked.transfer == 2, "dedicated transfer selection is preserved");
-}
-
-fn void presentation_can_use_a_separate_queue_family() @test {
-    vk::QueueFamilyProperties[2] table = {
-        family(QF_G | QF_C | QF_T, 1),
-        family(QF_C | QF_T, 2),
-    };
-    bool[2] present_support = { false, true };
-
-    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
-        table[..],
-        present_support[..],
-    )!!;
-
-    assert(picked.graphics == 0, "graphics remains on the main family");
-    assert(picked.present == 1, "presentation uses the supported separate family");
-    assert(picked.compute == 1, "compute selection remains independent");
-}
-
-fn void presentation_support_must_cover_every_queue_family() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 1),
-    };
-
-    fault result = @catch(vk::pick_queue_families_for_surface(table[..], {}));
-
-    assert(result == gpu::INVALID_ARGUMENT, "mismatched presentation support is rejected");
-}
-
-fn void presentation_requires_a_capable_queue_family() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 1),
-    };
-    bool[1] present_support = { false };
-
-    fault result = @catch(vk::pick_queue_families_for_surface(
-        table[..],
-        present_support[..],
-    ));
-
-    assert(result == gpu::UNSUPPORTED_FEATURE, "no presentation-capable family faults");
-}
-
-fn void presentation_queue_selection_requires_instance_dispatch() @test {
-    vk::VkRuntimeState runtime;
-    fault result = @catch(vk::select_queue_families_for_surface(
-        &runtime,
-        (vk::PhysicalDevice)(uptr)0x10,
-        (vk::SurfaceKHR)(uptr)0x20,
-    ));
-    assert(result == gpu::UNSUPPORTED_FEATURE, "surface selection requires instance dispatch");
-}
-
-fn gpu::Device make_queue_test_device() {
-    gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .enable_vulkan_validation = true,
-        .application_name  = "gpu_queue_selection_test",
-    };
-    return create_test_device(&desc)!!;
-}
-
-fn void queue_alias_matches_async_compute_cap() @test {
-    gpu::Device device = make_queue_test_device();
-    defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* s = gpu::internal::device_slots[device.index].data.state;
-    assert(s.compute_queue_distinct == gpu::get_device_caps(&device)!!.async_compute, "distinct flag mirrors the cap");
-    assert((s.compute_queue == s.graphics_queue) == !gpu::get_device_caps(&device)!!.async_compute, "alias iff no async compute");
-    uint expected_index = s.compute_queue_distinct && s.compute_family == s.graphics_family ? 1 : 0;
-    assert(s.compute_queue_index == expected_index, "stored compute queue index matches selection");
-}
-
-fn void cross_queue_timeline_chain_validates() @test {
-    gpu::Device device = make_queue_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute_queue)!!;
-    defer gpu::destroy_command_allocator(&compute_allocator)!!;
-    gpu::Queue graphics_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics_queue)!!;
-    defer gpu::destroy_command_allocator(&graphics_allocator)!!;
-    gpu::CommandList compute_cmd = gpu::begin_commands(&compute_allocator)!!;
-    defer discard_test_commands(&compute_cmd)!!;
-    gpu::ExecutableCommandList compute_cmd_executable = gpu::end_commands(&compute_cmd)!!;
-    defer discard_test_executable(&compute_cmd_executable)!!;
-    gpu::ExecutableCommandList[1] compute_lists = { compute_cmd_executable };
-    gpu::SubmitDesc compute_submit = {
-        .command_lists = compute_lists[..],
-    };
-    gpu::CompletionPoint compute_done = submit_test_queue(&device, gpu::QueueKind.COMPUTE,
-        &compute_submit,
-    )!!;
-
-    gpu::CommandList gfx_cmd = gpu::begin_commands(&graphics_allocator)!!;
-    defer discard_test_commands(&gfx_cmd)!!;
-    gpu::ExecutableCommandList gfx_cmd_executable = gpu::end_commands(&gfx_cmd)!!;
-    defer discard_test_executable(&gfx_cmd_executable)!!;
-    gpu::ExecutableCommandList[1] gfx_lists = { gfx_cmd_executable };
-    gpu::CompletionWait[1] completion_waits = {{
-        .point  = compute_done,
-        .before = { .all },
-    }};
-    gpu::SubmitDesc gfx_submit = {
-        .command_lists    = gfx_lists[..],
-        .completion_waits = completion_waits[..],
-    };
-    gpu::CompletionPoint graphics_done = submit_test_queue(&device, gpu::QueueKind.GRAPHICS,
-        &gfx_submit,
-    )!!;
-
-    gpu::wait_completion(graphics_done, 1_000_000_000)!!;
-}
-
-fn void distinct_transfer_compute_graphics_completion_chain() @test {
-    gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .enable_vulkan_validation = true,
-        .application_name  = "gpu_distinct_completion_chain_test",
-    };
-    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
-    defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = 1,
-            .compute  = 1,
-            .transfer = 1,
-        },
-        .distinct = { .graphics, .compute, .transfer },
-    };
-    gpu::DeviceDesc device_desc = { .queues = requirements };
-
-    for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
-            continue;
-        }
-
-        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
-        defer gpu::destroy_device(&device)!!;
-        gpu::Queue graphics = gpu::get_queue(
-            &device,
-            gpu::QueueKind.GRAPHICS,
-        )!!;
-        gpu::Queue compute = gpu::get_queue(
-            &device,
-            gpu::QueueKind.COMPUTE,
-        )!!;
-        gpu::Queue transfer = gpu::get_queue(
-            &device,
-            gpu::QueueKind.TRANSFER,
-        )!!;
-        assert(graphics.id != compute.id
-            && graphics.id != transfer.id
-            && compute.id != transfer.id,
-            "the integration request owns three distinct queues");
-        gpu::CommandAllocator transfer_allocator = gpu::create_command_allocator(&device, transfer)!!;
-        defer gpu::destroy_command_allocator(&transfer_allocator)!!;
-        gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute)!!;
-        defer gpu::destroy_command_allocator(&compute_allocator)!!;
-        gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics)!!;
-        defer gpu::destroy_command_allocator(&graphics_allocator)!!;
-
-        gpu::CommandList transfer_commands = gpu::begin_commands(&transfer_allocator)!!;
-        defer discard_test_commands(&transfer_commands)!!;
-        gpu::ExecutableCommandList transfer_commands_executable = gpu::end_commands(&transfer_commands)!!;
-        defer discard_test_executable(&transfer_commands_executable)!!;
-        gpu::ExecutableCommandList[1] transfer_lists = { transfer_commands_executable };
-        gpu::SubmitDesc transfer_submit = {
-            .command_lists = transfer_lists[..],
-        };
-        gpu::CompletionPoint transfer_done = submit_test_queue(&device, gpu::QueueKind.TRANSFER,
-            &transfer_submit,
-        )!!;
-
-        gpu::CommandList compute_commands = gpu::begin_commands(&compute_allocator)!!;
-        defer discard_test_commands(&compute_commands)!!;
-        gpu::ExecutableCommandList compute_commands_executable = gpu::end_commands(&compute_commands)!!;
-        defer discard_test_executable(&compute_commands_executable)!!;
-        gpu::ExecutableCommandList[1] compute_lists = { compute_commands_executable };
-        gpu::CompletionWait[1] compute_waits = {{
-            .point  = transfer_done,
-            .before = { .compute },
-        }};
-        gpu::SubmitDesc compute_submit = {
-            .command_lists    = compute_lists[..],
-            .completion_waits = compute_waits[..],
-        };
-        gpu::CompletionPoint compute_done = submit_test_queue(&device, gpu::QueueKind.COMPUTE,
-            &compute_submit,
-        )!!;
-
-        gpu::CommandList graphics_commands = gpu::begin_commands(&graphics_allocator)!!;
-        defer discard_test_commands(&graphics_commands)!!;
-        gpu::ExecutableCommandList graphics_commands_executable = gpu::end_commands(&graphics_commands)!!;
-        defer discard_test_executable(&graphics_commands_executable)!!;
-        gpu::ExecutableCommandList[1] graphics_lists = { graphics_commands_executable };
-        gpu::CompletionWait[1] graphics_waits = {{
-            .point  = compute_done,
-            .before = { .all },
-        }};
-        gpu::SubmitDesc graphics_submit = {
-            .command_lists    = graphics_lists[..],
-            .completion_waits = graphics_waits[..],
-        };
-        gpu::CompletionPoint graphics_done = submit_test_queue(&device, gpu::QueueKind.GRAPHICS,
-            &graphics_submit,
-        )!!;
-
-        gpu::SubmitDesc empty;
-        gpu::CompletionPoint transfer_for_fragment = gpu::submit(
-            transfer,
-            &empty,
-        )!!;
-        gpu::CompletionWait[1] fragment_wait = {{
-            .point  = transfer_for_fragment,
-            .before = { .fragment_shader },
-        }};
-        gpu::SubmitDesc fragment_submit = {
-            .completion_waits = fragment_wait[..],
-        };
-        gpu::CompletionPoint fragment_done = gpu::submit(
-            graphics,
-            &fragment_submit,
-        )!!;
-
-        gpu::CompletionPoint transfer_for_vertex = gpu::submit(
-            transfer,
-            &empty,
-        )!!;
-        gpu::CompletionWait[1] vertex_wait = {{
-            .point  = transfer_for_vertex,
-            .before = { .vertex_shader },
-        }};
-        gpu::SubmitDesc vertex_submit = {
-            .completion_waits = vertex_wait[..],
-        };
-        gpu::CompletionPoint vertex_done = gpu::submit(
-            graphics,
-            &vertex_submit,
-        )!!;
-
-        gpu::CompletionWait[1] graphics_to_compute = {{
-            .point  = vertex_done,
-            .before = { .compute },
-        }};
-        gpu::SubmitDesc compute_after_graphics = {
-            .completion_waits = graphics_to_compute[..],
-        };
-        gpu::CompletionPoint compute_after_vertex = gpu::submit(
-            compute,
-            &compute_after_graphics,
-        )!!;
-
-        gpu::CompletionPoint transfer_for_multi = gpu::submit(
-            transfer,
-            &empty,
-        )!!;
-        gpu::CompletionWait[2] multi_waits = {
-            {
-                .point  = compute_after_vertex,
-                .before = { .all },
-            },
-            {
-                .point  = transfer_for_multi,
-                .before = { .fragment_shader },
-            },
-        };
-        gpu::SubmitDesc multi_submit = {
-            .completion_waits = multi_waits[..],
-        };
-        gpu::CompletionPoint multi_done = gpu::submit(
-            graphics,
-            &multi_submit,
-        )!!;
-
-        gpu::wait_completion(graphics_done, 1_000_000_000)!!;
-        gpu::wait_completion(fragment_done, 1_000_000_000)!!;
-        gpu::wait_completion(multi_done, 1_000_000_000)!!;
-        return;
-    }
-}
-
-fn void multi_role_access_stays_exclusive_on_single_family() @test {
-    gpu::Device device = make_queue_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::AllocationDesc allocation_desc = {
-        .size         = 256,
-        .alignment    = 16,
-        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
-        .access       = { .graphics, .compute, .transfer },
-        .debug_name   = "multi_role_data",
-    };
-    gpu::GpuAllocation allocation = gpu::allocate_memory(&device, &allocation_desc)!!;
-    gpu::free_allocation(&device, &allocation)!!;
-
-    gpu::TextureDesc tex_desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 4,
-        .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .sampled, .transfer_dst },
-    };
-    gpu::TextureHandle tex = gpu::create_texture(&device, &tex_desc)!!;
-    gpu::destroy_texture(&device, tex)!!;
-}
-
-fn void shader_heap_families_alias_without_transfer() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute },
-        .graphics_family = 4,
-        .compute_family  = 4,
-        .transfer_family = 7,
-    };
-    uint[2] families;
-    uint count = vk::shader_heap_queue_families(&state, families[..]);
-    assert(count == 1, "aliased graphics and compute produce one family");
-    assert(families[0] == 4, "graphics family is first");
-}
-
-fn void shader_heap_families_are_graphics_compute_only() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute },
-        .graphics_family = 4,
-        .compute_family  = 5,
-        .transfer_family = 7,
-    };
-    uint[2] families;
-    uint count = vk::shader_heap_queue_families(&state, families[..]);
-    assert(count == 2, "distinct graphics and compute produce two families");
-    assert(families[0] == 4, "graphics family is first");
-    assert(families[1] == 5, "compute family is second");
-}
-
-fn void selected_queue_families_keep_distinct_transfer() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute, .transfer },
-        .graphics_family = 4,
-        .compute_family  = 5,
-        .transfer_family = 7,
-    };
-    uint[3] families;
-    uint count = vk::used_queue_families(&state, families[..]);
-    assert(count == 3, "selected roles keep three distinct families");
-    assert(
-        families[0] == 4 && families[1] == 5 && families[2] == 7,
-        "selected families keep graphics, compute, and transfer order"
-    );
-}
-
-fn void resource_access_families_include_only_admitted_roles() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics, .compute, .transfer },
-        .graphics_family = 4,
-        .compute_family  = 5,
-        .transfer_family = 7,
-    };
-    uint[3] families;
-    uint count = vk::resource_queue_families(
-        &state,
-        { .graphics, .compute },
-        families[..],
-    );
-    assert(count == 2, "two admitted families are retained");
-    assert(families[0] == 4 && families[1] == 5, "unadmitted transfer is excluded");
-
-    state.compute_family = 4;
-    count = vk::resource_queue_families(
-        &state,
-        { .graphics, .compute },
-        families[..],
-    );
-    assert(count == 1 && families[0] == 4, "same-family roles remain exclusive");
-}
-
-fn void resource_access_families_include_every_identity_of_one_role() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .compute },
-        .compute_family = 5,
-    };
-    state.queues.counts.compute = 2;
-    state.queues.compute_ids[0] = vk::native_queue_id(5, 0);
-    state.queues.compute_ids[1] = vk::native_queue_id(7, 0);
-
-    uint[2] families;
-    uint count = vk::resource_queue_families(&state, { .compute }, families[..]);
-    assert(count == 2, "all admitted compute identities contribute families");
-    assert(families[0] == 5 && families[1] == 7, "compute families preserve selected order");
-}
-
-fn void resource_texture_create_info_uses_exact_access_families() @test {
-    gpu::TextureDesc desc = {
-        .access    = { .graphics, .compute },
-        .width     = 4,
-        .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .sampled, .storage },
-    };
-
-    uint[1] aliased = { 4 };
-    vk::ImageCreateInfo exclusive = vk::make_texture_create_info(&desc, aliased[..]);
-    assert(exclusive.sharing_mode == vk::SharingMode.EXCLUSIVE);
-    assert(exclusive.queue_family_index_count == 0);
-
-    uint[2] split = { 4, 5 };
-    vk::ImageCreateInfo concurrent = vk::make_texture_create_info(&desc, split[..]);
-    assert(concurrent.sharing_mode == vk::SharingMode.CONCURRENT);
-    assert(concurrent.queue_family_index_count == 2);
-    assert(concurrent.p_queue_family_indices[0] == 4);
-    assert(concurrent.p_queue_family_indices[1] == 5);
-}
-
-fn void allocator_pool_ownership_is_exact() @test {
-    gpu::Device device = make_queue_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
-    gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics)!!;
-    defer gpu::destroy_command_allocator(&graphics_allocator)!!;
-    gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute)!!;
-    defer gpu::destroy_command_allocator(&compute_allocator)!!;
-    gpu::CommandAllocator transfer_allocator = gpu::create_command_allocator(&device, transfer)!!;
-    defer gpu::destroy_command_allocator(&transfer_allocator)!!;
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    vk::CommandAllocatorSlot* graphics_slot = state.command_allocators.get(
-        graphics_allocator.handle,
-    )!!;
-    vk::CommandAllocatorSlot* compute_slot = state.command_allocators.get(
-        compute_allocator.handle,
-    )!!;
-    vk::CommandAllocatorSlot* transfer_slot = state.command_allocators.get(
-        transfer_allocator.handle,
-    )!!;
-
-    assert(graphics_slot.queue == graphics
-        && compute_slot.queue == compute
-        && transfer_slot.queue == transfer,
-        "allocator slots preserve their exact selected queues");
-    assert(graphics_slot.pool != compute_slot.pool
-        && graphics_slot.pool != transfer_slot.pool
-        && compute_slot.pool != transfer_slot.pool,
-        "each allocator owns an independent native command pool");
-}
-
-fn void tri_queue_completions_wait_cleanly() @test {
-    gpu::Device device = make_queue_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::QueueKind[3] kinds = {
-        gpu::QueueKind.GRAPHICS,
-        gpu::QueueKind.COMPUTE,
-        gpu::QueueKind.TRANSFER,
-    };
-    gpu::CommandAllocator[3] allocators;
-    for (uint i = 0; i < kinds.len; i++) {
-        gpu::Queue queue = gpu::get_queue(&device, kinds[i])!!;
-        allocators[i] = gpu::create_command_allocator(&device, queue)!!;
-    }
-    defer {
-        for (uint i = 0; i < allocators.len; i++) {
-            (void)gpu::destroy_command_allocator(&allocators[i]);
-        }
-    }
-
-    for (uint round = 0; round < 4; round++) {
-        gpu::CompletionPoint[3] completions;
-        for (uint i = 0; i < kinds.len; i++) {
-            gpu::CommandList cmd = gpu::begin_commands(&allocators[i])!!;
-            defer discard_test_commands(&cmd)!!;
-            gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-            gpu::ExecutableCommandList[1] one = { cmd_executable };
-            gpu::SubmitDesc submit = { .command_lists = one[..] };
-            completions[i] = submit_test_queue(&device, kinds[i], &submit)!!;
-        }
-        for (uint i = 0; i < completions.len; i++) {
-            gpu::wait_completion(completions[i])!!;
-        }
-    }
-}
-
-fn void swapchain_sharing_aliases_the_main_family() @test {
-    vk::Queue queue = (vk::Queue)(uptr)0x10;
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics },
-        .graphics_family = 4,
-        .graphics_queue  = queue,
-        .presentation    = {
-            .enabled = true,
-            .family  = 4,
-            .queue   = queue,
-        },
-    };
-    uint[2] families;
-    uint family_count = vk::swapchain_queue_families(&state, families[..]);
-    assert(family_count == 1, "aliased presentation uses exclusive sharing");
-    assert(families[0] == 4, "the graphics family is retained");
-
-    vk::Queue[2] queues;
-    uint queue_count = vk::swapchain_idle_queues(&state, queues[..]);
-    assert(queue_count == 1, "an aliased queue is waited once");
-    assert(queues[0] == queue, "the graphics queue is waited");
-}
-
-fn void swapchain_sharing_includes_every_selected_graphics_family() @test {
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics },
-        .graphics_family      = 4,
-        .presentation         = {
-            .enabled = true,
-            .family  = 7,
-        },
-    };
-    state.queues.counts.graphics = 2;
-    state.queues.graphics_ids[0] = vk::native_queue_id(4, 0);
-    state.queues.graphics_ids[1] = vk::native_queue_id(6, 0);
-
-    uint[4] families;
-    uint family_count = vk::swapchain_queue_families(&state, families[..]);
-    assert(family_count == 3,
-        "swapchain sharing includes every selected graphics family");
-    assert(families[0] == 4 && families[1] == 6 && families[2] == 7,
-        "graphics families precede the private presentation family");
-}
-
-fn void swapchain_sharing_includes_a_separate_present_family() @test {
-    vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
-    vk::Queue present_queue = (vk::Queue)(uptr)0x20;
-    vk::VkDeviceState state = {
-        .selected_queue_roles = { .graphics },
-        .graphics_family = 4,
-        .graphics_queue  = graphics_queue,
-        .presentation    = {
-            .enabled = true,
-            .family  = 7,
-            .queue   = present_queue,
-        },
-    };
-    uint[2] families;
-    uint family_count = vk::swapchain_queue_families(&state, families[..]);
-    assert(family_count == 2, "split presentation uses concurrent sharing");
-    assert(
-        families[0] == 4 && families[1] == 7,
-        "sharing keeps graphics then presentation"
-    );
-
-    vk::Queue[2] queues;
-    uint queue_count = vk::swapchain_idle_queues(&state, queues[..]);
-    assert(queue_count == 2, "split queues are both waited");
-    assert(
-        queues[0] == graphics_queue && queues[1] == present_queue,
-        "idle waits preserve graphics then presentation order"
-    );
-}
-
-fn void same_family_presentation_keeps_its_exact_queue() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_T, 4),
-    };
-    bool[1] presentation_support = { true };
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 2, .transfer = 2 },
-        .distinct = { .transfer },
-    };
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_surface_requirements(
-            table[..],
-            presentation_support[..],
-            requirements,
-        )!!;
-    assert(picked.graphics == picked.present);
-    assert(picked.graphics_index != picked.present_index);
-
-    vk::Queue graphics_queue = (vk::Queue)(uptr)0x20;
-    vk::Queue transfer_queue = (vk::Queue)(uptr)0x30;
-    vk::Queue present_queue = (vk::Queue)(uptr)0x10;
-    vk::QueueCompletionState[1] completions = {{
-        .queue    = graphics_queue,
-        .timeline = (vk::Semaphore)(uptr)0x40,
-        .roles    = { .graphics },
-        .bound    = true,
-    }};
-    vk::VkDeviceState state = {
-        .selected_queue_roles  = picked.selected,
-        .graphics_family       = picked.graphics,
-        .graphics_queue        = graphics_queue,
-        .transfer_family       = picked.transfer,
-        .transfer_queue        = transfer_queue,
-        .queue_completions     = completions[..],
-        .graphics_completion_id = 0,
-        .presentation          = {
-            .enabled = true,
-            .family  = picked.present,
-            .queue   = present_queue,
-        },
-    };
-    vk::Queue[2] queues;
-    uint queue_count = vk::swapchain_idle_queues(&state, queues[..]);
-    assert(queue_count == 2);
-    assert(queues[0] == graphics_queue && queues[1] == present_queue);
-    assert(
-        vk::present_queue_mutex_for(&state)
-            != vk::queue_mutex_for(&state, gpu::QueueKind.GRAPHICS)
-    );
-    assert(
-        vk::native_queue_mutex_for(&state, present_queue)
-            == vk::present_queue_mutex_for(&state)
-    );
-}
-
-fn void distinct_compute_requirement_uses_a_second_native_queue() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 2),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1 },
-        .distinct = { .compute },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(picked.graphics == picked.compute, "both roles use the capable family");
-    assert(picked.compute_index == 1, "compute uses a distinct queue index");
-}
-
-fn void distinct_graphics_requirement_uses_a_second_native_queue() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 2),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1, .transfer = 1 },
-        .distinct = { .graphics },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(picked.graphics_index == 0, "graphics keeps the first queue");
-    assert(
-        picked.compute_index == 1 && picked.transfer_index == 1,
-        "compute and transfer share the other queue"
-    );
-}
-
-fn void distinct_transfer_requirement_uses_a_second_native_queue() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 2),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1, .transfer = 1 },
-        .distinct = { .transfer },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(
-        picked.graphics_index == 0 && picked.compute_index == 0,
-        "graphics and compute share the first queue"
-    );
-    assert(picked.transfer_index == 1, "transfer uses the other queue");
-}
-
-fn void distinct_roles_use_split_capability_families() @test {
-    vk::QueueFamilyProperties[3] table = {
-        family(QF_G, 1),
-        family(QF_C, 1),
-        family(QF_T, 1),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = 1,
-            .compute  = 1,
-            .transfer = 1,
-        },
-        .distinct = { .graphics, .compute, .transfer },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
     assert(picked.graphics == 0 && picked.graphics_index == 0);
-    assert(picked.compute == 1 && picked.compute_index == 0);
-    assert(picked.transfer == 2 && picked.transfer_index == 0);
+    assert(picked.compute == 0 && picked.compute_index == 0);
+    assert(picked.transfer == 0 && picked.transfer_index == 0);
+    assert(!picked.async_compute);
 }
 
-fn void presentation_requirements_consider_a_later_main_family() @test {
-    vk::QueueFamilyProperties[3] table = {
-        family(QF_G | QF_C | QF_T, 1),
-        family(QF_G | QF_C | QF_T, 2),
-        family(QF_T, 1),
-    };
-    bool[3] present_support = { true, false, false };
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1 },
-        .distinct = { .compute },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_surface_requirements(
-            table[..],
-            present_support[..],
-            requirements,
-        )!!;
-    assert(picked.graphics == 1, "the later family supplies two semantic queues");
-    assert(picked.compute == 1 && picked.compute_index == 1);
-    assert(picked.present == 0, "presentation stays on the supported family");
-}
-
-fn void supported_selection_requests_every_selected_queue_index() @test {
+fn void no_graphics_family_faults_for_default_request() @test {
     vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 2),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1, .transfer = 1 },
-        .distinct = { .transfer },
+        family(QF_C | QF_T, 4),
     };
 
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(
-        vk::requested_queue_count(&picked, picked.graphics, false) == 2,
-        "device creation requests through the highest selected index"
-    );
+    fault result = @catch(vk::pick_queue_families(table[..]));
+
+    assert(result == gpu::UNSUPPORTED_FEATURE);
 }
 
 fn void graphics_only_selection_has_no_hidden_roles() @test {
@@ -801,34 +53,16 @@ fn void graphics_only_selection_has_no_hidden_roles() @test {
         family(QF_C, 1),
         family(QF_T, 1),
     };
-    gpu::QueueRequirements requirements = {
-        .counts = { .graphics = 1 },
+    gpu::QueueRequest request = {
+        .required = { .graphics },
     };
 
     vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
     assert(picked.selected.graphics);
     assert(!picked.selected.compute && !picked.selected.transfer);
-
-    uint[4] device_families;
-    uint device_count = vk::selected_device_queue_families(
-        &picked,
-        false,
-        device_families[..],
-    );
-    assert(device_count == 1 && device_families[0] == 0);
-    assert(vk::requested_queue_count(&picked, 1, false) == 0);
-    assert(vk::requested_queue_count(&picked, 2, false) == 0);
-
-    vk::VkDeviceState state = {
-        .selected_queue_roles = picked.selected,
-        .graphics_family      = picked.graphics,
-        .compute_family       = picked.compute,
-        .transfer_family      = picked.transfer,
-    };
-    uint[3] shared_families;
-    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
-    assert(shared_count == 1 && shared_families[0] == 0);
+    assert(picked.graphics == 0);
 }
 
 fn void compute_only_selection_has_no_hidden_roles() @test {
@@ -837,34 +71,16 @@ fn void compute_only_selection_has_no_hidden_roles() @test {
         family(QF_C, 1),
         family(QF_T, 1),
     };
-    gpu::QueueRequirements requirements = {
-        .counts = { .compute = 1 },
+    gpu::QueueRequest request = {
+        .required = { .compute },
     };
 
     vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
     assert(!picked.selected.graphics && picked.selected.compute);
     assert(!picked.selected.transfer && !picked.async_compute);
-
-    uint[4] device_families;
-    uint device_count = vk::selected_device_queue_families(
-        &picked,
-        false,
-        device_families[..],
-    );
-    assert(device_count == 1 && device_families[0] == 1);
-    assert(vk::requested_queue_count(&picked, 0, false) == 0);
-    assert(vk::requested_queue_count(&picked, 2, false) == 0);
-
-    vk::VkDeviceState state = {
-        .selected_queue_roles = picked.selected,
-        .graphics_family      = picked.graphics,
-        .compute_family       = picked.compute,
-        .transfer_family      = picked.transfer,
-    };
-    uint[3] shared_families;
-    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
-    assert(shared_count == 1 && shared_families[0] == 1);
+    assert(picked.compute == 1);
 }
 
 fn void transfer_only_selection_has_no_hidden_roles() @test {
@@ -873,56 +89,408 @@ fn void transfer_only_selection_has_no_hidden_roles() @test {
         family(QF_C, 1),
         family(QF_T, 1),
     };
-    gpu::QueueRequirements requirements = {
-        .counts = { .transfer = 1 },
+    gpu::QueueRequest request = {
+        .required = { .transfer },
     };
 
     vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
     assert(!picked.selected.graphics && !picked.selected.compute);
     assert(picked.selected.transfer && !picked.async_compute);
-
-    uint[4] device_families;
-    uint device_count = vk::selected_device_queue_families(
-        &picked,
-        false,
-        device_families[..],
-    );
-    assert(device_count == 1 && device_families[0] == 2);
-    assert(vk::requested_queue_count(&picked, 0, false) == 0);
-    assert(vk::requested_queue_count(&picked, 1, false) == 0);
-
-    vk::VkDeviceState state = {
-        .selected_queue_roles = picked.selected,
-        .graphics_family      = picked.graphics,
-        .compute_family       = picked.compute,
-        .transfer_family      = picked.transfer,
-    };
-    uint[3] shared_families;
-    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
-    assert(shared_count == 1 && shared_families[0] == 2);
+    assert(picked.transfer == 0);
 }
 
-fn void presentation_without_graphics_is_rejected() @test {
-    vk::QueueFamilyProperties[4] table = {
+fn void distinct_compute_uses_a_second_native_queue() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 2),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute },
+        .distinct = { .compute },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
+    assert(picked.graphics == picked.compute);
+    assert(picked.graphics_index == 0 && picked.compute_index == 1);
+    assert(picked.async_compute);
+}
+
+fn void distinct_compute_prefers_a_compute_only_family() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 2),
+        family(QF_C | QF_T, 1),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute },
+        .distinct = { .compute },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
+    assert(picked.graphics == 0 && picked.graphics_index == 0);
+    assert(picked.compute == 1 && picked.compute_index == 0);
+}
+
+fn void distinct_graphics_leaves_other_roles_aliased() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 2),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .distinct = { .graphics },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
+    assert(picked.graphics_index == 0);
+    assert(picked.compute_index == 1 && picked.transfer_index == 1);
+}
+
+fn void distinct_transfer_prefers_a_transfer_only_family() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 2),
+        family(QF_T, 1),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .distinct = { .transfer },
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
+    assert(picked.graphics == 0 && picked.compute == 0);
+    assert(picked.graphics_index == 0 && picked.compute_index == 0);
+    assert(picked.transfer == 1 && picked.transfer_index == 0);
+}
+
+fn void distinct_roles_use_split_capability_families() @test {
+    vk::QueueFamilyProperties[3] table = {
         family(QF_G, 1),
         family(QF_C, 1),
         family(QF_T, 1),
-        family(0, 1),
     };
-    bool[4] present_support = { false, false, false, true };
-    gpu::QueueRequirements requirements = {
-        .counts = { .compute = 1 },
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .distinct = { .graphics, .compute, .transfer },
     };
 
-    assert(
-        @catch(vk::pick_queue_families_for_surface_requirements(
-            table[..],
-            present_support[..],
-            requirements,
-        )) == gpu::INVALID_ARGUMENT,
-        "presentation requires a public graphics queue"
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
+    assert(picked.graphics == 0 && picked.graphics_index == 0);
+    assert(picked.compute == 1 && picked.compute_index == 0);
+    assert(picked.transfer == 2 && picked.transfer_index == 0);
+}
+
+fn void unavailable_distinct_queue_faults() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 1),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute },
+        .distinct = { .compute },
+    };
+
+    fault result =
+        @catch(vk::pick_queue_families_for_request(table[..], request));
+
+    assert(result == gpu::UNSUPPORTED_FEATURE);
+}
+
+fn void presentation_selects_a_surface_capable_graphics_queue() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G | QF_C | QF_T, 1),
+        family(QF_G | QF_C | QF_T, 2),
+        family(QF_T, 1),
+    };
+    bool[3] presentation_support = { false, true, false };
+
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+        table[..],
+        presentation_support[..],
+    )!!;
+
+    assert(picked.graphics == 1 && picked.graphics_index == 0);
+    assert(picked.compute == 1 && picked.compute_index == 0);
+    assert(picked.transfer == 1 && picked.transfer_index == 0);
+    assert(picked.present == 1 && picked.present_index == 0);
+}
+
+fn void presentation_can_use_a_selected_non_graphics_queue() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 1),
+        family(QF_C | QF_T, 2),
+    };
+    bool[2] presentation_support = { false, true };
+
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+        table[..],
+        presentation_support[..],
+    )!!;
+
+    assert(picked.graphics == 0);
+    assert(picked.compute == 1 && picked.transfer == 0);
+    assert(picked.present == picked.compute);
+}
+
+fn void presentation_can_use_a_private_queue_family() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 1),
+        family(0, 1),
+    };
+    bool[2] presentation_support = { false, true };
+
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+        table[..],
+        presentation_support[..],
+    )!!;
+
+    assert(picked.graphics == 0 && picked.compute == 0);
+    assert(picked.transfer == 0);
+    assert(picked.present == 1 && picked.presentation);
+}
+
+fn void presentation_support_must_cover_every_queue_family() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 1),
+    };
+
+    fault result =
+        @catch(vk::pick_queue_families_for_surface(table[..], {}));
+
+    assert(result == gpu::INVALID_ARGUMENT);
+}
+
+fn void presentation_requires_a_capable_queue_family() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 1),
+    };
+    bool[1] presentation_support = { false };
+
+    fault result = @catch(vk::pick_queue_families_for_surface(
+        table[..],
+        presentation_support[..],
+    ));
+
+    assert(result == gpu::UNSUPPORTED_FEATURE);
+}
+
+fn void presentation_without_graphics_is_rejected() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_C, 1),
+        family(0, 1),
+    };
+    bool[2] presentation_support = { false, true };
+    gpu::QueueRequest request = {
+        .required = { .compute },
+    };
+
+    fault result = @catch(vk::pick_queue_families_for_surface_request(
+        table[..],
+        presentation_support[..],
+        request,
+    ));
+
+    assert(result == gpu::INVALID_ARGUMENT);
+}
+
+fn void presentation_queue_selection_requires_instance_dispatch() @test {
+    vk::VkRuntimeState runtime;
+
+    fault result = @catch(vk::select_queue_families_for_surface(
+        &runtime,
+        (vk::PhysicalDevice)(uptr)0x10,
+        (vk::SurfaceKHR)(uptr)0x20,
+    ));
+
+    assert(result == gpu::UNSUPPORTED_FEATURE);
+}
+
+fn void selected_device_families_are_unique() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G, 1),
+        family(QF_C, 1),
+        family(QF_T, 1),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .distinct = { .graphics, .compute, .transfer },
+    };
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_request(table[..], request)!!;
+    uint[3] families;
+
+    uint count = vk::selected_device_queue_families(
+        &picked,
+        false,
+        families[..],
     );
+
+    assert(count == 3);
+    assert(families[0] == 0 && families[1] == 1 && families[2] == 2);
+}
+
+fn void used_queue_families_keep_distinct_transfer() @test {
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
+        .graphics_family      = 4,
+        .compute_family       = 5,
+        .transfer_family      = 7,
+    };
+    uint[3] families;
+
+    uint count = vk::used_queue_families(&state, families[..]);
+
+    assert(count == 3);
+    assert(families[0] == 4 && families[1] == 5 && families[2] == 7);
+}
+
+fn void requested_queue_count_covers_the_highest_selected_index() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 2),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .distinct = { .transfer },
+    };
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
+    assert(vk::requested_queue_count(&picked, 0, false) == 2);
+}
+
+fn void shader_heap_families_alias_without_transfer() @test {
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute },
+        .graphics_family      = 4,
+        .compute_family       = 4,
+        .transfer_family      = 7,
+    };
+    uint[2] families;
+
+    uint count = vk::shader_heap_queue_families(&state, families[..]);
+
+    assert(count == 1);
+    assert(families[0] == 4);
+}
+
+fn void shader_heap_families_are_graphics_compute_only() @test {
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute },
+        .graphics_family      = 4,
+        .compute_family       = 5,
+        .transfer_family      = 7,
+    };
+    uint[2] families;
+
+    uint count = vk::shader_heap_queue_families(&state, families[..]);
+
+    assert(count == 2);
+    assert(families[0] == 4 && families[1] == 5);
+}
+
+fn void resource_access_families_include_only_admitted_roles() @test {
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics, .compute, .transfer },
+        .graphics_family      = 4,
+        .compute_family       = 5,
+        .transfer_family      = 7,
+    };
+    uint[3] families;
+
+    uint count = vk::resource_queue_families(
+        &state,
+        { .graphics, .compute },
+        families[..],
+    );
+
+    assert(count == 2);
+    assert(families[0] == 4 && families[1] == 5);
+
+    state.compute_family = 4;
+    count = vk::resource_queue_families(
+        &state,
+        { .graphics, .compute },
+        families[..],
+    );
+    assert(count == 1 && families[0] == 4);
+}
+
+fn void resource_texture_create_info_uses_exact_access_families() @test {
+    gpu::TextureDesc desc = {
+        .access = { .graphics, .compute },
+        .width  = 4,
+        .height = 4,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled, .storage },
+    };
+    uint[1] aliased = { 4 };
+    uint[2] split = { 4, 5 };
+
+    vk::ImageCreateInfo exclusive =
+        vk::make_texture_create_info(&desc, aliased[..]);
+    vk::ImageCreateInfo concurrent =
+        vk::make_texture_create_info(&desc, split[..]);
+
+    assert(exclusive.sharing_mode == vk::SharingMode.EXCLUSIVE);
+    assert(exclusive.queue_family_index_count == 0);
+    assert(concurrent.sharing_mode == vk::SharingMode.CONCURRENT);
+    assert(concurrent.queue_family_index_count == 2);
+    assert(concurrent.p_queue_family_indices[0] == 4);
+    assert(concurrent.p_queue_family_indices[1] == 5);
+}
+
+fn void swapchain_sharing_aliases_the_graphics_family() @test {
+    vk::Queue queue = (vk::Queue)(uptr)0x10;
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics },
+        .graphics_family      = 4,
+        .graphics_queue       = queue,
+        .presentation         = {
+            .enabled = true,
+            .family  = 4,
+            .queue   = queue,
+        },
+    };
+    uint[2] families;
+    vk::Queue[2] queues;
+
+    uint family_count = vk::swapchain_queue_families(&state, families[..]);
+    uint queue_count = vk::swapchain_idle_queues(&state, queues[..]);
+
+    assert(family_count == 1 && families[0] == 4);
+    assert(queue_count == 1 && queues[0] == queue);
+}
+
+fn void swapchain_sharing_includes_a_separate_present_family() @test {
+    vk::Queue graphics_queue = (vk::Queue)(uptr)0x10;
+    vk::Queue present_queue = (vk::Queue)(uptr)0x20;
+    vk::VkDeviceState state = {
+        .selected_queue_roles = { .graphics },
+        .graphics_family      = 4,
+        .graphics_queue       = graphics_queue,
+        .presentation         = {
+            .enabled = true,
+            .family  = 7,
+            .queue   = present_queue,
+        },
+    };
+    uint[2] families;
+    vk::Queue[2] queues;
+
+    uint family_count = vk::swapchain_queue_families(&state, families[..]);
+    uint queue_count = vk::swapchain_idle_queues(&state, queues[..]);
+
+    assert(family_count == 2);
+    assert(families[0] == 4 && families[1] == 7);
+    assert(queue_count == 2);
+    assert(queues[0] == graphics_queue && queues[1] == present_queue);
 }
 
 fn void aliased_compute_and_transfer_share_one_queue_mutex() @test {
@@ -943,298 +511,224 @@ fn void aliased_compute_and_transfer_share_one_queue_mutex() @test {
         },
     };
     vk::VkDeviceState state = {
-        .selected_queue_roles   = { .graphics, .compute, .transfer },
-        .graphics_queue          = graphics_queue,
-        .compute_queue           = compute_queue,
-        .transfer_queue          = compute_queue,
-        .queue_completions       = completions[..],
-        .graphics_completion_id  = 0,
-        .compute_completion_id   = 1,
-        .transfer_completion_id  = 1,
-        .compute_queue_distinct  = true,
+        .selected_queue_roles  = { .graphics, .compute, .transfer },
+        .graphics_queue        = graphics_queue,
+        .compute_queue         = compute_queue,
+        .transfer_queue        = compute_queue,
+        .queue_completions     = completions[..],
+        .graphics_completion_id = 0,
+        .compute_completion_id  = 1,
+        .transfer_completion_id = 1,
+        .compute_queue_distinct = true,
     };
 
     assert(
         vk::queue_mutex_for(&state, gpu::QueueKind.COMPUTE)
-            == vk::queue_mutex_for(&state, gpu::QueueKind.TRANSFER),
-        "aliased semantic roles serialize one native queue"
+            == vk::queue_mutex_for(&state, gpu::QueueKind.TRANSFER)
     );
 }
 
-fn void unavailable_distinct_queue_requirement_faults() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 1),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1 },
-        .distinct = { .compute },
-    };
+fn void queue_alias_matches_async_compute_cap() @test {
+    gpu::Device device = make_queue_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
 
-    assert(
-        @catch(vk::pick_queue_families_for_requirements(table[..], requirements))
-            == gpu::UNSUPPORTED_FEATURE,
-        "an unavailable distinct queue is rejected"
-    );
+    assert(state.compute_queue_distinct == caps.async_compute);
+    assert((state.compute_queue == state.graphics_queue) == !caps.async_compute);
+    uint expected_index = state.compute_queue_distinct
+        && state.compute_family == state.graphics_family
+        ? 1
+        : 0;
+    assert(state.compute_queue_index == expected_index);
 }
 
-fn void multiple_queues_per_role_share_available_native_queues() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 2),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = 2,
-            .compute  = 2,
-            .transfer = 2,
-        },
-    };
+fn void allocator_pool_ownership_is_exact() @test {
+    gpu::Device device = make_queue_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue graphics =
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue compute =
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue transfer =
+        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator graphics_allocator =
+        gpu::create_command_allocator(&device, graphics)!!;
+    defer gpu::destroy_command_allocator(&graphics_allocator)!!;
+    gpu::CommandAllocator compute_allocator =
+        gpu::create_command_allocator(&device, compute)!!;
+    defer gpu::destroy_command_allocator(&compute_allocator)!!;
+    gpu::CommandAllocator transfer_allocator =
+        gpu::create_command_allocator(&device, transfer)!!;
+    defer gpu::destroy_command_allocator(&transfer_allocator)!!;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::CommandAllocatorSlot* graphics_slot =
+        state.command_allocators.get(graphics_allocator.handle)!!;
+    vk::CommandAllocatorSlot* compute_slot =
+        state.command_allocators.get(compute_allocator.handle)!!;
+    vk::CommandAllocatorSlot* transfer_slot =
+        state.command_allocators.get(transfer_allocator.handle)!!;
 
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(
-        vk::requested_queue_count(&picked, picked.graphics, false) == 2,
-        "two native queues satisfy all three semantic roles"
-    );
+    assert(graphics_slot.queue == graphics);
+    assert(compute_slot.queue == compute);
+    assert(transfer_slot.queue == transfer);
+    assert(graphics_slot.pool != compute_slot.pool);
+    assert(graphics_slot.pool != transfer_slot.pool);
+    assert(compute_slot.pool != transfer_slot.pool);
 }
 
-fn void compute_only_multi_count_keeps_exact_families() @test {
-    vk::QueueFamilyProperties[2] table = {
-        family(QF_C, 1),
-        family(QF_C, 1),
+fn void cross_queue_timeline_chain_validates() @test {
+    gpu::Device device = make_queue_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue compute_queue =
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue graphics_queue =
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator compute_allocator =
+        gpu::create_command_allocator(&device, compute_queue)!!;
+    defer gpu::destroy_command_allocator(&compute_allocator)!!;
+    gpu::CommandAllocator graphics_allocator =
+        gpu::create_command_allocator(&device, graphics_queue)!!;
+    defer gpu::destroy_command_allocator(&graphics_allocator)!!;
+    gpu::CommandList compute_commands =
+        gpu::begin_commands(&compute_allocator)!!;
+    defer discard_test_commands(&compute_commands)!!;
+    gpu::ExecutableCommandList compute_executable =
+        gpu::end_commands(&compute_commands)!!;
+    defer discard_test_executable(&compute_executable)!!;
+    gpu::ExecutableCommandList[1] compute_lists = { compute_executable };
+    gpu::SubmitDesc compute_submit = {
+        .command_lists = compute_lists[..],
     };
-    gpu::QueueRequirements requirements = {
-        .counts = { .compute = 2 },
+    gpu::CompletionPoint compute_done = gpu::submit(
+        compute_queue,
+        &compute_submit,
+    )!!;
+    gpu::CommandList graphics_commands =
+        gpu::begin_commands(&graphics_allocator)!!;
+    defer discard_test_commands(&graphics_commands)!!;
+    gpu::ExecutableCommandList graphics_executable =
+        gpu::end_commands(&graphics_commands)!!;
+    defer discard_test_executable(&graphics_executable)!!;
+    gpu::ExecutableCommandList[1] graphics_lists = { graphics_executable };
+    gpu::CompletionWait[1] waits = {{
+        .point  = compute_done,
+        .before = { .all },
+    }};
+    gpu::SubmitDesc graphics_submit = {
+        .command_lists    = graphics_lists[..],
+        .completion_waits = waits[..],
     };
 
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(!picked.selected.graphics && picked.selected.compute);
-    assert(!picked.selected.transfer && picked.counts.compute == 2);
+    gpu::CompletionPoint graphics_done = gpu::submit(
+        graphics_queue,
+        &graphics_submit,
+    )!!;
 
-    uint[2] device_families;
-    uint device_count = vk::selected_device_queue_families(
-        &picked,
-        false,
-        device_families[..],
-    );
-    assert(device_count == 2);
-    assert(device_families[0] == 0 && device_families[1] == 1);
-
-    vk::VkDeviceState state = {
-        .selected_queue_roles = picked.selected,
-        .compute_family       = picked.compute,
-        .queues               = picked,
-    };
-    uint[2] shared_families;
-    uint shared_count = vk::used_queue_families(&state, shared_families[..]);
-    assert(shared_count == 2);
-    assert(shared_families[0] == 0 && shared_families[1] == 1);
+    gpu::wait_completion(graphics_done, 1_000_000_000)!!;
 }
 
-fn void private_presentation_preserves_graphics_multi_count() @test {
-    vk::QueueFamilyProperties[3] table = {
-        family(QF_G, 1),
-        family(QF_G, 1),
-        family(0, 1),
+fn void selected_role_completions_wait_cleanly() @test {
+    gpu::Device device = make_queue_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::QueueKind[3] kinds = {
+        gpu::QueueKind.GRAPHICS,
+        gpu::QueueKind.COMPUTE,
+        gpu::QueueKind.TRANSFER,
     };
-    bool[3] presentation_support = { false, false, true };
-    gpu::QueueRequirements requirements = {
-        .counts = { .graphics = 2 },
-    };
+    gpu::CommandAllocator[3] allocators;
+    for (uint i = 0; i < kinds.len; i++) {
+        gpu::Queue queue = gpu::get_queue(&device, kinds[i])!!;
+        allocators[i] = gpu::create_command_allocator(&device, queue)!!;
+    }
+    defer {
+        for (uint i = 0; i < allocators.len; i++) {
+            (void)gpu::destroy_command_allocator(&allocators[i]);
+        }
+    }
 
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_surface_requirements(
-            table[..],
-            presentation_support[..],
-            requirements,
+    gpu::CompletionPoint[3] completions;
+    for (uint i = 0; i < kinds.len; i++) {
+        gpu::CommandList commands = gpu::begin_commands(&allocators[i])!!;
+        defer discard_test_commands(&commands)!!;
+        gpu::ExecutableCommandList executable =
+            gpu::end_commands(&commands)!!;
+        gpu::ExecutableCommandList[1] lists = { executable };
+        gpu::SubmitDesc submit = {
+            .command_lists = lists[..],
+        };
+        completions[i] = gpu::submit(
+            gpu::get_queue(&device, kinds[i])!!,
+            &submit,
         )!!;
-    assert(picked.selected.graphics && !picked.selected.compute);
-    assert(picked.presentation && picked.present == 2);
-
-    uint[3] device_families;
-    uint device_count = vk::selected_device_queue_families(
-        &picked,
-        true,
-        device_families[..],
-    );
-    assert(device_count == 3);
-    assert(
-        device_families[0] == 0
-            && device_families[1] == 1
-            && device_families[2] == 2
-    );
-}
-
-fn void unavailable_queue_count_faults() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 1),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = 2,
-            .compute  = 1,
-            .transfer = 1,
-        },
-    };
-
-    assert(
-        @catch(vk::pick_queue_families_for_requirements(table[..], requirements))
-            == gpu::UNSUPPORTED_FEATURE
-    );
-}
-
-fn void distinct_role_counts_request_disjoint_native_queues() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 3),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = 2,
-            .compute  = 1,
-        },
-        .distinct = { .compute },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(
-        vk::requested_queue_count(&picked, picked.graphics, false) == 3,
-        "distinct compute and two graphics queues require three native queues"
-    );
-}
-
-fn void multiple_distinct_roles_preserve_constrained_capacity() @test {
-    vk::QueueFamilyProperties[2] table = {
-        family(QF_G | QF_C | QF_T, 3),
-        family(QF_G, 1),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = 2,
-            .compute  = 2,
-        },
-        .distinct = { .graphics, .compute },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(picked.counts.graphics == 2 && picked.counts.compute == 2);
-    for (uint graphics = 0; graphics < picked.counts.graphics; graphics++) {
-        for (uint compute = 0; compute < picked.counts.compute; compute++) {
-            assert(
-                vk::selected_native_queue(&picked, gpu::QueueKind.GRAPHICS, graphics)
-                    != vk::selected_native_queue(&picked, gpu::QueueKind.COMPUTE, compute),
-                "distinct role identities do not overlap"
-            );
-        }
+    }
+    foreach (completion : completions) {
+        gpu::wait_completion(completion)!!;
     }
 }
 
-fn void one_distinct_role_preserves_other_role_capacity() @test {
-    vk::QueueFamilyProperties[2] table = {
-        family(QF_G | QF_C | QF_T, 3),
-        family(QF_G, 1),
+fn void distinct_role_device_queues_are_unique() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_distinct_queue_test",
     };
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = 2,
-            .compute  = 2,
-        },
-        .distinct = { .graphics },
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .distinct = { .graphics, .compute, .transfer },
+    };
+    gpu::DeviceDesc device_desc = {
+        .queues = request,
     };
 
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(picked.counts.graphics == 2 && picked.counts.compute == 2);
-    for (uint graphics = 0; graphics < picked.counts.graphics; graphics++) {
-        for (uint compute = 0; compute < picked.counts.compute; compute++) {
-            assert(
-                vk::selected_native_queue(&picked, gpu::QueueKind.GRAPHICS, graphics)
-                    != vk::selected_native_queue(&picked, gpu::QueueKind.COMPUTE, compute),
-                "the distinct graphics role leaves both compute queues available"
-            );
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            continue;
         }
+
+        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
+        defer gpu::destroy_device(&device)!!;
+        gpu::Queue graphics =
+            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::Queue compute =
+            gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::Queue transfer =
+            gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+
+        assert(graphics.id != compute.id);
+        assert(graphics.id != transfer.id);
+        assert(compute.id != transfer.id);
+        return;
     }
 }
 
-fn void device_queue_families_include_multi_count_selections() @test {
-    vk::QueueFamilyProperties[2] table = {
-        family(QF_G | QF_C | QF_T, 1),
-        family(QF_G, 1),
+fn void multi_role_access_stays_exclusive_on_single_family() @test {
+    gpu::Device device = make_queue_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::AllocationDesc allocation_desc = {
+        .size         = 256,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access       = { .graphics, .compute, .transfer },
+        .debug_name   = "multi_role_data",
     };
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = 2,
-            .compute  = 1,
-            .transfer = 1,
-        },
+    gpu::GpuAllocation allocation =
+        gpu::allocate_memory(&device, &allocation_desc)!!;
+    gpu::free_allocation(&device, &allocation)!!;
+    gpu::TextureDesc texture_desc = {
+        .access = { .graphics, .compute, .transfer },
+        .width  = 4,
+        .height = 4,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled, .transfer_dst },
     };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    uint[4] families;
-    uint count = vk::selected_device_queue_families(
-        &picked,
-        false,
-        families[..],
-    );
-    assert(count == 2, "logical device creation includes both graphics families");
-    assert(families[0] == 0 && families[1] == 1);
-}
-
-fn void maximum_queue_counts_share_full_native_range() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .compute  = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .transfer = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
-        },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(picked.counts.graphics == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(picked.counts.compute == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(picked.counts.transfer == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(
-        vk::requested_queue_count(&picked, 0, false)
-            == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE
-    );
-    assert(
-        vk::selected_native_queue(&picked, gpu::QueueKind.GRAPHICS, 254)
-            == vk::selected_native_queue(&picked, gpu::QueueKind.COMPUTE, 254)
-    );
-    assert(
-        vk::selected_native_queue(&picked, gpu::QueueKind.COMPUTE, 254)
-            == vk::selected_native_queue(&picked, gpu::QueueKind.TRANSFER, 254)
-    );
-}
-
-fn void maximum_distinct_queue_counts_use_disjoint_native_ranges() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES),
-    };
-    gpu::QueueRequirements requirements = {
-        .counts = {
-            .graphics = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .compute  = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
-            .transfer = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE,
-        },
-        .distinct = {
-            .graphics,
-            .compute,
-            .transfer,
-        },
-    };
-
-    vk::QueueFamilies picked =
-        vk::pick_queue_families_for_requirements(table[..], requirements)!!;
-    assert(picked.counts.graphics == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(picked.counts.compute == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(picked.counts.transfer == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE);
-    assert(vk::requested_queue_count(&picked, 0, false)
-        == gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES);
+    gpu::TextureHandle texture =
+        gpu::create_texture(&device, &texture_desc)!!;
+    gpu::destroy_texture(&device, texture)!!;
 }

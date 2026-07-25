@@ -43,6 +43,9 @@ SHARED_PRIVATE_BACKEND_TYPES = {
 
 FORBIDDEN_TEXT = {
     "devicerequest": "retired packed DeviceRequest",
+    "queuerequirements": "retired queue count request",
+    "queuecounts": "retired selected queue counts",
+    '"name":"get_queue_counts"': "retired selected queue count query",
     '"name":"strict_device_request"': "retired strict request builder",
     '"name":"request_presentation"': "retired presentation request builder",
     '"name":"request_queues"': "retired queue request builder",
@@ -1021,10 +1024,23 @@ def validate_document(document: dict) -> list[str]:
 
     device_desc_schema = (
         ("surface", "Surface"),
-        ("queues", "QueueRequirements"),
+        ("queues", "QueueRequest"),
     )
     if member_schema(types.get("DeviceDesc")) != device_desc_schema:
         failures.append("DeviceDesc must match the exact semantic schema")
+
+    queue_request_schema = (
+        ("required", "QueueRoles"),
+        ("distinct", "QueueRoles"),
+    )
+    if member_schema(types.get("QueueRequest")) != queue_request_schema:
+        failures.append("QueueRequest must match the exact semantic schema")
+
+    adapter_queue_info_schema = (
+        ("available", "QueueRoles"),
+    )
+    if member_schema(types.get("AdapterQueueInfo")) != adapter_queue_info_schema:
+        failures.append("AdapterQueueInfo must expose semantic availability")
 
     device_support_schema = (
         ("supported", "bool"),
@@ -1043,9 +1059,24 @@ def validate_document(document: dict) -> list[str]:
             failures.append(f"DeviceCaps.{field} must be a uint")
     if device_caps_fields.get("generated_work") != "bool":
         failures.append("DeviceCaps.generated_work must be a bool")
+    if device_caps_fields.get("queues") != "QueueRoles":
+        failures.append("DeviceCaps.queues must be QueueRoles")
     for field in ("max_sampler_lod_bias", "max_sampler_anisotropy"):
         if device_caps_fields.get(field) != "float":
             failures.append(f"DeviceCaps.{field} must be a float")
+
+    get_queue = functions.get("get_queue")
+    if get_queue is None:
+        failures.append("missing get_queue")
+    else:
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in get_queue.get("members", [])
+        )
+        if parameter_types != ("Device*", "QueueKind"):
+            failures.append("get_queue must take Device* and QueueKind")
+        if get_queue.get("return_type", {}).get("name") != "Queue?":
+            failures.append("get_queue must return Queue?")
 
     begin_commands = functions.get("begin_commands")
     if begin_commands is None:

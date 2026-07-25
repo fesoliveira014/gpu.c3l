@@ -472,11 +472,3 @@ for collecting debug cost with a matching layer.
   count, and implicitly preprocessed generated-command input. The Vulkan backend
   includes command-preprocess scope automatically when generated work is enabled.
   Narrower waits permit overlap but do not guarantee it.
-
-`completion_wait_scope_bench` compares `.all` with
-`consumers.draw_arguments` over a real compute-producer to indirect-dispatch
-consumer chain on two distinct compute queues. Each consumer records independent
-compute work before the indirect dispatch so the narrow wait exposes a real
-overlap opportunity; warmups and alternating case order reduce timing bias. It
-reports not-applicable when that topology is unavailable. Output equivalence and
-exact native stage-mask tests are hard evidence; the elapsed ratio is advisory.

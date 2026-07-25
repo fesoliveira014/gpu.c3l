@@ -1696,25 +1696,17 @@ fn bool Queue.equals(self, Queue other) @operator(==) {
         && (uint)self.roles == (uint)other.roles;
 }
 
-<* Return selected queue counts by semantic role; aliased roles count the same
-   queue. INVALID_HANDLE if the device is not live. *>
-fn QueueCounts? get_queue_counts(Device* device) {
+<* Return a device-owned queue identity for a semantic role. Aliased roles
+   return the same token. A dead device faults INVALID_HANDLE; an unavailable
+   role faults INVALID_ARGUMENT. *>
+fn Queue? get_queue(Device* device, QueueKind kind) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return gpu::internal::selected_queue_counts(&operation);
-}
-
-<* Return a device-owned queue identity for a semantic role and index. Aliased
-   roles return the same token. A dead device faults INVALID_HANDLE; an
-   unavailable index faults INVALID_ARGUMENT. *>
-fn Queue? get_queue(Device* device, QueueKind kind, uint index = 0) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
-    defer gpu::internal::end_device_operation(&operation);
-    if (index >= gpu::internal::selected_queue_count(&operation, kind)) return INVALID_ARGUMENT~;
+    gpu::internal::validate_selected_queue_kind(&operation, kind)!;
     return {
         .device = *device,
-        .id     = gpu::internal::selected_queue_id(&operation, kind, index),
-        .roles  = gpu::internal::selected_queue_roles(&operation, kind, index),
+        .id     = gpu::internal::selected_queue_id(&operation, kind),
+        .roles  = gpu::internal::selected_queue_roles(&operation, kind),
     };
 }
 

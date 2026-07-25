@@ -626,7 +626,7 @@ fn void malformed_native_desc_preserves_runtime_state() @test {
     gpu::Adapter adapter = adapters.get(0)!!;
     gpu::DeviceDesc invalid = {
         .queues = {
-            .counts   = { .graphics = 1 },
+            .required = { .graphics },
             .distinct = { .compute },
         },
     };

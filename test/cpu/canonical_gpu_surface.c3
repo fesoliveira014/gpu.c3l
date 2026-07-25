@@ -8,11 +8,11 @@ fn void pin_runtime_adapter_device() {
     gpu::Runtime runtime = {};
     gpu::AdapterList adapters = {};
     gpu::Adapter adapter = {};
-    gpu::QueueRequirements queues = {
-        .counts = {
-            .graphics = 1,
-            .compute  = 1,
-            .transfer = 1,
+    gpu::QueueRequest queues = {
+        .required = {
+            .graphics,
+            .compute,
+            .transfer,
         },
     };
     gpu::DeviceDesc device_desc = { .queues = queues };
@@ -28,7 +28,6 @@ fn void pin_runtime_adapter_device() {
     (void)gpu::create_device(&adapter);
     (void)gpu::create_device(&adapter, &device_desc);
     (void)gpu::get_device_caps(&device);
-    (void)gpu::get_queue_counts(&device);
     (void)gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     (void)gpu::get_queue_info(&device, {});
     (void)gpu::get_memory_stats(&device);

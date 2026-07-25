@@ -721,9 +721,11 @@ fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
             .host_visible_bytes = 1024,
         },
         .queues           = {
-            .graphics_count = 1,
-            .compute_count  = 1,
-            .transfer_count = 1,
+            .available = {
+                .graphics,
+                .compute,
+                .transfer,
+            },
         },
     };
 }
@@ -802,18 +804,18 @@ fn bool? vk_supports_presentation(
     return presentation_supported;
 }
 
-fn bool? vk_supports_queue_requirements(
+fn bool? vk_supports_queue_request(
     VkRuntimeState* state,
     uint adapter_index,
-    gpu::QueueRequirements* requirements,
+    gpu::QueueRequest* request,
     void* backend_surface,
 ) {
     (void)backend_surface;
-    if (state == null || requirements == null || adapter_index >= state.adapter_count) {
+    if (state == null || request == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
-    gpu::internal::QueueSelection? selection = gpu::internal::queue_selection_for_requirements(
-        requirements:               *requirements,
+    gpu::internal::QueueSelection? selection = gpu::internal::queue_selection_for_request(
+        request:                    *request,
         compute_aliases_graphics:    true,
         transfer_aliases_graphics:   true,
         transfer_aliases_compute:    true,
@@ -1386,8 +1388,8 @@ fn gpu::Device? create_vk_device(
 
     state.adapter = *adapter;
     last_device_adapter = *adapter;
-    gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_requirements(
-        requirements:               normalized.queues,
+    gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_request(
+        request:                    normalized.queues,
         compute_aliases_graphics:    true,
         transfer_aliases_graphics:   true,
         transfer_aliases_compute:    true,

@@ -10,9 +10,9 @@ fn gpu::Device create_compute_only_resource_access_device(
 ) {
     state.allocation_out_of_memory = true;
     state.texture_out_of_memory = true;
-    gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_requirements(
-        requirements: {
-            .counts = { .compute = 1 },
+    gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_request(
+        request: {
+            .required = { .compute },
         },
         compute_aliases_graphics:  false,
         transfer_aliases_graphics: false,

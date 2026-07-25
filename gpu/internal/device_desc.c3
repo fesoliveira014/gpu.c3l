@@ -3,52 +3,39 @@ module gpu::internal @private;
 import gpu;
 import gpu::internal::vk @public;
 
-const uint MAX_REQUESTED_QUEUES_PER_ROLE @private = 255;
-
-fn bool queue_requirements_are_zero(QueueRequirements requirements) @private {
-    return requirements.counts.graphics == 0
-        && requirements.counts.compute == 0
-        && requirements.counts.transfer == 0
-        && (uint)requirements.distinct == 0;
+fn bool queue_request_is_zero(QueueRequest request) @private {
+    return (uint)request.required == 0
+        && (uint)request.distinct == 0;
 }
 
-fn bool queue_requirements_are_valid(QueueRequirements requirements) @private {
-    if (requirements.counts.graphics > MAX_REQUESTED_QUEUES_PER_ROLE
-        || requirements.counts.compute > MAX_REQUESTED_QUEUES_PER_ROLE
-        || requirements.counts.transfer > MAX_REQUESTED_QUEUES_PER_ROLE) {
-        return false;
-    }
-    if (requirements.counts.graphics == 0
-        && requirements.counts.compute == 0
-        && requirements.counts.transfer == 0) {
-        return false;
-    }
-    if (((uint)requirements.distinct & ~0x7u) != 0) return false;
-    if (requirements.distinct.graphics && requirements.counts.graphics == 0) return false;
-    if (requirements.distinct.compute && requirements.counts.compute == 0) return false;
-    if (requirements.distinct.transfer && requirements.counts.transfer == 0) return false;
-    return true;
+fn bool queue_request_is_valid(QueueRequest request) @private {
+    uint required = (uint)request.required;
+    uint distinct = (uint)request.distinct;
+    return required != 0
+        && (required & ~gpu::internal::QUEUE_ROLE_MASK) == 0
+        && (distinct & ~gpu::internal::QUEUE_ROLE_MASK) == 0
+        && (distinct & ~required) == 0;
 }
 
-fn QueueRequirements default_queue_requirements() @private {
+fn QueueRequest default_queue_request() @private {
     return {
-        .counts = {
-            .graphics = 1,
-            .compute  = 1,
-            .transfer = 1,
+        .required = {
+            .graphics,
+            .compute,
+            .transfer,
         },
     };
 }
 
 fn DeviceDesc? normalize_device_desc(DeviceDesc* desc) @private {
     DeviceDesc normalized = desc == null ? {} : *desc;
-    if (queue_requirements_are_zero(normalized.queues)) {
-        normalized.queues = default_queue_requirements();
-    } else if (!queue_requirements_are_valid(normalized.queues)) {
+    if (queue_request_is_zero(normalized.queues)) {
+        normalized.queues = default_queue_request();
+    } else if (!queue_request_is_valid(normalized.queues)) {
         return gpu::INVALID_ARGUMENT~;
     }
     if (normalized.surface.is_valid()
-        && normalized.queues.counts.graphics == 0) {
+        && !normalized.queues.required.graphics) {
         return gpu::INVALID_ARGUMENT~;
     }
     return normalized;
@@ -79,34 +66,11 @@ fn DeviceSupport? evaluate_device_desc_support(
         }
     }
 
-    AdapterInfo info = gpu::internal::vk::vk_get_adapter_info(
-        data.state,
-        adapter.adapter_index,
-    )!;
-    QueueRequirements queues = normalized.queues;
-    if (queues.counts.graphics > info.queues.graphics_count) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "graphics queues",
-        };
-    }
-    if (queues.counts.compute > info.queues.compute_count) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "compute queues",
-        };
-    }
-    if (queues.counts.transfer > info.queues.transfer_count) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "transfer queues",
-        };
-    }
-
-    if (!gpu::internal::vk::vk_supports_queue_requirements(
+    QueueRequest queues = normalized.queues;
+    if (!gpu::internal::vk::vk_supports_queue_request(
         state:           data.state,
         adapter_index:   adapter.adapter_index,
-        requirements:    &queues,
+        request:         &queues,
         backend_surface: backend_surface,
     )!) {
         return {

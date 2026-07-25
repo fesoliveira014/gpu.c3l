@@ -175,9 +175,9 @@ fn void presentation_desc_is_immutable_and_surface_bound() @test {
     assert(device_desc_equal(device_desc, original));
 
     Device device = gpu::create_device(&adapter, &device_desc)!!;
-    QueueCounts counts = gpu::get_queue_counts(&device)!!;
+    QueueRoles queues = gpu::get_device_caps(&device)!!.queues;
     Queue graphics = gpu::get_queue(&device, QueueKind.GRAPHICS)!!;
-    assert(counts.graphics == 1, "a supported presentation descriptor admits graphics");
+    assert(queues.graphics, "a supported presentation descriptor admits graphics");
     assert(graphics.roles.graphics, "the admitted graphics queue supports graphics");
     gpu::destroy_device(&device)!!;
 
@@ -234,7 +234,7 @@ fn void presentation_desc_requires_graphics() @test {
     Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
     DeviceDesc invalid = {
         .surface = surface,
-        .queues  = { .counts = { .compute = 1 } },
+        .queues  = { .required = { .compute } },
     };
 
     assert(

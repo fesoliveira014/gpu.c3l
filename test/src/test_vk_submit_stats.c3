@@ -321,11 +321,11 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1 },
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute },
         .distinct = { .compute },
     };
-    gpu::DeviceDesc device_desc = { .queues = requirements };
+    gpu::DeviceDesc device_desc = { .queues = request };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
@@ -487,11 +487,11 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1 },
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute },
         .distinct = { .compute },
     };
-    gpu::DeviceDesc device_desc = { .queues = requirements };
+    gpu::DeviceDesc device_desc = { .queues = request };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
@@ -1577,11 +1577,11 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1 },
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute },
         .distinct = { .compute },
     };
-    gpu::DeviceDesc device_desc = { .queues = requirements };
+    gpu::DeviceDesc device_desc = { .queues = request };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;

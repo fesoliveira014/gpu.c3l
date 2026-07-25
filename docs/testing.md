@@ -556,13 +556,12 @@ packet and an identical replacement each require exactly three native calls and
 zero host/VMA allocation, resource lookup/lock, native pipeline creation, or
 pipeline/cache lookup.
 
-The benchmark runner builds twelve executable targets with `-O1`:
+The benchmark runner builds eleven executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
 `upload_throughput_bench`, `command_wrapper_bench`,
 `command_path_baseline_bench`, `command_record_bench`, `lifecycle_bench`,
 `submit_batch_bench`,
-`pipeline_cache_bench`, `async_overlap_bench`, and
-`completion_wait_scope_bench`.
+`pipeline_cache_bench`, and `async_overlap_bench`.
 `command_wrapper_bench` routes through `test/cpu/project.json`; it links only
 the CPU project and libc, so it can run without a Vulkan loader, ICD, VMA, or
 native Vulkan library. `command_path_baseline_bench` routes through

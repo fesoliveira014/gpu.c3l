@@ -99,9 +99,7 @@ AdapterMemoryInfo
     ulong host_visible_bytes
 
 AdapterQueueInfo
-    uint graphics_count
-    uint compute_count
-    uint transfer_count
+    QueueRoles available
 
 AdapterLimits
     uint max_texture_dimension_2d
@@ -244,14 +242,14 @@ rather than backend features.
 ```text
 DeviceDesc
     Surface surface
-    QueueRequirements queues
+    QueueRequest queues
 
 DeviceSupport
     bool supported
     String unmet_requirement     (borrowed static semantic label)
 
-QueueRequirements
-    QueueCounts counts
+QueueRequest
+    QueueRoles required
     QueueRoles distinct
 
 supports_device_desc(Adapter*, DeviceDesc* = null) -> DeviceSupport?
@@ -277,15 +275,11 @@ gpu::Device device = gpu::create_device(&adapter, &device_desc)!;
 ```
 
 `DeviceDesc.queues = {}` selects the default topology. Any nonzero
-`QueueRequirements` is explicit: each role count is 0..255 and requests
-distinct identities within that role. At least one count must be nonzero. A
-role marked `distinct` must have a nonzero count and may not alias another
-requested role. Presentation requires at least one graphics queue. Unknown
-role bits, invalid count/distinct combinations, and a presentation descriptor
-without graphics fault `INVALID_ARGUMENT`.
-
-The current descriptor uses `QueueRequirements`, including queue counts and
-distinct-role constraints.
+`QueueRequest` is explicit. At least one role must be required. A role marked
+`distinct` must also be required and may not alias another requested role.
+Presentation requires graphics. Unknown role bits, invalid required/distinct
+combinations, and a presentation descriptor without graphics fault
+`INVALID_ARGUMENT`.
 
 Descriptor input is borrowed for the call and copied during normalization.
 Zero surface means no presentation. A nonzero surface must resolve live and
@@ -309,7 +303,7 @@ DeviceCaps
     bool draw_indirect_count
     bool generated_work
     bool async_compute
-    QueueCounts queues
+    QueueRoles queues
     bool line_polygon_mode
     uint texture_heap_capacity
     uint sampler_heap_capacity
@@ -1039,8 +1033,7 @@ used concurrently. See `docs/threading.md`.
 ### Command lifecycle
 
 ```text
-get_queue_counts(Device* device) -> QueueCounts?
-get_queue(Device* device, QueueKind kind, uint index = 0) -> Queue?
+get_queue(Device* device, QueueKind kind) -> Queue?
 get_queue_info(Device* device, Queue queue) -> QueueInfo?
 create_command_allocator(
     Device* device,
@@ -1072,11 +1065,6 @@ Queue
     Device device
     uint id
     QueueRoles roles
-
-QueueCounts
-    uint graphics
-    uint compute
-    uint transfer
 
 QueueRoles
     bool graphics
@@ -1228,11 +1216,10 @@ limit, submission faults retryable `DEVICE_BUSY` before reserving a sequence.
 
 `Queue` is a small device-owned identity for a selected queue. Its `device`
 field is a copied `Device` token used for exact ownership validation; it does not
-borrow caller storage. `get_queue_counts` reports selected counts by semantic
-role. Each role index names a distinct selected identity; identities may satisfy
-several roles unless the request marks a role `distinct`. `get_queue` faults
-`INVALID_HANDLE` for a non-live device and `INVALID_ARGUMENT` for an
-unavailable role index.
+borrow caller storage. Each semantic role names at most one selected identity;
+identities may satisfy several roles unless the request marks a role `distinct`.
+`get_queue` faults `INVALID_HANDLE` for a non-live device and
+`INVALID_ARGUMENT` for an unavailable role.
 `get_queue_info` faults `INVALID_HANDLE` for zero, stale, foreign-device, or
 malformed tokens and returns the stable device-local ID and supported roles.
 Backend family indices and native handles remain private. Resource descriptions

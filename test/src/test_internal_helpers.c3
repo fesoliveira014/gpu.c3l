@@ -181,30 +181,30 @@ fn void queue_selection_aliases_roles_by_default() @test {
     DeviceCaps caps;
     gpu::internal::QueueSelection selection = gpu::internal::default_queue_selection(&caps);
 
-    assert(selection.counts.graphics == 1, "default selection exposes graphics role");
-    assert(selection.counts.compute == 1, "default selection exposes compute role");
-    assert(selection.counts.transfer == 1, "default selection exposes transfer role");
+    assert(selection.selected.graphics, "default selection exposes graphics role");
+    assert(selection.selected.compute, "default selection exposes compute role");
+    assert(selection.selected.transfer, "default selection exposes transfer role");
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS, 0)
-            == gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS)
+            == gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE),
         "default compute aliases graphics identity"
     );
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE, 0)
-            == gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE)
+            == gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER),
         "default transfer aliases graphics identity"
     );
     assert(
         gpu::internal::queue_roles_equal(
-            gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS, 0),
-            gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE, 0),
+            gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS),
+            gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE),
         ),
         "aliased roles share one role mask"
     );
     assert(
         gpu::internal::queue_roles_equal(
-            gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE, 0),
-            gpu::internal::queue_selection_roles(&selection, QueueKind.TRANSFER, 0),
+            gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE),
+            gpu::internal::queue_selection_roles(&selection, QueueKind.TRANSFER),
         ),
         "transfer role shares the aliased mask"
     );
@@ -215,29 +215,29 @@ fn void queue_selection_splits_async_compute() @test {
     gpu::internal::QueueSelection selection = gpu::internal::default_queue_selection(&caps);
 
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS, 0)
-            != gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS)
+            != gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE),
         "async compute uses a distinct identity"
     );
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER, 0)
-            == gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER)
+            == gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS),
         "transfer still aliases graphics by default"
     );
     assert(
-        gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS, 0).graphics,
+        gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS).graphics,
         "graphics identity supports graphics"
     );
     assert(
-        !gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS, 0).compute,
+        !gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS).compute,
         "graphics identity excludes distinct compute"
     );
     assert(
-        gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE, 0).compute,
+        gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE).compute,
         "compute identity supports compute"
     );
     assert(
-        !gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE, 0).graphics,
+        !gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE).graphics,
         "compute identity excludes graphics"
     );
 }
@@ -250,36 +250,36 @@ fn void queue_selection_splits_distinct_transfer() @test {
     );
 
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS, 0)
-            == gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS)
+            == gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE),
         "graphics and compute alias"
     );
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER, 0)
-            != gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER)
+            != gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS),
         "transfer has a distinct identity"
     );
     assert(
         gpu::internal::queue_roles_equal(
-            gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS, 0),
-            gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE, 0),
+            gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS),
+            gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE),
         ),
         "aliased roles share canonical metadata"
     );
     assert(
-        gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS, 0).graphics,
+        gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS).graphics,
         "shared identity reports graphics"
     );
     assert(
-        gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS, 0).compute,
+        gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS).compute,
         "shared identity reports compute"
     );
     assert(
-        !gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS, 0).transfer,
+        !gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS).transfer,
         "shared identity excludes transfer"
     );
     assert(
-        gpu::internal::queue_selection_roles(&selection, QueueKind.TRANSFER, 0).transfer,
+        gpu::internal::queue_selection_roles(&selection, QueueKind.TRANSFER).transfer,
         "transfer identity reports transfer"
     );
 }
@@ -292,114 +292,69 @@ fn void queue_selection_represents_three_distinct_queues() @test {
     );
 
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS, 0)
-            != gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS)
+            != gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE),
         "graphics and compute differ"
     );
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS, 0)
-            != gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS)
+            != gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER),
         "graphics and transfer differ"
     );
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE, 0)
-            != gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE)
+            != gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER),
         "compute and transfer differ"
     );
     assert(
-        (uint)gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS, 0)
+        (uint)gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS)
             == (uint)(QueueRoles){ .graphics },
         "graphics identity reports one role"
     );
     assert(
-        (uint)gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE, 0)
+        (uint)gpu::internal::queue_selection_roles(&selection, QueueKind.COMPUTE)
             == (uint)(QueueRoles){ .compute },
         "compute identity reports one role"
     );
     assert(
-        (uint)gpu::internal::queue_selection_roles(&selection, QueueKind.TRANSFER, 0)
+        (uint)gpu::internal::queue_selection_roles(&selection, QueueKind.TRANSFER)
             == (uint)(QueueRoles){ .transfer },
         "transfer identity reports one role"
     );
 }
 
-fn void queue_selection_stores_multiple_role_identities() @test {
-    QueueRequirements requirements = {
-        .counts = {
-            .graphics = 2,
-            .compute  = 2,
-            .transfer = 1,
-        },
-    };
-    ulong[2] graphics = { 10, 20 };
-    ulong[2] compute = { 20, 30 };
-    ulong[1] transfer = { 10 };
-    gpu::internal::QueueSelection selection = gpu::internal::queue_selection_from_native_ids(
-        requirements: requirements,
-        graphics:     graphics[..],
-        compute:      compute[..],
-        transfer:     transfer[..],
-    )!!;
-
-    uint graphics_0 = gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS, 0);
-    uint graphics_1 = gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS, 1);
-    uint compute_0 = gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE, 0);
-    uint compute_1 = gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE, 1);
-    uint transfer_0 = gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER, 0);
-    assert(selection.identity_count == 3, "three native identities are stored");
-    assert(graphics_0 != graphics_1, "one role exposes distinct identities");
-    assert(compute_0 == graphics_1, "compute aliases the second graphics queue");
-    assert(
-        compute_1 != graphics_0 && compute_1 != graphics_1,
-        "new native queue gets a new identity"
-    );
-    assert(transfer_0 == graphics_0, "transfer aliases the first graphics queue");
-    assert(
-        (uint)gpu::internal::queue_selection_roles(&selection, QueueKind.GRAPHICS, 0)
-            == (uint)(QueueRoles){ .graphics, .transfer },
-        "aliased identities publish the union of their roles"
-    );
-}
-
-fn void queue_selection_rejects_distinct_role_aliases_across_multiple_ids() @test {
-    QueueRequirements requirements = {
-        .counts = {
-            .graphics = 2,
-            .compute  = 1,
-        },
+fn void queue_selection_rejects_distinct_role_aliases() @test {
+    QueueRequest request = {
+        .required = { .graphics, .compute },
         .distinct = { .compute },
     };
-    ulong[2] graphics = { 10, 20 };
-    ulong[1] compute = { 20 };
 
     assert(
         @catch(gpu::internal::queue_selection_from_native_ids(
-            requirements: requirements,
-            graphics:     graphics[..],
-            compute:      compute[..],
-            transfer:     {},
+            request:  request,
+            graphics: 10,
+            compute:  10,
+            transfer: 0,
         )) == UNSUPPORTED_FEATURE,
-        "a distinct role cannot alias any identity from another role"
+        "a distinct role cannot alias another requested role"
     );
 }
 
-fn void scalar_queue_selection_ignores_aliases_to_absent_roles() @test {
-    QueueRequirements requirements = {
-        .counts = {
-            .compute  = 1,
-            .transfer = 1,
-        },
+fn void queue_selection_ignores_aliases_to_absent_roles() @test {
+    QueueRequest request = {
+        .required = { .compute, .transfer },
     };
-    gpu::internal::QueueSelection selection = gpu::internal::queue_selection_for_requirements(
-        requirements:               requirements,
+    gpu::internal::QueueSelection selection =
+        gpu::internal::queue_selection_for_request(
+        request:                    request,
         compute_aliases_graphics:    true,
         transfer_aliases_graphics:   true,
         transfer_aliases_compute:    false,
     )!!;
 
     assert(
-        gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE, 0)
-            != gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER, 0),
+        gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE)
+            != gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER),
         "an absent graphics role cannot cause an alias"
     );
 }
