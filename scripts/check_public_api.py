@@ -34,11 +34,15 @@ SURFACE_TYPES = {
     "win32": (("InstanceHandle", "void*"), ("WindowHandle", "void*")),
     "x11": (("DisplayHandle", "void*"), ("WindowHandle", "ulong")),
 }
+SHARED_PRIVATE_BACKEND_TYPE_UIDS = {
+    "gpu::internal::vk::VkRuntimeState",
+    "gpu::internal::vk::VkDeviceState",
+    "gpu::internal::vk::CommandRecord",
+    "gpu::internal::vk::CommandOps",
+}
 SHARED_PRIVATE_BACKEND_TYPES = {
-    "VkRuntimeState",
-    "VkDeviceState",
-    "CommandRecord",
-    "CommandOps",
+    uid.rsplit("::", 1)[-1]
+    for uid in SHARED_PRIVATE_BACKEND_TYPE_UIDS
 }
 
 FORBIDDEN_TEXT = {
@@ -49,11 +53,13 @@ FORBIDDEN_TEXT = {
     '"name":"supports_device_request"': "retired device request support query",
     '"name":"strict_enabled"': "retired strict device capability",
     '"name":"strict_supported"': "retired strict adapter capability",
+    "backendkind": "retired BackendKind",
     "commandlisthandle": "retired CommandListHandle",
     '"name":"command_list_handle_invalid"': (
         "retired COMMAND_LIST_HANDLE_INVALID"
     ),
     '"name":"create_device_from_desc"': "retired direct device creation",
+    '"name":"get_device_backend"': "retired backend query",
     "backend_state": "backend state pointer",
     "backendvtable": "backend dispatch table",
     "descriptorheapmode": "backend heap strategy type",
@@ -234,6 +240,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "supports_device_request(",
     "strict_enabled",
     "strict_supported",
+    "BackendKind",
+    "get_device_backend(",
     "create_device_from_desc(",
     "PlatformKind",
     "PresentDesc",
@@ -571,7 +579,7 @@ def validate_generated_backend_privacy(document: dict) -> list[str]:
             or module_name.startswith("gpu::internal::")
         ):
             continue
-        for contents in module.values():
+        for kind, contents in module.items():
             if not isinstance(contents, list):
                 continue
             for entry in contents:
@@ -581,7 +589,8 @@ def validate_generated_backend_privacy(document: dict) -> list[str]:
                     continue
                 if (
                     module_name == "gpu::internal::vk"
-                    and entry.get("name") in SHARED_PRIVATE_BACKEND_TYPES
+                    and kind == "types"
+                    and entry.get("uid") in SHARED_PRIVATE_BACKEND_TYPE_UIDS
                 ):
                     continue
                 identity = entry.get("uid") or (
