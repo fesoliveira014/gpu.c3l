@@ -18,6 +18,16 @@ Runtime and device registry entries store typed `VkRuntimeState*` and
 `VkDeviceState*` values. Public implementations pin or resolve those entries
 and call the corresponding private Vulkan functions directly.
 
+C3 0.8.0 has no package-private visibility. The four state declarations shared
+across `gpu::internal`, `gpu::internal::vk`, and the root implementation
+therefore use declaration-level `@public`: `VkRuntimeState`, `VkDeviceState`,
+`CommandRecord`, and `CommandOps`. Generated metadata can name these types and
+the library-owned command-token record pointer, but they are unsupported
+implementation details. Consumers must not import or name internal modules.
+
+There is no runtime backend plugin interface. Adding another backend is future
+source work, not a current stable private ABI.
+
 It imports:
 
 ```c3
@@ -1123,5 +1133,5 @@ all native texture-layout consumers share the one explicit classic mapping
 offscreen dynamic rendering works
 SDL3 swapchain sample presents and resizes
 live resource leaks are reported
-no vk:: or vma:: type appears in public API signatures
+no vk:: or vma:: binding type appears in caller-supplied descriptors or callable signatures
 ```
