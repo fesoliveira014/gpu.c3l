@@ -108,11 +108,59 @@ fn void unlock_stub_samplers(VkDeviceState* state) @private {
     (void)state.sampler_lock.clear(AtomicOrdering.RELEASE);
 }
 
-fn gpu::SamplerIndex? intern_stub_sampler(
-    gpu::Device* device,
+fn gpu::AttachmentViewHandle? vk_create_attachment_view(
+    VkDeviceState* state,
+    gpu::AttachmentViewDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_destroy_attachment_view(
+    VkDeviceState* state,
+    gpu::AttachmentViewHandle view,
+) {
+    (void)state;
+    (void)view;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::TextureView? vk_create_texture_view(
+    VkDeviceState* state,
+    gpu::TextureHandle texture,
+    gpu::TextureViewDesc* desc,
+) {
+    (void)state;
+    (void)texture;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_destroy_texture_view(
+    VkDeviceState* state,
+    gpu::TextureView view,
+) {
+    (void)state;
+    (void)view;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_create_texture_views(
+    VkDeviceState* state,
+    gpu::TextureViewCreateDesc[] descs,
+    gpu::TextureView[] out_views,
+) {
+    (void)state;
+    (void)descs;
+    (void)out_views;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::SamplerIndex? vk_intern_sampler(
+    VkDeviceState* state,
     gpu::SamplerDesc* desc,
 ) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
     if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
@@ -762,7 +810,6 @@ fn void? destroy_stub_swapchain(
 }
 
 const gpu::internal::BackendVTable STUB_DEVICE_VTABLE @private = {
-    .intern_sampler    = &intern_stub_sampler,
     .create_swapchain  = &create_stub_swapchain,
     .destroy_swapchain = &destroy_stub_swapchain,
 };

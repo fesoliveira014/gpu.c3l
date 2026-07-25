@@ -45,18 +45,6 @@ alias CmdCopyBufferToTextureFn @private = fn void? (CommandRecord*, BufferTextur
 alias CmdCopyTextureToBufferFn @private = fn void? (CommandRecord*, TextureBufferCopyDesc*);
 alias CmdBarrierFn @private          = fn void? (CommandRecord*, Barrier*);
 alias CmdTextureBarrierFn @private   = fn void? (CommandRecord*, TextureBarrier*);
-alias CreateAttachmentViewFn @private = fn AttachmentViewHandle? (
-    Device*,
-    AttachmentViewDesc*,
-);
-alias DestroyAttachmentViewFn @private = fn void? (
-    Device*,
-    AttachmentViewHandle,
-);
-alias CreateTextureViewFn @private       = fn TextureView? (Device*, TextureHandle, TextureViewDesc*);
-alias DestroyTextureViewFn @private      = fn void? (Device*, TextureView);
-alias CreateTextureViewsFn @private      = fn void? (Device*, TextureViewCreateDesc[], TextureView[]);
-alias InternSamplerFn @private            = fn SamplerIndex? (Device*, SamplerDesc*);
 alias CreateComputePipelineFn @private  = fn PipelineHandle? (Device*, ComputePipelineDesc*);
 alias CreateGraphicsPipelineFn @private = fn PipelineHandle? (Device*, GraphicsPipelineDesc*);
 alias CreateDynamicGraphicsPipelineFn @private =
@@ -266,12 +254,6 @@ struct BackendVTable @private {
     PollCompletionFn          poll_completion;
     WaitCompletionFn          wait_completion;
     CommandOps*               command_ops;
-    CreateAttachmentViewFn    create_attachment_view;
-    DestroyAttachmentViewFn   destroy_attachment_view;
-    CreateTextureViewFn       create_texture_view;
-    DestroyTextureViewFn      destroy_texture_view;
-    CreateTextureViewsFn      create_texture_views;
-    InternSamplerFn           intern_sampler;
     CreateComputePipelineFn   create_compute_pipeline;
     CreateGraphicsPipelineFn  create_graphics_pipeline;
     CreateDynamicGraphicsPipelineFn create_dynamic_graphics_pipeline;

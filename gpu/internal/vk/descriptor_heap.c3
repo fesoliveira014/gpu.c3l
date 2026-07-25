@@ -1018,8 +1018,11 @@ fn vk::ImageView? resolve_descriptor_texture_view(
     return resolved;
 }
 
-fn gpu::TextureView? vk_create_texture_view(gpu::Device* device, gpu::TextureHandle texture, gpu::TextureViewDesc* view) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+fn gpu::TextureView? vk_create_texture_view(
+    VkDeviceState* state,
+    gpu::TextureHandle texture,
+    gpu::TextureViewDesc* view,
+) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     state.texture_view_cache_mutex.lock()!!;
@@ -1196,8 +1199,11 @@ fn uint accumulate_texture_descriptor_write(
 
 <* All validation and fallible view creation precedes descriptor mutation.
    A preparation fault restores only views created by this transaction. *>
-fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc[] descs, gpu::TextureView[] out_views) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+fn void? vk_create_texture_views(
+    VkDeviceState* state,
+    gpu::TextureViewCreateDesc[] descs,
+    gpu::TextureView[] out_views,
+) {
     if (out_views.len != descs.len) {
         return report_contract_failure(
             state:               state,
@@ -1308,10 +1314,9 @@ fn void? vk_create_texture_views(gpu::Device* device, gpu::TextureViewCreateDesc
 }
 
 fn void? vk_destroy_texture_view(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::TextureView view,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureDescriptorCell*? resolved = texture_cell_get(state, view);

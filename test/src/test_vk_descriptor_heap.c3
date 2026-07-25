@@ -1566,7 +1566,7 @@ fn void sampler_native_create_failure_is_transactional() @test {
     uint bucket_head = state.samplers.bucket_heads[bucket];
 
     vk::set_sampler_create_result(
-        &device,
+        state,
         vk::Result.ERROR_OUT_OF_HOST_MEMORY,
     );
     assert(@catch(gpu::intern_sampler(&device, &desc))

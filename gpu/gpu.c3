@@ -821,7 +821,7 @@ fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
     if (desc == null) return INVALID_ARGUMENT~;
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     gpu::internal::validate_sampler_desc(&operation, desc)!;
-    return operation.vtable.intern_sampler(device, desc);
+    return gpu::internal::vk::vk_intern_sampler(operation.state, desc);
 }
 
 <* Publish one texture view in the strict shader-visible heap. Requires strict
@@ -836,7 +836,8 @@ fn TextureView? create_texture_view(
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
-    TextureView view = operation.vtable.create_texture_view(device, texture, desc)!;
+    TextureView view =
+        gpu::internal::vk::vk_create_texture_view(operation.state, texture, desc)!;
     gpu::internal::retain_device_children(&operation);
     return view;
 }
@@ -849,7 +850,7 @@ fn void? destroy_texture_view(Device* device, TextureView view) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, view.owner, gpu::internal::ResourceOwnerKind.TEXTURE_VIEW)!;
-    operation.vtable.destroy_texture_view(device, view)!;
+    gpu::internal::vk::vk_destroy_texture_view(operation.state, view)!;
     gpu::internal::release_device_children(&operation);
 }
 
@@ -878,7 +879,7 @@ fn void? create_texture_views(
         gpu::internal::validate_resource_owner(&operation, desc.texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
     }
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
-    operation.vtable.create_texture_views(device, descs, out_views)!;
+    gpu::internal::vk::vk_create_texture_views(operation.state, descs, out_views)!;
     gpu::internal::retain_device_children(&operation, (ulong)descs.len);
 }
 
@@ -1662,8 +1663,8 @@ fn AttachmentViewHandle? create_attachment_view(
         desc.texture.owner,
         gpu::internal::ResourceOwnerKind.TEXTURE,
     )!;
-    AttachmentViewHandle view = operation.vtable.create_attachment_view(
-        device,
+    AttachmentViewHandle view = gpu::internal::vk::vk_create_attachment_view(
+        operation.state,
         desc,
     )!;
     gpu::internal::retain_device_children(&operation);
@@ -1685,7 +1686,7 @@ fn void? destroy_attachment_view(
         view.owner,
         gpu::internal::ResourceOwnerKind.ATTACHMENT_VIEW,
     )!;
-    operation.vtable.destroy_attachment_view(device, view)!;
+    gpu::internal::vk::vk_destroy_attachment_view(operation.state, view)!;
     gpu::internal::release_device_children(&operation);
 }
 
