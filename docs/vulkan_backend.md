@@ -831,10 +831,12 @@ cmd_texture_barrier -> vk::ImageMemoryBarrier2
 
 `cmd_barrier` emits one global memory barrier. Under `FULL`, normal access scopes follow from
 its producer and consumer stages; draw-argument and depth/stencil cache paths
-are enabled only by their hazard flags. Invalid,
-contradictory, consumer-incompatible, or queue-unsupported scopes fault before
-recording under every policy. `FULL` additionally emits the detailed public
-contract diagnostic; `TRUSTED` returns the same fault without diagnostic work.
+are enabled only by their hazard flags. Contradictory,
+consumer-incompatible, and queue-unsupported scopes fault before recording
+under `FULL`, which also emits the detailed public contract diagnostic.
+`TRUSTED` retains the null-barrier, unknown-hazard-bit, and command-state
+checks and treats stage-mask, consumer-compatibility, and queue-support misuse
+as a caller contract.
 Cross-queue ordering remains a submission completion-wait concern.
 
 A global barrier emits one `VkMemoryBarrier2` and no
