@@ -322,9 +322,20 @@ RETIRED_SOURCE_SYMBOLS = (
     "create_dynamic_graphics_pipelines(",
     "resource_agnostic_texture_sync",
     "RESOURCE_AGNOSTIC_TEXTURE_SYNC",
+    "strict_heap_buffer_bind_commands",
+    "strict_heap_offset_commands",
+    "note_command_strict_heap_buffer_bind",
+    "note_command_strict_heap_offset",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
+    "descriptor_buffer",
+    "DescriptorBuffer",
+    "DESCRIPTOR_BUFFER",
+    "VkHeapImplementation",
+    "heap_implementation",
+    "binding_offset_",
+    "vkGetDescriptorEXT",
     "resource_agnostic",
     "RESOURCE_AGNOSTIC",
     "unified_image_layout",
