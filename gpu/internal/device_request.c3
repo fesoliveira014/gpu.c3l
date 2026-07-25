@@ -20,21 +20,18 @@ const ulong DEVICE_REQUEST_QUEUE_VALUE_BITS @private =
     | (DEVICE_REQUEST_QUEUE_ROLE_MASK << DEVICE_REQUEST_DISTINCT_QUEUE_SHIFT);
 const ulong DEVICE_REQUEST_QUEUES_BIT @private = 1ull << 29;
 const ulong DEVICE_REQUEST_RESOURCE_AGNOSTIC_TEXTURE_SYNC_BIT @private = 1ull << 30;
-const ulong DEVICE_REQUEST_DYNAMIC_COLOR_STATE_BIT @private = 1ull << 31;
 const ulong DEVICE_REQUEST_KNOWN_BITS @private = DEVICE_REQUEST_HEADER
     | DEVICE_REQUEST_STRICT_BIT
     | DEVICE_REQUEST_PRESENTATION_BIT
     | DEVICE_REQUEST_QUEUE_VALUE_BITS
     | DEVICE_REQUEST_QUEUES_BIT
-    | DEVICE_REQUEST_RESOURCE_AGNOSTIC_TEXTURE_SYNC_BIT
-    | DEVICE_REQUEST_DYNAMIC_COLOR_STATE_BIT;
+    | DEVICE_REQUEST_RESOURCE_AGNOSTIC_TEXTURE_SYNC_BIT;
 const uint DEVICE_REQUEST_SURFACE_SHIFT @private = 64;
 
 enum DeviceCapability @private {
     STRICT,
     PRESENTATION,
     RESOURCE_AGNOSTIC_TEXTURE_SYNC,
-    DYNAMIC_COLOR_STATE,
 }
 
 fn bool queue_requirements_are_valid(QueueRequirements requirements) @private {
@@ -134,11 +131,6 @@ fn bool requests_resource_agnostic_texture_sync(DeviceRequest request) @private 
         & DEVICE_REQUEST_RESOURCE_AGNOSTIC_TEXTURE_SYNC_BIT) != 0;
 }
 
-fn bool requests_dynamic_color_state(DeviceRequest request) @private {
-    return ((ulong)(uint128)request
-        & DEVICE_REQUEST_DYNAMIC_COLOR_STATE_BIT) != 0;
-}
-
 fn DeviceRequest? compose_device_request(
     DeviceRequest request,
     DeviceCapability capability,
@@ -163,9 +155,6 @@ fn DeviceRequest? compose_device_request(
         case DeviceCapability.RESOURCE_AGNOSTIC_TEXTURE_SYNC:
             if (surface != null) return gpu::INVALID_ARGUMENT~;
             contribution = DEVICE_REQUEST_RESOURCE_AGNOSTIC_TEXTURE_SYNC_BIT;
-        case DeviceCapability.DYNAMIC_COLOR_STATE:
-            if (surface != null) return gpu::INVALID_ARGUMENT~;
-            contribution = DEVICE_REQUEST_DYNAMIC_COLOR_STATE_BIT;
     }
     if (((ulong)(uint128)request & contribution) != 0) {
         return gpu::INVALID_ARGUMENT~;

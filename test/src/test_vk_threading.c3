@@ -227,10 +227,8 @@ fn int render_view_gate_worker(void* raw_args) {
             .width  = 4,
             .height = 4,
         };
-        gpu::GraphicsState graphics =
-            gpu::full_render_graphics_state(pass.width, pass.height)!!;
         args.entered.store(true, AtomicOrdering.RELEASE);
-        gpu::cmd_begin_render_pass_with_state(&args.commands, &pass, &graphics)!!;
+        gpu::cmd_begin_render_pass(&args.commands, &pass)!!;
         gpu::cmd_end_render_pass(&args.commands)!!;
         args.executable = gpu::end_commands(&args.commands)!!;
         args.completed.store(true, AtomicOrdering.RELEASE);

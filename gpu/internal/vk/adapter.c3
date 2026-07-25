@@ -19,7 +19,6 @@ struct VkAdapterState {
     ResourceAgnosticTextureSyncSupport  resource_agnostic_texture_sync;
     gpu::AdapterInfo                   info;
     gpu::AdapterDiagnostics            diagnostics;
-    bool                               dynamic_color_state_supported;
 }
 
 fn gpu::AdapterClass adapter_class(vk::PhysicalDeviceType device_type) {
@@ -138,8 +137,6 @@ fn void initialize_adapter(
 ) {
     adapter.physical_device = physical_device;
     vk::get_physical_device_properties(physical_device, &adapter.properties);
-    adapter.dynamic_color_state_supported =
-        query_dynamic_color_state_support(physical_device);
 
     bool has_driver_properties = adapter.properties.api_version >= API_VERSION_1_2
         || device_supports_extension(physical_device, "VK_KHR_driver_properties");
@@ -236,14 +233,4 @@ fn bool? vk_supports_resource_agnostic_texture_sync(
     return resource_agnostic_texture_sync_supported(
         state.adapters[index].resource_agnostic_texture_sync,
     );
-}
-
-fn bool? vk_supports_dynamic_color_state(
-    VkRuntimeState* state,
-    uint adapter_index,
-) {
-    if (state == null || adapter_index >= state.adapters.len) {
-        return gpu::INVALID_HANDLE~;
-    }
-    return state.adapters[adapter_index].dynamic_color_state_supported;
 }

@@ -288,14 +288,13 @@ fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipe_desc = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
     };
     ctx.graphics = gpu::create_graphics_pipeline(device, &pipe_desc)!!;
 
@@ -787,7 +786,7 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
         .height = 2,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
     assert(@catch(gpu::cmd_begin_render_pass_with_state(
             &commands,
             &pass,
@@ -931,10 +930,13 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
-
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     fault misaligned_fault = @catch(gpu::cmd_draw_indexed(
         commands:      &cmd,
         vertex_root:   val_span_address(&device, verts_span),
@@ -983,6 +985,8 @@ fn void dispatch_with_graphics_pipeline_faults() @test {
 fn void draw_with_compute_pipeline_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
     gpu::TextureHandle target = make_val_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
     gpu::AttachmentViewHandle target_view = create_test_attachment_view(
@@ -1005,9 +1009,13 @@ fn void draw_with_compute_pipeline_faults() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
+    gpu::cmd_bind_pipeline(&cmd, draw.graphics)!!;
     gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
-
     gpu::cmd_bind_pipeline(&cmd, compute)!!;
     fault wrong_kind = @catch(gpu::cmd_draw(
         commands:      &cmd,
@@ -1066,7 +1074,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         "dispatch without an active pipeline faults command state");
 
     gpu::reset_command_resolution_stats();
-    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     fault wrong_compute_kind = @catch(gpu::cmd_dispatch(
         commands: &commands,
@@ -1188,9 +1195,13 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
     gpu::reset_command_resolution_stats();
 
     gpu::cmd_draw(
@@ -1246,8 +1257,8 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     assert_warm_command_resolution(gpu::command_resolution_stats(), 5);
     gpu::cmd_end_render_pass(&commands)!!;
 
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
     gpu::cmd_draw(
         commands:      &commands,
         vertex_root:   root,
@@ -1281,7 +1292,11 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
     defer discard_test_commands(&commands)!!;
     gpu::DynamicRasterState raster = {};
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
 
     gpu::reset_command_resolution_stats();
     gpu::cmd_set_raster_state(&commands, &raster)!!;
@@ -1315,7 +1330,7 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
 
     gpu::reset_command_resolution_stats();
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
-    assert(gpu::command_resolution_stats().native_commands == 10,
+    assert(gpu::command_resolution_stats().native_commands == 13,
         "complete graphics state records before a render pass");
     assert(vk::resolve_command(&commands)!!.graphics_state_initialized,
         "a complete pre-pass packet establishes initialization");
@@ -1422,7 +1437,7 @@ fn void full_graphics_state_setters_reject_non_graphics_recording_roles() @test 
     defer record.queue = recorded_queue;
 
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_graphics_state(&commands, &graphics))
             == gpu::INVALID_ARGUMENT
@@ -1461,14 +1476,13 @@ fn void graphics_pipeline_from_swapped_shader_stages_faults() @test {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = VAL_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag_shader = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc swapped = {
         .vertex_shader   = frag_shader,
         .fragment_shader = vert_shader,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
     };
     fault wrong_stage = @catch(gpu::create_graphics_pipeline(&device, &swapped));
     assert(wrong_stage == gpu::INVALID_ARGUMENT, "graphics pipeline with swapped vertex/fragment shaders faults INVALID_ARGUMENT");
@@ -1556,9 +1570,13 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     gpu::cmd_draw(&cmd, val_span_address(&device, verts_span), val_span_address(&device, frag_span), 3, 1)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
@@ -1688,11 +1706,15 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
 
     gpu::GpuSpan index_span_stub = {};
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     fault beyond = @catch(gpu::cmd_draw_indexed_indirect_count(
         commands:       &cmd,
         vertex_root:    (gpu::GpuAddress)1,
@@ -1770,8 +1792,11 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
 
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     uint original_limit = state.caps.max_draw_indirect_count;
@@ -1779,6 +1804,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
     defer state.caps.max_draw_indirect_count = original_limit;
 
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     gpu::cmd_draw_indirect(
         commands:      &cmd,
         vertex_root:   (gpu::GpuAddress)1,
@@ -1901,9 +1927,13 @@ fn void generated_work_commands_require_capability() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
     fault draw_unsupported = @catch(gpu::cmd_draw_generated(
         commands:      &commands,
         records:       records.span,
@@ -2093,10 +2123,13 @@ fn void draw_indexed_index_span_beyond_buffer_faults() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
-
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     fault beyond = @catch(gpu::cmd_draw_indexed(
         commands:       &cmd,
         vertex_root:    (gpu::GpuAddress)1,
@@ -2144,10 +2177,13 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
-
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
     gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     gpu::cmd_draw_indexed(
         commands:       &cmd,
         vertex_root:    (gpu::GpuAddress)1,
@@ -2656,7 +2692,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::ColorTargetDesc[1] large_color = { { .view = large_view } };
     gpu::RenderPassDesc oversized = { .colors = large_color[..], .width = 17, .height = 16 };
     gpu::GraphicsState oversized_state =
-        gpu::full_render_graphics_state(oversized.width, oversized.height)!!;
+        gpu::render_geometry_state(oversized.width, oversized.height)!!;
     assert(@catch(gpu::cmd_begin_render_pass_with_state(
             &cmd,
             &oversized,
@@ -2671,7 +2707,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     };
     gpu::RenderPassDesc mixed = { .colors = mixed_colors[..], .width = 16, .height = 16 };
     gpu::GraphicsState mixed_state =
-        gpu::full_render_graphics_state(mixed.width, mixed.height)!!;
+        gpu::render_geometry_state(mixed.width, mixed.height)!!;
     assert(@catch(gpu::cmd_begin_render_pass_with_state(
             &cmd,
             &mixed,
@@ -2688,7 +2724,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     };
     gpu::RenderPassDesc invalid_later_pass = { .colors = invalid_later[..], .width = 4, .height = 4 };
     gpu::GraphicsState invalid_later_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             invalid_later_pass.width,
             invalid_later_pass.height,
         )!!;
@@ -2705,7 +2741,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::ColorTargetDesc[1] mip_color = { { .view = large_mip_one } };
     gpu::RenderPassDesc mip_oversized = { .colors = mip_color[..], .width = 9, .height = 8 };
     gpu::GraphicsState mip_oversized_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             mip_oversized.width,
             mip_oversized.height,
         )!!;
@@ -2717,15 +2753,13 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         "render area wider than nonzero mip faults INVALID_ARGUMENT");
 
     gpu::RenderPassDesc mip_exact = { .colors = mip_color[..], .width = 8, .height = 8 };
-    gpu::GraphicsState mip_exact_state =
-        gpu::full_render_graphics_state(mip_exact.width, mip_exact.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &mip_exact, &mip_exact_state)!!;
+    gpu::cmd_begin_render_pass(&cmd, &mip_exact)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::DepthTargetDesc depth_target = { .view = depth_view };
     gpu::RenderPassDesc depth_oversized = { .depth = &depth_target, .width = 9, .height = 8 };
     gpu::GraphicsState depth_oversized_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             depth_oversized.width,
             depth_oversized.height,
         )!!;
@@ -2739,12 +2773,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
 
     gpu::DepthTargetDesc mip_depth_target = { .view = mip_depth_view };
     gpu::RenderPassDesc mip_depth_pass = { .depth = &mip_depth_target, .width = 8, .height = 8 };
-    gpu::GraphicsState mip_depth_state =
-        gpu::full_render_graphics_state(
-            mip_depth_pass.width,
-            mip_depth_pass.height,
-        )!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &mip_depth_pass, &mip_depth_state)!!;
+    gpu::cmd_begin_render_pass(&cmd, &mip_depth_pass)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
@@ -2765,7 +2794,7 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::ColorTargetDesc[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
     gpu::RenderPassDesc library_limit = { .colors = too_many[..], .width = 1, .height = 1 };
     gpu::GraphicsState library_limit_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             library_limit.width,
             library_limit.height,
         )!!;
@@ -2782,7 +2811,7 @@ fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::ColorTargetDesc[2] device_excess;
     gpu::RenderPassDesc selected_limit = { .colors = device_excess[..], .width = 1, .height = 1 };
     gpu::GraphicsState selected_limit_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             selected_limit.width,
             selected_limit.height,
         )!!;
@@ -2901,16 +2930,7 @@ fn void warm_render_pass_reuses_many_precreated_views() @test {
                 .width  = 1,
                 .height = 1,
             };
-            gpu::GraphicsState graphics_state =
-                gpu::full_render_graphics_state(
-                    pass.width,
-                    pass.height,
-                )!!;
-            gpu::cmd_begin_render_pass_with_state(
-                &commands,
-                &pass,
-                &graphics_state,
-            )!!;
+            gpu::cmd_begin_render_pass(&commands, &pass)!!;
             gpu::cmd_end_render_pass(&commands)!!;
         }
         gpu::internal::RecordingWorkCounters after =
@@ -3392,7 +3412,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         invariant:      "color attachment must include color_attach usage",
     );
     gpu::GraphicsState usage_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             usage_pass.width,
             usage_pass.height,
         )!!;
@@ -3452,7 +3472,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         invariant:      "render area must fit every color attachment mip",
     );
     gpu::GraphicsState too_tall_state =
-        gpu::full_render_graphics_state(
+        gpu::render_geometry_state(
             too_tall.width,
             too_tall.height,
         )!!;
@@ -3471,7 +3491,12 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         generation:          color_target.generation,
     );
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {
+        gpu::color_blend_disabled(),
+    };
+    graphics_state.color.targets = color_targets[..];
+    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_begin_render_pass_with_state(
         &commands,
         &pass,

@@ -254,7 +254,6 @@ QueueRequirements
     QueueRoles distinct
 
 strict_device_request()          -> DeviceRequest
-request_dynamic_color_state(DeviceRequest) -> DeviceRequest?
 request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
 request_resource_agnostic_texture_sync(DeviceRequest) -> DeviceRequest?
 request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
@@ -294,7 +293,6 @@ DeviceCaps
     bool shader_int64
     bool draw_indirect_count
     bool generated_work
-    bool dynamic_color_state
     bool async_compute
     QueueCounts queues
     bool line_polygon_mode
@@ -317,19 +315,18 @@ get_device_caps(Device*)         -> DeviceCaps?
 ```
 
 `strict_enabled` reports whether strict semantics were requested and enabled.
-`dynamic_color_state` is true only when the immutable request added dynamic
-color state and device creation enabled the complete semantic profile.
-Unrequested or unsupported devices report false; there is no silent fallback.
 The minimum supported device profile is intentionally Vulkan 1.3 plus
 `VK_EXT_extended_dynamic_state3` and
 `dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. The strict profile also
-requires independent per-target blending and depth-bias clamp. Query request
-support before creation; creation returns `UNSUPPORTED_FEATURE` when an adapter
-cannot provide every requirement. `generated_work` is true only when the
-created strict device enables GPU-written root and work records for graphics
-and compute. A supported device reports a nonzero `max_generated_work_count`;
-an unsupported device reports false and zero. Heap and generated-work
-implementation mechanisms remain private.
+requires the extension's color blend-enable, color blend-equation, and color
+write-mask features, together with independent per-target blending and
+depth-bias clamp. Query request support before creation; creation returns
+`UNSUPPORTED_FEATURE` when an adapter cannot provide every requirement.
+`generated_work` is true only when the created strict device enables
+GPU-written root and work records for graphics and compute. A supported device
+reports a nonzero `max_generated_work_count`; an unsupported device reports
+false and zero. Heap and generated-work implementation mechanisms remain
+private.
 
 Runtime heap capacities are exact semantic device defaults, not clampable upper
 bounds. Device creation fails rather than clamping when the selected adapter
@@ -467,7 +464,7 @@ both always-checked and `FULL`-only causes.
 |---|---|---|---|
 | `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the Vulkan loader, driver, or required backend initialization path is unavailable |
 | `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `full_render_graphics_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
+| `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
 | `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource handle; or a zero, stale, consumed, or wrong-phase valid-origin direct command token; submit also rejects a token recorded for another device |
 | `INVALID_RESOURCE_STATE` | Always checked lifecycle/safe snapshot / Runtime failures | command execution; surface and swapchain creation/lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an authoritative lifecycle transition is invalid, trusted-table command execution has no usable bound-pipeline snapshot, a borrowed view was passed for destruction, a generated-scratch key is not reserved, or Vulkan reports that the native window is already in use |
 | `OUT_OF_HOST_MEMORY` | Runtime failures | creates; mapped visibility | driver or backend cache host-allocation failure |
@@ -932,19 +929,11 @@ ColorWriteMask
     bool alpha
 
 ColorTargetState
-    Format format
-    BlendState blend
-    ColorWriteMask write_mask
-
-ColorTargetFormat
-    Format format
-
-ColorTargetBlendState
     BlendState blend
     ColorWriteMask write_mask
 
 ColorState
-    ColorTargetBlendState[] targets
+    ColorTargetState[] targets
 
 DynamicRasterState
     PrimitiveTopology topology
@@ -958,34 +947,16 @@ DynamicRasterState
 GraphicsPipelineDesc
     ShaderCode vertex_shader
     ShaderCode fragment_shader
-    ColorTargetState[] colors
-    Format depth_format
-    SampleCount sample_count
-    PolygonMode polygon_mode
-    ZString debug_name
-
-DynamicGraphicsPipelineDesc
-    ShaderCode vertex_shader
-    ShaderCode fragment_shader
-    ColorTargetFormat[] colors
+    Format[] color_formats
     Format depth_format
     SampleCount sample_count
     PolygonMode polygon_mode
     ZString debug_name
 
 create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) -> PipelineHandle?
-create_dynamic_graphics_pipeline(
-    Device* device,
-    DynamicGraphicsPipelineDesc* desc,
-) -> PipelineHandle?
 create_graphics_pipelines(
     Device* device,
     GraphicsPipelineDesc[] descs,
-    PipelineHandle[] out_pipelines,
-) -> void?
-create_dynamic_graphics_pipelines(
-    Device* device,
-    DynamicGraphicsPipelineDesc[] descs,
     PipelineHandle[] out_pipelines,
 ) -> void?
 destroy_pipeline(Device* device, PipelineHandle pipeline) -> void?
@@ -995,33 +966,26 @@ using it; unsupported LINE creation returns `UNSUPPORTED_FEATURE`.
 `PrimitiveTopology.LINES` remains available independently with FILL mode and is
 selected with `cmd_set_raster_state`.
 
-`colors` carries at most `MAX_COLOR_ATTACHMENTS` (8) entries. Format, blend,
-and write mask are specified independently for every target. The zero write
-mask disables all writes; use `COLOR_WRITE_ALL` for the conventional RGBA
-mask. In particular, a zero-initialized `ColorTargetState` that sets only
-`.format` creates a valid target that renders no color. Enabled blending is
-invalid for integer color formats. A disabled blend equation, or any blend
-equation paired with a zero write mask, is normalized out of pipeline identity.
+`color_formats` carries at most `MAX_COLOR_ATTACHMENTS` (8) entries and defines
+the pipeline's ordered color-target domain. The matching blend equations and
+write masks come from a complete command-time `ColorState` packet. The zero
+write mask disables all writes; use `COLOR_WRITE_ALL` for conventional RGBA
+writes. Enabled blending is invalid for integer color formats.
 
-`GraphicsPipelineDesc` is the immutable color profile: format, blend, and
-write mask all participate in identity. `DynamicGraphicsPipelineDesc` is the
-explicit format-only profile and requires `DeviceCaps.dynamic_color_state`.
-Its blend and write-mask state comes from a complete `ColorState` packet
-recorded with `cmd_set_color_state`. Common caller-owned packet constructors
-are `color_blend_disabled`, `alpha_blend`, `premultiplied_alpha_blend`,
-`additive_blend`, and `uniform_color_state`; the library retains none of their
-storage.
+Common caller-owned packet constructors are `color_blend_disabled`,
+`alpha_blend`, `premultiplied_alpha_blend`, `additive_blend`, and
+`uniform_color_state`; the library retains none of their storage.
 
 ### Pipeline deduplication
 
 Pipeline creation deduplicates through a descriptor-keyed cache. Every create
 returns a fresh handle, but descriptors identical in immutable state (exact
-shader code identity, polygon mode, per-target format/blend/write masks, depth
-format, and sample count) alias one backend pipeline underneath. Compute
+shader code identity, polygon mode, ordered color formats, depth format, and
+sample count) alias one backend pipeline underneath. Compute
 identity is shader identity because its `RootPush` layout is fixed. Digest collisions are
 resolved by stage, entry point, length, and exact SPIR-V bytes. Topology,
-cull/front-face, depth bias, depth test/write/compare, viewport, and scissor are
-separate dynamic command state.
+cull/front-face, depth bias, depth test/write/compare, viewport, scissor,
+blend equations, and write masks are separate command state.
 
 Batch output length must equal descriptor count; an empty batch succeeds.
 Shared shader code creates one temporary native module per exact stage, entry
@@ -1283,6 +1247,7 @@ cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) -> void?
 cmd_set_graphics_state(CommandList* commands, GraphicsState* state) -> void?
 cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
 cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
+cmd_set_color_state(CommandList* commands, ColorState* color) -> void?
 cmd_dispatch(
     CommandList* commands,
     GpuAddress root,
@@ -1308,19 +1273,22 @@ every policy. A shader must branch before dereferencing a zero root unless the
 application deliberately relies on defined robustness behavior.
 
 Graphics state belongs to a graphics-capable command buffer, not to one render
-pass. `cmd_set_graphics_state` records a complete packet before or during a pass;
-`cmd_set_raster_state`, `cmd_set_depth_state`, `cmd_set_viewport`, and
+pass. After a compatible graphics pipeline is bound, `cmd_set_graphics_state`
+records a complete packet before or during a pass; `cmd_set_raster_state`,
+`cmd_set_depth_state`, `cmd_set_color_state`, `cmd_set_viewport`, and
 `cmd_set_scissor` record optional partial updates in either phase. A minimal
 pass begin leaves that state unchanged. The convenience begin records a
 complete packet after beginning the pass. Host-safe descriptor access and
 lowering prerequisites are always checked. Under `FULL`, semantic state
-validation is atomic: invalid values return `INVALID_ARGUMENT` without emitting
-native state.
+validation is atomic: invalid values return `INVALID_ARGUMENT` without
+emitting native state.
 
 Under `ContractValidation.FULL`, regular and generated graphics draws return
 `COMMAND_RECORDING_ERROR` until one complete packet has succeeded in the
 current command-buffer recording. Partial setters do not establish that
-initialization, pass boundaries do not clear it, and command-buffer reset does.
+initialization, compatible pipeline switches and pass boundaries do not clear
+it, incompatible color-format domains clear color readiness, and command-buffer
+reset clears all readiness.
 Trusted command entries retain this requirement as a caller contract without a
 warm validation branch. A wrong active pipeline kind returns
 `INVALID_ARGUMENT`.
@@ -1393,8 +1361,9 @@ GraphicsState
     ScissorRect scissor
     DynamicRasterState raster
     DepthState depth
+    ColorState color
 
-full_render_graphics_state(uint width, uint height) -> GraphicsState?
+render_geometry_state(uint width, uint height) -> GraphicsState?
 cmd_begin_render_pass(
     CommandList* commands,
     RenderPassDesc* desc,
@@ -1439,15 +1408,17 @@ pass. It neither requires nor emits a `GraphicsState` packet.
 `cmd_begin_render_pass_with_state` applies the same always-checked preparation
 to both inputs; `FULL` adds the complete semantic pass and graphics-state
 diagnostics before tracking or native mutation. It then begins rendering and
-emits the complete packet. A rejected convenience call leaves command-list
-state, tracked references, and the native command buffer unchanged.
+emits the complete packet. Select a compatible graphics pipeline before this
+call. A rejected convenience call leaves command-list state, tracked
+references, and the native command buffer unchanged.
 
-A complete packet emits exactly ten dynamic-state commands in fixed order:
-viewport, scissor, five raster commands, and three depth commands. There is no
-state diffing or dirty-bit cache. `cmd_set_graphics_state` safely lowers and
-emits the same complete replacement before or during a pass; `FULL` diagnoses
-invalid values and a non-graphics queue. The four partial setters remain
-available in both phases:
+A complete packet emits viewport, scissor, five raster commands, and three
+depth commands in fixed order, followed by three color-array commands when the
+selected pipeline has color targets. There is no state diffing or dirty-bit
+cache. `cmd_set_graphics_state` safely lowers and emits the same complete
+replacement before or during a pass; select a compatible graphics pipeline
+first. `FULL` diagnoses invalid values and a non-graphics queue. The five
+partial setters remain available in both phases:
 
 ```text
 Viewport
@@ -1468,22 +1439,37 @@ cmd_set_viewport(CommandList* commands, Viewport* viewport) -> void?
 cmd_set_scissor(CommandList* commands, ScissorRect* scissor) -> void?
 cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
 cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
+cmd_set_color_state(CommandList* commands, ColorState* color) -> void?
 ```
 
 A conventional starting packet can be constructed from the pass dimensions:
 
 ```c3
-gpu::GraphicsState state = gpu::full_render_graphics_state(
+gpu::GraphicsState state = gpu::render_geometry_state(
     pass.width,
     pass.height,
 )!!;
+gpu::ColorTargetState[1] color_targets = {
+    gpu::color_blend_disabled(),
+};
+state.color = { .targets = color_targets[..] };
+gpu::cmd_bind_pipeline(&commands, pipeline)!!;
 gpu::cmd_begin_render_pass_with_state(&commands, &pass, &state)!!;
 ```
 
 The helper faults `INVALID_ARGUMENT` before signed casts when either dimension
 is zero or exceeds `int::max`. It returns a full-area viewport and scissor, the
-conventional `[0, 1]` depth range, and zero raster/depth state. Zero depth state
-means disabled depth testing and writing and is valid for drawing.
+conventional `[0, 1]` depth range, zero raster/depth state, and an empty color
+packet. Zero depth state means disabled depth testing and writing and is valid
+for drawing. Depth-only pipelines use the empty color packet unchanged; color
+pipelines replace it with a packet matching their ordered color-format domain.
+
+Migration: `full_render_graphics_state` is retired in favor of
+`render_geometry_state`. The new name makes the boundary explicit: the helper
+constructs geometry-related state but cannot manufacture caller-owned color
+target storage. Existing color-pass callers must assign `GraphicsState.color`
+before recording. This is a valid-caller precondition under `TRUSTED` and a
+diagnosed target-count error under `FULL`.
 
 Every viewport field
 and computed axis endpoint must be finite. Width is positive, height is
@@ -1498,24 +1484,26 @@ library invariant, not a Vulkan 1.3 validity requirement.
 Scissors use signed inputs, so valid callers provide nonnegative origins and
 extents. Each widened offset-plus-extent fits `int::max` before native
 lowering. The rectangle may extend beyond the render area and zero extent is a
-valid empty clip. `FULL` diagnoses invalid viewport, scissor, raster, and depth
-values with `INVALID_ARGUMENT` before changing dynamic state. Authoritative
-recording/pass phase is always checked and faults `COMMAND_RECORDING_ERROR`.
+valid empty clip. `FULL` diagnoses invalid viewport, scissor, raster, depth, or
+color values with `INVALID_ARGUMENT` before changing command state.
+Authoritative recording/pass phase is always checked and faults
+`COMMAND_RECORDING_ERROR`.
 
-Explicit dynamic state survives graphics pipeline and cache-alias handle
-switches and render-pass boundaries. Minimal begin preserves it without
-re-emission; convenience begin and explicit setters replace it.
+Explicit command state survives compatible graphics pipeline and cache-alias
+handle switches and render-pass boundaries. An incompatible color-format
+domain invalidates color readiness while leaving the other command state
+intact. Minimal begin preserves state without re-emission; convenience begin
+and explicit setters replace it.
 The current API intentionally exposes one viewport and one scissor only.
 
-`cmd_set_color_state` applies only to a selected dynamic-color graphics
-pipeline. The packet target count and order must match that pipeline's format
-domain. `FULL` validates the complete packet before any native call, including
-integer-format blend rejection. A compatible dynamic pipeline alias or pass
-boundary preserves initialization; binding a different dynamic format domain
-clears it. Draw and generated-draw paths reject an uninitialized domain.
-Every explicit nonempty packet emits again as exactly three native array
-commands; identical packets are not suppressed. An unrequested device returns
-`UNSUPPORTED_FEATURE` under every validation policy before mutation.
+`cmd_set_color_state` applies to the selected graphics pipeline. The packet
+target count and order must match that pipeline's ordered color-format domain.
+`FULL` validates the complete packet before any native call, including
+integer-format blend rejection. A compatible pipeline alias or pass boundary
+preserves initialization; binding a different color-format domain clears it.
+Draw and generated-draw paths reject an uninitialized domain. Every explicit
+nonempty packet emits again as exactly three native array commands; identical
+packets are not suppressed.
 
 This is a source-breaking experimental API. Migrate an old three-argument
 `cmd_begin_render_pass(commands, desc, state)` call to

@@ -41,23 +41,23 @@ dynamic_color_features_with_required() {
         .set_extended_dynamic_state3color_write_mask(vk::TRUE);
 }
 
-fn void dynamic_color_features_require_the_complete_set() @test {
+fn void required_dynamic_color_features_require_the_complete_set() @test {
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT features =
         dynamic_color_features_with_required();
     assert(
-        gpu::internal::vk::dynamic_color_state_features_supported(&features),
-        "all three color features support the semantic capability"
+        gpu::internal::vk::required_dynamic_color_features_supported(&features),
+        "all three color features satisfy the strict baseline"
     );
 
     features.extended_dynamic_state3color_blend_enable = vk::FALSE;
-    assert(!gpu::internal::vk::dynamic_color_state_features_supported(&features));
+    assert(!gpu::internal::vk::required_dynamic_color_features_supported(&features));
     features = dynamic_color_features_with_required();
     features.extended_dynamic_state3color_blend_equation = vk::FALSE;
-    assert(!gpu::internal::vk::dynamic_color_state_features_supported(&features));
+    assert(!gpu::internal::vk::required_dynamic_color_features_supported(&features));
     features = dynamic_color_features_with_required();
     features.extended_dynamic_state3color_write_mask = vk::FALSE;
-    assert(!gpu::internal::vk::dynamic_color_state_features_supported(&features));
-    assert(!gpu::internal::vk::dynamic_color_state_features_supported(null));
+    assert(!gpu::internal::vk::required_dynamic_color_features_supported(&features));
+    assert(!gpu::internal::vk::required_dynamic_color_features_supported(null));
 }
 
 fn void required_features_present_ok() @test {
@@ -69,6 +69,8 @@ fn void required_features_present_ok() @test {
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color =
+        dynamic_color_features_with_required();
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         dynamic_properties_with_required();
 
@@ -77,8 +79,36 @@ fn void required_features_present_ok() @test {
         v11:                &v11,
         v12:                &v12,
         v13:                &v13,
+        dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     )), "all required features present must pass the gate");
+}
+
+fn void required_features_reject_only_missing_dynamic_color() @test {
+    vk::PhysicalDeviceFeatures base = base_with_required();
+    vk::PhysicalDeviceVulkan11Features v11 = v11_with_required();
+    vk::PhysicalDeviceVulkan12Features v12 =
+        vk::physical_device_vulkan12features()
+            .set_buffer_device_address(vk::TRUE)
+            .set_timeline_semaphore(vk::TRUE);
+    vk::PhysicalDeviceVulkan13Features v13 =
+        vk::physical_device_vulkan13features()
+            .set_synchronization2(vk::TRUE)
+            .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color =
+        vk::physical_device_extended_dynamic_state3features_ext();
+    vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT
+        dynamic_properties = dynamic_properties_with_required();
+
+    assert(@catch(gpu::internal::vk::check_required_features(
+        base:               &base,
+        v11:                &v11,
+        v12:                &v12,
+        v13:                &v13,
+        dynamic_color:      &dynamic_color,
+        dynamic_properties: &dynamic_properties,
+    )) == gpu::UNSUPPORTED_FEATURE,
+        "the strict gate rejects an otherwise complete device without dynamic color");
 }
 
 fn bool? dynamic_state3_extension_absent(
@@ -104,6 +134,8 @@ fn void missing_feature_rejected() @test {
     vk::PhysicalDeviceVulkan11Features v11 = vk::physical_device_vulkan11features();
     vk::PhysicalDeviceVulkan12Features v12 = vk::physical_device_vulkan12features();
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features();
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color =
+        vk::physical_device_extended_dynamic_state3features_ext();
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         vk::physical_device_extended_dynamic_state3properties_ext();
 
@@ -112,6 +144,7 @@ fn void missing_feature_rejected() @test {
         v11:                &v11,
         v12:                &v12,
         v13:                &v13,
+        dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     ));
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "a missing required feature raises UNSUPPORTED_FEATURE");
@@ -126,6 +159,8 @@ fn void one_missing_feature_rejected() @test {
         .set_timeline_semaphore(vk::TRUE);
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color =
+        dynamic_color_features_with_required();
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         dynamic_properties_with_required();
 
@@ -134,6 +169,7 @@ fn void one_missing_feature_rejected() @test {
         v11:                &v11,
         v12:                &v12,
         v13:                &v13,
+        dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     ));
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "a single missing feature still raises UNSUPPORTED_FEATURE");
@@ -152,6 +188,8 @@ fn void missing_shader_int64_rejected() @test {
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color =
+        dynamic_color_features_with_required();
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         dynamic_properties_with_required();
 
@@ -160,6 +198,7 @@ fn void missing_shader_int64_rejected() @test {
         v11:                &v11,
         v12:                &v12,
         v13:                &v13,
+        dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     ));
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "missing shaderInt64 raises UNSUPPORTED_FEATURE");
@@ -172,6 +211,8 @@ fn void missing_indirect_features_rejected() @test {
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color =
+        dynamic_color_features_with_required();
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         dynamic_properties_with_required();
 
@@ -186,6 +227,7 @@ fn void missing_indirect_features_rejected() @test {
         v11:                &v11,
         v12:                &v12,
         v13:                &v13,
+        dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     ));
     assert(mdi_fault == gpu::UNSUPPORTED_FEATURE, "missing multiDrawIndirect raises UNSUPPORTED_FEATURE");
@@ -198,6 +240,7 @@ fn void missing_indirect_features_rejected() @test {
         v11:                &v11_empty,
         v12:                &v12,
         v13:                &v13,
+        dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     ));
     assert(sdp_fault == gpu::UNSUPPORTED_FEATURE, "missing shaderDrawParameters raises UNSUPPORTED_FEATURE");
@@ -212,6 +255,8 @@ fn void raster_feature_requirements_rejected_individually() @test {
     vk::PhysicalDeviceVulkan13Features v13 = vk::physical_device_vulkan13features()
         .set_synchronization2(vk::TRUE)
         .set_dynamic_rendering(vk::TRUE);
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color =
+        dynamic_color_features_with_required();
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         dynamic_properties_with_required();
 
@@ -221,6 +266,7 @@ fn void raster_feature_requirements_rejected_individually() @test {
         v11:                &v11,
         v12:                &v12,
         v13:                &v13,
+        dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     )) == gpu::UNSUPPORTED_FEATURE, "missing independentBlend rejects the candidate");
 
@@ -231,6 +277,7 @@ fn void raster_feature_requirements_rejected_individually() @test {
         v11:                &v11,
         v12:                &v12,
         v13:                &v13,
+        dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     )) == gpu::UNSUPPORTED_FEATURE, "missing depthBiasClamp rejects the candidate");
 
@@ -241,6 +288,7 @@ fn void raster_feature_requirements_rejected_individually() @test {
         v11:                &v11,
         v12:                &v12,
         v13:                &v13,
+        dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     )) == gpu::UNSUPPORTED_FEATURE,
         "restricted dynamic topology rejects the candidate before scoring");

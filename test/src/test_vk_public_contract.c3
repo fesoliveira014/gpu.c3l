@@ -44,22 +44,15 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
             == gpu::INVALID_ARGUMENT,
         "create_graphics_pipeline rejects a null descriptor"
     );
+    gpu::GraphicsPipelineDesc[1] graphics_descs;
+    gpu::PipelineHandle[2] graphics_outputs;
     assert(
-        @catch(gpu::create_dynamic_graphics_pipeline(
+        @catch(gpu::create_graphics_pipelines(
             &device,
-            (gpu::DynamicGraphicsPipelineDesc*)null,
+            graphics_descs[..],
+            graphics_outputs[..],
         )) == gpu::INVALID_ARGUMENT,
-        "create_dynamic_graphics_pipeline rejects a null descriptor"
-    );
-    gpu::DynamicGraphicsPipelineDesc[1] dynamic_descs;
-    gpu::PipelineHandle[2] dynamic_outputs;
-    assert(
-        @catch(gpu::create_dynamic_graphics_pipelines(
-            &device,
-            dynamic_descs[..],
-            dynamic_outputs[..],
-        )) == gpu::INVALID_ARGUMENT,
-        "dynamic pipeline batch rejects mismatched output shape"
+        "graphics pipeline batch rejects mismatched output shape"
     );
     assert(
         @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, (gpu::SubmitDesc*)null))
@@ -134,7 +127,7 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
         "cmd_texture_barrier rejects a null barrier"
     );
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(1, 1)!!;
+        gpu::render_geometry_state(1, 1)!!;
     assert(
         @catch(gpu::cmd_begin_render_pass_with_state(
             &commands,

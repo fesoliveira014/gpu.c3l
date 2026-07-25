@@ -50,23 +50,6 @@ fn void resource_agnostic_texture_sync_request_is_explicit_and_immutable() @test
     gpu::internal::validate_device_request(&requested)!!;
 }
 
-fn void dynamic_color_state_request_is_explicit_and_immutable() @test {
-    gpu::DeviceRequest strict = gpu::strict_device_request();
-    gpu::DeviceRequest original = strict;
-    gpu::DeviceRequest requested = gpu::request_dynamic_color_state(strict)!!;
-
-    assert((uint128)strict == (uint128)original, "composition preserves its input");
-    assert(
-        gpu::internal::requests_dynamic_color_state(requested),
-        "the contribution records the semantic request"
-    );
-    assert(
-        !gpu::internal::requests_dynamic_color_state(strict),
-        "the input remains unrequested"
-    );
-    gpu::internal::validate_device_request(&requested)!!;
-}
-
 fn void resource_agnostic_texture_sync_request_rejects_duplicate_and_malformed_inputs() @test {
     gpu::DeviceRequest requested = gpu::request_resource_agnostic_texture_sync(
         gpu::strict_device_request(),
@@ -78,29 +61,10 @@ fn void resource_agnostic_texture_sync_request_rejects_duplicate_and_malformed_i
     );
 
     gpu::DeviceRequest malformed = (gpu::DeviceRequest)(
-        (uint128)gpu::strict_device_request() | ((uint128)1 << 33)
+        (uint128)gpu::strict_device_request() | ((uint128)1 << 31)
     );
     assert(
         @catch(gpu::request_resource_agnostic_texture_sync(malformed))
-            == gpu::INVALID_ARGUMENT,
-        "unknown request bits are rejected"
-    );
-}
-
-fn void dynamic_color_state_request_rejects_duplicate_and_malformed_inputs() @test {
-    gpu::DeviceRequest requested =
-        gpu::request_dynamic_color_state(gpu::strict_device_request())!!;
-    assert(
-        @catch(gpu::request_dynamic_color_state(requested))
-            == gpu::INVALID_ARGUMENT,
-        "duplicate composition is rejected"
-    );
-
-    gpu::DeviceRequest malformed = (gpu::DeviceRequest)(
-        (uint128)gpu::strict_device_request() | ((uint128)1 << 33)
-    );
-    assert(
-        @catch(gpu::request_dynamic_color_state(malformed))
             == gpu::INVALID_ARGUMENT,
         "unknown request bits are rejected"
     );

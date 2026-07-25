@@ -147,7 +147,7 @@ The suite covers:
 | `command_record_bench` | Direct-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording under TRUSTED and FULL; 1/16/256/4,096 command lists; exact native output and zero forbidden warm work |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact direct-token visits, duplicate detection, claim, queue serialization, native submit, and forbidden-work evidence |
-| `pipeline_cache_bench` | Dynamic raster and five-state dynamic-color matrix aliasing, state recording, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
+| `pipeline_cache_bench` | Dynamic raster and five command color-state matrix aliasing, state recording, ordered color-format separation, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
 | `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; zero-through-eight sampler probes at occupancy 8/64/1,024/65,536; upper-bounded texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
 | `upload_throughput_bench` | Explicit uploads at 4 KiB, 256 KiB, and 4 MiB across 1/2/4 workers |
@@ -178,8 +178,8 @@ exact zero. Timings and unpinned generated assembly are advisory.
 |---|---|
 | Cold allocator creation | Host allocations, exactly one exact-family command-pool create, one complete native command-buffer allocation call, and configured buffer count |
 | Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and pre-bind `CommandResolutionStats` |
-| Warm minimal begin + state packet + draw | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, exactly one native begin per pass, exactly ten dynamic-state commands per explicit complete packet, and native draw emission |
-| Warm dynamic-color packet | Exactly three native array commands and zero allocation, resource locks, pipeline creation, pipeline/cache lookup, or identical-packet suppression |
+| Warm minimal begin + state packet + draw | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, exactly one native begin per pass, exactly ten viewport/raster/depth commands plus three color-array commands per nonempty explicit complete packet, and native draw emission |
+| Warm command color packet | Exactly three native array commands and zero allocation, resource locks, pipeline creation, pipeline/cache lookup, or identical-packet suppression |
 | Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
@@ -201,8 +201,9 @@ heap binds.
 
 Minimal pass begin accounts for exactly one native begin-rendering command and
 no dynamic-state commands. The convenience begin accounts for that begin plus
-one ten-command packet. A complete `cmd_set_graphics_state` replacement
-accounts for exactly ten; additional passes and draws scale only with their
+ten viewport/raster/depth commands and, for a nonempty color domain, three
+color-array commands. A complete `cmd_set_graphics_state` replacement accounts
+for the same state commands; additional passes and draws scale only with their
 begin/end/draw commands unless the caller records another setter. The
 `{2, 16, 256}` pass-count matrix records one packet before the first pass and
 requires no hidden state replay, allocation, state diff, or dirty-bit work.

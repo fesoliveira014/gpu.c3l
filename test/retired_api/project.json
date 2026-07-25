@@ -537,10 +537,10 @@
         "retired_graphics_pipeline_blend.c3"
       ]
     },
-    "retired_pipeline_color_formats": {
+    "retired_pipeline_colors": {
       "type": "object-files",
       "sources": [
-        "retired_pipeline_color_formats.c3"
+        "retired_pipeline_colors.c3"
       ]
     },
     "retired_compute_push_constant": {
@@ -577,6 +577,60 @@
       "type": "object-files",
       "sources": [
         "retired_release_generated_scratch_queue.c3"
+      ]
+    },
+    "dynamic_graphics_pipeline_desc": {
+      "type": "object-files",
+      "sources": [
+        "dynamic_graphics_pipeline_desc.c3"
+      ]
+    },
+    "color_target_format": {
+      "type": "object-files",
+      "sources": [
+        "color_target_format.c3"
+      ]
+    },
+    "color_target_blend_state": {
+      "type": "object-files",
+      "sources": [
+        "color_target_blend_state.c3"
+      ]
+    },
+    "request_dynamic_color_state": {
+      "type": "object-files",
+      "sources": [
+        "request_dynamic_color_state.c3"
+      ]
+    },
+    "create_dynamic_graphics_pipeline": {
+      "type": "object-files",
+      "sources": [
+        "create_dynamic_graphics_pipeline.c3"
+      ]
+    },
+    "create_dynamic_graphics_pipelines": {
+      "type": "object-files",
+      "sources": [
+        "create_dynamic_graphics_pipelines.c3"
+      ]
+    },
+    "dynamic_color_state_caps": {
+      "type": "object-files",
+      "sources": [
+        "dynamic_color_state_caps.c3"
+      ]
+    },
+    "color_target_state_format": {
+      "type": "object-files",
+      "sources": [
+        "color_target_state_format.c3"
+      ]
+    },
+    "full_render_graphics_state": {
+      "type": "object-files",
+      "sources": [
+        "full_render_graphics_state.c3"
       ]
     },
     "backend_kind": {

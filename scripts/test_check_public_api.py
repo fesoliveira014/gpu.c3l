@@ -372,7 +372,7 @@ def valid_document() -> dict:
                         ("state", "GraphicsState*"),
                     ),
                     api_function(
-                        "full_render_graphics_state",
+                        "render_geometry_state",
                         "GraphicsState?",
                         ("width", "uint"),
                         ("height", "uint"),
@@ -547,7 +547,6 @@ def valid_document() -> dict:
                         "name": "ColorTargetState",
                         "kind": "struct",
                         "members": [
-                            {"name": "format", "type": {"name": "Format"}},
                             {
                                 "name": "blend",
                                 "type": {"name": "BlendState"},
@@ -555,6 +554,16 @@ def valid_document() -> dict:
                             {
                                 "name": "write_mask",
                                 "type": {"name": "ColorWriteMask"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "ColorState",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "targets",
+                                "type": {"name": "ColorTargetState[]"},
                             },
                         ],
                     },
@@ -670,6 +679,10 @@ def valid_document() -> dict:
                                 "name": "depth",
                                 "type": {"name": "DepthState"},
                             },
+                            {
+                                "name": "color",
+                                "type": {"name": "ColorState"},
+                            },
                         ],
                     },
                     {
@@ -699,8 +712,8 @@ def valid_document() -> dict:
                                 "type": {"name": "ShaderCode"},
                             },
                             {
-                                "name": "colors",
-                                "type": {"name": "ColorTargetState[]"},
+                                "name": "color_formats",
+                                "type": {"name": "Format[]"},
                             },
                             {
                                 "name": "depth_format",
@@ -1767,6 +1780,41 @@ method gpu::Runtime.is_valid
         self.assertIn("retired wait_queue_idle", failures)
         self.assertIn("retired timeline capability", failures)
 
+    def test_rejects_retired_optional_color_surface(self) -> None:
+        document = valid_document()
+        gpu_module = document["modules"]["gpu"]
+        gpu_module["types"].extend([
+            {"name": "DynamicGraphicsPipelineDesc"},
+            {"name": "ColorTargetFormat"},
+            {"name": "ColorTargetBlendState"},
+        ])
+        gpu_module["functions"].extend([
+            {"name": "request_dynamic_color_state"},
+            {"name": "create_dynamic_graphics_pipeline"},
+            {"name": "create_dynamic_graphics_pipelines"},
+        ])
+        caps = next(
+            entry for entry in gpu_module["types"]
+            if entry["name"] == "DeviceCaps"
+        )
+        caps["members"].append({
+            "name": "dynamic_color_state",
+            "type": {"name": "bool"},
+        })
+
+        failures = check_public_api.validate_document(document)
+        for failure in (
+            "retired dynamic graphics pipeline descriptor",
+            "retired color target format wrapper",
+            "retired color target blend state",
+            "retired dynamic color device request",
+            "retired dynamic graphics pipeline creation",
+            "retired dynamic graphics pipeline batch creation",
+            "retired optional dynamic color capability",
+        ):
+            with self.subTest(failure=failure):
+                self.assertIn(failure, failures)
+
     def test_rejects_each_retired_frame_policy_symbol(self) -> None:
         cases = (
             (
@@ -2128,6 +2176,7 @@ method gpu::Runtime.is_valid
         for type_name in (
             "BlendState",
             "ColorTargetState",
+            "ColorState",
             "DynamicRasterState",
             "ComputePipelineDesc",
             "GraphicsPipelineDesc",
@@ -2343,7 +2392,7 @@ method gpu::Runtime.is_valid
                     )
 
     def test_requires_complete_graphics_state_schema(self) -> None:
-        for member_name in ("viewport", "scissor", "raster", "depth"):
+        for member_name in ("viewport", "scissor", "raster", "depth", "color"):
             with self.subTest(member_name=member_name):
                 document = valid_document()
                 state = next(
@@ -2389,17 +2438,17 @@ method gpu::Runtime.is_valid
             ),
             (
                 "full render state dimensions",
-                "full_render_graphics_state",
+                "render_geometry_state",
                 lambda function: function["members"].pop(),
-                "full_render_graphics_state has the wrong parameters",
+                "render_geometry_state has the wrong parameters",
             ),
             (
                 "full render state optional return",
-                "full_render_graphics_state",
+                "render_geometry_state",
                 lambda function: function["return_type"].update(
                     {"name": "GraphicsState"}
                 ),
-                "full_render_graphics_state has the wrong return type",
+                "render_geometry_state has the wrong return type",
             ),
         )
         for label, function_name, mutate, failure in mutations:
@@ -3181,6 +3230,40 @@ method gpu::Runtime.is_valid
             "retired backend texture_barrier_to_vk( in gpu/internal/vk/sync.c3",
             failures,
         )
+
+    def test_rejects_retired_dynamic_color_backend_symbols(self) -> None:
+        relative = Path("gpu/internal/vk/pipeline.c3")
+        source = (
+            "module gpu::internal::vk @private;\n"
+            "enum GraphicsColorProfile {}\n"
+            "struct ColorTargetKey {}\n"
+            "struct BlendKey {}\n"
+            "fn void color_profile() {}\n"
+            "fn void dynamic_color_state_enabled() {}\n"
+            "fn void requests_dynamic_color_state() {}\n"
+            "fn void vk_supports_dynamic_color_state() {}\n"
+            "fn void query_dynamic_color_state_support() {}\n"
+        )
+
+        failures = check_public_api.validate_private_backend_source(
+            relative,
+            source,
+        )
+        for symbol in (
+            "GraphicsColorProfile",
+            "ColorTargetKey",
+            "BlendKey",
+            "color_profile",
+            "dynamic_color_state_enabled",
+            "requests_dynamic_color_state",
+            "vk_supports_dynamic_color_state",
+            "query_dynamic_color_state_support",
+        ):
+            with self.subTest(symbol=symbol):
+                self.assertIn(
+                    f"retired backend {symbol} in {relative.as_posix()}",
+                    failures,
+                )
 
     def test_rejects_sibling_modules_in_public_sources(self) -> None:
         relative = Path("gpu/gpu.c3")

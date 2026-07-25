@@ -15,7 +15,7 @@ const char[*] PERFORMANCE_FRAG_SPIRV =
 const uint PERFORMANCE_PIPELINE_CHURN_COUNT = 16;
 const uint PERFORMANCE_DRAW_COUNT = 4;
 const ulong PERFORMANCE_BEGIN_NATIVE_COMMANDS = 1;
-const ulong PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
+const ulong PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS = 13;
 
 fn gpu::Device make_performance_invariant_device() {
     gpu::RuntimeDesc desc = {
@@ -73,16 +73,15 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
         .spirv       = PERFORMANCE_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ColorTargetState[1] alternate_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] alternate_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc alternate_desc = {
         .vertex_shader = gpu::prepare_shader_code(&alternate_vertex_desc)!!,
         .fragment_shader = gpu::prepare_shader_code(
             &alternate_fragment_desc,
         )!!,
-        .colors = alternate_colors[..],
+        .color_formats = alternate_color_formats[..],
     };
     gpu::PipelineHandle alternate_pipeline = gpu::create_graphics_pipeline(
         &device,
@@ -262,14 +261,13 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         .spirv       = PERFORMANCE_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader = gpu::prepare_shader_code(&vertex_desc)!!,
         .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
-        .colors = pipeline_colors[..],
+        .color_formats = pipeline_color_formats[..],
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(
         &device,
@@ -301,7 +299,11 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         .height = 8,
     };
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics.color = { .targets = color_targets[..] };
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -319,8 +321,8 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         },
     };
     gpu::cmd_texture_barrier(&warmup, &transition)!!;
-    gpu::cmd_begin_render_pass_with_state(&warmup, &pass, &graphics)!!;
     bind_test_graphics_pipeline(&warmup, pipeline);
+    gpu::cmd_begin_render_pass_with_state(&warmup, &pass, &graphics)!!;
     gpu::cmd_draw(
         commands:       &warmup,
         vertex_root:    (gpu::GpuAddress)1,
@@ -349,7 +351,7 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     assert_warm_command_resolution(after_state, 1);
     assert(after_state.native_commands
             == PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS,
-        "complete graphics state emits exactly ten native commands");
+        "complete graphics state emits exactly thirteen native commands");
     gpu::reset_command_resolution_stats();
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::CommandResolutionStats after_begin =
@@ -415,6 +417,41 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     assert(after.command_buffer_resets == before.command_buffer_resets + 1,
         "warm render recording resets its reusable command buffer");
     gpu::discard_executable_commands(&executable)!!;
+
+    gpu::internal::RecordingWorkCounters combined_before =
+        vk::command_recording_work_counters(state);
+    ulong combined_shader_modules_before =
+        vk::pipeline_shader_module_create_count(state);
+    ulong combined_pipelines_before = vk::pipeline_native_create_count(state);
+    gpu::CommandList combined = gpu::begin_commands(&allocator)!!;
+    gpu::cmd_bind_pipeline(&combined, pipeline)!!;
+    gpu::reset_command_resolution_stats();
+    gpu::cmd_begin_render_pass_with_state(
+        &combined,
+        &pass,
+        &graphics,
+    )!!;
+    gpu::CommandResolutionStats combined_stats =
+        gpu::command_resolution_stats();
+    assert_warm_command_resolution(combined_stats, 1);
+    assert(combined_stats.native_commands
+            == PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS
+                + PERFORMANCE_BEGIN_NATIVE_COMMANDS,
+        "combined begin emits exact complete-state and pass native work");
+    gpu::cmd_end_render_pass(&combined)!!;
+    gpu::ExecutableCommandList combined_executable =
+        gpu::end_commands(&combined)!!;
+    gpu::internal::RecordingWorkCounters combined_after =
+        vk::command_recording_work_counters(state);
+    assert_zero_warm_creation_work(
+        before:                combined_before,
+        after:                 combined_after,
+        shader_modules_before: combined_shader_modules_before,
+        shader_modules_after:  vk::pipeline_shader_module_create_count(state),
+        pipelines_before:      combined_pipelines_before,
+        pipelines_after:       vk::pipeline_native_create_count(state),
+    );
+    gpu::discard_executable_commands(&combined_executable)!!;
 
     uint[3] pass_counts = { 2, 16, 256 };
     foreach (pass_count : pass_counts) {

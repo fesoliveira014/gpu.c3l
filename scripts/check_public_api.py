@@ -64,6 +64,26 @@ FORBIDDEN_TEXT = {
     '"name":"sampler_descriptor_capacity"': "backend-shaped sampler capacity",
     '"name":"max_texture_descriptors"': "backend-shaped texture limit",
     '"name":"max_sampler_descriptors"': "backend-shaped sampler limit",
+    '"name":"dynamicgraphicspipelinedesc"': (
+        "retired dynamic graphics pipeline descriptor"
+    ),
+    '"name":"colortargetformat"': "retired color target format wrapper",
+    '"name":"colortargetblendstate"': "retired color target blend state",
+    '"name":"request_dynamic_color_state"': (
+        "retired dynamic color device request"
+    ),
+    '"name":"create_dynamic_graphics_pipeline"': (
+        "retired dynamic graphics pipeline creation"
+    ),
+    '"name":"create_dynamic_graphics_pipelines"': (
+        "retired dynamic graphics pipeline batch creation"
+    ),
+    '"name":"dynamic_color_state"': (
+        "retired optional dynamic color capability"
+    ),
+    '"name":"full_render_graphics_state"': (
+        "retired ambiguous graphics-state helper"
+    ),
     '"name":"device_generated_commands"': "device_generated_commands",
     '"name":"supported_indirect_commands_shader_stages"': (
         "supported_indirect_commands_shader_stages"
@@ -287,6 +307,12 @@ RETIRED_SOURCE_SYMBOLS = (
     "ClearDepthStencil",
     "SAMPLER_INVALID",
     "publish_sampler(",
+    "DynamicGraphicsPipelineDesc",
+    "ColorTargetFormat",
+    "ColorTargetBlendState",
+    "request_dynamic_color_state(",
+    "create_dynamic_graphics_pipeline(",
+    "create_dynamic_graphics_pipelines(",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -306,6 +332,14 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "MAX_RECORDING_CONTEXTS",
     "MAX_THREAD_DEVICE_CONTEXTS",
     "RetiredCommandBuffer",
+    "GraphicsColorProfile",
+    "ColorTargetKey",
+    "BlendKey",
+    "color_profile",
+    "dynamic_color_state_enabled",
+    "requests_dynamic_color_state",
+    "vk_supports_dynamic_color_state",
+    "query_dynamic_color_state_support",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
@@ -687,9 +721,15 @@ def validate_document(document: dict) -> list[str]:
             "ColorTargetState",
             "struct",
             (
-                ("format", "Format"),
                 ("blend", "BlendState"),
                 ("write_mask", "ColorWriteMask"),
+            ),
+        ),
+        (
+            "ColorState",
+            "struct",
+            (
+                ("targets", "ColorTargetState[]"),
             ),
         ),
         (
@@ -744,6 +784,7 @@ def validate_document(document: dict) -> list[str]:
                 ("scissor", "ScissorRect"),
                 ("raster", "DynamicRasterState"),
                 ("depth", "DepthState"),
+                ("color", "ColorState"),
             ),
         ),
         (
@@ -760,7 +801,7 @@ def validate_document(document: dict) -> list[str]:
             (
                 ("vertex_shader", "ShaderCode"),
                 ("fragment_shader", "ShaderCode"),
-                ("colors", "ColorTargetState[]"),
+                ("color_formats", "Format[]"),
                 ("depth_format", "Format"),
                 ("sample_count", "SampleCount"),
                 ("polygon_mode", "PolygonMode"),
@@ -1227,7 +1268,7 @@ def validate_document(document: dict) -> list[str]:
             ("CommandList*", "GraphicsState*"),
             "void?",
         ),
-        "full_render_graphics_state": (
+        "render_geometry_state": (
             ("uint", "uint"),
             "GraphicsState?",
         ),
@@ -1360,7 +1401,7 @@ def validate_document(document: dict) -> list[str]:
         "cmd_set_depth_state": ("commands", "depth"),
         "cmd_set_raster_state": ("commands", "raster"),
         "cmd_set_graphics_state": ("commands", "state"),
-        "full_render_graphics_state": ("width", "height"),
+        "render_geometry_state": ("width", "height"),
         "cmd_dispatch": ("commands", "root", "groups"),
         "cmd_draw": (
             "commands",

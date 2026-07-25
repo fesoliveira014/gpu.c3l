@@ -87,6 +87,8 @@ struct DeviceCreationProbe {
     bool                     descriptor_buffer_capability_available;
     bool                     descriptor_buffer_selected;
     bool                     fail_native_device_creation @if(env::TESTING);
+    bool                     dynamic_color_support_override @if(env::TESTING);
+    bool                     dynamic_color_support_available @if(env::TESTING);
     bool                     dynamic_color_feature_chained @if(env::TESTING);
     uint                     dynamic_color_blend_enable @if(env::TESTING);
     uint                     dynamic_color_blend_equation @if(env::TESTING);
@@ -159,7 +161,6 @@ struct VkDeviceState @public {
     bool                       memory_budget_enabled;
     bool                       draw_indirect_count;
     GeneratedWorkSupport       generated_work;
-    bool                       dynamic_color_state_enabled;
     float                      max_sampler_anisotropy;
     vk::Result                 sampler_create_result @if(env::TESTING);
     float                      sampler_last_create_max_anisotropy @if(env::TESTING);
@@ -255,7 +256,7 @@ struct VkDeviceState @public {
     vk::Result                 pipeline_native_create_result @if(env::TESTING);
     uint                       pipeline_native_dynamic_state_count @if(env::TESTING);
     uint                       pipeline_native_color_target_count @if(env::TESTING);
-    bool                       pipeline_native_dynamic_color_states @if(env::TESTING);
+    bool                       pipeline_native_color_states @if(env::TESTING);
     bool                       pipeline_native_canonical_color_attachments @if(env::TESTING);
     bool                       pipeline_cache_insert_failure @if(env::TESTING);
     ShaderId                   pipeline_prepare_poison_id @if(env::TESTING);
@@ -289,7 +290,6 @@ struct CapsInputs {
     bool                 resource_agnostic_texture_sync;
     bool                 async_compute;
     bool                 line_polygon_mode;
-    bool                 dynamic_color_state;
     uint                 texture_capacity;
     uint                 sampler_capacity;
     GeneratedWorkSupport generated_work;
@@ -528,12 +528,6 @@ fn gpu::Device? create_vk_device_with_probe(
 
     VkDeviceConfig desc = runtime_device_config(runtime_state);
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
-    bool dynamic_color_requested =
-        gpu::internal::requests_dynamic_color_state(*request);
-    if (dynamic_color_requested
-        && !adapter_state.dynamic_color_state_supported) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
     gpu::Surface requested_surface = gpu::internal::requested_surface(*request);
     if (requested_surface.is_valid()
         && !runtime_state.instance_capabilities.surface_maintenance) {
@@ -568,7 +562,6 @@ fn gpu::Device? create_vk_device_with_probe(
         instance:                   runtime_state.instance,
         physical_device:            adapter_state.physical_device,
         strict_requested:           gpu::internal::requests_strict(*request),
-        dynamic_color_requested:    dynamic_color_requested,
         resource_agnostic_texture_sync_selected:
             resource_agnostic_texture_sync_selected,
         retained_runtime:           retained_runtime,
@@ -588,7 +581,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     vk::Instance instance,
     vk::PhysicalDevice physical_device,
     bool strict_requested,
-    bool dynamic_color_requested,
     bool resource_agnostic_texture_sync_selected = false,
     gpu::Runtime* retained_runtime = null,
     gpu::Adapter* adapter = null,
@@ -598,6 +590,13 @@ fn gpu::Device? create_vk_device_from_runtime(
     gpu::QueueRequirements* queue_requirements = null,
     DeviceCreationProbe* probe = null,
 ) @private {
+    $if env::TESTING:
+        if (probe != null
+            && probe.dynamic_color_support_override
+            && !probe.dynamic_color_support_available) {
+            return gpu::UNSUPPORTED_FEATURE~;
+        }
+    $endif
     VkDeviceState* state = mem::new(VkDeviceState);
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     defer catch {
@@ -623,7 +622,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.strict_heap = resolve_strict_heap_state(strict_requested, desc)!;
     state.resource_agnostic_texture_sync_selected =
         resource_agnostic_texture_sync_selected;
-    state.dynamic_color_state_enabled = dynamic_color_requested;
 
     state.presentation.enabled = presentation_surface != null;
     if (state.presentation.enabled) state.presentation.queue_mutex.init()!;
@@ -671,12 +669,16 @@ fn gpu::Device? create_vk_device_from_runtime(
         vk::physical_device_maintenance5features_khr();
     vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT presentation_features =
         vk::physical_device_swapchain_maintenance1features_ext();
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color_features =
+        vk::physical_device_extended_dynamic_state3features_ext();
     vk::PhysicalDeviceVulkan13Features features13 =
         vk::physical_device_vulkan13features();
     if (generated_work_usage_extension) {
         maintenance5_features = maintenance5_features.set_next(&generated_work_features);
         features13 = features13.set_next(&maintenance5_features);
     }
+    dynamic_color_features = dynamic_color_features.set_next(features13.p_next);
+    features13 = features13.set_next(&dynamic_color_features);
     if (swapchain_maintenance_extension) {
         presentation_features = presentation_features.set_next(
             features13.p_next,
@@ -701,6 +703,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         v11:                &features11,
         v12:                &features12,
         v13:                &features13,
+        dynamic_color:      &dynamic_color_features,
         dynamic_properties: &dynamic_properties,
     )!;
     if (state.presentation.enabled
@@ -777,7 +780,6 @@ fn gpu::Device? create_vk_device_from_runtime(
         .presentation      = state.presentation.enabled,
         .descriptor_buffer = strict_heap_uses_descriptor_buffer(&state.strict_heap),
         .generated_work    = state.generated_work.enabled,
-        .dynamic_color     = state.dynamic_color_state_enabled,
     };
     state.device_dispatch = load_vk_device_dispatch(
         state.device,
@@ -797,8 +799,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         && !device_dispatch_supports_generated_work(&state.device_dispatch)) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    if (state.dynamic_color_state_enabled
-        && !device_dispatch_supports_dynamic_color(&state.device_dispatch)) {
+    if (!device_dispatch_supports_dynamic_color(&state.device_dispatch)) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     if (families.selected.graphics) {
@@ -906,7 +907,6 @@ fn gpu::Device? create_vk_device_from_runtime(
             state.resource_agnostic_texture_sync_selected,
         .async_compute                   = state.compute_queue_distinct,
         .line_polygon_mode               = line_polygon_mode,
-        .dynamic_color_state             = state.dynamic_color_state_enabled,
         .texture_capacity                = state.strict_heap.texture_capacity,
         .sampler_capacity                = state.strict_heap.sampler_capacity,
         .generated_work                  = state.generated_work,
@@ -1104,13 +1104,14 @@ fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @
     mem::free(state);
 }
 
-<* Gate required base/core features and unrestricted dynamic topology.
+<* Gate required device features and unrestricted dynamic topology.
    Pure, so it is unit-testable without a device. *>
 fn void? check_required_features(
     vk::PhysicalDeviceFeatures* base,
     vk::PhysicalDeviceVulkan11Features* v11,
     vk::PhysicalDeviceVulkan12Features* v12,
     vk::PhysicalDeviceVulkan13Features* v13,
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT* dynamic_color,
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT* dynamic_properties,
 ) {
     if (base.shader_int64 == 0)          return gpu::UNSUPPORTED_FEATURE~;
@@ -1122,6 +1123,9 @@ fn void? check_required_features(
     if (v12.timeline_semaphore == 0)     return gpu::UNSUPPORTED_FEATURE~;
     if (v13.synchronization2 == 0)       return gpu::UNSUPPORTED_FEATURE~;
     if (v13.dynamic_rendering == 0)      return gpu::UNSUPPORTED_FEATURE~;
+    if (!required_dynamic_color_features_supported(dynamic_color)) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     if (dynamic_properties.dynamic_primitive_topology_unrestricted == 0) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
@@ -1137,28 +1141,13 @@ query_dynamic_raster_properties(vk::PhysicalDevice physical_device) {
     return dynamic_properties;
 }
 
-fn bool dynamic_color_state_features_supported(
+fn bool required_dynamic_color_features_supported(
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT* features,
 ) {
     return features != null
         && features.extended_dynamic_state3color_blend_enable != 0
         && features.extended_dynamic_state3color_blend_equation != 0
         && features.extended_dynamic_state3color_write_mask != 0;
-}
-
-fn bool query_dynamic_color_state_support(
-    vk::PhysicalDevice physical_device,
-) {
-    if (!device_supports_extension(
-        physical_device,
-        DYNAMIC_STATE_3_EXTENSION,
-    )) return false;
-    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT features =
-        vk::physical_device_extended_dynamic_state3features_ext();
-    vk::PhysicalDeviceFeatures2 features2 =
-        vk::physical_device_features2().set_next(&features);
-    vk::get_physical_device_features2(physical_device, &features2);
-    return dynamic_color_state_features_supported(&features);
 }
 
 <* Optional non-solid polygon rasterization support. Pure. *>
@@ -1413,7 +1402,10 @@ fn bool candidate_satisfies(
     if (props.api_version < API_VERSION_1_3) return false;
     if (catch check_required_dynamic_state3_extension(candidate)) return false;
 
-    vk::PhysicalDeviceVulkan13Features features13 = vk::physical_device_vulkan13features();
+    vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color_features =
+        vk::physical_device_extended_dynamic_state3features_ext();
+    vk::PhysicalDeviceVulkan13Features features13 =
+        vk::physical_device_vulkan13features().set_next(&dynamic_color_features);
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features().set_next(&features13);
     vk::PhysicalDeviceVulkan11Features features11 = vk::physical_device_vulkan11features().set_next(&features12);
     vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&features11);
@@ -1425,6 +1417,7 @@ fn bool candidate_satisfies(
         v11:                &features11,
         v12:                &features12,
         v13:                &features13,
+        dynamic_color:      &dynamic_color_features,
         dynamic_properties: &dynamic_properties,
     )) return false;
 
@@ -1555,7 +1548,10 @@ fn void? create_logical_device_with_queue_infos(
             .set_synchronization2(vk::TRUE)
             .set_maintenance4(vk::TRUE);
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color_features =
-        vk::physical_device_extended_dynamic_state3features_ext();
+        vk::physical_device_extended_dynamic_state3features_ext()
+            .set_extended_dynamic_state3color_blend_enable(vk::TRUE)
+            .set_extended_dynamic_state3color_blend_equation(vk::TRUE)
+            .set_extended_dynamic_state3color_write_mask(vk::TRUE);
     if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
         if (state.generated_work.enabled) {
             db_features = db_features.set_next(&maintenance5_features);
@@ -1564,14 +1560,8 @@ fn void? create_logical_device_with_queue_infos(
     } else if (state.generated_work.enabled) {
         features13 = features13.set_next(&maintenance5_features);
     }
-    if (state.dynamic_color_state_enabled) {
-        dynamic_color_features = dynamic_color_features
-            .set_extended_dynamic_state3color_blend_enable(vk::TRUE)
-            .set_extended_dynamic_state3color_blend_equation(vk::TRUE)
-            .set_extended_dynamic_state3color_write_mask(vk::TRUE)
-            .set_next(features13.p_next);
-        features13 = features13.set_next(&dynamic_color_features);
-    }
+    dynamic_color_features = dynamic_color_features.set_next(features13.p_next);
+    features13 = features13.set_next(&dynamic_color_features);
     if (state.presentation.enabled) {
         presentation_features = presentation_features.set_next(
             features13.p_next,
@@ -1666,11 +1656,10 @@ fn void? create_logical_device_with_queue_infos(
     $if env::TESTING:
         if (probe != null) {
             probe.dynamic_color_feature_chained =
-                state.dynamic_color_state_enabled
-                && (features13.p_next == &dynamic_color_features
+                features13.p_next == &dynamic_color_features
                     || (state.presentation.enabled
                         && presentation_features.p_next
-                            == &dynamic_color_features));
+                            == &dynamic_color_features);
             probe.dynamic_color_blend_enable =
                 dynamic_color_features.extended_dynamic_state3color_blend_enable;
             probe.dynamic_color_blend_equation =
@@ -1773,7 +1762,6 @@ fn gpu::DeviceCaps build_caps(
         .generated_work             = inputs.generated_work.enabled,
         .async_compute              = inputs.async_compute,
         .line_polygon_mode          = inputs.line_polygon_mode,
-        .dynamic_color_state        = inputs.dynamic_color_state,
         .texture_heap_capacity      = inputs.texture_capacity,
         .sampler_heap_capacity      = inputs.sampler_capacity,
         .max_color_attachments      = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS

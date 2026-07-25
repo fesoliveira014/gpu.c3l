@@ -162,14 +162,13 @@ fn gpu::PipelineHandle create_graphics_pipeline(gpu::Device* device) {
         .spirv       = COMMAND_PATH_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ColorTargetState[1] colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader   = gpu::prepare_shader_code(&vertex_desc)!!,
         .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
-        .colors          = colors[..],
+        .color_formats   = color_formats[..],
     };
     return gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
 }
@@ -263,11 +262,15 @@ fn void prepare_render_commands(
     *direct = gpu::begin_commands(allocator)!!;
     *library = gpu::begin_commands(allocator)!!;
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(direct, pass, &graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(library, pass, &graphics)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics.color = { .targets = color_targets[..] };
     gpu::cmd_bind_pipeline(direct, pipeline)!!;
     gpu::cmd_bind_pipeline(library, pipeline)!!;
+    gpu::cmd_begin_render_pass_with_state(direct, pass, &graphics)!!;
+    gpu::cmd_begin_render_pass_with_state(library, pass, &graphics)!!;
 }
 
 fn OperationResult measure_dispatch(

@@ -304,7 +304,12 @@ fn void device_dispatch_loads_only_selected_groups() @test {
         &recording_device_proc_loader,
         plan,
     );
-    assert(counts.is_empty(), "disabled device groups perform no lookups");
+    assert(counts.device_debug == 0
+        && counts.device_presentation == 0
+        && counts.descriptor_buffer == 0
+        && counts.dynamic_color == 3
+        && counts.unexpected == 0,
+        "strict baseline loads only the required color procedures");
 
     counts = {};
     plan.debug = true;
@@ -316,6 +321,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_debug == 3, "debug selection loads only device diagnostics");
     assert(counts.device_presentation == 0, "debug selection does not load presentation procedures");
     assert(counts.descriptor_buffer == 0, "debug selection does not load descriptor procedures");
+    assert(counts.dynamic_color == 3, "debug selection retains baseline color procedures");
     assert(counts.unexpected == 0, "debug selection loads no unrelated procedures");
 
     counts = {};
@@ -328,7 +334,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_debug == 0, "presentation selection does not load debug procedures");
     assert(counts.device_presentation == 5, "presentation selection loads only device WSI");
     assert(counts.descriptor_buffer == 0, "presentation selection does not load descriptor procedures");
-    assert(counts.dynamic_color == 0, "presentation selection does not load color procedures");
+    assert(counts.dynamic_color == 3, "presentation selection retains baseline color procedures");
     assert(counts.unexpected == 0, "presentation selection loads no unrelated procedures");
 
     counts = {};
@@ -341,21 +347,8 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_debug == 0, "descriptor selection does not load debug procedures");
     assert(counts.device_presentation == 0, "descriptor selection does not load presentation procedures");
     assert(counts.descriptor_buffer == 5, "descriptor selection loads only descriptor-buffer procedures");
-    assert(counts.dynamic_color == 0, "descriptor selection does not load color procedures");
+    assert(counts.dynamic_color == 3, "descriptor selection retains baseline color procedures");
     assert(counts.unexpected == 0, "descriptor selection loads no unrelated procedures");
-
-    counts = {};
-    plan = { .dynamic_color = true };
-    (void)gpu::internal::vk::load_vk_device_dispatch(
-        (vk::Device)&counts,
-        &recording_device_proc_loader,
-        plan,
-    );
-    assert(counts.device_debug == 0, "color selection does not load debug procedures");
-    assert(counts.device_presentation == 0, "color selection does not load presentation procedures");
-    assert(counts.descriptor_buffer == 0, "color selection does not load descriptor procedures");
-    assert(counts.dynamic_color == 3, "color selection loads the complete command set");
-    assert(counts.unexpected == 0, "color selection loads no unrelated procedures");
 }
 
 fn void fake_get_descriptor_a(
@@ -468,10 +461,8 @@ fn void device_label_dispatch_requires_complete_pair() @test {
     assert(gpu::internal::vk::device_dispatch_supports_labels(&complete), "complete pair is available");
 }
 
-fn void device_dynamic_color_dispatch_requires_complete_set() @test {
-    gpu::internal::vk::VkDeviceDispatchPlan plan = {
-        .dynamic_color = true,
-    };
+fn void device_color_dispatch_requires_complete_set() @test {
+    gpu::internal::vk::VkDeviceDispatchPlan plan;
     DispatchLookupCounts counts;
     gpu::internal::vk::VkDeviceDispatch complete =
         gpu::internal::vk::load_vk_device_dispatch(

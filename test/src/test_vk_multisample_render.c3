@@ -166,14 +166,13 @@ fn void multisample_color_depth_resolves_to_readback() @test {
     defer destroy_test_attachment_view(&device, &resolve_view)!!;
 
     DepthCtx shaders = make_depth_ctx();
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader   = shaders.vert,
         .fragment_shader = shaders.frag,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
         .depth_format    = gpu::Format.D32_FLOAT,
         .sample_count    = sample_count,
         .debug_name      = "multisample_color_depth",
@@ -256,10 +255,18 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .compare      = gpu::CompareOp.LESS,
     };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT)!!;
     graphics_state.depth = depth_state;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics_state.color = { .targets = color_targets[..] };
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::cmd_begin_render_pass_with_state(
+        &commands,
+        &pass,
+        &graphics_state,
+    )!!;
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    test_span_address(

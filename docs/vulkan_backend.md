@@ -91,6 +91,9 @@ independentBlend
 depthBiasClamp
 dynamicPrimitiveTopologyUnrestricted
 VK_EXT_extended_dynamic_state3
+extendedDynamicState3ColorBlendEnable
+extendedDynamicState3ColorBlendEquation
+extendedDynamicState3ColorWriteMask
 ```
 
 `independentBlend` and `depthBiasClamp` are core physical-device features.
@@ -99,9 +102,8 @@ VK_EXT_extended_dynamic_state3
 to be `VK_TRUE` but cannot enable it. Requiring it
 allows `cmd_set_raster_state` to switch topology classes without compiling
 pipeline variants. The backend separately requires and enables the extension
-name. Vulkan 1.3 supplies the promoted topology, cull, front-face, and
-depth-bias core commands; no extended-dynamic-state feature structure is
-enabled.
+name and all three color-state feature bits. Vulkan 1.3 supplies the promoted
+topology, cull, front-face, and depth-bias core commands.
 
 Shader heaps are selected automatically. Descriptor indexing is preferred when
 its features and limits satisfy the requested semantic capacities. Descriptor
@@ -196,6 +198,9 @@ must support timeline semaphores
 must support shaderInt64
 must support multiDrawIndirect
 must support shaderDrawParameters
+must support VK_EXT_extended_dynamic_state3
+must report dynamicPrimitiveTopologyUnrestricted
+must support all three EDS3 color command features and dispatch entries
 must support one exact shader-heap implementation
 must satisfy the default one-graphics, one-compute, one-transfer queue profile;
 roles may alias or use separate families
@@ -239,11 +244,15 @@ multiDrawIndirect
 shaderDrawParameters
 independentBlend
 depthBiasClamp
+extendedDynamicState3ColorBlendEnable
+extendedDynamicState3ColorBlendEquation
+extendedDynamicState3ColorWriteMask
 ```
 
 `VK_EXT_extended_dynamic_state3` is also always enabled. Before device creation,
 the backend has already required the independently queried
-`dynamicPrimitiveTopologyUnrestricted` property; command dispatch remains
+`dynamicPrimitiveTopologyUnrestricted` property. The backend loads the three
+EDS3 color commands for every created device; raster command dispatch remains
 Vulkan 1.3 core.
 
 When resource-agnostic texture synchronization is requested, creation rechecks
@@ -273,16 +282,14 @@ fillModeNonSolid -> DeviceCaps.line_polygon_mode
 `PolygonMode.LINE` faults `UNSUPPORTED_FEATURE` before shader or cache lookup
 when this cap is false. The feature is not a physical-device selection requirement.
 
-Dynamic color state is a separate request-time profile. Support requires all
-three `VkPhysicalDeviceExtendedDynamicState3FeaturesEXT` bits:
+Strict support requires all three
+`VkPhysicalDeviceExtendedDynamicState3FeaturesEXT` bits:
 `extendedDynamicState3ColorBlendEnable`,
 `extendedDynamicState3ColorBlendEquation`, and
-`extendedDynamicState3ColorWriteMask`. The backend queries and caches the
-complete set, chains and enables it only for a supported request, loads the
-three command pointers only for the selected device, and publishes
-`DeviceCaps.dynamic_color_state` only after successful creation. Partial
-feature or dispatch availability rejects creation with `UNSUPPORTED_FEATURE`
-and rolls back; an unrequested device leaves the dispatch group empty.
+`extendedDynamicState3ColorWriteMask`. The backend queries the complete set,
+chains and enables it for every strict device, and loads all three command
+pointers. Partial feature or dispatch availability rejects creation with
+`UNSUPPORTED_FEATURE` and rolls back without publishing a device.
 
 Strict devices probe `VK_EXT_device_generated_commands` and
 `VK_KHR_maintenance5` as the optional implementation of generated work. The
@@ -625,8 +632,7 @@ vertex shader
 fragment shader
 pipeline layout with vertex/fragment root push constants
 color/depth formats for dynamic rendering
-immutable profile: per-target blend and write-mask state
-dynamic profile: canonical ignored static attachments plus three EDS3 states
+canonical ignored static color attachments plus three EDS3 color states
 immutable polygon mode
 separate dynamic raster and depth state
 viewport/scissor dynamic state
@@ -637,10 +643,11 @@ vk::Pipeline
 Minimal dynamic-rendering begin emits only `vkCmdBeginRendering` and leaves
 command-buffer graphics state unchanged. The convenience begin follows it with
 viewport, scissor, five raster commands, and three depth commands as one fixed
-ten-command packet. It does not compare against cached state or skip unchanged
-fields. `cmd_set_graphics_state` emits the same complete packet before or
-during a pass; the individual setters emit their corresponding subset in
-either recording phase.
+ten-command prefix, then three color-array commands for a nonempty color
+domain. It does not compare against cached state or skip unchanged fields.
+`cmd_set_graphics_state` emits the same complete packet before or during a
+pass; the individual setters emit their corresponding subset in either
+recording phase.
 
 Under `FULL`, state validation checks finite viewport values, selected-device
 viewport dimensions and coordinate bounds, independently bounded depth
@@ -657,15 +664,14 @@ bit. The command list retains active render compatibility only while
 `RECORDING_RENDER_PASS`; it stores no pass extent for viewport or scissor
 validation.
 
-Topology, cull mode, front face, depth bias, viewport, scissor, and depth state
-are absent from `PipelineKey` and `PipelineSlot`. `PipelineKey` stores each
-color target's format plus an explicit immutable/dynamic profile tag. Immutable
-keys also store blend equations and write masks; dynamic keys canonicalize
-those fields out. Both retain depth format, sample count, polygon mode, and
-shader identity. `cmd_set_color_state` validates a complete selected dynamic
-format domain before emitting `vkCmdSetColorBlendEnableEXT`,
+Topology, cull mode, front face, depth bias, viewport, scissor, depth state,
+blend equations, and write masks are absent from `PipelineKey` and
+`PipelineSlot`. `PipelineKey` stores the ordered color formats, depth format,
+sample count, polygon mode, and shader identity. `cmd_set_color_state`
+validates a complete selected format domain before emitting
+`vkCmdSetColorBlendEnableEXT`,
 `vkCmdSetColorBlendEquationEXT`, and `vkCmdSetColorWriteMaskEXT`. Compatible
-passes and dynamic aliases preserve initialization, incompatible dynamic
+passes and pipeline aliases preserve initialization, incompatible format
 domains clear it, and no bind or pass boundary replays state. Explicit pipeline binding
 emits the native pipeline and heap binds when the selected bind point's cache
 entry changes; graphics and compute selections are independent, and rebinding
@@ -1001,9 +1007,10 @@ publish active compatibility and retained references
 
 The convenience begin also rejects a host-unsafe state pointer and validates
 and lowers the complete packet before tracking or native mutation. After
-`vkCmdBeginRendering`, it emits the fixed ten-command packet and publishes
-FULL graphics-state initialization. Any preparation failure leaves
-command-list state, tracked references, and the native command buffer unchanged.
+`vkCmdBeginRendering`, it emits the ten-command viewport/raster/depth prefix
+and three color-array commands for a nonempty color domain, then publishes FULL
+graphics-state initialization. Any preparation failure leaves command-list
+state, tracked references, and the native command buffer unchanged.
 
 Render pass end:
 

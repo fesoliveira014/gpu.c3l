@@ -119,6 +119,8 @@ surface-aware queue selection and presentation-request gating
 create/destroy Vulkan device
 required `VK_EXT_extended_dynamic_state3` absence and
 `dynamicPrimitiveTopologyUnrestricted` property rejection
+required EDS3 color blend-enable, blend-equation, and write-mask feature and
+dispatch rejection
 generated-work extension, feature, stage, layout-limit, and public-cap coherence
 create/destroy VMA allocator
 query memory budget and stats
@@ -406,9 +408,9 @@ Test names describe behavior, not roadmap or ticket labels.
 | Commands | exact 16-byte x64 direct token size and deterministic stale/wrong-phase/consumed diagnostics, including copied tokens after device-slot reuse; submit-only foreign-device rejection; one authoritative state through begin/end/submit/rollback/discard/retirement; one backend claim with exact linear direct-token visits and duplicate visits; authoritative record-queue validation without allocator reproof; retryable failure; intrusive exact-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; FULL regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback; immutable/dynamic parity for opaque, alpha, premultiplied, additive, and masked writes; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; transactional convenience rejection without native or command-state mutation; exact ten-command graphics and three-command color packets; state reuse across pass boundaries and reset on command-buffer reuse; optional partial updates; FULL regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; and pipeline-alias persistence. |
+| Graphics | offscreen clear/draw/readback for opaque, alpha, premultiplied, additive, and masked writes; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; transactional convenience rejection without native or command-state mutation; exact ten-command viewport/raster/depth prefix and three-command color packets; state reuse across compatible pipeline switches and pass boundaries and reset on command-buffer reuse; optional partial updates; FULL regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; incompatible color-domain invalidation; and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
-| Pipeline cache | cache create/reuse, blob save/load, warm start, raster-state aliasing, immutable blend/write separation, five-state dynamic-color aliasing, profile separation, transactional batches, and singleton compute/generated-dispatch layouts. |
+| Pipeline cache | cache create/reuse, blob save/load, warm start, raster- and color-state aliasing across five command color packets, ordered color-format separation, transactional batches, and singleton compute/generated-dispatch layouts. |
 | Threading | one explicit allocator per concurrent worker, same-allocator bounded-full rejection, synchronized allocator migration and executable handoff, one-thread-at-a-time alias confinement, no device-wide recording lock, no temp-pool setup, historical worker churn, private command-buffer/generated-scratch reuse, parallel record, same-queue submit/present serialization, distinct-queue submission concurrency, and prior-point retirement across a later publication gap. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
@@ -523,12 +525,13 @@ layout through the bound pipeline slot. Validation-mode lifetime coverage also
 proves a recording command blocks public pipeline destruction, then continues
 from its cached native snapshot before discard releases ownership.
 
-Injected native pipeline and dynamic-color dispatch arrays are the direct
-native-call oracle: they verify the declared EDS3 state set and exact emitted
+Injected native pipeline and EDS3 color-command arrays are the direct
+native-call oracle: they verify the declared dynamic-state set and exact emitted
 array contents without relying on driver interpretation. `PipelineKey` is
-process-local and is never serialized. Profile equality/inequality tests cover
-its exact bytes and hash contract, while opaque driver-cache export/import smoke
-tests cover the only persistent cache representation.
+process-local and is never serialized. Format-only identity equality and
+inequality tests cover its exact bytes and hash contract, while opaque
+driver-cache export/import smoke tests cover the only persistent cache
+representation.
 
 `vk_performance` runs complete warm
 begin/bind/dispatch/end and render-pass operations against existing pipelines,
@@ -553,11 +556,10 @@ is used for private pipeline or command-record state; semantic, resolution,
 and native-emission outcomes remain the authority as those representations
 change.
 
-Dynamic-color work coverage selects a requested live device when available and
-otherwise reports deterministic unsupported capability. On a supported device,
-one packet and an identical replacement each require exactly three native
-calls and zero host/VMA allocation, resource lookup/lock, native pipeline
-creation, or pipeline/cache lookup.
+Command color-state work coverage runs on every created strict device. One
+packet and an identical replacement each require exactly three native calls and
+zero host/VMA allocation, resource lookup/lock, native pipeline creation, or
+pipeline/cache lookup.
 
 The benchmark runner builds twelve executable targets with `-O1`:
 `allocation_bench`, `resource_create_bench`, `descriptor_churn_bench`,
@@ -624,11 +626,12 @@ discarded.
 The command target enables test-only resolution counters and measures complete
 recording sequences. Minimal pass begin reports one native begin-rendering
 command and no dynamic-state commands. Convenience begin reports that command
-followed by exactly ten state commands. A complete
-`cmd_set_graphics_state` replacement reports exactly ten, while additional
-compatible passes and draws add only their begin/end/draw commands unless
-another setter is recorded. The `{2, 16, 256}` matrix rejects hidden pass-boundary
-replay, default, or state-diff work. Every warm command performs one static
+followed by exactly ten viewport/raster/depth commands and three color-array
+commands for a nonempty color domain. A complete `cmd_set_graphics_state`
+replacement reports the same state commands, while additional compatible
+passes and draws add only their begin/end/draw commands unless another setter
+is recorded. The `{2, 16, 256}` matrix rejects hidden pass-boundary replay,
+default, or state-diff work. Every warm command performs one static
 device-slot liveness load and requires zero retained device-operation
 resolution, retained-pin borrow, command-table lookup, pipeline-table/cache
 lookup. It also requires
@@ -876,6 +879,8 @@ Graphics:
 
 ```text
 construct a complete GraphicsState for the render area
+include one ColorTargetState per pipeline color format, or none for depth-only
+bind the compatible graphics pipeline
 record that packet, or use transactional begin-with-state
 begin the pass
 clear to known color

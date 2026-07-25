@@ -111,9 +111,7 @@ fn void offscreen_clear_works() @test {
         .clear = { .rgba = { 64.0f / 255.0f, 128.0f / 255.0f, 192.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
-    gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::TextureBarrier to_src = {
@@ -201,16 +199,14 @@ fn void warm_render_pass_uses_precreated_attachment_without_allocation() @test {
         .width  = RT_SIZE,
         .height = RT_SIZE,
     };
-    gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
 
-    gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::internal::RecordingWorkCounters after =
         vk::command_recording_work_counters(state);
@@ -287,14 +283,13 @@ fn void offscreen_textured_triangle() @test {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OFFSCREEN_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipe_desc = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
         .debug_name      = "offscreen_triangle",
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipe_desc)!!;
@@ -380,9 +375,13 @@ fn void offscreen_textured_triangle() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+        gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics_state.color = { .targets = color_targets[..] };
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    (gpu::GpuAddress)0,
@@ -468,14 +467,13 @@ fn void dynamic_viewport_scissor_pixels() @test {
         .stage = gpu::ShaderStage.FRAGMENT, .spirv = DYNAMIC_RECT_FRAG_SPIRV[..], .entry_point = "main",
     };
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_desc)!!;
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
@@ -560,7 +558,12 @@ fn void dynamic_viewport_scissor_pixels() @test {
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
         gpu::GraphicsState graphics_state =
-            gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
+            gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
+        gpu::ColorTargetState[1] color_targets = {{
+            .write_mask = gpu::COLOR_WRITE_ALL,
+        }};
+        graphics_state.color = { .targets = color_targets[..] };
+        gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
         if (i == 0) {
             graphics_state.viewport = {
                 .width = (float)RT_SIZE / 2.0f, .height = (float)RT_SIZE, .max_depth = 1.0f,
@@ -600,7 +603,6 @@ fn void dynamic_viewport_scissor_pixels() @test {
             assert(@catch(gpu::cmd_set_scissor(&cmd, &rejected)) == gpu::INVALID_ARGUMENT,
                 "a rejected scissor does not replace the valid scissor");
         }
-        gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
         gpu::cmd_draw(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, vertices),
@@ -673,17 +675,17 @@ fn void dynamic_viewport_scissor_pixels() @test {
         "an explicit complete replacement restores full raster coverage");
 }
 
-fn void dynamic_color_output_matches_immutable_output() @test {
+fn void combined_and_individual_color_state_output_matches() @test {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation       = gpu::ContractValidation.FULL,
         .enable_vulkan_validation  = true,
-        .application_name          = "gpu_dynamic_color_output_test",
+        .application_name          = "gpu_color_output_test",
     };
-    gpu::Device? maybe_device = create_dynamic_color_test_device(&runtime_desc);
+    gpu::Device? maybe_device = create_test_device(&runtime_desc);
     if (catch err = maybe_device) {
         assert(err == gpu::UNSUPPORTED_FEATURE,
-            "dynamic color output fails only when live support is absent");
-        io::eprintfn("dynamic_color_output_matches_immutable_output: unsupported, skipping");
+            "color output fails only when live support is absent");
+        io::eprintfn("combined_and_individual_color_state_output_matches: unsupported, skipping");
         return;
     }
     gpu::Device device = maybe_device;
@@ -701,49 +703,31 @@ fn void dynamic_color_output_matches_immutable_output() @test {
     gpu::ShaderCode vertex = gpu::prepare_shader_code(&vertex_desc)!!;
     gpu::ShaderCode fragment = gpu::prepare_shader_code(&fragment_desc)!!;
     gpu::ColorWriteMask red_green = { .red, .green };
-    gpu::ColorTargetBlendState[5] packets = {
+    gpu::ColorTargetState[5] packets = {
         gpu::color_blend_disabled(),
         gpu::alpha_blend(),
         gpu::premultiplied_alpha_blend(),
         gpu::additive_blend(),
         gpu::color_blend_disabled(red_green),
     };
-    gpu::ColorTargetState[1][5] immutable_colors;
-    gpu::GraphicsPipelineDesc[5] immutable_descs;
-    foreach (i, packet : packets) {
-        immutable_colors[i][0] = {
-            .format     = gpu::Format.RGBA8_UNORM,
-            .blend      = packet.blend,
-            .write_mask = packet.write_mask,
-        };
-        immutable_descs[i] = {
-            .vertex_shader   = vertex,
-            .fragment_shader = fragment,
-            .colors          = immutable_colors[i][..],
-        };
-    }
-    gpu::PipelineHandle[5] immutable_pipelines;
-    gpu::create_graphics_pipelines(
-        device:        &device,
-        descs:         immutable_descs[..],
-        out_pipelines: immutable_pipelines[..],
-    )!!;
-    defer foreach (pipeline : immutable_pipelines) {
-        gpu::destroy_pipeline(&device, pipeline)!!;
-    }
-    gpu::ColorTargetFormat[1] dynamic_formats = {{
-        .format = gpu::Format.RGBA8_UNORM,
-    }};
-    gpu::DynamicGraphicsPipelineDesc dynamic_desc = {
+    gpu::Format[1] color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc pipeline_desc = {
         .vertex_shader   = vertex,
         .fragment_shader = fragment,
-        .colors          = dynamic_formats[..],
+        .color_formats   = color_formats[..],
     };
-    gpu::PipelineHandle dynamic = gpu::create_dynamic_graphics_pipeline(
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    ulong native_before = vk::pipeline_native_create_count(state);
+    gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(
         &device,
-        &dynamic_desc,
+        &pipeline_desc,
     )!!;
-    defer gpu::destroy_pipeline(&device, dynamic)!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    assert(vk::pipeline_native_create_count(state) - native_before == 1,
+        "the format-only graphics identity creates one native pipeline");
     gpu::TextureHandle[10] targets;
     foreach (&target : targets) *target = make_render_target(&device);
     defer foreach (target : targets) {
@@ -761,7 +745,7 @@ fn void dynamic_color_output_matches_immutable_output() @test {
         size:         3 * 16,
         memory_class: gpu::MemoryClass.CPU_WRITE,
         access:       { .graphics },
-        debug_name:   "dynamic_color_output_vertices",
+        debug_name:   "color_output_vertices",
     )!!;
     defer free_owned_span(&device, &vertices)!!;
     float[12] vertex_data = {
@@ -777,7 +761,7 @@ fn void dynamic_color_output_matches_immutable_output() @test {
         size:         16,
         memory_class: gpu::MemoryClass.CPU_WRITE,
         access:       { .graphics },
-        debug_name:   "dynamic_color_output_root",
+        debug_name:   "color_output_root",
     )!!;
     defer free_owned_span(&device, &color)!!;
     float[4] source_color = { 0.5f, 0.5f, 0.5f, 0.5f };
@@ -796,7 +780,7 @@ fn void dynamic_color_output_matches_immutable_output() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     foreach (i, target : targets) {
         usz state_index = (usz)i / 2;
-        bool dynamic_profile = i % 2 == 1;
+        bool individual_state = i % 2 == 1;
         gpu::TextureBarrier to_attachment = {
             .texture = target,
             .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -819,22 +803,26 @@ fn void dynamic_color_output_matches_immutable_output() @test {
             .height = RT_SIZE,
         };
         gpu::GraphicsState graphics =
-            gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-        gpu::cmd_begin_render_pass_with_state(
-            &commands,
-            &pass,
-            &graphics,
-        )!!;
-        gpu::cmd_bind_pipeline(
-            &commands,
-            dynamic_profile ? dynamic : immutable_pipelines[state_index],
-        )!!;
-        if (dynamic_profile) {
-            gpu::ColorTargetBlendState[1] color_targets = {
-                packets[state_index],
-            };
+            gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
+        gpu::ColorTargetState[1] color_targets = {
+            packets[state_index],
+        };
+        graphics.color = { .targets = color_targets[..] };
+        gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+        if (individual_state) {
+            gpu::cmd_begin_render_pass(&commands, &pass)!!;
+            gpu::cmd_set_viewport(&commands, &graphics.viewport)!!;
+            gpu::cmd_set_scissor(&commands, &graphics.scissor)!!;
+            gpu::cmd_set_raster_state(&commands, &graphics.raster)!!;
+            gpu::cmd_set_depth_state(&commands, &graphics.depth)!!;
             gpu::ColorState color_state = { .targets = color_targets[..] };
             gpu::cmd_set_color_state(&commands, &color_state)!!;
+        } else {
+            gpu::cmd_begin_render_pass_with_state(
+                &commands,
+                &pass,
+                &graphics,
+            )!!;
         }
         gpu::cmd_draw(
             commands:       &commands,
@@ -880,26 +868,28 @@ fn void dynamic_color_output_matches_immutable_output() @test {
     };
     usz center = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE / 2) * 4;
     for (usz state_index = 0; state_index < packets.len; state_index++) {
-        char[] immutable_pixels =
+        char[] combined_pixels =
             pixels[RT_BYTES * state_index * 2 : RT_BYTES];
-        char[] dynamic_pixels =
+        char[] individual_pixels =
             pixels[RT_BYTES * (state_index * 2 + 1) : RT_BYTES];
-        assert(immutable_pixels == dynamic_pixels,
-            "equivalent immutable and dynamic color profiles render identical bytes");
+        assert(combined_pixels == individual_pixels,
+            "combined and individual color state render identical bytes");
         for (uint channel = 0; channel < 4; channel++) {
-            uint actual = (uint)dynamic_pixels[center + channel];
+            uint actual = (uint)individual_pixels[center + channel];
             uint expected_value = expected[state_index * 4 + channel];
             uint difference = actual >= expected_value
                 ? actual - expected_value
                 : expected_value - actual;
             assert(difference <= COLOR_READBACK_TOLERANCE,
-                "dynamic color state %d channel %d readback %d is within one LSB of expected %d",
+                "color state %d channel %d readback %d is within one LSB of expected %d",
                 state_index,
                 channel,
                 actual,
                 expected_value);
         }
     }
+    assert(vk::pipeline_native_create_count(state) - native_before == 1,
+        "five distinct color packets render through one native pipeline identity");
 }
 
 fn void offscreen_render_to_mip() @test {
@@ -947,9 +937,7 @@ fn void offscreen_render_to_mip() @test {
         .clear = { .rgba = { 40.0f / 255.0f, 80.0f / 255.0f, 120.0f / 255.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = MIP1, .height = MIP1 };
-    gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(MIP1, MIP1)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::TextureBarrier to_src = {
@@ -1005,14 +993,13 @@ fn void graphics_pipeline_depth_format_validation() @test {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OFFSCREEN_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
 
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc with_depth = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
         .depth_format    = gpu::Format.D32_FLOAT,
     };
     gpu::PipelineHandle depth_pipeline = gpu::create_graphics_pipeline(&device, &with_depth)!!;
@@ -1021,7 +1008,7 @@ fn void graphics_pipeline_depth_format_validation() @test {
     gpu::GraphicsPipelineDesc color_as_depth = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
         .depth_format    = gpu::Format.RGBA8_UNORM,
     };
     assert(@catch(gpu::create_graphics_pipeline(&device, &color_as_depth)) == gpu::INVALID_ARGUMENT,
@@ -1081,9 +1068,7 @@ fn void dynamic_viewport_scissor_validation() @test {
         .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
-    gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
 
     assert(@catch(gpu::cmd_set_viewport(&cmd, null)) == gpu::INVALID_ARGUMENT,
         "null viewport faults INVALID_ARGUMENT");
@@ -1210,9 +1195,7 @@ fn void render_pass_state_machine() @test {
         .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
-    gpu::GraphicsState graphics_state =
-        gpu::full_render_graphics_state(RT_SIZE, RT_SIZE)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
 
     // Copies and barriers are illegal inside a pass.
     fault fill_fault = @catch(gpu::cmd_fill_buffer(

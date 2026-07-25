@@ -278,7 +278,6 @@ struct DeviceCaps {
     // 0 means anisotropic filtering is unsupported.
     float max_sampler_anisotropy;
     bool resource_agnostic_texture_sync;
-    bool dynamic_color_state;
 }
 
 alias DebugMessageCallback = fn void (DebugMessage*, void*);
@@ -855,28 +854,15 @@ struct BlendState {
     BlendOp     alpha_op;
 }
 
-<* Immutable format, blend equation, and write mask for one color target.
-   A zero write mask disables every channel; use COLOR_WRITE_ALL for RGBA. *>
-struct ColorTargetState {
-    Format         format;
-    BlendState     blend;
-    ColorWriteMask write_mask;
-}
-
-<* Immutable format compatibility for one dynamic-color target. *>
-struct ColorTargetFormat {
-    Format format;
-}
-
 <* Command-time blend equation and write mask for one color target. *>
-struct ColorTargetBlendState {
+struct ColorTargetState {
     BlendState     blend;
     ColorWriteMask write_mask;
 }
 
-<* Borrowed complete color state for a selected dynamic graphics pipeline. *>
+<* Borrowed complete color state for a selected graphics pipeline. *>
 struct ColorState {
-    ColorTargetBlendState[] targets;
+    ColorTargetState[] targets;
 }
 
 <* Pass-bounded raster state; zero means triangles, no culling,
@@ -900,25 +886,13 @@ struct ComputePipelineDesc {
 <* Inputs to create_graphics_pipeline, targeting dynamic rendering. The layout
    is fixed: the global heap set plus a 16-byte vertex/fragment root push range. *>
 struct GraphicsPipelineDesc {
-    ShaderCode         vertex_shader;
-    ShaderCode         fragment_shader;
-    ColorTargetState[] colors;
-    Format             depth_format;
-    SampleCount        sample_count;
-    PolygonMode        polygon_mode;
-    ZString            debug_name;
-}
-
-<* Inputs to a format-only dynamic-color graphics pipeline. The layout is
-   fixed: the global heap set plus a 16-byte vertex/fragment root push range. *>
-struct DynamicGraphicsPipelineDesc {
-    ShaderCode          vertex_shader;
-    ShaderCode          fragment_shader;
-    ColorTargetFormat[] colors;
-    Format              depth_format;
-    SampleCount         sample_count;
-    PolygonMode         polygon_mode;
-    ZString             debug_name;
+    ShaderCode   vertex_shader;
+    ShaderCode   fragment_shader;
+    Format[]     color_formats;
+    Format       depth_format;
+    SampleCount  sample_count;
+    PolygonMode  polygon_mode;
+    ZString      debug_name;
 }
 
 const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
@@ -974,6 +948,7 @@ struct GraphicsState {
     ScissorRect        scissor;
     DynamicRasterState raster;
     DepthState         depth;
+    ColorState         color;
 }
 
 // Shader-writable indirect argument layouts; GLSL definitions are generated

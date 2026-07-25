@@ -225,18 +225,16 @@ Public shape:
 ```text
 Device                         (slot | generation | reserved)
 request_resource_agnostic_texture_sync(DeviceRequest) -> DeviceRequest?
-request_dynamic_color_state(DeviceRequest) -> DeviceRequest?
 get_device_caps(Device*)       -> DeviceCaps?
 ```
 
 Device requests compose strict semantics with independent queue, presentation,
-resource-agnostic texture-synchronization, and dynamic-color contributions.
+and resource-agnostic texture-synchronization contributions.
 Each optional capability is selected only when explicitly requested and fully
-enabled. The results are published as
-`DeviceCaps.resource_agnostic_texture_sync` and
-`DeviceCaps.dynamic_color_state`. Unrequested devices retain classic native
-texture layouts and immutable pipeline color state. Immutable pipelines remain
-available on every strict device and are the fallback application path.
+enabled. The texture-synchronization result is published as
+`DeviceCaps.resource_agnostic_texture_sync`. Unrequested devices retain classic
+native texture layouts. Command-time color state is part of every strict
+device's mandatory graphics-state model.
 
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
@@ -512,22 +510,15 @@ Pipelines are immutable shader execution objects. Creation is split by kind:
 ```text
 create_compute_pipeline(device, ComputePipelineDesc)    -> PipelineHandle?
 create_graphics_pipeline(device, GraphicsPipelineDesc)  -> PipelineHandle?
-create_dynamic_graphics_pipeline(device, DynamicGraphicsPipelineDesc)
-                                                        -> PipelineHandle?
 create_compute_pipelines(device, descriptions, outputs)  -> void?
 create_graphics_pipelines(device, descriptions, outputs) -> void?
-create_dynamic_graphics_pipelines(device, descriptions, outputs)
-                                                        -> void?
 ```
 
-Graphics pipeline identity has an explicit color profile. The immutable profile
-includes shaders, per-target format/blend/write-mask state, depth format,
-sample count, and polygon mode. The dynamic profile includes the same
-dimensions except blend and write mask; those are complete caller-owned command
-packets and never enter the cache key. The profile tag itself prevents an
-immutable descriptor from aliasing a dynamic descriptor. Format, sample count,
-and polygon mode remain distinct in both profiles. Topology, cull mode, front
-face, depth bias, depth state, viewport, and scissor are command-time state.
+Graphics pipeline identity includes shaders, the ordered color-format domain,
+depth format, sample count, and polygon mode. Blend equations and write masks
+are complete caller-owned command packets and never enter the cache key.
+Topology, cull mode, front face, depth bias, depth state, viewport, scissor,
+and color state are command-time state.
 Compute pipelines share one device-owned `RootPush` layout and, when
 generated work is available, one generated-dispatch layout. Batch creation
 reuses temporary modules by shader ID, deduplicates pipeline identity, and
@@ -712,13 +703,14 @@ defined robustness behavior.
 ### Graphics
 
 ```text
-full_render_graphics_state(width, height)
+render_geometry_state(width, height)
 cmd_begin_render_pass(command_list, render_pass_desc)
 cmd_begin_render_pass_with_state(command_list, render_pass_desc, graphics_state)
 cmd_bind_pipeline(command_list, pipeline)
 cmd_set_graphics_state(command_list, graphics_state)
 cmd_set_raster_state(command_list, raster_state)
 cmd_set_depth_state(command_list, depth_state)
+cmd_set_color_state(command_list, color_state)
 cmd_set_viewport(command_list, viewport)
 cmd_set_scissor(command_list, scissor)
 cmd_draw(command_list, vertex_root, fragment_root, vertex_count, instance_count)
@@ -730,14 +722,16 @@ Minimal pass begin validates, lowers, and tracks only attachments, then emits
 one native begin-rendering command. It does not change command-buffer graphics
 state. `cmd_begin_render_pass_with_state` is the transactional convenience:
 pass and state preparation completes before native mutation, then it emits the
-begin plus a fixed ten-command packet containing viewport, scissor, five raster
-commands, and three depth commands.
+begin plus viewport, scissor, five raster commands, three depth commands, and
+three color-array commands for a nonempty color domain.
 
 `cmd_set_graphics_state` emits that complete packet before or during a pass on
-a graphics-capable command list. The raster, depth, viewport, and scissor
-setters remain optional partial updates in either recording phase. Graphics
-state persists across pipeline binds and render-pass boundaries until another
-setter supplies it; a minimal begin never replays or replaces it. Under `FULL`,
+a graphics-capable command list after a compatible pipeline is bound. The
+raster, depth, color, viewport, and scissor setters remain optional partial
+updates in either recording phase. Graphics state persists across compatible
+pipeline binds and render-pass boundaries until another setter supplies it; an
+incompatible color-format domain clears color readiness, and a minimal begin
+never replays or replaces it. Under `FULL`,
 regular and generated draws require one successful complete packet in the
 current command-buffer recording. Fresh command-buffer reuse clears that
 initialization. Dynamic state remains outside pipeline keys, so handle aliasing

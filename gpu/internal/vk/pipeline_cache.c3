@@ -21,44 +21,20 @@ enum PipelineKind : int {
     GRAPHICS,
 }
 
-enum GraphicsColorProfile : int {
-    IMMUTABLE,
-    DYNAMIC,
-}
-
-struct BlendKey {
-    int src_color;
-    int dst_color;
-    int color_op;
-    int src_alpha;
-    int dst_alpha;
-    int alpha_op;
-}
-$assert BlendKey::size == 24;
-
-struct ColorTargetKey {
-    int                 format;
-    int                 blend_enable;
-    BlendKey            blend;
-    gpu::ColorWriteMask write_mask;
-}
-$assert ColorTargetKey::size == 36;
-
 // Canonical packed key over immutable pipeline state. Zero-init plus field-wise
 // assignment keeps the byte view deterministic for hashing. Command-time state
 // and debug_name stay out.
 struct PipelineKey {
-    ShaderId vertex_shader;
-    ShaderId fragment_shader;
-    uint  color_target_count;
-    ColorTargetKey[gpu::MAX_COLOR_ATTACHMENTS] color_targets;
-    int   depth_format;
-    int   sample_count;
-    int   polygon_mode;
-    int   kind;
-    int   color_profile;
+    ShaderId                                vertex_shader;
+    ShaderId                                fragment_shader;
+    uint                                    color_target_count;
+    gpu::Format[gpu::MAX_COLOR_ATTACHMENTS] color_formats;
+    gpu::Format                             depth_format;
+    gpu::SampleCount                        sample_count;
+    gpu::PolygonMode                        polygon_mode;
+    int                                     kind;
 }
-$assert PipelineKey::size == 320;
+$assert PipelineKey::size == 60;
 
 struct PipelineCacheEntry {
     ulong                          hash;
@@ -189,51 +165,16 @@ fn PipelineKey build_graphics_key(
     ShaderId fragment_shader,
 ) @private {
     PipelineKey key = {
-        .vertex_shader   = vertex_shader,
-        .fragment_shader = fragment_shader,
+        .vertex_shader      = vertex_shader,
+        .fragment_shader    = fragment_shader,
+        .color_target_count = (uint)desc.color_formats.len,
+        .depth_format       = desc.depth_format,
+        .sample_count       = desc.sample_count,
+        .polygon_mode       = desc.polygon_mode,
+        .kind               = (int)PipelineKind.GRAPHICS,
     };
-    key.kind                   = (int)PipelineKind.GRAPHICS;
-    key.color_profile          = (int)GraphicsColorProfile.IMMUTABLE;
-    key.polygon_mode           = (int)desc.polygon_mode;
-    key.depth_format           = (int)desc.depth_format;
-    key.sample_count           = (int)desc.sample_count;
-    key.color_target_count     = (uint)desc.colors.len;
-    foreach (i, &target : desc.colors) {
-        ColorTargetKey* color = &key.color_targets[i];
-        color.format = (int)target.format;
-        color.write_mask = target.write_mask;
-        if (target.blend.enable && (uint)color.write_mask != 0) {
-            color.blend_enable = 1;
-            color.blend = {
-                .src_color = (int)target.blend.src_color,
-                .dst_color = (int)target.blend.dst_color,
-                .color_op  = (int)target.blend.color_op,
-                .src_alpha = (int)target.blend.src_alpha,
-                .dst_alpha = (int)target.blend.dst_alpha,
-                .alpha_op  = (int)target.blend.alpha_op,
-            };
-        }
-    }
-    return key;
-}
-
-fn PipelineKey build_dynamic_graphics_key(
-    gpu::DynamicGraphicsPipelineDesc* desc,
-    ShaderId vertex_shader,
-    ShaderId fragment_shader,
-) @private {
-    PipelineKey key = {
-        .vertex_shader   = vertex_shader,
-        .fragment_shader = fragment_shader,
-        .kind            = (int)PipelineKind.GRAPHICS,
-        .color_profile   = (int)GraphicsColorProfile.DYNAMIC,
-        .polygon_mode    = (int)desc.polygon_mode,
-        .depth_format    = (int)desc.depth_format,
-        .sample_count    = (int)desc.sample_count,
-        .color_target_count = (uint)desc.colors.len,
-    };
-    foreach (i, &target : desc.colors) {
-        key.color_targets[i].format = (int)target.format;
+    foreach (i, format : desc.color_formats) {
+        key.color_formats[i] = format;
     }
     return key;
 }
@@ -363,7 +304,7 @@ fn ulong pipeline_native_create_count(VkDeviceState* state) {
 struct GraphicsPipelineNativeObservation {
     uint dynamic_state_count;
     uint color_target_count;
-    bool dynamic_color_states;
+    bool color_states;
     bool canonical_color_attachments;
 }
 
@@ -375,8 +316,8 @@ fn GraphicsPipelineNativeObservation graphics_pipeline_native_observation(
             state.pipeline_native_dynamic_state_count,
         .color_target_count          =
             state.pipeline_native_color_target_count,
-        .dynamic_color_states        =
-            state.pipeline_native_dynamic_color_states,
+        .color_states                =
+            state.pipeline_native_color_states,
         .canonical_color_attachments =
             state.pipeline_native_canonical_color_attachments,
     };

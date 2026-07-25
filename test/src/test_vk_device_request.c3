@@ -24,7 +24,7 @@ fn uint live_device_slot_count() @private {
     return live_count;
 }
 
-fn fault run_injected_resource_agnostic_texture_sync_create(
+fn fault run_injected_device_create(
     gpu::Runtime* runtime,
     gpu::Adapter* adapter,
     gpu::DeviceRequest* request,
@@ -281,7 +281,7 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
             .native_device_create_user_data = &unrequested_observation,
         };
         assert(
-            run_injected_resource_agnostic_texture_sync_create(
+            run_injected_device_create(
                 runtime: &runtime,
                 adapter: &adapter,
                 request: &classic_request,
@@ -312,7 +312,7 @@ fn void resource_agnostic_texture_sync_device_creation_is_exact_and_transactiona
             .native_device_create_user_data = &requested_observation,
         };
         assert(
-            run_injected_resource_agnostic_texture_sync_create(
+            run_injected_device_create(
                 runtime: &runtime,
                 adapter: &adapter,
                 request: &selected_request,
@@ -795,11 +795,10 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
         assert(device_state.strict_heap.enabled, "the strict request owns heap state");
         assert(caps.strict_enabled, "strict state is enabled");
         assert(
-            !caps.dynamic_color_state
-                && !gpu::internal::vk::device_dispatch_supports_dynamic_color(
-                    &device_state.device_dispatch,
-                ),
-            "an unrequested color capability publishes no cap or dispatch"
+            gpu::internal::vk::device_dispatch_supports_dynamic_color(
+                &device_state.device_dispatch,
+            ),
+            "every strict device loads the required color dispatch"
         );
         assert(
             device_state.strict_heap.descriptors.texture_cells.ptr != null,
@@ -1050,54 +1049,41 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void dynamic_color_activation_rejects_missing_support_and_rolls_back() @test {
+fn void required_dynamic_color_features_are_enabled_transactionally() @test {
     gpu::RuntimeDesc desc = {
-        .application_name = "gpu_vk_dynamic_color_activation_rollback_test",
+        .application_name = "gpu_vk_required_dynamic_color_features_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest classic = gpu::strict_device_request();
-    gpu::DeviceRequest requested =
-        gpu::request_dynamic_color_state(classic)!!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &classic)!!.supported) continue;
-        gpu::internal::RuntimeData* runtime_data =
-            gpu::internal::resolve_adapter(&adapter);
-        gpu::internal::vk::VkRuntimeState* runtime_state =
-            runtime_data.state;
-        gpu::internal::vk::VkAdapterState* adapter_state =
-            &runtime_state.adapters[adapter.adapter_index];
-        bool original_support = adapter_state.dynamic_color_state_supported;
-        defer adapter_state.dynamic_color_state_supported = original_support;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
         uint live_slots_before = live_device_slot_count();
 
-        adapter_state.dynamic_color_state_supported = false;
-        gpu::Runtime retained_runtime = runtime;
-        gpu::internal::runtime_retain_device(&retained_runtime)!!;
-        gpu::internal::vk::DeviceCreationProbe missing_probe;
+        gpu::internal::vk::DeviceCreationProbe missing_support = {
+            .dynamic_color_support_override = true,
+        };
         assert(
-            @catch(gpu::internal::vk::create_vk_device_with_probe(
-                adapter:          &adapter,
-                request:          &requested,
-                retained_runtime: &retained_runtime,
-                probe:            &missing_probe,
-            )) == gpu::UNSUPPORTED_FEATURE,
-            "a missing color feature group rejects the request"
+            run_injected_device_create(
+                runtime: &runtime,
+                adapter: &adapter,
+                request: &request,
+                probe:   &missing_support,
+            ) == gpu::UNSUPPORTED_FEATURE,
+            "strict creation rechecks and rejects missing dynamic color support"
         );
-        gpu::internal::runtime_release_device(&retained_runtime)!!;
         assert(
-            missing_probe.reached
+            missing_support.reached
                     == gpu::internal::vk::DeviceCreationCheckpoint.NONE
-                && missing_probe.rollback_count == 0
+                && missing_support.rollback_count == 0
                 && live_device_slot_count() == live_slots_before,
-            "missing support rejects before native mutation or publication"
+            "missing color support rejects before state mutation or publication"
         );
 
-        adapter_state.dynamic_color_state_supported = true;
-        retained_runtime = runtime;
+        gpu::Runtime retained_runtime = runtime;
         gpu::internal::runtime_retain_device(&retained_runtime)!!;
         gpu::internal::vk::DeviceCreationProbe failure_probe = {
             .fail_native_device_creation = true,
@@ -1105,11 +1091,11 @@ fn void dynamic_color_activation_rejects_missing_support_and_rolls_back() @test 
         assert(
             @catch(gpu::internal::vk::create_vk_device_with_probe(
                 adapter:          &adapter,
-                request:          &requested,
+                request:          &request,
                 retained_runtime: &retained_runtime,
                 probe:            &failure_probe,
             )) == gpu::BACKEND_ERROR,
-            "an injected native failure aborts requested activation"
+            "an injected native failure aborts strict creation"
         );
         gpu::internal::runtime_release_device(&retained_runtime)!!;
         assert(
@@ -1117,26 +1103,25 @@ fn void dynamic_color_activation_rejects_missing_support_and_rolls_back() @test 
                 && failure_probe.dynamic_color_blend_enable == vk::TRUE
                 && failure_probe.dynamic_color_blend_equation == vk::TRUE
                 && failure_probe.dynamic_color_write_mask == vk::TRUE,
-            "requested activation chains all three feature bits together"
+            "strict creation chains and enables all three color feature bits"
         );
         assert(
             failure_probe.rollback_count == 1
                 && live_device_slot_count() == live_slots_before,
-            "native failure rolls back once and publishes no capability"
+            "native failure rolls back once and publishes no device"
         );
         return;
     }
 }
 
-fn void supported_dynamic_color_request_publishes_complete_activation() @test {
+fn void strict_device_loads_required_dynamic_color_dispatch() @test {
     gpu::RuntimeDesc desc = {
-        .application_name = "gpu_vk_dynamic_color_activation_success_test",
+        .application_name = "gpu_vk_required_dynamic_color_dispatch_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest request =
-        gpu::request_dynamic_color_state(gpu::strict_device_request())!!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
@@ -1145,11 +1130,10 @@ fn void supported_dynamic_color_request_publishes_complete_activation() @test {
         gpu::internal::vk::VkDeviceState* state =
             gpu::internal::device_slots[device.index].data.state;
         assert(
-            gpu::get_device_caps(&device)!!.dynamic_color_state
-                && gpu::internal::vk::device_dispatch_supports_dynamic_color(
-                    &state.device_dispatch,
-                ),
-            "successful creation publishes the cap with complete dispatch"
+            gpu::internal::vk::device_dispatch_supports_dynamic_color(
+                &state.device_dispatch,
+            ),
+            "successful strict creation loads the complete color dispatch"
         );
         gpu::destroy_device(&device)!!;
         return;

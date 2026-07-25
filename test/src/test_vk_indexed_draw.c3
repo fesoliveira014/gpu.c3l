@@ -84,9 +84,13 @@ fn void u16v_draw(
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = U16V_RT, .height = U16V_RT };
     gpu::GraphicsState graphics =
-        gpu::full_render_graphics_state(pass.width, pass.height)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
+        gpu::render_geometry_state(pass.width, pass.height)!!;
+    gpu::ColorTargetState[1] color_targets = {{
+        .write_mask = gpu::COLOR_WRITE_ALL,
+    }};
+    graphics.color = { .targets = color_targets[..] };
     bind_test_graphics_pipeline(&cmd, pipeline);
+    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics)!!;
     gpu::cmd_draw_indexed(
         commands:       &cmd,
         vertex_root:    verts,
@@ -138,14 +142,13 @@ fn void u16_and_u32_indexed_draws_match() @test {
     gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = U16V_FRAG_SPIRV[..], .entry_point = "main" };
     gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
     gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
-    gpu::ColorTargetState[1] pipeline_colors = {{
-        .format     = gpu::Format.RGBA8_UNORM,
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
+    gpu::Format[1] pipeline_color_formats = {
+        gpu::Format.RGBA8_UNORM,
+    };
     gpu::GraphicsPipelineDesc pd = {
         .vertex_shader   = vert,
         .fragment_shader = frag,
-        .colors          = pipeline_colors[..],
+        .color_formats   = pipeline_color_formats[..],
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pd)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
