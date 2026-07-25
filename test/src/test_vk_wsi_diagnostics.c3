@@ -18,7 +18,6 @@ fn void capture_wsi_diagnostic(gpu::DebugMessage* message, void* user_data) {
 fn void wsi_presentation_gate_diagnostic() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -32,7 +31,13 @@ fn void wsi_presentation_gate_diagnostic() @test {
 
     gpu::Surface surface;
     gpu::SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
-    fault gate_fault = @catch(gpu::internal::vk::vk_create_swapchain(&device, &surface, &swapchain_desc));
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    fault gate_fault = @catch(gpu::internal::vk::vk_create_swapchain(
+        state,
+        &surface,
+        &swapchain_desc,
+    ));
 
     assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "presentation gate fault is unchanged");
     assert(capture.calls == 1, "presentation gate emits exactly once");
@@ -84,7 +89,6 @@ fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
 fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

@@ -8,7 +8,6 @@ const usz MIP1_BYTES = (UP_SIZE / 2) * (UP_SIZE / 2) * 4;
 
 fn gpu::Device make_upload_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

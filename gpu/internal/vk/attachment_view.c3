@@ -100,11 +100,10 @@ fn void? AttachmentViewTable.free(
 }
 
 fn gpu::AttachmentViewHandle? vk_create_attachment_view(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::AttachmentViewDesc* desc,
-) @private {
+) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureSlot* texture = state.textures.get(desc.texture)!;
@@ -172,10 +171,9 @@ fn gpu::AttachmentViewHandle? vk_create_attachment_view(
 }
 
 fn void? vk_destroy_attachment_view(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::AttachmentViewHandle handle,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     AttachmentViewSlot* slot = state.attachment_views.get(handle)!;

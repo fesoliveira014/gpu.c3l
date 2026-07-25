@@ -66,8 +66,8 @@ and object-boundary modes require every policy-work counter to be zero. Both
 full modes require semantic and tracking work, releases must equal increments,
 and allocations cannot exceed increments. Every warm command performs one
 static device-slot liveness load. Every warm interval must report zero retained
-device-operation resolution, retained-pin borrow, lifecycle-vtable dispatch,
-command-table lookup, pipeline-table/cache lookup, and policy reselection.
+device-operation resolution, retained-pin borrow, command-table lookup,
+pipeline-table/cache lookup, and policy reselection.
 Each target creates its explicit queue-bound allocator before warmup and outside
 every measured interval. Its cold counters report allocator host allocation,
 one pool creation, and one complete native command-buffer allocation separately
@@ -194,12 +194,12 @@ exact zero. Timings and unpinned generated assembly are advisory.
 Warm recording performs one acquire-load of the static device slot followed by
 direct-record generation and authoritative phase checks per public command.
 `CommandResolutionStats` require zero retained device-operation resolution,
-retained-pin borrow, lifecycle-vtable dispatch, command-table lookup,
-encoder-cell computation, packed-lease comparison, frontend phase transition,
-or warm allocation. The benchmark requires exact native emission and GPU
-output. Pipeline and descriptor-heap counters measure native emission, not
-public bind attempts, so compatible pipeline switches can increase pipeline
-binds without increasing heap binds.
+retained-pin borrow, command-table lookup, encoder-cell computation,
+packed-lease comparison, frontend phase transition, or warm allocation. The
+benchmark requires exact native emission and GPU output. Pipeline and
+descriptor-heap counters measure native emission, not public bind attempts, so
+compatible pipeline switches can increase pipeline binds without increasing
+heap binds.
 
 Minimal pass begin accounts for exactly one native begin-rendering command and
 no dynamic-state commands. The convenience begin accounts for that begin plus
@@ -213,15 +213,15 @@ Warm command-buffer reset is expected reuse evidence. Warm host allocation is
 prohibited in every policy mode; tracking modes retain into fixed reference
 storage allocated with the command allocator. VMA allocation,
 command-buffer allocation/free, image-view creation, pipeline/shader creation,
-and retained device-operation resolution, retained-pin borrow,
-lifecycle-vtable dispatch, command-table lookup, and policy work remain
-prohibited in warm recording. Binding an opaque pipeline handle performs
-exactly one pipeline-table and one pipeline-cache lookup; dispatch and draw
-perform no additional resolution and each emits exactly one root push plus its
-native execution command. The dispatch invariant mutates the bound handle's
-backing slot after binding and observes the pushed layout, proving command
-recording uses the bind-time value snapshot. Private pipeline and command-record
-member inventories are intentionally not static contracts.
+and retained device-operation resolution, retained-pin borrow, command-table
+lookup, and policy work remain prohibited in warm recording. Binding an opaque
+pipeline handle performs exactly one pipeline-table and one pipeline-cache
+lookup; dispatch and draw perform no additional resolution and each emits
+exactly one root push plus its native execution command. The dispatch invariant
+mutates the bound handle's backing slot after binding and observes the pushed
+layout, proving command recording uses the bind-time value snapshot. Private
+pipeline and command-record member inventories are intentionally not static
+contracts.
 
 The lifecycle benchmark first establishes full retirement for each measured
 point, then resets completion-work counters before 100,000 repeated polls. The
@@ -293,10 +293,9 @@ necessary.
 
 The direct-recording gates require zero command-table lookups and exact zero
 for retired frontend proof work, retained device-operation resolution,
-retained-pin borrow, lifecycle dispatch, policy reselection, and warm
-allocation. Each command still performs the static device-slot liveness load.
-Runtime `CommandOps` indirect dispatch and fallible recording signatures remain
-intentional.
+retained-pin borrow, policy reselection, and warm allocation. Each command
+still performs the static device-slot liveness load. Runtime `CommandOps`
+indirect dispatch and fallible recording signatures remain intentional.
 
 Representative dispatch, draw, barrier, viewport, and buffer-copy assembly can
 be reported locally:

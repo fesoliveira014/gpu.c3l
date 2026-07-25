@@ -1,192 +1,11 @@
 module gpu::internal @private;
 
 import gpu;
+import gpu::internal::vk @public;
 import std::atomic;
 import std::atomic::types;
 import std::thread;
 import std::core::mem;
-
-// Backend dispatch functions. Lifecycle entries take validated public tokens;
-// recording entries take the authoritative record resolved at begin.
-alias CheckDeviceDestroyFn @private  = fn void? (void*);
-alias DestroyDeviceFn @private       = fn void (void*);
-alias ReportContractFailureFn @private = fn fault (
-    void* backend_state,
-    ZString operation,
-    fault public_fault,
-    DebugResourceKind resource_kind,
-    ZString rejected_field,
-    ZString invariant,
-);
-alias GetMemoryStatsFn @private      = fn MemoryStats? (Device*);
-alias BuildMemoryReportFn @private   = fn String? (Device*, bool detailed);
-alias AllocateMemoryFn @private      = fn GpuAllocation? (Device*, AllocationDesc*);
-alias FreeAllocationFn @private      = fn void? (Device*, GpuAllocation);
-alias GetAllocationInfoFn @private   = fn AllocationInfo? (Device*, GpuAllocation);
-alias GetAllocationSpanFn @private   = fn GpuSpan? (Device*, GpuAllocation);
-alias GetSpanMappingFn @private      = fn char[]? (Device*, GpuSpan);
-alias GetSpanAddressFn @private      = fn GpuAddress? (Device*, GpuSpan);
-alias FlushSpanFn @private           = fn void? (Device*, GpuSpan);
-alias InvalidateSpanFn @private      = fn void? (Device*, GpuSpan);
-// Out-param form avoids a c3c 0.8.0 debug-info codegen failure.
-alias CreateCommandAllocatorFn @private = fn CommandAllocatorHandle? (
-    Device*,
-    Queue,
-    CommandAllocatorDesc*,
-);
-alias DestroyCommandAllocatorFn @private = fn void? (
-    Device*,
-    CommandAllocatorHandle,
-);
-alias BeginCommandsFn @private = fn void? (
-    CommandAllocator* allocator,
-    CommandList* out_commands,
-);
-alias ReserveGeneratedScratchFn @private = fn void? (
-    CommandAllocator*,
-    GeneratedScratchDesc*,
-);
-alias ReleaseGeneratedScratchFn @private = fn void? (
-    CommandAllocator*,
-    PipelineHandle,
-    GeneratedWorkKind,
-);
-alias EndCommandsFn @private     = fn void? (CommandRecord*);
-alias DiscardCommandsFn @private = fn void? (
-    CommandRecord*,
-    bool executable,
-);
-alias SubmitFn @private          = fn CompletionPoint? (Queue, SubmitDesc*);
-alias PollCompletionFn @private      = fn bool? (Device*, uint, ulong);
-alias WaitCompletionFn @private      = fn void? (Device*, uint, ulong, ulong);
-alias CmdCopyBufferFn @private       = fn void? (CommandRecord*, BufferCopyDesc*);
-alias CmdFillBufferFn @private       = fn void? (CommandRecord*, GpuSpan, uint);
-alias CmdCopyBufferToTextureFn @private = fn void? (CommandRecord*, BufferTextureCopyDesc*);
-alias CmdCopyTextureToBufferFn @private = fn void? (CommandRecord*, TextureBufferCopyDesc*);
-alias CmdBarrierFn @private          = fn void? (CommandRecord*, Barrier*);
-alias CmdTextureBarrierFn @private   = fn void? (CommandRecord*, TextureBarrier*);
-alias GetTextureFormatSupportFn @private = fn TextureFormatSupport? (Device*, Format);
-alias SupportsTextureDescFn @private     = fn bool? (Device*, TextureDesc*);
-alias GetTextureRequirementsFn @private  = fn TextureRequirements? (Device*, TextureDesc*);
-alias CreateTextureFn @private           = fn TextureHandle? (Device*, TextureDesc*);
-alias CreatePlacedTextureFn @private = fn TextureHandle? (
-    Device* device,
-    TextureDesc* desc,
-    GpuAllocation allocation,
-    usz offset,
-);
-alias CreateDedicatedTextureFn @private = fn DedicatedTexture? (
-    Device* device,
-    TextureDesc* desc,
-    AllocationDesc* allocation_desc,
-);
-alias CreateAttachmentViewFn @private = fn AttachmentViewHandle? (
-    Device*,
-    AttachmentViewDesc*,
-);
-alias DestroyAttachmentViewFn @private = fn void? (
-    Device*,
-    AttachmentViewHandle,
-);
-alias CreateTextureViewFn @private       = fn TextureView? (Device*, TextureHandle, TextureViewDesc*);
-alias DestroyTextureFn @private          = fn void? (Device*, TextureHandle);
-alias DestroyTextureViewFn @private      = fn void? (Device*, TextureView);
-alias CreateTextureViewsFn @private      = fn void? (Device*, TextureViewCreateDesc[], TextureView[]);
-alias InternSamplerFn @private            = fn SamplerIndex? (Device*, SamplerDesc*);
-alias CreateComputePipelineFn @private  = fn PipelineHandle? (Device*, ComputePipelineDesc*);
-alias CreateGraphicsPipelineFn @private = fn PipelineHandle? (Device*, GraphicsPipelineDesc*);
-alias CreateDynamicGraphicsPipelineFn @private =
-    fn PipelineHandle? (Device*, DynamicGraphicsPipelineDesc*);
-alias CreateComputePipelinesFn @private = fn void? (Device*, ComputePipelineDesc[], PipelineHandle[]);
-alias CreateGraphicsPipelinesFn @private = fn void? (Device*, GraphicsPipelineDesc[], PipelineHandle[]);
-alias CreateDynamicGraphicsPipelinesFn @private =
-    fn void? (Device*, DynamicGraphicsPipelineDesc[], PipelineHandle[]);
-alias DestroyPipelineFn @private        = fn void? (Device*, PipelineHandle);
-alias GetPipelineCacheSizeFn @private   = fn usz? (Device*);
-alias GetPipelineCacheDataFn @private   = fn usz? (Device*, char[]);
-alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, PipelineHandle);
-alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, DepthState*);
-alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, DynamicRasterState*);
-alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, GraphicsState*);
-alias CmdSetColorStateFn @private            = fn void? (CommandRecord*, ColorState*);
-alias CmdDispatchFn @private                 = fn void? (CommandRecord*, GpuAddress, Vec3u);
-alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, RenderPassDesc*);
-alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandRecord*, RenderPassDesc*, GraphicsState*);
-alias CmdSetViewportFn @private              = fn void? (CommandRecord*, Viewport*);
-alias CmdSetScissorFn @private               = fn void? (CommandRecord*, ScissorRect*);
-alias CmdEndRenderPassFn @private            = fn void? (CommandRecord*);
-alias CmdDrawFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    uint vertex_count,
-    uint instance_count,
-);
-alias CmdDrawIndexedFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    GpuSpan index_span,
-    uint index_count,
-    uint instance_count,
-    IndexType index_type,
-);
-alias CmdDrawIndirectFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    GpuSpan args,
-    uint draw_count,
-);
-alias CmdDrawIndexedIndirectFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    GpuSpan args,
-    uint draw_count,
-    GpuSpan index_span,
-    IndexType index_type,
-);
-alias CmdDrawIndexedIndirectCountFn @private = fn void? (
-    CommandRecord* record,
-    GpuAddress vertex_root,
-    GpuAddress fragment_root,
-    GpuSpan args,
-    GpuSpan count_span,
-    uint max_draw_count,
-    GpuSpan index_span,
-    IndexType index_type,
-);
-alias CmdDispatchIndirectFn @private         = fn void? (CommandRecord*, GpuAddress, GpuSpan);
-alias CmdDrawGeneratedFn @private = fn void? (
-    CommandRecord* record,
-    GpuSpan records,
-    GpuSpan count_span,
-    uint max_draw_count,
-);
-alias CmdDrawIndexedGeneratedFn @private = fn void? (
-    CommandRecord* record,
-    GpuSpan records,
-    GpuSpan count_span,
-    uint max_draw_count,
-    GpuSpan index_span,
-    IndexType index_type,
-);
-alias CmdDispatchGeneratedFn @private = fn void? (
-    CommandRecord* record,
-    GpuSpan records,
-    GpuSpan count_span,
-    uint max_dispatch_count,
-);
-alias CmdBeginLabelFn @private               = fn void? (CommandRecord*, ZString, float[4]);
-alias CmdEndLabelFn @private                 = fn void? (CommandRecord*);
-alias CreateSwapchainFn @private       = fn SwapchainHandle? (Device*, Surface*, SwapchainDesc*);
-alias DestroySwapchainFn @private      = fn void? (Device*, SwapchainHandle);
-alias ResizeSwapchainFn @private       = fn void? (Device*, SwapchainHandle, uint, uint);
-alias GetSwapchainInfoFn @private      = fn SwapchainInfo? (Device*, SwapchainHandle);
-alias AcquireNextImageFn @private      = fn AcquiredImage? (Device*, SwapchainHandle, ulong);
-alias PresentFn @private               = fn void? (Device*, AcquiredImage*, CompletionPoint);
-alias GetPresentModeSupportFn @private = fn PresentModeSupport? (Device*, SwapchainHandle);
 
 const uint MAX_DEVICES @private = 64;
 const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
@@ -249,116 +68,15 @@ struct CommandListHandle @private {
 }
 $assert CommandListHandle::size <= ulong::size * 2;
 
-struct CommandRecord @private {
-    CommandOps*       ops;
-    void*             backend_state;
-    void*             backend_command;
-    Device            device;
-    CommandListHandle identity;
-    CommandState      state;
-}
-$assert CommandRecord::size <= ulong::size * 8;
-
-struct CommandOps @private {
-    CmdCopyBufferFn               copy_buffer;
-    CmdFillBufferFn               fill_buffer;
-    CmdCopyBufferToTextureFn      copy_buffer_to_texture;
-    CmdCopyTextureToBufferFn      copy_texture_to_buffer;
-    CmdBarrierFn                  barrier;
-    CmdTextureBarrierFn           texture_barrier;
-    CmdBindPipelineFn             bind_pipeline;
-    CmdSetDepthStateFn            set_depth_state;
-    CmdSetRasterStateFn           set_raster_state;
-    CmdSetGraphicsStateFn         set_graphics_state;
-    CmdSetColorStateFn            set_color_state;
-    CmdDispatchFn                 dispatch;
-    CmdBeginRenderPassFn          begin_render_pass;
-    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
-    CmdSetViewportFn              set_viewport;
-    CmdSetScissorFn               set_scissor;
-    CmdEndRenderPassFn            end_render_pass;
-    CmdDrawFn                     draw;
-    CmdDrawIndexedFn              draw_indexed;
-    CmdDrawIndirectFn             draw_indirect;
-    CmdDrawIndexedIndirectFn      draw_indexed_indirect;
-    CmdDrawIndexedIndirectCountFn draw_indexed_indirect_count;
-    CmdDispatchIndirectFn         dispatch_indirect;
-    CmdDrawGeneratedFn            draw_generated;
-    CmdDrawIndexedGeneratedFn     draw_indexed_generated;
-    CmdDispatchGeneratedFn        dispatch_generated;
-    CmdBeginLabelFn               begin_label;
-    CmdEndLabelFn                 end_label;
-}
-
-// One immutable table per backend.
-struct BackendVTable @private {
-    CheckDeviceDestroyFn      check_device_destroy;
-    DestroyDeviceFn           destroy_device;
-    ReportContractFailureFn   report_contract_failure;
-    GetMemoryStatsFn          get_memory_stats;
-    BuildMemoryReportFn       build_memory_report;
-    AllocateMemoryFn          allocate_memory;
-    FreeAllocationFn          free_allocation;
-    GetAllocationInfoFn       get_allocation_info;
-    GetAllocationSpanFn       get_allocation_span;
-    GetSpanMappingFn          get_span_mapping;
-    GetSpanAddressFn          get_span_address;
-    FlushSpanFn               flush_mapped_span;
-    InvalidateSpanFn          invalidate_mapped_span;
-    CreateCommandAllocatorFn  create_command_allocator;
-    DestroyCommandAllocatorFn destroy_command_allocator;
-    ReserveGeneratedScratchFn reserve_generated_scratch;
-    ReleaseGeneratedScratchFn release_generated_scratch;
-    BeginCommandsFn           begin_commands;
-    EndCommandsFn             end_commands;
-    DiscardCommandsFn         discard_commands;
-    SubmitFn                  submit;
-    PollCompletionFn          poll_completion;
-    WaitCompletionFn          wait_completion;
-    CommandOps*               command_ops;
-    GetTextureFormatSupportFn get_texture_format_support;
-    SupportsTextureDescFn     supports_texture_desc;
-    GetTextureRequirementsFn  get_texture_requirements;
-    CreateTextureFn           create_texture;
-    CreatePlacedTextureFn     create_placed_texture;
-    CreateDedicatedTextureFn  create_dedicated_texture;
-    DestroyTextureFn          destroy_texture;
-    CreateAttachmentViewFn    create_attachment_view;
-    DestroyAttachmentViewFn   destroy_attachment_view;
-    CreateTextureViewFn       create_texture_view;
-    DestroyTextureViewFn      destroy_texture_view;
-    CreateTextureViewsFn      create_texture_views;
-    InternSamplerFn           intern_sampler;
-    CreateComputePipelineFn   create_compute_pipeline;
-    CreateGraphicsPipelineFn  create_graphics_pipeline;
-    CreateDynamicGraphicsPipelineFn create_dynamic_graphics_pipeline;
-    CreateComputePipelinesFn  create_compute_pipelines;
-    CreateGraphicsPipelinesFn create_graphics_pipelines;
-    CreateDynamicGraphicsPipelinesFn create_dynamic_graphics_pipelines;
-    DestroyPipelineFn         destroy_pipeline;
-    GetPipelineCacheSizeFn    get_pipeline_cache_size;
-    GetPipelineCacheDataFn    get_pipeline_cache_data;
-    CreateSwapchainFn         create_swapchain;
-    DestroySwapchainFn        destroy_swapchain;
-    ResizeSwapchainFn         resize_swapchain;
-    GetSwapchainInfoFn        get_swapchain_info;
-    AcquireNextImageFn        acquire_next_image;
-    PresentFn                 present;
-    GetPresentModeSupportFn   get_present_mode_support;
-}
-
 struct DeviceData @private {
-    BackendKind    backend;
-    DeviceCaps     caps;
-    QueueSelection queues;
-    BackendVTable* vtable;
-    CommandOps*    command_ops;
-    void*          backend_state;
-    ulong          resource_owner;
-    Runtime        runtime;
-    Adapter        adapter;
-    Surface        presentation_surface;
-    bool           runtime_retained;
+    gpu::internal::vk::VkDeviceState* state;
+    DeviceCaps                        caps;
+    QueueSelection                    queues;
+    ulong                             resource_owner;
+    Runtime                           runtime;
+    Adapter                           adapter;
+    Surface                           presentation_surface;
+    bool                              runtime_retained;
 }
 
 struct DeviceSlot @private {
@@ -369,13 +87,12 @@ struct DeviceSlot @private {
 }
 
 struct DeviceOperation @private {
-    DeviceSlot*    slot;
-    DeviceData*    data;
-    BackendVTable* vtable;
-    bool           active;
-    bool           owns_pin;
+    DeviceSlot*                       slot;
+    DeviceData*                       data;
+    gpu::internal::vk::VkDeviceState* state;
+    bool                              active;
+    bool                              owns_pin;
 }
-
 
 <* Private test and benchmark counters for structural recording work. Compare
    relaxed snapshots only around externally synchronized cold or warm work. *>
@@ -400,7 +117,6 @@ struct RecordingWorkCounters @private @if(
 
 Atomic{ulong} command_device_registry_resolutions @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_retained_pin_operations @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_lifecycle_vtable_dispatches @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
@@ -444,15 +160,6 @@ fn void note_command_device_registry_resolution() @private {
 fn void note_command_retained_pin_operation() @private {
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         (void)command_retained_pin_operations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_lifecycle_vtable_dispatch() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
-        (void)command_lifecycle_vtable_dispatches.add(
             1,
             AtomicOrdering.RELAXED,
         );
@@ -607,7 +314,7 @@ fn DeviceOperation? begin_device_operation(
         return {
             .slot     = slot,
             .data     = &slot.data,
-            .vtable   = slot.data.vtable,
+            .state    = slot.data.state,
             .active   = true,
             .owns_pin = true,
         };
@@ -638,7 +345,7 @@ fn DeviceOperation? borrow_retained_device_operation(
     return {
         .slot   = slot,
         .data   = &slot.data,
-        .vtable = slot.data.vtable,
+        .state  = slot.data.state,
         .active = true,
     };
 }
@@ -691,14 +398,11 @@ fn bool release_retained_device_pins(
     }
 }
 
-fn void release_command_record_ownership(
-    CommandRecord* record,
-) @private {
-    if (record == null || !record.device.is_valid()
-        || record.device.index >= MAX_DEVICES) {
+fn void release_command_record_ownership(Device device) @private {
+    if (!device.is_valid() || device.index >= MAX_DEVICES) {
         return;
     }
-    DeviceSlot* slot = &device_slots[record.device.index];
+    DeviceSlot* slot = &device_slots[device.index];
     (void)slot.live_children.sub(1, AtomicOrdering.RELEASE);
     DeviceOperation operation = {
         .slot   = slot,
@@ -730,10 +434,9 @@ fn fault report_device_contract_failure(
     ZString rejected_field,
     ZString invariant,
 ) @private {
-    if (operation != null && operation.active
-        && operation.vtable.report_contract_failure != null) {
-        return operation.vtable.report_contract_failure(
-            backend_state:  operation.data.backend_state,
+    if (operation != null && operation.active) {
+        return gpu::internal::vk::vk_report_root_contract_failure(
+            state:          operation.state,
             operation:      operation_name,
             public_fault:   public_fault,
             resource_kind:  resource_kind,
@@ -791,11 +494,8 @@ fn bool device_slot_available() @private {
 }
 
 fn Device? register_device(
-    BackendKind backend,
+    gpu::internal::vk::VkDeviceState* state,
     DeviceCaps caps,
-    BackendVTable* vtable,
-    void* backend_state,
-    CommandOps* command_ops = null,
     ulong resource_owner = 0,
     Runtime* retained_runtime = null,
     Adapter* adapter = null,
@@ -803,10 +503,7 @@ fn Device? register_device(
     QueueSelection queues = {},
     Device* owner = null,
 ) @private {
-    if (vtable == null || backend_state == null || vtable.destroy_device == null) return gpu::INVALID_ARGUMENT~;
-    CommandOps* selected_ops = command_ops == null
-        ? vtable.command_ops
-        : command_ops;
+    if (state == null) return gpu::INVALID_ARGUMENT~;
     if (resource_owner == 0) resource_owner = allocate_device_resource_owner()!;
     bool has_runtime = retained_runtime != null;
     if (has_runtime != (adapter != null)) return gpu::INVALID_ARGUMENT~;
@@ -861,12 +558,9 @@ fn Device? register_device(
         slot.live_children.store(0, AtomicOrdering.RELAXED);
         slot.lost.store(false, AtomicOrdering.RELAXED);
         slot.data = {
-            .backend              = backend,
+            .state                = state,
             .caps                 = caps,
             .queues               = queues,
-            .vtable               = vtable,
-            .command_ops          = selected_ops,
-            .backend_state        = backend_state,
             .resource_owner       = resource_owner,
             .runtime              = runtime,
             .adapter              = registered_adapter,
@@ -878,13 +572,4 @@ fn Device? register_device(
         return handle;
     }
     return gpu::SLOT_TABLE_FULL~;
-}
-
-fn void* device_backend_state_ptr(Device* device) @private {
-    DeviceData* data = resolve_pinned_device(device);
-    return data == null ? null : data.backend_state;
-}
-
-fn void* device_backend_state(Device device) @private {
-    return device_backend_state_ptr(&device);
 }

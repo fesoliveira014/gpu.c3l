@@ -115,19 +115,21 @@ def check(root: Path = ROOT) -> list[str]:
         "intern_sampler",
     )
     validation_call = "gpu::internal::validate_sampler_desc(&operation, desc)!;"
-    dispatch_call = "return operation.vtable.intern_sampler(device, desc);"
+    dispatch_call = (
+        "return gpu::internal::vk::vk_intern_sampler(operation.state, desc);"
+    )
     validation_position = frontend.find(validation_call)
     dispatch_position = frontend.find(dispatch_call)
     if validation_position < 0:
         errors.append("intern_sampler must call backend-independent sampler validation")
     if dispatch_position < 0:
-        errors.append("intern_sampler vtable dispatch is missing")
+        errors.append("intern_sampler direct call is missing")
     if (
         validation_position >= 0
         and dispatch_position >= 0
         and validation_position > dispatch_position
     ):
-        errors.append("sampler validation must precede vtable dispatch")
+        errors.append("sampler validation must precede the direct backend call")
 
     _, validation = declaration_and_body(
         sources["gpu/internal/sampler.c3"],

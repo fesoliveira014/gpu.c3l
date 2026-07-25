@@ -32,7 +32,8 @@ non-callables, `gpu/gpu.c3` supplies public callables, each platform surface is
 a local `.c3i`/`.c3` pair, `gpu/internal/*.c3` is backend-independent private
 code, and `gpu/internal/vk/*.c3` is the private Vulkan backend. CPU projects
 list private files explicitly so their `gpu::internal::vk` stub never compiles
-the real backend.
+the real backend. The stub implements the same typed private Vulkan functions
+at compile time; it is not a runtime polymorphism layer.
 
 Examples:
 
@@ -77,7 +78,7 @@ rejection, support routing, and supported-but-unrequested classic selection
 shader ABI scalar widths plus generated-work record sizes, offsets, and strides
 TextureView owner/generation validation and descriptor-heap free-list reuse
 null-safe, exactly-once structured debug dispatch and userdata preservation
-invalid-backend callback delivery with callback-enabled/disabled fault parity
+runtime-bootstrap callback delivery with callback-enabled/disabled fault parity
 borrowed field and explicit absent-fault representation
 synthetic allocation sharing plans and exact buffer create-info mode/indices
 sampler exact anisotropy boundaries, inactive-field canonicalization and byte
@@ -281,7 +282,7 @@ transactional creation rollback. Trusted-mode cases distinguish that floor
 from semantic misuse that is intentionally a caller precondition. Every policy
 checks static device-slot liveness, record generation, and command phase before
 native mutation. Lifecycle and submit coverage additionally validates
-device/backend ownership.
+device ownership.
 
 Zero-root execution evidence covers direct compute, direct graphics, indirect
 work, and generated draw, indexed-draw, and dispatch records. Each family
@@ -555,9 +556,9 @@ image-view creation, and pipeline/shader creation are required to remain zero. R
 snapshots begin before pipeline binding: binding the opaque pipeline handle
 performs exactly one pipeline-table and one pipeline-cache lookup and records
 one `pipeline_bind_commands` increment for the selected bind point, while
-retained device-operation resolution, retained-pin borrow, lifecycle-vtable
-dispatch, command-table lookup, and policy work remain zero. Each public
-recording call checks the static device slot before loading the stable record.
+retained device-operation resolution, retained-pin borrow, command-table lookup,
+and policy work remain zero. Each public recording call checks the static
+device slot before loading the stable record.
 Exact heap counters require one indexing set bind or descriptor-buffer
 offset per used bind point and one descriptor-buffer bind per command record;
 later compatible pipeline changes add none. Dispatch and draw add no further
@@ -655,8 +656,8 @@ compatible passes and draws add only their begin/end/draw commands unless
 another setter is recorded. The `{2, 16, 256}` matrix rejects hidden pass-boundary
 replay, default, or state-diff work. Every warm command performs one static
 device-slot liveness load and requires zero retained device-operation
-resolution, retained-pin borrow, lifecycle-vtable dispatch, command-table
-lookup, pipeline-table/cache lookup, and policy selection. It also requires
+resolution, retained-pin borrow, command-table lookup, pipeline-table/cache
+lookup, and policy selection. It also requires
 zero encoder-cell computation, packed-lease comparison, frontend phase
 transition, and warm allocation. Source helper names, call topology, and
 proof-note placement are not blocking contracts.
@@ -850,9 +851,9 @@ test/shaders/graphics/
 They `#include` the library's published shader-side ABI includes from `include/shaders/`.
 
 Pure-CPU tests (handles, ranges, ABI layout) live in the `test/cpu` project:
-the full public module plus a stub backend, linking no native libraries — a
-clean checkout runs them with no Vulkan/VMA installed, and CI runs them
-before any native setup.
+the full public module plus the typed private Vulkan stub, linking no native
+libraries — a clean checkout runs them with no Vulkan/VMA installed, and CI
+runs them before any native setup.
 
 Shared CPU/shader structs come from `.abi` schemas (see `docs/shader_abi.md`
 §12). Generated outputs are committed; `scripts/gen_abi.py --check` is the drift

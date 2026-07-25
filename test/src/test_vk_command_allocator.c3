@@ -225,47 +225,47 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
         .owner = 41,
     };
     gpu::Device device = { .generation = 1 };
-    gpu::internal::CommandRecord* first = table.claim(
-        device:        device,
-        ops:           null,
-        backend_state: null,
-        value:         {
+    gpu::internal::vk::CommandRecord* first = table.claim(
+        device:       device,
+        ops:          null,
+        device_state: null,
+        value: {
             .command_buffer = (vk::CommandBuffer)(uptr)1,
         },
     )!!;
     gpu::internal::CommandListHandle first_identity = first.identity;
-    gpu::internal::CommandRecord* concurrent = table.claim(
-        device:        device,
-        ops:           null,
-        backend_state: null,
-        value:         {
+    gpu::internal::vk::CommandRecord* concurrent = table.claim(
+        device:       device,
+        ops:          null,
+        device_state: null,
+        value: {
             .command_buffer = (vk::CommandBuffer)(uptr)2,
         },
     )!!;
     gpu::internal::CommandListHandle concurrent_identity = concurrent.identity;
 
     table.cancel_claim(first_identity)!!;
-    assert(table.get_record(concurrent_identity)!! == concurrent,
+    assert(table.get(concurrent_identity)!! == concurrent,
         "cancelling an earlier claim preserves the concurrent record");
-    gpu::internal::CommandRecord* replacement = table.claim(
-        device:        device,
-        ops:           null,
-        backend_state: null,
-        value:         {
+    gpu::internal::vk::CommandRecord* replacement = table.claim(
+        device:       device,
+        ops:          null,
+        device_state: null,
+        value: {
             .command_buffer = (vk::CommandBuffer)(uptr)3,
         },
     )!!;
     assert(replacement.identity.index == first_identity.index
         && replacement.identity.generation != first_identity.generation,
         "the cancelled cell rejoins the current free list with new identity");
-    assert(table.get_record(concurrent_identity)!! == concurrent
+    assert(table.get(concurrent_identity)!! == concurrent
         && concurrent.identity == concurrent_identity,
         "replacement publication leaves the interleaved claim unchanged");
     assert(@catch(table.claim(
-        device:        device,
-        ops:           null,
-        backend_state: null,
-        value:         {},
+        device:       device,
+        ops:          null,
+        device_state: null,
+        value:        {},
     )) == gpu::SLOT_TABLE_FULL,
         "interleaved cancellation and reuse preserve exact table capacity");
 }
@@ -504,7 +504,6 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
 
 fn void command_allocator_defaults_preallocate_exact_storage() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend = gpu::BackendKind.VULKAN,
         .application_name = "command_allocator_defaults_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -522,8 +521,7 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
         &desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::internal::vk::VkDeviceState* state = (gpu::internal::vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -552,7 +550,6 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
 
 fn void command_allocator_capacity_and_destroy_are_non_waiting() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend = gpu::BackendKind.VULKAN,
         .application_name = "command_allocator_capacity_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -587,8 +584,7 @@ fn void command_allocator_capacity_and_destroy_are_non_waiting() @test {
         "destroy preserves an allocator with executable work");
     gpu::discard_executable_commands(&executable)!!;
 
-    gpu::internal::vk::VkDeviceState* state = (gpu::internal::vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::reset_completion_work_counters(state);
     gpu::internal::vk::CompletionWorkCounters before =
         gpu::internal::vk::completion_work_counters(state);
@@ -604,7 +600,6 @@ fn void command_allocator_capacity_and_destroy_are_non_waiting() @test {
 
 fn void command_allocator_destroy_never_waits_for_an_active_operation() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "command_allocator_nonblocking_destroy_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -618,8 +613,7 @@ fn void command_allocator_destroy_never_waits_for_an_active_operation() @test {
         queue,
     )!!;
     gpu::CommandAllocator original = allocator;
-    gpu::internal::vk::VkDeviceState* state = (gpu::internal::vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -639,7 +633,6 @@ fn void command_allocator_destroy_never_waits_for_an_active_operation() @test {
 
 fn void command_table_exhaustion_restores_allocator_claim() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend = gpu::BackendKind.VULKAN,
         .application_name = "command_table_exhaustion_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -659,8 +652,7 @@ fn void command_table_exhaustion_restores_allocator_claim() @test {
         &desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::internal::vk::VkDeviceState* state = (gpu::internal::vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -698,7 +690,6 @@ fn void command_table_exhaustion_restores_allocator_claim() @test {
 
 fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "command_reset_failure_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -714,15 +705,14 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
         &desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::internal::vk::VkDeviceState* state = (gpu::internal::vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
     uint available_index = slot.available[0];
     gpu::internal::vk::CommandScratch* scratch = &slot.scratch[available_index];
     gpu::CommandList token = {
-        .record          = (gpu::internal::CommandRecord*)(uptr)91,
+        .record          = (gpu::internal::vk::CommandRecord*)(uptr)91,
         .generation      = 5,
         .device_identity = 11,
     };
@@ -732,6 +722,7 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
     gpu::internal::vk::CommandRecordingOps ops = command_recording_ops(&probe);
 
     assert(@catch(gpu::internal::vk::begin_commands_with_injected_ops(
+        state,
         &allocator,
         &token,
         &ops,
@@ -751,14 +742,15 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
         && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0,
         "reset failure restores the exact scratch unit");
-    assert(token.record == (gpu::internal::CommandRecord*)(uptr)91
+    assert(token.record == (gpu::internal::vk::CommandRecord*)(uptr)91
         && token.generation == 5
         && token.device_identity == 11,
         "reset failure publishes neither a command record nor a token");
 
     probe.reset_result = vk::Result.SUCCESS;
-    gpu::internal::vk::VkCommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::vk::begin_commands_with_injected_ops(
+            state,
             &allocator,
             &token,
             &ops,
@@ -767,12 +759,11 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
         && record.scratch == scratch && scratch.in_use
         && slot.available_count == 0 && slot.live_recordings == 1,
         "the reset-failed allocator unit succeeds on immediate retry");
-    gpu::internal::vk::vk_discard_commands(record.root, false)!!;
+    gpu::internal::vk::vk_discard_commands(state, record, false)!!;
 }
 
 fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "command_begin_failure_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -788,15 +779,14 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
         &desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::internal::vk::VkDeviceState* state = (gpu::internal::vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
     uint available_index = slot.available[0];
     gpu::internal::vk::CommandScratch* scratch = &slot.scratch[available_index];
     gpu::CommandList token = {
-        .record          = (gpu::internal::CommandRecord*)(uptr)93,
+        .record          = (gpu::internal::vk::CommandRecord*)(uptr)93,
         .generation      = 7,
         .device_identity = 13,
     };
@@ -806,6 +796,7 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
     gpu::internal::vk::CommandRecordingOps ops = command_recording_ops(&probe);
 
     assert(@catch(gpu::internal::vk::begin_commands_with_injected_ops(
+        state,
         &allocator,
         &token,
         &ops,
@@ -825,14 +816,15 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
         && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0,
         "begin failure restores the exact scratch unit");
-    assert(token.record == (gpu::internal::CommandRecord*)(uptr)93
+    assert(token.record == (gpu::internal::vk::CommandRecord*)(uptr)93
         && token.generation == 7
         && token.device_identity == 13,
         "begin failure publishes neither a command record nor a token");
 
     probe.begin_result = vk::Result.SUCCESS;
-    gpu::internal::vk::VkCommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::vk::begin_commands_with_injected_ops(
+            state,
             &allocator,
             &token,
             &ops,
@@ -841,12 +833,11 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
         && record.scratch == scratch && scratch.in_use
         && slot.available_count == 0 && slot.live_recordings == 1,
         "the begin-failed allocator unit succeeds on immediate retry");
-    gpu::internal::vk::vk_discard_commands(record.root, false)!!;
+    gpu::internal::vk::vk_discard_commands(state, record, false)!!;
 }
 
 fn void native_end_failure_preserves_recording_for_retry() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "command_end_failure_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -862,8 +853,7 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
         &desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::internal::vk::VkDeviceState* state = (gpu::internal::vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -872,14 +862,15 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
     CommandRecordingProbe probe;
     gpu::internal::vk::CommandRecordingOps ops = command_recording_ops(&probe);
     gpu::CommandList token;
-    gpu::internal::vk::VkCommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::vk::begin_commands_with_injected_ops(
+            state,
             &allocator,
             &token,
             &ops,
         )!!;
-    gpu::internal::CommandListHandle handle = record.root.identity;
-    gpu::internal::CommandRecord* token_record = token.record;
+    gpu::internal::CommandListHandle handle = record.identity;
+    gpu::internal::vk::CommandRecord* token_record = token.record;
     uint token_generation = token.generation;
     uint next_new = state.commands.next_new;
     uint free_head = state.commands.free_head;
@@ -894,7 +885,7 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
     assert(probe.end_calls == 1
         && probe.command_buffer == slot.command_buffers[available_index],
         "end failure targets the exact allocator-owned native buffer");
-    assert(record.root.state == gpu::internal::CommandState.RECORDING
+    assert(record.state == gpu::internal::CommandState.RECORDING
         && record.allocator == allocator.handle
         && record.allocator_buffer == available_index
         && record.scratch == scratch,
@@ -918,18 +909,17 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
     probe.end_result = vk::Result.SUCCESS;
     gpu::internal::vk::end_commands_with_injected_ops(state, record, &ops)!!;
     assert(probe.end_calls == 2
-        && record.root.state == gpu::internal::CommandState.EXECUTABLE
+        && record.state == gpu::internal::CommandState.EXECUTABLE
         && slot.live_recordings == 0
         && slot.live_executables == 1
         && !slot.recording_thread_set
         && scratch.in_use,
         "the same recording succeeds on immediate end retry");
-    gpu::internal::vk::vk_discard_commands(record.root, true)!!;
+    gpu::internal::vk::vk_discard_commands(state, record, true)!!;
 }
 
 fn void tracking_allocator_wires_non_overlapping_reference_slices() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .application_name         = "command_allocator_tracking_test",
@@ -950,8 +940,7 @@ fn void tracking_allocator_wires_non_overlapping_reference_slices() @test {
         &desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::internal::vk::VkDeviceState* state = (gpu::internal::vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;

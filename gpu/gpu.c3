@@ -82,7 +82,6 @@ fn bool Runtime.is_valid(self) => (ulong)self != 0;
 <* Return FULL contract diagnostics with lifetime tracking and Vulkan
    validation layers enabled. *>
 fn RuntimeDesc full_validation_runtime_desc() => {
-    .backend                  = BackendKind.VULKAN,
     .contract_validation      = ContractValidation.FULL,
     .track_resource_lifetimes = true,
     .enable_vulkan_validation = true,
@@ -91,23 +90,7 @@ fn RuntimeDesc full_validation_runtime_desc() => {
 <* Initialize backend discovery. Importing gpu performs no initialization. *>
 fn Runtime? create_runtime(RuntimeDesc* desc) {
     gpu::internal::validate_runtime_desc(desc)!;
-    switch (desc.backend) {
-        case BackendKind.VULKAN:
-            return gpu::internal::vk::create_vk_runtime(desc);
-        default:
-            DebugMessage message = {
-                .severity       = DebugMessageSeverity.ERROR,
-                .category       = { .public_contract },
-                .operation      = "create_runtime",
-                .has_fault      = true,
-                .public_fault   = UNSUPPORTED_BACKEND,
-                .rejected_field = "RuntimeDesc.backend",
-                .invariant      = "backend must be supported",
-                .backend_text   = "unsupported GPU backend",
-            };
-            gpu::internal::dispatch_debug_message(desc.debug_callback, desc.debug_user_data, &message);
-            return UNSUPPORTED_BACKEND~;
-    }
+    return gpu::internal::vk::create_vk_runtime(desc);
 }
 
 <* Destroy a runtime.
@@ -121,14 +104,12 @@ fn void? destroy_runtime(Runtime* runtime) {
         return RESOURCE_IN_USE~;
     }
 
-    gpu::internal::DestroyRuntimeBackendFn destroy_backend = data.vtable.destroy_runtime;
-    void* backend_state = data.backend_state;
-    data.vtable = null;
-    data.backend_state = null;
+    gpu::internal::vk::VkRuntimeState* state = data.state;
+    data.state = null;
     data.adapter_count = 0;
     data.used = false;
     *runtime = RUNTIME_INVALID;
-    destroy_backend(backend_state);
+    gpu::internal::vk::destroy_vk_runtime_state(state);
 }
 
 <* True when the token is not the invalid zero value. *>
@@ -162,8 +143,8 @@ fn AdapterList? enumerate_adapters(Runtime* runtime) {
 fn AdapterInfo? get_adapter_info(Adapter* adapter) {
     gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
-    return data.vtable.get_adapter_info(
-        data.backend_state,
+    return gpu::internal::vk::vk_get_adapter_info(
+        data.state,
         adapter.adapter_index,
     );
 }
@@ -172,8 +153,8 @@ fn AdapterInfo? get_adapter_info(Adapter* adapter) {
 fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
     gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
-    return data.vtable.get_adapter_diagnostics(
-        data.backend_state,
+    return gpu::internal::vk::vk_get_adapter_diagnostics(
+        data.state,
         adapter.adapter_index,
     );
 }
@@ -247,8 +228,8 @@ fn DeviceRequestSupport? supports_device_request(
     gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
 
-    AdapterInfo info = data.vtable.get_adapter_info(
-        data.backend_state,
+    AdapterInfo info = gpu::internal::vk::vk_get_adapter_info(
+        data.state,
         adapter.adapter_index,
     )!;
     if (!info.strict_supported) {
@@ -259,11 +240,10 @@ fn DeviceRequestSupport? supports_device_request(
     }
 
     if (gpu::internal::requests_resource_agnostic_texture_sync(*request)
-        && (data.vtable.supports_resource_agnostic_texture_sync == null
-            || !data.vtable.supports_resource_agnostic_texture_sync(
-                data.backend_state,
-                adapter.adapter_index,
-            )!)) {
+        && !gpu::internal::vk::vk_supports_resource_agnostic_texture_sync(
+            data.state,
+            adapter.adapter_index,
+        )!) {
         return {
             .supported         = false,
             .unmet_requirement = "resource-agnostic texture synchronization",
@@ -271,11 +251,10 @@ fn DeviceRequestSupport? supports_device_request(
     }
 
     if (gpu::internal::requests_dynamic_color_state(*request)
-        && (data.vtable.supports_dynamic_color_state == null
-            || !data.vtable.supports_dynamic_color_state(
-                data.backend_state,
-                adapter.adapter_index,
-            )!)) {
+        && !gpu::internal::vk::vk_supports_dynamic_color_state(
+            data.state,
+            adapter.adapter_index,
+        )!) {
         return {
             .supported         = false,
             .unmet_requirement = "dynamic color state",
@@ -314,13 +293,12 @@ fn DeviceRequestSupport? supports_device_request(
         backend_surface = gpu::internal::surface_backend_handle(&surface)!;
     }
 
-    if (data.vtable.supports_queue_requirements == null
-        || !data.vtable.supports_queue_requirements(
-            data.backend_state,
-            adapter.adapter_index,
-            &queues,
-            backend_surface,
-        )!) {
+    if (!gpu::internal::vk::vk_supports_queue_requirements(
+        state:           data.state,
+        adapter_index:   adapter.adapter_index,
+        requirements:    &queues,
+        backend_surface: backend_surface,
+    )!) {
         return {
             .supported         = false,
             .unmet_requirement = "queue topology",
@@ -340,9 +318,8 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
 
     gpu::internal::RuntimeData* surface_runtime = gpu::internal::resolve_runtime(&surface_data.runtime);
     if (surface_runtime != adapter_runtime) return INVALID_HANDLE~;
-    if (adapter_runtime.vtable.supports_presentation == null) return false;
-    return adapter_runtime.vtable.supports_presentation(
-        adapter_runtime.backend_state,
+    return gpu::internal::vk::vk_supports_presentation(
+        adapter_runtime.state,
         adapter.adapter_index,
         surface_data.backend_surface,
     );
@@ -368,8 +345,8 @@ fn void? destroy_surface(Surface* surface) {
     data.used = false;
     *surface = SURFACE_INVALID;
 
-    runtime_data.vtable.destroy_surface(
-        runtime_data.backend_state,
+    gpu::internal::vk::vk_destroy_surface(
+        runtime_data.state,
         backend_surface,
     );
     gpu::internal::runtime_release_surface(&runtime)!!;
@@ -380,7 +357,6 @@ fn void? destroy_surface(Surface* surface) {
 fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
     gpu::internal::command_device_registry_resolutions.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_retained_pin_operations.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_lifecycle_vtable_dispatches.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_table_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
@@ -402,9 +378,6 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
             AtomicOrdering.RELAXED,
         ),
         .retained_pin_operations = gpu::internal::command_retained_pin_operations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .lifecycle_vtable_dispatches = gpu::internal::command_lifecycle_vtable_dispatches.load(
             AtomicOrdering.RELAXED,
         ),
         .command_table_lookups = gpu::internal::command_table_lookups.load(
@@ -438,13 +411,6 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
             AtomicOrdering.RELAXED,
         ),
     };
-}
-
-<* Return the backend selected for the live device. *>
-fn BackendKind? get_device_backend(Device* device) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
-    defer gpu::internal::end_device_operation(&operation);
-    return operation.data.backend;
 }
 
 <* Snapshot the selected device's capabilities. *>
@@ -482,12 +448,7 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
         }
     }
 
-    switch (runtime_data.backend) {
-        case BackendKind.VULKAN:
-            device = gpu::internal::vk::create_vk_device(adapter, request, &runtime)!;
-        default:
-            return UNSUPPORTED_BACKEND~;
-    }
+    device = gpu::internal::vk::create_vk_device(adapter, request, &runtime)!;
     retain_transferred = true;
     return device;
 }
@@ -528,10 +489,9 @@ fn void? destroy_device(Device* device) {
             (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
             return RESOURCE_IN_USE~;
         }
-        if (!lost && slot.data.vtable.check_device_destroy != null) {
-            if (catch readiness_fault = slot.data.vtable.check_device_destroy(
-                slot.data.backend_state,
-            )) {
+        if (!lost) {
+            if (catch readiness_fault =
+                gpu::internal::vk::vk_check_device_destroy(slot.data.state)) {
                 (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
                 return readiness_fault~;
             }
@@ -545,7 +505,7 @@ fn void? destroy_device(Device* device) {
         data = slot.data;
     }
 
-    data.vtable.destroy_device(data.backend_state);
+    gpu::internal::vk::vk_destroy_device(data.state);
 
     {
         gpu::internal::lock_device_registry();
@@ -572,7 +532,7 @@ fn void? destroy_device(Device* device) {
 fn MemoryStats? get_memory_stats(Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_memory_stats(device);
+    return gpu::internal::vk::vk_get_memory_stats(operation.state);
 }
 
 <* Build a human-readable memory report. Ownership: the caller frees the
@@ -580,14 +540,14 @@ fn MemoryStats? get_memory_stats(Device* device) {
 fn String? build_memory_report(Device* device, bool detailed) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.build_memory_report(device, detailed);
+    return gpu::internal::vk::vk_build_memory_report(operation.state, detailed);
 }
 
 <* Open a debug-utils label region; a no-op without debug utils.
    Preconditions: calls are balanced while recording.
    Always checked: token identity, authoritative phase, and non-null label. *>
 fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (label == null) return INVALID_ARGUMENT~;
     return record.ops.begin_label(record, label, color);
 }
@@ -596,7 +556,7 @@ fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = 
    Preconditions: a matching label region is open.
    Always checked: token identity and authoritative recording phase. *>
 fn void? cmd_end_label(CommandList* commands) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.end_label(record);
 }
 
@@ -611,10 +571,8 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     AllocationDesc normalized = *desc;
     normalized.alignment = gpu::internal::normalized_allocation_alignment(desc.alignment)!;
     gpu::internal::validate_texture_allocation(&operation, desc, &normalized.alignment)!;
-    GpuAllocation allocation = operation.vtable.allocate_memory(
-        device,
-        &normalized,
-    )!;
+    GpuAllocation allocation =
+        gpu::internal::vk::vk_allocate_memory(operation.state, &normalized)!;
     gpu::internal::retain_device_children(&operation);
     return allocation;
 }
@@ -632,7 +590,7 @@ fn void? free_allocation(Device* device, GpuAllocation* allocation) {
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    operation.vtable.free_allocation(device, *allocation)!;
+    gpu::internal::vk::vk_free_allocation(operation.state, *allocation)!;
     gpu::internal::release_device_children(&operation);
     *allocation = GPU_ALLOCATION_INVALID;
 }
@@ -649,7 +607,7 @@ fn AllocationInfo? get_allocation_info(
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    return operation.vtable.get_allocation_info(device, allocation);
+    return gpu::internal::vk::vk_get_allocation_info(operation.state, allocation);
 }
 
 <* Borrow the allocation's complete range. *>
@@ -661,21 +619,21 @@ fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    return operation.vtable.get_allocation_span(device, allocation);
+    return gpu::internal::vk::vk_get_allocation_span(operation.state, allocation);
 }
 
 <* Borrow the CPU mapping for a live host-visible span. *>
 fn char[]? get_span_mapping(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_span_mapping(device, span);
+    return gpu::internal::vk::vk_get_span_mapping(operation.state, span);
 }
 
 <* Return the stable nonzero address of a live span. *>
 fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_span_address(device, span);
+    return gpu::internal::vk::vk_get_span_address(operation.state, span);
 }
 
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
@@ -688,7 +646,7 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
         span.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    return operation.vtable.flush_mapped_span(device, span);
+    return gpu::internal::vk::vk_flush_mapped_span(operation.state, span);
 }
 
 <* After the relevant GPU completion point, make its writes visible to CPU
@@ -701,7 +659,7 @@ fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
         span.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    return operation.vtable.invalidate_mapped_span(device, span);
+    return gpu::internal::vk::vk_invalidate_mapped_span(operation.state, span);
 }
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the
@@ -739,7 +697,7 @@ fn bool TextureCompatibility.is_valid(self) {
 fn TextureFormatSupport? get_texture_format_support(Device* device, Format format) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_texture_format_support(device, format);
+    return gpu::internal::vk::vk_get_texture_format_support(operation.state, format);
 }
 
 <* Return whether an exact descriptor is creatable by the backend and adapter.
@@ -749,7 +707,7 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     if (!gpu::internal::queue_access_is_valid(&operation, desc.access)) return false;
-    return operation.vtable.supports_texture_desc(device, desc);
+    return gpu::internal::vk::vk_supports_texture_desc(operation.state, desc);
 }
 
 <* Return exact storage requirements for a texture descriptor. *>
@@ -758,7 +716,7 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_queue_access(&operation, desc.access)!;
-    return operation.vtable.get_texture_requirements(device, desc);
+    return gpu::internal::vk::vk_get_texture_requirements(operation.state, desc);
 }
 
 <* The handle owns the image; shader access goes through a TextureIndex.
@@ -768,7 +726,8 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_queue_access(&operation, desc.access)!;
-    TextureHandle texture = operation.vtable.create_texture(device, desc)!;
+    TextureHandle texture =
+        gpu::internal::vk::vk_create_texture(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
     return texture;
 }
@@ -789,11 +748,11 @@ fn TextureHandle? create_placed_texture(
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     )!;
-    TextureHandle texture = operation.vtable.create_placed_texture(
-        device:     device,
-        desc:       desc,
-        allocation: allocation,
-        offset:     offset,
+    TextureHandle texture = gpu::internal::vk::vk_create_placed_texture(
+        state:     operation.state,
+        desc:      desc,
+        placement: allocation,
+        offset:    offset,
     )!;
     gpu::internal::retain_device_children(&operation);
     return texture;
@@ -828,8 +787,8 @@ fn DedicatedTexture? create_dedicated_texture(
         alignment:       &normalized.alignment,
         allow_dedicated: true,
     )!;
-    DedicatedTexture created = operation.vtable.create_dedicated_texture(
-        device,
+    DedicatedTexture created = gpu::internal::vk::vk_create_dedicated_texture(
+        operation.state,
         desc,
         &normalized,
     )!;
@@ -844,7 +803,7 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
-    operation.vtable.destroy_texture(device, texture)!;
+    gpu::internal::vk::vk_destroy_texture(operation.state, texture)!;
     gpu::internal::release_device_children(&operation);
 }
 
@@ -858,7 +817,7 @@ fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
     if (desc == null) return INVALID_ARGUMENT~;
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     gpu::internal::validate_sampler_desc(&operation, desc)!;
-    return operation.vtable.intern_sampler(device, desc);
+    return gpu::internal::vk::vk_intern_sampler(operation.state, desc);
 }
 
 <* Publish one texture view in the strict shader-visible heap. Requires strict
@@ -873,7 +832,8 @@ fn TextureView? create_texture_view(
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
-    TextureView view = operation.vtable.create_texture_view(device, texture, desc)!;
+    TextureView view =
+        gpu::internal::vk::vk_create_texture_view(operation.state, texture, desc)!;
     gpu::internal::retain_device_children(&operation);
     return view;
 }
@@ -886,7 +846,7 @@ fn void? destroy_texture_view(Device* device, TextureView view) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, view.owner, gpu::internal::ResourceOwnerKind.TEXTURE_VIEW)!;
-    operation.vtable.destroy_texture_view(device, view)!;
+    gpu::internal::vk::vk_destroy_texture_view(operation.state, view)!;
     gpu::internal::release_device_children(&operation);
 }
 
@@ -915,7 +875,7 @@ fn void? create_texture_views(
         gpu::internal::validate_resource_owner(&operation, desc.texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
     }
     if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
-    operation.vtable.create_texture_views(device, descs, out_views)!;
+    gpu::internal::vk::vk_create_texture_views(operation.state, descs, out_views)!;
     gpu::internal::retain_device_children(&operation, (ulong)descs.len);
 }
 
@@ -1046,7 +1006,8 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    PipelineHandle pipeline = operation.vtable.create_compute_pipeline(device, desc)!;
+    PipelineHandle pipeline =
+        gpu::internal::vk::vk_create_compute_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
@@ -1061,7 +1022,8 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    PipelineHandle pipeline = operation.vtable.create_graphics_pipeline(device, desc)!;
+    PipelineHandle pipeline =
+        gpu::internal::vk::vk_create_graphics_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
@@ -1077,12 +1039,13 @@ fn PipelineHandle? create_dynamic_graphics_pipeline(
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    if (!operation.data.caps.dynamic_color_state
-        || operation.vtable.create_dynamic_graphics_pipeline == null) {
+    if (!operation.data.caps.dynamic_color_state) {
         return UNSUPPORTED_FEATURE~;
     }
-    PipelineHandle pipeline =
-        operation.vtable.create_dynamic_graphics_pipeline(device, desc)!;
+    PipelineHandle pipeline = gpu::internal::vk::vk_create_dynamic_graphics_pipeline(
+        operation.state,
+        desc,
+    )!;
     gpu::internal::retain_device_children(&operation);
     return pipeline;
 }
@@ -1098,7 +1061,11 @@ fn void? create_compute_pipelines(
     defer gpu::internal::end_device_operation(&operation);
     if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    operation.vtable.create_compute_pipelines(device, descs, out_pipelines)!;
+    gpu::internal::vk::vk_create_compute_pipelines(
+        operation.state,
+        descs,
+        out_pipelines,
+    )!;
     for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
 }
 
@@ -1113,7 +1080,11 @@ fn void? create_graphics_pipelines(
     defer gpu::internal::end_device_operation(&operation);
     if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    operation.vtable.create_graphics_pipelines(device, descs, out_pipelines)!;
+    gpu::internal::vk::vk_create_graphics_pipelines(
+        operation.state,
+        descs,
+        out_pipelines,
+    )!;
     for (usz i = 0; i < descs.len; i++) gpu::internal::retain_device_children(&operation);
 }
 
@@ -1130,12 +1101,11 @@ fn void? create_dynamic_graphics_pipelines(
     defer gpu::internal::end_device_operation(&operation);
     if (out_pipelines.len != descs.len) return INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    if (!operation.data.caps.dynamic_color_state
-        || operation.vtable.create_dynamic_graphics_pipelines == null) {
+    if (!operation.data.caps.dynamic_color_state) {
         return UNSUPPORTED_FEATURE~;
     }
-    operation.vtable.create_dynamic_graphics_pipelines(
-        device,
+    gpu::internal::vk::vk_create_dynamic_graphics_pipelines(
+        operation.state,
         descs,
         out_pipelines,
     )!;
@@ -1152,7 +1122,7 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, pipeline.owner, gpu::internal::ResourceOwnerKind.PIPELINE)!;
-    operation.vtable.destroy_pipeline(device, pipeline)!;
+    gpu::internal::vk::vk_destroy_pipeline(operation.state, pipeline)!;
     gpu::internal::release_device_children(&operation);
 }
 
@@ -1162,7 +1132,7 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
 fn usz? get_pipeline_cache_size(Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_pipeline_cache_size(device);
+    return gpu::internal::vk::vk_get_pipeline_cache_size(operation.state);
 }
 
 <* Fill `out` with the driver pipeline cache blob and return the bytes
@@ -1173,7 +1143,7 @@ fn usz? get_pipeline_cache_size(Device* device) {
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_pipeline_cache_data(device, out);
+    return gpu::internal::vk::vk_get_pipeline_cache_data(operation.state, out);
 }
 
 <* Create one fixed-capacity command allocator for an exact selected queue.
@@ -1219,11 +1189,8 @@ fn CommandAllocator? create_command_allocator(
         .device = *device,
         .queue  = queue,
     };
-    if (operation.vtable.create_command_allocator == null) {
-        return BACKEND_ERROR~;
-    }
-    allocator.handle = operation.vtable.create_command_allocator(
-        device,
+    allocator.handle = gpu::internal::vk::vk_create_command_allocator(
+        operation.state,
         queue,
         &normalized,
     )!;
@@ -1233,12 +1200,10 @@ fn CommandAllocator? create_command_allocator(
     );
     if (!allocator.handle.is_valid()
         || allocator.handle.owner != expected_owner) {
-        if (operation.vtable.destroy_command_allocator != null) {
-            (void)operation.vtable.destroy_command_allocator(
-                device,
-                allocator.handle,
-            );
-        }
+        (void)gpu::internal::vk::vk_destroy_command_allocator(
+            operation.state,
+            allocator.handle,
+        );
         return BACKEND_ERROR~;
     }
     gpu::internal::retain_device_children(&operation);
@@ -1256,11 +1221,8 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device, true)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator)!;
-    if (operation.vtable.destroy_command_allocator == null) {
-        return BACKEND_ERROR~;
-    }
-    operation.vtable.destroy_command_allocator(
-        &allocator.device,
+    gpu::internal::vk::vk_destroy_command_allocator(
+        operation.state,
         allocator.handle,
     )!;
     *allocator = {};
@@ -1290,10 +1252,11 @@ fn void? reserve_generated_scratch(
             > operation.data.caps.max_generated_work_count) {
         return INVALID_ARGUMENT~;
     }
-    if (operation.vtable.reserve_generated_scratch == null) {
-        return BACKEND_ERROR~;
-    }
-    return operation.vtable.reserve_generated_scratch(allocator, desc);
+    return gpu::internal::vk::vk_reserve_generated_scratch(
+        operation.state,
+        allocator,
+        desc,
+    );
 }
 
 <* Release one generated-work reservation from a quiescent allocator. *>
@@ -1312,13 +1275,11 @@ fn void? release_generated_scratch(
         gpu::internal::ResourceOwnerKind.PIPELINE,
     )!;
     if (!gpu::internal::generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
-    if (operation.vtable.release_generated_scratch == null) {
-        return BACKEND_ERROR~;
-    }
-    return operation.vtable.release_generated_scratch(
-        allocator,
-        pipeline,
-        kind,
+    return gpu::internal::vk::vk_release_generated_scratch(
+        state:     operation.state,
+        allocator: allocator,
+        pipeline:  pipeline,
+        kind:      kind,
     );
 }
 
@@ -1331,11 +1292,12 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator)!;
-    gpu::internal::BackendVTable* vtable = operation.vtable;
-    if (vtable.begin_commands == null) return BACKEND_ERROR~;
     CommandList commands;
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    vtable.begin_commands(allocator, &commands)!;
+    gpu::internal::vk::vk_begin_commands(
+        operation.state,
+        allocator,
+        &commands,
+    )!;
     gpu::internal::retain_device_children(&operation);
     gpu::internal::transfer_device_operation_pin(&operation);
     return commands;
@@ -1346,12 +1308,11 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
    Always checked: token identity and authoritative phase.
    Runtime failures: failure leaves the token recording. *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     gpu::internal::DeviceOperation operation =
         gpu::internal::command_operation(record)!;
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    operation.vtable.end_commands(record)!;
+    gpu::internal::vk::vk_end_commands(operation.state, record)!;
     ExecutableCommandList executable;
     gpu::internal::publish_executable_command_list(record, &executable);
     *commands = {};
@@ -1363,16 +1324,18 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
    Always checked: token identity and authoritative recording phase.
    Runtime failures: failure preserves the token. *>
 fn void? discard_commands(CommandList* commands) {
-    gpu::internal::CommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands, count_command: false)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
         allow_lost: true,
     )!;
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::BackendVTable* vtable = operation.vtable;
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    vtable.discard_commands(record, false)!;
+    gpu::internal::vk::vk_discard_commands(
+        operation.state,
+        record,
+        false,
+    )!;
     *commands = {};
     gpu::internal::release_device_children(&operation);
     (void)gpu::internal::release_retained_device_pins(&operation);
@@ -1383,16 +1346,18 @@ fn void? discard_commands(CommandList* commands) {
    Always checked: token identity and authoritative executable phase.
    Runtime failures: failure preserves the token. *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
-    gpu::internal::CommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::executable_command(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
         allow_lost: true,
     )!;
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::BackendVTable* vtable = operation.vtable;
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    vtable.discard_commands(record, true)!;
+    gpu::internal::vk::vk_discard_commands(
+        operation.state,
+        record,
+        true,
+    )!;
     *commands = {};
     gpu::internal::release_device_children(&operation);
     (void)gpu::internal::release_retained_device_pins(&operation);
@@ -1403,7 +1368,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
    Always checked: token phase, required pointer, identity, bounds, and safe lowering.
    FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return record.ops.copy_buffer(record, desc);
 }
@@ -1413,7 +1378,7 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
    Always checked: token phase, identity, bounds, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.fill_buffer(record, dst, value);
 }
 
@@ -1423,7 +1388,7 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
    subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return record.ops.copy_buffer_to_texture(record, desc);
 }
@@ -1434,7 +1399,7 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
    subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse. *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
     return record.ops.copy_texture_to_buffer(record, desc);
 }
@@ -1444,7 +1409,7 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
    Always checked: token identity, authoritative phase, and required pointer.
    FULL diagnostics: stage, hazard, and queue-support misuse. *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return record.ops.barrier(record, barrier);
 }
@@ -1454,7 +1419,7 @@ fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
    Always checked: token phase, required pointer, texture identity, range, and safe lowering.
    FULL diagnostics: state, usage, queue, format, and presentation misuse. *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return record.ops.texture_barrier(record, barrier);
 }
@@ -1466,7 +1431,7 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
    FULL diagnostics: render-pass compatibility when binding during a pass;
    failure preserves the prior logical bind. *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.bind_pipeline(record, pipeline);
 }
 
@@ -1478,7 +1443,7 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    usable bound-pipeline snapshot.
    FULL diagnostics: active-kind and group-limit misuse. *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch(record, root, groups);
 }
 
@@ -1487,7 +1452,7 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
    Always checked: token phase and required pointer.
    FULL diagnostics: queue and enum misuse; failure preserves prior state. *>
 fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (depth == null) return INVALID_ARGUMENT~;
     return record.ops.set_depth_state(record, depth);
 }
@@ -1497,7 +1462,7 @@ fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
    Always checked: token phase and required pointer.
    FULL diagnostics: queue, enum, feature, and finite-value misuse. *>
 fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (raster == null) return INVALID_ARGUMENT~;
     return record.ops.set_raster_state(record, raster);
 }
@@ -1507,7 +1472,7 @@ fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster)
    Always checked: token phase and required pointer.
    FULL diagnostics: queue and viewport-value misuse. *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
     return record.ops.set_viewport(record, viewport);
 }
@@ -1517,7 +1482,7 @@ fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
    Always checked: token phase and required pointer.
    FULL diagnostics: queue and scissor-value misuse. *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
     return record.ops.set_scissor(record, scissor);
 }
@@ -1529,7 +1494,7 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    usable bound-pipeline snapshot.
    FULL diagnostics: pipeline-kind and state misuse. *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw(
         record:        record,
         vertex_root:    vertex_root,
@@ -1546,7 +1511,7 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, and index-type misuse. *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed(
         record:        record,
         vertex_root:    vertex_root,
@@ -1565,7 +1530,7 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse. *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indirect(
         record:       record,
         vertex_root:   vertex_root,
@@ -1582,7 +1547,7 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    usable bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse. *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed_indirect(
         record:       record,
         vertex_root:   vertex_root,
@@ -1602,7 +1567,7 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
    Runtime failures: unsupported count execution faults UNSUPPORTED_FEATURE. *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed_indirect_count(
         record:        record,
         vertex_root:    vertex_root,
@@ -1622,7 +1587,7 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    snapshot, and safe lowering.
    FULL diagnostics: pipeline kind, usage, queue, and span misuse. *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch_indirect(record, root, args);
 }
 
@@ -1636,7 +1601,7 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_generated(
         record:        record,
         records:        records,
@@ -1655,7 +1620,7 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.draw_indexed_generated(
         record:        record,
         records:        records,
@@ -1676,7 +1641,7 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch_generated(
         record:            record,
         records:            records,
@@ -1699,8 +1664,8 @@ fn AttachmentViewHandle? create_attachment_view(
         desc.texture.owner,
         gpu::internal::ResourceOwnerKind.TEXTURE,
     )!;
-    AttachmentViewHandle view = operation.vtable.create_attachment_view(
-        device,
+    AttachmentViewHandle view = gpu::internal::vk::vk_create_attachment_view(
+        operation.state,
         desc,
     )!;
     gpu::internal::retain_device_children(&operation);
@@ -1722,7 +1687,7 @@ fn void? destroy_attachment_view(
         view.owner,
         gpu::internal::ResourceOwnerKind.ATTACHMENT_VIEW,
     )!;
-    operation.vtable.destroy_attachment_view(device, view)!;
+    gpu::internal::vk::vk_destroy_attachment_view(operation.state, view)!;
     gpu::internal::release_device_children(&operation);
 }
 
@@ -1753,7 +1718,7 @@ fn GraphicsState? full_render_graphics_state(uint width, uint height) {
    Always checked: token phase, host-safe descriptor shape, identities, and safe lowering.
    FULL diagnostics: attachment, usage, queue, compatibility, and render-area misuse. *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
     return record.ops.begin_render_pass(record, desc);
 }
@@ -1767,7 +1732,7 @@ fn void? cmd_begin_render_pass_with_state(
     RenderPassDesc* desc,
     GraphicsState* state,
 ) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)
         || !gpu::internal::graphics_state_host_safe(state)) {
         return INVALID_ARGUMENT~;
@@ -1783,7 +1748,7 @@ fn void? cmd_set_graphics_state(
     CommandList* commands,
     GraphicsState* state,
 ) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
     return record.ops.set_graphics_state(record, state);
 }
@@ -1796,7 +1761,7 @@ fn void? cmd_set_color_state(
     CommandList* commands,
     ColorState* state,
 ) {
-    gpu::internal::CommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     if (!gpu::internal::color_state_host_safe(state)) {
         return INVALID_ARGUMENT~;
@@ -1808,7 +1773,7 @@ fn void? cmd_set_color_state(
    Preconditions: a render pass is active.
    Always checked: token identity and authoritative render-pass phase. *>
 fn void? cmd_end_render_pass(CommandList* commands) {
-    gpu::internal::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.end_render_pass(record);
 }
 
@@ -1883,9 +1848,8 @@ fn bool? poll_completion(CompletionPoint point) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, &device, point)!;
-    if (operation.vtable.poll_completion == null) return UNSUPPORTED_FEATURE~;
-    return operation.vtable.poll_completion(
-        &device,
+    return gpu::internal::vk::vk_poll_completion(
+        operation.state,
         gpu::internal::completion_point_queue_id(point),
         gpu::internal::completion_point_sequence(point),
     );
@@ -1903,12 +1867,11 @@ fn void? wait_completion(
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, &device, point)!;
-    if (operation.vtable.wait_completion == null) return UNSUPPORTED_FEATURE~;
-    return operation.vtable.wait_completion(
-        &device,
-        gpu::internal::completion_point_queue_id(point),
-        gpu::internal::completion_point_sequence(point),
-        timeout_ns,
+    return gpu::internal::vk::vk_wait_completion(
+        state:      operation.state,
+        queue_id:   gpu::internal::completion_point_queue_id(point),
+        sequence:   gpu::internal::completion_point_sequence(point),
+        timeout_ns: timeout_ns,
     );
 }
 
@@ -1993,8 +1956,11 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     } else if ((uint)desc.readiness_before != 0) {
         return INVALID_ARGUMENT~;
     }
-    gpu::internal::note_command_lifecycle_vtable_dispatch();
-    CompletionPoint point = operation.vtable.submit(queue, desc)!;
+    CompletionPoint point = gpu::internal::vk::vk_submit(
+        operation.state,
+        queue,
+        desc,
+    )!;
     foreach (&commands : desc.command_lists) {
         *commands = {};
     }
@@ -2029,7 +1995,11 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
     if (device_runtime == null || surface_runtime != device_runtime) {
         return INVALID_HANDLE~;
     }
-    SwapchainHandle swapchain = device_data.vtable.create_swapchain(device, surface, desc)!;
+    SwapchainHandle swapchain = gpu::internal::vk::vk_create_swapchain(
+        operation.state,
+        surface,
+        desc,
+    )!;
     gpu::internal::retain_device_children(&operation);
     return swapchain;
 }
@@ -2041,7 +2011,7 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    operation.vtable.destroy_swapchain(device, swapchain)!;
+    gpu::internal::vk::vk_destroy_swapchain(operation.state, swapchain)!;
     gpu::internal::release_device_children(&operation);
 }
 
@@ -2053,7 +2023,12 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.resize_swapchain(device, swapchain, width, height);
+    return gpu::internal::vk::vk_resize_swapchain(
+        state:  operation.state,
+        handle: swapchain,
+        width:  width,
+        height: height,
+    );
 }
 
 <* Actual format, extent, image count, and present mode selected for a
@@ -2061,7 +2036,10 @@ fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width,
 fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_swapchain_info(device, swapchain);
+    return gpu::internal::vk::vk_get_swapchain_info(
+        operation.state,
+        swapchain,
+    );
 }
 
 <* Acquire with a nonblocking default; finite values are nanoseconds.
@@ -2076,7 +2054,11 @@ fn AcquiredImage? acquire_next_image(
 ) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.acquire_next_image(device, swapchain, timeout_ns);
+    return gpu::internal::vk::vk_acquire_next_image(
+        operation.state,
+        swapchain,
+        timeout_ns,
+    );
 }
 
 <* Present an acquired image after its readiness-consuming submit.
@@ -2092,7 +2074,11 @@ fn void? present(
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, device, render_completion)!;
-    operation.vtable.present(device, image, render_completion)!;
+    gpu::internal::vk::vk_present(
+        operation.state,
+        image,
+        render_completion,
+    )!;
     *image = {};
 }
 
@@ -2101,5 +2087,8 @@ fn void? present(
 fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle swapchain) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    return operation.vtable.get_present_mode_support(device, swapchain);
+    return gpu::internal::vk::vk_get_present_mode_support(
+        operation.state,
+        swapchain,
+    );
 }

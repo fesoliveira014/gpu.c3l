@@ -74,6 +74,42 @@ fn void surfaces_retain_their_runtime_and_expire_on_destroy() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
+fn void surface_publication_failure_is_transactional() @test {
+    gpu::internal::vk::stub_reset_surface_counts();
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface[gpu::internal::MAX_SURFACES] surfaces;
+    for (uint i = 0; i < gpu::internal::MAX_SURFACES; i++) {
+        surfaces[i] = create_test_surface(&runtime);
+    }
+
+    assert(
+        @catch(gpu::surface::win32::create_surface(
+            &runtime,
+            (gpu::surface::win32::InstanceHandle)(void*)1,
+            (gpu::surface::win32::WindowHandle)(void*)2,
+        )) == gpu::SLOT_TABLE_FULL,
+        "a full surface table faults cleanly"
+    );
+    assert(
+        gpu::internal::vk::stub_surface_create_count()
+            == gpu::internal::MAX_SURFACES + 1,
+        "the failed publication creates one native surface"
+    );
+    assert(
+        gpu::internal::vk::stub_surface_destroy_count() == 1,
+        "the unpublished native surface is destroyed immediately"
+    );
+
+    foreach (&surface : surfaces) gpu::destroy_surface(surface)!!;
+    assert(
+        gpu::internal::vk::stub_surface_create_count()
+            == gpu::internal::vk::stub_surface_destroy_count(),
+        "every created native surface is released"
+    );
+    gpu::destroy_runtime(&runtime)!!;
+}
+
 fn void invalid_platform_handles_fault_before_backend_work() @test {
     gpu::internal::vk::stub_reset_surface_counts();
     RuntimeDesc desc = runtime_desc();
@@ -102,28 +138,6 @@ fn void invalid_platform_handles_fault_before_backend_work() @test {
         )) == gpu::INVALID_ARGUMENT
     );
     assert(gpu::internal::vk::stub_surface_create_count() == 0);
-}
-
-fn void surface_creation_rejects_an_incomplete_backend_contract() @test {
-    gpu::internal::vk::stub_reset_surface_counts();
-    gpu::internal::vk::stub_set_surface_destroy_available(false);
-    defer gpu::internal::vk::stub_set_surface_destroy_available(true);
-
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    defer gpu::destroy_runtime(&runtime)!!;
-
-    assert(
-        @catch(gpu::surface::win32::create_surface(
-            &runtime,
-            (gpu::surface::win32::InstanceHandle)(void*)1,
-            (gpu::surface::win32::WindowHandle)(void*)2,
-        )) == gpu::UNSUPPORTED_FEATURE
-    );
-    assert(
-        gpu::internal::vk::stub_surface_create_count() == 0,
-        "an unusable surface must not reach the backend"
-    );
 }
 
 fn void presentation_support_validates_runtime_ownership() @test {

@@ -25,9 +25,8 @@ fn void? create_vk_allocator(VkDeviceState* state) {
     check_backend_create_result(vma::create_allocator(&info, &state.allocator))!;
 }
 
-fn gpu::MemoryStats? vk_get_memory_stats(gpu::Device* device) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (state == null || state.allocator == null) return gpu::INVALID_ARGUMENT~;
+fn gpu::MemoryStats? vk_get_memory_stats(VkDeviceState* state) {
+    if (state.allocator == null) return gpu::INVALID_ARGUMENT~;
 
     vk::PhysicalDeviceMemoryProperties mem_props;
     vk::get_physical_device_memory_properties(state.physical_device, &mem_props);
@@ -56,9 +55,8 @@ fn gpu::MemoryStats? vk_get_memory_stats(gpu::Device* device) @private {
     return stats;
 }
 
-fn String? vk_build_memory_report(gpu::Device* device, bool detailed) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (state == null || state.allocator == null) return gpu::INVALID_ARGUMENT~;
+fn String? vk_build_memory_report(VkDeviceState* state, bool detailed) {
+    if (state.allocator == null) return gpu::INVALID_ARGUMENT~;
 
     ZString vma_string;
     state.allocator.build_stats_string(&vma_string, detailed ? vk::TRUE : vk::FALSE);

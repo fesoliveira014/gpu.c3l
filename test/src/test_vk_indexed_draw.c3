@@ -16,7 +16,6 @@ const uint U16V_OFFSET_ELEMENTS = 6;
 
 fn gpu::Device u16v_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

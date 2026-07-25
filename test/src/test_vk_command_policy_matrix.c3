@@ -85,7 +85,6 @@ fn bool command_policy_observation_matches(
             == recording_before.recording_allocations
         && resolution.device_registry_resolutions == 0
         && resolution.retained_pin_operations == 0
-        && resolution.lifecycle_vtable_dispatches == 0
         && resolution.command_table_lookups == 0
         && resolution.pipeline_table_lookups == 0
         && resolution.pipeline_cache_lookups == 0
@@ -866,7 +865,7 @@ fn void full_tracking_copy_capacity_rejection_is_transactional() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     vk::VkDeviceState* state = policy_device_state(&device);
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -1044,14 +1043,6 @@ fn void command_policy_matcher_rejects_each_forbidden_mutation() @test {
         &mutation,
         &expected,
         "retained pin operation",
-    );
-
-    mutation = passing;
-    mutation.resolution.lifecycle_vtable_dispatches = 1;
-    assert_command_policy_mutation_rejected(
-        &mutation,
-        &expected,
-        "lifecycle dispatch",
     );
 
     mutation = passing;

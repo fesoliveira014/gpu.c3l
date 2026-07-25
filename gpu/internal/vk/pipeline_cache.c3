@@ -602,8 +602,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
     create_shader_store(state, capacity)!;
 }
 
-fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+fn usz? vk_get_pipeline_cache_size(VkDeviceState* state) {
     sz size = 0;
     check_backend_result(
         state:     state,
@@ -613,8 +612,10 @@ fn usz? vk_get_pipeline_cache_size(gpu::Device* device) @private {
     return (usz)size;
 }
 
-fn usz? vk_get_pipeline_cache_data(gpu::Device* device, char[] out) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+fn usz? vk_get_pipeline_cache_data(
+    VkDeviceState* state,
+    char[] out,
+) {
     sz required = 0;
     check_backend_result(
         state:     state,

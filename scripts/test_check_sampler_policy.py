@@ -43,15 +43,18 @@ class SamplerPolicyCheckTests(unittest.TestCase):
     def test_current_sources_satisfy_contract(self) -> None:
         self.assertEqual(check_sampler_policy.check(), [])
 
-    def test_rejects_validation_after_vtable_dispatch(self) -> None:
+    def test_rejects_validation_after_direct_backend_call(self) -> None:
         errors = self.mutate(
             "gpu/gpu.c3",
             "    gpu::internal::validate_sampler_desc(&operation, desc)!;\n"
-            "    return operation.vtable.intern_sampler(device, desc);",
-            "    return operation.vtable.intern_sampler(device, desc);\n"
+            "    return gpu::internal::vk::vk_intern_sampler(operation.state, desc);",
+            "    return gpu::internal::vk::vk_intern_sampler(operation.state, desc);\n"
             "    gpu::internal::validate_sampler_desc(&operation, desc)!;",
         )
-        self.assertIn("sampler validation must precede vtable dispatch", errors)
+        self.assertIn(
+            "sampler validation must precede the direct backend call",
+            errors,
+        )
 
     def test_rejects_missing_over_limit_branch(self) -> None:
         errors = self.mutate(

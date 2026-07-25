@@ -21,7 +21,6 @@ fn Runtime sampler_test_runtime() {
     gpu::internal::vk::stub_set_adapter_count(1);
     gpu::internal::vk::stub_set_strict_support(true);
     RuntimeDesc desc = {
-        .backend          = BackendKind.VULKAN,
         .application_name = "sampler_identity_test",
     };
     return gpu::create_runtime(&desc)!!;

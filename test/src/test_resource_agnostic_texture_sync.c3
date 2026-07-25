@@ -58,7 +58,6 @@ fn vk::Result create_selected_native_device(
 
 fn gpu::Device? create_selected_device() {
     gpu::RuntimeDesc desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -76,7 +75,7 @@ fn gpu::Device? create_selected_device() {
         gpu::internal::RuntimeData* runtime_data =
             gpu::internal::resolve_adapter(&adapter);
         vk::VkRuntimeState* runtime_state =
-            (vk::VkRuntimeState*)runtime_data.backend_state;
+            runtime_data.state;
         vk::VkAdapterState* adapter_state =
             &runtime_state.adapters[adapter.adapter_index];
         adapter_state.resource_agnostic_texture_sync = {
@@ -119,7 +118,7 @@ fn void selected_texture_dependency_is_resource_free() @test {
     );
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,

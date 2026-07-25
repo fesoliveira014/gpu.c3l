@@ -51,7 +51,6 @@ fn void dispatch_root_probe(
 fn void root_pointer_compute_readback() @test {
     const uint COUNT = 256;
     gpu::RuntimeDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -151,7 +150,6 @@ fn void direct_reference_root_runtime_evidence() @test {
     const uint INPUT_VALUE = 0x1357_9bdf;
     const uint XOR_VALUE = 0xa5a5_5a5a;
     gpu::RuntimeDesc device_desc = {
-        .backend                   = gpu::BackendKind.VULKAN,
         .contract_validation       = gpu::ContractValidation.FULL,
         .track_resource_lifetimes  = true,
         .enable_vulkan_validation  = true,
@@ -160,7 +158,7 @@ fn void direct_reference_root_runtime_evidence() @test {
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::set_root_abi_evidence_enabled(state, true);
     defer vk::set_root_abi_evidence_enabled(state, false);
 
@@ -226,7 +224,6 @@ fn void direct_reference_root_runtime_evidence() @test {
 fn void signed_root_runtime_evidence() @test {
     const uint EXPECTED = 0xc3a5_f17e;
     gpu::RuntimeDesc device_desc = {
-        .backend                   = gpu::BackendKind.VULKAN,
         .contract_validation       = gpu::ContractValidation.FULL,
         .track_resource_lifetimes  = true,
         .enable_vulkan_validation  = true,
@@ -235,7 +232,7 @@ fn void signed_root_runtime_evidence() @test {
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::set_root_abi_evidence_enabled(state, true);
     defer vk::set_root_abi_evidence_enabled(state, false);
 

@@ -55,16 +55,18 @@ concurrent aliases valid.
 
 Most public device operations take a short-lived atomic pin. `begin_commands`
 transfers its pin to one stable device-table command record paired with the
-originating allocator unit and publishes `RECORDING` last. Recording calls
-load that record from the direct token and compare its generation and
-authoritative phase; they do not borrow another registry pin, resolve a command
-table, or load device-loss state. End, submit, and other lifecycle boundaries report
-loss, while discard remains available. Successful end transfers the same
-record and retained ownership to the executable phase. Executable discard
-releases that ownership immediately. Successful submission consumes the public
-token but keeps the record and its ownership live through ordered completion
-retirement. Pin acquisition may return `DEVICE_BUSY`; failed destruction
-restores the live state and preserves the token and generation.
+originating allocator unit and publishes `RECORDING` last. Other pinned
+operations receive the typed private Vulkan state and call its subsystem
+directly. Recording calls load their record from the direct token and compare
+its generation and authoritative phase; they do not borrow another registry
+pin, resolve a command table, or load device-loss state. End, submit, and other
+lifecycle boundaries report loss, while discard remains available. Successful
+end transfers the same record and retained ownership to the executable phase.
+Executable discard releases that ownership immediately. Successful submission
+consumes the public token but keeps the record and its ownership live through
+ordered completion retirement. Pin acquisition may return `DEVICE_BUSY`;
+failed destruction restores the live state and preserves the token and
+generation.
 
 `create_command_allocator` allocates one exact-queue command pool, every native
 command buffer, fixed per-list scratch, and recycling metadata before returning.
@@ -123,13 +125,14 @@ span operations may overlap, but callers synchronize writes to mapped storage
 and keep every allocation live through its last submitted use.
 
 Submission validates and claims the complete direct-token batch once inside the
-backend, using the exact queue stored by each authoritative record. It consumes
-executable command tokens only after native acceptance, pending-record append,
-and completion-sequence publication, then returns a reusable
-`CompletionPoint`. The authoritative records remain `SUBMITTED`, retain their
-devices, allocators, native buffers, and fixed scratch, and cannot be reused
-before ordered retirement. Validation, preparation, or native failure restores
-the batch to retryable `EXECUTABLE` state without consuming tokens or readiness.
+private Vulkan implementation, using the exact queue stored by each
+authoritative record. It consumes executable command tokens only after native
+acceptance, pending-record append, and completion-sequence publication, then
+returns a reusable `CompletionPoint`. The authoritative records remain
+`SUBMITTED`, retain their devices, allocators, native buffers, and fixed
+scratch, and cannot be reused before ordered retirement. Validation,
+preparation, or native failure restores the batch to retryable `EXECUTABLE`
+state without consuming tokens or readiness.
 The caller retains the point whenever it guards resource reuse,
 command-dependent destruction, or cross-queue ordering.
 Before device destruction, wait for the latest point on every used queue and
@@ -265,7 +268,7 @@ Each queue owns an intrusive FIFO of its submitted authoritative records and
 release-publishes one retired prefix. Sequence N is retired only after native
 completion and after every covered record through N has moved to `INACTIVE`,
 released tracked references and generated scratch, returned its buffer/scratch
-index to its exact allocator, released retained device/backend ownership,
+index to its exact allocator, released retained device ownership,
 cleared its embedded pending link, and invalidated or generation-advanced its
 private command-record identity. A first successful observation queries every
 represented pending queue before publishing any retired prefix, then locks and

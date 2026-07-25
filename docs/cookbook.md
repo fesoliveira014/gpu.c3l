@@ -432,7 +432,6 @@ char[] blob = mem::new_array(char, (sz)size);
 usz written = gpu::get_pipeline_cache_data(&device, blob)!;   // save to disk
 // next run:
 gpu::RuntimeDesc runtime_desc = {
-    .backend             = gpu::BackendKind.VULKAN,
     .pipeline_cache_data = loaded_blob,
 };
 gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;

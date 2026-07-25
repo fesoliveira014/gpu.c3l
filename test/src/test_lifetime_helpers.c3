@@ -369,8 +369,6 @@ fn void assert_warm_command_resolution(
         "warm commands do not resolve the device registry");
     assert(stats.retained_pin_operations == 0,
         "warm commands do not borrow retained pins");
-    assert(stats.lifecycle_vtable_dispatches == 0,
-        "warm commands do not load the lifecycle vtable");
     assert(stats.command_table_lookups == 0,
         "warm commands use the stable record directly");
     assert(stats.pipeline_table_lookups == expected_pipeline_lookups,

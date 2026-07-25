@@ -10,9 +10,23 @@ module gpu::internal::vk @private;
 
 Backend declarations are private by default and are nested under the
 backend-independent private `gpu::internal` module. Public non-callables remain
-in `gpu/gpu.c3i`; `gpu/gpu.c3` owns public dispatch callables. Only those
+in `gpu/gpu.c3i`; `gpu/gpu.c3` owns public callable implementations. Only those
 implementations and white-box tests import backend declarations with a scoped
 visibility override.
+
+Runtime and device registry entries store typed `VkRuntimeState*` and
+`VkDeviceState*` values. Public implementations pin or resolve those entries
+and call the corresponding private Vulkan functions directly.
+
+C3 0.8.0 has no package-private visibility. The four state declarations shared
+across `gpu::internal`, `gpu::internal::vk`, and the root implementation
+therefore use declaration-level `@public`: `VkRuntimeState`, `VkDeviceState`,
+`CommandRecord`, and `CommandOps`. Generated metadata can name these types and
+the library-owned command-token record pointer, but they are unsupported
+implementation details. Consumers must not import or name internal modules.
+
+There is no runtime backend plugin interface. Adding another backend is future
+source work, not a current stable private ABI.
 
 It imports:
 
@@ -118,10 +132,12 @@ install a persistent debug-utils messenger for layer, name, or callback routing
 ```
 
 Runtime creation enables available platform surface extensions and owns the
-surface dispatch. A device retains surface procedures only for a presentation
-request and loads only the selected device dispatch groups after logical-device
-creation. Headless devices create no presentation state. Missing platform
-support faults when that platform constructor is called.
+surface dispatch. The public platform modules resolve their runtime token to
+`VkRuntimeState*` and call the matching WSI functions directly. A device
+retains surface procedures only for a presentation request and loads only the
+selected native device dispatch groups after logical-device creation. Headless
+devices create no presentation state. Missing platform support faults when that
+platform constructor is called.
 
 `VK_EXT_debug_utils` is requested when Vulkan validation, Vulkan debug names,
 or a structured callback needs it. `enable_debug_names` remains independent of
@@ -147,9 +163,9 @@ arbitrary driver/application threads. Payloads are borrowed, no diagnostic
 allocation or queue is introduced, and callback reentry into gpu.c3l is
 prohibited. Native Vulkan object handles/types never cross the public boundary.
 When no callback is configured, Vulkan layer output retains the stderr fallback.
-Accepted teardown scans backend state for `OBJECT_BOUNDARIES`/`FULL` or when a
-structured callback is active. Normal live children are rejected by the public
-device registry; the scan covers internal, partial-initialization, and
+Accepted teardown scans private Vulkan state for `OBJECT_BOUNDARIES`/`FULL` or
+when a structured callback is active. Normal live children are rejected by the
+public device registry; the scan covers internal, partial-initialization, and
 device-loss leftovers.
 Callback messages use `WARNING`/`resource_lifetime` with operation
 `destroy_device`; enabled contract reporting without a callback uses stderr.
@@ -388,7 +404,7 @@ table entries before destroying the allocator.
 ## 8. Private buffer implementation
 
 `gpu::internal::vk::BufferHandle`, `BufferDesc`, and `BufferUsage` implement
-generic allocation backing. They never cross backend dispatch.
+generic allocation backing. They remain inside the private Vulkan module.
 
 Creation validates size and semantic access, derives the exact native queue
 families, translates private usage and memory policy, creates the VMA-backed
@@ -509,12 +525,12 @@ contract.
 Every strict-enabled device has an append-only sampler table keyed by normalized
 semantic state. Explicitly zero-initialized canonical keys are byte-hashed into
 fixed power-of-two buckets with `+1`-encoded links; candidates with an equal hash
-are compared by complete canonical equality. Before backend dispatch, the public
-frontend validates that enabled anisotropy is finite and within the inclusive
-reported range; an over-limit request is rejected rather than clamped. The
-accepted value is copied exactly through the canonical key into
-`VkSamplerCreateInfo.maxAnisotropy`. Under the resource mutex, interning creates
-at most one native sampler for an equal key and publishes its
+are compared by complete canonical equality. Before calling the private Vulkan
+implementation, the public frontend validates that enabled anisotropy is finite
+and within the inclusive reported range; an over-limit request is rejected
+rather than clamped. The accepted value is copied exactly through the canonical
+key into `VkSamplerCreateInfo.maxAnisotropy`. Under the resource mutex,
+interning creates at most one native sampler for an equal key and publishes its
 descriptor, stable index, cell, and bucket link in the same transaction. A
 capacity or native-create fault changes neither the table, index, nor descriptor
 high-water state. Device teardown destroys each published native sampler and
@@ -736,16 +752,14 @@ authoritative phase.
 Begin claims one stable `CommandRecord` from the device's fixed command table
 and one native buffer/scratch unit from the originating allocator's fixed
 storage. The record is the sole lifecycle authority. It owns the selected
-immutable command-operation table, backend state and backend-command pointers,
-retained device ownership, private table identity, and the current
-recording/submission state. The linked `VkCommandRecord` identifies the
-originating allocator and fixed buffer/scratch index and holds Vulkan-specific
-pipeline snapshots and pending texture transitions. Warm recording first
-acquire-loads the static device slot to verify liveness and generation, then
-loads the record directly and dispatches through its preselected operation
-entry without a retained device-operation borrow, backend resolver, or
-command-table lookup. Trusted backend entries do not repeat capability null
-checks. Only lifecycle operations continue through the device vtable and
+immutable `CommandOps`, typed device state, retained device ownership,
+originating allocator and fixed buffer/scratch identity, Vulkan pipeline and
+rendering snapshots, submission linkage, and the current recording/submission
+state. Warm recording first acquire-loads the static device slot to verify
+liveness and generation, then loads the record directly and dispatches through
+its preselected operation entry without a retained device-operation borrow or
+command-table lookup. Trusted command entries do not repeat capability null
+checks. Lifecycle operations call the typed Vulkan implementation directly and
 report device loss.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
@@ -971,7 +985,7 @@ Use dynamic rendering.
 Render pass begin:
 
 ```text
-reject a host-unsafe pass pointer before backend dispatch
+reject a host-unsafe pass pointer before the Vulkan call
 reject color counts above the library or selected-device limit
 validate every color source handle, usage, mip/layer range, and selected-mip extent
 require one sample count across color and depth sources
@@ -1131,5 +1145,5 @@ all ordinary native texture-layout consumers share one selected-device policy
 offscreen dynamic rendering works
 SDL3 swapchain sample presents and resizes
 live resource leaks are reported
-no vk:: or vma:: type appears in public API signatures
+no vk:: or vma:: binding type appears in caller-supplied descriptors or callable signatures
 ```

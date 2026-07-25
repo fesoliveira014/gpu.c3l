@@ -8,7 +8,7 @@ import std::atomic;
 
 
 fn ulong command_submit_count(gpu::Device* device) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     return vk::submit_stats(state).queue_submits;
 }
 
@@ -65,7 +65,7 @@ fn void direct_command_tokens_fit_two_machine_words() @test {
 }
 
 fn void discard_consumes_recording_and_executable_lists() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
@@ -95,7 +95,6 @@ fn void discard_consumes_recording_and_executable_lists() @test {
 
 fn void copy_upload_to_readback() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -161,7 +160,7 @@ fn void copy_upload_to_readback() @test {
 }
 
 fn void empty_command_list_submits() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -179,7 +178,7 @@ fn void empty_command_list_submits() @test {
 }
 
 fn void command_record_owns_its_device_token_value() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -200,7 +199,7 @@ fn void command_record_owns_its_device_token_value() @test {
 }
 
 fn void stale_command_generation_faults_invalid_handle() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -213,8 +212,7 @@ fn void stale_command_generation_faults_invalid_handle() @test {
     defer discard_test_executable(&commands_executable)!!;
     gpu::ExecutableCommandList live_commands = commands_executable;
     commands_executable.generation++;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     gpu::ExecutableCommandList[1] stale_lists = { commands_executable };
     gpu::SubmitDesc stale_submit = { .command_lists = stale_lists[..] };
@@ -238,7 +236,7 @@ fn void stale_command_generation_faults_invalid_handle() @test {
 }
 
 fn void foreign_device_command_faults_before_claim() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device target = create_test_device(&desc)!!;
     defer destroy_test_device(&target)!!;
     gpu::Device foreign = create_test_device(&desc)!!;
@@ -255,8 +253,7 @@ fn void foreign_device_command_faults_before_claim() @test {
     defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    vk::VkDeviceState* target_state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(target);
+    vk::VkDeviceState* target_state = gpu::internal::device_slots[target.index].data.state;
     vk::reset_submit_work_counters(target_state);
 
     assert(@catch(gpu::submit(target_queue, &submit)) == gpu::INVALID_HANDLE,
@@ -277,7 +274,7 @@ fn void foreign_device_command_faults_before_claim() @test {
 }
 
 fn void aliased_queue_roles_share_the_authoritative_queue() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue graphics =
@@ -294,8 +291,7 @@ fn void aliased_queue_roles_share_the_authoritative_queue() @test {
     defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::reset_submit_work_counters(state);
 
     gpu::CompletionPoint completion = gpu::submit(compute, &submit)!!;
@@ -310,7 +306,7 @@ fn void aliased_queue_roles_share_the_authoritative_queue() @test {
 }
 
 fn void copied_alias_cannot_resubmit_after_success() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -337,8 +333,7 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
 
 
     ulong before = command_submit_count(&device);
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::ExecutableCommandList[1] original_alias = { original_executable };
     gpu::SubmitDesc second = { .command_lists = original_alias[..] };
     vk::reset_submit_work_counters(state);
@@ -377,7 +372,7 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
 }
 
 fn void command_generation_exhaustion_retires_slot() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -388,8 +383,8 @@ fn void command_generation_exhaustion_retires_slot() @test {
     defer discard_test_commands(&final_generation)!!;
     gpu::ExecutableCommandList final_generation_executable = gpu::end_commands(&final_generation)!!;
     defer discard_test_executable(&final_generation_executable)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    gpu::internal::CommandRecord* final_record =
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    gpu::internal::vk::CommandRecord* final_record =
         final_generation_executable.record;
     uint final_index = final_record.identity.index;
     state.commands.slots[final_index].generation = vk::HANDLE_GENERATION_MAX - 1;
@@ -407,7 +402,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
-    gpu::internal::CommandRecord* next_record = next.record;
+    gpu::internal::vk::CommandRecord* next_record = next.record;
     assert(next_record.identity.index != final_index,
         "exhausted command slot is retired");
     assert(next.generation == 1,
@@ -421,7 +416,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
 }
 
 fn void duplicate_token_batch_rejects_without_consuming() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -435,7 +430,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::ExecutableCommandList[2] duplicates = { cmd_executable, cmd_executable };
     gpu::SubmitDesc bad = { .command_lists = duplicates[..] };
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::reset_submit_work_counters(state);
     ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &bad));
@@ -459,7 +454,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
 
 fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
     const uint BATCH_SIZE = 128;
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -484,7 +479,7 @@ fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
         }
     }
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     ulong submits_before = command_submit_count(&device);
 
     gpu::ExecutableCommandList[BATCH_SIZE] beginning = unique;
@@ -558,7 +553,7 @@ fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
 }
 
 fn void duplicate_fault_allows_subset_retry_and_remaining_discards() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -593,7 +588,7 @@ fn void duplicate_fault_allows_subset_retry_and_remaining_discards() @test {
 fn void submit_valid_batch_sizes_visit_each_record_once() @test {
     const uint MAX_BATCH_SIZE = 1_024;
     uint[5] batch_sizes = { 1, 8, 32, 128, 1_024 };
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -610,7 +605,7 @@ fn void submit_valid_batch_sizes_visit_each_record_once() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
 
     foreach (batch_size : batch_sizes) {
         gpu::ExecutableCommandList[MAX_BATCH_SIZE] lists;
@@ -639,7 +634,7 @@ fn void submit_valid_batch_sizes_visit_each_record_once() @test {
 }
 
 fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -654,12 +649,11 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
         lists[2].record.identity;
     gpu::discard_executable_commands(&lists[2])!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::CommandCell* unused =
         &state.commands.slots[discarded_handle.index];
     uint unused_generation = unused.generation;
-    vk::VkCommandRecord* unvisited_live =
-        vk::backend_command(lists[1].record);
+    vk::CommandRecord* unvisited_live = lists[1].record;
     unvisited_live.submit_visit_epoch = ulong::max;
     gpu::ExecutableCommandList[2] duplicate = { lists[0], lists[0] };
     gpu::SubmitDesc submit = { .command_lists = duplicate[..] };
@@ -709,7 +703,7 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
 }
 
 fn void empty_submit_preserves_duplicate_epoch_and_work() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -717,7 +711,7 @@ fn void empty_submit_preserves_duplicate_epoch_and_work() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     state.next_submit_visit_epoch = 73;
     vk::reset_submit_work_counters(state);
     gpu::SubmitDesc submit = {};
@@ -739,11 +733,11 @@ fn void empty_submit_preserves_duplicate_epoch_and_work() @test {
 }
 
 fn void readiness_only_submit_validates_stale_swapchain() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::SwapchainHandle stale = {
         .owner      = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.SWAPCHAIN),
         .generation = 1,
@@ -765,7 +759,7 @@ fn void readiness_only_submit_validates_stale_swapchain() @test {
 }
 
 fn void readiness_only_submit_rejects_malformed_identity() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
@@ -785,7 +779,7 @@ fn void readiness_only_submit_rejects_malformed_identity() @test {
 }
 
 fn void simultaneous_devices_submit_independently() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device first = create_test_device(&desc)!!;
     gpu::Device second = create_test_device(&desc)!!;
     defer destroy_test_device(&second)!!;
@@ -818,11 +812,11 @@ fn void simultaneous_devices_submit_independently() @test {
 }
 
 fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -852,7 +846,6 @@ fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
 
 fn void bad_command_state_rejected() @test {
     gpu::RuntimeDesc desc = {
-        .backend = gpu::BackendKind.VULKAN,
     };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
@@ -877,7 +870,7 @@ fn void bad_command_state_rejected() @test {
         "recording through an ended alias faults COMMAND_RECORDING_ERROR");
 }
 fn void texture_barrier_faults() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -901,11 +894,11 @@ fn void texture_barrier_faults() @test {
 }
 
 fn void submitted_command_buffer_recycles_at_completion() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -941,7 +934,7 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
 }
 
 fn void command_recording_requires_no_lifecycle_boundary() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -965,7 +958,6 @@ fn void command_recording_requires_no_lifecycle_boundary() @test {
 
 fn void warm_command_begin_reuses_allocator_owned_storage() @test {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "warm_command_reuse_test",
     };
     gpu::Device device = create_test_device(&desc)!!;
@@ -976,9 +968,7 @@ fn void warm_command_begin_reuses_allocator_owned_storage() @test {
     )!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(
-        &device,
-    );
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     gpu::CommandList first = gpu::begin_commands(&allocator)!!;
     gpu::ExecutableCommandList first_executable = gpu::end_commands(&first)!!;
@@ -1008,7 +998,6 @@ fn void warm_command_begin_reuses_allocator_owned_storage() @test {
 
 fn void recording_work_reset_snapshot_and_delta_are_exact() @test {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "recording_work_stats_test",
     };
     gpu::Device device = create_test_device(&desc)!!;
@@ -1022,9 +1011,7 @@ fn void recording_work_reset_snapshot_and_delta_are_exact() @test {
         queue,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(
-        &device,
-    );
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     gpu::CommandList warm = gpu::begin_commands(&allocator)!!;
     gpu::ExecutableCommandList warm_executable = gpu::end_commands(&warm)!!;
@@ -1084,7 +1071,7 @@ fn void recording_work_reset_snapshot_and_delta_are_exact() @test {
 }
 
 fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -1103,8 +1090,7 @@ fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
         queue,
         &allocator_desc,
     )!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     gpu::CommandList first_commands = gpu::begin_commands(&first)!!;
     gpu::CommandList second_commands = gpu::begin_commands(&second)!!;
@@ -1162,7 +1148,7 @@ fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
 }
 
 fn void later_completion_observation_retires_multi_allocator_prefix_once() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -1181,8 +1167,7 @@ fn void later_completion_observation_retires_multi_allocator_prefix_once() @test
         queue,
         &allocator_desc,
     )!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     gpu::CommandList first_commands = gpu::begin_commands(&first)!!;
     uint first_buffer =
@@ -1236,7 +1221,7 @@ fn void later_completion_observation_retires_multi_allocator_prefix_once() @test
 }
 
 fn void submit_uses_record_queue_without_allocator_queue_reproof() @test {
-    gpu::RuntimeDesc desc = { .backend = gpu::BackendKind.VULKAN };
+    gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -1251,9 +1236,8 @@ fn void submit_uses_record_queue_without_allocator_queue_reproof() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
-    vk::VkCommandRecord* record = vk::backend_command(executable.record);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    vk::CommandRecord* record = executable.record;
     vk::CommandAllocatorSlot* slot =
         state.command_allocators.get(record.allocator)!!;
     gpu::Queue original_queue = slot.queue;

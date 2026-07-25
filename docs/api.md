@@ -70,16 +70,12 @@ Methods are acceptable only for operations that clearly operate on an existing `
 ### Backend, runtime, adapters, and device
 
 ```text
-BackendKind
-    VULKAN
-
 ContractValidation
     TRUSTED
     OBJECT_BOUNDARIES
     FULL
 
 RuntimeDesc
-    BackendKind backend
     ContractValidation contract_validation
     bool track_resource_lifetimes
     bool enable_vulkan_validation
@@ -199,10 +195,11 @@ and Vulkan validation on (or the helper); `false` or omission maps to
 `TRUSTED`, tracking off, and Vulkan validation off. The retired field is not
 part of `RuntimeDesc` and intentionally fails to compile.
 
-Creating a runtime is the first operation that may initialize backend discovery. Enumeration returns an allocation-free view:
+Creating a runtime is the first operation that may initialize Vulkan discovery
+behind the backend-neutral API. Enumeration returns an allocation-free view:
 
 ```c3
-gpu::RuntimeDesc runtime_desc = { .backend = gpu::BackendKind.VULKAN };
+gpu::RuntimeDesc runtime_desc = {};
 gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
 gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
 for (uint i = 0; i < adapters.count; i++) {
@@ -318,7 +315,6 @@ DeviceCaps
     bool resource_agnostic_texture_sync
 
 Device                           (slot | generation | reserved)
-get_device_backend(Device*)      -> BackendKind?
 get_device_caps(Device*)         -> DeviceCaps?
 ```
 
@@ -365,22 +361,22 @@ transactionally by private composition helpers.
 
 Multiple live devices may coexist. `Device` is a compact slot and generation
 token. Most public operations take a short-lived atomic pin before reading
-backend state. `begin_commands` transfers its pin to the returned command token;
-recording calls reach the token's stable authoritative record and acquire no
-additional pin or device-registry operation.
+the typed private Vulkan state. `begin_commands` transfers its pin to the
+returned command token; recording calls reach the token's stable authoritative
+record and acquire no additional pin or device-registry operation.
 
 `destroy_device` never waits. Live resources, command allocators, command lists,
 swapchains and descriptors return `RESOURCE_IN_USE`.
 Active operations, incomplete queue work, or
 a closing slot return retryable `DEVICE_BUSY`. Every failed attempt preserves
-the token, generation, and backend state. Success increments the generation
-and invalidates the passed token. A lost device bypasses child and progress
-checks after operation pins retire. Lost command tokens remain discardable so
-their lifetime pins cannot strand the device.
+the token, generation, and typed private state. Success increments the
+generation and invalidates the passed token. A lost device bypasses child and
+progress checks after operation pins retire. Lost command tokens remain
+discardable so their lifetime pins cannot strand the device.
 
 Queue tokens, command tokens, resource handles, descriptor
 indices, GPU addresses/spans, and completion points are scoped to their
-owning device. Backend table resolution rejects foreign handle owners before
+owning device. Private table resolution rejects foreign handle owners before
 resource mutation. Shader-visible indices and GPU addresses remain
 caller-lifetime values.
 
@@ -471,7 +467,7 @@ both always-checked and `FULL`-only causes.
 
 | Fault | Cause category | Fired by | Typical cause |
 |---|---|---|---|
-| `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the selected backend is unavailable |
+| `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the Vulkan loader, driver, or required backend initialization path is unavailable |
 | `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `full_render_graphics_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
 | `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource handle; or a zero, stale, consumed, or wrong-phase valid-origin direct command token; submit also rejects a token recorded for another device |
@@ -1039,7 +1035,7 @@ Each successful create must be balanced by exactly one `destroy_pipeline`; the
 backend pipeline is destroyed when its last alias is released. Destroying a
 handle twice faults `INVALID_HANDLE` and never affects other aliases. Handles
 must not be compared to decide whether two pipelines are "the same object" —
-distinct handles may or may not share backend state.
+distinct handles may or may not share native pipeline state.
 
 ### Pipeline cache
 
@@ -1147,10 +1143,10 @@ swapchain acquisition.
 
 `CommandList` is a recording token. Successful `end_commands` consumes it and
 returns a one-shot `ExecutableCommandList`; failure leaves the recording token
-unchanged. Copies alias the same backend record. Recording and executable tokens
-retain the device while the record is recording or executable. Successful
-submission consumes the public executable value but keeps the same record,
-allocator unit, device/backend ownership, fixed scratch, and native command
+unchanged. Copies alias the same authoritative record. Recording and executable
+tokens retain the device while the record is recording or executable.
+Successful submission consumes the public executable value but keeps the same
+record, allocator unit, device ownership, fixed scratch, and native command
 buffer live until ordered completion retirement.
 
 `CommandList.is_valid` and `ExecutableCommandList.is_valid` test only whether a
@@ -1202,7 +1198,7 @@ its reuse generation, and a packed static device-slot identity. A valid
 recording call acquire-loads that static slot and verifies its liveness and
 generation before dereferencing the record. It then compares the record
 generation and validates the authoritative phase. This performs no retained
-device-operation borrow, backend resolver dispatch, or command-table lookup.
+device-operation borrow or command-table lookup.
 Tokens must originate from `begin_commands`; callers must never construct,
 mutate, persist, or serialize their fields.
 
@@ -1338,7 +1334,7 @@ diagnoses an over-limit call with `INVALID_ARGUMENT` before recording;
 Warm recording dispatches through the immutable operation table stored in the
 authoritative record. There is currently one checked policy. Policy selection
 happens at device or record setup; a warm `cmd_*` call never branches on policy
-or reloads lifecycle dispatch. The direct representation retains
+or resolves another device operation. The direct representation retains
 `CommandOps` indirection and the fallible public signatures.
 
 Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
@@ -1984,10 +1980,10 @@ Labels group work for capture tools; they are valid while recording,
 including inside render passes, and silently succeed when debug-utils is
 absent. Balance is the caller's responsibility.
 
-Accepted destruction scans backend state under `OBJECT_BOUNDARIES` or `FULL`,
-or whenever a callback is configured. `TRUSTED` without a callback may remain
-silent. Normal live children are rejected before this scan; diagnostics are a
-safety net for internal, partial-initialization, and device-loss leftovers.
+Accepted destruction scans private Vulkan state under `OBJECT_BOUNDARIES` or
+`FULL`, or whenever a callback is configured. `TRUSTED` without a callback may
+remain silent. Normal live children are rejected before this scan; diagnostics
+are a safety net for internal, partial-initialization, and device-loss leftovers.
 Callback messages use `WARNING`/`resource_lifetime` with operation
 `destroy_device`; enabled contract reporting without a callback uses stderr.
 Layer and debug-name settings do not control the scan. Debug names are stored

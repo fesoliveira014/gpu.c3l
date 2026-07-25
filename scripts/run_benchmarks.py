@@ -168,7 +168,6 @@ COMMAND_RECORD_RESOLUTION = re.compile(
     r"descriptor_buffer_offsets=(?P<descriptor_buffer_offsets>[0-9]+) "
     r"device_registry=(?P<device_registry>[0-9]+) "
     r"retained_pins=(?P<retained_pins>[0-9]+) "
-    r"lifecycle_vtable=(?P<lifecycle_vtable>[0-9]+) "
     r"command_table=(?P<command_table>[0-9]+) "
     r"pipeline_table=(?P<pipeline_table>[0-9]+) "
     r"pipeline_cache=(?P<pipeline_cache>[0-9]+) "
@@ -1082,7 +1081,6 @@ def require_command_record_outcomes(output):
             "descriptor_buffer_offsets",
             "device_registry",
             "retained_pins",
-            "lifecycle_vtable",
             "command_table",
             "pipeline_table",
             "pipeline_cache",
@@ -1098,7 +1096,6 @@ def require_command_record_outcomes(output):
         "descriptor_buffer_offsets",
         "device_registry",
         "retained_pins",
-        "lifecycle_vtable",
         "command_table",
         "pipeline_table",
         "pipeline_cache",

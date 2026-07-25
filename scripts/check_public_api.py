@@ -34,14 +34,26 @@ SURFACE_TYPES = {
     "win32": (("InstanceHandle", "void*"), ("WindowHandle", "void*")),
     "x11": (("DisplayHandle", "void*"), ("WindowHandle", "ulong")),
 }
+SHARED_PRIVATE_BACKEND_TYPE_UIDS = {
+    "gpu::internal::vk::VkRuntimeState",
+    "gpu::internal::vk::VkDeviceState",
+    "gpu::internal::vk::CommandRecord",
+    "gpu::internal::vk::CommandOps",
+}
+SHARED_PRIVATE_BACKEND_TYPES = {
+    uid.rsplit("::", 1)[-1]
+    for uid in SHARED_PRIVATE_BACKEND_TYPE_UIDS
+}
 
 FORBIDDEN_TEXT = {
     "devicedesc": "retired transitional DeviceDesc",
+    "backendkind": "retired BackendKind",
     "commandlisthandle": "retired CommandListHandle",
     '"name":"command_list_handle_invalid"': (
         "retired COMMAND_LIST_HANDLE_INVALID"
     ),
     '"name":"create_device_from_desc"': "retired direct device creation",
+    '"name":"get_device_backend"': "retired backend query",
     "backend_state": "backend state pointer",
     "backendvtable": "backend dispatch table",
     "descriptorheapmode": "backend heap strategy type",
@@ -188,6 +200,8 @@ DEBUG_RESOURCE_KINDS = (
 )
 
 RETIRED_SOURCE_SYMBOLS = (
+    "BackendKind",
+    "get_device_backend(",
     "DeviceDesc",
     "create_device_from_desc(",
     "PlatformKind",
@@ -510,13 +524,19 @@ def validate_generated_backend_privacy(document: dict) -> list[str]:
             or module_name.startswith("gpu::internal::")
         ):
             continue
-        for contents in module.values():
+        for kind, contents in module.items():
             if not isinstance(contents, list):
                 continue
             for entry in contents:
                 if not isinstance(entry, dict):
                     continue
                 if entry.get("visibility") in ("private", "local"):
+                    continue
+                if (
+                    module_name == "gpu::internal::vk"
+                    and kind == "types"
+                    and entry.get("uid") in SHARED_PRIVATE_BACKEND_TYPE_UIDS
+                ):
                     continue
                 identity = entry.get("uid") or (
                     f"{module_name}::{entry.get('name', '<anonymous>')}"
@@ -531,7 +551,22 @@ def validate_document(document: dict) -> list[str]:
     if public_module is None:
         return ["missing gpu module"]
 
-    public_surface = public_entries(public_module)
+    public_surface = json.loads(json.dumps(public_entries(public_module)))
+    for definition in public_surface.get("types", []):
+        if definition.get("name") not in (
+            "CommandList",
+            "ExecutableCommandList",
+        ):
+            continue
+        for member in definition.get("members", []):
+            if member.get("name") != "record":
+                continue
+            member_type = member.get("type", {})
+            if member_type == {
+                "name": "CommandRecord*",
+                "uid": "gpu::internal::vk::CommandRecord",
+            }:
+                member_type.pop("uid")
     encoded = json.dumps(public_surface, separators=(",", ":"))
     lowered = encoded.lower()
     failures = validate_generated_backend_privacy(document)
@@ -916,7 +951,6 @@ def validate_document(document: dict) -> list[str]:
             failures.append(failure)
 
     runtime_desc_schema = (
-        ("backend", "BackendKind"),
         ("contract_validation", "ContractValidation"),
         ("track_resource_lifetimes", "bool"),
         ("enable_vulkan_validation", "bool"),
@@ -2106,10 +2140,14 @@ def validate_surface_source(relative: Path, source: str) -> list[str]:
         failures.append(
             f"{relative.as_posix()} may not contain non-callable declarations"
         )
-    if sorted(imports) != ["gpu @public", "gpu::internal @public"]:
+    if sorted(imports) != [
+        "gpu @public",
+        "gpu::internal @public",
+        "gpu::internal::vk",
+    ]:
         failures.append(
-            f"{relative.as_posix()} must import exactly gpu @public and "
-            "gpu::internal @public"
+            f"{relative.as_posix()} must import exactly gpu @public, "
+            "gpu::internal @public, and gpu::internal::vk"
         )
     if "@private" in masked:
         failures.append(
@@ -2140,7 +2178,7 @@ def validate_public_metadata_boundaries(document: dict) -> list[str]:
                     member_type = member.get("type", {})
                     if member_type == {
                         "name": "CommandRecord*",
-                        "uid": "gpu::internal::CommandRecord",
+                        "uid": "gpu::internal::vk::CommandRecord",
                     }:
                         member_type.pop("uid")
         encoded = json.dumps(entries, separators=(",", ":"))
@@ -2187,10 +2225,15 @@ def validate_private_backend_source(relative: Path, source: str) -> list[str]:
 
     for line_number, line in enumerate(normalized.splitlines(), start=1):
         stripped = line.strip()
+        shared_private_type = any(
+            stripped.startswith(f"struct {name} ")
+            for name in SHARED_PRIVATE_BACKEND_TYPES
+        )
         if (
             "@public" in stripped
             and not stripped.startswith("import ")
             and not stripped.startswith("module ")
+            and not shared_private_type
         ):
             failures.append(
                 f"{relative.as_posix()}:{line_number} "

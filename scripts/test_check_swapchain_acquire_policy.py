@@ -112,6 +112,19 @@ class SwapchainAcquirePolicyTests(unittest.TestCase):
             check_swapchain_acquire_policy.validate_acquire_policy(mutated),
         )
 
+    def test_rejects_device_reresolution_during_poll(self) -> None:
+        mutated = SOURCE.replace(
+            "        state,\n"
+            "        gpu::internal::completion_point_queue_id(point),",
+            "        device,\n"
+            "        gpu::internal::completion_point_queue_id(point),",
+            1,
+        )
+        self.assertIn(
+            "production swapchain polling must remain a direct poll",
+            check_swapchain_acquire_policy.validate_acquire_policy(mutated),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,12 +41,12 @@ fn double mask_and_scale(ulong raw, uint valid_bits, float period) {
 }
 
 fn vk::CommandBuffer command_buffer(gpu::CommandList* commands) {
-    gpu::internal::CommandRecord* record =
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(
             commands,
             count_command: false,
         )!!;
-    return gpu::internal::vk::backend_command(record).command_buffer;
+    return record.command_buffer;
 }
 
 <* Read and normalize one timestamp pair. *>
@@ -150,7 +150,6 @@ fn int main() {
         REPS,
     );
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation = validation_enabled()
             ? gpu::ContractValidation.FULL
             : gpu::ContractValidation.TRUSTED,
@@ -178,7 +177,7 @@ fn int main() {
         graphics_queue,
     )!!;
     defer gpu::destroy_command_allocator(&graphics_allocator)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     bool families_distinct = state.graphics_family != state.compute_family;
     io::printfn(

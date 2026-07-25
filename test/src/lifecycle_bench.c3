@@ -98,7 +98,7 @@ fn double measure_texture_destruction(
     }
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::reset_completion_work_counters(state);
     std::time::Clock start = std::time::clock::now();
     foreach (texture : textures) {
@@ -114,7 +114,6 @@ fn double measure_texture_destruction(
 
 fn int main() {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_lifecycle_bench",
     };
     gpu::Device device = create_bench_device(&desc)!!;
@@ -130,7 +129,7 @@ fn int main() {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
 
     gpu::CompletionPoint warm_completion;
     (void)measure_submissions(&allocator, queue, &warm_completion);

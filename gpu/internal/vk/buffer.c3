@@ -213,13 +213,10 @@ fn BufferHandle? create_buffer_for_state(VkDeviceState* state, BufferDesc* desc)
     return create_buffer_with_families_for_state(state, desc, families[:count]);
 }
 
-fn BufferHandle? vk_create_buffer(gpu::Device* device, BufferDesc* desc) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    return create_buffer_for_state(state, desc);
-}
-
-fn void? vk_destroy_buffer(gpu::Device* device, BufferHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+fn void? destroy_buffer_for_state(
+    VkDeviceState* state,
+    BufferHandle handle,
+) @private {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     BufferSlot* slot = state.buffers.get(handle)!;
@@ -235,32 +232,6 @@ fn void? vk_destroy_buffer(gpu::Device* device, BufferHandle handle) @private {
     state.allocator.destroy_buffer(buffer, allocation);
 }
 
-fn gpu::GpuAddress? vk_get_buffer_address(gpu::Device* device, BufferHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    BufferSlot* slot = state.buffers.get(handle)!;
-    if ((ulong)slot.gpu_base == 0) return gpu::INVALID_ARGUMENT~;
-    return slot.gpu_base;
-}
-
-fn void? vk_flush_buffer(gpu::Device* device, BufferHandle handle, usz offset, usz size) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    BufferSlot* slot = state.buffers.get(handle)!;
-    if (!gpu::internal::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
-    // WHOLE_SIZE requires offset strictly inside the buffer.
-    if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
-    vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
-    check_device_result(state, state.allocator.flush_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
-}
-
-fn void? vk_invalidate_buffer(gpu::Device* device, BufferHandle handle, usz offset, usz size) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    BufferSlot* slot = state.buffers.get(handle)!;
-    if (!gpu::internal::range_fits(slot.size, offset, size)) return gpu::INVALID_ARGUMENT~;
-    if (size == 0 && offset >= slot.size) return gpu::INVALID_ARGUMENT~;
-    vk::DeviceSize range = size == 0 ? (vk::DeviceSize)vk::WHOLE_SIZE : (vk::DeviceSize)size;
-    check_device_result(state, state.allocator.invalidate_allocation(slot.allocation, (vk::DeviceSize)offset, range))!;
-}
-
 fn gpu::GpuSpan? get_buffer_span_for_state(VkDeviceState* state, BufferHandle handle) @private {
     BufferSlot* slot = state.buffers.get(handle)!;
     return {
@@ -271,22 +242,15 @@ fn gpu::GpuSpan? get_buffer_span_for_state(VkDeviceState* state, BufferHandle ha
     };
 }
 
-fn gpu::GpuSpan? vk_get_buffer_span(gpu::Device* device, BufferHandle handle) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (state == null) return gpu::INVALID_HANDLE~;
-    return get_buffer_span_for_state(state, handle);
-}
-
-fn char[]? vk_get_span_mapping(gpu::Device* device, gpu::GpuSpan span) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (state == null) return gpu::INVALID_HANDLE~;
+fn char[]? vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
     ResolvedSpan resolved = resolve_span(state, &span)!;
     return resolved_span_mapping(&resolved);
 }
 
-fn gpu::GpuAddress? vk_get_span_address(gpu::Device* device, gpu::GpuSpan span) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (state == null) return gpu::INVALID_HANDLE~;
+fn gpu::GpuAddress? vk_get_span_address(
+    VkDeviceState* state,
+    gpu::GpuSpan span,
+) {
     ResolvedSpan resolved = resolve_span(state, &span)!;
     return resolved_span_address(&resolved);
 }

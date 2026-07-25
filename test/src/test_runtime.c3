@@ -4,9 +4,26 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 
+struct RuntimeDebugCapture {
+    uint calls;
+    bool valid;
+}
+
+fn void capture_runtime_debug_message(
+    DebugMessage* message,
+    void* user_data,
+) {
+    RuntimeDebugCapture* capture = (RuntimeDebugCapture*)user_data;
+    capture.calls++;
+    capture.valid = message != null
+        && message.operation != null
+        && message.operation.str_view() == "create_runtime"
+        && message.category.backend
+        && message.category.general;
+}
+
 fn RuntimeDesc runtime_desc() {
     return {
-        .backend          = BackendKind.VULKAN,
         .application_name = "gpu_runtime_test",
     };
 }
@@ -24,7 +41,6 @@ fn void contract_validation_defaults_to_trusted() @test {
 
 fn void full_validation_runtime_desc_enables_every_policy() @test {
     RuntimeDesc desc = gpu::full_validation_runtime_desc();
-    assert(desc.backend == BackendKind.VULKAN);
     assert(desc.contract_validation == ContractValidation.FULL);
     assert(desc.track_resource_lifetimes);
     assert(desc.enable_vulkan_validation);
@@ -49,6 +65,19 @@ fn void null_runtime_descriptor_is_rejected() @test {
         @catch(gpu::create_runtime((RuntimeDesc*)null)) == gpu::INVALID_ARGUMENT,
         "create_runtime rejects a null descriptor"
     );
+}
+
+fn void runtime_debug_callback_reaches_public_creation_path() @test {
+    RuntimeDebugCapture capture;
+    RuntimeDesc desc = runtime_desc();
+    desc.debug_callback = &capture_runtime_debug_message;
+    desc.debug_user_data = &capture;
+
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+
+    assert(capture.calls == 1 && capture.valid,
+        "public runtime creation routes the configured diagnostic callback");
 }
 
 fn void runtimes_enumerate_independent_borrowed_adapters() @test {

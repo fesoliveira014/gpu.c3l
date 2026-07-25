@@ -83,7 +83,7 @@ page doesn't explain it, that's a bug in this page — file an issue.
   profile and return `UNSUPPORTED_FEATURE`; the library does not synthesize
   color-state pipeline variants or replay hidden defaults.
 - **GPU-generated roots are optional.** `DeviceCaps.generated_work` requires
-  one backend facility that supports the draw, indexed-draw, and dispatch
+  one Vulkan facility that supports the draw, indexed-draw, and dispatch
   record layouts together. Unsupported devices retain the shared-root indirect
   path and report a zero `max_generated_work_count`.
 - **Command recording has no implicit allocator.** Every command list begins
@@ -162,7 +162,7 @@ Two sizing rules that bite:
   remain caller-owned even when tracking is on.
 - **Submission retains command allocator and device lifetime.** Successful
   submit consumes the public executable value, but its stable record, native
-  buffer, fixed scratch, allocator unit, and retained device/backend ownership
+  buffer, fixed scratch, allocator unit, and retained device ownership
   remain live until ordered completion retirement. The allocator cannot be
   destroyed and the unit cannot be reused before that retirement.
 - **Transient data is caller-owned.** Applications choose allocation reuse and
@@ -202,7 +202,6 @@ Two sizing rules that bite:
 | FIFO present does not throttle under xvfb | virtual displays have no vblank | expected; pacing numbers under xvfb are structural only (`present_mode_explorer`) | — |
 | Schema field named `sampler` (or other GLSL keyword) breaks shader compile | generator emits the name verbatim into GLSL | rename the field (for example, `heap_sampler`) | reserved names are not rewritten |
 | Pipeline creation returns `SHADER_INVALID` for a size-correct root push block | exact reflection rejects a nested `RootPush`/`GraphicsRootPush` struct because its member shape differs | declare the generated fields directly in the push block, in schema order | reflected member names may differ; numeric shape may not |
-| `TYPE_OPTIONAL` c3c crash building the library with debug info | c3c 0.8.0/0.8.1 debug-codegen bug on optional-of-struct vtable signatures | no consumer action; the in-tree vtable uses an out parameter | `scripts/c3c_bug_repro/` |
 
 ## 4. Capability queries
 

@@ -28,7 +28,11 @@ Vulkan types, feature names, queue families, layouts, descriptor mechanisms, and
 
 Capability groups are explicit and immutable. A strict request enables only the strict contract. `gpu::compat` can add descriptor-set requirements to that same request. A capable device may enable both groups, but importing `gpu::compat` or detecting descriptor-set support enables nothing by itself.
 
-The library supports multiple live devices. Devices, queues, and resources use generational ownership. Each device owns its backend state, capability state, dispatch tables, completion state, and resource tables. Queue requests and resource access domains use semantic roles rather than backend queue-family indices.
+The library supports multiple live devices. Devices, queues, and resources use
+generational ownership. The device registry publishes one typed private Vulkan
+state per device; that state owns capability state, optional native dispatch
+groups, completion state, and resource tables. Queue requests and resource
+access domains use semantic roles rather than Vulkan queue-family indices.
 
 Device destruction never waits. It faults while children, incomplete queue work, or active operations remain, and changes the device generation only after successful destruction.
 
@@ -44,7 +48,7 @@ Backend API and driver versions are diagnostic information. Applications select 
 - Texture requirements are queried before creation and report whether dedicated backing is required.
 - Placed texture creation validates caller-provided memory before mutation.
 - Dedicated texture creation transactionally publishes separate texture and allocation tokens.
-- Sampler descriptions intern directly to stable device-lifetime shader indices and require no individual destruction. Compatibility-only devices have no strict sampler heap and reject interning before backend mutation.
+- Sampler descriptions intern directly to stable device-lifetime shader indices and require no individual destruction. Compatibility-only devices have no strict sampler heap and reject interning before native mutation.
 - VMA remains private.
 - Non-WSI resource destruction is immediate. No live recording command list, executable command token, or incomplete submission may reference the resource. Strict presentation integration applies the same no-hidden-wait rule to swapchain destruction and resize.
 - Readback uses a caller-owned `CPU_READ` allocation and span, copy, completion
@@ -85,7 +89,7 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
   recording lock.
 - Successful submission consumes command tokens and returns a compact queue-owned `CompletionPoint`.
 - Submission retains the authoritative record, allocator unit, native buffer,
-  fixed scratch, and device/backend ownership until ordered completion
+  fixed scratch, and device ownership until ordered completion
   retirement releases them exactly once.
 - Completion points support host poll/wait and stage-scoped cross-queue waits;
   same-queue order is inherent after point and stage validation.

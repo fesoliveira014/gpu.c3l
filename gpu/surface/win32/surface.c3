@@ -2,6 +2,7 @@ module gpu::surface::win32;
 
 import gpu @public;
 import gpu::internal @public;
+import gpu::internal::vk;
 
 <* Create a runtime-owned Win32 surface from native handles. *>
 fn gpu::Surface? create_surface(
@@ -17,18 +18,13 @@ fn gpu::Surface? create_surface(
 
     gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(runtime);
     if (runtime_data == null) return gpu::INVALID_HANDLE~;
-    if (runtime_data.vtable.create_win32_surface == null
-        || runtime_data.vtable.destroy_surface == null) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-
-    void* backend_surface = runtime_data.vtable.create_win32_surface(
-        runtime_data.backend_state,
+    void* backend_surface = gpu::internal::vk::vk_create_win32_surface(
+        runtime_data.state,
         native_instance,
         native_window,
     )!;
-    defer catch runtime_data.vtable.destroy_surface(
-        runtime_data.backend_state,
+    defer catch gpu::internal::vk::vk_destroy_surface(
+        runtime_data.state,
         backend_surface,
     );
     return gpu::internal::register_surface(runtime, backend_surface);

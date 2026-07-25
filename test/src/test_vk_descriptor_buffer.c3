@@ -6,8 +6,8 @@ import gpu::internal::vk @public;
 import std::os::env;
 import std::io;
 
-// A private creation probe forces descriptor-buffer coverage without exposing
-// backend selection. Shader-access E2E stays gated for affected Mesa versions.
+// A private creation probe forces descriptor-buffer coverage.
+// Shader-access E2E stays gated for affected Mesa versions.
 
 const char[*] DB_WRITE_SPIRV  = $embed("shaders/heap_write.comp.spv");
 const char[*] DB_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");
@@ -159,7 +159,6 @@ fn gpu::PipelineHandle create_descriptor_buffer_binding_graphics_pipeline(
 
 fn void descriptor_buffer_device_and_heap() @test {
     gpu::RuntimeDesc desc = {
-        .backend               = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -184,7 +183,7 @@ fn void descriptor_buffer_device_and_heap() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(
         gpu::internal::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"
@@ -219,7 +218,6 @@ fn void descriptor_buffer_device_and_heap() @test {
 fn void descriptor_buffer_binding_is_cached_per_command_and_bind_point() @test {
     DescriptorBufferValidationCapture capture = {};
     gpu::RuntimeDesc desc = {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -315,7 +313,7 @@ fn void descriptor_buffer_binding_is_cached_per_command_and_bind_point() @test {
         && stats.strict_heap_offset_commands == 0,
         "a descriptor hazard barrier preserves cached buffer binding");
 
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::invalidate_strict_heap_binding(record);
     gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, second_compute)!!;
@@ -371,7 +369,6 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     const usz TARGET_BYTES = TARGET_SIZE * TARGET_SIZE * 4;
     const usz VERTEX_BYTES = 3 * 16;
     gpu::RuntimeDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -393,7 +390,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(
         gpu::internal::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"
@@ -714,7 +711,6 @@ fn void descriptor_buffer_write_then_sample() @test {
 
     const uint TEX = 16;
     gpu::RuntimeDesc device_desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -736,7 +732,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(
         gpu::internal::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"

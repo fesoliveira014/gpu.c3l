@@ -44,7 +44,6 @@ fn void capture_zero_generated_execute(
 
 fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "generated_scratch_reservation_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -81,8 +80,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         .max_commands_per_list   = 8,
         .preprocess_buffer_count = 1,
     };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
         state,
         &reservation,
@@ -109,7 +107,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         == gpu::RESOURCE_IN_USE,
         "reservation replacement requires a quiescent allocator");
 
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         record.allocator,
     )!!;
@@ -165,7 +163,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
 
     gpu::discard_commands(&commands)!!;
     gpu::CommandList retry = gpu::begin_commands(&allocator)!!;
-    vk::VkCommandRecord* retry_record = vk::resolve_command(&retry)!!;
+    vk::CommandRecord* retry_record = vk::resolve_command(&retry)!!;
     vk::GeneratedPreprocessBuffer* reacquired =
         vk::acquire_generated_preprocess_buffer(
             state:        state,
@@ -187,7 +185,6 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
 
 fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "generated_scratch_allocator_ownership_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -231,8 +228,7 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     };
     gpu::GeneratedScratchDesc alias_reservation = reservation;
     alias_reservation.pipeline = alias_pipeline;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
         state,
         &reservation,
@@ -336,7 +332,7 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     gpu::CommandList unreserved_commands = gpu::begin_commands(
         &unreserved_allocator,
     )!!;
-    vk::VkCommandRecord* unreserved_record = vk::resolve_command(
+    vk::CommandRecord* unreserved_record = vk::resolve_command(
         &unreserved_commands,
     )!!;
     uint unreserved_indices =
@@ -400,7 +396,6 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
 
 fn void zero_size_generated_scratch_still_requires_reservation() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "zero_size_generated_scratch_test",
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
@@ -440,8 +435,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         .max_commands_per_list   = 8,
         .preprocess_buffer_count = 1,
     };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::PFN_vkGetGeneratedCommandsMemoryRequirementsEXT original =
         state.device_dispatch.generated_work.get_memory_requirements;
     zero_generated_requirement_calls = 0;
@@ -487,7 +481,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         &reserved_allocator,
     )!!;
     bind_test_compute_pipeline(&reserved_commands, pipeline);
-    vk::VkCommandRecord* reserved_record = vk::resolve_command(
+    vk::CommandRecord* reserved_record = vk::resolve_command(
         &reserved_commands,
     )!!;
     gpu::cmd_dispatch_generated(
@@ -522,7 +516,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         &unreserved_allocator,
     )!!;
     bind_test_compute_pipeline(&unreserved_commands, pipeline);
-    vk::VkCommandRecord* unreserved_record = vk::resolve_command(
+    vk::CommandRecord* unreserved_record = vk::resolve_command(
         &unreserved_commands,
     )!!;
     assert(@catch(gpu::cmd_dispatch_generated(

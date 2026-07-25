@@ -256,10 +256,9 @@ fn void destroy_sampler_table(VkDeviceState* state) @private {
 }
 
 fn void set_sampler_create_result(
-    gpu::Device* device,
+    VkDeviceState* state,
     vk::Result result,
 ) @if(env::TESTING) {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.sampler_create_result = result;
 }
 
@@ -270,10 +269,9 @@ fn float sampler_last_create_max_anisotropy(
 }
 
 fn gpu::SamplerIndex? vk_intern_sampler(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::SamplerDesc* desc,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     SamplerKey key = canonical_sampler_key(desc);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();

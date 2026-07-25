@@ -28,8 +28,8 @@ fn usz? generated_work_bytes(
     return indirect_argument_bytes(record_size, count, max_count);
 }
 
-fn gpu::internal::CommandRecord*? direct_command_record(
-    gpu::internal::CommandRecord* record,
+fn gpu::internal::vk::CommandRecord*? direct_command_record(
+    gpu::internal::vk::CommandRecord* record,
     uint generation,
     uint device_identity,
 ) @private {
@@ -64,12 +64,12 @@ fn gpu::internal::CommandRecord*? direct_command_record(
     return record;
 }
 
-fn gpu::internal::CommandRecord*? recording_command(
+fn gpu::internal::vk::CommandRecord*? recording_command(
     CommandList* commands,
     bool count_command = true,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
-    gpu::internal::CommandRecord* record = direct_command_record(
+    gpu::internal::vk::CommandRecord* record = direct_command_record(
         commands.record,
         commands.generation,
         commands.device_identity,
@@ -83,11 +83,11 @@ fn gpu::internal::CommandRecord*? recording_command(
     return record;
 }
 
-fn gpu::internal::CommandRecord*? executable_command(
+fn gpu::internal::vk::CommandRecord*? executable_command(
     ExecutableCommandList* commands,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
-    gpu::internal::CommandRecord* record = direct_command_record(
+    gpu::internal::vk::CommandRecord* record = direct_command_record(
         commands.record,
         commands.generation,
         commands.device_identity,
@@ -99,7 +99,7 @@ fn gpu::internal::CommandRecord*? executable_command(
 }
 
 fn void publish_command_list(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     CommandList* commands,
 ) @private {
     commands.record = record;
@@ -109,7 +109,7 @@ fn void publish_command_list(
 }
 
 fn void publish_executable_command_list(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     ExecutableCommandList* commands,
 ) @private {
     commands.record = record;
@@ -119,7 +119,7 @@ fn void publish_executable_command_list(
 }
 
 fn gpu::internal::DeviceOperation? command_operation(
-    gpu::internal::CommandRecord* record,
+    gpu::internal::vk::CommandRecord* record,
     bool allow_lost = false,
 ) @private {
     if (record == null) return gpu::INVALID_HANDLE~;

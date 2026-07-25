@@ -165,7 +165,7 @@ struct ViewportLimits {
     float max_bound;
 }
 
-struct VkDeviceState {
+struct VkDeviceState @public {
     gpu::Device                 owner;
     ulong                       resource_owner;
     vk::Instance               instance;
@@ -195,7 +195,7 @@ struct VkDeviceState {
     ulong                      max_timeline_semaphore_value_difference;
     usz                        non_coherent_atom_size;
     DeviceValidationPolicy     validation_policy;
-    gpu::internal::CommandOps*           command_ops;
+    CommandOps*                command_ops;
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;
@@ -462,7 +462,7 @@ fn void? reach_device_creation_checkpoint(
     if (probe.fail_at == checkpoint) return gpu::BACKEND_ERROR~;
 }
 
-const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
+const CommandOps TRUSTED_COMMAND_OPS @private = {
     .copy_buffer                 = &trusted_copy_buffer,
     .fill_buffer                 = &trusted_fill_buffer,
     .copy_buffer_to_texture      = &trusted_copy_buffer_to_texture,
@@ -493,7 +493,7 @@ const gpu::internal::CommandOps TRUSTED_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
+const CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .copy_buffer                 = &trusted_tracking_copy_buffer,
     .fill_buffer                 = &trusted_tracking_fill_buffer,
     .copy_buffer_to_texture      = &trusted_tracking_copy_buffer_to_texture,
@@ -524,7 +524,7 @@ const gpu::internal::CommandOps TRUSTED_TRACKING_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
+const CommandOps CHECKED_COMMAND_OPS @private = {
     .copy_buffer                 = &checked_copy_buffer,
     .fill_buffer                 = &checked_fill_buffer,
     .copy_buffer_to_texture      = &checked_copy_buffer_to_texture,
@@ -555,7 +555,7 @@ const gpu::internal::CommandOps CHECKED_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
+const CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .copy_buffer                 = &checked_tracking_copy_buffer,
     .fill_buffer                 = &checked_tracking_fill_buffer,
     .copy_buffer_to_texture      = &checked_tracking_copy_buffer_to_texture,
@@ -586,7 +586,7 @@ const gpu::internal::CommandOps CHECKED_TRACKING_COMMAND_OPS @private = {
     .end_label                   = &vk_cmd_end_label,
 };
 
-fn gpu::internal::CommandOps* select_command_ops(DeviceValidationPolicy policy) {
+fn CommandOps* select_command_ops(DeviceValidationPolicy policy) {
     switch (policy.contract) {
         case gpu::ContractValidation.TRUSTED:
         case gpu::ContractValidation.OBJECT_BOUNDARIES:
@@ -602,38 +602,6 @@ fn gpu::internal::CommandOps* select_command_ops(DeviceValidationPolicy policy) 
                 ? &CHECKED_TRACKING_COMMAND_OPS
                 : &CHECKED_COMMAND_OPS;
     }
-}
-
-fn bool command_ops_are_complete(gpu::internal::CommandOps* ops) {
-    return ops != null
-        && ops.copy_buffer != null
-        && ops.fill_buffer != null
-        && ops.copy_buffer_to_texture != null
-        && ops.copy_texture_to_buffer != null
-        && ops.barrier != null
-        && ops.texture_barrier != null
-        && ops.bind_pipeline != null
-        && ops.set_depth_state != null
-        && ops.set_raster_state != null
-        && ops.set_graphics_state != null
-        && ops.set_color_state != null
-        && ops.dispatch != null
-        && ops.begin_render_pass != null
-        && ops.begin_render_pass_with_state != null
-        && ops.set_viewport != null
-        && ops.set_scissor != null
-        && ops.end_render_pass != null
-        && ops.draw != null
-        && ops.draw_indexed != null
-        && ops.draw_indirect != null
-        && ops.draw_indexed_indirect != null
-        && ops.draw_indexed_indirect_count != null
-        && ops.dispatch_indirect != null
-        && ops.draw_generated != null
-        && ops.draw_indexed_generated != null
-        && ops.dispatch_generated != null
-        && ops.begin_label != null
-        && ops.end_label != null;
 }
 
 fn void note_command_semantic_check(VkDeviceState* state) @private {
@@ -879,63 +847,6 @@ fn CommandReferenceWorkCounters command_reference_work_counters(
     };
 }
 
-// One static lifecycle table shared by every Vulkan device.
-const gpu::internal::BackendVTable VK_VTABLE @private = {
-    .check_device_destroy        = &vk_check_device_destroy,
-    .destroy_device              = &vk_destroy_device,
-    .report_contract_failure     = &vk_report_root_contract_failure,
-    .get_memory_stats            = &vk_get_memory_stats,
-    .build_memory_report         = &vk_build_memory_report,
-    .allocate_memory             = &vk_allocate_memory,
-    .free_allocation             = &vk_free_allocation,
-    .get_allocation_info         = &vk_get_allocation_info,
-    .get_allocation_span         = &vk_get_allocation_span,
-    .get_span_mapping            = &vk_get_span_mapping,
-    .get_span_address            = &vk_get_span_address,
-    .flush_mapped_span           = &vk_flush_mapped_span,
-    .invalidate_mapped_span      = &vk_invalidate_mapped_span,
-    .create_command_allocator    = &vk_create_command_allocator,
-    .destroy_command_allocator   = &vk_destroy_command_allocator,
-    .reserve_generated_scratch   = &vk_reserve_generated_scratch,
-    .release_generated_scratch   = &vk_release_generated_scratch,
-    .begin_commands              = &vk_begin_commands,
-    .end_commands                = &vk_end_commands,
-    .discard_commands            = &vk_discard_commands,
-    .submit                      = &vk_submit,
-    .poll_completion             = &vk_poll_completion,
-    .wait_completion             = &vk_wait_completion,
-    .command_ops                 = &CHECKED_TRACKING_COMMAND_OPS,
-    .get_texture_format_support  = &vk_get_texture_format_support,
-    .supports_texture_desc       = &vk_supports_texture_desc,
-    .get_texture_requirements    = &vk_get_texture_requirements,
-    .create_texture              = &vk_create_texture,
-    .create_placed_texture       = &vk_create_placed_texture,
-    .create_dedicated_texture    = &vk_create_dedicated_texture,
-    .destroy_texture             = &vk_destroy_texture,
-    .create_attachment_view      = &vk_create_attachment_view,
-    .destroy_attachment_view     = &vk_destroy_attachment_view,
-    .create_texture_view         = &vk_create_texture_view,
-    .destroy_texture_view        = &vk_destroy_texture_view,
-    .create_texture_views        = &vk_create_texture_views,
-    .intern_sampler              = &vk_intern_sampler,
-    .create_compute_pipeline     = &vk_create_compute_pipeline,
-    .create_graphics_pipeline    = &vk_create_graphics_pipeline,
-    .create_dynamic_graphics_pipeline = &vk_create_dynamic_graphics_pipeline,
-    .create_compute_pipelines    = &vk_create_compute_pipelines,
-    .create_graphics_pipelines   = &vk_create_graphics_pipelines,
-    .create_dynamic_graphics_pipelines = &vk_create_dynamic_graphics_pipelines,
-    .destroy_pipeline            = &vk_destroy_pipeline,
-    .get_pipeline_cache_size     = &vk_get_pipeline_cache_size,
-    .get_pipeline_cache_data     = &vk_get_pipeline_cache_data,
-    .create_swapchain            = &vk_create_swapchain,
-    .destroy_swapchain           = &vk_destroy_swapchain,
-    .resize_swapchain            = &vk_resize_swapchain,
-    .get_swapchain_info          = &vk_get_swapchain_info,
-    .acquire_next_image          = &vk_acquire_next_image,
-    .present                     = &vk_present,
-    .get_present_mode_support    = &vk_get_present_mode_support,
-};
-
 fn VkDeviceConfig runtime_device_config(VkRuntimeState* state) {
     return {
         .validation_policy     = state.validation_policy,
@@ -972,7 +883,7 @@ fn gpu::Device? create_vk_device_with_probe(
     gpu::internal::validate_device_request(request)!;
     gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(adapter);
     if (runtime_data == null) return gpu::INVALID_HANDLE~;
-    VkRuntimeState* runtime_state = (VkRuntimeState*)runtime_data.backend_state;
+    VkRuntimeState* runtime_state = runtime_data.state;
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
 
     VkDeviceConfig desc = runtime_device_config(runtime_state);
@@ -1386,11 +1297,8 @@ fn gpu::Device? create_vk_device_from_runtime(
 
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
     return gpu::internal::register_device(
-        backend:              gpu::BackendKind.VULKAN,
+        state:                state,
         caps:                 state.caps,
-        vtable:               &VK_VTABLE,
-        backend_state:        (void*)state,
-        command_ops:          state.command_ops,
         resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
         adapter:              adapter,
@@ -1431,14 +1339,13 @@ fn bool? device_destroy_ready_with_query(
 }
 
 fn fault vk_report_root_contract_failure(
-    void* backend_state,
+    VkDeviceState* state,
     ZString operation,
     fault public_fault,
     gpu::DebugResourceKind resource_kind,
     ZString rejected_field,
     ZString invariant,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)backend_state;
+) {
     if (state.validation_policy.contract
         == gpu::ContractValidation.TRUSTED) return public_fault;
     return report_contract_failure(
@@ -1456,15 +1363,14 @@ fn fault vk_report_root_contract_failure(
     );
 }
 
-fn void? vk_check_device_destroy(void* backend_state) @private {
-    VkDeviceState* state = (VkDeviceState*)backend_state;
+fn void? vk_check_device_destroy(VkDeviceState* state) {
     if (!device_destroy_ready_with_query(state, &real_semaphore_counter_query)!) {
         return gpu::DEVICE_BUSY~;
     }
 }
 
-fn void vk_destroy_device(void* backend_state) @private {
-    destroy_state((VkDeviceState*)backend_state);
+fn void vk_destroy_device(VkDeviceState* state) {
+    destroy_state(state);
 }
 
 fn bool report_teardown_leaks(VkDeviceState* state) =>

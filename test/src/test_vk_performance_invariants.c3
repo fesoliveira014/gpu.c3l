@@ -19,7 +19,6 @@ const ulong PERFORMANCE_GRAPHICS_STATE_NATIVE_COMMANDS = 10;
 
 fn gpu::Device make_performance_invariant_device() {
     gpu::RuntimeDesc desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .application_name = "gpu_performance_invariants",
     };
     return create_test_device(&desc)!!;
@@ -137,8 +136,7 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
         gpu::end_commands(&warmup)!!;
     gpu::discard_executable_commands(&warmup_executable)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(
@@ -335,8 +333,7 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         gpu::end_commands(&warmup)!!;
     gpu::discard_executable_commands(&warmup_executable)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(

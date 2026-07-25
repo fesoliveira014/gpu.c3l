@@ -61,7 +61,6 @@ fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
 
 fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -74,7 +73,6 @@ fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
 
 fn gpu::Device make_val_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -108,7 +106,7 @@ fn void reference_capacity_preflight_counts_unique_identities() @test {
             .epoch = 1,
         },
     };
-    vk::VkCommandRecord record = {
+    vk::CommandRecord record = {
         .scratch = &scratch,
     };
     vk::CommandResourceReference first = {
@@ -187,9 +185,8 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
         desc:   &allocator_desc,
     )!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
@@ -247,9 +244,8 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer gpu::discard_commands(&commands)!!;
     record_val_target_to_attach(&commands, target);
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
     uint reference_epoch_before = record.scratch.reference_index.epoch;
     assert(references_before == 1,
@@ -276,7 +272,7 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
         vk::command_reference_work_counters(state);
     vk::DynamicStateObservation observation =
         vk::dynamic_state_observation(state);
-    assert(record.root.state == gpu::internal::CommandState.RECORDING,
+    assert(record.state == gpu::internal::CommandState.RECORDING,
         "tracking rejection leaves the command outside a render pass");
     assert(record.scratch.reference_count == references_before
         && record.scratch.reference_index.epoch == reference_epoch_before,
@@ -490,8 +486,8 @@ fn void submit_requires_exact_recording_queue_token() @test {
     defer discard_test_executable(&executable)!!;
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::VkCommandRecord* record = vk::backend_command(executable.record);
+        gpu::internal::device_slots[device.index].data.state;
+    vk::CommandRecord* record = executable.record;
     gpu::Queue recorded_queue = record.queue;
     record.queue.id++;
 
@@ -601,7 +597,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::ResolvedSpan buffer_span = vk::resolve_span(state, &span)!!;
     vk::ResolvedSpan compute_only_span = vk::resolve_span(state, &compute_only)!!;
     gpu::GpuSpan compute_only_tail = compute_only.checked_subspan(4, 4)!!;
@@ -615,7 +611,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
         "allocation subspans preserve immutable access");
     assert(multi_access_span.access.graphics && multi_access_span.access.compute,
         "allocation subspans preserve every immutable role");
-    vk::VkCommandRecord* record = vk::backend_command(commands.record);
+    vk::CommandRecord* record = commands.record;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics, .compute };
 
@@ -706,7 +702,7 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
 }
 
 fn bool val_distinct_graphics_compute_families(gpu::Device* device) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     if (state.graphics_family != state.compute_family) return true;
     io::eprintfn("access-domain rejection not applicable: graphics and compute share family %d", state.graphics_family);
     return false;
@@ -798,7 +794,7 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     record_val_target_to_attach(&commands, admitted);
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics };
     uint references_before = record.scratch.reference_count;
@@ -823,7 +819,7 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
         "a later attachment outside the recording role rejects the whole pass");
     assert(record.scratch.reference_count == references_before,
         "attachment access failure rolls back precreated-view references");
-    assert(record.root.state == gpu::internal::CommandState.RECORDING,
+    assert(record.state == gpu::internal::CommandState.RECORDING,
         "attachment access rejection leaves command state reusable");
 
     record.queue = recorded_queue;
@@ -1074,7 +1070,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     )!!;
     defer free_owned_span(&device, &root_owned)!!;
     gpu::GpuAddress root = val_span_address(&device, root_owned.span);
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -1109,7 +1105,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         "repeated binds and aliases emit once per selected bind point");
     assert_strict_heap_bind_work(state, bind_stats, 2);
 
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::invalidate_strict_heap_bind_point(
         record,
         vk::PipelineBindPoint.COMPUTE,
@@ -1442,7 +1438,7 @@ fn void full_graphics_state_setters_reject_non_graphics_recording_roles() @test 
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .compute };
     defer record.queue = recorded_queue;
@@ -1799,7 +1795,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
         gpu::full_render_graphics_state(pass.width, pass.height)!!;
     gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     uint original_limit = state.caps.max_draw_indirect_count;
     state.caps.max_draw_indirect_count = 1;
     defer state.caps.max_draw_indirect_count = original_limit;
@@ -1895,7 +1891,7 @@ fn void generated_work_commands_require_capability() @test {
     )!!;
     defer free_owned_span(&device, &indices)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     bool original_enabled = state.generated_work.enabled;
     state.generated_work.enabled = false;
     defer state.generated_work.enabled = original_enabled;
@@ -2003,7 +1999,7 @@ fn void generated_dispatch_validates_zero_count_bounds_and_alignment() @test {
     )!!;
     defer free_owned_span(&device, &count)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     bool original_enabled = state.generated_work.enabled;
     uint original_limit = state.caps.max_generated_work_count;
     state.generated_work.enabled = true;
@@ -2439,9 +2435,9 @@ fn void barrier_queue_stage_mismatch_faults_without_poisoning_recording() @test 
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, record.queue.id)!!;
     vk::QueueFamilyFlags selected_flags = completion.queue_flags;
@@ -2480,9 +2476,9 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, record.queue.id)!!;
     vk::QueueFamilyFlags selected_flags = completion.queue_flags;
@@ -2706,7 +2702,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         "one mixed-size attachment that cannot cover the pass faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "mixed-size rejection records no pass");
 
-    vk::VkCommandRecord* record = vk::resolve_command(&cmd)!!;
+    vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
     uint references_before = record.scratch.reference_count;
     gpu::ColorTargetDesc[2] invalid_later = {
         { .view = large_mip_two },
@@ -2781,7 +2777,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
 fn void render_pass_color_count_limits_validate_before_lookup() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -2833,7 +2829,7 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
     ValComputeCtx ctx = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &ctx);
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::DeviceCaps original_caps = state.caps;
     gpu::DeviceCaps limited_caps = state.caps;
     limited_caps.max_compute_work_group_count = { .x = 1, .y = 1, .z = 1 };
@@ -2917,7 +2913,7 @@ fn void warm_render_pass_reuses_many_precreated_views() @test {
         gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
         if (iteration == 0) record_val_target_to_attach(&commands, texture);
         vk::VkDeviceState* state =
-            (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+            gpu::internal::device_slots[device.index].data.state;
         gpu::internal::RecordingWorkCounters before =
             vk::command_recording_work_counters(state);
         foreach (view : views) {
@@ -2999,7 +2995,7 @@ fn void barrier_mask_diagnostic_identifies_semantic_field() @test {
         "the semantic stage-mask invariant is identified");
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     state.debug_callback = null;
     fault without_callback = @catch(gpu::cmd_barrier(&commands, &barrier));
     assert(without_callback == with_callback,
@@ -3100,8 +3096,8 @@ fn void buffer_to_texture_access_diagnostic_precedes_recording() @test {
         .width   = 1,
         .height  = 1,
     };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
-    vk::VkCommandRecord* record = vk::backend_command(commands.record);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    vk::CommandRecord* record = commands.record;
     gpu::QueueRoles selected_roles = record.queue.roles;
     // Keep diagnostic precedence independent of physical queue aliasing.
     record.queue.roles = { .transfer };
@@ -3166,7 +3162,7 @@ fn void texture_copy_span_usage_diagnostics_are_semantic() @test {
     defer free_owned_span(&device, &owned)!!;
     gpu::GpuSpan span = owned.span;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::ResolvedSpan resolved = vk::resolve_span(state, &span)!!;
     bool transfer_src = resolved.slot.usage.transfer_src;
     bool transfer_dst = resolved.slot.usage.transfer_dst;
@@ -3243,7 +3239,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     SyncDiagnosticCapture capture = {};
     gpu::Device device = make_sync_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     OwnedSpan dst = allocate_owned_span(
         device:       &device,
@@ -3442,7 +3438,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
 
     record_val_target_to_attach(&commands, color_target);
     gpu::RenderPassDesc oversized = { .colors = colors[..], .width = 9, .height = 8 };
-    vk::VkCommandRecord* render_record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* render_record = vk::resolve_command(&commands)!!;
     uint render_references_before =
         render_record.scratch.reference_count;
     reset_sync_diagnostic(
@@ -3516,7 +3512,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     );
     fault state_fault = @catch(gpu::cmd_copy_buffer(&commands, &state_copy));
     assert(state_fault == gpu::COMMAND_RECORDING_ERROR, "recording-state fault is unchanged");
-    gpu::internal::CommandRecord* command_record = commands.record;
+    gpu::internal::vk::CommandRecord* command_record = commands.record;
     assert_sync_contract_diagnostic(
         capture:             &capture,
         expected_fault:      state_fault,

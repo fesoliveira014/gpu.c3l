@@ -4,52 +4,12 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 
-uint resource_access_allocations;
-uint resource_access_texture_queries;
-uint resource_access_texture_creates;
 
-fn void destroy_resource_access_device(void* backend_state) {
-    (void)backend_state;
-}
-
-fn gpu::GpuAllocation? allocate_resource_access_memory(
-    gpu::Device* device,
-    gpu::AllocationDesc* desc,
+fn gpu::Device create_compute_only_resource_access_device(
+    gpu::internal::vk::VkDeviceState* state,
 ) {
-    (void)device;
-    (void)desc;
-    resource_access_allocations++;
-    return gpu::OUT_OF_DEVICE_MEMORY~;
-}
-
-fn bool? supports_resource_access_texture(
-    gpu::Device* device,
-    gpu::TextureDesc* desc,
-) {
-    (void)device;
-    (void)desc;
-    resource_access_texture_queries++;
-    return true;
-}
-
-fn gpu::TextureHandle? create_resource_access_texture(
-    gpu::Device* device,
-    gpu::TextureDesc* desc,
-) {
-    (void)device;
-    (void)desc;
-    resource_access_texture_creates++;
-    return gpu::OUT_OF_DEVICE_MEMORY~;
-}
-
-gpu::internal::BackendVTable resource_access_vtable = {
-    .destroy_device        = &destroy_resource_access_device,
-    .allocate_memory       = &allocate_resource_access_memory,
-    .supports_texture_desc = &supports_resource_access_texture,
-    .create_texture        = &create_resource_access_texture,
-};
-
-fn gpu::Device create_compute_only_resource_access_device(int* state) {
+    state.allocation_out_of_memory = true;
+    state.texture_out_of_memory = true;
     gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_requirements(
         requirements: {
             .counts = { .compute = 1 },
@@ -59,11 +19,9 @@ fn gpu::Device create_compute_only_resource_access_device(int* state) {
         transfer_aliases_compute:  false,
     )!!;
     return gpu::internal::register_device(
-        backend:       gpu::BackendKind.VULKAN,
-        caps:          {},
-        vtable:        &resource_access_vtable,
-        backend_state: state,
-        queues:        queues,
+        state:  state,
+        caps:   {},
+        queues: queues,
     )!!;
 }
 
@@ -87,9 +45,8 @@ fn gpu::TextureDesc resource_access_texture_desc(gpu::QueueRoles access) {
 }
 
 fn void resource_access_rejects_invalid_allocation_domains_before_backend() @test {
-    int state;
+    gpu::internal::vk::VkDeviceState state;
     gpu::Device device = create_compute_only_resource_access_device(&state);
-    resource_access_allocations = 0;
 
     gpu::AllocationDesc empty = resource_access_allocation_desc({});
     assert(@catch(gpu::allocate_memory(&device, &empty)) == gpu::INVALID_ARGUMENT);
@@ -99,20 +56,20 @@ fn void resource_access_rejects_invalid_allocation_domains_before_backend() @tes
 
     gpu::AllocationDesc unknown = resource_access_allocation_desc((gpu::QueueRoles)0x8);
     assert(@catch(gpu::allocate_memory(&device, &unknown)) == gpu::INVALID_ARGUMENT);
-    assert(resource_access_allocations == 0, "invalid domains do not reach allocation");
+    assert(state.allocation_attempts == 0,
+        "invalid domains do not reach allocation");
 
     gpu::AllocationDesc accepted = resource_access_allocation_desc({ .compute });
     assert(@catch(gpu::allocate_memory(&device, &accepted)) == gpu::OUT_OF_DEVICE_MEMORY);
-    assert(resource_access_allocations == 1, "selected compute access reaches allocation");
+    assert(state.allocation_attempts == 1,
+        "selected compute access reaches allocation");
 
     gpu::destroy_device(&device)!!;
 }
 
 fn void resource_access_rejects_invalid_texture_domains_before_backend() @test {
-    int state;
+    gpu::internal::vk::VkDeviceState state;
     gpu::Device device = create_compute_only_resource_access_device(&state);
-    resource_access_texture_queries = 0;
-    resource_access_texture_creates = 0;
 
     gpu::TextureDesc empty = resource_access_texture_desc({});
     assert(!gpu::supports_texture_desc(&device, &empty)!!);
@@ -125,14 +82,18 @@ fn void resource_access_rejects_invalid_texture_domains_before_backend() @test {
     gpu::TextureDesc unknown = resource_access_texture_desc((gpu::QueueRoles)0x80);
     assert(!gpu::supports_texture_desc(&device, &unknown)!!);
     assert(@catch(gpu::create_texture(&device, &unknown)) == gpu::INVALID_ARGUMENT);
-    assert(resource_access_texture_queries == 0, "invalid domains do not reach texture support");
-    assert(resource_access_texture_creates == 0, "invalid domains do not reach texture creation");
+    assert(state.texture_support_queries == 0,
+        "invalid domains do not reach texture support");
+    assert(state.texture_create_attempts == 0,
+        "invalid domains do not reach texture creation");
 
     gpu::TextureDesc accepted = resource_access_texture_desc({ .compute });
     assert(gpu::supports_texture_desc(&device, &accepted)!!);
     assert(@catch(gpu::create_texture(&device, &accepted)) == gpu::OUT_OF_DEVICE_MEMORY);
-    assert(resource_access_texture_queries == 1, "selected compute access reaches support query");
-    assert(resource_access_texture_creates == 1, "selected compute access reaches texture creation");
+    assert(state.texture_support_queries == 1,
+        "selected compute access reaches support query");
+    assert(state.texture_create_attempts == 1,
+        "selected compute access reaches texture creation");
 
     gpu::destroy_device(&device)!!;
 }

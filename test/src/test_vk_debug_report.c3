@@ -373,7 +373,6 @@ fn void vulkan_debug_message_handles_null_callback_data() @test {
 fn void barrier_mask_diagnostic_preserves_fault() @test {
     DebugCapture capture;
     gpu::RuntimeDesc device_desc = {
-        .backend             = gpu::BackendKind.VULKAN,
         .contract_validation = gpu::ContractValidation.FULL,
         .debug_callback      = &capture_debug_message,
         .debug_user_data     = &capture,
@@ -462,13 +461,12 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
 
 fn void debug_names_do_not_require_validation() @test {
     gpu::RuntimeDesc desc = {
-        .backend            = gpu::BackendKind.VULKAN,
         .enable_debug_names = true,
         .application_name   = "gpu_debug_names_test",
     };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     assert(state.debug_names, "backend retains the debug-name opt-in without validation");
 
@@ -479,19 +477,18 @@ fn void debug_names_do_not_require_validation() @test {
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "names_without_validation",
     };
-    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &buffer_desc)!!;
-    vk::vk_destroy_buffer(&device, buffer)!!;
+    vk::BufferHandle buffer = vk::create_buffer_for_state(state, &buffer_desc)!!;
+    vk::destroy_buffer_for_state(state, buffer)!!;
 }
 
 fn void interned_sampler_keeps_first_debug_name() @test {
     gpu::RuntimeDesc device_desc = {
-        .backend            = gpu::BackendKind.VULKAN,
         .enable_debug_names = true,
         .application_name   = "gpu_sampler_name_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     SamplerNameCapture capture;
     sampler_name_capture = &capture;
     vk::PFN_vkSetDebugUtilsObjectNameEXT original =
@@ -518,7 +515,6 @@ fn void interned_sampler_keeps_first_debug_name() @test {
 
 fn gpu::Device make_dbg_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -529,7 +525,7 @@ fn gpu::Device make_dbg_device() {
 
 fn void leak_reporters_count_leaks() @test {
     gpu::Device device = make_dbg_device();
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     vk::BufferDesc buf_desc = {
         .size        = 256,
@@ -538,7 +534,7 @@ fn void leak_reporters_count_leaks() @test {
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "leaky_gpu_span_storage",
     };
-    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &buf_desc)!!;
+    vk::BufferHandle buffer = vk::create_buffer_for_state(state, &buf_desc)!!;
 
     gpu::AllocationDesc allocation_desc = {
         .size         = 256,
@@ -640,7 +636,7 @@ fn void leak_reporters_count_leaks() @test {
     gpu::destroy_pipeline(&device, first_alias)!!;
     gpu::destroy_pipeline(&device, second_alias)!!;
     gpu::destroy_texture(&device, texture)!!;
-    vk::vk_destroy_buffer(&device, buffer)!!;
+    vk::destroy_buffer_for_state(state, buffer)!!;
     gpu::free_allocation(&device, &allocation)!!;
 
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
@@ -651,7 +647,7 @@ fn void leak_reporters_count_leaks() @test {
 fn void debug_name_copy_is_independent() @test {
     gpu::Device device = make_dbg_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     char[16] volatile_name;
     char[7] source = { 'v', 'o', 'l', 'a', 't', 'i', 'l' };
@@ -665,8 +661,8 @@ fn void debug_name_copy_is_independent() @test {
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = (ZString)&volatile_name[0],
     };
-    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &desc)!!;
-    defer vk::vk_destroy_buffer(&device, buffer)!!;
+    vk::BufferHandle buffer = vk::create_buffer_for_state(state, &desc)!!;
+    defer vk::destroy_buffer_for_state(state, buffer)!!;
 
     foreach (&b : volatile_name) *b = 'X';
 
@@ -793,6 +789,7 @@ fn void labels_record_validation_clean() @test {
 
 fn void live_backend_resource_is_reported_before_device_teardown() @test {
     gpu::Device device = make_dbg_device();
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::BufferDesc desc = {
         .size        = 128,
         .usage       = { .storage },
@@ -800,9 +797,8 @@ fn void live_backend_resource_is_reported_before_device_teardown() @test {
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "canary_buffer",
     };
-    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &desc)!!;
+    vk::BufferHandle buffer = vk::create_buffer_for_state(state, &desc)!!;
     assert(buffer.is_valid(), "private backend storage is live");
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
     assert(vk::report_resource_leaks(state) == 1, "the live private backing is reported");
     destroy_test_device(&device)!!;
 }
@@ -813,12 +809,12 @@ fn void callback_reports_leaks_without_validation() @test {
         .named_resources_valid = true,
     };
     gpu::RuntimeDesc device_desc = {
-        .backend          = gpu::BackendKind.VULKAN,
         .debug_callback   = &capture_leak_message,
         .debug_user_data  = &capture,
         .application_name = "gpu_callback_leak_test",
     };
     gpu::Device device = create_test_device(&device_desc)!!;
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::BufferDesc buffer_desc = {
         .size        = 128,
         .usage       = { .storage },
@@ -826,8 +822,7 @@ fn void callback_reports_leaks_without_validation() @test {
         .access      = { .graphics, .compute, .transfer },
         .debug_name  = "leaky_gpu_span_storage",
     };
-    vk::BufferHandle buffer = vk::vk_create_buffer(&device, &buffer_desc)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::BufferHandle buffer = vk::create_buffer_for_state(state, &buffer_desc)!!;
     capture = {
         .metadata_valid        = true,
         .named_resources_valid = true,
@@ -842,6 +837,6 @@ fn void callback_reports_leaks_without_validation() @test {
         "private backing storage exposes no private handle identity");
     assert(capture.private_span_wording_valid,
         "private backing storage uses semantic GPU span wording");
-    vk::vk_destroy_buffer(&device, buffer)!!;
+    vk::destroy_buffer_for_state(state, buffer)!!;
     destroy_test_device(&device)!!;
 }

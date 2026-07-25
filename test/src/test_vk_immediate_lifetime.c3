@@ -72,7 +72,6 @@ fn vk::Result distinct_upstream_counter_query(
 
 fn gpu::Device make_lifetime_test_device() {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,
@@ -124,8 +123,7 @@ fn void unreferenced_destroy_is_immediate() @test {
     defer destroy_test_device(&device)!!;
     OwnedSpan owned = make_lifetime_span(&device, "immediate_unreferenced");
     gpu::GpuAllocation stale = owned.allocation;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::reset_completion_work_counters(state);
 
     gpu::free_allocation(&device, &owned.allocation)!!;
@@ -150,8 +148,7 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
             free_owned_span(&device, &owned)!!;
         }
     }
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
@@ -385,7 +382,7 @@ fn void incomplete_submitted_commands_retain_references() @test {
     }
     gpu::wait_completion(completion)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::QueueCompletionState* queue_completion =
         vk::queue_completion_state(state, queue.id)!!;
     assert(queue_completion.submitted_count == 0,
@@ -402,7 +399,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     gpu::Device device = make_lifetime_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
 
     vk::AttachmentViewSlot borrowed_view = { .swapchain_owned = true };
     gpu::AttachmentViewHandle view =
@@ -417,7 +414,7 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::track_command_reference(
         state:      state,
         record:     record,

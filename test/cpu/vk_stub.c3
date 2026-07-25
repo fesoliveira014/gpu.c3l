@@ -6,11 +6,191 @@ import std::atomic;
 import std::core::mem;
 import std::thread;
 
+alias CmdCopyBufferFn @private = fn void? (
+    CommandRecord*,
+    gpu::BufferCopyDesc*,
+);
+alias CmdFillBufferFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuSpan,
+    uint,
+);
+alias CmdCopyBufferToTextureFn @private = fn void? (
+    CommandRecord*,
+    gpu::BufferTextureCopyDesc*,
+);
+alias CmdCopyTextureToBufferFn @private = fn void? (
+    CommandRecord*,
+    gpu::TextureBufferCopyDesc*,
+);
+alias CmdBarrierFn @private = fn void? (CommandRecord*, gpu::Barrier*);
+alias CmdTextureBarrierFn @private = fn void? (
+    CommandRecord*,
+    gpu::TextureBarrier*,
+);
+alias CmdBindPipelineFn @private = fn void? (
+    CommandRecord*,
+    gpu::PipelineHandle,
+);
+alias CmdSetDepthStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::DepthState*,
+);
+alias CmdSetRasterStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::DynamicRasterState*,
+);
+alias CmdSetGraphicsStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::GraphicsState*,
+);
+alias CmdSetColorStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::ColorState*,
+);
+alias CmdDispatchFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::Vec3u,
+);
+alias CmdBeginRenderPassFn @private = fn void? (
+    CommandRecord*,
+    gpu::RenderPassDesc*,
+);
+alias CmdBeginRenderPassWithStateFn @private = fn void? (
+    CommandRecord*,
+    gpu::RenderPassDesc*,
+    gpu::GraphicsState*,
+);
+alias CmdSetViewportFn @private = fn void? (
+    CommandRecord*,
+    gpu::Viewport*,
+);
+alias CmdSetScissorFn @private = fn void? (
+    CommandRecord*,
+    gpu::ScissorRect*,
+);
+alias CmdEndRenderPassFn @private = fn void? (CommandRecord*);
+alias CmdDrawFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+);
+alias CmdDrawIndexedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    gpu::IndexType index_type,
+);
+alias CmdDrawIndirectFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+);
+alias CmdDrawIndexedIndirectFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+);
+alias CmdDrawIndexedIndirectCountFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+);
+alias CmdDispatchIndirectFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::GpuSpan,
+);
+alias CmdDrawGeneratedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+);
+alias CmdDrawIndexedGeneratedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+);
+alias CmdDispatchGeneratedFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+);
+alias CmdBeginLabelFn @private = fn void? (
+    CommandRecord*,
+    ZString,
+    float[4],
+);
+alias CmdEndLabelFn @private = fn void? (CommandRecord*);
+
 const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
 const float STUB_SAMPLER_ANISOTROPY_LIMIT @private = 16.0f;
+const uint STUB_COMMAND_CAPACITY @private = 64;
 
-struct StubRuntimeState {
+struct CommandRecord @public {
+    CommandOps*                      ops;
+    VkDeviceState*                   device_state;
+    gpu::Device                      device;
+    gpu::internal::CommandListHandle identity;
+    gpu::internal::CommandState      state;
+    gpu::Queue                       queue;
+}
+
+struct CommandOps @public {
+    CmdCopyBufferFn               copy_buffer;
+    CmdFillBufferFn               fill_buffer;
+    CmdCopyBufferToTextureFn      copy_buffer_to_texture;
+    CmdCopyTextureToBufferFn      copy_texture_to_buffer;
+    CmdBarrierFn                  barrier;
+    CmdTextureBarrierFn           texture_barrier;
+    CmdBindPipelineFn             bind_pipeline;
+    CmdSetDepthStateFn            set_depth_state;
+    CmdSetRasterStateFn           set_raster_state;
+    CmdSetGraphicsStateFn         set_graphics_state;
+    CmdSetColorStateFn            set_color_state;
+    CmdDispatchFn                 dispatch;
+    CmdBeginRenderPassFn          begin_render_pass;
+    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
+    CmdSetViewportFn              set_viewport;
+    CmdSetScissorFn               set_scissor;
+    CmdEndRenderPassFn            end_render_pass;
+    CmdDrawFn                     draw;
+    CmdDrawIndexedFn              draw_indexed;
+    CmdDrawIndirectFn             draw_indirect;
+    CmdDrawIndexedIndirectFn      draw_indexed_indirect;
+    CmdDrawIndexedIndirectCountFn draw_indexed_indirect_count;
+    CmdDispatchIndirectFn         dispatch_indirect;
+    CmdDrawGeneratedFn            draw_generated;
+    CmdDrawIndexedGeneratedFn     draw_indexed_generated;
+    CmdDispatchGeneratedFn        dispatch_generated;
+    CmdBeginLabelFn               begin_label;
+    CmdEndLabelFn                 end_label;
+}
+
+struct VkRuntimeState @public {
     gpu::Runtime runtime;
     uint         adapter_count;
 }
@@ -20,21 +200,89 @@ struct StubSamplerSlot {
     gpu::SamplerIndex index;
 }
 
-struct StubDeviceState {
+struct VkDeviceState @public {
     gpu::Adapter         adapter;
     gpu::Surface         surface;
+    gpu::Device          owner;
+    gpu::Queue           allocator_queue;
+    gpu::CommandAllocatorDesc allocator_desc;
+    CommandOps*          command_ops;
+    CommandRecord[STUB_COMMAND_CAPACITY] command_records;
     gpu::GpuAllocation   allocation;
+    gpu::AllocationDesc  allocation_desc;
     gpu::TextureHandle   texture;
     gpu::SwapchainHandle swapchain;
+    gpu::SwapchainInfo   swapchain_info;
+    char[128]            allocation_mapping;
     StubSamplerSlot[STUB_SAMPLER_CAPACITY] samplers;
     Atomic{bool}         sampler_lock;
     ulong                resource_owner;
     uint                 sampler_count;
     uint                 sampler_intern_attempts;
     uint                 sampler_native_creates;
+    uint                 allocator_creates;
+    uint                 allocator_destroy_calls;
+    uint[STUB_COMMAND_CAPACITY] command_generations;
+    uint                 next_command;
+    uint                 completion_poll_calls;
+    uint                 completion_wait_calls;
+    uint                 completion_last_queue_id;
+    uint                 pins_during_submit;
+    ulong                completion_current;
+    ulong                completion_last_sequence;
+    ulong                completion_last_timeout_ns;
+    ulong                completion_sequence;
+    uint                 allocation_attempts;
+    uint                 allocation_free_calls;
+    uint                 allocation_flush_calls;
+    uint                 allocation_invalidate_calls;
+    uint                 allocation_visibility_entries;
+    uint                 texture_support_queries;
+    uint                 texture_requirements_calls;
+    uint                 texture_create_attempts;
+    uint                 texture_placed_calls;
+    uint                 texture_dedicated_calls;
+    uint                 root_diagnostic_calls;
+    ZString              root_diagnostic_operation;
+    fault                root_diagnostic_fault;
+    fault                completion_wait_fault;
+    gpu::DebugResourceKind root_diagnostic_resource_kind;
+    ZString              root_diagnostic_rejected_field;
+    ZString              root_diagnostic_invariant;
+    Atomic{bool}         destroy_entered;
+    Atomic{bool}         destroy_release;
+    Atomic{bool}         check_entered;
+    Atomic{bool}         check_release;
+    Atomic{uint}         check_calls;
+    Atomic{uint}         destroy_calls;
+    Atomic{bool}         discard_entered;
+    Atomic{bool}         discard_release;
+    Atomic{bool}         memory_stats_entered;
+    Atomic{bool}         memory_stats_release;
     bool                 allocation_live;
+    bool                 allocation_has_texture_placement;
     bool                 texture_live;
     bool                 swapchain_live;
+    bool                 block_destroy;
+    bool                 block_check;
+    bool                 destroy_busy;
+    bool                 publish_child_on_check;
+    bool                 allocation_block_free;
+    bool                 allocation_out_of_memory;
+    bool                 texture_out_of_memory;
+    bool                 block_memory_stats;
+    bool                 free_on_destroy;
+    bool                 reject_allocator_create;
+    bool                 reject_allocator_destroy;
+    bool                 return_invalid_allocator;
+    bool                 return_foreign_allocator;
+    bool[STUB_COMMAND_CAPACITY] command_used;
+    bool                 reject_discard;
+    bool                 reject_end;
+    bool                 block_discard;
+    bool                 reuse_command_index;
+    bool                 submit_busy;
+    bool                 lose_during_submit;
 }
 
 uint configured_adapter_count @private = 1;
@@ -50,7 +298,6 @@ bool fail_device_after_temporary_allocation @private;
 gpu::Adapter last_device_adapter @private;
 uint runtime_creates @private;
 uint runtime_destroys @private;
-bool surface_destroy_available @private = true;
 bool probe_destroy_visibility @private;
 fault destroy_visibility_fault @private;
 uint surface_creates @private;
@@ -62,21 +309,296 @@ uint allocation_free_attempts @private;
 uint texture_destroy_attempts @private;
 uint sampler_native_destroys @private;
 
-fn void lock_stub_samplers(StubDeviceState* state) @private {
+fn void lock_stub_samplers(VkDeviceState* state) @private {
     while (state.sampler_lock.set(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
 }
 
-fn void unlock_stub_samplers(StubDeviceState* state) @private {
+fn void unlock_stub_samplers(VkDeviceState* state) @private {
     (void)state.sampler_lock.clear(AtomicOrdering.RELEASE);
 }
 
-fn gpu::SamplerIndex? intern_stub_sampler(
-    gpu::Device* device,
+fn void? vk_begin_commands(
+    VkDeviceState* state,
+    gpu::CommandAllocator* allocator,
+    gpu::CommandList* out_commands,
+) {
+    if (state == null || allocator == null || out_commands == null) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.command_ops == null) return gpu::BACKEND_ERROR~;
+    gpu::Device device = allocator.device;
+    gpu::internal::DeviceData* data =
+        gpu::internal::resolve_pinned_device(&device);
+    if (data == null || data.state != state) return gpu::INVALID_HANDLE~;
+
+    state.next_command++;
+    uint index = state.reuse_command_index ? 1 : state.next_command;
+    if (index >= state.command_records.len) return gpu::SLOT_TABLE_FULL~;
+    if (state.command_used[index]) return gpu::DEVICE_BUSY~;
+    state.command_generations[index]++;
+    if (state.command_generations[index] == 0) {
+        state.command_generations[index] = 1;
+    }
+    gpu::internal::CommandListHandle identity = {
+        .owner = gpu::internal::resource_owner_tag(
+            data.resource_owner,
+            gpu::internal::ResourceOwnerKind.COMMAND,
+        ),
+        .index = index,
+        .generation = state.command_generations[index],
+    };
+    state.command_records[index] = {
+        .ops          = state.command_ops,
+        .device_state = state,
+        .device       = device,
+        .identity     = identity,
+        .state        = gpu::internal::CommandState.RECORDING,
+        .queue        = allocator.queue,
+    };
+    state.command_used[index] = true;
+    gpu::internal::publish_command_list(
+        &state.command_records[index],
+        out_commands,
+    );
+}
+
+fn void? vk_end_commands(
+    VkDeviceState* state,
+    CommandRecord* record,
+) {
+    if (state == null || record == null || record.device_state != state) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.reject_end) return gpu::DEVICE_BUSY~;
+    if (record.state != gpu::internal::CommandState.RECORDING) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    record.state = gpu::internal::CommandState.EXECUTABLE;
+}
+
+fn void? vk_discard_commands(
+    VkDeviceState* state,
+    CommandRecord* record,
+    bool executable,
+) {
+    if (state == null
+        || record == null
+        || record.device_state != state
+        || !record.identity.is_valid()) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.reject_discard) return gpu::DEVICE_BUSY~;
+    bool state_matches = executable
+        ? record.state == gpu::internal::CommandState.EXECUTABLE
+        : record.state == gpu::internal::CommandState.RECORDING
+            || record.state
+                == gpu::internal::CommandState.RECORDING_RENDER_PASS;
+    if (!state_matches) return gpu::COMMAND_RECORDING_ERROR~;
+    uint index = record.identity.index;
+    if (index >= state.command_records.len
+        || !state.command_used[index]
+        || record != &state.command_records[index]) {
+        return gpu::INVALID_HANDLE~;
+    }
+
+    record.state = gpu::internal::CommandState.INACTIVE;
+    state.discard_entered.store(true, AtomicOrdering.RELEASE);
+    while (state.block_discard
+        && !state.discard_release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    state.command_records[index] = {};
+    state.command_used[index] = false;
+}
+
+fn bool? vk_poll_completion(
+    VkDeviceState* state,
+    uint queue_id,
+    ulong sequence,
+) {
+    if (state == null) return gpu::INVALID_HANDLE~;
+    state.completion_poll_calls++;
+    state.completion_last_queue_id = queue_id;
+    state.completion_last_sequence = sequence;
+    return state.completion_current >= sequence;
+}
+
+fn void? vk_wait_completion(
+    VkDeviceState* state,
+    uint queue_id,
+    ulong sequence,
+    ulong timeout_ns,
+) {
+    if (state == null) return gpu::INVALID_HANDLE~;
+    state.completion_wait_calls++;
+    state.completion_last_queue_id = queue_id;
+    state.completion_last_sequence = sequence;
+    state.completion_last_timeout_ns = timeout_ns;
+    if (state.completion_wait_fault) {
+        return state.completion_wait_fault~;
+    }
+}
+
+fn gpu::CompletionPoint? vk_submit(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    gpu::SubmitDesc* desc,
+) {
+    if (state == null || desc == null) return gpu::INVALID_HANDLE~;
+    gpu::internal::DeviceData* data =
+        gpu::internal::resolve_pinned_device(&queue.device);
+    if (data == null || data.state != state) return gpu::INVALID_HANDLE~;
+    gpu::internal::DeviceSlotControl control =
+        (gpu::internal::DeviceSlotControl)
+            gpu::internal::device_slots[queue.device.index]
+                .control.load(AtomicOrdering.ACQUIRE);
+    state.pins_during_submit = control.pins;
+    if (state.submit_busy) return gpu::DEVICE_BUSY~;
+    if (state.completion_sequence == gpu::internal::MAX_COMPLETION_SEQUENCE) {
+        return gpu::SLOT_TABLE_FULL~;
+    }
+
+    CommandRecord*[gpu::internal::MAX_DEVICE_COMMANDS] records;
+    foreach (i, &commands : desc.command_lists) {
+        CommandRecord* record =
+            gpu::internal::executable_command(commands)!;
+        if (record.device_state != state || record.queue != queue) {
+            return gpu::INVALID_HANDLE~;
+        }
+        for (sz previous = 0; previous < i; previous++) {
+            if (records[previous] == record) {
+                return gpu::COMMAND_RECORDING_ERROR~;
+            }
+        }
+        records[i] = record;
+    }
+
+    state.completion_sequence++;
+    gpu::CompletionPoint point = gpu::internal::make_completion_point(
+        queue,
+        state.completion_sequence,
+    )!;
+    if (state.lose_during_submit) {
+        gpu::internal::mark_device_lost(&queue.device);
+    }
+    foreach (record : records[:desc.command_lists.len]) {
+        record.state = gpu::internal::CommandState.INACTIVE;
+        state.command_used[record.identity.index] = false;
+        gpu::internal::release_command_record_ownership(record.device);
+    }
+    return point;
+}
+
+fn gpu::CommandAllocatorHandle? vk_create_command_allocator(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    gpu::CommandAllocatorDesc* desc,
+) {
+    if (state == null || desc == null) return gpu::INVALID_HANDLE~;
+    state.allocator_creates++;
+    state.allocator_queue = queue;
+    state.allocator_desc = *desc;
+    if (state.reject_allocator_create) return gpu::DEVICE_BUSY~;
+    if (state.return_invalid_allocator) return {};
+    gpu::CommandAllocatorHandle handle = {
+        .owner = gpu::internal::resource_owner_tag(
+            state.resource_owner,
+            gpu::internal::ResourceOwnerKind.COMMAND_ALLOCATOR,
+        ),
+        .index = 0,
+        .generation = state.allocator_creates,
+    };
+    if (state.return_foreign_allocator) handle.owner++;
+    return handle;
+}
+
+fn void? vk_destroy_command_allocator(
+    VkDeviceState* state,
+    gpu::CommandAllocatorHandle handle,
+) {
+    if (state == null) return gpu::INVALID_HANDLE~;
+    state.allocator_destroy_calls++;
+    if (!handle.is_valid()) return gpu::INVALID_HANDLE~;
+    if (state.reject_allocator_destroy) return gpu::RESOURCE_IN_USE~;
+}
+
+fn void? vk_reserve_generated_scratch(
+    VkDeviceState* state,
+    gpu::CommandAllocator* allocator,
+    gpu::GeneratedScratchDesc* desc,
+) {
+    (void)state;
+    (void)allocator;
+    (void)desc;
+}
+
+fn void? vk_release_generated_scratch(
+    VkDeviceState* state,
+    gpu::CommandAllocator* allocator,
+    gpu::PipelineHandle pipeline,
+    gpu::GeneratedWorkKind kind,
+) {
+    (void)state;
+    (void)allocator;
+    (void)pipeline;
+    (void)kind;
+}
+
+fn gpu::AttachmentViewHandle? vk_create_attachment_view(
+    VkDeviceState* state,
+    gpu::AttachmentViewDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_destroy_attachment_view(
+    VkDeviceState* state,
+    gpu::AttachmentViewHandle view,
+) {
+    (void)state;
+    (void)view;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::TextureView? vk_create_texture_view(
+    VkDeviceState* state,
+    gpu::TextureHandle texture,
+    gpu::TextureViewDesc* desc,
+) {
+    (void)state;
+    (void)texture;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_destroy_texture_view(
+    VkDeviceState* state,
+    gpu::TextureView view,
+) {
+    (void)state;
+    (void)view;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_create_texture_views(
+    VkDeviceState* state,
+    gpu::TextureViewCreateDesc[] descs,
+    gpu::TextureView[] out_views,
+) {
+    (void)state;
+    (void)descs;
+    (void)out_views;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::SamplerIndex? vk_intern_sampler(
+    VkDeviceState* state,
     gpu::SamplerDesc* desc,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
@@ -98,15 +620,104 @@ fn gpu::SamplerIndex? intern_stub_sampler(
     return index;
 }
 
+fn gpu::PipelineHandle? vk_create_compute_pipeline(
+    VkDeviceState* state,
+    gpu::ComputePipelineDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::PipelineHandle? vk_create_graphics_pipeline(
+    VkDeviceState* state,
+    gpu::GraphicsPipelineDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::PipelineHandle? vk_create_dynamic_graphics_pipeline(
+    VkDeviceState* state,
+    gpu::DynamicGraphicsPipelineDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_create_compute_pipelines(
+    VkDeviceState* state,
+    gpu::ComputePipelineDesc[] descs,
+    gpu::PipelineHandle[] out_pipelines,
+) {
+    (void)state;
+    (void)descs;
+    (void)out_pipelines;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_create_graphics_pipelines(
+    VkDeviceState* state,
+    gpu::GraphicsPipelineDesc[] descs,
+    gpu::PipelineHandle[] out_pipelines,
+) {
+    (void)state;
+    (void)descs;
+    (void)out_pipelines;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_create_dynamic_graphics_pipelines(
+    VkDeviceState* state,
+    gpu::DynamicGraphicsPipelineDesc[] descs,
+    gpu::PipelineHandle[] out_pipelines,
+) {
+    (void)state;
+    (void)descs;
+    (void)out_pipelines;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_destroy_pipeline(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+) {
+    (void)state;
+    (void)pipeline;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn usz? vk_get_pipeline_cache_size(VkDeviceState* state) {
+    (void)state;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn usz? vk_get_pipeline_cache_data(
+    VkDeviceState* state,
+    char[] out,
+) {
+    (void)state;
+    (void)out;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn uint stub_sampler_intern_attempt_count(gpu::Device* device) {
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!!;
+    defer gpu::internal::end_device_operation(&operation);
+    VkDeviceState* state = operation.state;
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     return state.sampler_intern_attempts;
 }
 
 fn uint stub_sampler_native_create_count(gpu::Device* device) {
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!!;
+    defer gpu::internal::end_device_operation(&operation);
+    VkDeviceState* state = operation.state;
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     return state.sampler_native_creates;
@@ -114,8 +725,7 @@ fn uint stub_sampler_native_create_count(gpu::Device* device) {
 
 fn uint stub_sampler_native_destroy_count() => sampler_native_destroys;
 
-fn void destroy_stub_runtime(void* backend_state) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
+fn void destroy_vk_runtime_state(VkRuntimeState* state) {
     if (probe_destroy_visibility) {
         destroy_visibility_fault = @catch(gpu::enumerate_adapters(&state.runtime));
         probe_destroy_visibility = false;
@@ -124,8 +734,7 @@ fn void destroy_stub_runtime(void* backend_state) {
     mem::free(state);
 }
 
-fn gpu::AdapterInfo? get_stub_adapter_info(void* backend_state, uint index) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
+fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
     device_support_queries++;
     if (state == null || index >= state.adapter_count) return gpu::INVALID_HANDLE~;
     return {
@@ -144,8 +753,10 @@ fn gpu::AdapterInfo? get_stub_adapter_info(void* backend_state, uint index) {
     };
 }
 
-fn gpu::AdapterDiagnostics? get_stub_adapter_diagnostics(void* backend_state, uint index) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
+fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
+    VkRuntimeState* state,
+    uint index,
+) {
     if (state == null || index >= state.adapter_count) return gpu::INVALID_HANDLE~;
     return {
         .backend_name = "stub",
@@ -153,68 +764,66 @@ fn gpu::AdapterDiagnostics? get_stub_adapter_diagnostics(void* backend_state, ui
     };
 }
 
-fn void*? create_stub_win32_surface(
-    void* backend_state,
+fn void*? vk_create_win32_surface(
+    VkRuntimeState* state,
     void* instance,
     void* window,
 ) {
-    if (backend_state == null || instance == null || window == null) {
+    if (state == null || instance == null || window == null) {
         return gpu::INVALID_ARGUMENT~;
     }
     surface_creates++;
     return mem::new(char);
 }
 
-fn void*? create_stub_wayland_surface(
-    void* backend_state,
+fn void*? vk_create_wayland_surface(
+    VkRuntimeState* state,
     void* display,
     void* surface,
 ) {
-    return create_stub_win32_surface(
-        backend_state,
+    return vk_create_win32_surface(
+        state,
         display,
         surface,
     );
 }
 
-fn void*? create_stub_x11_surface(
-    void* backend_state,
+fn void*? vk_create_x11_surface(
+    VkRuntimeState* state,
     void* display,
     ulong window,
 ) {
-    if (backend_state == null || display == null || window == 0) {
+    if (state == null || display == null || window == 0) {
         return gpu::INVALID_ARGUMENT~;
     }
     surface_creates++;
     return mem::new(char);
 }
 
-fn void destroy_stub_surface(void* backend_state, void* surface) {
-    if (backend_state == null || surface == null) return;
+fn void vk_destroy_surface(VkRuntimeState* state, void* surface) {
+    if (state == null || surface == null) return;
     surface_destroys++;
     mem::free(surface);
 }
 
-fn bool? supports_stub_presentation(
-    void* backend_state,
+fn bool? vk_supports_presentation(
+    VkRuntimeState* state,
     uint adapter_index,
     void* surface,
 ) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
     if (state == null || surface == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
     return presentation_supported;
 }
 
-fn bool? supports_stub_queue_requirements(
-    void* backend_state,
+fn bool? vk_supports_queue_requirements(
+    VkRuntimeState* state,
     uint adapter_index,
     gpu::QueueRequirements* requirements,
     void* backend_surface,
 ) {
     (void)backend_surface;
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
     if (state == null || requirements == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
@@ -231,11 +840,10 @@ fn bool? supports_stub_queue_requirements(
     return true;
 }
 
-fn bool? supports_stub_resource_agnostic_texture_sync(
-    void* backend_state,
+fn bool? vk_supports_resource_agnostic_texture_sync(
+    VkRuntimeState* state,
     uint adapter_index,
 ) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
     if (state == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
@@ -243,11 +851,10 @@ fn bool? supports_stub_resource_agnostic_texture_sync(
     return configured_resource_agnostic_texture_sync_support;
 }
 
-fn bool? supports_stub_dynamic_color_state(
-    void* backend_state,
+fn bool? vk_supports_dynamic_color_state(
+    VkRuntimeState* state,
     uint adapter_index,
 ) {
-    StubRuntimeState* state = (StubRuntimeState*)backend_state;
     if (state == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
@@ -255,47 +862,32 @@ fn bool? supports_stub_dynamic_color_state(
     return configured_dynamic_color_state_support;
 }
 
-const gpu::internal::RuntimeBackendVTable STUB_RUNTIME_VTABLE @private = {
-    .destroy_runtime         = &destroy_stub_runtime,
-    .get_adapter_info        = &get_stub_adapter_info,
-    .get_adapter_diagnostics = &get_stub_adapter_diagnostics,
-    .create_win32_surface    = &create_stub_win32_surface,
-    .create_wayland_surface  = &create_stub_wayland_surface,
-    .create_x11_surface      = &create_stub_x11_surface,
-    .destroy_surface         = &destroy_stub_surface,
-    .supports_presentation   = &supports_stub_presentation,
-    .supports_queue_requirements = &supports_stub_queue_requirements,
-    .supports_resource_agnostic_texture_sync = &supports_stub_resource_agnostic_texture_sync,
-    .supports_dynamic_color_state = &supports_stub_dynamic_color_state,
-};
-
-const gpu::internal::RuntimeBackendVTable STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY @private = {
-    .destroy_runtime         = &destroy_stub_runtime,
-    .get_adapter_info        = &get_stub_adapter_info,
-    .get_adapter_diagnostics = &get_stub_adapter_diagnostics,
-    .create_win32_surface    = &create_stub_win32_surface,
-    .create_wayland_surface  = &create_stub_wayland_surface,
-    .create_x11_surface      = &create_stub_x11_surface,
-    .supports_presentation   = &supports_stub_presentation,
-    .supports_queue_requirements = &supports_stub_queue_requirements,
-    .supports_resource_agnostic_texture_sync = &supports_stub_resource_agnostic_texture_sync,
-    .supports_dynamic_color_state = &supports_stub_dynamic_color_state,
-};
-
 fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
-    StubRuntimeState* state = mem::new(StubRuntimeState);
+    VkRuntimeState* state = mem::new(VkRuntimeState);
     state.adapter_count = configured_adapter_count;
     runtime_creates++;
-    defer catch destroy_stub_runtime(state);
+    defer catch destroy_vk_runtime_state(state);
     gpu::Runtime runtime = gpu::internal::register_runtime(
-        backend:       gpu::BackendKind.VULKAN,
-        vtable:        surface_destroy_available
-            ? &STUB_RUNTIME_VTABLE
-            : &STUB_RUNTIME_VTABLE_NO_SURFACE_DESTROY,
-        backend_state: state,
+        state:         state,
         adapter_count: state.adapter_count,
     )!;
     state.runtime = runtime;
+    if (desc.debug_callback != null) {
+        gpu::DebugMessage message = {
+            .severity     = gpu::DebugMessageSeverity.INFO,
+            .category     = {
+                .backend = true,
+                .general = true,
+            },
+            .operation    = "create_runtime",
+            .backend_text = "stub runtime initialized",
+        };
+        gpu::internal::dispatch_debug_message(
+            desc.debug_callback,
+            desc.debug_user_data,
+            &message,
+        );
+    }
     return runtime;
 }
 
@@ -344,16 +936,12 @@ fn void stub_fail_device_after_temporary_allocation(bool fail) {
     fail_device_after_temporary_allocation = fail;
 }
 
-fn void stub_set_surface_destroy_available(bool available) {
-    surface_destroy_available = available;
-}
-
 fn gpu::Adapter stub_last_device_adapter() => last_device_adapter;
 
 fn gpu::Adapter? stub_device_adapter(gpu::Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
+    VkDeviceState* state = operation.state;
     if (state == null) return gpu::INVALID_HANDLE~;
     return state.adapter;
 }
@@ -403,24 +991,80 @@ fn void stub_set_presentation_support(bool supported) {
     presentation_supported = supported;
 }
 
-fn void destroy_stub_device(void* backend_state) {
-    StubDeviceState* state = (StubDeviceState*)backend_state;
+fn void? vk_check_device_destroy(VkDeviceState* state) {
+    (void)state.check_calls.add(1, AtomicOrdering.RELEASE);
+    state.check_entered.store(true, AtomicOrdering.RELEASE);
+    while (state.block_check
+        && !state.check_release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    if (state.publish_child_on_check) {
+        (void)gpu::internal::device_slots[state.owner.index].live_children.add(
+            1,
+            AtomicOrdering.RELEASE,
+        );
+    }
+    if (state.destroy_busy) return gpu::DEVICE_BUSY~;
+}
+
+fn void vk_destroy_device(VkDeviceState* state) {
+    state.destroy_entered.store(true, AtomicOrdering.RELEASE);
+    while (state.block_destroy
+        && !state.destroy_release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
     if (state.swapchain_live) {
         gpu::internal::surface_release_swapchain(&state.surface)!!;
     }
     sampler_native_destroys += state.sampler_count;
-    device_temporary_destroys++;
-    mem::free(state);
+    (void)state.destroy_calls.add(1, AtomicOrdering.RELEASE);
+    if (state.free_on_destroy) {
+        device_temporary_destroys++;
+        mem::free(state);
+    }
 }
 
-fn gpu::GpuAllocation? allocate_stub_memory(
-    gpu::Device* device,
+fn fault vk_report_root_contract_failure(
+    VkDeviceState* state,
+    ZString operation,
+    fault public_fault,
+    gpu::DebugResourceKind resource_kind,
+    ZString rejected_field,
+    ZString invariant,
+) {
+    state.root_diagnostic_calls++;
+    state.root_diagnostic_operation = operation;
+    state.root_diagnostic_fault = public_fault;
+    state.root_diagnostic_resource_kind = resource_kind;
+    state.root_diagnostic_rejected_field = rejected_field;
+    state.root_diagnostic_invariant = invariant;
+    return public_fault;
+}
+
+fn gpu::MemoryStats? vk_get_memory_stats(VkDeviceState* state) {
+    state.memory_stats_entered.store(true, AtomicOrdering.RELEASE);
+    while (state.block_memory_stats
+        && !state.memory_stats_release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    return {};
+}
+
+fn String? vk_build_memory_report(VkDeviceState* state, bool detailed) {
+    (void)state;
+    (void)detailed;
+    return {};
+}
+
+fn gpu::GpuAllocation? vk_allocate_memory(
+    VkDeviceState* state,
     gpu::AllocationDesc* desc,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     allocation_create_attempts++;
-    if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    state.allocation_attempts++;
+    if (state.allocation_out_of_memory) return gpu::OUT_OF_DEVICE_MEMORY~;
     if (state.allocation_live) return gpu::INVALID_RESOURCE_STATE~;
+    state.allocation_desc = *desc;
     state.allocation = {
         .owner      = gpu::internal::resource_owner_tag(
             state.resource_owner,
@@ -433,29 +1077,155 @@ fn gpu::GpuAllocation? allocate_stub_memory(
     return state.allocation;
 }
 
-fn void? free_stub_allocation(
-    gpu::Device* device,
+fn void? vk_free_allocation(
+    VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     allocation_free_attempts++;
-    if (state == null || !state.allocation_live) return gpu::INVALID_HANDLE~;
+    state.allocation_free_calls++;
+    if (!state.allocation_live) return gpu::INVALID_HANDLE~;
     if (state.allocation != allocation) return gpu::INVALID_HANDLE~;
+    if (state.allocation_block_free
+        || state.allocation_has_texture_placement) {
+        return gpu::RESOURCE_IN_USE~;
+    }
     state.allocation = {};
+    state.allocation_desc = {};
     state.allocation_live = false;
 }
+
+fn gpu::AllocationInfo? vk_get_allocation_info(
+    VkDeviceState* state,
+    gpu::GpuAllocation allocation,
+) {
+    if (!state.allocation_live || allocation != state.allocation) {
+        return gpu::INVALID_HANDLE~;
+    }
+    bool texture_memory =
+        state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE;
+    return {
+        .size         = state.allocation_desc.size,
+        .alignment    = state.allocation_desc.alignment,
+        .memory_class = state.allocation_desc.memory_class,
+        .access       = state.allocation_desc.access,
+        .mapped       = state.allocation_desc.memory_class
+            != gpu::MemoryClass.GPU_PRIVATE
+            && !texture_memory,
+        .coherent     = false,
+        .addressable  = !texture_memory,
+    };
+}
+
+fn gpu::GpuSpan? vk_get_allocation_span(
+    VkDeviceState* state,
+    gpu::GpuAllocation allocation,
+) {
+    if (!state.allocation_live || allocation != state.allocation) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return {
+        .owner      = allocation.owner,
+        .index      = allocation.index,
+        .generation = allocation.generation,
+        .size       = state.allocation_desc.size,
+    };
+}
+
+fn char[]? vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
+    if (!state.allocation_live || span.owner != state.allocation.owner
+        || span.index != state.allocation.index
+        || span.generation != state.allocation.generation) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (span.size == 0
+        || state.allocation_desc.memory_class == gpu::MemoryClass.GPU_PRIVATE
+        || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (!gpu::internal::range_fits(
+        state.allocation_desc.size,
+        span.offset,
+        span.size,
+    )) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return state.allocation_mapping[span.offset:span.size];
+}
+
+fn gpu::GpuAddress? vk_get_span_address(
+    VkDeviceState* state,
+    gpu::GpuSpan span,
+) {
+    if (!state.allocation_live || span.owner != state.allocation.owner
+        || span.index != state.allocation.index
+        || span.generation != state.allocation.generation) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (span.size == 0
+        || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE
+        || !gpu::internal::range_fits(
+            state.allocation_desc.size,
+            span.offset,
+            span.size,
+        )) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return (gpu::GpuAddress)(0x1000 + span.offset);
+}
+
+fn void? vk_flush_mapped_span(VkDeviceState* state, gpu::GpuSpan span) {
+    state.allocation_visibility_entries++;
+    (void)vk_get_span_mapping(state, span)!;
+    state.allocation_flush_calls++;
+}
+
+fn void? vk_invalidate_mapped_span(VkDeviceState* state, gpu::GpuSpan span) {
+    state.allocation_visibility_entries++;
+    (void)vk_get_span_mapping(state, span)!;
+    state.allocation_invalidate_calls++;
+}
+
 fn gpu::TextureCompatibility stub_texture_compatibility(ulong owner, uint value) {
     return (gpu::TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
 }
 
+fn gpu::TextureFormatSupport? vk_get_texture_format_support(
+    VkDeviceState* state,
+    gpu::Format format,
+) {
+    (void)state;
+    if (format == gpu::Format.UNDEFINED) return {};
+    return {
+        .features = {
+            .sampled       = true,
+            .storage       = true,
+            .color_attach  = true,
+            .depth_attach  = true,
+            .transfer_src  = true,
+            .transfer_dst  = true,
+            .linear_filter = true,
+        },
+        .sample_counts = { .one = true },
+    };
+}
 
-fn gpu::TextureRequirements? get_stub_texture_requirements(
-    gpu::Device* device,
+fn bool? vk_supports_texture_desc(
+    VkDeviceState* state,
     gpu::TextureDesc* desc,
 ) {
-    StubDeviceState* state =
-        (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (state == null || !gpu::internal::texture_desc_valid(desc)) {
+    state.texture_support_queries++;
+    return gpu::internal::texture_desc_valid(desc);
+}
+
+fn gpu::TextureRequirements? vk_get_texture_requirements(
+    VkDeviceState* state,
+    gpu::TextureDesc* desc,
+) {
+    state.texture_requirements_calls++;
+    if (!gpu::internal::texture_desc_valid(desc)) {
         return gpu::INVALID_ARGUMENT~;
     }
     return {
@@ -471,12 +1241,15 @@ fn gpu::TextureRequirements? get_stub_texture_requirements(
     };
 }
 
-fn gpu::TextureHandle? create_stub_texture(
-    gpu::Device* device,
+fn gpu::TextureHandle? vk_create_texture(
+    VkDeviceState* state,
     gpu::TextureDesc* desc,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    state.texture_create_attempts++;
+    if (!gpu::internal::texture_desc_valid(desc)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (state.texture_out_of_memory) return gpu::OUT_OF_DEVICE_MEMORY~;
     if (state.texture_live) return gpu::INVALID_RESOURCE_STATE~;
     state.texture = {
         .owner      = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.TEXTURE),
@@ -487,39 +1260,68 @@ fn gpu::TextureHandle? create_stub_texture(
     return state.texture;
 }
 
-fn gpu::TextureHandle? create_stub_placed_texture(
-    gpu::Device* device,
+fn gpu::TextureHandle? vk_create_placed_texture(
+    VkDeviceState* state,
     gpu::TextureDesc* desc,
-    gpu::GpuAllocation allocation,
+    gpu::GpuAllocation placement,
     usz offset,
 ) {
-    StubDeviceState* state =
-        (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
-    if (state == null || !state.allocation_live
-        || state.allocation != allocation || offset != 0) {
+    state.texture_placed_calls++;
+    gpu::TextureRequirements requirements =
+        vk_get_texture_requirements(state, desc)!;
+    if (!state.allocation_live
+        || state.allocation != placement
+        || state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE
+        || state.allocation_desc.size < requirements.size
+        || offset > state.allocation_desc.size - requirements.size) {
         return gpu::INVALID_ARGUMENT~;
     }
-    return create_stub_texture(device, desc);
+    gpu::TextureHandle texture = vk_create_texture(state, desc)!;
+    state.allocation_has_texture_placement = true;
+    return texture;
 }
 
-fn void? destroy_stub_texture(
-    gpu::Device* device,
+fn gpu::DedicatedTexture? vk_create_dedicated_texture(
+    VkDeviceState* state,
+    gpu::TextureDesc* desc,
+    gpu::AllocationDesc* allocation_desc,
+) {
+    state.texture_dedicated_calls++;
+    gpu::GpuAllocation allocation =
+        vk_allocate_memory(state, allocation_desc)!;
+    gpu::TextureHandle? texture = vk_create_placed_texture(
+        state:     state,
+        desc:      desc,
+        placement: allocation,
+        offset:    0,
+    );
+    if (catch err = texture) {
+        vk_free_allocation(state, allocation)!!;
+        return err~;
+    }
+    return {
+        .texture    = texture,
+        .allocation = allocation,
+    };
+}
+
+fn void? vk_destroy_texture(
+    VkDeviceState* state,
     gpu::TextureHandle texture,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     texture_destroy_attempts++;
-    if (state == null || !state.texture_live) return gpu::INVALID_HANDLE~;
+    if (!state.texture_live) return gpu::INVALID_HANDLE~;
     if (state.texture != texture) return gpu::INVALID_HANDLE~;
     state.texture = {};
     state.texture_live = false;
+    state.allocation_has_texture_placement = false;
 }
 
-fn gpu::SwapchainHandle? create_stub_swapchain(
-    gpu::Device* device,
+fn gpu::SwapchainHandle? vk_create_swapchain(
+    VkDeviceState* state,
     gpu::Surface* surface,
     gpu::SwapchainDesc* desc,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     swapchain_create_attempts++;
     if (state == null || surface == null || desc == null) return gpu::INVALID_ARGUMENT~;
     if (state.swapchain_live) return gpu::INVALID_RESOURCE_STATE~;
@@ -531,62 +1333,110 @@ fn gpu::SwapchainHandle? create_stub_swapchain(
         .index      = 0,
         .generation = 1,
     };
+    state.swapchain_info = {
+        .format       = desc.preferred_format,
+        .width        = desc.width,
+        .height       = desc.height,
+        .image_count  = desc.image_count,
+        .present_mode = desc.present_mode,
+    };
     state.swapchain_live = true;
     return state.swapchain;
 }
 
-fn void? destroy_stub_swapchain(
-    gpu::Device* device,
-    gpu::SwapchainHandle swapchain,
+fn void? vk_destroy_swapchain(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
 ) {
-    StubDeviceState* state = (StubDeviceState*)gpu::internal::device_backend_state_ptr(device);
     if (state == null || !state.swapchain_live) return gpu::INVALID_HANDLE~;
-    if (state.swapchain != swapchain) return gpu::INVALID_HANDLE~;
+    if (state.swapchain != handle) return gpu::INVALID_HANDLE~;
 
     gpu::internal::surface_release_swapchain(&state.surface)!;
     state.surface = {};
     state.swapchain = {};
+    state.swapchain_info = {};
     state.swapchain_live = false;
 }
 
-const gpu::internal::BackendVTable STUB_DEVICE_VTABLE @private = {
-    .destroy_device           = &destroy_stub_device,
-    .allocate_memory          = &allocate_stub_memory,
-    .free_allocation          = &free_stub_allocation,
-    .get_texture_requirements = &get_stub_texture_requirements,
-    .create_texture           = &create_stub_texture,
-    .create_placed_texture    = &create_stub_placed_texture,
-    .destroy_texture          = &destroy_stub_texture,
-    .intern_sampler           = &intern_stub_sampler,
-    .create_swapchain         = &create_stub_swapchain,
-    .destroy_swapchain        = &destroy_stub_swapchain,
-};
+fn void? vk_resize_swapchain(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+    uint width,
+    uint height,
+) {
+    if (state == null || !state.swapchain_live || state.swapchain != handle) {
+        return gpu::INVALID_HANDLE~;
+    }
+    state.swapchain_info.width = width;
+    state.swapchain_info.height = height;
+}
+
+fn gpu::SwapchainInfo? vk_get_swapchain_info(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+) {
+    if (state == null || !state.swapchain_live || state.swapchain != handle) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return state.swapchain_info;
+}
+
+fn gpu::AcquiredImage? vk_acquire_next_image(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+    ulong timeout_ns,
+) {
+    (void)timeout_ns;
+    if (state == null || !state.swapchain_live || state.swapchain != handle) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_present(
+    VkDeviceState* state,
+    gpu::AcquiredImage* image,
+    gpu::CompletionPoint render_completion,
+) {
+    (void)state;
+    (void)image;
+    (void)render_completion;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::PresentModeSupport? vk_get_present_mode_support(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+) {
+    if (state == null || !state.swapchain_live || state.swapchain != handle) {
+        return gpu::INVALID_HANDLE~;
+    }
+    return { .fifo = true };
+}
 
 fn gpu::Device? stub_create_strict_disabled_device() {
-    StubDeviceState* state = mem::new(StubDeviceState);
+    VkDeviceState* state = mem::new(VkDeviceState);
     defer catch mem::free(state);
+    state.free_on_destroy = true;
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     return gpu::internal::register_device(
-        backend:        gpu::BackendKind.VULKAN,
+        state:          state,
         caps:           { .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT },
-        vtable:         &STUB_DEVICE_VTABLE,
-        backend_state:  state,
         resource_owner: state.resource_owner,
     );
 }
 
 fn gpu::Device? stub_create_anisotropy_disabled_device() {
-    StubDeviceState* state = mem::new(StubDeviceState);
+    VkDeviceState* state = mem::new(VkDeviceState);
     defer catch mem::free(state);
+    state.free_on_destroy = true;
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     return gpu::internal::register_device(
-        backend: gpu::BackendKind.VULKAN,
+        state: state,
         caps: {
             .strict_enabled       = true,
             .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         },
-        vtable:         &STUB_DEVICE_VTABLE,
-        backend_state:  state,
         resource_owner: state.resource_owner,
     );
 }
@@ -597,7 +1447,8 @@ fn gpu::Device? create_vk_device(
     gpu::Runtime* retained_runtime,
 ) {
     gpu::internal::validate_device_request(request)!;
-    StubDeviceState* state = mem::new(StubDeviceState);
+    VkDeviceState* state = mem::new(VkDeviceState);
+    state.free_on_destroy = true;
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     device_temporary_creates++;
     defer catch {
@@ -625,16 +1476,15 @@ fn gpu::Device? create_vk_device(
         .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
     };
     return gpu::internal::register_device(
-        backend:              gpu::BackendKind.VULKAN,
+        state:                state,
         caps:                 caps,
-        vtable:               &STUB_DEVICE_VTABLE,
-        backend_state:        state,
         resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
         adapter:              adapter,
         presentation_surface: presentation_surface.is_valid()
             ? &presentation_surface
             : null,
-        queues:               queues,
+        queues: queues,
+        owner:  &state.owner,
     );
 }

@@ -6,7 +6,7 @@ import vk;
 import std::core::mem;
 import std::io;
 
-struct VkRuntimeState {
+struct VkRuntimeState @public {
     vk::Instance               instance;
     VkInstanceDispatch         dispatch;
     VkInstanceCapabilities     instance_capabilities;
@@ -132,25 +132,6 @@ fn void destroy_vk_runtime_state(VkRuntimeState* state) {
     mem::free(state);
 }
 
-fn void vk_destroy_runtime(void* backend_state) {
-    destroy_vk_runtime_state((VkRuntimeState*)backend_state);
-}
-
-const gpu::internal::RuntimeBackendVTable VK_RUNTIME_VTABLE @private = {
-    .destroy_runtime         = &vk_destroy_runtime,
-    .get_adapter_info        = &vk_get_adapter_info,
-    .get_adapter_diagnostics = &vk_get_adapter_diagnostics,
-    .create_win32_surface    = &vk_create_win32_surface,
-    .create_wayland_surface  = &vk_create_wayland_surface,
-    .create_x11_surface      = &vk_create_x11_surface,
-    .destroy_surface         = &vk_destroy_surface,
-    .supports_presentation   = &vk_supports_presentation,
-    .supports_queue_requirements = &vk_supports_queue_requirements,
-    .supports_resource_agnostic_texture_sync =
-        &vk_supports_resource_agnostic_texture_sync,
-    .supports_dynamic_color_state = &vk_supports_dynamic_color_state,
-};
-
 fn VkInstanceDesc runtime_instance_desc(
     gpu::RuntimeDesc* desc,
     vk::DebugUtilsMessengerCreateInfoEXT* messenger_info,
@@ -233,9 +214,7 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
 
     enumerate_vk_adapters(state)!;
     return gpu::internal::register_runtime(
-        backend:       gpu::BackendKind.VULKAN,
-        vtable:        &VK_RUNTIME_VTABLE,
-        backend_state: state,
+        state:         state,
         adapter_count: (uint)state.adapters.len,
     );
 }

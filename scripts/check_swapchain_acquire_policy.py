@@ -98,7 +98,7 @@ def validate_acquire_policy(source: str) -> list[str]:
 
     poll = blocks.get("poll_swapchain_completion", "")
     poll_body = re.compile(
-        r"return\s+vk_poll_completion\s*\(\s*device,\s*"
+        r"return\s+vk_poll_completion\s*\(\s*state,\s*"
         r"gpu::internal::completion_point_queue_id\(point\),\s*"
         r"gpu::internal::completion_point_sequence\(point\),\s*\)\s*;",
         re.DOTALL,

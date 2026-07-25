@@ -354,7 +354,7 @@ fn vk::Result create_graphics_pipeline_native(
 <* Create-info structs are assigned directly rather than through by-value
    builder setters (c3c 0.8.0 codegen crash). *>
 fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
-    gpu::Device* device,
+    VkDeviceState* state,
     PipelineKey* requested_key,
     gpu::ShaderCode* vertex_code,
     gpu::ShaderCode* fragment_code,
@@ -367,7 +367,6 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     PipelineShaderModule* batch_vertex_shader,
     PipelineShaderModule* batch_fragment_shader,
 ) {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     PipelineKey key = *requested_key;
     ulong hash = hash_key(&key);
     {
@@ -650,11 +649,9 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
 }
 
 fn gpu::PipelineHandle? vk_create_dynamic_graphics_pipeline(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::DynamicGraphicsPipelineDesc* desc,
 ) {
-    VkDeviceState* state =
-        (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
     if (!state.caps.dynamic_color_state) return gpu::UNSUPPORTED_FEATURE~;
@@ -697,7 +694,7 @@ fn gpu::PipelineHandle? vk_create_dynamic_graphics_pipeline(
         prepared[1].id,
     );
     return create_graphics_pipeline_from_modules(
-        device:                   device,
+        state:                    state,
         requested_key:            &key,
         vertex_code:              &desc.vertex_shader,
         fragment_code:            &desc.fragment_shader,
@@ -713,14 +710,12 @@ fn gpu::PipelineHandle? vk_create_dynamic_graphics_pipeline(
 }
 
 fn void? vk_create_dynamic_graphics_pipelines(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::DynamicGraphicsPipelineDesc[] descs,
     gpu::PipelineHandle[] out_pipelines,
 ) {
     if (out_pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    VkDeviceState* state =
-        (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
     if (!state.caps.dynamic_color_state) return gpu::UNSUPPORTED_FEATURE~;
@@ -786,7 +781,7 @@ fn void? vk_create_dynamic_graphics_pipelines(
         foreach (i, &desc : descs) {
             if (pipeline_creation_should_fail(state, (usz)i)) {
                 for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(device, created[rollback])!!;
+                    vk_destroy_pipeline(state, created[rollback])!!;
                 }
                 return gpu::PIPELINE_CREATE_FAILED~;
             }
@@ -797,7 +792,7 @@ fn void? vk_create_dynamic_graphics_pipelines(
             );
             gpu::PipelineHandle? created_optional =
                 create_graphics_pipeline_from_modules(
-                    device:                   device,
+                    state:                    state,
                     requested_key:            &key,
                     vertex_code:              &desc.vertex_shader,
                     fragment_code:            &desc.fragment_shader,
@@ -812,7 +807,7 @@ fn void? vk_create_dynamic_graphics_pipelines(
                 );
             if (catch create_fault = created_optional) {
                 for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(device, created[rollback])!!;
+                    vk_destroy_pipeline(state, created[rollback])!!;
                 }
                 return create_fault~;
             }
@@ -824,10 +819,9 @@ fn void? vk_create_dynamic_graphics_pipelines(
 }
 
 fn gpu::PipelineHandle? vk_create_graphics_pipeline(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::GraphicsPipelineDesc* desc,
-) @private {
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+) {
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
     validate_graphics_pipeline_desc(state, desc)!;
@@ -869,7 +863,7 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
         prepared[1].id,
     );
     return create_graphics_pipeline_from_modules(
-        device:                   device,
+        state:                    state,
         requested_key:            &key,
         vertex_code:              &desc.vertex_shader,
         fragment_code:            &desc.fragment_shader,
@@ -885,13 +879,12 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
 }
 
 fn void? vk_create_graphics_pipelines(
-    gpu::Device* device,
+    VkDeviceState* state,
     gpu::GraphicsPipelineDesc[] descs,
     gpu::PipelineHandle[] out_pipelines,
-) @private {
+) {
     if (out_pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
     if (descs.len == 0) return;
-    VkDeviceState* state = (VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
 
@@ -998,7 +991,7 @@ fn void? vk_create_graphics_pipelines(
         foreach (i, &desc : descs) {
             if (pipeline_creation_should_fail(state, (usz)i)) {
                 for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(device, created[rollback])!!;
+                    vk_destroy_pipeline(state, created[rollback])!!;
                 }
                 return gpu::PIPELINE_CREATE_FAILED~;
             }
@@ -1008,7 +1001,7 @@ fn void? vk_create_graphics_pipelines(
                 prepared_fragment[i].id,
             );
             gpu::PipelineHandle? created_optional = create_graphics_pipeline_from_modules(
-                device:                   device,
+                state:                    state,
                 requested_key:            &key,
                 vertex_code:              &desc.vertex_shader,
                 fragment_code:            &desc.fragment_shader,
@@ -1023,7 +1016,7 @@ fn void? vk_create_graphics_pipelines(
             );
             if (catch create_fault = created_optional) {
                 for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(device, created[rollback])!!;
+                    vk_destroy_pipeline(state, created[rollback])!!;
                 }
                 return create_fault~;
             }

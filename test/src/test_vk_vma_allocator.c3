@@ -1,13 +1,32 @@
 module gpu_test;
 
 import gpu;
+import gpu::internal @public;
+import gpu::internal::vk @public;
 import std::core::mem;
 
 // Headless (lavapipe): the device's VMA allocator + memory stats.
 
+
+fn void memory_queries_reject_uninitialized_allocator() @test {
+    gpu::internal::vk::VkDeviceState* state =
+        mem::new(gpu::internal::vk::VkDeviceState);
+    gpu::Device device = gpu::internal::register_device(
+        state:  state,
+        caps:   {},
+    )!!;
+
+    assert(@catch(gpu::get_memory_stats(&device)) == gpu::INVALID_ARGUMENT,
+        "stats reject an uninitialized allocator before native work");
+    assert(@catch(gpu::build_memory_report(&device, false))
+        == gpu::INVALID_ARGUMENT,
+        "reports reject an uninitialized allocator before native work");
+
+    gpu::destroy_device(&device)!!;
+}
+
 fn void allocator_stats_and_report() @test {
     gpu::RuntimeDesc desc = {
-        .backend           = gpu::BackendKind.VULKAN,
         .contract_validation      = gpu::ContractValidation.FULL,
         .track_resource_lifetimes = true,
         .enable_vulkan_validation = true,

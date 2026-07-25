@@ -998,10 +998,6 @@ def valid_document() -> dict:
                         "kind": "struct",
                         "members": [
                             {
-                                "name": "backend",
-                                "type": {"name": "BackendKind"},
-                            },
-                            {
                                 "name": "contract_validation",
                                 "type": {"name": "ContractValidation"},
                             },
@@ -1677,17 +1673,31 @@ method gpu::Runtime.is_valid
                     "visibility": "local",
                 },
             ],
-            "types": [{
-                "name": "PrivateState",
-                "uid": "gpu::internal::vk::PrivateState",
-                "visibility": "private",
-            }],
+            "types": [
+                {
+                    "name": "PrivateState",
+                    "uid": "gpu::internal::vk::PrivateState",
+                    "visibility": "private",
+                },
+                {
+                    "name": "VkRuntimeState",
+                    "uid": "gpu::internal::vk::VkRuntimeState",
+                    "visibility": "public",
+                },
+                {
+                    "name": "VkRuntimeState",
+                    "uid": "gpu::internal::vk::testing::VkRuntimeState",
+                    "visibility": "public",
+                },
+            ],
         }
         self.assertEqual(
             check_public_api.validate_generated_backend_privacy(document),
             [
                 "generated gpu::internal::vk::create_native_device "
-                "must remain private"
+                "must remain private",
+                "generated gpu::internal::vk::testing::VkRuntimeState "
+                "must remain private",
             ],
         )
 
@@ -2822,6 +2832,7 @@ method gpu::Runtime.is_valid
             "module gpu::surface::win32;\n"
             "import gpu @public;\n"
             "import gpu::internal @public;\n"
+            "import gpu::internal::vk;\n"
             "fn void create_surface() {}\n"
             "fn void extra() {}\n",
         )
@@ -2832,6 +2843,7 @@ method gpu::Runtime.is_valid
         reordered_implementation = (
             "module gpu::surface::win32;\n"
             "import gpu::internal @public;\n"
+            "import gpu::internal::vk;\n"
             "import gpu @public;\n"
             "fn void create_surface() {}\n"
         )
@@ -2871,7 +2883,7 @@ method gpu::Runtime.is_valid
                     "name": "record",
                     "type": {
                         "name": "CommandRecord*",
-                        "uid": "gpu::internal::CommandRecord",
+                        "uid": "gpu::internal::vk::CommandRecord",
                     },
                 }],
             }
@@ -3078,6 +3090,18 @@ method gpu::Runtime.is_valid
                 "backend declaration may not use @public"
             ],
         )
+        shared_type_source = (
+            "module gpu::internal::vk @private;\n"
+            "import gpu @public;\n"
+            "struct VkRuntimeState @public {}\n"
+        )
+        self.assertEqual(
+            check_public_api.validate_private_backend_source(
+                relative,
+                shared_type_source,
+            ),
+            [],
+        )
 
         wrong_module_source = (
             "module gpu::internal::vk @private;\n"
@@ -3243,6 +3267,7 @@ method gpu::Runtime.is_valid
                     f"module {module};\n"
                     "import gpu @public;\n"
                     "import gpu::internal @public;\n"
+                    "import gpu::internal::vk;\n"
                     "fn void create_surface() {}\n",
                     encoding="utf-8",
                 )

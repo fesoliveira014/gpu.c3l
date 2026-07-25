@@ -30,7 +30,6 @@ fn gpu::RuntimeDesc policy_runtime_desc(
     PolicyDiagnosticCapture* capture,
 ) {
     return {
-        .backend                  = gpu::BackendKind.VULKAN,
         .contract_validation      = contract,
         .track_resource_lifetimes = track_lifetimes,
         .enable_vulkan_validation = vulkan_layers,
@@ -42,7 +41,7 @@ fn gpu::RuntimeDesc policy_runtime_desc(
 }
 
 fn vk::VkDeviceState* policy_device_state(gpu::Device* device) {
-    return (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+    return gpu::internal::device_slots[device.index].data.state;
 }
 
 fn gpu::CommandList record_policy_fill(
@@ -214,14 +213,14 @@ fn void tracking_off_keeps_reference_storage_empty_through_retirement() @test {
 
     vk::reset_command_policy_counters(state);
     gpu::CommandList commands = record_policy_fill(&allocator, owned.span);
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     assert(record.scratch.references.ptr == null
         && record.scratch.reference_count == 0,
         "tracking-off recording owns no reference storage");
     assert_zero_tracking_work(state);
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    record = vk::backend_command(executable.record);
+    record = executable.record;
     assert(record.scratch.references.ptr == null
         && record.scratch.reference_count == 0,
         "tracking-off executable owns no reference storage");
@@ -234,8 +233,7 @@ fn void tracking_off_keeps_reference_storage_empty_through_retirement() @test {
     vk::QueueCompletionState* completion_state =
         vk::queue_completion_state(state, queue.id)!!;
     if (completion_state.submitted_head != null) {
-        vk::VkCommandRecord* submitted =
-            vk::backend_command(completion_state.submitted_head);
+        vk::CommandRecord* submitted = completion_state.submitted_head;
         vk::CommandAllocatorSlot* allocator_slot =
             state.command_allocators.get(submitted.allocator)!!;
         vk::CommandScratch* scratch =
@@ -279,7 +277,7 @@ fn void tracking_off_allows_early_caller_owned_destruction() @test {
     commands = gpu::begin_commands(
         &allocator,
     )!!;
-    vk::VkCommandRecord* reused = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* reused = vk::resolve_command(&commands)!!;
     assert(reused.scratch.references.ptr == null
         && reused.scratch.reference_count == 0,
         "tracking-off command reuse starts from empty reference storage");
@@ -576,7 +574,7 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
 
     state.validation_policy.contract = gpu::ContractValidation.TRUSTED;
     fault returned = vk::vk_report_root_contract_failure(
-        backend_state:  &state,
+        state:          &state,
         operation:      "free_allocation",
         public_fault:   gpu::INVALID_HANDLE,
         resource_kind:  gpu::DebugResourceKind.ALLOCATION,
@@ -589,7 +587,7 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
     state.validation_policy.contract =
         gpu::ContractValidation.OBJECT_BOUNDARIES;
     returned = vk::vk_report_root_contract_failure(
-        backend_state:  &state,
+        state:          &state,
         operation:      "free_allocation",
         public_fault:   gpu::INVALID_HANDLE,
         resource_kind:  gpu::DebugResourceKind.ALLOCATION,
@@ -602,7 +600,7 @@ fn void boundary_diagnostics_follow_contract_not_callback_presence() @test {
     state.debug_callback = null;
     state.validation_policy.contract = gpu::ContractValidation.FULL;
     returned = vk::vk_report_root_contract_failure(
-        backend_state:  &state,
+        state:          &state,
         operation:      "free_allocation",
         public_fault:   gpu::INVALID_HANDLE,
         resource_kind:  gpu::DebugResourceKind.ALLOCATION,
@@ -818,19 +816,19 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
         .slots = command_cells[..],
         .owner = 2,
     };
-    vk::VkCommandRecord empty = {
+    vk::CommandRecord empty = {
         .allocator        = allocator,
         .allocator_buffer = 0,
         .scratch          = &scratch[0],
     };
-    gpu::internal::CommandRecord* empty_record = state.commands.claim(
+    gpu::internal::vk::CommandRecord* empty_record = state.commands.claim(
         device:        {},
         ops:           null,
-        backend_state: &state,
+        device_state:  &state,
         value:         empty,
     )!!;
     empty_record.state = gpu::internal::CommandState.SUBMITTING;
-    gpu::internal::CommandRecord*[1] empty_records = { empty_record };
+    gpu::internal::vk::CommandRecord*[1] empty_records = { empty_record };
     completions[0].retirement_mutex.lock()!!;
     vk::publish_pending_commands_locked(
         state:      &state,
@@ -848,19 +846,19 @@ fn void submission_transfer_accepts_empty_and_populated_reference_storage() @tes
     assert_zero_tracking_work(&state);
 
     allocator_slot.live_executables = 1;
-    vk::VkCommandRecord populated = {
+    vk::CommandRecord populated = {
         .allocator        = allocator,
         .allocator_buffer = 1,
         .scratch          = &scratch[1],
     };
-    gpu::internal::CommandRecord* populated_record = state.commands.claim(
+    gpu::internal::vk::CommandRecord* populated_record = state.commands.claim(
         device:        {},
         ops:           null,
-        backend_state: &state,
+        device_state:  &state,
         value:         populated,
     )!!;
     populated_record.state = gpu::internal::CommandState.SUBMITTING;
-    gpu::internal::CommandRecord*[1] populated_records = {
+    gpu::internal::vk::CommandRecord*[1] populated_records = {
         populated_record,
     };
     completions[0].retirement_mutex.lock()!!;
@@ -902,7 +900,7 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
         vk::CommandBufferStats before = vk::command_buffer_stats(state);
         vk::reset_command_policy_counters(state);
         gpu::CommandList commands = record_policy_fill(&allocator, owned.span);
-        vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+        vk::CommandRecord* record = vk::resolve_command(&commands)!!;
         vk::CommandBufferStats recorded = vk::command_buffer_stats(state);
         assert((record.scratch.reference_count == 1) == tracking,
             "device-loss setup reflects the selected tracking policy");
@@ -1097,7 +1095,7 @@ fn void command_reference_duplicate_avoids_mutex_and_retain_work() @test {
     defer free_owned_span(&device, &owned)!!;
     vk::VkDeviceState* state = policy_device_state(&device);
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::VkCommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::reset_command_reference_work_counters(state);
 
     vk::track_command_reference(
@@ -1187,7 +1185,7 @@ fn void texture_reference_publishes_after_retain_and_deduplicates() @test {
             .epoch = 1,
         },
     };
-    vk::VkCommandRecord record = { .scratch = &scratch };
+    vk::CommandRecord record = { .scratch = &scratch };
     gpu::TextureHandle valid = {
         .owner      = state.textures.owner,
         .index      = 0,
@@ -1280,7 +1278,7 @@ fn void command_reference_rollback_releases_suffix_and_rebuilds_epoch() @test {
             reference_index: i,
         );
     }
-    vk::VkCommandRecord record = { .scratch = &scratch };
+    vk::CommandRecord record = { .scratch = &scratch };
     vk::reset_command_reference_work_counters(&state);
 
     vk::rollback_command_references(&state, &record, 1);
@@ -1335,7 +1333,7 @@ fn void command_reference_noop_rollback_preserves_epoch_and_index() @test {
         probe:           &insertion,
         reference_index: 0,
     );
-    vk::VkCommandRecord record = { .scratch = &scratch };
+    vk::CommandRecord record = { .scratch = &scratch };
     vk::reset_command_reference_work_counters(&state);
 
     vk::rollback_command_references(&state, &record, 1);
@@ -1377,7 +1375,7 @@ fn void command_reference_retain_failure_rolls_back_without_publication() @test 
             .epoch = 1,
         },
     };
-    vk::VkCommandRecord record = { .scratch = &scratch };
+    vk::CommandRecord record = { .scratch = &scratch };
     vk::reset_command_reference_work_counters(&state);
 
     vk::track_command_reference(

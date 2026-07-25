@@ -83,9 +83,8 @@ fn void rendering_attachment_layouts_follow_selected_policy() @test {
         .height = DP_RT,
     };
     gpu::internal::vk::VkDeviceState* backend =
-        (gpu::internal::vk::VkDeviceState*)
-            gpu::internal::device_backend_state(device);
-    gpu::internal::CommandRecord* record =
+        gpu::internal::device_slots[device.index].data.state;
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(&commands, false)!!;
 
     gpu::internal::vk::PreparedRenderPass classic =
@@ -235,9 +234,8 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .height = DP_RT,
     };
     gpu::internal::vk::VkDeviceState* backend =
-        (gpu::internal::vk::VkDeviceState*)
-            gpu::internal::device_backend_state(device);
-    gpu::internal::CommandRecord* record =
+        gpu::internal::device_slots[device.index].data.state;
+    gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(&commands, false)!!;
     gpu::internal::vk::PreparedRenderPass classic =
         gpu::internal::vk::lower_render_pass(record, &pass)!!;

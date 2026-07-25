@@ -59,7 +59,6 @@ distinct type gpu::GpuAddress
 distinct type gpu::TextureCompatibility
 enum gpu::AdapterClass
 enum gpu::AddressMode
-enum gpu::BackendKind
 enum gpu::BlendFactor
 enum gpu::BlendOp
 enum gpu::CompareOp
@@ -176,7 +175,6 @@ function gpu::get_adapter_diagnostics
 function gpu::get_adapter_info
 function gpu::get_allocation_info
 function gpu::get_allocation_span
-function gpu::get_device_backend
 function gpu::get_device_caps
 function gpu::get_memory_stats
 function gpu::get_pipeline_cache_data
