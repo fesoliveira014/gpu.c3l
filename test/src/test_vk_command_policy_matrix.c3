@@ -502,8 +502,7 @@ fn void exercise_policy_matrix_render(
         index_span:    {},
     )!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    ulong native_commands = 32;
-    if (state.caps.dynamic_color_state) native_commands += 3;
+    ulong native_commands = 38;
     if (state.draw_indirect_count) native_commands += 2;
     finish_and_assert_command_family_observation(
         state:                              state,
