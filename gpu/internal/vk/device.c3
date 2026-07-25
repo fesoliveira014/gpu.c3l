@@ -1317,17 +1317,17 @@ fn bool candidate_satisfies(
         desc.texture_heap_capacity,
         gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
     );
-    if (catch capacity_fault = resolved_tex) return false;
+    if (catch resolved_tex) return false;
     uint? resolved_smp = resolve_descriptor_capacity(
         desc.sampler_heap_capacity,
         gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     );
-    if (catch capacity_fault = resolved_smp) return false;
-    if (catch capacity_fault = resolve_descriptor_capacity(
+    if (catch resolved_smp) return false;
+    if (catch resolve_descriptor_capacity(
         desc.texture_capacity,
         gpu::DEFAULT_TEXTURE_CAPACITY,
     )) return false;
-    if (catch capacity_fault = resolve_descriptor_capacity(
+    if (catch resolve_descriptor_capacity(
         desc.pipeline_capacity,
         gpu::MAX_PIPELINES,
     )) return false;
