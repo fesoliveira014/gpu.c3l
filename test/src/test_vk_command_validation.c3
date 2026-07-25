@@ -38,6 +38,10 @@ struct SyncDiagnosticCapture {
     bool                   invariant_matches;
 }
 
+struct BarrierEmitCapture {
+    uint calls;
+}
+
 fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
     if (message.operation == null) return;
     SyncDiagnosticCapture* capture = (SyncDiagnosticCapture*)user_data;
@@ -58,6 +62,15 @@ fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
         && message.rejected_field.str_view() == capture.expected_rejected_field.str_view();
     capture.invariant_matches = message.invariant != null
         && message.invariant.str_view() == capture.expected_invariant.str_view();
+}
+
+fn void capture_barrier_emit(
+    void* user_data,
+    vk::MemoryBarrier2* native,
+) {
+    (void)native;
+    BarrierEmitCapture* capture = (BarrierEmitCapture*)user_data;
+    capture.calls++;
 }
 
 fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
@@ -89,6 +102,47 @@ fn void texture_copies_use_transfer_optimal_layouts() @test {
         == vk::ImageLayout.TRANSFER_DST_OPTIMAL);
     assert(vk::texture_copy_layout(&texture, false)
         == vk::ImageLayout.TRANSFER_SRC_OPTIMAL);
+}
+
+fn void global_barrier_emits_no_texture_barrier() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    BarrierEmitCapture capture;
+    vk::set_barrier_emit_hook(state, &capture_barrier_emit, &capture);
+    defer vk::set_barrier_emit_hook(state, null, null);
+    vk::reset_barrier_work_counters(state);
+    gpu::Barrier dependency = {
+        .before = { .compute },
+        .after  = { .compute },
+    };
+    gpu::cmd_barrier(&commands, &dependency)!!;
+    vk::BarrierWorkCounters counters = vk::barrier_work_counters(state);
+
+    assert(
+        capture.calls == 1
+            && counters.native_memory_emissions == 1
+            && counters.native_image_emissions == 0,
+        "one global barrier emits one memory barrier and no image barrier"
+    );
+    assert(
+        counters.texture_helper_calls == 0
+            && counters.texture_handle_resolutions == 0,
+        "a global barrier performs no texture inference or resolution"
+    );
 }
 
 fn void reference_capacity_preflight_counts_unique_identities() @test {

@@ -80,7 +80,6 @@ struct DeviceCreationProbe {
     bool                     descriptor_buffer_capability_checked;
     bool                     descriptor_buffer_capability_available;
     bool                     descriptor_buffer_selected;
-    bool                     fail_native_device_creation @if(env::TESTING);
     bool                     dynamic_color_support_override @if(env::TESTING);
     bool                     dynamic_color_support_available @if(env::TESTING);
     bool                     dynamic_color_feature_chained @if(env::TESTING);
@@ -1589,9 +1588,6 @@ fn void? create_logical_device_with_queue_infos(
                 dynamic_color_features.extended_dynamic_state3color_blend_equation;
             probe.dynamic_color_write_mask =
                 dynamic_color_features.extended_dynamic_state3color_write_mask;
-            if (probe.fail_native_device_creation) {
-                return gpu::BACKEND_ERROR~;
-            }
         }
     $endif
 
