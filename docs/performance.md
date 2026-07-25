@@ -26,7 +26,7 @@ and fixed workload run in this required order:
 | 3 | `FULL` | off |
 | 4 | `FULL` | on |
 
-Only mode 1 participates in release timing thresholds. Both elapsed times
+Only mode 1 participates in release timing thresholds. All four elapsed times
 remain advisory. Whenever the runner is executed locally or on a self-hosted
 machine, exact schema and work violations hard-fail the run. Hosted CI builds the
 benchmark targets and unit-tests their schemas but does not execute this live

@@ -570,7 +570,7 @@ fn void exercise_command_families(
     gpu::RuntimeDesc desc = policy_runtime_desc(
         contract:      contract,
         vulkan_layers: vulkan_layers,
-        callback:      false,
+        callback:      true,
         debug_names:   true,
         capture:       &capture,
     );
@@ -637,6 +637,7 @@ fn void exercise_command_families(
         .height = 8,
     };
 
+    capture.calls = 0;
     exercise_policy_matrix_transfer(
         allocator:   &allocator,
         state:       state,
@@ -660,9 +661,11 @@ fn void exercise_command_families(
         indirect:  &indirect,
     );
     exercise_policy_matrix_labels(&allocator, state);
+    assert(capture.calls == 0,
+        "recorded command families raise no recording diagnostic");
 }
 
-fn void command_families_run_under_both_contract_modes() @test {
+fn void command_families_run_under_each_contract_and_layer_mode() @test {
     gpu::ContractValidation[2] contracts = {
         gpu::ContractValidation.TRUSTED,
         gpu::ContractValidation.FULL,
