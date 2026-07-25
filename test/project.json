@@ -77,8 +77,7 @@
     },
     // Advisory texture-descriptor churn and sampler lookup timing across
     // worker counts 1/2/4; executable so it never gates CI.
-    // Needs an ICD — pin lavapipe via VK_DRIVER_FILES. The backend selects
-    // the native heap implementation automatically.
+    // Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
     "descriptor_churn_bench": {
       "type": "executable",
       "features": [ "TEXTURE_VIEW_ACCOUNTING_STATS", "SAMPLER_INTERN_STATS" ],
@@ -145,7 +144,7 @@
     },
     "vk_texture_heap": {
       "type": "test",
-      "sources": [ "src/test_vk_texture_heap.c3", "src/test_vk_descriptor_buffer.c3", "src/test_vk_texture_upload.c3", "src/bindless_abi.c3", "src/offscreen_abi.c3" ]
+      "sources": [ "src/test_vk_texture_heap.c3", "src/test_vk_texture_upload.c3", "src/bindless_abi.c3", "src/offscreen_abi.c3" ]
     },
     "vk_shader_reflection": {
       "type": "test",

@@ -674,13 +674,12 @@ scanner. Timing is blocking only for an explicitly pinned runner, driver, and
 comparison profile.
 
 The strict descriptor heap is device-global and bound lazily on the first
-strict pipeline selection in a command record. Descriptor indexing binds set 0
-once per used graphics or compute bind point. Descriptor-buffer mode binds its
-stable buffer address once per command record and sets one offset per used bind
-point. Ordinary strict pipeline changes, descriptor publication, draws,
-dispatches, and descriptor hazard barriers do not replay that setup. Fresh
-command records start with empty binding state after native command-buffer
-reset.
+strict pipeline selection in a command record. Its descriptor-indexing set 0
+binds once per used graphics or compute bind point. The two bind-point cache
+bits remain independent when commands alternate between compute and graphics.
+Ordinary strict pipeline changes, descriptor publication, draws, dispatches,
+and global barriers do not replay that setup. Fresh command records start with
+empty binding state after native command-buffer reset.
 
 ### Compute
 
@@ -832,12 +831,13 @@ mutex and publishes the native sampler, descriptor, stable index, cell, and
 bucket link as one transaction. Device teardown destroys every native sampler
 and releases both slot and bucket storage.
 
-The backend prefers descriptor indexing when it satisfies the requested
-capacities and falls back to descriptor buffers when available. Callers cannot
-select or branch on the native implementation; shader material records are
-identical on either path. Descriptor updates remain independent from
-command-buffer binding state and continue to use the explicit descriptor hazard
-contract.
+The backend implements the heap with one update-after-bind descriptor set.
+Adapter support and device creation require the descriptor-indexing feature
+set and validate the exact runtime-configured texture and sampler capacities
+against cached per-type, per-stage aggregate, and all-pools limits. Native-limit
+mismatches return `UNSUPPORTED_FEATURE`; capacities are never clamped.
+Descriptor updates remain independent from command-buffer binding state and
+require no public descriptor synchronization hazard.
 
 ## 10. Swapchain model
 

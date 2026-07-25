@@ -8,7 +8,7 @@ import vk;
 // Vulkan 1.3 in the (variant<<29)|(major<<22)|(minor<<12)|patch layout. The
 // binding ships no API_VERSION_1_3 constant.
 const uint API_VERSION_1_3 = (1u << 22) | (3u << 12);
-const uint BARRIER_HAZARD_BITS = 0x0007;
+const uint BARRIER_HAZARD_BITS = 0x0005;
 
 enum WsiResultKind : int {
     SURFACE,
@@ -357,7 +357,6 @@ fn vk::AccessFlags2 barrier_before_access_to_vk(gpu::StageMask stages) {
 fn vk::AccessFlags2 barrier_after_access_to_vk(
     gpu::StageMask stages,
     gpu::HazardFlags hazards,
-    bool descriptor_buffer,
     bool generated_work = false,
 ) {
     ulong mask;
@@ -391,9 +390,6 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
             mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV;
         }
     }
-    if (hazards.descriptors && descriptor_buffer) {
-        mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT;
-    }
     if (hazards.depth_stencil) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
             | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
@@ -403,7 +399,6 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
 
 fn vk::MemoryBarrier2 barrier_to_vk(
     gpu::Barrier* barrier,
-    bool descriptor_buffer,
     bool generated_work = false,
 ) {
     return vk::memory_barrier2()
@@ -417,7 +412,6 @@ fn vk::MemoryBarrier2 barrier_to_vk(
         .set_dst_access_mask(barrier_after_access_to_vk(
             barrier.after,
             barrier.hazards,
-            descriptor_buffer,
             generated_work,
         ));
 }
@@ -426,19 +420,19 @@ fn bool barrier_stage_mask_valid(gpu::StageMask stages) @private {
     return gpu::internal::stage_mask_valid(stages);
 }
 
+fn bool barrier_hazards_known(gpu::HazardFlags hazards) {
+    uint raw = (uint)hazards;
+    return (raw & BARRIER_HAZARD_BITS) == raw;
+}
+
 fn ZString barrier_masks_rejected_field(gpu::Barrier* barrier) {
     if (barrier == null) return "Barrier";
     if (!barrier_stage_mask_valid(barrier.before)) return "Barrier.before";
     if (!barrier_stage_mask_valid(barrier.after)) return "Barrier.after";
     uint hazards = (uint)barrier.hazards;
-    bool descriptor_consumer = barrier.after.all
-        || barrier.after.compute
-        || barrier.after.vertex_shader
-        || barrier.after.fragment_shader;
-    if ((hazards & BARRIER_HAZARD_BITS) != hazards
+    if (!barrier_hazards_known(barrier.hazards)
         || (hazards != 0
-            && (barrier.before.present || barrier.after.present))
-        || (barrier.hazards.descriptors && !descriptor_consumer)) {
+            && (barrier.before.present || barrier.after.present))) {
         return "Barrier.hazards";
     }
     return null;
@@ -532,7 +526,6 @@ fn ZString barrier_queue_rejected_field(
     bool compute = queue_flags_include(flags, vk::QueueFlagBits.COMPUTE_BIT);
     bool shader_queue = graphics || compute;
     if ((barrier.hazards.draw_arguments && !shader_queue)
-        || (barrier.hazards.descriptors && !shader_queue)
         || (barrier.hazards.depth_stencil && !graphics)) {
         return "Barrier.hazards";
     }

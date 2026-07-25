@@ -8,6 +8,102 @@ import std::atomic;
 import std::core::mem;
 import std::io;
 
+struct StrictSupportDiagnosticCapture {
+    uint calls;
+    ZString expected_field;
+    ZString expected_invariant;
+    bool matched;
+}
+
+struct StrictSupportDiagnosticCase {
+    gpu::internal::vk::IndexingHeapLimits limits;
+    ZString                               expected_field;
+    ZString                               expected_invariant;
+}
+
+struct NativeDeviceCreateCapture {
+    uint calls;
+}
+
+struct IndexingFeatureChainCapture {
+    uint calls;
+    bool found_features12;
+    bool all_required_bits_enabled;
+}
+
+fn void capture_strict_support_diagnostic(
+    gpu::DebugMessage* message,
+    void* user_data,
+) {
+    StrictSupportDiagnosticCapture* capture =
+        (StrictSupportDiagnosticCapture*)user_data;
+    bool matched = message.severity == gpu::DebugMessageSeverity.ERROR
+        && message.category.public_contract
+        && message.has_fault
+        && message.public_fault == gpu::UNSUPPORTED_FEATURE
+        && message.operation.str_view() == "create_device"
+        && message.rejected_field.str_view() == capture.expected_field.str_view()
+        && message.invariant.str_view() == capture.expected_invariant.str_view();
+    if (matched) {
+        capture.calls++;
+        capture.matched = true;
+    }
+}
+
+fn vk::Result count_native_device_create(
+    void* user_data,
+    vk::PhysicalDevice physical_device,
+    vk::DeviceCreateInfo* create_info,
+    vk::Device* device,
+) {
+    (void)physical_device;
+    (void)create_info;
+    (void)device;
+    NativeDeviceCreateCapture* capture = (NativeDeviceCreateCapture*)user_data;
+    capture.calls++;
+    return vk::Result.ERROR_INITIALIZATION_FAILED;
+}
+
+fn vk::Result capture_indexing_feature_chain(
+    void* user_data,
+    vk::PhysicalDevice physical_device,
+    vk::DeviceCreateInfo* create_info,
+    vk::Device* device,
+) {
+    (void)physical_device;
+    (void)device;
+    IndexingFeatureChainCapture* capture =
+        (IndexingFeatureChainCapture*)user_data;
+    capture.calls++;
+
+    vk::BaseInStructure* feature =
+        (vk::BaseInStructure*)create_info.p_next;
+    while (feature != null) {
+        if (feature.s_type
+            == vk::StructureType.PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
+            vk::PhysicalDeviceVulkan12Features* features12 =
+                (vk::PhysicalDeviceVulkan12Features*)feature;
+            capture.found_features12 = true;
+            capture.all_required_bits_enabled =
+                features12.runtime_descriptor_array == vk::TRUE
+                && features12.shader_sampled_image_array_non_uniform_indexing
+                    == vk::TRUE
+                && features12.shader_storage_image_array_non_uniform_indexing
+                    == vk::TRUE
+                && features12.descriptor_binding_partially_bound == vk::TRUE
+                && features12.descriptor_binding_sampled_image_update_after_bind
+                    == vk::TRUE
+                && features12.descriptor_binding_storage_image_update_after_bind
+                    == vk::TRUE
+                && features12.descriptor_binding_update_unused_while_pending
+                    == vk::TRUE;
+            break;
+        }
+        feature = feature.p_next;
+    }
+    return vk::Result.ERROR_INITIALIZATION_FAILED;
+}
+
 fn uint live_device_slot_count() @private {
     uint live_count;
     for (uint i = 0; i < gpu::internal::MAX_DEVICES; i++) {
@@ -91,271 +187,133 @@ fn gpu::internal::vk::IndexingHeapLimits permissive_indexing_heap_limits() @priv
     };
 }
 
-fn void strict_heap_state_selects_private_implementation() @test {
+fn void strict_heap_state_preserves_requested_capacities() @test {
     gpu::internal::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
-    gpu::internal::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
-
     gpu::internal::vk::VkStrictHeapState disabled =
         gpu::internal::vk::resolve_strict_heap_state(false, &desc)!!;
-    gpu::internal::vk::select_strict_heap_implementation(
-        state:              &disabled,
-        indexing_supported: false,
-        buffer_supported:   false,
-        indexing_limits:    limits,
-    )!!;
     assert(!disabled.enabled, "an unrequested strict heap remains disabled");
-    assert(
-        disabled.implementation == gpu::internal::vk::VkHeapImplementation.NONE,
-        "a disabled strict heap selects no private implementation"
-    );
     assert(disabled.texture_capacity == 0, "a disabled strict heap reserves no texture capacity");
     assert(disabled.sampler_capacity == 0, "a disabled strict heap reserves no sampler capacity");
     assert(disabled.descriptors.texture_cells.ptr == null, "a disabled strict heap owns no descriptor cells");
 
     gpu::internal::vk::VkStrictHeapState indexing =
         gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::internal::vk::select_strict_heap_implementation(
-        state:              &indexing,
-        indexing_supported: true,
-        buffer_supported:   true,
-        indexing_limits:    limits,
-    )!!;
     assert(indexing.enabled, "a requested strict heap is enabled");
-    assert(
-        indexing.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
-        "indexing is preferred when it satisfies the semantic capacities"
-    );
     assert(indexing.texture_capacity == 7, "the requested texture capacity is preserved");
     assert(indexing.sampler_capacity == 9, "the requested sampler capacity is preserved");
-    assert(gpu::internal::vk::strict_heap_uses_descriptor_indexing(&indexing), "the indexing path requests indexing features");
-    assert(
-        !gpu::internal::vk::strict_heap_uses_descriptor_buffer(&indexing),
-        "the indexing path requests no descriptor-buffer dispatch"
-    );
+}
 
-    gpu::internal::vk::IndexingHeapLimits constrained = limits;
-    constrained.max_sampled_images = 6;
-    gpu::internal::vk::VkStrictHeapState fallback =
-        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::internal::vk::select_strict_heap_implementation(
-        state:              &fallback,
-        indexing_supported: true,
-        buffer_supported:   true,
-        indexing_limits:    constrained,
-    )!!;
+fn void strict_heap_defaults_fit_required_indexing_limits() @test {
+    gpu::internal::vk::IndexingHeapLimits required_limits = {
+        .max_sampled_images           = 500_000,
+        .max_storage_images           = 500_000,
+        .max_samplers                 = 500_000,
+        .max_per_stage_sampled_images = 500_000,
+        .max_per_stage_storage_images = 500_000,
+        .max_per_stage_samplers       = 500_000,
+        .max_per_stage_resources      = 500_000,
+        .max_all_pools_descriptors    = 500_000,
+    };
     assert(
-        fallback.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
-        "descriptor buffers are selected when indexing cannot provide the requested capacity"
-    );
-
-    gpu::internal::vk::VkStrictHeapState buffer_only =
-        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::internal::vk::select_strict_heap_implementation(
-        state:              &buffer_only,
-        indexing_supported: false,
-        buffer_supported:   true,
-        indexing_limits:    limits,
-    )!!;
-    assert(
-        buffer_only.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
-        "descriptor buffers satisfy strict heaps when indexing is unavailable"
-    );
-
-    gpu::internal::vk::VkStrictHeapState unavailable =
-        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    fault selection_fault = @catch(gpu::internal::vk::select_strict_heap_implementation(
-        state:              &unavailable,
-        indexing_supported: false,
-        buffer_supported:   false,
-        indexing_limits:    limits,
-    ));
-    assert(
-        selection_fault == gpu::UNSUPPORTED_FEATURE,
-        "strict heap selection faults when no private implementation is available"
-    );
-    assert(
-        unavailable.implementation == gpu::internal::vk::VkHeapImplementation.NONE,
-        "failed selection leaves the private implementation unpublished"
+        gpu::internal::vk::indexing_heap_limit_failure(
+            gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+            gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
+            required_limits,
+        ) == gpu::internal::vk::IndexingHeapLimitFailure.NONE,
+        "the shipped defaults fit Vulkan's required update-after-bind limits"
     );
 }
 
-fn void descriptor_buffer_creation_override_is_private_and_exact() @test {
+fn void strict_heap_support_reports_exact_failure() @test {
     gpu::internal::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
-    gpu::internal::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
-
-    gpu::internal::vk::VkStrictHeapState automatic =
+    gpu::internal::vk::VkStrictHeapState heap =
         gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::internal::vk::select_strict_heap_implementation_for_creation(
-        state:              &automatic,
-        indexing_supported: true,
-        buffer_supported:   true,
-        indexing_limits:    limits,
-        probe:              null,
-    )!!;
-    assert(
-        automatic.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
-        "ordinary creation keeps automatic indexing preference"
-    );
-
-    gpu::internal::vk::DeviceCreationProbe probe = {
-        .descriptor_buffer_override = true,
+    StrictSupportDiagnosticCapture capture = {
+        .expected_field = "DeviceRequest.features.strict",
+        .expected_invariant =
+            "strict mode requires descriptor indexing with update-after-bind support",
     };
-    gpu::internal::vk::VkStrictHeapState overridden =
-        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::internal::vk::select_strict_heap_implementation_for_creation(
-        state:              &overridden,
-        indexing_supported: true,
-        buffer_supported:   true,
-        indexing_limits:    limits,
-        probe:              &probe,
-    )!!;
-    assert(
-        overridden.implementation == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
-        "the private creation probe can exercise descriptor-buffer runtime paths"
-    );
-    assert(
-        probe.descriptor_buffer_capability_checked
-            && probe.descriptor_buffer_capability_available
-            && probe.descriptor_buffer_selected,
-        "the probe records advertised capability and completed selection"
-    );
-
-    gpu::internal::vk::VkStrictHeapState unsupported =
-        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    assert(
-        @catch(gpu::internal::vk::select_strict_heap_implementation_for_creation(
-            state:              &unsupported,
-            indexing_supported: true,
-            buffer_supported:   false,
-            indexing_limits:    limits,
-            probe:              &probe,
-        )) == gpu::UNSUPPORTED_FEATURE,
-        "the private override never bypasses descriptor-buffer feature support"
-    );
-    assert(
-        probe.descriptor_buffer_capability_checked
-            && !probe.descriptor_buffer_capability_available
-            && !probe.descriptor_buffer_selected,
-        "the probe distinguishes proven capability absence from later failure"
-    );
-}
-
-fn void descriptor_buffer_query_is_needed_only_for_fallback_or_override() @test {
-    gpu::internal::vk::VkDeviceConfig desc = {
-        .texture_heap_capacity = 7,
-        .sampler_heap_capacity = 9,
+    gpu::internal::vk::VkDeviceState device = {
+        .debug_callback  = &capture_strict_support_diagnostic,
+        .debug_user_data = &capture,
     };
-    gpu::internal::vk::VkStrictHeapState state =
-        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    gpu::internal::vk::IndexingHeapLimits limits = permissive_indexing_heap_limits();
-    assert(
-        !gpu::internal::vk::strict_heap_needs_descriptor_buffer_query(
-            state:              &state,
-            indexing_supported: true,
-            indexing_limits:    limits,
-            probe:              null,
-        ),
-        "a usable indexing heap does not require a descriptor-buffer query"
-    );
-
-    gpu::internal::vk::IndexingHeapLimits constrained = limits;
-    constrained.max_sampled_images = 6;
-    assert(
-        gpu::internal::vk::strict_heap_needs_descriptor_buffer_query(
-            state:              &state,
-            indexing_supported: true,
-            indexing_limits:    constrained,
-            probe:              null,
-        ),
-        "an indexing-capacity shortfall requires descriptor-buffer fallback evidence"
-    );
-    assert(
-        gpu::internal::vk::strict_heap_needs_descriptor_buffer_query(
-            state:              &state,
-            indexing_supported: false,
-            indexing_limits:    limits,
-            probe:              null,
-        ),
-        "missing indexing features require descriptor-buffer fallback evidence"
-    );
-
-    gpu::internal::vk::DeviceCreationProbe probe = {
-        .descriptor_buffer_override = true,
+    gpu::internal::vk::StrictHeapSupport support = {
+        .limits = permissive_indexing_heap_limits(),
     };
-    assert(
-        gpu::internal::vk::strict_heap_needs_descriptor_buffer_query(
-            state:              &state,
-            indexing_supported: true,
-            indexing_limits:    limits,
-            probe:              &probe,
-        ),
-        "the private override always requires descriptor-buffer capability evidence"
-    );
-}
-fn bool? descriptor_buffer_extension_absent(
-    vk::PhysicalDevice physical_device,
-    ZString extension,
-) {
-    return false;
-}
+    assert(@catch(gpu::internal::vk::validate_strict_heap_support(
+        &device,
+        &heap,
+        &support,
+    )) == gpu::UNSUPPORTED_FEATURE);
+    assert(capture.calls == 1 && capture.matched,
+        "missing indexing support reports the exact strict requirement");
 
-fn bool? descriptor_buffer_extension_query_host_oom(
-    vk::PhysicalDevice physical_device,
-    ZString extension,
-) {
-    return vk::ERROR_OUT_OF_HOST_MEMORY~;
-}
+    StrictSupportDiagnosticCase[5] cases;
+    gpu::internal::vk::IndexingHeapLimits limits =
+        permissive_indexing_heap_limits();
+    limits.max_sampled_images = 6;
+    cases[0] = {
+        .limits          = limits,
+        .expected_field = "RuntimeDesc.texture_heap_capacity",
+        .expected_invariant =
+            "texture heap capacity must fit the sampled-image update-after-bind limit",
+    };
+    limits = permissive_indexing_heap_limits();
+    limits.max_storage_images = 6;
+    cases[1] = {
+        .limits          = limits,
+        .expected_field = "RuntimeDesc.texture_heap_capacity",
+        .expected_invariant =
+            "texture heap capacity must fit the storage-image update-after-bind limit",
+    };
+    limits = permissive_indexing_heap_limits();
+    limits.max_samplers = 8;
+    cases[2] = {
+        .limits          = limits,
+        .expected_field = "RuntimeDesc.sampler_heap_capacity",
+        .expected_invariant =
+            "sampler heap capacity must fit the sampler update-after-bind limit",
+    };
+    limits = permissive_indexing_heap_limits();
+    limits.max_per_stage_resources = 13;
+    cases[3] = {
+        .limits          = limits,
+        .expected_field =
+            "RuntimeDesc.texture_heap_capacity/sampler_heap_capacity",
+        .expected_invariant =
+            "combined descriptor capacity must fit the per-stage update-after-bind resource limit",
+    };
+    limits = permissive_indexing_heap_limits();
+    limits.max_all_pools_descriptors = 22;
+    cases[4] = {
+        .limits          = limits,
+        .expected_field =
+            "RuntimeDesc.texture_heap_capacity/sampler_heap_capacity",
+        .expected_invariant =
+            "combined descriptor capacity must fit the all-pools update-after-bind descriptor limit",
+    };
 
-fn bool? descriptor_buffer_extension_query_device_oom(
-    vk::PhysicalDevice physical_device,
-    ZString extension,
-) {
-    return vk::ERROR_OUT_OF_DEVICE_MEMORY~;
-}
-
-fn bool? descriptor_buffer_extension_query_layer_missing(
-    vk::PhysicalDevice physical_device,
-    ZString extension,
-) {
-    return vk::ERROR_LAYER_NOT_PRESENT~;
-}
-
-fn void descriptor_buffer_capability_query_distinguishes_absence_and_failure() @test {
-    vk::PhysicalDevice physical_device = (vk::PhysicalDevice)(uptr)0xA0;
-    assert(
-        !gpu::internal::vk::query_descriptor_buffer_support_with_query(
-            physical_device,
-            &descriptor_buffer_extension_absent,
-        )!!,
-        "confirmed extension absence is unsupported capability"
-    );
-    assert(
-        @catch(gpu::internal::vk::query_descriptor_buffer_support_with_query(
-            physical_device,
-            &descriptor_buffer_extension_query_host_oom,
-        )) == gpu::OUT_OF_HOST_MEMORY,
-        "extension-query host OOM maps into the public fault taxonomy"
-    );
-    assert(
-        @catch(gpu::internal::vk::query_descriptor_buffer_support_with_query(
-            physical_device,
-            &descriptor_buffer_extension_query_device_oom,
-        )) == gpu::OUT_OF_DEVICE_MEMORY,
-        "extension-query device OOM maps into the public fault taxonomy"
-    );
-    assert(
-        @catch(gpu::internal::vk::query_descriptor_buffer_support_with_query(
-            physical_device,
-            &descriptor_buffer_extension_query_layer_missing,
-        )) == gpu::UNSUPPORTED_FEATURE,
-        "a missing extension layer maps through the public unsupported-feature taxonomy"
-    );
+    support.indexing = true;
+    foreach (&diagnostic_case : cases) {
+        capture = {
+            .expected_field     = diagnostic_case.expected_field,
+            .expected_invariant = diagnostic_case.expected_invariant,
+        };
+        support.limits = diagnostic_case.limits;
+        assert(@catch(gpu::internal::vk::validate_strict_heap_support(
+            &device,
+            &heap,
+            &support,
+        )) == gpu::UNSUPPORTED_FEATURE);
+        assert(capture.calls == 1 && capture.matched,
+            "each strict capacity failure reports its exact diagnostic mapping");
+    }
 }
 
 fn void runtime_copies_device_creation_defaults() @test {
@@ -435,9 +393,26 @@ fn void adapter_support_inherits_runtime_device_config() @test {
         bool expected = gpu::internal::vk::strict_adapter_supported(
             adapter_state.physical_device,
             &config,
+            &adapter_state.strict_heap,
         );
         assert(info.strict_supported == expected, "adapter info uses the runtime configuration");
         assert(support.supported == expected, "support and adapter info agree");
+        if (expected) {
+            gpu::internal::vk::validate_strict_device_request_support(
+                runtime_state,
+                adapter.adapter_index,
+                &request,
+            )!!;
+        } else {
+            assert(
+                @catch(gpu::internal::vk::validate_strict_device_request_support(
+                    runtime_state,
+                    adapter.adapter_index,
+                    &request,
+                )) == gpu::UNSUPPORTED_FEATURE,
+                "the creation preflight agrees with cached adapter support"
+            );
+        }
 
         gpu::internal::vk::VkDeviceConfig invalid_config = config;
         invalid_config.texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1;
@@ -468,6 +443,157 @@ fn void adapter_support_inherits_runtime_device_config() @test {
         );
         gpu::destroy_device(&device)!!;
     }
+}
+
+fn void public_creation_reports_cached_strict_capacity_failure() @test {
+    StrictSupportDiagnosticCapture capture = {
+        .expected_field = "RuntimeDesc.texture_heap_capacity",
+        .expected_invariant =
+            "texture heap capacity must fit the sampled-image update-after-bind limit",
+    };
+    gpu::RuntimeDesc desc = {
+        .texture_heap_capacity = 7,
+        .sampler_heap_capacity = 9,
+        .debug_callback        = &capture_strict_support_diagnostic,
+        .debug_user_data       = &capture,
+        .application_name      = "gpu_vk_cached_strict_support_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+    gpu::internal::RuntimeData* runtime_data =
+        gpu::internal::resolve_runtime(&runtime);
+    gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+            continue;
+        }
+        gpu::internal::vk::VkAdapterState* adapter_state =
+            &runtime_state.adapters[adapter.adapter_index];
+        gpu::internal::vk::StrictHeapSupport saved_support =
+            adapter_state.strict_heap;
+        adapter_state.strict_heap = {
+            .indexing = true,
+            .limits   = permissive_indexing_heap_limits(),
+        };
+        adapter_state.strict_heap.limits.max_sampled_images = 6;
+
+        fault rejected = @catch(gpu::create_device(&adapter, &request));
+        adapter_state.strict_heap = saved_support;
+
+        assert(rejected == gpu::UNSUPPORTED_FEATURE,
+            "public creation rejects the cached strict capacity failure");
+        assert(capture.calls == 1 && capture.matched,
+            "public creation reports the exact cached capacity diagnostic");
+        return;
+    }
+    assert(false, "the pinned Vulkan adapter supports strict device creation");
+}
+
+fn void cached_strict_failure_precedes_native_device_creation() @test {
+    gpu::RuntimeDesc desc = {
+        .texture_heap_capacity = 7,
+        .sampler_heap_capacity = 9,
+        .application_name      = "gpu_vk_cached_strict_native_gate_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+    gpu::internal::RuntimeData* runtime_data =
+        gpu::internal::resolve_runtime(&runtime);
+    gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+            continue;
+        }
+        gpu::internal::vk::VkAdapterState* adapter_state =
+            &runtime_state.adapters[adapter.adapter_index];
+        gpu::internal::vk::StrictHeapSupport saved_support =
+            adapter_state.strict_heap;
+        adapter_state.strict_heap = {
+            .indexing = true,
+            .limits   = permissive_indexing_heap_limits(),
+        };
+        adapter_state.strict_heap.limits.max_sampled_images = 6;
+
+        NativeDeviceCreateCapture create_capture;
+        gpu::internal::vk::DeviceCreationProbe probe = {
+            .native_device_create_hook      = &count_native_device_create,
+            .native_device_create_user_data = &create_capture,
+        };
+        gpu::Runtime retained_runtime = runtime;
+        gpu::internal::runtime_retain_device(&retained_runtime)!!;
+        fault rejected =
+            @catch(gpu::internal::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                request:          &request,
+                retained_runtime: &retained_runtime,
+                probe:            &probe,
+            ));
+        gpu::internal::runtime_release_device(&retained_runtime)!!;
+        adapter_state.strict_heap = saved_support;
+
+        assert(rejected == gpu::UNSUPPORTED_FEATURE,
+            "cached strict capacity failure rejects backend creation");
+        assert(create_capture.calls == 0,
+            "cached strict capacity failure never reaches vkCreateDevice");
+        assert(
+            probe.reached == gpu::internal::vk::DeviceCreationCheckpoint.NONE
+                && probe.rollback_count == 1,
+            "cached strict rejection precedes the first creation checkpoint"
+        );
+        return;
+    }
+    assert(false, "the pinned Vulkan adapter supports strict device creation");
+}
+
+fn void strict_creation_enables_all_required_indexing_features() @test {
+    gpu::RuntimeDesc desc = {
+        .application_name = "gpu_vk_required_indexing_features_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceRequest request = gpu::strict_device_request();
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+            continue;
+        }
+        IndexingFeatureChainCapture capture;
+        gpu::internal::vk::DeviceCreationProbe probe = {
+            .native_device_create_hook      = &capture_indexing_feature_chain,
+            .native_device_create_user_data = &capture,
+        };
+        gpu::Runtime retained_runtime = runtime;
+        gpu::internal::runtime_retain_device(&retained_runtime)!!;
+        fault rejected =
+            @catch(gpu::internal::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                request:          &request,
+                retained_runtime: &retained_runtime,
+                probe:            &probe,
+            ));
+        gpu::internal::runtime_release_device(&retained_runtime)!!;
+
+        assert(rejected == gpu::UNSUPPORTED_BACKEND,
+            "the native hook aborts creation after inspecting the feature chain");
+        assert(capture.calls == 1 && capture.found_features12,
+            "strict creation chains Vulkan 1.2 features into vkCreateDevice");
+        assert(capture.all_required_bits_enabled,
+            "strict creation enables all seven required indexing feature bits");
+        assert(probe.rollback_count == 1,
+            "the injected native creation failure rolls back exactly once");
+        return;
+    }
+    assert(false, "the pinned Vulkan adapter supports strict device creation");
 }
 
 fn void adapter_request_creation_reuses_runtime_discovery() @test {
@@ -545,25 +671,6 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             caps.sampler_heap_capacity == device_state.strict_heap.sampler_capacity,
             "published sampler capacity matches strict state"
         );
-        if (gpu::internal::vk::strict_heap_uses_descriptor_buffer(&device_state.strict_heap)) {
-            assert(
-                gpu::internal::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
-                "the selected descriptor-buffer path loads its dispatch"
-            );
-            assert(
-                device_state.strict_heap.descriptors.descriptor_buffer != null,
-                "the selected descriptor-buffer path owns its buffer"
-            );
-        } else {
-            assert(
-                !gpu::internal::vk::device_dispatch_supports_descriptor_buffer(&device_state.device_dispatch),
-                "the indexing path loads no descriptor-buffer dispatch"
-            );
-            assert(
-                device_state.strict_heap.descriptors.descriptor_buffer == null,
-                "the indexing path owns no descriptor buffer"
-            );
-        }
         assert(!device_state.presentation.enabled, "headless requests create no presentation state");
         assert(device_state.presentation.queue == null, "headless requests retrieve no presentation queue");
         assert(!device_state.presentation.queue_mutex.is_initialized(), "headless requests initialize no presentation mutex");

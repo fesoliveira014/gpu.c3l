@@ -146,10 +146,17 @@ exists (else the limit is compile-time).
 
 Two sizing rules that bite:
 - **Heap capacities are exact device defaults.** `create_device` checks the
-  selected adapter against the runtime's texture and sampler capacities,
-  including the driver's exact descriptor-buffer layout size when that path
-  is needed. It returns `UNSUPPORTED_FEATURE` rather than clamping; the caller
-  may then try another adapter from the runtime.
+  selected adapter against cached sampled-image, storage-image, sampler,
+  per-stage aggregate, and all-pools update-after-bind limits. It returns
+  `UNSUPPORTED_FEATURE` with an exact FULL/backend diagnostic rather than
+  clamping; the caller may then try another adapter from the runtime. Values
+  above `MAX_SHADER_HEAP_CAPACITY` remain `INVALID_ARGUMENT`. The 4096-texture
+  and 256-sampler defaults are retained deliberately: every relevant
+  update-after-bind limit is at least 500,000 when the required descriptor
+  indexing feature is supported, so the heap's largest checked aggregate is
+  8,448 descriptors. These checks are necessary compatibility gates, not
+  reservations of device-wide capacity shared with other update-after-bind
+  pools or pipeline layouts.
 
 - **Shader-visible indices have caller-managed lifetime.** Destroying a
   `TextureView` recycles its raw index immediately. Wait or discard every use
@@ -199,7 +206,6 @@ Two sizing rules that bite:
 | Symptom | Cause | Workaround | Notes |
 |---|---|---|---|
 | `intern_sampler` faults `INVALID_ARGUMENT` for enabled anisotropy | requested `max_anisotropy` is outside the inclusive range `[1, DeviceCaps.max_sampler_anisotropy]` | query the cap and clamp explicitly before interning | over-limit values are never implicitly clamped |
-| Segfault on any image/sampler access, lavapipe + descriptor-buffer heap | Mesa 25.0.7 lavapipe descriptor-buffer bug | no caller action; automatic selection uses descriptor indexing when it satisfies the request | retest on Mesa upgrade |
 | `UNSUPPORTED_FEATURE` at runtime create with Vulkan validation on | `vulkan-validationlayers` not installed | install it, or leave `enable_vulkan_validation = false`; `ContractValidation.FULL` still works without layers | — |
 | Windows: driver not found in elevated shells despite `VK_DRIVER_FILES` | elevated processes ignore loader env vars | register the ICD under `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` (CI does this for mesa-dist-win) | elevated shells only |
 | Pipeline-cache blob is 32 bytes, warm start ≈ cold | lavapipe returns a header-only blob (no compiled-shader payload) | expected; real drivers populate it — `pipeline_cache_timing` prints blob size as the signal | — |

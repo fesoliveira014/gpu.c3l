@@ -157,8 +157,12 @@ Windows: vulkan-1.dll / vulkan-1 import library
 
 `vk.c3l` handles link declarations according to its manifest. Headless use
 requires Vulkan 1.3, `VK_EXT_extended_dynamic_state3`, and
-`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. Presentation additionally
-requires
+`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. Strict devices also require
+runtime descriptor arrays, non-uniform sampled/storage image indexing,
+partially-bound arrays, sampled/storage update-after-bind, and
+update-unused-while-pending. Configured texture and sampler heap capacities
+must fit the selected adapter's update-after-bind limits. Presentation
+additionally requires
 `VK_KHR_get_surface_capabilities2` and `VK_EXT_surface_maintenance1` on the
 instance plus `VK_KHR_swapchain` and
 `VK_EXT_swapchain_maintenance1` on the device; support queries reject adapters

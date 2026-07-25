@@ -321,8 +321,6 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
     gpu::internal::command_native_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_bind_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_strict_heap_set_bind_commands.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_strict_heap_buffer_bind_commands.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_strict_heap_offset_commands.store(0, AtomicOrdering.RELAXED);
 }
 
 <* Snapshot process-wide command instrumentation with relaxed loads.
@@ -357,12 +355,6 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
         .strict_heap_set_bind_commands = gpu::internal::command_strict_heap_set_bind_commands.load(
             AtomicOrdering.RELAXED,
         ),
-        .strict_heap_buffer_bind_commands = gpu::internal::command_strict_heap_buffer_bind_commands.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .strict_heap_offset_commands = gpu::internal::command_strict_heap_offset_commands.load(
-            AtomicOrdering.RELAXED,
-        ),
     };
 }
 
@@ -381,6 +373,11 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
     if (runtime_data == null) return INVALID_HANDLE~;
     if (!gpu::internal::device_slot_available()) return SLOT_TABLE_FULL~;
 
+    gpu::internal::vk::validate_strict_device_request_support(
+        runtime_data.state,
+        adapter.adapter_index,
+        request,
+    )!;
     DeviceRequestSupport support = supports_device_request(adapter, request)!;
     if (!support.supported) return UNSUPPORTED_FEATURE~;
 

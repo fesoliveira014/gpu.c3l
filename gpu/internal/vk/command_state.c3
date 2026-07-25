@@ -131,9 +131,6 @@ struct NativePipelineBinding {
 }
 
 struct StrictHeapCommandBinding {
-    bool descriptor_buffer_bound;
-    bool graphics_offsets_set;
-    bool compute_offsets_set;
     bool graphics_set_bound;
     bool compute_set_bound;
 }

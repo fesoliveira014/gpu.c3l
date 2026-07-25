@@ -1375,6 +1375,16 @@ fn gpu::Device? stub_create_anisotropy_disabled_device() {
     );
 }
 
+fn void? validate_strict_device_request_support(
+    VkRuntimeState* runtime_state,
+    uint adapter_index,
+    gpu::DeviceRequest* request,
+) {
+    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+    if (request == null) return gpu::INVALID_ARGUMENT~;
+    (void)adapter_index;
+}
+
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
     gpu::DeviceRequest* request,

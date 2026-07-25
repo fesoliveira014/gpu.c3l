@@ -50,7 +50,6 @@ COMMAND_OUTPUT = "\n".join(
         (
             "resolution: recording_commands=300320 native_commands=400320 "
             "pipeline_binds=0 descriptor_set_binds=0 "
-            "descriptor_buffer_binds=0 descriptor_buffer_offsets=0 "
             "device_registry=0 "
             "retained_pins=0 command_table=0 "
             "pipeline_table=0 pipeline_cache=0 "
@@ -936,8 +935,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
         for field in (
             "pipeline_binds",
             "descriptor_set_binds",
-            "descriptor_buffer_binds",
-            "descriptor_buffer_offsets",
             "device_registry",
             "retained_pins",
             "command_table",

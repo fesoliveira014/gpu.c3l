@@ -784,11 +784,8 @@ fn void? vk_cmd_barrier(
         )~;
     }
 
-    bool descriptor_buffer = state.strict_heap.implementation
-        == VkHeapImplementation.DESCRIPTOR_BUFFER;
     vk::MemoryBarrier2 native_barrier = barrier_to_vk(
         barrier,
-        descriptor_buffer,
         state.generated_work.enabled,
     );
     emit_barrier(commands, &native_barrier);
@@ -799,16 +796,16 @@ fn void? trusted_barrier(
     gpu::Barrier* barrier,
 ) {
     if (barrier == null) return gpu::INVALID_ARGUMENT~;
+    if (!barrier_hazards_known(barrier.hazards)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    bool descriptor_buffer = state.strict_heap.implementation
-        == VkHeapImplementation.DESCRIPTOR_BUFFER;
     vk::MemoryBarrier2 native_barrier = barrier_to_vk(
         barrier,
-        descriptor_buffer,
         state.generated_work.enabled,
     );
     emit_barrier(commands, &native_barrier);

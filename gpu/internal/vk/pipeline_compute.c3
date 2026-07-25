@@ -189,9 +189,6 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         .set_mod(shader.shader_module)
         .set_name(&shader.entry_point[0]);
     pipe_info.layout = state.compute_layout;
-    if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
-        pipe_info.flags = vk::PipelineCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT;
-    }
 
     vk::Pipeline pipeline;
     check_pipeline_create_device_result(

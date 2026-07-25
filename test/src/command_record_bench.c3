@@ -86,10 +86,6 @@ fn void accumulate_resolution_stats(
     total.native_commands += sample.native_commands;
     total.pipeline_bind_commands += sample.pipeline_bind_commands;
     total.strict_heap_set_bind_commands += sample.strict_heap_set_bind_commands;
-    total.strict_heap_buffer_bind_commands +=
-        sample.strict_heap_buffer_bind_commands;
-    total.strict_heap_offset_commands +=
-        sample.strict_heap_offset_commands;
 }
 
 fn double record_barriers(
@@ -150,7 +146,6 @@ fn double record_hazard_barriers(
         .after = { .compute = true },
         .hazards = {
             .draw_arguments = true,
-            .descriptors = true,
             .depth_stencil = true,
         },
     };
@@ -455,9 +450,7 @@ fn int main() {
     assert(resolution.pipeline_cache_lookups == 0,
         "warm recording does not resolve the pipeline cache after bind");
     assert(resolution.pipeline_bind_commands == 0
-        && resolution.strict_heap_set_bind_commands == 0
-        && resolution.strict_heap_buffer_bind_commands == 0
-        && resolution.strict_heap_offset_commands == 0,
+        && resolution.strict_heap_set_bind_commands == 0,
         "post-bind recording emits no pipeline or descriptor heap binds");
     assert(resolution.encoder_cell_computations == 0,
         "warm recording performs no frontend encoder-cell computation");
@@ -512,13 +505,11 @@ fn int main() {
         preprocess_allocations,
     );
     io::printfn(
-        "resolution: recording_commands=%d native_commands=%d pipeline_binds=%d descriptor_set_binds=%d descriptor_buffer_binds=%d descriptor_buffer_offsets=%d device_registry=%d retained_pins=%d command_table=%d pipeline_table=%d pipeline_cache=%d encoder_cells=%d encoder_leases=%d",
+        "resolution: recording_commands=%d native_commands=%d pipeline_binds=%d descriptor_set_binds=%d device_registry=%d retained_pins=%d command_table=%d pipeline_table=%d pipeline_cache=%d encoder_cells=%d encoder_leases=%d",
         resolution.recording_commands,
         resolution.native_commands,
         resolution.pipeline_bind_commands,
         resolution.strict_heap_set_bind_commands,
-        resolution.strict_heap_buffer_bind_commands,
-        resolution.strict_heap_offset_commands,
         resolution.device_registry_resolutions,
         resolution.retained_pin_operations,
         resolution.command_table_lookups,

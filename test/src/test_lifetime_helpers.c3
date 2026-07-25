@@ -359,27 +359,9 @@ fn void assert_warm_command_resolution(
 }
 
 fn void assert_strict_heap_bind_work(
-    vk::VkDeviceState* state,
     gpu::CommandResolutionStats stats,
     ulong expected_bind_points,
-    ulong expected_buffer_binds = 1,
 ) @if(env::TESTING) {
-    if (state.strict_heap.implementation
-        == vk::VkHeapImplementation.DESCRIPTOR_INDEXING) {
-        assert(stats.strict_heap_set_bind_commands == expected_bind_points,
-            "indexing binds the strict set once per used bind point");
-        assert(stats.strict_heap_buffer_bind_commands == 0
-            && stats.strict_heap_offset_commands == 0,
-            "indexing emits no descriptor-buffer commands");
-        return;
-    }
-    assert(state.strict_heap.implementation
-        == vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
-        "a strict test device selects a descriptor heap implementation");
-    assert(stats.strict_heap_set_bind_commands == 0,
-        "descriptor-buffer mode emits no descriptor-set binds");
-    assert(stats.strict_heap_buffer_bind_commands == expected_buffer_binds,
-        "descriptor-buffer mode emits the expected global buffer binds");
-    assert(stats.strict_heap_offset_commands == expected_bind_points,
-        "descriptor-buffer mode sets one offset per used bind point");
+    assert(stats.strict_heap_set_bind_commands == expected_bind_points,
+        "the strict descriptor set binds once per used bind point");
 }

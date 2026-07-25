@@ -52,6 +52,7 @@ FIXTURES = {
     "global_barrier": "GlobalBarrier",
     "stage": "Stage",
     "hazard": "Hazard",
+    "hazard_descriptors": "descriptors",
     "texture_use": "TextureUse",
     "prior_use": "prior_use",
     "cmd_buffer_barrier": "cmd_buffer_barrier",
@@ -171,6 +172,7 @@ ENUM_VALUES = {
 
 FIELD_OR_METHODS = {
     "timeline_caps": "DeviceCaps.timeline_semaphore",
+    "hazard_descriptors": "HazardFlags.descriptors",
     "descriptor_buffer_caps": "DeviceCaps.descriptor_buffer",
     "descriptor_indexing_caps": "DeviceCaps.descriptor_indexing",
     "max_texture_descriptors_caps": "DeviceCaps.max_texture_descriptors",

@@ -1021,7 +1021,7 @@ fn void distinct_graphics_cache_entries_emit_distinct_binds() @test {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.pipeline_bind_commands == 2,
         "distinct graphics cache entries emit two native binds");
-    assert_strict_heap_bind_work(state, stats, 1);
+    assert_strict_heap_bind_work(stats, 1);
 }
 
 fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
@@ -1204,9 +1204,13 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
         .height = VAL_RT,
     };
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = 1,
+    };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
+        &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::GraphicsState graphics =
@@ -1223,6 +1227,9 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
     assert(first_record.graphics_state_initialized
             && first_record.color_state_initialized,
         "complete state initializes both readiness domains");
+    assert(first_record.strict_heap_binding.graphics_set_bound
+            && first_record.strict_heap_binding.compute_set_bound,
+        "the first record caches both descriptor-set bind points");
     gpu::cmd_bind_pipeline(&first, compute.pipeline)!!;
     assert(first_record.color_state_initialized
             && first_record.color_state.count == 1
@@ -1238,6 +1245,9 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
         && !reused_record.color_state_initialized
         && reused_record.color_state.count == 0,
         "command-buffer reuse clears graphics and color initialization");
+    assert(!reused_record.strict_heap_binding.graphics_set_bound
+            && !reused_record.strict_heap_binding.compute_set_bound,
+        "command-buffer reuse clears both descriptor-set bind points");
     record_val_target_to_attach(&reused, target);
     gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&reused, compute.pipeline)!!;
@@ -1245,7 +1255,7 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.pipeline_bind_commands == 2,
         "command-buffer reuse resets both native pipeline caches");
-    assert_strict_heap_bind_work(state, stats, 2);
+    assert_strict_heap_bind_work(stats, 2);
     gpu::cmd_begin_render_pass(&reused, &pass)!!;
     assert(@catch(gpu::cmd_draw(
         commands:       &reused,

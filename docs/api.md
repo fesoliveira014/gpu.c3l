@@ -736,9 +736,9 @@ publication limit. Sampler indices remain stable until device
 destruction.
 
 `create_texture_views` batch-publishes N views under one lock hold and ends in
-one accumulated descriptor-set update in indexing mode. Descriptor-buffer mode
-writes each mapped entry directly. `out_views.len` must equal `descs.len`
-(`INVALID_ARGUMENT` otherwise); an empty input is a no-op success. A
+one accumulated update to the device-global descriptor set.
+`out_views.len` must equal `descs.len` (`INVALID_ARGUMENT` otherwise); an empty
+input is a no-op success. A
 zero-initialized `TextureViewCreateDesc.view` selects the default view, matching
 a null `desc` passed to `create_texture_view`.
 
@@ -1297,9 +1297,8 @@ Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
 `CommandResolutionStats`, `reset_command_resolution_stats`, and
 `command_resolution_stats`. The process-wide relaxed counters measure
 live command entry-point attempts, every emitted Vulkan command, and forbidden
-resolution paths. Exact native-operation fields distinguish pipeline binds,
-descriptor-set binds, descriptor-buffer binds, and descriptor-buffer offset
-commands. Gates perform one static device-slot liveness load, direct-record
+resolution paths. Exact native-operation fields distinguish pipeline and
+descriptor-set binds. Gates perform one static device-slot liveness load, direct-record
 load, generation comparison, and authoritative phase check per accepted
 command, and require zero retained device-operation resolution, retained-pin
 borrow, command-table lookup, encoder-cell computation, packed-lease
@@ -1747,7 +1746,6 @@ StageMask
 
 HazardFlags
     draw_arguments
-    descriptors
     depth_stencil
 
 CompletionConsumerFlags
@@ -1769,9 +1767,11 @@ diagnoses those semantic violations with `INVALID_ARGUMENT`. Required pointer
 and authoritative phase checks remain active under every policy.
 
 Normal host, transfer, shader, color-output, and depth-output access scopes are
-derived from the stage masks. `draw_arguments`, `descriptors`, and
-`depth_stencil` opt into special consumer data paths; `descriptors` requires a
-shader or `all` consumer stage. The library does not infer barriers. Cross-queue
+derived from the stage masks. `draw_arguments` and `depth_stencil` opt into
+special consumer data paths. The former descriptor-hazard bit remains invalid
+and raw masks containing it fault `INVALID_ARGUMENT` under every policy; it is
+not reinterpreted as `depth_stencil`. Descriptor-set publication has no public
+GPU memory-hazard bit. The library does not infer barriers. Cross-queue
 dependencies use `SubmitDesc.completion_waits`, not `cmd_barrier`.
 
 Texture transitions remain explicit and semantic:

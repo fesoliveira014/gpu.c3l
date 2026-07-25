@@ -17,7 +17,6 @@ struct VkInstanceDispatchPlan {
 struct VkDeviceDispatchPlan {
     bool debug;
     bool presentation;
-    bool descriptor_buffer;
     bool generated_work;
 }
 
@@ -56,14 +55,6 @@ struct VkDevicePresentationDispatch {
     vk::PFN_vkQueuePresentKHR       queue_present;
 }
 
-struct VkDescriptorBufferDispatch {
-    vk::PFN_vkGetDescriptorSetLayoutSizeEXT          get_descriptor_set_layout_size;
-    vk::PFN_vkGetDescriptorSetLayoutBindingOffsetEXT get_descriptor_set_layout_binding_offset;
-    vk::PFN_vkGetDescriptorEXT                       get_descriptor;
-    vk::PFN_vkCmdBindDescriptorBuffersEXT            cmd_bind_descriptor_buffers;
-    vk::PFN_vkCmdSetDescriptorBufferOffsetsEXT       cmd_set_descriptor_buffer_offsets;
-}
-
 struct VkGeneratedWorkDispatch {
     vk::PFN_vkCmdExecuteGeneratedCommandsEXT         cmd_execute_generated_commands;
     vk::PFN_vkGetGeneratedCommandsMemoryRequirementsEXT get_memory_requirements;
@@ -80,7 +71,6 @@ struct VkDynamicColorDispatch {
 struct VkDeviceDispatch {
     VkDeviceDebugDispatch        debug;
     VkDevicePresentationDispatch presentation;
-    VkDescriptorBufferDispatch   descriptor_buffer;
     VkGeneratedWorkDispatch      generated_work;
     VkDynamicColorDispatch       dynamic_color;
 }
@@ -192,30 +182,6 @@ fn VkDeviceDispatch load_vk_device_dispatch(
             ),
         };
     }
-    if (plan.descriptor_buffer) {
-        dispatch.descriptor_buffer = {
-            .get_descriptor_set_layout_size = (vk::PFN_vkGetDescriptorSetLayoutSizeEXT)loader(
-                device,
-                "vkGetDescriptorSetLayoutSizeEXT",
-            ),
-            .get_descriptor_set_layout_binding_offset = (vk::PFN_vkGetDescriptorSetLayoutBindingOffsetEXT)loader(
-                device,
-                "vkGetDescriptorSetLayoutBindingOffsetEXT",
-            ),
-            .get_descriptor = (vk::PFN_vkGetDescriptorEXT)loader(
-                device,
-                "vkGetDescriptorEXT",
-            ),
-            .cmd_bind_descriptor_buffers = (vk::PFN_vkCmdBindDescriptorBuffersEXT)loader(
-                device,
-                "vkCmdBindDescriptorBuffersEXT",
-            ),
-            .cmd_set_descriptor_buffer_offsets = (vk::PFN_vkCmdSetDescriptorBufferOffsetsEXT)loader(
-                device,
-                "vkCmdSetDescriptorBufferOffsetsEXT",
-            ),
-        };
-    }
     if (plan.generated_work) {
         dispatch.generated_work = {
             .cmd_execute_generated_commands = (vk::PFN_vkCmdExecuteGeneratedCommandsEXT)loader(
@@ -278,13 +244,6 @@ fn bool device_dispatch_supports_presentation(VkDeviceDispatch* dispatch) {
         && dispatch.presentation.queue_present != null;
 }
 
-fn bool device_dispatch_supports_descriptor_buffer(VkDeviceDispatch* dispatch) {
-    return dispatch.descriptor_buffer.get_descriptor_set_layout_size != null
-        && dispatch.descriptor_buffer.get_descriptor_set_layout_binding_offset != null
-        && dispatch.descriptor_buffer.get_descriptor != null
-        && dispatch.descriptor_buffer.cmd_bind_descriptor_buffers != null
-        && dispatch.descriptor_buffer.cmd_set_descriptor_buffer_offsets != null;
-}
 fn bool device_dispatch_supports_generated_work(VkDeviceDispatch* dispatch) {
     return dispatch.generated_work.cmd_execute_generated_commands != null
         && dispatch.generated_work.get_memory_requirements != null

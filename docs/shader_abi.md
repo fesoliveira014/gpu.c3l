@@ -277,7 +277,7 @@ texture_heap[GPU_HEAP_SLOT(material.albedo_texture)]
 sampler_heap[GPU_HEAP_SLOT(material.material_sampler)]
 ```
 
-The exact shader spelling depends on the private heap implementation, but material records remain unchanged.
+Material records remain independent from the native descriptor-set objects.
 
 ## 9. Descriptor heap shader contract
 
@@ -297,7 +297,17 @@ load_storage_texture(TextureIndex, Vec2i) -> Vec4f
 store_storage_texture(TextureIndex, Vec2i, Vec4f)
 ```
 
-Backend-specific descriptor details should be hidden behind these helpers where possible.
+The descriptor-indexing ABI is fixed:
+
+```text
+set 0, binding 0: sampled image array
+set 0, binding 1: storage image array
+set 0, binding 2: sampler array
+```
+
+The same binding 2 is declared as a sampler-shadow view for depth comparison.
+Backend descriptor objects and binding commands remain hidden behind the
+helpers.
 
 ## 10. Push constant contract
 

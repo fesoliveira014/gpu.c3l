@@ -505,9 +505,6 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         pipe_info.p_color_blend_state = &blend_state;
         pipe_info.p_dynamic_state = &dynamic_state;
         pipe_info.layout = state.graphics_layout;
-        if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
-            pipe_info.flags = vk::PipelineCreateFlagBits.DESCRIPTOR_BUFFER_BIT_EXT;
-        }
 
         vk::Pipeline pipeline;
         check_pipeline_create_device_result(
