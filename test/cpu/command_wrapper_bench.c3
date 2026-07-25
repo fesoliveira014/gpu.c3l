@@ -100,9 +100,6 @@ gpu::internal::vk::CommandOps wrapper_bench_command_ops @private = {
     .draw         = &wrapper_bench_draw,
 };
 
-gpu::internal::BackendVTable wrapper_bench_vtable @private = {
-};
-
 fn double sample_elapsed(std::time::Clock start) {
     return (double)(long)start.to_now() / (double)WRAPPER_BENCH_ITERATIONS;
 }
@@ -370,7 +367,6 @@ fn int main() {
     Device device = gpu::internal::register_device(
         state:          &state.state,
         caps:           {},
-        vtable:         &wrapper_bench_vtable,
         resource_owner: state.state.resource_owner,
     )!!;
     defer destroy_device(&device)!!;

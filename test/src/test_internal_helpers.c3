@@ -7,7 +7,6 @@ struct CompletionFixture {
     gpu::internal::vk::VkDeviceState state;
 }
 
-gpu::internal::BackendVTable completion_fixture_vtable;
 
 fn void range_helper() @test {
     assert(gpu::internal::range_fits(256, 0, 256), "exact fit passes");
@@ -86,7 +85,6 @@ fn void completion_points_poll_and_wait_without_consumption() @test {
     Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &completion_fixture_vtable,
     )!!;
     Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
     CompletionPoint point = gpu::internal::make_completion_point(queue, 7)!!;
@@ -126,12 +124,10 @@ fn void completion_points_reject_stale_and_foreign_ownership() @test {
     Device first = gpu::internal::register_device(
         state:  &first_fixture.state,
         caps:   {},
-        vtable: &completion_fixture_vtable,
     )!!;
     Device second = gpu::internal::register_device(
         state:  &second_fixture.state,
         caps:   {},
-        vtable: &completion_fixture_vtable,
     )!!;
     Queue first_queue = get_queue(&first, QueueKind.GRAPHICS)!!;
     CompletionPoint point = gpu::internal::make_completion_point(first_queue, 1)!!;
@@ -165,7 +161,6 @@ fn void completion_point_creation_allocates_no_public_object() @test {
     Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &completion_fixture_vtable,
     )!!;
     Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];

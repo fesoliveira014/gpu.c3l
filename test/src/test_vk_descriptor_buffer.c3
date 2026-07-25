@@ -183,7 +183,7 @@ fn void descriptor_buffer_device_and_heap() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(
         gpu::internal::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"
@@ -390,7 +390,7 @@ fn void descriptor_buffer_compute_to_graphics() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(
         gpu::internal::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"
@@ -732,7 +732,7 @@ fn void descriptor_buffer_write_then_sample() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(
         gpu::internal::vk::strict_heap_uses_descriptor_buffer(&state.strict_heap),
         "the private creation probe selects descriptor buffers"

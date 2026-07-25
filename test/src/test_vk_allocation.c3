@@ -1158,8 +1158,7 @@ fn void native_allocation_classes_map_and_release() @test {
             && (ulong)gpu::get_span_address(&device, span)!! != 0,
             "every memory class exposes a nonzero GPU address");
 
-        vk::VkDeviceState* state = (vk::VkDeviceState*)
-            gpu::internal::device_backend_state_ptr(&device);
+        vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
         vk::AllocationSlot* slot = state.allocations.get(allocation)!!;
         vk::MemoryRequirements native_requirements;
         vk::get_buffer_memory_requirements(

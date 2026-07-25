@@ -448,7 +448,7 @@ fn void depth_state_variants_share_entry() @test {
     gpu::PipelineHandle test_off = make_depth_pipeline(&device, &ctx);
     defer gpu::destroy_pipeline(&device, test_off)!!;
 
-    uint entries = vk::pipeline_cache_entry_count((vk::VkDeviceState*)gpu::internal::device_backend_state(device));
+    uint entries = vk::pipeline_cache_entry_count(gpu::internal::device_slots[device.index].data.state);
     assert(entries == 1, "depth-state variants share one cache entry");
     OwnedSpan near_verts_owned = write_tri(&device, NEAR_Z);
     defer free_owned_span(&device, &near_verts_owned)!!;

@@ -183,7 +183,7 @@ fn int main() {
     foreach (i, &raster : rasters) *raster = raster_permutation((uint)i);
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     ulong native_before = vk::pipeline_native_create_count(state);
     gpu::PipelineHandle[BENCH_RASTER_PERMUTATION_COUNT] aliases;
     std::time::Clock cold_start = std::time::clock::now();

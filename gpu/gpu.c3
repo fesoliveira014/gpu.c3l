@@ -357,7 +357,6 @@ fn void? destroy_surface(Surface* surface) {
 fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
     gpu::internal::command_device_registry_resolutions.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_retained_pin_operations.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_lifecycle_vtable_dispatches.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_table_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
@@ -379,9 +378,6 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
             AtomicOrdering.RELAXED,
         ),
         .retained_pin_operations = gpu::internal::command_retained_pin_operations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .lifecycle_vtable_dispatches = gpu::internal::command_lifecycle_vtable_dispatches.load(
             AtomicOrdering.RELAXED,
         ),
         .command_table_lookups = gpu::internal::command_table_lookups.load(

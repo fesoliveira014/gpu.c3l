@@ -16,7 +16,6 @@ fn Device create_queue_test_device(Runtime* runtime) {
     return gpu::create_device(&adapter, &request)!!;
 }
 
-gpu::internal::BackendVTable queue_test_vtable;
 
 fn bool queue_roles_are_all(gpu::QueueRoles roles) {
     return roles.graphics && roles.compute && roles.transfer;
@@ -87,7 +86,6 @@ fn void queue_queries_preserve_distinct_compute_identity() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &state,
         caps:   { .async_compute = true },
-        vtable: &queue_test_vtable,
         queues: selection,
     )!!;
 
@@ -155,7 +153,6 @@ fn void selected_queue_counts_round_trip_stored_identities() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &state,
         caps:   {},
-        vtable: &queue_test_vtable,
         queues: selection,
     )!!;
     defer gpu::destroy_device(&device)!!;
@@ -206,7 +203,6 @@ fn void selected_queue_counts_reach_encoded_capacity() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &state,
         caps:   {},
-        vtable: &queue_test_vtable,
         queues: selection,
     )!!;
     defer gpu::destroy_device(&device)!!;
@@ -245,7 +241,6 @@ fn void queue_registration_rejects_duplicate_role_identity() @test {
         @catch(gpu::internal::register_device(
             state:  &state,
             caps:   {},
-            vtable: &queue_test_vtable,
             queues: selection,
         )) == gpu::INVALID_ARGUMENT,
         "one role cannot publish the same identity twice"

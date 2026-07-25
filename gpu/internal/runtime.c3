@@ -69,13 +69,6 @@ fn Runtime? register_runtime(
     return gpu::SLOT_TABLE_FULL~;
 }
 
-fn gpu::internal::vk::VkRuntimeState* runtime_backend_state(
-    Runtime* runtime,
-) @private {
-    RuntimeData* data = resolve_runtime(runtime);
-    return data == null ? null : data.state;
-}
-
 fn void? runtime_retain_surface(Runtime* runtime) @private {
     RuntimeData* data = resolve_runtime(runtime);
     if (data == null) return gpu::INVALID_HANDLE~;

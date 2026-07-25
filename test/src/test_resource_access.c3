@@ -4,7 +4,6 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 
-gpu::internal::BackendVTable resource_access_vtable;
 
 fn gpu::Device create_compute_only_resource_access_device(
     gpu::internal::vk::VkDeviceState* state,
@@ -22,7 +21,6 @@ fn gpu::Device create_compute_only_resource_access_device(
     return gpu::internal::register_device(
         state:  state,
         caps:   {},
-        vtable: &resource_access_vtable,
         queues: queues,
     )!!;
 }

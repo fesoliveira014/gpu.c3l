@@ -68,15 +68,10 @@ struct CommandListHandle @private {
 }
 $assert CommandListHandle::size <= ulong::size * 2;
 
-struct BackendVTable @private {
-    bool marker;
-}
-
 struct DeviceData @private {
     gpu::internal::vk::VkDeviceState* state;
     DeviceCaps                       caps;
     QueueSelection                   queues;
-    BackendVTable*                   vtable;
     ulong                            resource_owner;
     Runtime                          runtime;
     Adapter                          adapter;
@@ -95,7 +90,6 @@ struct DeviceOperation @private {
     DeviceSlot*                       slot;
     DeviceData*                       data;
     gpu::internal::vk::VkDeviceState* state;
-    BackendVTable*                    vtable;
     bool                              active;
     bool                              owns_pin;
 }
@@ -124,7 +118,6 @@ struct RecordingWorkCounters @private @if(
 
 Atomic{ulong} command_device_registry_resolutions @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_retained_pin_operations @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_lifecycle_vtable_dispatches @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
@@ -168,15 +161,6 @@ fn void note_command_device_registry_resolution() @private {
 fn void note_command_retained_pin_operation() @private {
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         (void)command_retained_pin_operations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_lifecycle_vtable_dispatch() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
-        (void)command_lifecycle_vtable_dispatches.add(
             1,
             AtomicOrdering.RELAXED,
         );
@@ -332,7 +316,6 @@ fn DeviceOperation? begin_device_operation(
             .slot     = slot,
             .data     = &slot.data,
             .state    = slot.data.state,
-            .vtable   = slot.data.vtable,
             .active   = true,
             .owns_pin = true,
         };
@@ -364,7 +347,6 @@ fn DeviceOperation? borrow_retained_device_operation(
         .slot   = slot,
         .data   = &slot.data,
         .state  = slot.data.state,
-        .vtable = slot.data.vtable,
         .active = true,
     };
 }
@@ -515,7 +497,6 @@ fn bool device_slot_available() @private {
 fn Device? register_device(
     gpu::internal::vk::VkDeviceState* state,
     DeviceCaps caps,
-    BackendVTable* vtable,
     ulong resource_owner = 0,
     Runtime* retained_runtime = null,
     Adapter* adapter = null,
@@ -523,7 +504,7 @@ fn Device? register_device(
     QueueSelection queues = {},
     Device* owner = null,
 ) @private {
-    if (state == null || vtable == null) return gpu::INVALID_ARGUMENT~;
+    if (state == null) return gpu::INVALID_ARGUMENT~;
     if (resource_owner == 0) resource_owner = allocate_device_resource_owner()!;
     bool has_runtime = retained_runtime != null;
     if (has_runtime != (adapter != null)) return gpu::INVALID_ARGUMENT~;
@@ -581,7 +562,6 @@ fn Device? register_device(
             .state                = state,
             .caps                 = caps,
             .queues               = queues,
-            .vtable               = vtable,
             .resource_owner       = resource_owner,
             .runtime              = runtime,
             .adapter              = registered_adapter,
@@ -593,17 +573,4 @@ fn Device? register_device(
         return handle;
     }
     return gpu::SLOT_TABLE_FULL~;
-}
-
-fn gpu::internal::vk::VkDeviceState* device_backend_state_ptr(
-    Device* device,
-) @private {
-    DeviceData* data = resolve_pinned_device(device);
-    return data == null ? null : data.state;
-}
-
-fn gpu::internal::vk::VkDeviceState* device_backend_state(
-    Device device,
-) @private {
-    return device_backend_state_ptr(&device);
 }

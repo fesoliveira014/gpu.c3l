@@ -304,7 +304,7 @@ fn void strict_pipeline_layouts_share_heap_set_zero() @test {
     gpu::Device device = make_heap_test_device(1, 1);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
 
     assert(state.graphics_layout != null && state.compute_layout != null,
         "strict devices create both shared pipeline layouts");
@@ -317,7 +317,7 @@ fn void sampler_lookup_scale_empty_bucket_miss_has_zero_work() @test {
     gpu::Device device = make_heap_test_device(1, 1);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::SamplerTable table = vk::create_sampler_lookup_probe_table(
         SAMPLER_LOOKUP_SCALE_OCCUPANCY,
     );
@@ -344,7 +344,7 @@ fn void descriptor_sampler_failures_report_context() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle transfer = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, transfer)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     state.textures.slots[transfer.index].value.usage = { .transfer_dst };
     DescriptorDiagnosticCapture capture;
     state.debug_callback = &capture_descriptor_diagnostic;
@@ -443,7 +443,7 @@ fn void texture_view_round_trip() @test {
     gpu::TextureHandle texture = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
 
     gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
     assert(view.is_valid() && view.index.is_valid(),
@@ -476,7 +476,7 @@ fn void texture_view_multi_layer_ranges_select_array_views() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
 
     gpu::TextureViewDesc full_range = {};
@@ -537,9 +537,9 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
     assert(first_view.index == second_view.index,
         "coincident devices may publish the same raw shader index");
     vk::VkDeviceState* first_state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(first_device);
+        gpu::internal::device_slots[first_device.index].data.state;
     vk::VkDeviceState* second_state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(second_device);
+        gpu::internal::device_slots[second_device.index].data.state;
     uint first_free_before = first_state.strict_heap.descriptors.texture_free_count;
     uint second_free_before = second_state.strict_heap.descriptors.texture_free_count;
     uint first_owner_before = live_descriptor_view_count(
@@ -603,7 +603,7 @@ fn void texture_view_exhaustion_does_not_cache_failed_views() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureView occupied = gpu::create_texture_view(&device, texture, null)!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     assert(cached_texture_view_count(state, texture) == 0, "the fixture starts with an empty view cache");
 
     for (uint i = 0; i < vk::INITIAL_CACHED_VIEW_CAPACITY; i++) {
@@ -651,7 +651,7 @@ fn void texture_view_generation_exhaustion_retires_slot() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureDescriptorCell* cell =
         &state.strict_heap.descriptors.texture_cells[view.index.value - 1];
     cell.generation = vk::HANDLE_GENERATION_MAX - 1;
@@ -677,7 +677,7 @@ fn void texture_view_zero_owner_count_faults_before_destruction_mutation() @test
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* owner = state.textures.get(texture)!!;
     vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
     vk::TextureDescriptorCell* cell =
@@ -726,7 +726,7 @@ fn void texture_view_missing_owner_faults_before_destruction_mutation() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* owner = state.textures.get(texture)!!;
     vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
     vk::TextureDescriptorCell* cell =
@@ -774,7 +774,7 @@ fn void texture_view_increment_invariant_faults_transactionally() @test {
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* owner = state.textures.get(texture)!!;
     vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
     owner.live_descriptor_views = 8;
@@ -820,7 +820,7 @@ fn void texture_views_batch_increment_invariant_is_transactional() @test {
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* owner = state.textures.get(texture)!!;
     vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
     owner.live_descriptor_views = 7;
@@ -871,7 +871,7 @@ fn void texture_views_late_increment_invariant_rolls_back_cached_view() @test {
     gpu::TextureHandle inconsistent = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, inconsistent)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* inconsistent_owner = state.textures.get(inconsistent)!!;
     inconsistent_owner.live_descriptor_views = 8;
     gpu::TextureViewDesc new_view = {
@@ -992,7 +992,7 @@ fn void texture_destroy_ownership_work_is_high_water_invariant() @test {
     gpu::Device device = make_heap_test_device(65_536, 1);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     uint[3] high_water_marks = { 16, 4_096, 65_536 };
 
     foreach (high_water : high_water_marks) {
@@ -1037,7 +1037,7 @@ fn void texture_views_batch_counts_repeated_owners_exactly() @test {
     gpu::TextureHandle second = make_heap_texture(&device);
     defer gpu::destroy_texture(&device, second)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
 
     gpu::TextureViewCreateDesc[4] descs = {
         { .texture = first },
@@ -1148,7 +1148,7 @@ fn void texture_views_failed_batch_restores_full_view_capacity() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     for (uint i = 0; i < vk::INITIAL_CACHED_VIEW_CAPACITY; i++) {
         gpu::TextureViewDesc failed_view = {
@@ -1191,7 +1191,7 @@ fn void texture_views_failed_batch_restores_multiple_created_views() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
     DescriptorDiagnosticCapture capture;
     state.debug_callback = &capture_descriptor_diagnostic;
@@ -1243,7 +1243,7 @@ fn void texture_views_failed_batch_preserves_existing_and_duplicate_views() @tes
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
 
     gpu::TextureViewDesc existing_view = {
@@ -1298,7 +1298,7 @@ fn void texture_views_mid_batch_fault_preserves_descriptor_state() @test {
 
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
     uint owner_count_before = live_descriptor_view_count(state, texture);
 
@@ -1421,7 +1421,7 @@ fn void sampler_interning_is_stable() @test {
     assert(gpu::intern_sampler(&device, &desc)!! == first_index,
         "an existing sampler succeeds after heap exhaustion");
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(state.samplers.count == 2
             && state.strict_heap.descriptors.sampler_next_new == 2,
         "failed interning preserves table and heap state");
@@ -1455,7 +1455,7 @@ fn void sampler_hash_collisions_preserve_distinct_keys() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     const ulong COLLISION_HASH = 0x5a5a5a5a5a5a5a5a;
     vk::set_sampler_hash_override(state, true, COLLISION_HASH);
 
@@ -1548,7 +1548,7 @@ fn void sampler_native_create_failure_is_transactional() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::SamplerDesc existing_desc = {};
     gpu::SamplerIndex existing = gpu::intern_sampler(&device, &existing_desc)!!;
     uint table_count = state.samplers.count;
@@ -1585,7 +1585,7 @@ fn void sampler_native_create_failure_is_transactional() @test {
 fn void sampler_table_teardown_releases_owned_storage() @test {
     gpu::Device device = make_heap_test_device(8, 4);
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::SamplerDesc first_desc = {};
     gpu::SamplerDesc second_desc = { .mag_filter = gpu::Filter.LINEAR };
     (void)gpu::intern_sampler(&device, &first_desc)!!;
@@ -1608,7 +1608,7 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
     defer destroy_test_device(&device)!!;
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::PhysicalDeviceProperties properties;
     vk::get_physical_device_properties(state.physical_device, &properties);
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
@@ -1688,7 +1688,7 @@ fn void sampler_invalid_enum_values_are_rejected() @test {
     gpu::Device device = make_heap_test_device(8, 8);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     uint count_before = state.samplers.count;
 
     gpu::SamplerDesc invalid_filter = {};
@@ -1740,7 +1740,7 @@ fn void device_loss_teardown_accepts_live_texture_view_accounting() @test {
         &desc,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(view.is_valid()
             && state.textures.get(texture)!!.live_descriptor_views == 1
             && cached_texture_view_count(state, texture) == 1,
@@ -2051,7 +2051,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     DescriptorDiagnosticCapture capture;
     state.debug_callback = &capture_descriptor_diagnostic;
     state.debug_user_data = &capture;
@@ -2235,7 +2235,7 @@ fn void texture_view_cache_growth_reports_host_oom_transactionally() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     state.host_allocator = &allocators::NULL_ALLOCATOR;
     gpu::TextureViewDesc view = {
         .mip_count   = 1,
@@ -2284,7 +2284,7 @@ fn void texture_view_cache_grows_past_initial_capacity() @test {
         texture,
         &beyond_initial_capacity,
     )!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     assert(cached_texture_view_count(state, texture) == vk::INITIAL_CACHED_VIEW_CAPACITY + 1,
         "distinct texture views grow past the initial native-view cache capacity");
 
@@ -2317,7 +2317,7 @@ fn void texture_view_batch_rollback_survives_cache_growth() @test {
     assert(@catch(gpu::create_texture_views(&device, descs[..], views[..]))
         == gpu::INVALID_HANDLE,
         "a stale final item rejects a batch after native-view cache growth");
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     assert(cached_texture_view_count(state, texture) == 0,
         "batch rollback removes creations made before and after cache growth");
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;

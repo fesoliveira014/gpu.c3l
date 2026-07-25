@@ -80,8 +80,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         .max_commands_per_list   = 8,
         .preprocess_buffer_count = 1,
     };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
         state,
         &reservation,
@@ -229,8 +228,7 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     };
     gpu::GeneratedScratchDesc alias_reservation = reservation;
     alias_reservation.pipeline = alias_pipeline;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
         state,
         &reservation,
@@ -437,8 +435,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         .max_commands_per_list   = 8,
         .preprocess_buffer_count = 1,
     };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state_ptr(&device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::PFN_vkGetGeneratedCommandsMemoryRequirementsEXT original =
         state.device_dispatch.generated_work.get_memory_requirements;
     zero_generated_requirement_calls = 0;

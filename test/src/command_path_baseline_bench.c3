@@ -1231,7 +1231,7 @@ fn int main() {
         create_bench_device(&runtime_desc, explicit_policy: true)!!;
     defer destroy_bench_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(state.validation_policy.contract == policy.contract);
     assert(state.validation_policy.track_lifetimes == policy.track_lifetimes);
     assert(state.validation_policy.vulkan_layers == policy.vulkan_layers);

@@ -388,12 +388,6 @@ fn void? command_pin_end_label(gpu::internal::vk::CommandRecord* record) {
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-gpu::internal::BackendVTable blocking_device_vtable = {
-};
-
-gpu::internal::BackendVTable blocking_operation_vtable = {
-};
-
 gpu::internal::vk::CommandOps command_pin_ops = {
     .copy_buffer                 = &command_pin_copy_buffer,
     .fill_buffer                 = &command_pin_fill_buffer,
@@ -424,7 +418,6 @@ gpu::internal::vk::CommandOps command_pin_ops = {
     .end_label                   = &command_pin_end_label,
 };
 
-gpu::internal::BackendVTable command_pin_vtable;
 
 fn gpu::CommandList? begin_command_pin(gpu::Device* device) {
     if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
@@ -507,7 +500,6 @@ fn int device_registry_worker(void* raw_args) {
     gpu::Device? registered = gpu::internal::register_device(
         state:  &args.fixture.state,
         caps:   {},
-        vtable: &device_fixture_vtable,
     );
     if (catch registration_fault = registered) {
         (void)registration_fault;
@@ -534,7 +526,6 @@ fn void command_allocator_public_lifecycle_is_transactional() @test {
     gpu::Device device = gpu::internal::register_device(
         state:          &fixture.state,
         caps:           {},
-        vtable:         &command_pin_vtable,
         resource_owner: fixture.state.resource_owner,
     )!!;
     gpu::Queue queue = gpu::get_queue(
@@ -585,13 +576,11 @@ fn void command_allocator_creation_rejects_before_publication() @test {
     gpu::Device first = gpu::internal::register_device(
         state:          &first_fixture.state,
         caps:           {},
-        vtable:         &command_pin_vtable,
         resource_owner: first_fixture.state.resource_owner,
     )!!;
     gpu::Device second = gpu::internal::register_device(
         state:  &second_fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::Queue foreign = gpu::get_queue(
         &second,
@@ -653,7 +642,6 @@ fn void command_calls_use_the_retained_lifetime_pin() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::internal::vk::CommandRecord* record = commands.record;
@@ -701,7 +689,6 @@ fn void warm_command_dispatch_skips_resolution_paths() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::reset_command_resolution_stats();
@@ -717,8 +704,6 @@ fn void warm_command_dispatch_skips_resolution_paths() @test {
         "warm recording does not resolve the device registry");
     assert(stats.retained_pin_operations == 0,
         "warm recording does not borrow or acquire a device pin");
-    assert(stats.lifecycle_vtable_dispatches == 0,
-        "warm recording does not load lifecycle dispatch");
     assert(stats.command_table_lookups == 0,
         "warm recording does not resolve the backend command table");
     assert(stats.pipeline_table_lookups == 0
@@ -742,7 +727,6 @@ fn void null_and_stale_direct_command_tokens_are_rejected() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::Barrier barrier = {
@@ -791,7 +775,6 @@ fn void recording_alias_is_rejected_after_end_phase_transition() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::CommandList recording_alias = commands;
@@ -818,7 +801,6 @@ fn void failed_command_lifecycle_preserves_record_state() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::CommandList original = commands;
@@ -848,7 +830,6 @@ fn void executable_alias_of_recording_token_faults_command_state() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::ExecutableCommandList forged = {
@@ -871,7 +852,6 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList first = begin_command_pin(&device)!!;
     gpu::CommandList second = begin_command_pin(&device)!!;
@@ -917,7 +897,6 @@ fn void device_loss_after_backend_submit_still_consumes_every_token() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList first = begin_command_pin(&device)!!;
     gpu::CommandList second = begin_command_pin(&device)!!;
@@ -951,7 +930,6 @@ fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::CommandList duplicate = commands;
@@ -981,7 +959,6 @@ fn void command_record_is_not_reused_before_discard_returns() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -1015,7 +992,6 @@ fn void lost_commands_can_be_discarded() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::internal::mark_device_lost(&device);
@@ -1054,7 +1030,6 @@ fn void lost_executable_commands_can_be_discarded() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&device)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
@@ -1082,7 +1057,6 @@ fn void stale_commands_do_not_use_unrelated_lifetime_pins() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList discarded = begin_command_pin(&device)!!;
     gpu::CommandList stale = discarded;
@@ -1113,7 +1087,6 @@ fn void stale_command_faults_before_reused_device_callback() @test {
     gpu::Device retired = gpu::internal::register_device(
         state:  &retired_fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList commands = begin_command_pin(&retired)!!;
     gpu::CommandList stale = commands;
@@ -1125,7 +1098,6 @@ fn void stale_command_faults_before_reused_device_callback() @test {
     gpu::Device replacement = gpu::internal::register_device(
         state:  &replacement_fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::Barrier barrier = {
         .before = { .compute = true },
@@ -1161,7 +1133,6 @@ fn void stale_command_generation_does_not_use_reused_slot_pin() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &command_pin_vtable,
     )!!;
     gpu::CommandList first = begin_command_pin(&device)!!;
     gpu::CommandList stale = first;
@@ -1332,7 +1303,6 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
     gpu::Device closing = gpu::internal::register_device(
         state:  &blocking_fixture.state,
         caps:   {},
-        vtable: &blocking_device_vtable,
         owner:  &blocking_fixture.state.owner,
     )!!;
     gpu::Device stale = closing;
@@ -1365,7 +1335,6 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
     gpu::Device? registered = gpu::internal::register_device(
         state:  &survivor_fixture.state,
         caps:   {},
-        vtable: &device_fixture_vtable,
     );
     if (catch registration_fault = registered) {
         (void)registration_fault;
@@ -1401,7 +1370,6 @@ fn void active_operations_make_device_destruction_retryable() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &blocking_operation_vtable,
     )!!;
 
     DeviceOperationWorkerArgs operation_args = { .device = device };
@@ -1442,7 +1410,6 @@ fn void live_children_take_precedence_over_active_operations() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &blocking_operation_vtable,
     )!!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     slot.live_children.store(1, AtomicOrdering.RELEASE);
@@ -1472,7 +1439,6 @@ fn void backend_busy_device_destruction_is_retryable() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &blocking_operation_vtable,
     )!!;
     gpu::Device original = device;
 
@@ -1498,7 +1464,6 @@ fn void readiness_check_runs_after_new_operations_are_closed() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &blocking_operation_vtable,
     )!!;
     gpu::Device stale = device;
 
@@ -1527,7 +1492,6 @@ fn void child_published_while_closing_blocks_destruction() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &blocking_operation_vtable,
         owner:  &fixture.state.owner,
     )!!;
     gpu::Device original = device;

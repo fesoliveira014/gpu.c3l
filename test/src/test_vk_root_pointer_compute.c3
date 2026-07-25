@@ -158,7 +158,7 @@ fn void direct_reference_root_runtime_evidence() @test {
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::set_root_abi_evidence_enabled(state, true);
     defer vk::set_root_abi_evidence_enabled(state, false);
 
@@ -232,7 +232,7 @@ fn void signed_root_runtime_evidence() @test {
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::set_root_abi_evidence_enabled(state, true);
     defer vk::set_root_abi_evidence_enabled(state, false);
 

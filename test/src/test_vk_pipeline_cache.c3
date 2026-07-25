@@ -59,15 +59,15 @@ fn gpu::Device make_generated_work_cache_test_device() {
 }
 
 fn uint cache_entry_count(gpu::Device* device) {
-    return vk::pipeline_cache_entry_count((vk::VkDeviceState*)gpu::internal::device_backend_state(*device));
+    return vk::pipeline_cache_entry_count(gpu::internal::device_slots[device.index].data.state);
 }
 
 fn bool cache_index_consistent(gpu::Device* device) {
-    return vk::pipeline_cache_index_consistent((vk::VkDeviceState*)gpu::internal::device_backend_state(*device));
+    return vk::pipeline_cache_index_consistent(gpu::internal::device_slots[device.index].data.state);
 }
 
 fn vk::VkDeviceState* cache_test_state(gpu::Device* device) {
-    return (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+    return gpu::internal::device_slots[device.index].data.state;
 }
 
 struct CacheShaders {
@@ -304,7 +304,7 @@ fn void integer_color_targets_reject_blending_before_native_creation() @test {
         colors[..],
     );
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     ulong native_before = vk::pipeline_native_create_count(state);
 
     assert(@catch(gpu::create_graphics_pipeline(&device, &desc))
@@ -549,7 +549,7 @@ fn void formats_split_entries_and_limits_enforced() @test {
     defer gpu::destroy_pipeline(&device, second)!!;
     assert(cache_entry_count(&device) == 2, "different formats produce distinct pipelines");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::PipelineLayout first_layout = state.pipelines.slots[first.index].value.layout;
     vk::PipelineLayout second_layout = state.pipelines.slots[second.index].value.layout;
     assert(first_layout == second_layout, "graphics pipelines share one layout");
@@ -616,7 +616,7 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
     assert(cache_entry_count(&device) == 2,
         "distinct compute shaders create distinct pipeline entries");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::PipelineLayout first_layout = state.pipelines.slots[first.index].value.layout;
     vk::PipelineLayout second_layout = state.pipelines.slots[second.index].value.layout;
     vk::PipelineLayout third_layout = state.pipelines.slots[third.index].value.layout;
@@ -1107,7 +1107,7 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     assert(cache_entry_count(&device) == 1, "dynamic cull state shares one graphics identity");
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     ulong native_pipelines = vk::pipeline_native_create_count(state);
 
     OwnedSpan rb_culled = allocate_owned_span(
@@ -1508,7 +1508,7 @@ fn void line_polygon_mode_respects_optional_feature() @test {
         .format     = gpu::Format.RGBA8_UNORM,
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     bool supported = state.caps.line_polygon_mode;
 
     state.caps.line_polygon_mode = false;
@@ -1533,7 +1533,7 @@ fn void compute_layout_exists_before_pipeline_creation() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(state.compute_layout != null,
         "strict device creation publishes the singleton compute layout");
     assert(state.generated_work.enabled
@@ -1612,7 +1612,7 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
         .preprocess_buffer_count = 1,
     };
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
         state,
         &scratch,
@@ -1719,7 +1719,7 @@ fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test 
         { .shader = distinct_shader },
     };
     gpu::PipelineHandle[3] pipelines;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
     ulong reflections_before = vk::shader_reflection_validation_count(state);
     ulong native_shader_attempts_before =
@@ -1769,7 +1769,7 @@ fn void graphics_pipeline_batch_reuses_shared_shader_modules() @test {
         .alpha_op  = gpu::BlendOp.ADD,
     };
     gpu::PipelineHandle[2] pipelines;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
     ulong reflections_before = vk::shader_reflection_validation_count(state);
     ulong native_shader_attempts_before =
@@ -1807,7 +1807,7 @@ fn void graphics_pipeline_batch_revalidates_shared_shader_roles() @test {
         { .owner = 1, .index = 2, .generation = 3 },
     };
     gpu::PipelineHandle before = outputs[0];
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 
     fault stage_fault = @catch(gpu::create_graphics_pipelines(
@@ -1867,7 +1867,7 @@ fn void pipeline_batch_capacity_failure_is_transactional() @test {
         { .owner = 10, .index = 11, .generation = 12 },
     };
     gpu::PipelineHandle[2] before = outputs;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
     vk::reset_pipeline_identity_stats(state);
@@ -2149,7 +2149,7 @@ fn void pipeline_batch_invalid_state_prevalidates_transactionally() @test {
         { .owner = 4, .index = 5, .generation = 6 },
     };
     gpu::PipelineHandle[2] before = outputs;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 
@@ -2194,7 +2194,7 @@ fn void pipeline_batch_partial_failure_rolls_back_publication() @test {
         { .owner = 16, .index = 17, .generation = 18 },
     };
     gpu::PipelineHandle[2] before = outputs;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
     vk::reset_pipeline_identity_stats(state);
     vk::set_pipeline_creation_failure(state, 1);
@@ -2232,7 +2232,7 @@ fn void empty_pipeline_batches_succeed_without_native_work() @test {
     gpu::ComputePipelineDesc[] compute_descs = {};
     gpu::GraphicsPipelineDesc[] graphics_descs = {};
     gpu::PipelineHandle[] outputs = {};
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 

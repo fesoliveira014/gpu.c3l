@@ -268,7 +268,6 @@ fn void invalid_retained_runtime_metadata_is_rejected_before_publication() @test
     Device? result = gpu::internal::register_device(
         state:            &fixture.state,
         caps:             {},
-        vtable:           &device_fixture_vtable,
         retained_runtime: &runtime,
         adapter:          &forged_adapter,
         owner:            &owner,

@@ -604,38 +604,6 @@ fn CommandOps* select_command_ops(DeviceValidationPolicy policy) {
     }
 }
 
-fn bool command_ops_are_complete(CommandOps* ops) {
-    return ops != null
-        && ops.copy_buffer != null
-        && ops.fill_buffer != null
-        && ops.copy_buffer_to_texture != null
-        && ops.copy_texture_to_buffer != null
-        && ops.barrier != null
-        && ops.texture_barrier != null
-        && ops.bind_pipeline != null
-        && ops.set_depth_state != null
-        && ops.set_raster_state != null
-        && ops.set_graphics_state != null
-        && ops.set_color_state != null
-        && ops.dispatch != null
-        && ops.begin_render_pass != null
-        && ops.begin_render_pass_with_state != null
-        && ops.set_viewport != null
-        && ops.set_scissor != null
-        && ops.end_render_pass != null
-        && ops.draw != null
-        && ops.draw_indexed != null
-        && ops.draw_indirect != null
-        && ops.draw_indexed_indirect != null
-        && ops.draw_indexed_indirect_count != null
-        && ops.dispatch_indirect != null
-        && ops.draw_generated != null
-        && ops.draw_indexed_generated != null
-        && ops.dispatch_generated != null
-        && ops.begin_label != null
-        && ops.end_label != null;
-}
-
 fn void note_command_semantic_check(VkDeviceState* state) @private {
     $if env::TESTING || $feature(VALIDATION_POLICY_STATS):
         (void)state.command_policy_counters.semantic_checks.add(
@@ -878,8 +846,6 @@ fn CommandReferenceWorkCounters command_reference_work_counters(
         ),
     };
 }
-
-const gpu::internal::BackendVTable VK_VTABLE @private = {};
 
 fn VkDeviceConfig runtime_device_config(VkRuntimeState* state) {
     return {
@@ -1333,7 +1299,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     return gpu::internal::register_device(
         state:                state,
         caps:                 state.caps,
-        vtable:               &VK_VTABLE,
         resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
         adapter:              adapter,

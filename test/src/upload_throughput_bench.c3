@@ -60,7 +60,7 @@ fn void? free_upload_storage(gpu::Device* device, UploadStorage* storage) {
 }
 
 fn void print_upload_adapter(gpu::Device* device) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::PhysicalDeviceDriverProperties driver = vk::physical_device_driver_properties();
     vk::PhysicalDeviceProperties2 properties = vk::physical_device_properties2().set_next(&driver);
     vk::get_physical_device_properties2(state.physical_device, &properties);

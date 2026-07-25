@@ -1303,13 +1303,11 @@ fn void? vk_end_commands(
 }
 
 fn CommandRecord*? begin_commands_with_injected_ops(
+    VkDeviceState* state,
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
     CommandRecordingOps* ops,
 ) @if(env::TESTING) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(
-        &allocator.device,
-    );
     vk_begin_commands_with_ops(
         state:        state,
         allocator:    allocator,

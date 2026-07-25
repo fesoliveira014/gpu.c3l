@@ -207,7 +207,7 @@ fn void warm_render_pass_uses_precreated_attachment_without_allocation() @test {
     gpu::cmd_begin_render_pass_with_state(&commands, &pass, &graphics_state)!!;
     gpu::cmd_end_render_pass(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
 
@@ -540,7 +540,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
             .texture = targets[i],

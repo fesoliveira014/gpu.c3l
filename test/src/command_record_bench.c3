@@ -82,7 +82,6 @@ fn void accumulate_resolution_stats(
 ) {
     total.device_registry_resolutions += sample.device_registry_resolutions;
     total.retained_pin_operations += sample.retained_pin_operations;
-    total.lifecycle_vtable_dispatches += sample.lifecycle_vtable_dispatches;
     total.command_table_lookups += sample.command_table_lookups;
     total.pipeline_table_lookups += sample.pipeline_table_lookups;
     total.pipeline_cache_lookups += sample.pipeline_cache_lookups;
@@ -321,7 +320,7 @@ fn int main() {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::CommandAllocatorDesc allocator_desc;
     gpu::GeneratedScratchDesc scratch;
     if (caps.generated_work) {
@@ -460,8 +459,6 @@ fn int main() {
         "warm recording does not resolve the device registry");
     assert(resolution.retained_pin_operations == 0,
         "warm recording does not borrow retained pins");
-    assert(resolution.lifecycle_vtable_dispatches == 0,
-        "warm recording does not load the lifecycle vtable");
     assert(resolution.command_table_lookups == 0,
         "warm recording uses the stable record directly");
     assert(resolution.pipeline_table_lookups == 0,
@@ -549,7 +546,7 @@ fn int main() {
         preprocess_allocations,
     );
     io::printfn(
-        "resolution: recording_commands=%d native_commands=%d pipeline_binds=%d descriptor_set_binds=%d descriptor_buffer_binds=%d descriptor_buffer_offsets=%d device_registry=%d retained_pins=%d lifecycle_vtable=%d command_table=%d pipeline_table=%d pipeline_cache=%d policy=%d encoder_cells=%d encoder_leases=%d",
+        "resolution: recording_commands=%d native_commands=%d pipeline_binds=%d descriptor_set_binds=%d descriptor_buffer_binds=%d descriptor_buffer_offsets=%d device_registry=%d retained_pins=%d command_table=%d pipeline_table=%d pipeline_cache=%d policy=%d encoder_cells=%d encoder_leases=%d",
         resolution.recording_commands,
         resolution.native_commands,
         resolution.pipeline_bind_commands,
@@ -558,7 +555,6 @@ fn int main() {
         resolution.strict_heap_offset_commands,
         resolution.device_registry_resolutions,
         resolution.retained_pin_operations,
-        resolution.lifecycle_vtable_dispatches,
         resolution.command_table_lookups,
         resolution.pipeline_table_lookups,
         resolution.pipeline_cache_lookups,

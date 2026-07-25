@@ -135,7 +135,7 @@ fn int main() {
     };
     gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     run_phase(&device, state, BenchPhase.TEXTURE);
     run_phase(&device, state, BenchPhase.SHADER_CODE);

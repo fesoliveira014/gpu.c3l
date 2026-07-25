@@ -118,7 +118,7 @@ fn void selected_texture_dependency_is_resource_free() @test {
     );
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,

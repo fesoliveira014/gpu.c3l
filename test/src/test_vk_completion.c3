@@ -140,7 +140,7 @@ fn void queue_completion_publication_rejects_gaps() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint first = vk::reserve_queue_completion(
         state,
         queue,
@@ -183,7 +183,7 @@ fn void completion_observation_advances_for_poll_and_wait() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, queue.id)!!;
 
@@ -229,7 +229,7 @@ fn void queue_completion_poll_wait_is_reusable() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(
         state,
         queue,
@@ -278,7 +278,7 @@ fn void completion_cache_skips_native_and_locked_work() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(state, queue)!!;
     vk::publish_queue_completion(state, point)!!;
     ulong sequence = gpu::internal::completion_point_sequence(point);
@@ -347,7 +347,7 @@ fn void concurrent_cached_waits_update_atomic_stats() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(state, queue)!!;
     vk::publish_queue_completion(state, point)!!;
     ulong sequence = gpu::internal::completion_point_sequence(point);
@@ -396,7 +396,7 @@ fn void wait_retires_exact_sequence_and_timeout_preserves_state() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint first = vk::reserve_queue_completion(state, queue)!!;
     vk::publish_queue_completion(state, first)!!;
     gpu::CompletionPoint second = vk::reserve_queue_completion(state, queue)!!;
@@ -448,7 +448,7 @@ fn void concurrent_first_observers_publish_one_retirement() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(state, queue)!!;
     vk::publish_queue_completion(state, point)!!;
     ulong sequence = gpu::internal::completion_point_sequence(point);

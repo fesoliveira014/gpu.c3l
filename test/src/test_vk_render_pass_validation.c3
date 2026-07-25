@@ -182,8 +182,7 @@ fn DynamicStateFixture make_dynamic_state_fixture_before_pass(
     )!!;
     fixture.commands = gpu::begin_commands(&fixture.allocator)!!;
     record_val_target_to_attach(&fixture.commands, fixture.target);
-    fixture.state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(fixture.device);
+    fixture.state = gpu::internal::device_slots[fixture.device.index].data.state;
     vk::reset_dynamic_state_observation(fixture.state);
     return fixture;
 }
@@ -418,7 +417,7 @@ fn vk::TextureSlot* render_validation_slot(
     gpu::TextureHandle texture,
 ) {
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+        gpu::internal::device_slots[device.index].data.state;
     return state.textures.get(texture)!!;
 }
 
@@ -427,7 +426,7 @@ fn vk::AttachmentViewSlot* render_validation_view_slot(
     gpu::AttachmentViewHandle view,
 ) {
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+        gpu::internal::device_slots[device.index].data.state;
     return state.attachment_views.get(view)!!;
 }
 
@@ -515,7 +514,7 @@ fn void graphics_pipeline_rejects_unsupported_sample_count() @test {
         .sample_count = unsupported,
     };
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(@catch(vk::validate_graphics_pipeline_desc(state, &desc))
         == gpu::UNSUPPORTED_FEATURE,
         "pipeline creation preflights attachment sample support");
@@ -1009,8 +1008,7 @@ fn void preserves_graphics_binding_across_render_passes() @test {
 fn void distinct_graphics_cache_entries_emit_distinct_binds() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
     gpu::PipelineHandle alternate = review_distinct_graphics_pipeline(
@@ -1085,7 +1083,7 @@ fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
     record_val_target_to_attach(&commands, third);
 
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::reset_dynamic_state_observation(state);
     gpu::reset_command_resolution_stats();
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
@@ -1192,8 +1190,7 @@ fn void graphics_alias_updates_logical_handle_without_rebinding() @test {
 fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ValComputeCtx compute = make_val_compute_ctx(&device);
     defer destroy_val_compute_ctx(&device, &compute);
     ValDrawCtx draw = make_val_draw_ctx(&device);

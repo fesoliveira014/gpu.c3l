@@ -32,8 +32,7 @@ fn void wsi_presentation_gate_diagnostic() @test {
     gpu::Surface surface;
     gpu::SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)
-            gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     fault gate_fault = @catch(gpu::internal::vk::vk_create_swapchain(
         state,
         &surface,

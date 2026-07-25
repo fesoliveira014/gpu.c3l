@@ -289,8 +289,7 @@ fn void dynamic_color_command_warm_work_is_exact() @test {
     gpu::ColorState color = { .targets = targets[..] };
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::RecordingWorkCounters work_before =
         vk::command_recording_work_counters(state);
     ulong pipelines_before = vk::pipeline_native_create_count(state);

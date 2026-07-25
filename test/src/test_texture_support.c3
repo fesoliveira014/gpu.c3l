@@ -71,7 +71,7 @@ fn void texture_view_publication_requires_strict_capability() @test {
     fault mismatch_fault =
         @catch(gpu::create_texture_views(&device, descs[..], no_views));
     gpu::internal::vk::VkDeviceState* state =
-        gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     assert(mismatch_fault == gpu::INVALID_ARGUMENT,
         "batch length mismatch precedes strict capability validation");
     assert(state.root_diagnostic_calls == 1,

@@ -6,7 +6,6 @@ import gpu::internal::vk @public;
 import vk;
 import std::core::mem;
 
-const gpu::internal::BackendVTable DEVICE_LOSS_VTABLE = {};
 
 struct BackendResultCapture {
     uint calls;
@@ -17,7 +16,6 @@ fn gpu::Device device_loss_fixture(gpu::internal::vk::VkDeviceState* state) {
     return gpu::internal::register_device(
         state:  state,
         caps:   { .strict_enabled = true },
-        vtable: &DEVICE_LOSS_VTABLE,
         owner:  &state.owner,
     )!!;
 }

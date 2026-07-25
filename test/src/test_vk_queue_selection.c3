@@ -284,7 +284,7 @@ fn gpu::Device make_queue_test_device() {
 fn void queue_alias_matches_async_compute_cap() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* s = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* s = gpu::internal::device_slots[device.index].data.state;
     assert(s.compute_queue_distinct == gpu::get_device_caps(&device)!!.async_compute, "distinct flag mirrors the cap");
     assert((s.compute_queue == s.graphics_queue) == !gpu::get_device_caps(&device)!!.async_compute, "alias iff no async compute");
     uint expected_index = s.compute_queue_distinct && s.compute_family == s.graphics_family ? 1 : 0;
@@ -648,7 +648,7 @@ fn void allocator_pool_ownership_is_exact() @test {
     defer gpu::destroy_command_allocator(&compute_allocator)!!;
     gpu::CommandAllocator transfer_allocator = gpu::create_command_allocator(&device, transfer)!!;
     defer gpu::destroy_command_allocator(&transfer_allocator)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::CommandAllocatorSlot* graphics_slot = state.command_allocators.get(
         graphics_allocator.handle,
     )!!;

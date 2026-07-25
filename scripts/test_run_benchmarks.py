@@ -52,7 +52,7 @@ COMMAND_OUTPUT = "\n".join(
             "pipeline_binds=0 descriptor_set_binds=0 "
             "descriptor_buffer_binds=0 descriptor_buffer_offsets=0 "
             "device_registry=0 "
-            "retained_pins=0 lifecycle_vtable=0 command_table=0 "
+            "retained_pins=0 command_table=0 "
             "pipeline_table=0 pipeline_cache=0 policy=0 "
             "encoder_cells=0 encoder_leases=0"
         ),
@@ -1031,7 +1031,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
             "descriptor_buffer_offsets",
             "device_registry",
             "retained_pins",
-            "lifecycle_vtable",
             "command_table",
             "pipeline_table",
             "pipeline_cache",

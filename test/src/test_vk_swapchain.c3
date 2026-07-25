@@ -72,7 +72,6 @@ fn void reset_acquire_capture(vk::Result result, uint image_index = 0) {
     captured_acquire_image_index = image_index;
 }
 
-gpu::internal::BackendVTable public_acquire_fixture_vtable;
 
 fn void initialize_acquisition_fixture(AcquisitionFixture* fixture) {
     if (!fixture.device.is_valid()) {
@@ -472,8 +471,7 @@ fn void swapchain_requires_a_presentation_request() @test {
     gpu::Surface surface;
     gpu::SwapchainDesc sc_desc = { .width = 640, .height = 480 };
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)
-            gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     fault gate_fault = @catch(gpu::internal::vk::vk_create_swapchain(
         state,
         &surface,
@@ -618,7 +616,7 @@ fn void present_path_guards_precede_native_mutation() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     state.presentation.queue_mutex.init()!!;
 
     gpu::internal::vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
@@ -815,7 +813,6 @@ fn void public_acquire_default_reaches_backend_as_zero() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &public_acquire_fixture_vtable,
         owner:  &fixture.state.owner,
     )!!;
     fixture.device = device;
@@ -1237,7 +1234,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
 
     gpu::internal::vk::VkInstanceSurfaceDispatch original_surface_dispatch =
         state.instance_dispatch.surface;

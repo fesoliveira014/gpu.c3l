@@ -7,7 +7,6 @@ import std::core::mem;
 
 // Headless (lavapipe): the device's VMA allocator + memory stats.
 
-const gpu::internal::BackendVTable MEMORY_QUERY_VTABLE = {};
 
 fn void memory_queries_reject_uninitialized_allocator() @test {
     gpu::internal::vk::VkDeviceState* state =
@@ -15,7 +14,6 @@ fn void memory_queries_reject_uninitialized_allocator() @test {
     gpu::Device device = gpu::internal::register_device(
         state:  state,
         caps:   {},
-        vtable: &MEMORY_QUERY_VTABLE,
     )!!;
 
     assert(@catch(gpu::get_memory_stats(&device)) == gpu::INVALID_ARGUMENT,

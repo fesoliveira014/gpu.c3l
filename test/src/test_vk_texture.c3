@@ -626,7 +626,7 @@ fn void texture_create_destroy() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     assert(texture.is_valid(), "created texture handle is valid");
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = &state.textures.slots[texture.index].value;
     assert((uint)slot.access == (uint)desc.access,
         "texture slot retains the descriptor access roles");
@@ -820,7 +820,7 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     TextureBarrierEmitCapture capture;
     vk::set_texture_barrier_emit_hook(
@@ -913,7 +913,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     TextureBarrierEmitCapture capture;
     vk::set_texture_barrier_emit_hook(
@@ -1045,7 +1045,7 @@ fn void selected_texture_barriers_use_unified_layout_policy() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     state.caps.resource_agnostic_texture_sync = true;
     TextureBarrierEmitCapture capture;
     vk::set_texture_barrier_emit_hook(
@@ -1110,7 +1110,7 @@ fn void assert_present_barrier_emission_for_contract(
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     state.caps.resource_agnostic_texture_sync = resource_agnostic;
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     slot.swapchain_owned = true;
@@ -1237,7 +1237,7 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
@@ -1350,7 +1350,7 @@ fn void texture_barrier_stale_handle_rejected() @test {
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&cmd)!!;
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(&device);
+        gpu::internal::device_slots[device.index].data.state;
     vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
     uint references_before = record.scratch.reference_count;
     TextureBarrierEmitCapture emission;
@@ -1425,9 +1425,7 @@ fn void attachment_views_own_exact_subresources_and_retain_textures() @test {
         &view_desc,
     )!!;
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(
-        &device,
-    );
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
     assert(slot.texture == texture && slot.width == 8 && slot.height == 4,
         "attachment slots pin exact immutable subresource metadata");
@@ -1460,9 +1458,7 @@ fn void default_attachment_view_aliases_texture_native_view() @test {
         &device,
         &view_desc,
     )!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(
-        &device,
-    );
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
     assert(!slot.owns_native
         && slot.native == state.textures.get(texture)!!.default_view,
@@ -1487,9 +1483,7 @@ fn void swapchain_owned_attachment_view_rejects_caller_destruction() @test {
         &device,
         &view_desc,
     )!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(
-        &device,
-    );
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
     slot.swapchain_owned = true;
 
@@ -1521,9 +1515,7 @@ fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
         .texture   = texture,
         .mip_level = 1,
     };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(
-        &device,
-    );
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* texture_slot = state.textures.get(texture)!!;
     uint references_before = texture_slot.tracked_command_references.load(
         AtomicOrdering.RELAXED,
@@ -1864,7 +1856,7 @@ fn void invalid_texture_descriptor_diagnostic_preserves_fault() @test {
     assert(capture.rejected_field_matches, "invalid descriptor is reported without re-deriving its field");
     assert(capture.invariant_matches, "generic texture creation invariant is identified");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     state.debug_callback = null;
     fault without_callback = @catch(gpu::create_texture(&device, &invalid));
     assert(without_callback == with_callback, "callback presence does not alter the descriptor fault");
@@ -1904,7 +1896,7 @@ fn void unsupported_texture_capability_diagnostic_preserves_fault() @test {
     assert(capture.rejected_field_matches, "capability rejection avoids guessing a limiting field");
     assert(capture.invariant_matches, "generic capability invariant is accurate");
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     state.debug_callback = null;
     fault without_callback = @catch(gpu::create_texture(&device, &unsupported));
     assert(without_callback == with_callback, "callback presence does not alter the capability fault");
@@ -1964,7 +1956,7 @@ fn void texture_barrier_invalid_use_diagnostic_identifies_resource() @test {
     assert(capture.invariant_matches, "semantic-use invariant is identified");
 
     gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
     state.debug_callback = null;
     fault without_callback = @catch(gpu::cmd_texture_barrier(
         &commands,

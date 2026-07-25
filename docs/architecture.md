@@ -31,7 +31,7 @@ application / engine / sample
 gpu public API, module gpu
         |
         v
-backend dispatch layer
+gpu::internal registry and lifetime policy
         |
         v
 gpu::internal::vk Vulkan backend
@@ -189,8 +189,8 @@ presentation-capable private queue, which may differ from its graphics queue.
 Presentation requests require at least one public graphics queue.
 A platform surface implementation resolves its runtime token to the typed
 private Vulkan runtime state and calls the corresponding WSI operation
-directly. There is no runtime backend table between the public surface module
-and the Vulkan implementation.
+directly. There is no runtime forwarding table between the public surface
+module and the Vulkan implementation.
 A surface must outlive its swapchains; destroying a live dependency returns
 `RESOURCE_IN_USE`.
 
@@ -205,7 +205,7 @@ backend lifetime
 queue ownership
 resource slot tables, including independent allocations
 caller-owned command allocators and fixed recording storage
-VMA allocator through backend state
+VMA allocator through typed Vulkan state
 descriptor heaps
 caller-owned allocation and completion lifetimes
 pipeline cache
@@ -232,13 +232,14 @@ available on every strict device and are the fallback application path.
 
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
-Most public device operations pin the slot before reading backend state.
+Most public device operations pin the slot before reading its typed
+`VkDeviceState*`.
 `begin_commands` transfers its pin to one stable allocator-owned command
 record. Hot recording calls reach that record through the build-selected
 command token and dispatch through its immutable command-operation table
 after one acquire-load of the static device slot proves its liveness and
 generation. They do not borrow another pin, resolve a retained device
-operation, load the lifecycle vtable, or look up the command table.
+operation, or look up the command table.
 
 Destruction first rejects known live children, then closes the slot. Closing
 blocks new pins while active pins, a second child check, and queue completion
@@ -250,9 +251,10 @@ after pins retire; command tokens remain discardable after loss.
 
 Device-owned table handles and values, including `GpuAllocation` and
 `TextureView`, carry an opaque device-and-kind owner plus a local slot and
-generation. Backend tables reject foreign owners before validating liveness and
-generation. `GpuSpan` carries the same identity plus offset and size, but does
-not own storage. Command tokens derive ownership from their device.
+generation. Private resource tables reject foreign owners before validating
+liveness and generation. `GpuSpan` carries the same identity plus offset and
+size, but does not own storage. Command tokens derive ownership from their
+device.
 Shader-visible `TextureIndex`, `SamplerIndex`, and `GpuAddress` values contain no
 owner or generation metadata. They are direct device-local values whose lifetime
 the caller must preserve. `TextureView` owns a recyclable texture index;
@@ -286,7 +288,7 @@ submission sequence. Command entry points take `QueueKind`.
 `AllocationDesc` and `TextureDesc` declare a non-empty `QueueRoles` access
 set. The backend stores it as immutable resource
 metadata. Span resolution validates liveness, device ownership, bounds, and the
-recording role before backend state changes. A span cannot widen access because
+recording role before native state changes. A span cannot widen access because
 it contains no public access field. Root-addressed shader access remains a
 caller precondition because nested pointers are opaque.
 
@@ -314,14 +316,13 @@ device-operation borrow or command-table lookup. The token must originate from
 `begin_commands`; callers must not inspect, construct, or mutate its fields.
 
 Every preallocated command cell owns one address-stable authoritative
-`CommandRecord`. It contains the selected immutable `CommandOps`, backend state
-and backend-command pointers, retained device/backend ownership, private table
-identity, and the sole lifecycle state. Its linked backend record
-contains the originating allocator and buffer identity, fixed reference and
-generated-work scratch, and native command state. Copies of a public token
-alias the authoritative record; they do not copy or fork its state. Device loss
-is reported by lifecycle operations; explicit discard
-remains available so a lost device can release retained command state.
+Vulkan `CommandRecord`. It contains the selected immutable `CommandOps`, typed
+device state, retained device ownership, originating allocator and native
+buffer identity, fixed reference and generated-work scratch, native recording
+state, submission linkage, and the sole lifecycle state. Copies of a public
+token alias the authoritative record; they do not copy or fork its state.
+Device loss is reported by lifecycle operations; explicit discard remains
+available so a lost device can release retained command state.
 
 State transitions:
 
@@ -344,8 +345,8 @@ closes the same record to `EXECUTABLE`.
 
 For a nonempty submit, the backend reads each direct token exactly once under
 one command-lock transaction. It compares the reuse generation and validates
-device/backend ownership, authoritative phase, duplicate epoch, and the exact
-`Queue` stored by the backend record before claiming the complete batch as
+device ownership, authoritative phase, duplicate epoch, and the exact
+`Queue` stored by the command record before claiming the complete batch as
 `SUBMITTING`. The public wrapper performs no preliminary executable-token
 resolution, and submission does not resolve an allocator merely to re-prove its
 immutable queue. Duplicate detection visits each inspected token once, so
@@ -356,7 +357,7 @@ Validation, preparation, or native failure publishes no pending record or
 completion point and preserves tokens, readiness, allocator units, and scratch
 for retry. A fault after the complete claim restores every still-`SUBMITTING`
 record to `EXECUTABLE` under one rollback command-lock acquisition. After native
-acceptance, each backend record embeds its completion metadata and links into
+acceptance, each command record embeds its completion metadata and links into
 the exact selected queue's intrusive pending list. The queue publishes the
 completion sequence only after the pending records and `SUBMITTED` states are
 visible, then consumes the caller tokens.
@@ -451,7 +452,7 @@ private native buffers.
 
 The Vulkan backend may use private `BufferHandle`, `BufferDesc`, and
 `BufferUsage` declarations for generic allocation backing. They remain in
-`gpu::internal::vk` and never cross backend dispatch.
+`gpu::internal::vk` and never cross the private implementation boundary.
 
 ### Textures
 
@@ -549,19 +550,20 @@ texture handles used by shared transitions, render passes, and command lifetime
 validation. SDL3 supplies native handles to the platform surface module in
 samples; SDL types do not enter the core API.
 
-## 5. Backend dispatch
+## 5. Direct private implementation
 
-Preferred backend connection:
+Device operation flow:
 
 ```text
-public Device token -> private device state -> private backend dispatch
+public Device token -> pinned typed VkDeviceState* -> private Vulkan function
 ```
 
-Public functions validate the token before dispatch. Each Vulkan runtime owns
-surface discovery and optional debug instance dispatch. A device retains only
-the groups required by its request and loads only their dispatch. Headless
-devices create no presentation queue, mutex, table, or dispatch. Backend
-pointers and dispatch declarations remain private.
+Public functions validate and pin the token, then call private Vulkan functions
+directly with the typed state. Each Vulkan runtime owns surface discovery and
+optional debug instance dispatch. A device retains only the native dispatch
+groups required by its request and loads only those groups. Headless devices
+create no presentation queue, mutex, table, or native dispatch. Vulkan state
+pointers and native dispatch declarations remain private.
 
 ## 6. Resource lifetime
 
@@ -822,7 +824,8 @@ dispatch, and pipeline state remain private. An unrequested group owns none of
 that state; current public request validation requires strict semantics.
 
 The backend keeps one append-only sampler table per strict-enabled device.
-The public frontend validates sampler semantics before backend dispatch. Enabled
+The public frontend validates sampler semantics before calling the Vulkan
+implementation. Enabled
 anisotropy is accepted only in the inclusive range `[1,
 DeviceCaps.max_sampler_anisotropy]`; accepted values are preserved exactly in
 the canonical key, while inactive anisotropy and comparison values normalize to

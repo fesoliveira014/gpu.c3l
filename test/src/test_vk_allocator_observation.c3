@@ -70,8 +70,7 @@ fn void? record_warm_command_cycle(void* user_data) {
 fn void state_allocator_reports_acquire_resize_and_release_exactly() @test {
     gpu::Device device = make_allocator_observation_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::RecordingHostAllocatorSnapshot before =
         vk::recording_host_allocator_snapshot(state);
     gpu::internal::RecordingWorkCounters work_before =
@@ -103,8 +102,7 @@ fn void state_allocator_reports_acquire_resize_and_release_exactly() @test {
 fn void confined_thread_allocator_reports_hidden_work_and_restores() @test {
     gpu::Device device = make_allocator_observation_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     Allocator previous = mem;
     vk::RecordingHostAllocatorSnapshot before =
         vk::recording_host_allocator_snapshot(state);
@@ -131,8 +129,7 @@ fn void confined_thread_allocator_reports_hidden_work_and_restores() @test {
 fn void confined_thread_allocator_restores_after_named_fault() @test {
     gpu::Device device = make_allocator_observation_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     Allocator previous = mem;
     vk::RecordingHostAllocatorSnapshot before =
         vk::recording_host_allocator_snapshot(state);
@@ -169,8 +166,7 @@ fn void warm_command_cycle_has_zero_allocator_delta() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     WarmCommandContext context = { .allocator = &allocator };
     record_warm_command_cycle(&context)!!;
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::RecordingHostAllocatorSnapshot before =
         vk::recording_host_allocator_snapshot(state);
 
@@ -194,8 +190,7 @@ fn void warm_command_cycle_has_zero_allocator_delta() @test {
 fn void recording_wrapper_remains_owned_until_device_teardown() @test {
     Allocator previous = mem;
     gpu::Device device = make_allocator_observation_device();
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     assert(state.host_allocator.ptr == &state.recording_host_allocator
         && state.host_allocator.type
             == vk::RecordingHostAllocator::typeid,

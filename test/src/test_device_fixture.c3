@@ -8,12 +8,10 @@ struct DeviceFixture {
     gpu::internal::vk::VkDeviceState state;
 }
 
-gpu::internal::BackendVTable device_fixture_vtable;
 
 fn gpu::Device fixture_device(DeviceFixture* fixture) {
     return gpu::internal::register_device(
         state:  &fixture.state,
         caps:   {},
-        vtable: &device_fixture_vtable,
     )!!;
 }

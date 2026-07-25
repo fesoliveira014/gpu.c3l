@@ -704,14 +704,20 @@ fn usz? vk_get_pipeline_cache_data(
 }
 
 fn uint stub_sampler_intern_attempt_count(gpu::Device* device) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!!;
+    defer gpu::internal::end_device_operation(&operation);
+    VkDeviceState* state = operation.state;
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     return state.sampler_intern_attempts;
 }
 
 fn uint stub_sampler_native_create_count(gpu::Device* device) {
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!!;
+    defer gpu::internal::end_device_operation(&operation);
+    VkDeviceState* state = operation.state;
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     return state.sampler_native_creates;
@@ -919,7 +925,7 @@ fn gpu::Adapter stub_last_device_adapter() => last_device_adapter;
 fn gpu::Adapter? stub_device_adapter(gpu::Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    VkDeviceState* state = gpu::internal::device_backend_state_ptr(device);
+    VkDeviceState* state = operation.state;
     if (state == null) return gpu::INVALID_HANDLE~;
     return state.adapter;
 }
@@ -1392,8 +1398,6 @@ fn gpu::PresentModeSupport? vk_get_present_mode_support(
     return { .fifo = true };
 }
 
-const gpu::internal::BackendVTable STUB_DEVICE_VTABLE @private = {};
-
 fn gpu::Device? stub_create_strict_disabled_device() {
     VkDeviceState* state = mem::new(VkDeviceState);
     defer catch mem::free(state);
@@ -1402,7 +1406,6 @@ fn gpu::Device? stub_create_strict_disabled_device() {
     return gpu::internal::register_device(
         state:          state,
         caps:           { .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT },
-        vtable:         &STUB_DEVICE_VTABLE,
         resource_owner: state.resource_owner,
     );
 }
@@ -1418,7 +1421,6 @@ fn gpu::Device? stub_create_anisotropy_disabled_device() {
             .strict_enabled       = true,
             .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         },
-        vtable:         &STUB_DEVICE_VTABLE,
         resource_owner: state.resource_owner,
     );
 }
@@ -1460,7 +1462,6 @@ fn gpu::Device? create_vk_device(
     return gpu::internal::register_device(
         state:                state,
         caps:                 caps,
-        vtable:               &STUB_DEVICE_VTABLE,
         resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
         adapter:              adapter,

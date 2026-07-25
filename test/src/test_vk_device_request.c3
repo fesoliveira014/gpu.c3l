@@ -8,7 +8,6 @@ import std::atomic;
 import std::core::mem;
 import std::io;
 
-const gpu::internal::BackendVTable REGISTRY_BLOCKER_VTABLE @private = {};
 struct ResourceAgnosticCreateObservation {
     bool selected;
     uint calls;
@@ -354,8 +353,7 @@ fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
 fn uptr device_physical_adapter(gpu::Device* device) @private {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!!;
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::vk::VkDeviceState* state =
-        (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state_ptr(device);
+    gpu::internal::vk::VkDeviceState* state = operation.state;
     return (uptr)state.physical_device;
 }
 
@@ -652,7 +650,7 @@ fn void runtime_copies_device_creation_defaults() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::internal::vk::VkRuntimeState* state =
-        (gpu::internal::vk::VkRuntimeState*)gpu::internal::runtime_backend_state(&runtime);
+        gpu::internal::resolve_runtime(&runtime).state;
 
     assert(state != null, "the runtime publishes its Vulkan state");
     assert(state.debug_names, "the runtime retains the debug-name default");
@@ -777,7 +775,7 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             runtime_data.state;
         gpu::Device device = gpu::create_device(&adapter, &request)!!;
         gpu::internal::vk::VkDeviceState* device_state =
-            (gpu::internal::vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+            gpu::internal::device_slots[device.index].data.state;
 
         assert(device_state.instance == runtime_state.instance, "the device reuses the runtime instance");
         assert(
@@ -1011,10 +1009,6 @@ fn void command_policy_selection_covers_every_contract_and_tracking_mode() @test
         "full validation with tracking selects the checked tracking table"
     );
 
-    assert(gpu::internal::vk::command_ops_are_complete(&gpu::internal::vk::TRUSTED_COMMAND_OPS));
-    assert(gpu::internal::vk::command_ops_are_complete(&gpu::internal::vk::TRUSTED_TRACKING_COMMAND_OPS));
-    assert(gpu::internal::vk::command_ops_are_complete(&gpu::internal::vk::CHECKED_COMMAND_OPS));
-    assert(gpu::internal::vk::command_ops_are_complete(&gpu::internal::vk::CHECKED_TRACKING_COMMAND_OPS));
     assert(trusted_address != trusted_tracking_address);
     assert(trusted_address != checked_address);
     assert(checked_address != checked_tracking_address);
@@ -1201,8 +1195,7 @@ fn void supported_dynamic_color_request_publishes_complete_activation() @test {
         if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
         gpu::Device device = gpu::create_device(&adapter, &request)!!;
         gpu::internal::vk::VkDeviceState* state =
-            (gpu::internal::vk::VkDeviceState*)
-                gpu::internal::device_backend_state(device);
+            gpu::internal::device_slots[device.index].data.state;
         assert(
             gpu::get_device_caps(&device)!!.dynamic_color_state
                 && gpu::internal::vk::device_dispatch_supports_dynamic_color(
@@ -1243,7 +1236,6 @@ fn void publication_failure_rolls_back_native_state() @test {
             *blocker = gpu::internal::register_device(
                 state:  blocker_state,
                 caps:   {},
-                vtable: &REGISTRY_BLOCKER_VTABLE,
             )!!;
         }
 

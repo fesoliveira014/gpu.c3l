@@ -41,7 +41,7 @@ fn gpu::RuntimeDesc policy_runtime_desc(
 }
 
 fn vk::VkDeviceState* policy_device_state(gpu::Device* device) {
-    return (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+    return gpu::internal::device_slots[device.index].data.state;
 }
 
 fn gpu::CommandList record_policy_fill(

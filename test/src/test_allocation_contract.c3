@@ -8,7 +8,6 @@ fn TextureCompatibility test_texture_compatibility(ulong owner, uint value) {
     return (TextureCompatibility)(((uint128)owner << 64) | (uint128)value);
 }
 
-gpu::internal::BackendVTable allocation_stub_vtable;
 
 fn Device create_allocation_stub_device(
     gpu::internal::vk::VkDeviceState* state,
@@ -26,7 +25,6 @@ fn Device create_allocation_stub_device(
     return gpu::internal::register_device(
         state:          state,
         caps:           {},
-        vtable:         &allocation_stub_vtable,
         resource_owner: state.resource_owner,
         queues:         queues,
     )!!;

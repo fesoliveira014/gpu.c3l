@@ -111,7 +111,7 @@ fn int main() {
     )!!;
     defer (void)gpu::destroy_command_allocator(&allocator);
     vk::VkDeviceState* state =
-        (vk::VkDeviceState*)gpu::internal::device_backend_state(device);
+        gpu::internal::device_slots[device.index].data.state;
 
     io::printfn(
         "iterations=%d batch_sizes=1,8,32,128,1024 units=ns/submit,ns/list",

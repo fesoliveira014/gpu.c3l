@@ -188,7 +188,7 @@ fn char* center_pixel(gpu::Device* device, gpu::GpuSpan* rb_span) {
 }
 
 fn bool distinct_graphics_compute_families(gpu::Device* device, ZString test_name) {
-    vk::VkDeviceState* state = (vk::VkDeviceState*)gpu::internal::device_backend_state(*device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     if (state.graphics_family != state.compute_family) return true;
     io::eprintfn("%s not applicable: graphics and compute share family %d", test_name, state.graphics_family);
     return false;
@@ -906,8 +906,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .max_commands_per_list   = 2,
         .preprocess_buffer_count = 2,
     };
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::MemoryRequirements dispatch_requirements =
         vk::generated_scratch_requirements(state, &dispatch_scratch)!!;
     vk::MemoryRequirements draw_requirements =
@@ -1409,8 +1408,7 @@ fn void full_generated_draw_requires_complete_graphics_state() @test {
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
 
-    vk::VkDeviceState* state = (vk::VkDeviceState*)
-        gpu::internal::device_backend_state(device);
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::RecordingWorkCounters before =
         vk::command_recording_work_counters(state);
     gpu::GpuSpan empty;
@@ -1860,6 +1858,7 @@ fn void discard_consumes_active_render_pass_recording() @test {
 fn void indirect_argument_validation() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_ind_target(&device);
@@ -1876,9 +1875,9 @@ fn void indirect_argument_validation() @test {
         .memory_class = gpu::MemoryClass.GPU_PRIVATE,
         .access      = { .graphics, .compute, .transfer },
     };
-    vk::BufferHandle plain = vk::vk_create_buffer(&device, &plain_desc)!!;
-    defer vk::vk_destroy_buffer(&device, plain)!!;
-    gpu::GpuSpan plain_span = vk::vk_get_buffer_span(&device, plain)!!;
+    vk::BufferHandle plain = vk::create_buffer_for_state(state, &plain_desc)!!;
+    defer vk::destroy_buffer_for_state(state, plain)!!;
+    gpu::GpuSpan plain_span = vk::get_buffer_span_for_state(state, plain)!!;
     OwnedSpan verts_owned = allocate_owned_span(
         device:       &device,
         size:         3 * 16,
