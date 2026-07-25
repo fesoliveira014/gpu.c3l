@@ -6,8 +6,8 @@ import gpu::internal::vk @public;
 import std::os::env;
 import std::io;
 
-// A private creation probe forces descriptor-buffer coverage without exposing
-// backend selection. Shader-access E2E stays gated for affected Mesa versions.
+// A private creation probe forces descriptor-buffer coverage.
+// Shader-access E2E stays gated for affected Mesa versions.
 
 const char[*] DB_WRITE_SPIRV  = $embed("shaders/heap_write.comp.spv");
 const char[*] DB_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");

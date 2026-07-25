@@ -70,13 +70,13 @@ $assert CommandListHandle::size <= ulong::size * 2;
 
 struct DeviceData @private {
     gpu::internal::vk::VkDeviceState* state;
-    DeviceCaps                       caps;
-    QueueSelection                   queues;
-    ulong                            resource_owner;
-    Runtime                          runtime;
-    Adapter                          adapter;
-    Surface                          presentation_surface;
-    bool                             runtime_retained;
+    DeviceCaps                        caps;
+    QueueSelection                    queues;
+    ulong                             resource_owner;
+    Runtime                           runtime;
+    Adapter                           adapter;
+    Surface                           presentation_surface;
+    bool                              runtime_retained;
 }
 
 struct DeviceSlot @private {
@@ -90,10 +90,9 @@ struct DeviceOperation @private {
     DeviceSlot*                       slot;
     DeviceData*                       data;
     gpu::internal::vk::VkDeviceState* state;
-    bool                              active;
-    bool                              owns_pin;
+    bool                               active;
+    bool                               owns_pin;
 }
-
 
 <* Private test and benchmark counters for structural recording work. Compare
    relaxed snapshots only around externally synchronized cold or warm work. *>
