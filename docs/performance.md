@@ -181,7 +181,7 @@ exact zero. Timings and unpinned generated assembly are advisory.
 | Cold allocator creation | Host allocations, exactly one exact-family command-pool create, one complete native command-buffer allocation call, and configured buffer count |
 | Warm begin/bind/dispatch/end | `RecordingWorkCounters`, pipeline/shader creation counts, and pre-bind `CommandResolutionStats` |
 | Warm minimal begin + state packet + draw | `RecordingWorkCounters`, pipeline/shader creation counts, pre-bind `CommandResolutionStats`, exactly one native begin per pass, exactly ten dynamic-state commands per explicit complete packet, and native draw emission |
-| Warm dynamic-color packet | Exactly three native array commands, one static device-slot liveness load, direct-record generation and phase checks, and zero allocation, resource locks, pipeline creation, pipeline/cache lookup, or identical-packet suppression |
+| Warm dynamic-color packet | Exactly three native array commands and zero allocation, resource locks, pipeline creation, pipeline/cache lookup, or identical-packet suppression |
 | Generated dispatch/draw/indexed draw | Per-family `RecordingWorkCounters` emissions plus `CommandRecordingStats` reservation/allocation state |
 | Cached completion | `CompletionWorkCounters` across 100,000 polls, cached waits, and concurrent first observers |
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |

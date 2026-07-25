@@ -1347,11 +1347,12 @@ Test builds and builds with `COMMAND_RESOLUTION_STATS` expose
 live command entry-point attempts, every emitted Vulkan command, and forbidden
 resolution paths. Exact native-operation fields distinguish pipeline binds,
 descriptor-set binds, descriptor-buffer binds, and descriptor-buffer offset
-commands. Gates require one static device-slot liveness load, direct-record
+commands. Gates perform one static device-slot liveness load, direct-record
 load, generation comparison, and authoritative phase check per accepted
-command, with zero retained device-operation resolution, retained-pin borrow,
-command-table lookup, encoder-cell computation, packed-lease comparison,
-frontend phase transition, and warm allocation. A narrow structural guard rejects
+command, and require zero retained device-operation resolution, retained-pin
+borrow, command-table lookup, encoder-cell computation, packed-lease
+comparison, frontend phase transition, and warm allocation. A narrow
+structural guard rejects
 reintroduced duplicate identity comparisons, device-loss loads, and
 trusted-backend capability comparisons; those prohibitions are not inferred
 from runtime counters. Reset and compare the counters only across an externally

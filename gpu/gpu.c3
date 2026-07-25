@@ -1364,7 +1364,7 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
    Runtime failures: failure preserves the token. *>
 fn void? discard_commands(CommandList* commands) {
     gpu::internal::CommandRecord* record =
-        gpu::internal::recording_command(commands, false)!;
+        gpu::internal::recording_command(commands, count_command: false)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
         allow_lost: true,

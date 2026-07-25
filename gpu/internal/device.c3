@@ -194,6 +194,7 @@ const uint MAX_DEVICE_OPERATION_PINS @private = 0x3FFF_FFFF;
 const uint MAX_DEVICE_OPERATION_PIN_ATTEMPTS @private = 64;
 const uint MAX_DEVICE_COMMANDS @private = 4096;
 const uint COMMAND_TOKEN_DEVICE_INDEX_BITS @private = 6;
+const uint COMMAND_TOKEN_DEVICE_GENERATION_BITS @private = 24;
 
 const uint DEVICE_SLOT_FREE @private = 0;
 const uint DEVICE_SLOT_LIVE @private = 1;
@@ -238,6 +239,8 @@ bitstruct CommandTokenDeviceIdentity : uint @private {
     uint reserved   : 30..31;
 }
 $assert MAX_DEVICES == 1 << COMMAND_TOKEN_DEVICE_INDEX_BITS;
+$assert MAX_DEVICE_GENERATION
+    == (1 << COMMAND_TOKEN_DEVICE_GENERATION_BITS) - 1;
 
 struct CommandListHandle @private {
     ulong owner;

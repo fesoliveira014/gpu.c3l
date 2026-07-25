@@ -572,8 +572,7 @@ change.
 Dynamic-color work coverage selects a requested live device when available and
 otherwise reports deterministic unsupported capability. On a supported device,
 one packet and an identical replacement each require exactly three native
-calls, one static device-slot liveness load, direct-record generation and phase
-checks, and zero host/VMA allocation, resource lookup/lock, native pipeline
+calls and zero host/VMA allocation, resource lookup/lock, native pipeline
 creation, or pipeline/cache lookup.
 
 The benchmark runner builds thirteen executable targets with `-O1`:

@@ -1567,7 +1567,7 @@ fn void stale_command_faults_before_reused_device_callback() @test {
     gpu::destroy_device(&replacement)!!;
 }
 
-fn void stale_command_generation_cannot_borrow_reused_slot_pin() @test {
+fn void stale_command_generation_does_not_use_reused_slot_pin() @test {
     CommandPinFixture fixture = {
         .reject_command      = true,
         .reuse_command_index = true,
