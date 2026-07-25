@@ -26,7 +26,7 @@ and fixed workload run in this required order:
 | 3 | `FULL` | off |
 | 4 | `FULL` | on |
 
-Only mode 1 participates in release timing thresholds. Both elapsed times
+Only mode 1 participates in release timing thresholds. All four elapsed times
 remain advisory. Whenever the runner is executed locally or on a self-hosted
 machine, exact schema and work violations hard-fail the run. Hosted CI builds the
 benchmark targets and unit-tests their schemas but does not execute this live
@@ -46,6 +46,10 @@ are rejected. Do not compare those timings with the release baseline. The
 validation layer must recognize every enabled Vulkan extension; otherwise its
 diagnostics invalidate the timing run. `command_record_bench` always uses its
 four explicit contract/layer rows, even during this separate report.
+Those four rows run on every invocation, so
+`VK_LAYER_KHRONOS_validation` must be installed even when `--validation` is
+omitted. The layers-on rows provide deterministic contract evidence but do not
+participate in release timing thresholds.
 `command_path_baseline_bench` likewise uses the same trusted/full, layers-off
 matrix.
 
