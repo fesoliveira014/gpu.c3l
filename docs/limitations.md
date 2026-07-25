@@ -224,9 +224,11 @@ rejected. These limits can be promoted into `DeviceCaps` later if a caller-side
 layout query becomes necessary.
 
 Surface support is queried separately. `supports_presentation(adapter,
-surface)` preflights device creation; `get_present_mode_support(device,
-swapchain)` reports modes after swapchain creation. Prefer queries over
-hardcoded assumptions.
+surface)` checks one adapter/surface pair, while `supports_device_desc`
+preflights the complete presentation and queue descriptor.
+`get_present_mode_support(device, swapchain)` reports modes after swapchain
+creation. These queries are optional; callers may create directly and handle
+`UNSUPPORTED_FEATURE`.
 
 Texture format support is queried separately because it depends on both the
 backend profile and the physical adapter:

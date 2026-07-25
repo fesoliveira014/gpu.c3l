@@ -122,7 +122,7 @@ class DocumentationCheckTests(unittest.TestCase):
     def test_allows_target_document_status_language(self) -> None:
         self.assertEqual(
             check_docs.validate_current_state_text(
-                Path("docs/strict_gpu_profile.md"),
+                Path("docs/device_baseline.md"),
                 "Milestone 8 is future work.\n",
             ),
             [],

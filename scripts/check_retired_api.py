@@ -19,7 +19,14 @@ FIXTURES = {
     "texture_desc_dimension": "dimension",
     "texture_desc_depth": "depth",
     "texture_view_desc_format": "format",
-    "device_desc": "DeviceDesc",
+    "device_request": "DeviceRequest",
+    "device_request_support": "DeviceRequestSupport",
+    "strict_device_request": "strict_device_request",
+    "request_presentation": "request_presentation",
+    "request_queues": "request_queues",
+    "supports_device_request": "supports_device_request",
+    "strict_enabled_caps": "strict_enabled",
+    "strict_supported_adapter_info": "strict_supported",
     "runtime_enable_validation": "enable_validation",
     "runtime_track_resource_lifetimes": "track_resource_lifetimes",
     "request_resource_agnostic_texture_sync": (
@@ -177,6 +184,8 @@ FIELD_OR_METHODS = {
     "resource_agnostic_texture_sync_caps": (
         "DeviceCaps.resource_agnostic_texture_sync"
     ),
+    "strict_enabled_caps": "DeviceCaps.strict_enabled",
+    "strict_supported_adapter_info": "AdapterInfo.strict_supported",
     "command_list_device": "CommandList.device",
     "command_list_handle_member": "CommandList.handle",
     "executable_command_list_device": "ExecutableCommandList.device",

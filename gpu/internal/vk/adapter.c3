@@ -7,7 +7,7 @@ import std::core::mem;
 
 const uint API_VERSION_1_2 @private = (1u << 22) | (2u << 12);
 
-struct StrictHeapSupport {
+struct ShaderHeapSupport {
     bool               indexing;
     IndexingHeapLimits limits;
 }
@@ -16,7 +16,8 @@ struct VkAdapterState {
     vk::PhysicalDevice                 physical_device;
     vk::PhysicalDeviceProperties       properties;
     vk::PhysicalDeviceDriverProperties driver_properties;
-    StrictHeapSupport                  strict_heap;
+    ShaderHeapSupport                  shader_heap;
+    bool                               device_baseline_supported;
     gpu::AdapterInfo                   info;
     gpu::AdapterDiagnostics            diagnostics;
 }
@@ -92,20 +93,20 @@ fn gpu::AdapterQueueInfo query_adapter_queues(vk::PhysicalDevice physical_device
     return info;
 }
 
-fn bool strict_adapter_supported(
+fn bool device_baseline_supported(
     vk::PhysicalDevice physical_device,
     VkDeviceConfig* config,
-    StrictHeapSupport* strict_heap,
+    ShaderHeapSupport* shader_heap,
 ) {
-    if (config == null || strict_heap == null) return false;
+    if (config == null || shader_heap == null) return false;
     return candidate_satisfies(
         candidate:   physical_device,
         desc:        config,
-        strict_heap: strict_heap,
+        shader_heap: shader_heap,
     );
 }
 
-fn StrictHeapSupport query_strict_heap_support(
+fn ShaderHeapSupport query_shader_heap_support(
     vk::PhysicalDevice physical_device,
 ) {
     vk::PhysicalDeviceVulkan12Features features12 =
@@ -129,7 +130,12 @@ fn void initialize_adapter(
 ) {
     adapter.physical_device = physical_device;
     vk::get_physical_device_properties(physical_device, &adapter.properties);
-    adapter.strict_heap = query_strict_heap_support(physical_device);
+    adapter.shader_heap = query_shader_heap_support(physical_device);
+    adapter.device_baseline_supported = device_baseline_supported(
+        physical_device,
+        config,
+        &adapter.shader_heap,
+    );
 
     bool has_driver_properties = adapter.properties.api_version >= API_VERSION_1_2
         || device_supports_extension(physical_device, "VK_KHR_driver_properties");
@@ -149,11 +155,6 @@ fn void initialize_adapter(
         .device_class     = adapter_class(adapter.properties.device_type),
         .memory           = query_adapter_memory(physical_device),
         .queues           = query_adapter_queues(physical_device),
-        .strict_supported = strict_adapter_supported(
-            physical_device,
-            config,
-            &adapter.strict_heap,
-        ),
         .limits           = {
             .max_texture_dimension_2d  = limits.max_image_dimension2d,
             .max_texture_array_layers  = limits.max_image_array_layers,
@@ -179,6 +180,16 @@ fn void initialize_adapter(
             : "",
         .driver_version  = adapter.properties.driver_version,
     };
+}
+
+fn bool? vk_adapter_supports_device_baseline(
+    VkRuntimeState* state,
+    uint adapter_index,
+) {
+    if (state == null || adapter_index >= state.adapters.len) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return state.adapters[adapter_index].device_baseline_supported;
 }
 
 fn void? enumerate_vk_adapters(VkRuntimeState* state) {

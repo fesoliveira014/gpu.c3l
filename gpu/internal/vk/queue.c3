@@ -1578,8 +1578,8 @@ fn uint used_queue_families(VkDeviceState* state, uint[] out_families) {
     return count;
 }
 
-<* Selected strict-heap families, or transfer when it is the only admitted role. *>
-fn uint strict_heap_queue_families(VkDeviceState* state, uint[] out_families) @private {
+<* Selected shader-heap families, or transfer when it is the only admitted role. *>
+fn uint shader_heap_queue_families(VkDeviceState* state, uint[] out_families) @private {
     uint count;
     if (state.selected_queue_roles.graphics) {
         count = append_queue_family(out_families, count, state.graphics_family);

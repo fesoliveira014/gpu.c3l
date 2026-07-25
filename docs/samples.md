@@ -9,7 +9,7 @@ exactly as an external project would — the genuine consumer path.
 
 The samples repository contains 18 samples and two helper self-tests. Its root
 README is the authoritative 20-target index, capability matrix, and
-smoke-command reference. CI checks strict API usage and generated ABI files,
+smoke-command reference. CI checks public API usage and generated ABI files,
 builds shaders, runs all ten headless/helper targets, and runs all ten windowed
 targets under xvfb/lavapipe with bounded application-render iterations.
 

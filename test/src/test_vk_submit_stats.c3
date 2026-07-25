@@ -325,17 +325,14 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
         .counts   = { .graphics = 1, .compute = 1 },
         .distinct = { .compute },
     };
-    gpu::DeviceRequest request = gpu::request_queues(
-        gpu::strict_device_request(),
-        requirements,
-    )!!;
+    gpu::DeviceDesc device_desc = { .queues = requirements };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue[2] queues = {
             gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
@@ -494,17 +491,14 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
         .counts   = { .graphics = 1, .compute = 1 },
         .distinct = { .compute },
     };
-    gpu::DeviceRequest request = gpu::request_queues(
-        gpu::strict_device_request(),
-        requirements,
-    )!!;
+    gpu::DeviceDesc device_desc = { .queues = requirements };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue graphics = gpu::get_queue(
             &device,
@@ -1587,17 +1581,14 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
         .counts   = { .graphics = 1, .compute = 1 },
         .distinct = { .compute },
     };
-    gpu::DeviceRequest request = gpu::request_queues(
-        gpu::strict_device_request(),
-        requirements,
-    )!!;
+    gpu::DeviceDesc device_desc = { .queues = requirements };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
         gpu::Queue compute = gpu::get_queue(

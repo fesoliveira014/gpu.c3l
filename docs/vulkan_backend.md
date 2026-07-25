@@ -95,7 +95,7 @@ pipeline variants. The backend separately requires and enables the extension
 name and all three color-state feature bits. Vulkan 1.3 supplies the promoted
 topology, cull, front-face, and depth-bias core commands.
 
-Strict devices require runtime descriptor arrays, non-uniform sampled/storage
+Every device requires runtime descriptor arrays, non-uniform sampled/storage
 image indexing, partially-bound arrays, sampled/storage update-after-bind, and
 update-unused-while-pending. Adapter discovery caches those features and the
 Vulkan 1.2 update-after-bind limits. Support and creation reject missing
@@ -110,7 +110,11 @@ Each `VkRuntimeState` owns one instance, its instance dispatch, one optional
 debug messenger, and a stable adapter cache. Runtime creation publishes its
 public slot only after instance creation and adapter enumeration succeed.
 
-`create_device(Adapter*, DeviceRequest*)` uses the exact cached physical device and borrows the runtime-owned instance. Device destruction never destroys that instance; the retained runtime remains unavailable for destruction until the device is gone. Runtime device defaults are copied before instance creation and inherited by each created device.
+`create_device(Adapter*, DeviceDesc* = null)` uses the exact cached physical
+device and borrows the runtime-owned instance. Device destruction never
+destroys that instance; the retained runtime remains unavailable for
+destruction until the device is gone. Runtime device defaults are copied
+before instance creation and inherited by each created device.
 
 Instance creation responsibilities:
 
@@ -126,7 +130,7 @@ install a persistent debug-utils messenger for layer, name, or callback routing
 Runtime creation enables available platform surface extensions and owns the
 surface dispatch. The public platform modules resolve their runtime token to
 `VkRuntimeState*` and call the matching WSI functions directly. A device
-retains surface procedures only for a presentation request and loads only the
+retains surface procedures only for a presentation descriptor and loads only the
 selected native device dispatch groups after logical-device creation. Headless
 devices create no presentation state. Missing platform support faults when that
 platform constructor is called.
@@ -168,16 +172,18 @@ or object naming.
 
 ## 5. Adapter enumeration and device selection
 
-Runtime creation enumerates every physical adapter once and caches semantic memory totals, queue counts, general limits, strict support, and separate backend diagnostics. Public enumeration and queries allocate nothing. Cached strings remain valid until runtime destruction.
+Runtime creation enumerates every physical adapter once and caches semantic
+memory totals, queue counts, general limits, required baseline feature/limit
+facts, and separate backend diagnostics. Public enumeration and queries
+allocate nothing. Cached strings remain valid until runtime destruction.
 
-The cached `AdapterInfo.strict_supported` flag describes support for the
-runtime's configured strict profile, including its exact semantic heap
-capacities. Applications select an exact adapter from that cache;
-`supports_device_request` then evaluates the requested queue and presentation
-semantics without enabling state. Device creation uses that same runtime
-configuration for the selected adapter.
+Applications select an exact adapter from that cache.
+`supports_device_desc` evaluates the descriptor's queue and presentation
+semantics together with the mandatory baseline and runtime-configured heap
+capacities without enabling state. Device creation uses the same normalized
+descriptor and runtime configuration for the selected adapter.
 
-The strict profile requires:
+The mandatory baseline requires:
 
 ```text
 must support Vulkan 1.3
@@ -191,13 +197,13 @@ must support shaderDrawParameters
 must support VK_EXT_extended_dynamic_state3
 must report dynamicPrimitiveTopologyUnrestricted
 must support all three EDS3 color command features and dispatch entries
-must support one exact shader-heap implementation
-must satisfy the default one-graphics, one-compute, one-transfer queue profile;
-roles may alias or use separate families
+must support descriptor indexing for the shader-visible heap
+must satisfy the normalized descriptor queue profile; roles may alias or use
+separate families
 ```
 
-A presentation request names a runtime-owned surface. Device creation requires
-at least one requested graphics queue, instance extensions
+A presentation descriptor names a runtime-owned surface. Device creation
+requires at least one graphics queue, instance extensions
 `VK_KHR_get_surface_capabilities2` and `VK_EXT_surface_maintenance1`, device
 extensions `VK_KHR_swapchain` and
 `VK_EXT_swapchain_maintenance1`, and the maintenance feature enabled, then
@@ -207,8 +213,8 @@ non-blocking proof that presentation no longer uses private WSI objects. The
 backend prefers the representative graphics queue, then compute or transfer
 representatives, and otherwise uses a private queue. Split
 graphics/presentation families use concurrent sharing. `supports_presentation`
-reports the complete surface and strict-presentation capability.
-`supports_device_request` additionally preflights the requested queue counts,
+reports the complete surface and presentation capability.
+`supports_device_desc` additionally preflights the descriptor's queue counts,
 distinct-role constraints, graphics minimum, and presentation topology without
 enabling state. Surface formats and present modes remain swapchain-creation
 concerns.
@@ -240,7 +246,7 @@ the backend has already required the independently queried
 EDS3 color commands for every created device; raster command dispatch remains
 Vulkan 1.3 core.
 
-`maintenance4` is always enabled. The strict request adds its heap features:
+`maintenance4` and the shader-visible heap features are always enabled:
 
 ```text
 runtimeDescriptorArray
@@ -260,16 +266,16 @@ fillModeNonSolid -> DeviceCaps.line_polygon_mode
 `PolygonMode.LINE` faults `UNSUPPORTED_FEATURE` before shader or cache lookup
 when this cap is false. The feature is not a physical-device selection requirement.
 
-Strict support requires all three
+The required baseline includes all three
 `VkPhysicalDeviceExtendedDynamicState3FeaturesEXT` bits:
 `extendedDynamicState3ColorBlendEnable`,
 `extendedDynamicState3ColorBlendEquation`, and
 `extendedDynamicState3ColorWriteMask`. The backend queries the complete set,
-chains and enables it for every strict device, and loads all three command
+chains and enables it for every device, and loads all three command
 pointers. Partial feature or dispatch availability rejects creation with
 `UNSUPPORTED_FEATURE` and rolls back without publishing a device.
 
-Strict devices probe `VK_EXT_device_generated_commands` and
+Devices probe `VK_EXT_device_generated_commands` and
 `VK_KHR_maintenance5` as the optional implementation of generated work. The
 backend enables them only when both features are advertised and the generated
 command properties support vertex, fragment, and compute stages, two-token
@@ -305,11 +311,10 @@ A barrier with
 `hazards.draw_arguments` includes both indirect-command and generated
 command-preprocess reads when this capability is enabled.
 
-The strict heap adds runtime arrays, non-uniform sampled/storage indexing,
+The shader-visible heap adds runtime arrays, non-uniform sampled/storage indexing,
 partially-bound arrays, sampled/storage update-after-bind, and
-update-unused-while-pending. Unrequested strict state adds no heap feature
-chain, descriptors, or pipeline-shared state. Generic buffer device address
-and generated-work feature/dispatch paths remain independent.
+update-unused-while-pending. Generic buffer device address and generated-work
+feature/dispatch paths remain independent.
 
 Logical-device queue families form an ordered set. The backend visits the
 representative graphics, compute, and transfer queues, then every selected
@@ -443,7 +448,7 @@ image completed a presentation cycle so acquisition can report `prior_state`.
 
 ## 10. Descriptor heap implementation
 
-Descriptor indexing is the sole strict heap implementation.
+Descriptor indexing is the sole shader-visible heap implementation.
 
 Uses:
 
@@ -461,7 +466,7 @@ the exact resource total `2T` against
 `maxPerStageUpdateAfterBindResources`; plain `SAMPLER` descriptors do not count
 toward that limit. Its single update-after-bind pool contains `2T + S`
 descriptors and is checked against `maxUpdateAfterBindDescriptorsInAllPools`.
-Requests that exceed either aggregate or any per-type limit fail with
+Configured capacities that exceed either aggregate or any per-type limit fail with
 `UNSUPPORTED_FEATURE` with the first exact capacity or aggregate diagnostic;
 capacities are never clamped. Values above the library hard ceiling remain
 `INVALID_ARGUMENT`.
@@ -483,17 +488,17 @@ set 0, binding 2: SAMPLER[sampler_capacity]
 This does not expose descriptor sets in the public API or change shader
 material records.
 
-Strict heap binding is command-record state rather than pipeline state. The
-backend emits one set-0 bind for each used strict bind point. Graphics and
-compute binding bits remain independent across alternating work. Switching
-compatible strict pipelines does not repeat heap setup, while command-buffer
+Descriptor-heap binding is command-record state rather than pipeline state. The
+backend emits one set-0 bind for each used graphics or compute bind point.
+Graphics and compute binding bits remain independent across alternating work.
+Switching compatible pipelines does not repeat heap setup, while command-buffer
 reuse clears both bits.
 
 Publishing texture views or samplers does not invalidate this binding state.
 Descriptor publication uses `vkUpdateDescriptorSets` under the update-after-bind
 and update-unused-while-pending contract and requires no public GPU barrier.
 
-Every strict-enabled device has an append-only sampler table keyed by normalized
+Every device has an append-only sampler table keyed by normalized
 semantic state. Explicitly zero-initialized canonical keys are byte-hashed into
 fixed power-of-two buckets with `+1`-encoded links; candidates with an equal hash
 are compared by complete canonical equality. Before calling the private Vulkan

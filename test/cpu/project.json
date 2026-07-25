@@ -13,7 +13,7 @@
     "../../gpu/internal/runtime.c3",
     "../../gpu/internal/adapter.c3",
     "../../gpu/internal/device.c3",
-    "../../gpu/internal/device_request.c3",
+    "../../gpu/internal/device_desc.c3",
     "../../gpu/internal/surface.c3",
     "../../gpu/internal/debug.c3",
     "../../gpu/internal/shader_abi.c3",
@@ -42,10 +42,10 @@
         "import_surface_win32.c3"
       ]
     },
-    "canonical_strict_surface": {
+    "canonical_gpu_surface": {
       "type": "object-files",
       "sources": [
-        "canonical_strict_surface.c3"
+        "canonical_gpu_surface.c3"
       ]
     },
     "import_surface_wayland": {
@@ -87,7 +87,7 @@
         "../src/test_shader_code.c3",
         "../src/test_sampler_identity.c3",
         "../src/test_runtime.c3",
-        "../src/test_device_request.c3",
+        "../src/test_device_desc.c3",
         "../src/test_device_support.c3",
         "../src/test_device_creation.c3",
         "../src/test_queue.c3",

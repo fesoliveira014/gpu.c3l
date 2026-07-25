@@ -11,7 +11,7 @@ env:
   MESA_DIST_WIN_VERSION: "25.1.5"
   REQUIRED_GPU_CAPABILITIES: ""
   HEADLESS_TEST_TARGETS: >-
-    upload_bench_observation vk_device_request vk_bootstrap vk_allocation
+    upload_bench_observation vk_device_desc vk_bootstrap vk_allocation
     vk_command vk_texture vk_descriptor_heap vk_root_pointer vk_texture_heap
     vk_shader_reflection vk_offscreen vk_performance vk_allocator_observation
     vk_swapchain vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth
@@ -74,7 +74,7 @@ jobs:
       - name: CPU-only tests (no native libs)
         run: |
           c3c run import_gpu --path test/cpu
-          c3c build canonical_strict_surface --path test/cpu
+          c3c build canonical_gpu_surface --path test/cpu
           c3c build import_surface_win32 --path test/cpu
           c3c build import_surface_wayland --path test/cpu
           c3c build import_surface_x11 --path test/cpu
@@ -338,7 +338,7 @@ jobs:
       - name: CPU test targets
         run: |
           c3c run import_gpu --path test/cpu
-          c3c build canonical_strict_surface --path test/cpu
+          c3c build canonical_gpu_surface --path test/cpu
           c3c build import_surface_win32 --path test/cpu
           c3c build import_surface_wayland --path test/cpu
           c3c build import_surface_x11 --path test/cpu

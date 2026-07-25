@@ -1,7 +1,7 @@
-# Strict GPU Architecture
+# Device Baseline Architecture
 
-This document summarizes the strict architecture contract for `gpu`. It follows
-the pointer-first, bindless, explicit-synchronization model described in
+This document summarizes the mandatory device architecture contract for `gpu`.
+It follows the pointer-first, bindless, explicit-synchronization model described in
 [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api).
 
 The contract includes separately designed extensions that are not present in the
@@ -14,7 +14,7 @@ verification commands.
 
 ## Public topology
 
-- `gpu` owns the canonical runtime, adapter, device, queue, memory, texture, command, synchronization, rendering, presentation, and strict pipeline APIs.
+- `gpu` owns the canonical runtime, adapter, device, queue, memory, texture, command, synchronization, rendering, presentation, and shader-visible pipeline APIs.
 - `gpu::compat` adds explicit descriptor-set capabilities and compatibility pipelines. It does not preserve or wrap the current API.
 - `gpu::surface::<platform>` creates platform surfaces and returns the shared `gpu::Surface` type.
 - `gpu::internal::vk` is the single private Vulkan backend module. Compatibility implementation code, if added, remains private within that module.
@@ -24,9 +24,23 @@ Vulkan types, feature names, queue families, layouts, descriptor mechanisms, and
 
 ## Runtime and devices
 
-`gpu::Runtime` owns backend discovery, adapters, surfaces, and diagnostics. Applications enumerate adapters before device creation, query semantic support, build a `DeviceRequest`, and create a device from one adapter.
+`gpu::Runtime` owns backend discovery, adapters, surfaces, and diagnostics.
+Applications enumerate adapters and create a device from one exact adapter.
+An omitted, null, or zero-initialized `DeviceDesc` selects the default
+non-presenting device; presentation and explicit queue topology are ordinary
+descriptor fields. `supports_device_desc` is an optional read-only adapter
+selection query rather than a prerequisite for creation.
 
-Capability groups are explicit and immutable. A strict request enables only the strict contract. `gpu::compat` can add descriptor-set requirements to that same request. A capable device may enable both groups, but importing `gpu::compat` or detecting descriptor-set support enables nothing by itself.
+For #469, `DeviceDesc` intentionally retains `QueueRequirements`. #470 owns
+the one-queue-per-role public model and the replacement of count-based
+requirements; #469 does not preserve the packed request protocol for that
+migration.
+
+The pointer-first, shader-visible device baseline is implicit and mandatory.
+There is no request bit, capability group, or alternative public device
+profile.
+Any future `gpu::compat` extension must be specified separately and cannot
+weaken or replace this baseline.
 
 The library supports multiple live devices. Devices, queues, and resources use
 generational ownership. The device registry publishes one typed private Vulkan
@@ -48,9 +62,9 @@ Backend API and driver versions are diagnostic information. Applications select 
 - Texture requirements are queried before creation and report whether dedicated backing is required.
 - Placed texture creation validates caller-provided memory before mutation.
 - Dedicated texture creation transactionally publishes separate texture and allocation tokens.
-- Sampler descriptions intern directly to stable device-lifetime shader indices and require no individual destruction. Compatibility-only devices have no strict sampler heap and reject interning before native mutation.
+- Sampler descriptions intern directly to stable device-lifetime shader indices and require no individual destruction.
 - VMA remains private.
-- Non-WSI resource destruction is immediate. No live recording command list, executable command token, or incomplete submission may reference the resource. Strict presentation integration applies the same no-hidden-wait rule to swapchain destruction and resize.
+- Non-WSI resource destruction is immediate. No live recording command list, executable command token, or incomplete submission may reference the resource. Presentation integration applies the same no-hidden-wait rule to swapchain destruction and resize.
 - Readback uses a caller-owned `CPU_READ` allocation and span, copy, completion
   point, mapped-span invalidation, and direct CPU access.
 
@@ -65,7 +79,9 @@ public semaphore, or readback-ticket API.
 
 ## Shader data and pipelines
 
-Strict shaders receive root GPU addresses and access textures and samplers through device-wide shader-visible heaps. The public API exposes heap semantics and fixed-width shader indices, never the backend descriptor mechanism.
+Shaders receive root GPU addresses and access textures and samplers through
+device-wide shader-visible heaps. The public API exposes heap semantics and
+fixed-width shader indices, never the backend descriptor mechanism.
 
 Shader IR is supplied through reusable CPU-side `ShaderCode` values. The library computes their content identity. Pipeline creation may be batched to deduplicate shared IR. There is no public shader-module handle.
 
@@ -120,7 +136,10 @@ Pipeline binding is separate from draw and dispatch. Draw and dispatch commands 
 - descriptor-set binding commands;
 - descriptor-set shader interfaces.
 
-Compatibility pipelines use the shared device, queues, command lists, memory, textures, samplers, completion points, lifetime rules, render passes, and presentation APIs. Strict and compatibility pipelines may alternate in one command list when both capability groups were requested.
+If added, compatibility pipelines use the shared device, queues, command lists,
+memory, textures, samplers, completion points, lifetime rules, render passes,
+and presentation APIs. Their enablement contract requires a separate design;
+the current `DeviceDesc` contains no compatibility or backend feature flags.
 
 The library does not translate shaders, emulate root pointers through
 descriptors, silently change binding models, or provide a Vulkan 1.2 fallback.
@@ -128,14 +147,14 @@ descriptors, silently change binding models, or provide a Vulkan 1.2 fallback.
 ## Required invariants
 
 - `gpu` evolves in place; the current API is not moved wholesale into `gpu::compat`.
-- Strict operations never fall back to compatibility behavior.
-- Compatibility state exists only on devices that explicitly requested it.
-- Device creation either enables the complete request or publishes no device.
+- Baseline operations never fall back to compatibility behavior.
+- Device creation either satisfies the complete descriptor and mandatory
+  baseline or publishes no device.
 - Native pipeline compilation never occurs implicitly during draw or dispatch.
 - Public synchronization does not require resource lists for generic GPU memory.
 - Command-token aliases are one-shot and thread-confined. Direct generation and
   phase checks reject stale, consumed, and wrong-phase aliases while record
   storage remains alive; token storage must not be fabricated.
-- Non-WSI resource and device destruction never hide waits or deferred release; strict presentation extends that rule to swapchain destruction and resize.
-- Strict completion and readback require no root-level work lifecycle or public synchronization objects.
+- Non-WSI resource and device destruction never hide waits or deferred release; presentation extends that rule to swapchain destruction and resize.
+- Completion and readback require no root-level work lifecycle or public synchronization objects.
 - Public documentation and generated API references remain backend-neutral.

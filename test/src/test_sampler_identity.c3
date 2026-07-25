@@ -19,7 +19,7 @@ struct SamplerInternWorkerArgs {
 
 fn Runtime sampler_test_runtime() {
     gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_strict_support(true);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
     RuntimeDesc desc = {
         .application_name = "sampler_identity_test",
     };
@@ -28,8 +28,7 @@ fn Runtime sampler_test_runtime() {
 
 fn Device sampler_test_device(Runtime* runtime) {
     Adapter adapter = gpu::enumerate_adapters(runtime)!!.get(0)!!;
-    DeviceRequest request = gpu::strict_device_request();
-    return gpu::create_device(&adapter, &request)!!;
+    return gpu::create_device(&adapter)!!;
 }
 
 fn SamplerDesc sampler_test_desc() {
@@ -122,7 +121,7 @@ fn void sampler_anisotropy_contract_is_exact_and_transactional() @test {
     Device device = sampler_test_device(&runtime);
     DeviceCaps caps = gpu::get_device_caps(&device)!!;
     assert(caps.max_sampler_anisotropy == 16.0f,
-        "the strict stub exposes its exact anisotropy capability");
+        "the stub exposes its exact anisotropy capability");
 
     SamplerDesc exact = sampler_test_desc();
     exact.anisotropy_enable = true;
@@ -323,16 +322,4 @@ fn void sampler_identity_exhaustion_is_transactional() @test {
         "exhaustion creates no native sampler");
     gpu::destroy_device(&device)!!;
     gpu::destroy_runtime(&runtime)!!;
-}
-
-fn void sampler_interning_requires_strict_capability() @test {
-    Device device = gpu::internal::vk::stub_create_strict_disabled_device()!!;
-    SamplerDesc desc = sampler_test_desc();
-    uint attempts_before = gpu::internal::vk::stub_sampler_intern_attempt_count(&device);
-    assert(@catch(gpu::intern_sampler(&device, &desc))
-        == gpu::UNSUPPORTED_FEATURE);
-    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device)
-        == attempts_before,
-        "strict-disabled interning stops before backend mutation");
-    gpu::destroy_device(&device)!!;
 }

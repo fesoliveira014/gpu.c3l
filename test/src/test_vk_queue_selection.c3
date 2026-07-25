@@ -202,18 +202,15 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
         },
         .distinct = { .graphics, .compute, .transfer },
     };
-    gpu::DeviceRequest request = gpu::request_queues(
-        gpu::strict_device_request(),
-        requirements,
-    )!!;
+    gpu::DeviceDesc device_desc = { .queues = requirements };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
 
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue graphics = gpu::get_queue(
             &device,
@@ -383,7 +380,7 @@ fn void multi_role_access_stays_exclusive_on_single_family() @test {
     gpu::destroy_texture(&device, tex)!!;
 }
 
-fn void strict_heap_families_alias_without_transfer() @test {
+fn void shader_heap_families_alias_without_transfer() @test {
     vk::VkDeviceState state = {
         .selected_queue_roles = { .graphics, .compute },
         .graphics_family = 4,
@@ -391,12 +388,12 @@ fn void strict_heap_families_alias_without_transfer() @test {
         .transfer_family = 7,
     };
     uint[2] families;
-    uint count = vk::strict_heap_queue_families(&state, families[..]);
+    uint count = vk::shader_heap_queue_families(&state, families[..]);
     assert(count == 1, "aliased graphics and compute produce one family");
     assert(families[0] == 4, "graphics family is first");
 }
 
-fn void strict_heap_families_are_graphics_compute_only() @test {
+fn void shader_heap_families_are_graphics_compute_only() @test {
     vk::VkDeviceState state = {
         .selected_queue_roles = { .graphics, .compute },
         .graphics_family = 4,
@@ -404,7 +401,7 @@ fn void strict_heap_families_are_graphics_compute_only() @test {
         .transfer_family = 7,
     };
     uint[2] families;
-    uint count = vk::strict_heap_queue_families(&state, families[..]);
+    uint count = vk::shader_heap_queue_families(&state, families[..]);
     assert(count == 2, "distinct graphics and compute produce two families");
     assert(families[0] == 4, "graphics family is first");
     assert(families[1] == 5, "compute family is second");

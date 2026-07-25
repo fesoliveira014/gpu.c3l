@@ -9,7 +9,7 @@ from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCUMENT_INDEX = Path("docs/document_index.md")
-TARGET_DOCUMENT = Path("docs/strict_gpu_profile.md")
+TARGET_DOCUMENT = Path("docs/device_baseline.md")
 MARKDOWN_LINK = re.compile(r"!?\[[^]]*\]\((?P<target>[^)\s]+)")
 PROJECT_HISTORY_PATTERNS = (
     (

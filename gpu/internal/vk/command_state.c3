@@ -130,7 +130,7 @@ struct NativePipelineBinding {
     PipelineKind                  kind;
 }
 
-struct StrictHeapCommandBinding {
+struct DescriptorHeapCommandBinding {
     bool graphics_set_bound;
     bool compute_set_bound;
 }
@@ -155,7 +155,7 @@ struct CommandRecord @public {
     BoundPipeline                logical_pipeline;
     NativePipelineBinding        native_graphics_pipeline;
     NativePipelineBinding        native_compute_pipeline;
-    StrictHeapCommandBinding     strict_heap_binding;
+    DescriptorHeapCommandBinding descriptor_heap_binding;
     CommandScratch*              scratch;
 }
 

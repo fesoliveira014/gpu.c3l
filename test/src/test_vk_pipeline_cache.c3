@@ -1439,7 +1439,7 @@ fn void compute_layout_exists_before_pipeline_creation() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     assert(state.compute_layout != null,
-        "strict device creation publishes the singleton compute layout");
+        "device creation publishes the singleton compute layout");
     assert(state.generated_work.enabled
             ? state.generated_dispatch_layout != null
             : state.generated_dispatch_layout == null,

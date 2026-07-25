@@ -9,7 +9,7 @@ from pathlib import Path
 MATRIX_HEADING = "The blocking headless matrix is shared by Linux and Windows:"
 EXPECTED_HEADLESS_TARGETS = (
     "upload_bench_observation",
-    "vk_device_request",
+    "vk_device_desc",
     "vk_bootstrap",
     "vk_allocation",
     "vk_command",

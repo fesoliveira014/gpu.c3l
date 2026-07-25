@@ -300,7 +300,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
         && counts.device_presentation == 0
         && counts.dynamic_color == 3
         && counts.unexpected == 0,
-        "strict baseline loads only the required color procedures");
+        "the device baseline loads only the required color procedures");
 
     counts = {};
     plan.debug = true;

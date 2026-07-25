@@ -152,10 +152,10 @@ fn void run_texture_destroy_high_water(
     gpu::TextureHandle[BENCH_LIFECYCLE_ITERS] textures;
     foreach (&texture : textures) *texture = make_bench_texture(device);
     uint texture_next_new_before =
-        state.strict_heap.descriptors.texture_next_new;
-    defer state.strict_heap.descriptors.texture_next_new =
+        state.shader_heap.descriptors.texture_next_new;
+    defer state.shader_heap.descriptors.texture_next_new =
         texture_next_new_before;
-    state.strict_heap.descriptors.texture_next_new = high_water;
+    state.shader_heap.descriptors.texture_next_new = high_water;
     vk::reset_texture_view_accounting(state);
 
     std::time::Clock start = std::time::clock::now();
@@ -184,10 +184,10 @@ fn void run_swapchain_ownership_high_water(
     vk::SwapchainSlot slot = { .image_count = (uint)textures.len };
     foreach (i, texture : textures) slot.textures[i] = texture;
     uint texture_next_new_before =
-        state.strict_heap.descriptors.texture_next_new;
-    defer state.strict_heap.descriptors.texture_next_new =
+        state.shader_heap.descriptors.texture_next_new;
+    defer state.shader_heap.descriptors.texture_next_new =
         texture_next_new_before;
-    state.strict_heap.descriptors.texture_next_new = high_water;
+    state.shader_heap.descriptors.texture_next_new = high_water;
     vk::reset_texture_view_accounting(state);
 
     long elapsed_ns;

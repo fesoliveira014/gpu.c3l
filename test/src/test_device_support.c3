@@ -6,7 +6,7 @@ import gpu::internal::vk @public;
 
 fn RuntimeDesc device_support_runtime_desc() {
     return {
-        .application_name = "gpu_device_request_support_test",
+        .application_name = "gpu_device_desc_support_test",
     };
 }
 
@@ -14,104 +14,105 @@ fn Adapter first_support_adapter(Runtime* runtime) {
     return gpu::enumerate_adapters(runtime)!!.get(0)!!;
 }
 
-fn void request_support_is_semantic_and_does_not_enable_state() @test {
+fn void descriptor_support_is_semantic_and_does_not_enable_state() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_strict_support(true);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
     gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc desc = device_support_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     Adapter adapter = first_support_adapter(&runtime);
-    DeviceRequest request = gpu::strict_device_request();
+    DeviceDesc desc;
+    DeviceDesc original = desc;
 
-    DeviceRequestSupport support = gpu::supports_device_request(&adapter, &request)!!;
-    assert(support.supported, "strict semantics are supported");
-    assert(support.unmet_requirement.len == 0, "a supported request has no unmet label");
-    assert(gpu::internal::device_slot_available(), "support detection enables no device state");
-    assert(gpu::internal::vk::stub_device_support_query_count() == 1, "support is queried once");
-}
+    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
 
-fn void unsupported_request_names_the_first_semantic_requirement() @test {
-    gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_strict_support(false);
-    gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc desc = device_support_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    defer gpu::destroy_runtime(&runtime)!!;
-    Adapter adapter = first_support_adapter(&runtime);
-    DeviceRequest request = gpu::strict_device_request();
-
-    DeviceRequestSupport support = gpu::supports_device_request(&adapter, &request)!!;
-    assert(!support.supported, "unsupported strict semantics report false");
+    assert(support.supported, "the device baseline is supported");
+    assert(support.unmet_requirement.len == 0);
     assert(
-        support.unmet_requirement == "strict semantics",
-        "the unmet label is GPU-semantic"
+        device_desc_equal(desc, original),
+        "support detection does not mutate the descriptor"
     );
+    assert(gpu::internal::device_slot_available());
+    assert(gpu::internal::vk::stub_device_support_query_count() == 1);
 }
 
-fn void invalid_requests_and_stale_adapters_fault_before_backend_work() @test {
+fn void unsupported_baseline_names_the_semantic_requirement() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_strict_support(true);
+    gpu::internal::vk::stub_set_device_baseline_support(false);
     gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc desc = device_support_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
     Adapter adapter = first_support_adapter(&runtime);
-    DeviceRequest empty = gpu::internal::empty_device_request();
-    DeviceRequest malformed;
-    DeviceRequest reserved = (DeviceRequest)((uint128)gpu::strict_device_request() | ((uint128)1 << 63));
 
-    assert(@catch(gpu::supports_device_request(&adapter, &empty)) == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::supports_device_request(&adapter, &malformed)) == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::supports_device_request(&adapter, &reserved)) == gpu::INVALID_ARGUMENT);
-    assert(gpu::internal::vk::stub_device_support_query_count() == 0, "invalid requests bypass backend work");
+    DeviceSupport support = gpu::supports_device_desc(&adapter)!!;
 
-    DeviceRequest valid = gpu::strict_device_request();
+    assert(!support.supported);
+    assert(support.unmet_requirement == "device baseline");
+}
+
+fn void invalid_desc_and_stale_adapter_fault_before_backend_work() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc invalid = {
+        .queues = {
+            .counts   = { .graphics = 1 },
+            .distinct = { .compute },
+        },
+    };
+
+    assert(@catch(gpu::supports_device_desc(&adapter, &invalid))
+        == gpu::INVALID_ARGUMENT);
+    assert(gpu::internal::vk::stub_device_support_query_count() == 0);
+
     gpu::destroy_runtime(&runtime)!!;
-    assert(@catch(gpu::supports_device_request(&adapter, &valid)) == gpu::INVALID_HANDLE);
-    assert(gpu::internal::vk::stub_device_support_query_count() == 0, "stale adapters bypass backend work");
+    assert(@catch(gpu::supports_device_desc(&adapter)) == gpu::INVALID_HANDLE);
+    assert(gpu::internal::vk::stub_device_support_query_count() == 0);
 }
 
 fn void unavailable_queue_count_is_reported_semantically() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_strict_support(true);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
     gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc desc = device_support_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     Adapter adapter = first_support_adapter(&runtime);
-    QueueRequirements requirements = { .counts = { .graphics = 2 } };
-    DeviceRequest request = gpu::request_queues(
-        gpu::strict_device_request(),
-        requirements,
-    )!!;
+    DeviceDesc desc = {
+        .queues = { .counts = { .graphics = 2 } },
+    };
 
-    DeviceRequestSupport support = gpu::supports_device_request(&adapter, &request)!!;
-    assert(!support.supported, "an unavailable queue count is rejected");
-    assert(support.unmet_requirement == "graphics queues", "the unmet label stays semantic");
+    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
+
+    assert(!support.supported);
+    assert(support.unmet_requirement == "graphics queues");
 }
 
 fn void unavailable_queue_topology_is_reported_semantically() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_strict_support(true);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
     gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc desc = device_support_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     Adapter adapter = first_support_adapter(&runtime);
-    QueueRequirements requirements = {
-        .counts   = { .graphics = 1, .compute = 1 },
-        .distinct = { .compute },
+    DeviceDesc desc = {
+        .queues = {
+            .counts   = {
+                .graphics = 1,
+                .compute  = 1,
+            },
+            .distinct = { .compute },
+        },
     };
-    DeviceRequest request = gpu::request_queues(
-        gpu::strict_device_request(),
-        requirements,
-    )!!;
 
-    DeviceRequestSupport support =
-        gpu::supports_device_request(&adapter, &request)!!;
-    assert(!support.supported, "an unavailable queue topology is rejected");
-    assert(
-        support.unmet_requirement == "queue topology",
-        "the unmet label stays semantic"
-    );
+    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
+
+    assert(!support.supported);
+    assert(support.unmet_requirement == "queue topology");
 }

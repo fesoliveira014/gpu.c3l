@@ -225,7 +225,6 @@ fn vk::SamplerAddressMode sampler_address_mode_to_vk(
 }
 
 fn void? create_sampler_table(VkDeviceState* state) @private {
-    if (!state.strict_heap.enabled) return;
     vk::PhysicalDeviceProperties properties;
     vk::get_physical_device_properties(state.physical_device, &properties);
     uint capacity = properties.limits.max_sampler_allocation_count;
@@ -286,8 +285,8 @@ fn gpu::SamplerIndex? vk_intern_sampler(
     );
     if (existing != SAMPLER_CELL_NONE) return table.slots[existing].index;
     if (table.count >= table.slots.len) return gpu::SLOT_TABLE_FULL~;
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
-    if (heap.sampler_next_new >= state.strict_heap.sampler_capacity) {
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
+    if (heap.sampler_next_new >= state.shader_heap.sampler_capacity) {
         return report_contract_failure(
             state:               state,
             operation:           "intern_sampler",

@@ -199,12 +199,7 @@ fn void? run() {
     defer (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
     gpu::Adapter adapter = adapters.get(0)!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
-    gpu::DeviceRequestSupport support =
-        gpu::supports_device_request(&adapter, &request)!;
-    if (!support.supported) return gpu::UNSUPPORTED_FEATURE~;
-
-    gpu::Device device = gpu::create_device(&adapter, &request)!;
+    gpu::Device device = gpu::create_device(&adapter)!;
     defer (void)gpu::destroy_device(&device);
 
     gpu::AllocationDesc input_desc = {

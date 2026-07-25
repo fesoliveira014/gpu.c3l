@@ -920,7 +920,7 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
         return report_wsi_contract(
             context:        &context,
             public_fault:   gpu::UNSUPPORTED_FEATURE,
-            rejected_field: "DeviceRequest.presentation",
+            rejected_field: "DeviceDesc.surface",
             invariant:      "must be requested before device creation",
         )~;
     }

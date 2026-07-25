@@ -144,19 +144,16 @@ fn int main() {
         .counts   = { .graphics = 1, .compute = 2 },
         .distinct = { .compute },
     };
-    gpu::DeviceRequest request = gpu::request_queues(
-        gpu::strict_device_request(),
-        requirements,
-    )!!;
+    gpu::DeviceDesc device_desc = { .queues = requirements };
 
     for (uint adapter_index = 0;
         adapter_index < adapters.count;
         adapter_index++) {
         gpu::Adapter adapter = adapters.get(adapter_index)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue producer_queue = gpu::get_queue(
             &device,

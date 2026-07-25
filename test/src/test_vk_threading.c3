@@ -143,11 +143,11 @@ fn void concurrent_creation_storm() @test {
     foreach (&a : args) assert(!a.failed, "every storm create yielded a valid handle");
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    assert(state.strict_heap.descriptors.texture_free_count
-        == state.strict_heap.descriptors.texture_next_new,
+    assert(state.shader_heap.descriptors.texture_free_count
+        == state.shader_heap.descriptors.texture_next_new,
         "concurrent texture-view publication and release returns every slot");
-    for (uint i = 0; i < state.strict_heap.descriptors.texture_next_new; i++) {
-        assert(!state.strict_heap.descriptors.texture_cells[i].used,
+    for (uint i = 0; i < state.shader_heap.descriptors.texture_next_new; i++) {
+        assert(!state.shader_heap.descriptors.texture_cells[i].used,
             "no texture-view cell remains live after concurrent release");
     }
 }
@@ -332,8 +332,8 @@ fn void concurrent_sampler_interning_converges() @test {
         gpu::internal::device_slots[device.index].data.state;
     assert(state.samplers.count == 1,
         "concurrent interning creates one native sampler cell");
-    assert(state.strict_heap.descriptors.sampler_next_new == 1,
-        "concurrent interning writes one strict heap entry");
+    assert(state.shader_heap.descriptors.sampler_next_new == 1,
+        "concurrent interning writes one shader heap entry");
     assert(state.samplers.slots[0].native != null
             && state.samplers.bucket_heads[vk::sampler_bucket(
                 state.samplers.slots[0].hash,

@@ -26,9 +26,9 @@ concurrent aliases valid.
 |---|---|---|
 | `create_runtime` / `destroy_runtime` | E | process-wide runtime registry mutation |
 | `enumerate_adapters` / `AdapterList.get` / adapter queries | S | immutable cache reads; borrowed strings are read-only |
-| `Surface.is_valid` / `strict_device_request` | S | pure value operations; no registry access |
+| `Surface.is_valid` | S | pure value operation; no registry access |
 | `surface::{win32,wayland,x11}::create_surface` / `destroy_surface` | E | process-wide surface registry mutation |
-| `supports_presentation` / `request_presentation` / `supports_device_request` | E | process-wide surface registry access; a presentation request does not retain its surface |
+| `supports_presentation` / `supports_device_desc` | E | process-wide surface registry access when presentation is requested; a descriptor does not retain its surface |
 | `create_device` | E | per runtime; device-registry mutation is synchronized; presentation also uses the surface scope |
 | `destroy_device` | S | per target device; success invalidates the caller's token; live children return `RESOURCE_IN_USE`, while active operations, incomplete queue work, or closing state return retryable `DEVICE_BUSY` |
 | `submit` / `present` | E | externally synchronize each acquired image; submit consumes readiness, present consumes the image |
@@ -106,10 +106,11 @@ even for different runtimes, devices, or surfaces. `present`,
 and remain externally synchronized per
 device or swapchain.
 
-`create_surface` retains its runtime. A presentation-bearing `DeviceRequest`
-and the created device store only the surface token, so the surface must remain
-live through support checks, device creation, and swapchain creation. A device
-accepts only that exact surface. `create_swapchain` retains the surface until
+`create_surface` retains its runtime. A presentation-bearing `DeviceDesc` and
+the created device store only the surface token, so the surface must remain
+live through support checks, device creation, and swapchain creation. Neither
+operation retains it. A device accepts only that exact surface.
+`create_swapchain` retains the surface until
 `destroy_swapchain` or device teardown; `destroy_surface` returns
 `RESOURCE_IN_USE` while any swapchain retains it. The application keeps the
 native instance, display, and window objects valid until the surface is

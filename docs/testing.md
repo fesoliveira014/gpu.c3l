@@ -95,7 +95,7 @@ Examples:
 
 ```text
 test_vk_runtime.c3
-test_vk_device_request.c3
+test_vk_device_desc.c3
 test_vk_bootstrap.c3
 test_vk_vma_allocator.c3
 test_vk_allocation.c3
@@ -113,8 +113,8 @@ Coverage:
 
 ```text
 two independent Vulkan runtimes and borrowed-adapter invalidation
-exact-adapter request creation with runtime-instance reuse and retention
-surface-aware queue selection and presentation-request gating
+exact-adapter descriptor creation with runtime-instance reuse and retention
+surface-aware queue selection and presentation-descriptor gating
 create/destroy Vulkan device
 required `VK_EXT_extended_dynamic_state3` absence and
 `dynamicPrimitiveTopologyUnrestricted` property rejection
@@ -181,7 +181,7 @@ SDL init/shutdown
 window creation/destruction
 typed Win32, Wayland, and X11 surface-module imports
 runtime-owned surface creation and destruction
-adapter/surface presentation support and request composition
+adapter/surface presentation support and direct descriptor validation
 swapchain creation
 runtime info: selected format/mode, clamped extent, actual image count
 image acquire/present
@@ -437,7 +437,7 @@ CPU targets:
 
 ```sh
 c3c run import_gpu --path test/cpu
-c3c build canonical_strict_surface --path test/cpu
+c3c build canonical_gpu_surface --path test/cpu
 c3c build import_surface_win32 --path test/cpu
 c3c build import_surface_wayland --path test/cpu
 c3c build import_surface_x11 --path test/cpu
@@ -476,7 +476,7 @@ git submodule update --init --recursive
 The blocking headless matrix is shared by Linux and Windows:
 
 ```text
-upload_bench_observation vk_device_request vk_bootstrap vk_allocation
+upload_bench_observation vk_device_desc vk_bootstrap vk_allocation
 vk_command vk_texture vk_descriptor_heap vk_root_pointer vk_texture_heap
 vk_shader_reflection vk_offscreen vk_performance vk_allocator_observation
 vk_swapchain vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth
@@ -551,7 +551,7 @@ is used for private pipeline or command-record state; semantic, resolution,
 and native-emission outcomes remain the authority as those representations
 change.
 
-Command color-state work coverage runs on every created strict device. One
+Command color-state work coverage runs on every created device. One
 packet and an identical replacement each require exactly three native calls and
 zero host/VMA allocation, resource lookup/lock, native pipeline creation, or
 pipeline/cache lookup.
@@ -743,8 +743,8 @@ forms. HLSL and Slang are not supported or blocking audit toolchains; add one
 only when the project adopts a real frontend path that emits a distinct shape.
 
 Distinct-adapter ownership is gated deterministically by the CPU stub suite.
-`vk_device_request` also uses two physical adapters when both support the strict
-profile and reports `distinct-adapter=N/A` otherwise.
+`vk_device_desc` also uses two physical adapters when both satisfy the
+mandatory baseline and reports `distinct-adapter=N/A` otherwise.
 
 Prerequisites on `windows-x64`:
 

@@ -617,7 +617,7 @@ fn void leak_reporters_count_leaks() @test {
     assert(state.textures.get(texture)!!.live_descriptor_views == 1,
         "leak reporting does not decrement owner counts during table sweeps");
     assert(capture.public_identities == 5,
-        "only strict public resources carry slot identities");
+        "only exact public resources carry slot identities");
     assert(capture.private_span_identity_hidden,
         "private backing storage exposes no private handle identity");
     assert(capture.private_span_wording_valid,

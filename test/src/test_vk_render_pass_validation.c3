@@ -1021,7 +1021,7 @@ fn void distinct_graphics_cache_entries_emit_distinct_binds() @test {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.pipeline_bind_commands == 2,
         "distinct graphics cache entries emit two native binds");
-    assert_strict_heap_bind_work(stats, 1);
+    assert_shader_heap_bind_work(stats, 1);
 }
 
 fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
@@ -1245,7 +1245,7 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
     gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     assert(stats.pipeline_bind_commands == 2,
         "command-buffer reuse resets both native pipeline caches");
-    assert_strict_heap_bind_work(stats, 2);
+    assert_shader_heap_bind_work(stats, 2);
     gpu::cmd_begin_render_pass(&reused, &pass)!!;
     assert(@catch(gpu::cmd_draw(
         commands:       &reused,
