@@ -240,6 +240,7 @@ RETIRED_SOURCE_SYMBOLS = (
     "supports_device_request(",
     "strict_enabled",
     "strict_supported",
+    "full_render_graphics_state(",
     "BackendKind",
     "get_device_backend(",
     "create_device_from_desc(",
