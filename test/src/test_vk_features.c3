@@ -447,28 +447,6 @@ fn void generated_work_support_rejects_incomplete_layout_limits() @test {
     assert(!zero_count.enabled && zero_count.max_count == 0);
 }
 
-fn void heap_implementation_resolution_is_private() @test {
-    gpu::internal::vk::VkHeapImplementation both =
-        gpu::internal::vk::resolve_heap_implementation(true, true)!!;
-    assert(
-        both == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_INDEXING,
-        "indexing is preferred when both private implementations are usable"
-    );
-
-    gpu::internal::vk::VkHeapImplementation buffer_only =
-        gpu::internal::vk::resolve_heap_implementation(false, true)!!;
-    assert(
-        buffer_only == gpu::internal::vk::VkHeapImplementation.DESCRIPTOR_BUFFER,
-        "descriptor buffers provide the private fallback"
-    );
-
-    fault unavailable = @catch(gpu::internal::vk::resolve_heap_implementation(false, false));
-    assert(
-        unavailable == gpu::UNSUPPORTED_FEATURE,
-        "strict heaps require at least one exact implementation"
-    );
-}
-
 fn void line_polygon_mode_feature_support() @test {
     vk::PhysicalDeviceFeatures unsupported;
     assert(!gpu::internal::vk::line_polygon_mode_supported(&unsupported), "unset fillModeNonSolid reports no line polygon support");
@@ -1000,7 +978,6 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
 
     gpu::HazardFlags hazards = {
         .draw_arguments = true,
-        .descriptors = true,
         .depth_stencil = true,
     };
     ulong after_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_HOST_READ_BIT
@@ -1011,26 +988,20 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
         | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT
-        | (ulong)vk::AccessFlagBits2.ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages, hazards, true)
+    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages, hazards)
             == after_expected,
         "consumer stages and special hazards map to required access scopes");
-    ulong indexing_expected = after_expected
-        & ~(ulong)vk::AccessFlagBits2.ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT;
-    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages, hazards, false)
-            == indexing_expected,
-        "descriptor-buffer access is omitted for the indexing implementation");
 
     ulong generated_expected = after_expected
         | (ulong)vk::AccessFlagBits2.ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV;
-    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages, hazards, true, true)
+    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages, hazards, true)
             == generated_expected,
         "generated work adds command-preprocess reads without dropping indirect reads");
 
     gpu::StageMask present = { .present = true };
-    assert(gpu::internal::vk::barrier_after_access_to_vk(present, {}, false)
+    assert(gpu::internal::vk::barrier_after_access_to_vk(present, {})
             == vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT,
         "presentation consumes memory");
 }
@@ -1041,10 +1012,9 @@ fn void semantic_barrier_native_wiring_preserves_direction() @test {
         .after = { .compute = true },
         .hazards = {
             .draw_arguments = true,
-            .descriptors = true,
         },
     };
-    vk::MemoryBarrier2 native = gpu::internal::vk::barrier_to_vk(&barrier, true);
+    vk::MemoryBarrier2 native = gpu::internal::vk::barrier_to_vk(&barrier);
 
     assert(native.src_stage_mask
             == vk::PipelineStageFlagBits2.STAGE_2_HOST_BIT,
@@ -1060,12 +1030,11 @@ fn void semantic_barrier_native_wiring_preserves_direction() @test {
     ulong expected_dst_access =
         (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
-        | (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT
-        | (ulong)vk::AccessFlagBits2.ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT;
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT;
     assert((ulong)native.dst_access_mask == expected_dst_access,
         "the destination access comes from Barrier.after and hazards");
 
-    vk::MemoryBarrier2 generated = gpu::internal::vk::barrier_to_vk(&barrier, true, true);
+    vk::MemoryBarrier2 generated = gpu::internal::vk::barrier_to_vk(&barrier, true);
     assert((ulong)generated.dst_stage_mask
             == expected_dst_stages
                 | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV,
@@ -1080,7 +1049,6 @@ fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
     gpu::Barrier valid = {
         .before = { .compute = true },
         .after = { .fragment_shader = true },
-        .hazards = { .descriptors = true },
     };
     assert(gpu::internal::vk::barrier_masks_valid(&valid),
         "nonempty semantic masks are valid");
@@ -1123,13 +1091,10 @@ fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
     assert(!gpu::internal::vk::barrier_masks_valid(&unknown_hazard),
         "unknown hazard bits are invalid");
 
-    gpu::Barrier descriptor_without_shader = {
-        .before = { .transfer = true },
-        .after = { .transfer = true },
-        .hazards = { .descriptors = true },
-    };
-    assert(!gpu::internal::vk::barrier_masks_valid(&descriptor_without_shader),
-        "descriptor hazards require a shader consumer stage");
+    gpu::Barrier retired_descriptor_hazard = valid;
+    retired_descriptor_hazard.hazards = (gpu::HazardFlags)0x2u;
+    assert(!gpu::internal::vk::barrier_masks_valid(&retired_descriptor_hazard),
+        "the retired descriptor hazard bit remains invalid");
 }
 
 fn void semantic_barrier_queue_flags_reject_unsupported_stages() @test {

@@ -12,7 +12,6 @@ struct DispatchLookupCounts {
     uint instance_xlib_surface;
     uint device_debug;
     uint device_presentation;
-    uint descriptor_buffer;
     uint dynamic_color;
     uint unexpected;
 }
@@ -25,7 +24,6 @@ fn bool DispatchLookupCounts.is_empty(self) {
         && self.instance_xlib_surface == 0
         && self.device_debug == 0
         && self.device_presentation == 0
-        && self.descriptor_buffer == 0
         && self.dynamic_color == 0
         && self.unexpected == 0;
 }
@@ -222,12 +220,6 @@ fn vk::PFN_vkVoidFunction recording_device_proc_loader(
         || proc_name == "vkAcquireNextImageKHR"
         || proc_name == "vkQueuePresentKHR") {
         counts.device_presentation++;
-    } else if (proc_name == "vkGetDescriptorSetLayoutSizeEXT"
-        || proc_name == "vkGetDescriptorSetLayoutBindingOffsetEXT"
-        || proc_name == "vkGetDescriptorEXT"
-        || proc_name == "vkCmdBindDescriptorBuffersEXT"
-        || proc_name == "vkCmdSetDescriptorBufferOffsetsEXT") {
-        counts.descriptor_buffer++;
     } else if (proc_name == "vkCmdSetColorBlendEnableEXT"
         || proc_name == "vkCmdSetColorBlendEquationEXT"
         || proc_name == "vkCmdSetColorWriteMaskEXT") {
@@ -306,7 +298,6 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     );
     assert(counts.device_debug == 0
         && counts.device_presentation == 0
-        && counts.descriptor_buffer == 0
         && counts.dynamic_color == 3
         && counts.unexpected == 0,
         "strict baseline loads only the required color procedures");
@@ -320,7 +311,6 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     );
     assert(counts.device_debug == 3, "debug selection loads only device diagnostics");
     assert(counts.device_presentation == 0, "debug selection does not load presentation procedures");
-    assert(counts.descriptor_buffer == 0, "debug selection does not load descriptor procedures");
     assert(counts.dynamic_color == 3, "debug selection retains baseline color procedures");
     assert(counts.unexpected == 0, "debug selection loads no unrelated procedures");
 
@@ -333,64 +323,8 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     );
     assert(counts.device_debug == 0, "presentation selection does not load debug procedures");
     assert(counts.device_presentation == 5, "presentation selection loads only device WSI");
-    assert(counts.descriptor_buffer == 0, "presentation selection does not load descriptor procedures");
     assert(counts.dynamic_color == 3, "presentation selection retains baseline color procedures");
     assert(counts.unexpected == 0, "presentation selection loads no unrelated procedures");
-
-    counts = {};
-    plan = { .descriptor_buffer = true };
-    (void)gpu::internal::vk::load_vk_device_dispatch(
-        (vk::Device)&counts,
-        &recording_device_proc_loader,
-        plan,
-    );
-    assert(counts.device_debug == 0, "descriptor selection does not load debug procedures");
-    assert(counts.device_presentation == 0, "descriptor selection does not load presentation procedures");
-    assert(counts.descriptor_buffer == 5, "descriptor selection loads only descriptor-buffer procedures");
-    assert(counts.dynamic_color == 3, "descriptor selection retains baseline color procedures");
-    assert(counts.unexpected == 0, "descriptor selection loads no unrelated procedures");
-}
-
-fn void fake_get_descriptor_a(
-    vk::Device device,
-    vk::DescriptorGetInfoEXT* info,
-    sz data_size,
-    void* descriptor,
-) {}
-
-fn void fake_get_descriptor_b(
-    vk::Device device,
-    vk::DescriptorGetInfoEXT* info,
-    sz data_size,
-    void* descriptor,
-) {}
-
-fn vk::PFN_vkVoidFunction fake_device_proc_loader(
-    vk::Device device,
-    char* name,
-) {
-    if (((ZString)name).str_view() != "vkGetDescriptorEXT") return null;
-    return (vk::PFN_vkVoidFunction)(device == (vk::Device)(uptr)1
-        ? &fake_get_descriptor_a
-        : &fake_get_descriptor_b);
-}
-
-fn void device_dispatch_loads_per_device() @test {
-    gpu::internal::vk::VkDeviceDispatchPlan plan = { .descriptor_buffer = true };
-    gpu::internal::vk::VkDeviceDispatch first = gpu::internal::vk::load_vk_device_dispatch(
-        (vk::Device)(uptr)1,
-        &fake_device_proc_loader,
-        plan,
-    );
-    gpu::internal::vk::VkDeviceDispatch second = gpu::internal::vk::load_vk_device_dispatch(
-        (vk::Device)(uptr)2,
-        &fake_device_proc_loader,
-        plan,
-    );
-
-    assert(first.descriptor_buffer.get_descriptor == &fake_get_descriptor_a, "first device keeps its loaded entry point");
-    assert(second.descriptor_buffer.get_descriptor == &fake_get_descriptor_b, "second device keeps its loaded entry point");
-    assert(first.descriptor_buffer.get_descriptor != second.descriptor_buffer.get_descriptor, "device dispatch values do not alias mutable state");
 }
 
 fn vk::Result fake_create_debug_messenger(

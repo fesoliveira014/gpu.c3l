@@ -125,8 +125,6 @@ Atomic{ulong} command_recording_commands @private @if(env::TESTING || $feature(C
 Atomic{ulong} command_native_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_pipeline_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 Atomic{ulong} command_strict_heap_set_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_strict_heap_buffer_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_strict_heap_offset_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
 
 fn bool CommandListHandle.is_valid(self) =>
     self.owner != 0 && self.generation != 0;
@@ -211,18 +209,6 @@ fn void note_command_pipeline_bind() @private {
 fn void note_command_strict_heap_set_bind() @private {
     $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
         (void)command_strict_heap_set_bind_commands.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_strict_heap_buffer_bind() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
-        (void)command_strict_heap_buffer_bind_commands.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_strict_heap_offset() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
-        (void)command_strict_heap_offset_commands.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 

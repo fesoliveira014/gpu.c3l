@@ -45,7 +45,7 @@ gpu/internal/vk/allocator.c3            vma::Allocator creation/destruction, sta
 gpu/internal/vk/allocation.c3           generic-buffer and raw texture-memory allocations
 gpu/internal/vk/buffer.c3               VkBuffer + VMA allocation path
 gpu/internal/vk/texture.c3              owned/placed images, views, presentation-use state
-gpu/internal/vk/descriptor_heap.c3      descriptor buffer or descriptor indexing implementation
+gpu/internal/vk/descriptor_heap.c3      descriptor-indexing heap implementation
 gpu/internal/vk/shader.c3               temporary SPIR-V modules and reflection validation
 gpu/internal/vk/pipeline_cache.c3       pipeline dedup cache and driver cache
 gpu/internal/vk/pipeline_compute.c3     compute pipeline creation
@@ -95,12 +95,12 @@ pipeline variants. The backend separately requires and enables the extension
 name and all three color-state feature bits. Vulkan 1.3 supplies the promoted
 topology, cull, front-face, and depth-bias core commands.
 
-Shader heaps are selected automatically. Descriptor indexing is preferred when
-its features and limits satisfy the requested semantic capacities. Descriptor
-buffers provide the fallback only after an exact temporary layout preflight
-proves the same capacities fit the candidate's driver-reported limits. Indexing
-is preferred in part because lavapipe (Mesa 25.0.7) miscompiles
-descriptor-buffer image access.
+Strict devices require runtime descriptor arrays, non-uniform sampled/storage
+image indexing, partially-bound arrays, sampled/storage update-after-bind, and
+update-unused-while-pending. Adapter discovery caches those features and the
+Vulkan 1.2 update-after-bind limits. Support and creation reject missing
+features or configured capacities with `UNSUPPORTED_FEATURE`; they create no
+temporary logical device or descriptor layout and never clamp capacities.
 
 Device creation should fail with `UNSUPPORTED_FEATURE` if required features are missing.
 
@@ -305,10 +305,11 @@ A barrier with
 `hazards.draw_arguments` includes both indirect-command and generated
 command-preprocess reads when this capability is enabled.
 
-The selected strict heap path adds either descriptor-buffer support or the
-indexing path's partially-bound and update-after-bind features. Unrequested
-strict state adds no heap feature chain, extension, dispatch, descriptors, or
-pipeline-shared state.
+The strict heap adds runtime arrays, non-uniform sampled/storage indexing,
+partially-bound arrays, sampled/storage update-after-bind, and
+update-unused-while-pending. Unrequested strict state adds no heap feature
+chain, descriptors, or pipeline-shared state. Generic buffer device address
+and generated-work feature/dispatch paths remain independent.
 
 Logical-device queue families form an ordered set. The backend visits the
 representative graphics, compute, and transfer queues, then every selected
@@ -442,9 +443,7 @@ image completed a presentation cycle so acquisition can report `prior_state`.
 
 ## 10. Descriptor heap implementation
 
-### Descriptor indexing path
-
-Preferred automatically when its features and limits satisfy the requested capacities.
+Descriptor indexing is the sole strict heap implementation.
 
 Uses:
 
@@ -452,7 +451,8 @@ Uses:
 large descriptor arrays
 runtime descriptor array support
 partially bound descriptors
-update-after-bind where needed
+update-after-bind
+update-unused-while-pending
 ```
 
 The indexing layout contains `T` sampled images, `T` storage images, and `S`
@@ -462,29 +462,9 @@ the exact resource total `2T` against
 toward that limit. Its single update-after-bind pool contains `2T + S`
 descriptors and is checked against `maxUpdateAfterBindDescriptorsInAllPools`.
 Requests that exceed either aggregate or any per-type limit fail with
-`UNSUPPORTED_FEATURE`; capacities are never clamped.
-
-### Descriptor buffer path
-
-Selected automatically when descriptor indexing cannot satisfy the requested
-capacities and descriptor-buffer support is available. Candidate selection
-creates the exact layout temporarily and checks its driver-reported size
-against every descriptor-buffer range and address-space limit before ranking
-the adapter. Mesa 25.0.7 lavapipe miscompiles descriptor-buffer image access,
-so that path remains gated in native shader tests.
-
-Backend owns descriptor buffers for:
-
-```text
-sampled images
-storage images
-samplers
-```
-The internal descriptor buffer admits every selected
-graphics and compute identity, or every transfer identity on a transfer-only
-device. One family remains `EXCLUSIVE`; two or more use `CONCURRENT` with the
-exact ordered list. Transfer is otherwise excluded because transfer commands
-never bind or consume the descriptor heap.
+`UNSUPPORTED_FEATURE` with the first exact capacity or aggregate diagnostic;
+capacities are never clamped. Values above the library hard ceiling remain
+`INVALID_ARGUMENT`.
 
 This internal policy does not widen public resource access. Explicit command
 resources are checked against `CommandRecord.queue` before Vulkan commands,
@@ -492,21 +472,26 @@ command recording, pipeline binding, or transfer allocation. Span metadata must
 remain a non-empty subset of its backing buffer. Descriptor tokens and the
 internal heap remain scoped to their owning `Device`.
 
-Public indices map to descriptor entries. Neither path changes the public API
-or shader material records.
+Public indices map to descriptor entries in one update-after-bind set:
+
+```text
+set 0, binding 0: SAMPLED_IMAGE[texture_capacity]
+set 0, binding 1: STORAGE_IMAGE[texture_capacity]
+set 0, binding 2: SAMPLER[sampler_capacity]
+```
+
+This does not expose descriptor sets in the public API or change shader
+material records.
 
 Strict heap binding is command-record state rather than pipeline state. The
-indexing path emits one set-0 bind for each used strict bind point. The
-descriptor-buffer path emits one global buffer bind per command record and one
-offset command for each used strict bind point. Switching compatible strict
-pipelines does not repeat heap setup. Command-buffer reuse clears the cache, and
-private full/per-bind-point invalidation operations are reserved for future
-incompatible descriptor domains.
+backend emits one set-0 bind for each used strict bind point. Graphics and
+compute binding bits remain independent across alternating work. Switching
+compatible strict pipelines does not repeat heap setup, while command-buffer
+reuse clears both bits.
 
 Publishing texture views or samplers does not invalidate this binding state.
-Indexing updates retain their update-after-bind rules; descriptor-buffer writes
-and reads retain the caller-authored `HazardFlags.descriptors` synchronization
-contract.
+Descriptor publication uses `vkUpdateDescriptorSets` under the update-after-bind
+and update-unused-while-pending contract and requires no public GPU barrier.
 
 Every strict-enabled device has an append-only sampler table keyed by normalized
 semantic state. Explicitly zero-initialized canonical keys are byte-hashed into
@@ -597,7 +582,7 @@ accepted or cached.
 ```text
 shader module
 pipeline layout with root pointer push constant
-global descriptor heap layout or descriptor buffer binding convention
+global descriptor set layout
 vk::Pipeline
 ```
 
@@ -827,8 +812,8 @@ cmd_texture_barrier -> vk::ImageMemoryBarrier2
 ```
 
 `cmd_barrier` emits one global memory barrier. Under `FULL`, normal access scopes follow from
-its producer and consumer stages; draw-argument, descriptor-buffer, and
-depth/stencil cache paths are enabled only by their hazard flags. Invalid,
+its producer and consumer stages; draw-argument and depth/stencil cache paths
+are enabled only by their hazard flags. Invalid,
 contradictory, consumer-incompatible, or queue-unsupported scopes fault before
 recording. Trusted entries retain safe lowering and command-state checks but
 treat detailed stage/hazard/queue misuse as a caller contract. Cross-queue

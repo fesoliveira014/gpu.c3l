@@ -1311,11 +1311,10 @@ def valid_document() -> dict:
                                 "type": {"name": "bool"},
                                 "bit_range": [bit, bit],
                             }
-                            for bit, name in enumerate((
-                                "draw_arguments",
-                                "descriptors",
-                                "depth_stencil",
-                            ))
+                            for name, bit in (
+                                ("draw_arguments", 0),
+                                ("depth_stencil", 2),
+                            )
                         ],
                     },
                     {
@@ -2587,6 +2586,24 @@ method gpu::Runtime.is_valid
                     f"{name} must match the exact semantic flag schema",
                     check_public_api.validate_document(document),
                 )
+
+    def test_rejects_retired_descriptor_hazard(self) -> None:
+        document = valid_document()
+        hazard = next(
+            entry for entry in document["modules"]["gpu"]["types"]
+            if entry["name"] == "HazardFlags"
+        )
+        hazard["members"].insert(1, {
+            "name": "descriptors",
+            "type": {"name": "bool"},
+            "bit_range": [1, 1],
+        })
+        failures = check_public_api.validate_document(document)
+        self.assertIn("retired descriptor hazard", failures)
+        self.assertIn(
+            "HazardFlags must match the exact semantic flag schema",
+            failures,
+        )
 
     def test_rejects_retired_generic_barrier_symbols(self) -> None:
         for name, kind, failure in (

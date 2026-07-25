@@ -9,18 +9,11 @@ import std::core::env;
 import std::atomic;
 import std::atomic::types;
 import std::thread;
+import std::io;
 
 // Disambiguates from vma::Allocator: std::core::mem's host-memory interface.
 alias HostAllocator = std::core::mem::alloc::Allocator;
 alias DeviceExtensionQueryFn = fn bool?(vk::PhysicalDevice physical_device, ZString extension);
-alias DescriptorBufferCapacityProbeFn @private = fn bool (
-    void*,
-    vk::PhysicalDevice,
-    QueueFamilies*,
-    bool,
-    uint,
-    uint,
-);
 alias SemaphoreCounterQueryFn @private = fn vk::Result (
     vk::Device,
     vk::Semaphore,
@@ -76,10 +69,6 @@ struct DeviceCreationProbe {
     uint                     rollback_count;
     DeviceCreateHook         native_device_create_hook @if(env::TESTING);
     void*                    native_device_create_user_data @if(env::TESTING);
-    bool                     descriptor_buffer_override;
-    bool                     descriptor_buffer_capability_checked;
-    bool                     descriptor_buffer_capability_available;
-    bool                     descriptor_buffer_selected;
     bool                     fail_native_device_creation @if(env::TESTING);
     bool                     dynamic_color_support_override @if(env::TESTING);
     bool                     dynamic_color_support_available @if(env::TESTING);
@@ -87,11 +76,6 @@ struct DeviceCreationProbe {
     uint                     dynamic_color_blend_enable @if(env::TESTING);
     uint                     dynamic_color_blend_equation @if(env::TESTING);
     uint                     dynamic_color_write_mask @if(env::TESTING);
-}
-
-struct DescriptorBufferCapacityProbe {
-    void*                           user_data;
-    DescriptorBufferCapacityProbeFn fits;
 }
 
 struct VkPresentationState {
@@ -104,11 +88,10 @@ struct VkPresentationState {
 }
 
 struct VkStrictHeapState {
-    bool                    enabled;
-    VkHeapImplementation    implementation;
-    uint                    texture_capacity;
-    uint                    sampler_capacity;
-    DescriptorHeapState     descriptors;
+    bool                enabled;
+    uint                texture_capacity;
+    uint                sampler_capacity;
+    DescriptorHeapState descriptors;
 }
 
 struct ViewportLimits {
@@ -517,8 +500,35 @@ fn gpu::Device? create_vk_device_with_probe(
             ? &requested_surface
             : null,
         queue_requirements:         &queue_requirements,
+        strict_heap_support:        &adapter_state.strict_heap,
         probe:                      probe,
     );
+}
+
+fn void? validate_strict_device_request_support(
+    VkRuntimeState* runtime_state,
+    uint adapter_index,
+    gpu::DeviceRequest* request,
+) {
+    if (runtime_state == null
+        || request == null
+        || adapter_index >= runtime_state.adapters.len) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (!gpu::internal::requests_strict(*request)) return;
+
+    VkDeviceConfig desc = runtime_device_config(runtime_state);
+    VkStrictHeapState strict_heap = resolve_strict_heap_state(true, &desc)!;
+    VkDeviceState diagnostic_state = {
+        .debug_callback    = runtime_state.debug_callback,
+        .debug_user_data   = runtime_state.debug_user_data,
+        .validation_policy = runtime_state.validation_policy,
+    };
+    validate_strict_heap_support(
+        &diagnostic_state,
+        &strict_heap,
+        &runtime_state.adapters[adapter_index].strict_heap,
+    )!;
 }
 
 fn gpu::Device? create_vk_device_from_runtime(
@@ -532,6 +542,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null,
     gpu::Surface* presentation_surface_owner = null,
     gpu::QueueRequirements* queue_requirements = null,
+    StrictHeapSupport* strict_heap_support = null,
     DeviceCreationProbe* probe = null,
 ) @private {
     $if env::TESTING:
@@ -671,23 +682,21 @@ fn gpu::Device? create_vk_device_from_runtime(
         state.max_sampler_anisotropy = anisotropy_props.limits.max_sampler_anisotropy;
     }
     if (state.strict_heap.enabled) {
-        bool indexing_supported = heap_indexing_supported(&features2.features, &features12);
-        IndexingHeapLimits indexing_limits = query_indexing_heap_limits(state.physical_device);
-        bool buffer_supported;
-        if (strict_heap_needs_descriptor_buffer_query(
-            state:              &state.strict_heap,
-            indexing_supported: indexing_supported,
-            indexing_limits:    indexing_limits,
-            probe:              probe,
-        ) && heap_shared_features_supported(&features2.features, &features12)) {
-            buffer_supported = query_descriptor_buffer_support(state.physical_device, state)!;
+        StrictHeapSupport queried_support;
+        if (strict_heap_support == null) {
+            queried_support = {
+                .indexing = heap_indexing_supported(
+                    &features2.features,
+                    &features12,
+                ),
+                .limits = query_indexing_heap_limits(state.physical_device),
+            };
+            strict_heap_support = &queried_support;
         }
-        select_strict_heap_implementation_for_creation(
-            state:              &state.strict_heap,
-            indexing_supported: indexing_supported,
-            buffer_supported:   buffer_supported,
-            indexing_limits:    indexing_limits,
-            probe:              probe,
+        validate_strict_heap_support(
+            state,
+            &state.strict_heap,
+            strict_heap_support,
         )!;
     }
 
@@ -718,10 +727,9 @@ fn gpu::Device? create_vk_device_from_runtime(
     )!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.LOGICAL_DEVICE)!;
     VkDeviceDispatchPlan dispatch_plan = {
-        .debug             = debug_utils_enabled,
-        .presentation      = state.presentation.enabled,
-        .descriptor_buffer = strict_heap_uses_descriptor_buffer(&state.strict_heap),
-        .generated_work    = state.generated_work.enabled,
+        .debug          = debug_utils_enabled,
+        .presentation   = state.presentation.enabled,
+        .generated_work = state.generated_work.enabled,
     };
     state.device_dispatch = load_vk_device_dispatch(
         state.device,
@@ -731,10 +739,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     if (state.presentation.enabled
         && (!instance_dispatch_supports_presentation(&state.instance_dispatch)
             || !device_dispatch_supports_presentation(&state.device_dispatch))) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-    if (strict_heap_uses_descriptor_buffer(&state.strict_heap)
-        && !device_dispatch_supports_descriptor_buffer(&state.device_dispatch)) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     if (state.generated_work.enabled
@@ -1095,8 +1099,7 @@ fn bool line_polygon_mode_supported(vk::PhysicalDeviceFeatures* base) {
     return base.fill_mode_non_solid != 0;
 }
 
-<* Features both descriptor paths need — SPIR-V capabilities emitted by the
-   heap-access shader helpers. Pure. *>
+<* Features required by the heap-access shader helpers. Pure. *>
 fn bool heap_shared_features_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12) {
     return base.shader_storage_image_read_without_format != 0
         && base.shader_storage_image_write_without_format != 0
@@ -1130,56 +1133,91 @@ fn VkStrictHeapState? resolve_strict_heap_state(bool requested, VkDeviceConfig* 
     return state;
 }
 
-fn bool strict_heap_uses_descriptor_indexing(VkStrictHeapState* state) {
-    return state != null
-        && state.enabled
-        && state.implementation == VkHeapImplementation.DESCRIPTOR_INDEXING;
-}
-
-fn bool strict_heap_uses_descriptor_buffer(VkStrictHeapState* state) {
-    return state != null
-        && state.enabled
-        && state.implementation == VkHeapImplementation.DESCRIPTOR_BUFFER;
-}
-
-fn bool strict_heap_needs_descriptor_buffer_query(
+fn void? validate_strict_heap_support(
+    VkDeviceState* device,
     VkStrictHeapState* state,
-    bool indexing_supported,
-    IndexingHeapLimits indexing_limits,
-    DeviceCreationProbe* probe,
+    StrictHeapSupport* support,
 ) {
-    if (state == null || !state.enabled) return false;
-    if (probe != null && probe.descriptor_buffer_override) return true;
-    return !indexing_supported || !indexing_heap_fits_limits(
+    if (device == null || state == null || support == null) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (!state.enabled) return;
+    if (!support.indexing) {
+        return report_contract_failure(
+            state:               device,
+            operation:           "create_device",
+            public_fault:        gpu::UNSUPPORTED_FEATURE,
+            resource_kind:       gpu::DebugResourceKind.DEVICE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "DeviceRequest.features.strict",
+            invariant:           "strict mode requires descriptor indexing with update-after-bind support",
+            backend_text:        null,
+        )~;
+    }
+    IndexingHeapLimitFailure failure = indexing_heap_limit_failure(
         state.texture_capacity,
         state.sampler_capacity,
-        indexing_limits,
+        support.limits,
     );
-}
-
-fn void? select_strict_heap_implementation_for_creation(
-    VkStrictHeapState* state,
-    bool indexing_supported,
-    bool buffer_supported,
-    IndexingHeapLimits indexing_limits,
-    DeviceCreationProbe* probe,
-) {
-    if (probe == null || !probe.descriptor_buffer_override) {
-        return select_strict_heap_implementation(
-            state:              state,
-            indexing_supported: indexing_supported,
-            buffer_supported:   buffer_supported,
-            indexing_limits:    indexing_limits,
+    if (failure == IndexingHeapLimitFailure.NONE) return;
+    ZString rejected_field;
+    ZString invariant;
+    switch (failure) {
+        case IndexingHeapLimitFailure.SAMPLED_IMAGES:
+            rejected_field = "RuntimeDesc.texture_heap_capacity";
+            invariant = "texture heap capacity must fit the sampled-image update-after-bind limit";
+        case IndexingHeapLimitFailure.STORAGE_IMAGES:
+            rejected_field = "RuntimeDesc.texture_heap_capacity";
+            invariant = "texture heap capacity must fit the storage-image update-after-bind limit";
+        case IndexingHeapLimitFailure.SAMPLERS:
+            rejected_field = "RuntimeDesc.sampler_heap_capacity";
+            invariant = "sampler heap capacity must fit the sampler update-after-bind limit";
+        case IndexingHeapLimitFailure.PER_STAGE_RESOURCES:
+            rejected_field = "RuntimeDesc.texture_heap_capacity/sampler_heap_capacity";
+            invariant = "combined descriptor capacity must fit the per-stage update-after-bind resource limit";
+        case IndexingHeapLimitFailure.ALL_POOLS_DESCRIPTORS:
+            rejected_field = "RuntimeDesc.texture_heap_capacity/sampler_heap_capacity";
+            invariant = "combined descriptor capacity must fit the all-pools update-after-bind descriptor limit";
+        default:
+            return gpu::BACKEND_ERROR~;
+    }
+    if (device.debug_callback == null) {
+        HeapDescriptorTotals totals = descriptor_heap_totals(
+            state.texture_capacity,
+            state.sampler_capacity,
+        );
+        io::eprintfn(
+            "gpu: descriptor capacities (tex %d, smp %d) exceed a device update-after-bind limit (set %d/%d/%d, per-stage %d/%d/%d, per-stage resources %d/%d, all-pools descriptors %d/%d)",
+            state.texture_capacity,
+            state.sampler_capacity,
+            support.limits.max_sampled_images,
+            support.limits.max_storage_images,
+            support.limits.max_samplers,
+            support.limits.max_per_stage_sampled_images,
+            support.limits.max_per_stage_storage_images,
+            support.limits.max_per_stage_samplers,
+            totals.per_stage_resources,
+            support.limits.max_per_stage_resources,
+            totals.all_pools_descriptors,
+            support.limits.max_all_pools_descriptors,
         );
     }
-    if (state == null) return gpu::INVALID_ARGUMENT~;
-    if (!state.enabled) return;
-    probe.descriptor_buffer_capability_checked   = true;
-    probe.descriptor_buffer_capability_available = buffer_supported;
-    probe.descriptor_buffer_selected             = false;
-    if (!buffer_supported) return gpu::UNSUPPORTED_FEATURE~;
-    state.implementation = VkHeapImplementation.DESCRIPTOR_BUFFER;
-    probe.descriptor_buffer_selected = true;
+    return report_contract_failure(
+        state:               device,
+        operation:           "create_device",
+        public_fault:        gpu::UNSUPPORTED_FEATURE,
+        resource_kind:       gpu::DebugResourceKind.DEVICE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+        debug_name:          null,
+        rejected_field:      rejected_field,
+        invariant:           invariant,
+        backend_text:        null,
+    )~;
 }
 
 fn bool? query_device_extension_support_mapped(
@@ -1230,35 +1268,6 @@ fn void? check_required_dynamic_state3_extension(
     );
 }
 
-<* The feature struct is only chained once the extension is confirmed. *>
-fn bool? query_descriptor_buffer_support_with_query(
-    vk::PhysicalDevice physical_device,
-    DeviceExtensionQueryFn extension_query,
-    VkDeviceState* state = null,
-) {
-    if (!query_device_extension_support_mapped(
-        state:           state,
-        physical_device: physical_device,
-        extension:       "VK_EXT_descriptor_buffer",
-        extension_query: extension_query,
-    )!) return false;
-    vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features = vk::physical_device_descriptor_buffer_features_ext();
-    vk::PhysicalDeviceFeatures2 features2 = vk::physical_device_features2().set_next(&db_features);
-    vk::get_physical_device_features2(physical_device, &features2);
-    return db_features.descriptor_buffer != 0;
-}
-
-fn bool? query_descriptor_buffer_support(
-    vk::PhysicalDevice physical_device,
-    VkDeviceState* state = null,
-) @private {
-    return query_descriptor_buffer_support_with_query(
-        physical_device,
-        &query_device_extension_support,
-        state,
-    );
-}
-
 fn IndexingHeapLimits query_indexing_heap_limits(vk::PhysicalDevice physical_device) @private {
     vk::PhysicalDeviceVulkan12Properties props = vk::physical_device_vulkan12properties();
     vk::PhysicalDeviceProperties2 props2 = vk::physical_device_properties2().set_next(&props);
@@ -1275,71 +1284,15 @@ fn IndexingHeapLimits query_indexing_heap_limits(vk::PhysicalDevice physical_dev
     };
 }
 
-fn bool descriptor_buffer_capacity_probe_real(
-    void* user_data,
-    vk::PhysicalDevice physical_device,
-    QueueFamilies* families,
-    bool draw_indirect_count,
-    uint texture_capacity,
-    uint sampler_capacity,
-) @private {
-    return descriptor_buffer_candidate_fits(
-        physical_device:     physical_device,
-        families:            families,
-        draw_indirect_count: draw_indirect_count,
-        texture_capacity:    texture_capacity,
-        sampler_capacity:    sampler_capacity,
-    );
-}
-
-fn DescriptorBufferCapacityProbe real_descriptor_buffer_capacity_probe() @private {
-    return { .fits = &descriptor_buffer_capacity_probe_real };
-}
-
-fn VkHeapImplementation? resolve_candidate_heap_implementation_with_probe(
-    bool indexing_supported,
-    bool descriptor_buffer_supported,
-    uint texture_capacity,
-    uint sampler_capacity,
-    IndexingHeapLimits indexing_limits,
-    vk::PhysicalDevice physical_device,
-    QueueFamilies* families,
-    bool draw_indirect_count,
-    DescriptorBufferCapacityProbe* capacity_probe,
-) {
-    bool indexing_usable = indexing_supported && indexing_heap_fits_limits(
-        texture_capacity,
-        sampler_capacity,
-        indexing_limits,
-    );
-    bool descriptor_buffer_capacity_usable = false;
-    if (!indexing_usable && descriptor_buffer_supported) {
-        if (capacity_probe == null || capacity_probe.fits == null) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        descriptor_buffer_capacity_usable = capacity_probe.fits(
-            capacity_probe.user_data,
-            physical_device,
-            families,
-            draw_indirect_count,
-            texture_capacity,
-            sampler_capacity,
-        );
-    }
-    return resolve_heap_implementation(
-        indexing_usable,
-        descriptor_buffer_supported && descriptor_buffer_capacity_usable,
-    );
-}
-
 fn bool candidate_satisfies(
     vk::PhysicalDevice candidate,
     VkDeviceConfig* desc,
-    QueueFamilies* families,
+    StrictHeapSupport* strict_heap,
 ) @private {
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(candidate, &props);
     if (props.api_version < API_VERSION_1_3) return false;
+    if (catch queue_fault = select_queue_families(candidate)) return false;
     if (catch check_required_dynamic_state3_extension(candidate)) return false;
 
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color_features =
@@ -1380,29 +1333,13 @@ fn bool candidate_satisfies(
         gpu::MAX_PIPELINES,
     )) return false;
 
-    bool indexing_supported =
-        heap_indexing_supported(&features2.features, &features12);
-    bool descriptor_buffer_supported;
-    if (heap_shared_features_supported(&features2.features, &features12)) {
-        if (try supported = query_descriptor_buffer_support(candidate)) {
-            descriptor_buffer_supported = supported;
-        }
-    }
-    IndexingHeapLimits indexing_limits = query_indexing_heap_limits(candidate);
-    DescriptorBufferCapacityProbe capacity_probe =
-        real_descriptor_buffer_capacity_probe();
-    if (catch implementation_fault = resolve_candidate_heap_implementation_with_probe(
-        indexing_supported:          indexing_supported,
-        descriptor_buffer_supported: descriptor_buffer_supported,
-        texture_capacity:            resolved_tex,
-        sampler_capacity:            resolved_smp,
-        indexing_limits:             indexing_limits,
-        physical_device:             candidate,
-        families:                    families,
-        draw_indirect_count:         features12.draw_indirect_count != 0,
-        capacity_probe:              &capacity_probe,
-    )) return false;
-    return true;
+    return strict_heap != null
+        && strict_heap.indexing
+        && indexing_heap_fits_limits(
+            resolved_tex,
+            resolved_smp,
+            strict_heap.limits,
+        );
 }
 
 <* Enable requested feature groups and deduplicate queue families. *>
@@ -1476,9 +1413,6 @@ fn void? create_logical_device_with_queue_infos(
         vk::physical_device_maintenance5features_khr()
             .set_maintenance5(vk::TRUE)
             .set_next(&generated_work_features);
-    vk::PhysicalDeviceDescriptorBufferFeaturesEXT db_features =
-        vk::physical_device_descriptor_buffer_features_ext()
-            .set_descriptor_buffer(vk::TRUE);
     vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT presentation_features =
         vk::physical_device_swapchain_maintenance1features_ext()
             .set_swapchain_maintenance1(vk::TRUE);
@@ -1492,12 +1426,7 @@ fn void? create_logical_device_with_queue_infos(
             .set_extended_dynamic_state3color_blend_enable(vk::TRUE)
             .set_extended_dynamic_state3color_blend_equation(vk::TRUE)
             .set_extended_dynamic_state3color_write_mask(vk::TRUE);
-    if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
-        if (state.generated_work.enabled) {
-            db_features = db_features.set_next(&maintenance5_features);
-        }
-        features13 = features13.set_next(&db_features);
-    } else if (state.generated_work.enabled) {
+    if (state.generated_work.enabled) {
         features13 = features13.set_next(&maintenance5_features);
     }
     dynamic_color_features = dynamic_color_features.set_next(features13.p_next);
@@ -1518,7 +1447,7 @@ fn void? create_logical_device_with_queue_infos(
             .set_shader_sampled_image_array_non_uniform_indexing(vk::TRUE)
             .set_shader_storage_image_array_non_uniform_indexing(vk::TRUE);
     }
-    if (strict_heap_uses_descriptor_indexing(&state.strict_heap)) {
+    if (state.strict_heap.enabled) {
         features12 = features12
             .set_descriptor_binding_partially_bound(vk::TRUE)
             .set_descriptor_binding_sampled_image_update_after_bind(vk::TRUE)
@@ -1544,16 +1473,13 @@ fn void? create_logical_device_with_queue_infos(
     }
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[8] extensions;
+    ZString[7] extensions;
     uint extension_count = 0;
     extensions[extension_count++] = DYNAMIC_STATE_3_EXTENSION;
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
     if (state.generated_work.enabled) {
         extensions[extension_count++] = GENERATED_WORK_EXTENSION;
         extensions[extension_count++] = GENERATED_WORK_USAGE_EXTENSION;
-    }
-    if (strict_heap_uses_descriptor_buffer(&state.strict_heap)) {
-        extensions[extension_count++] = "VK_EXT_descriptor_buffer";
     }
     if (state.presentation.enabled) {
         if (!device_supports_extension(

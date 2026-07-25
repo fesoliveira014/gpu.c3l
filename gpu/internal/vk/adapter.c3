@@ -7,10 +7,16 @@ import std::core::mem;
 
 const uint API_VERSION_1_2 @private = (1u << 22) | (2u << 12);
 
+struct StrictHeapSupport {
+    bool               indexing;
+    IndexingHeapLimits limits;
+}
+
 struct VkAdapterState {
     vk::PhysicalDevice                 physical_device;
     vk::PhysicalDeviceProperties       properties;
     vk::PhysicalDeviceDriverProperties driver_properties;
+    StrictHeapSupport                  strict_heap;
     gpu::AdapterInfo                   info;
     gpu::AdapterDiagnostics            diagnostics;
 }
@@ -89,12 +95,31 @@ fn gpu::AdapterQueueInfo query_adapter_queues(vk::PhysicalDevice physical_device
 fn bool strict_adapter_supported(
     vk::PhysicalDevice physical_device,
     VkDeviceConfig* config,
+    StrictHeapSupport* strict_heap,
 ) {
-    if (config == null) return false;
-    if (try families = select_queue_families(physical_device)) {
-        return candidate_satisfies(physical_device, config, &families);
-    }
-    return false;
+    if (config == null || strict_heap == null) return false;
+    return candidate_satisfies(
+        candidate:   physical_device,
+        desc:        config,
+        strict_heap: strict_heap,
+    );
+}
+
+fn StrictHeapSupport query_strict_heap_support(
+    vk::PhysicalDevice physical_device,
+) {
+    vk::PhysicalDeviceVulkan12Features features12 =
+        vk::physical_device_vulkan12features();
+    vk::PhysicalDeviceFeatures2 features2 =
+        vk::physical_device_features2().set_next(&features12);
+    vk::get_physical_device_features2(physical_device, &features2);
+    return {
+        .indexing = heap_indexing_supported(
+            &features2.features,
+            &features12,
+        ),
+        .limits = query_indexing_heap_limits(physical_device),
+    };
 }
 
 fn void initialize_adapter(
@@ -104,6 +129,7 @@ fn void initialize_adapter(
 ) {
     adapter.physical_device = physical_device;
     vk::get_physical_device_properties(physical_device, &adapter.properties);
+    adapter.strict_heap = query_strict_heap_support(physical_device);
 
     bool has_driver_properties = adapter.properties.api_version >= API_VERSION_1_2
         || device_supports_extension(physical_device, "VK_KHR_driver_properties");
@@ -123,7 +149,11 @@ fn void initialize_adapter(
         .device_class     = adapter_class(adapter.properties.device_type),
         .memory           = query_adapter_memory(physical_device),
         .queues           = query_adapter_queues(physical_device),
-        .strict_supported = strict_adapter_supported(physical_device, config),
+        .strict_supported = strict_adapter_supported(
+            physical_device,
+            config,
+            &adapter.strict_heap,
+        ),
         .limits           = {
             .max_texture_dimension_2d  = limits.max_image_dimension2d,
             .max_texture_array_layers  = limits.max_image_array_layers,

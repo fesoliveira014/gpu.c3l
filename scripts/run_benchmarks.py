@@ -159,8 +159,6 @@ COMMAND_RECORD_RESOLUTION = re.compile(
     r"native_commands=(?P<native_commands>[1-9][0-9]*) "
     r"pipeline_binds=(?P<pipeline_binds>[0-9]+) "
     r"descriptor_set_binds=(?P<descriptor_set_binds>[0-9]+) "
-    r"descriptor_buffer_binds=(?P<descriptor_buffer_binds>[0-9]+) "
-    r"descriptor_buffer_offsets=(?P<descriptor_buffer_offsets>[0-9]+) "
     r"device_registry=(?P<device_registry>[0-9]+) "
     r"retained_pins=(?P<retained_pins>[0-9]+) "
     r"command_table=(?P<command_table>[0-9]+) "
@@ -849,8 +847,6 @@ def require_command_record_outcomes(output):
             "native_commands",
             "pipeline_binds",
             "descriptor_set_binds",
-            "descriptor_buffer_binds",
-            "descriptor_buffer_offsets",
             "device_registry",
             "retained_pins",
             "command_table",
@@ -863,8 +859,6 @@ def require_command_record_outcomes(output):
     forbidden = (
         "pipeline_binds",
         "descriptor_set_binds",
-        "descriptor_buffer_binds",
-        "descriptor_buffer_offsets",
         "device_registry",
         "retained_pins",
         "command_table",

@@ -415,17 +415,13 @@ Test names describe behavior, not roadmap or ticket labels.
 | Depth | depth attachment creation, depth-tested draw, exact nonzero mip/layer selection, neighboring-subresource isolation, and readback. |
 | Indirect draw | compute-written draw args, direct/indirect/generated zero-root execution, indirect draw, and readback. |
 
-Private heap selection has deterministic mocked coverage for both available
-implementations, no available implementation, and indexing limits below the
-requested capacities. Descriptor-buffer topology has deterministic create-info
-coverage for exclusive and concurrent paths. A private creation probe forces the
-real descriptor-buffer layout and descriptor-write path without exposing
-a public backend choice. The probe records capability discovery and selection;
-coverage skips only when descriptor-buffer capability absence was proven before
-selection; Vulkan capability-query faults remain failures. The gated
-`GPU_C3L_RUN_DESCRIPTOR_BUFFER_E2E=1`
-workloads use the same private path; the Windows CI Mesa pin fails closed on an
-upgrade until shader E2E is re-evaluated and the retest version is updated.
+Descriptor heap eligibility has pure coverage for every required indexing
+feature and sampled-image, storage-image, sampler, per-stage aggregate, and
+all-pools update-after-bind limit. Adapter support and device creation consume
+the same cached support record. Native-limit failures return
+`UNSUPPORTED_FEATURE` before logical-device or heap mutation, while values
+above the library ceiling remain `INVALID_ARGUMENT`. No test creates a
+temporary logical device or layout to probe heap support.
 
 ## 9. Build commands
 
@@ -543,9 +539,10 @@ one `pipeline_bind_commands` increment for the selected bind point, while
 retained device-operation resolution, retained-pin borrow, and command-table
 lookup remain zero. Each public recording call checks the static
 device slot before loading the stable record.
-Exact heap counters require one indexing set bind or descriptor-buffer
-offset per used bind point and one descriptor-buffer bind per command record;
-later compatible pipeline changes add none. Dispatch and draw add no further
+Exact heap counters require one descriptor-set bind per used bind point;
+later compatible pipeline changes add none. Compute and graphics cache state
+is independent, and command-buffer reset requires the next use to bind again.
+Dispatch and draw add no further
 resolution and each emits exactly one root push plus its native execution
 command. The dispatch test also replaces the bound handle's backing slot with
 invalid, different pipeline state after binding and requires the recorded
@@ -848,8 +845,7 @@ CI tiers (`.github/workflows/ci.yml`):
 | Benchmark/scanner/assembly parser unit coverage | linux + windows | yes |
 | Benchmark nanosecond comparisons | portable runners | no, unless runner, driver, and profile are pinned |
 | Live benchmark and generated-assembly execution | local/self-hosted | advisory unless the complete comparison identity is pinned |
-| Descriptor-buffer device/heap | windows | yes when exposed; otherwise reported not exercised |
-| Descriptor-buffer shader E2E | real hardware | pending; software ICD is reported not exercised |
+| Descriptor-indexing device/heap | linux + windows | yes |
 
 Generated SPIR-V should either:
 

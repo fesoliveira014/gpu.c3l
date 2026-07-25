@@ -219,6 +219,12 @@
         "hazard.c3"
       ]
     },
+    "hazard_descriptors": {
+      "type": "object-files",
+      "sources": [
+        "hazard_descriptors.c3"
+      ]
+    },
     "texture_use": {
       "type": "object-files",
       "sources": [

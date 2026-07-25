@@ -1084,30 +1084,9 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::CommandResolutionStats bind_stats = gpu::command_resolution_stats();
     assert(bind_stats.pipeline_bind_commands == 2,
         "repeated binds and aliases emit once per selected bind point");
-    assert_strict_heap_bind_work(state, bind_stats, 2);
+    assert_strict_heap_bind_work(bind_stats, 2);
 
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    vk::invalidate_strict_heap_bind_point(
-        record,
-        vk::PipelineBindPoint.COMPUTE,
-    );
-    gpu::reset_command_resolution_stats();
-    gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
-    gpu::CommandResolutionStats point_rebind =
-        gpu::command_resolution_stats();
-    assert(point_rebind.pipeline_bind_commands == 0,
-        "bind-point heap invalidation preserves the native pipeline cache");
-    assert_strict_heap_bind_work(state, point_rebind, 1, 0);
-
-    vk::invalidate_strict_heap_binding(record);
-    gpu::reset_command_resolution_stats();
-    gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
-    gpu::CommandResolutionStats full_rebind =
-        gpu::command_resolution_stats();
-    assert(full_rebind.pipeline_bind_commands == 0,
-        "full heap invalidation preserves the native pipeline cache");
-    assert_strict_heap_bind_work(state, full_rebind, 1);
-
     gpu::SamplerDesc sampler_desc = {};
     (void)gpu::intern_sampler(&device, &sampler_desc)!!;
     gpu::reset_command_resolution_stats();
@@ -1115,26 +1094,21 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::CommandResolutionStats publication_stats =
         gpu::command_resolution_stats();
     assert(publication_stats.pipeline_bind_commands == 0
-        && publication_stats.strict_heap_set_bind_commands == 0
-        && publication_stats.strict_heap_buffer_bind_commands == 0
-        && publication_stats.strict_heap_offset_commands == 0,
+        && publication_stats.strict_heap_set_bind_commands == 0,
         "descriptor publication preserves cached heap binding");
 
-    gpu::Barrier descriptor_hazard = {
-        .before  = { .compute = true },
-        .after   = { .compute = true },
-        .hazards = { .descriptors = true },
+    gpu::Barrier global_barrier = {
+        .before = { .compute = true },
+        .after  = { .compute = true },
     };
     gpu::reset_command_resolution_stats();
-    gpu::cmd_barrier(&commands, &descriptor_hazard)!!;
+    gpu::cmd_barrier(&commands, &global_barrier)!!;
     gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
     gpu::CommandResolutionStats hazard_stats =
         gpu::command_resolution_stats();
     assert(hazard_stats.pipeline_bind_commands == 0
-        && hazard_stats.strict_heap_set_bind_commands == 0
-        && hazard_stats.strict_heap_buffer_bind_commands == 0
-        && hazard_stats.strict_heap_offset_commands == 0,
-        "a descriptor hazard barrier does not invalidate heap binding");
+        && hazard_stats.strict_heap_set_bind_commands == 0,
+        "a global barrier does not invalidate heap binding");
 
     gpu::reset_command_resolution_stats();
     gpu::internal::vk::reset_root_push_observation();
@@ -1162,13 +1136,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         record.strict_heap_binding;
     fault stale_bind = @catch(gpu::cmd_bind_pipeline(&commands, stale_handle));
     assert(stale_bind == gpu::INVALID_HANDLE, "binding a stale pipeline faults INVALID_HANDLE");
-    assert(record.strict_heap_binding.descriptor_buffer_bound
-            == heap_binding_before.descriptor_buffer_bound
-        && record.strict_heap_binding.graphics_offsets_set
-            == heap_binding_before.graphics_offsets_set
-        && record.strict_heap_binding.compute_offsets_set
-            == heap_binding_before.compute_offsets_set
-        && record.strict_heap_binding.graphics_set_bound
+    assert(record.strict_heap_binding.graphics_set_bound
             == heap_binding_before.graphics_set_bound
         && record.strict_heap_binding.compute_set_bound
             == heap_binding_before.compute_set_bound,
@@ -2413,7 +2381,7 @@ fn void barrier_contradictory_mask_faults() @test {
     defer discard_test_executable(&executable)!!;
 }
 
-fn void barrier_descriptor_hazard_requires_shader_consumer() @test {
+fn void barrier_retired_descriptor_hazard_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -2422,17 +2390,15 @@ fn void barrier_descriptor_hazard_requires_shader_consumer() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
-        .before = { .transfer = true },
-        .after = { .transfer = true },
-        .hazards = { .descriptors = true },
+        .before  = { .compute = true },
+        .after   = { .compute = true },
+        .hazards = (gpu::HazardFlags)0x2u,
     };
 
     fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
     assert(rejected == gpu::INVALID_ARGUMENT,
-        "descriptor hazards without a shader consumer fault INVALID_ARGUMENT");
+        "the retired descriptor hazard bit faults INVALID_ARGUMENT");
 
-    barrier.after = { .fragment_shader = true };
-    gpu::cmd_barrier(&commands, &barrier)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
 }
@@ -2559,11 +2525,6 @@ fn void barrier_hazard_matrix_submits() @test {
             .before = { .compute = true },
             .after = { .compute = true },
             .hazards = { .draw_arguments = true },
-        },
-        {
-            .before = { .compute = true },
-            .after = { .fragment_shader = true },
-            .hazards = { .descriptors = true },
         },
         {
             .before = { .compute = true },

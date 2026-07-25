@@ -53,6 +53,7 @@ FORBIDDEN_TEXT = {
     "descriptorheapmode": "backend heap strategy type",
     '"name":"descriptor_heap_mode"': "backend heap strategy field",
     '"name":"descriptor_buffer"': "backend descriptor-buffer capability",
+    '"name":"descriptors"': "retired descriptor hazard",
     '"name":"descriptor_indexing"': "backend descriptor-indexing capability",
     '"name":"texture_descriptor_capacity"': "backend-shaped texture capacity",
     '"name":"sampler_descriptor_capacity"': "backend-shaped sampler capacity",
@@ -1821,9 +1822,8 @@ def validate_document(document: dict) -> list[str]:
             "present",
         ),
         "HazardFlags": (
-            "draw_arguments",
-            "descriptors",
-            "depth_stencil",
+            ("draw_arguments", 0),
+            ("depth_stencil", 2),
         ),
         "CompletionConsumerFlags": (
             "draw_arguments",
@@ -1836,15 +1836,23 @@ def validate_document(document: dict) -> list[str]:
     for name, expected_names in expected_flag_schemas.items():
         definition = types.get(name, {})
         members = definition.get("members", [])
+        expected_members = (
+            expected_names
+            if expected_names and isinstance(expected_names[0], tuple)
+            else tuple(
+                (member_name, bit)
+                for bit, member_name in enumerate(expected_names)
+            )
+        )
         exact_flags = (
             definition.get("kind") == "bitstruct"
             and definition.get("base_type", {}).get("name") == "uint"
             and tuple(member.get("name") for member in members)
-                == expected_names
+                == tuple(name for name, _ in expected_members)
             and all(
                 member.get("type", {}).get("name") == "bool"
                 and member.get("bit_range") == [bit, bit]
-                for bit, member in enumerate(members)
+                for member, (_, bit) in zip(members, expected_members)
             )
         )
         if not exact_flags:

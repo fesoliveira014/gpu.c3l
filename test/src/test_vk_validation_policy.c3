@@ -128,6 +128,37 @@ fn void both_modes_reject_null_command_record() @test {
     }
 }
 
+fn void trusted_rejects_retired_descriptor_hazard_bit() @test {
+    PolicyDiagnosticCapture capture;
+    gpu::RuntimeDesc desc = policy_runtime_desc(
+        contract:      gpu::ContractValidation.TRUSTED,
+        vulkan_layers: false,
+        callback:      false,
+        debug_names:   false,
+        capture:       &capture,
+    );
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::Barrier barrier = {
+        .before  = { .compute = true },
+        .after   = { .compute = true },
+        .hazards = (gpu::HazardFlags)0x2u,
+    };
+
+    fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "trusted validation rejects the retired descriptor hazard bit");
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+}
+
 fn void instance_plans_callback_names_and_layers_independently() @test {
     vk::DebugUtilsMessengerCreateInfoEXT messenger_info;
     PolicyDiagnosticCapture capture;

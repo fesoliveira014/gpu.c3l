@@ -5,6 +5,15 @@ import std::hash::fnv64a;
 
 const uint HANDLE_GENERATION_MAX = 0xFF_FFFF;
 
+enum IndexingHeapLimitFailure : char {
+    NONE,
+    SAMPLED_IMAGES,
+    STORAGE_IMAGES,
+    SAMPLERS,
+    PER_STAGE_RESOURCES,
+    ALL_POOLS_DESCRIPTORS,
+}
+
 struct IndexingHeapLimits {
     uint max_sampled_images;
     uint max_storage_images;
@@ -94,15 +103,40 @@ fn bool indexing_heap_fits_limits(
     uint smp_capacity,
     IndexingHeapLimits limits,
 ) {
+    return indexing_heap_limit_failure(
+        tex_capacity,
+        smp_capacity,
+        limits,
+    ) == IndexingHeapLimitFailure.NONE;
+}
+
+fn IndexingHeapLimitFailure indexing_heap_limit_failure(
+    uint tex_capacity,
+    uint smp_capacity,
+    IndexingHeapLimits limits,
+) {
     HeapDescriptorTotals totals = descriptor_heap_totals(tex_capacity, smp_capacity);
-    return tex_capacity <= limits.max_sampled_images
-        && tex_capacity <= limits.max_storage_images
-        && tex_capacity <= limits.max_per_stage_sampled_images
-        && tex_capacity <= limits.max_per_stage_storage_images
-        && smp_capacity <= limits.max_samplers
-        && smp_capacity <= limits.max_per_stage_samplers
-        && totals.per_stage_resources <= (ulong)limits.max_per_stage_resources
-        && totals.all_pools_descriptors <= (ulong)limits.max_all_pools_descriptors;
+    if (tex_capacity > limits.max_sampled_images
+        || tex_capacity > limits.max_per_stage_sampled_images) {
+        return IndexingHeapLimitFailure.SAMPLED_IMAGES;
+    }
+    if (tex_capacity > limits.max_storage_images
+        || tex_capacity > limits.max_per_stage_storage_images) {
+        return IndexingHeapLimitFailure.STORAGE_IMAGES;
+    }
+    if (smp_capacity > limits.max_samplers
+        || smp_capacity > limits.max_per_stage_samplers) {
+        return IndexingHeapLimitFailure.SAMPLERS;
+    }
+    if (totals.per_stage_resources
+        > (ulong)limits.max_per_stage_resources) {
+        return IndexingHeapLimitFailure.PER_STAGE_RESOURCES;
+    }
+    if (totals.all_pools_descriptors
+        > (ulong)limits.max_all_pools_descriptors) {
+        return IndexingHeapLimitFailure.ALL_POOLS_DESCRIPTORS;
+    }
+    return IndexingHeapLimitFailure.NONE;
 }
 
 fn uint? next_handle_generation(uint generation) {

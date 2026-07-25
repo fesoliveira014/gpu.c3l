@@ -489,8 +489,6 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong native_commands;
     ulong pipeline_bind_commands;
     ulong strict_heap_set_bind_commands;
-    ulong strict_heap_buffer_bind_commands;
-    ulong strict_heap_offset_commands;
 }
 
 // A shader-visible 64-bit GPU address. Distinct from a plain ulong so it can't
@@ -1138,10 +1136,10 @@ bitstruct StageMask : uint {
     bool present         : 8;
 }
 
-<* Explicit invalidation for special non-coherent GPU data paths. *>
+<* Explicit invalidation for special GPU data paths.
+   Bit 1 is retired and remains invalid. *>
 bitstruct HazardFlags : uint {
     bool draw_arguments : 0;
-    bool descriptors    : 1;
     bool depth_stencil  : 2;
 }
 

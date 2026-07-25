@@ -7,7 +7,6 @@ import vk;
 struct CommandPathNativeContext {
     CommandRecord*  record;
     vk::PipelineLayout pipeline_layout;
-    bool              descriptor_buffer;
     bool              generated_work;
 }
 
@@ -32,8 +31,6 @@ fn CommandPathNativeContext? command_path_native_context(
     return {
         .record            = record,
         .pipeline_layout   = record.logical_pipeline.layout,
-        .descriptor_buffer = state.strict_heap.implementation
-            == VkHeapImplementation.DESCRIPTOR_BUFFER,
         .generated_work    = state.generated_work.enabled,
     };
 }
@@ -120,7 +117,6 @@ fn void command_path_direct_barrier(
 ) {
     vk::MemoryBarrier2 native_barrier = barrier_to_vk(
         barrier,
-        context.descriptor_buffer,
         context.generated_work,
     );
     vk::DependencyInfo dependency =

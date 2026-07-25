@@ -1,13 +1,12 @@
 // gpu.c3l descriptor heap shader ABI.
 //
-// Set/binding convention (must match gpu/vk/descriptor_heap.c3):
+// Set/binding convention (must match gpu/internal/vk/descriptor_heap.c3):
 //   set 0, binding 0  sampled images
 //   set 0, binding 1  storage images
 //   set 0, binding 2  samplers
 //
 // TextureIndex/SamplerIndex values are generation-free uints. Zero is invalid;
-// live values encode the zero-based heap slot plus one. Both backend descriptor
-// paths use identical GLSL.
+// live values encode the zero-based heap slot plus one.
 //
 // Layout convention: a texture must sit in the layout its usage implies when
 // shaders access it — sampled-only textures in SHADER_READ, storage-capable

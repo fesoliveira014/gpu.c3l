@@ -181,7 +181,7 @@ exact zero. Timings and unpinned generated assembly are advisory.
 | Immediate destruction | `CompletionWorkCounters`, injected native-destroy counts, and stalled-queue ordering |
 | Submission ownership | Queue-owned intrusive pending records, caller tokens, retained-reference counts, publication order, and ordered retirement state |
 | Bound pipeline snapshot | Exact bind-time table/cache lookups, per-bind-point `pipeline_bind_commands`, zero post-bind resolution under cache churn, and unchanged layout use after backing-slot mutation |
-| Strict descriptor heap | Exact `strict_heap_set_bind_commands`, `strict_heap_buffer_bind_commands`, and `strict_heap_offset_commands`: one set or offset per used bind point and one descriptor-buffer bind per command record |
+| Strict descriptor heap | Exact `strict_heap_set_bind_commands`: one set-0 bind per used compute or graphics bind point after command-buffer reset |
 | Shader identity | Owned clone/free balance, zero post-intern shader work, and bounded intern/compact-key work at 1 KiB/64 KiB/1 MiB |
 | Sampler buckets | Bounded collision-chain probes and a zero-probe empty-bucket miss at 65,536 entries |
 
