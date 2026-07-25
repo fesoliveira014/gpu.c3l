@@ -56,11 +56,7 @@ COMMAND_OUTPUT = "\n".join(
             "pipeline_table=0 pipeline_cache=0 "
             "encoder_cells=0 encoder_leases=0"
         ),
-        (
-            "validation policy=trusted layers=false reference_lookups=0 "
-            "reference_probes=0 reference_mutex=0 reference_retains=0 "
-            "reference_releases=0"
-        ),
+        "validation policy=trusted layers=false",
         (
             "cold work: host_allocations=5 command_pool_creations=1 "
             "command_buffer_allocations=1 "
@@ -81,12 +77,6 @@ COMMAND_OUTPUT = "\n".join(
 FULL_COMMAND_OUTPUT = COMMAND_OUTPUT.replace(
     "policy=trusted",
     "policy=full",
-).replace(
-    "reference_lookups=0 reference_probes=0 reference_mutex=0 "
-    "reference_retains=0 reference_releases=0",
-    "reference_lookups=400000 reference_probes=400000 "
-    "reference_mutex=100000 reference_retains=100000 "
-    "reference_releases=100000",
 )
 COMMAND_POLICY_OUTPUTS = (
     COMMAND_OUTPUT,
@@ -1117,26 +1107,6 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "malformed"):
             runner.require_command_policy_matrix(retired_schema)
-
-    def test_command_policy_matrix_rejects_forbidden_trusted_reference_work(self):
-        runner = load_runner()
-        outputs = list(COMMAND_POLICY_OUTPUTS)
-        outputs[0] = outputs[0].replace(
-            "reference_probes=0",
-            "reference_probes=1",
-        )
-        with self.assertRaisesRegex(ValueError, "forbidden reference work"):
-            runner.require_command_policy_matrix(outputs)
-
-    def test_command_policy_matrix_rejects_unbalanced_full_reference_work(self):
-        runner = load_runner()
-        outputs = list(COMMAND_POLICY_OUTPUTS)
-        outputs[2] = outputs[2].replace(
-            "reference_releases=100000",
-            "reference_releases=99999",
-        )
-        with self.assertRaisesRegex(ValueError, "missing or unbalanced"):
-            runner.require_command_policy_matrix(outputs)
 
     def test_allocation_measurement_rejects_extra_fields(self):
         runner = load_runner()

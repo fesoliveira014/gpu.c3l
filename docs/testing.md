@@ -676,9 +676,9 @@ The lifecycle output requires `cached_poll_queries=0` and
 completion queries/waits, device waits, and deferred-release enqueues in their
 respective intervals. Run `python -B scripts/run_benchmarks.py`; one build of
 `command_record_bench` executes all four contract/layer combinations with the
-same fixed workload. The runner enforces exact policy and reference-work
-fields, zero warm command-table and other resolution/proof work, exact
-token/storage sizes, and exact native output. Only TRUSTED command timings with
+same fixed workload. The runner enforces exact policy fields, zero warm
+command-table and other resolution/proof work, exact token/storage sizes, and
+exact native output. Only TRUSTED command timings with
 Vulkan layers disabled participate in
 release threshold evaluation. `--validation` still supplies the separate
 all-enabled debug run for the other benchmark devices; those timings are not

@@ -60,8 +60,7 @@ GPU_C3L_BENCH_CONTRACT=full GPU_C3L_BENCH_LAYERS=true ./test/build/command_recor
 ```
 
 The executables reject missing or malformed policy variables. Each output has
-one exact `validation policy=...` line reporting contract, layer selection,
-and command-reference lookup, probe, lock, retain, and release work.
+one exact `validation policy=...` line reporting contract and layer selection.
 Functional tests establish that FULL performs semantic validation and lifetime
 tracking while TRUSTED performs neither. Every warm command performs one
 static device-slot liveness load. Every warm interval must report zero retained
@@ -275,8 +274,8 @@ The same advisory target creates opaque, alpha, premultiplied-alpha, additive,
 and masked-write aliases through one format-only dynamic descriptor. It asserts
 one cache entry and one native pipeline, then records all five packets and
 asserts three native commands per packet with no post-bind pipeline lookup.
-Blocking `vk_performance` coverage snapshots recording, reference, pipeline,
-and resolution counters around repeated identical packets; timing never gates.
+Blocking `vk_performance` coverage snapshots recording, pipeline, and
+resolution counters around repeated identical packets; timing never gates.
 
 ### Expectation changes and generated assembly
 
@@ -372,6 +371,14 @@ their unique candidates against the remaining fixed capacity before retaining
 anything, then use a checkpoint to release only the appended suffix if later
 validation fails. Recording performs no dynamic allocation, and capacity
 failure preserves the existing references and native command state.
+
+At the default capacity of 64, filling a list performs 2,016 prior-entry
+visits. At the public maximum of 4096, the same path performs about 8.4 million
+visits; compound preflight plus insertion can reach about 16.8 million. The
+maximum remains available for diagnostic workloads that need the established
+capacity, but it is a bounded millisecond-scale ceiling rather than a short
+scan. Prefer the default unless one list genuinely retains more than 64 unique
+resources.
 
 An advisory llvmpipe run on 2026-07-21 (Mesa 25.0.7, LLVM 15.0.7) requested
 200 dynamic raster states for one immutable graphics descriptor:

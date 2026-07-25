@@ -3,6 +3,7 @@ module gpu_test;
 import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
+import std::atomic::types;
 
 const char[*] POLICY_MATRIX_COMP_SPIRV =
     $embed("shaders/root_pointer.comp.spv");
@@ -138,6 +139,16 @@ fn void full_copy_capacity_rejection_is_transactional() @test {
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!!;
+    vk::AllocationSlot* source_slot =
+        state.allocations.get(source.allocation)!!;
+    vk::AllocationSlot* destination_slot =
+        state.allocations.get(destination.allocation)!!;
+    uint source_references_before =
+        source_slot.tracked_command_references.load(AtomicOrdering.RELAXED);
+    uint destination_references_before =
+        destination_slot.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        );
     uint reference_count_before = record.scratch.reference_count;
     gpu::reset_command_resolution_stats();
     gpu::BufferCopyDesc copy = {
@@ -150,6 +161,13 @@ fn void full_copy_capacity_rejection_is_transactional() @test {
         "two unique copy references exceed one fixed reference slot");
     assert(record.scratch.reference_count == reference_count_before,
         "rejected copy preserves the reference checkpoint");
+    assert(source_slot.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == source_references_before
+        && destination_slot.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == destination_references_before,
+        "rejected copy performs no transient retain or release");
     gpu::CommandResolutionStats resolution =
         gpu::command_resolution_stats();
     assert(resolution.recording_commands == 1

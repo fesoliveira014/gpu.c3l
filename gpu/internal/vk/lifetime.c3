@@ -88,6 +88,7 @@ fn void? retain_tracked_command_reference(
     reference.retained_counter.add(1, AtomicOrdering.RELAXED);
 }
 
+<* @require reference.retained_counter != null : "retained counter" *>
 fn void release_tracked_command_reference(
     CommandResourceReference reference,
 ) {

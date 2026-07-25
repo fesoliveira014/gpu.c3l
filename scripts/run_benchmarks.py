@@ -80,7 +80,7 @@ CONTEXT_FIELDS = ("adapter:", "driver:", "validation:", "queues:")
 # A unit token alone is not enough: the startup header already declares
 # units=..., so the gate demands a number carrying the unit.
 MEASURED_VALUE = re.compile(
-    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|create|submit|poll|destroy|reference)|ms)\b"
+    r"\d[\d,.]*\s?(?:ns/(?:allocation|free|op|descriptor|record|create|submit|poll|destroy)|ms)\b"
     r"|uploads_per_sec=\d[\d,.]*\b"
     r"|(?:direct|public)_median_ns=\d[\d,.]*\b"
 )
@@ -197,12 +197,7 @@ COMMAND_RECORD_EXPECTED_DIRECT_NATIVE_COMMANDS = 400_000
 COMMAND_RECORD_EXPECTED_GENERATED_COMMANDS = 320
 COMMAND_POLICY_EVIDENCE = re.compile(
     r"^validation policy=(?P<policy>trusted|full) "
-    r"layers=(?P<layers>true|false) "
-    r"reference_lookups=(?P<reference_lookups>[0-9]+) "
-    r"reference_probes=(?P<reference_probes>[0-9]+) "
-    r"reference_mutex=(?P<reference_mutex>[0-9]+) "
-    r"reference_retains=(?P<reference_retains>[0-9]+) "
-    r"reference_releases=(?P<reference_releases>[0-9]+)$"
+    r"layers=(?P<layers>true|false)$"
 )
 COMMAND_POLICY_MODES = (
     ("trusted", False),
@@ -771,29 +766,6 @@ def require_command_policy_evidence(output, expected=None):
         raise ValueError(
             "command_record_bench policy mode mismatch: "
             f"{actual} != {expected}"
-        )
-    reference_work = {
-        field: int(match.group(field))
-        for field in (
-            "reference_lookups",
-            "reference_probes",
-            "reference_mutex",
-            "reference_retains",
-            "reference_releases",
-        )
-    }
-    if policy == "full":
-        if (
-            reference_work["reference_retains"] == 0
-            or reference_work["reference_releases"]
-                != reference_work["reference_retains"]
-        ):
-            raise ValueError(
-                "command_record_bench full reference work is missing or unbalanced"
-            )
-    elif any(reference_work.values()):
-        raise ValueError(
-            "command_record_bench trusted policy performed forbidden reference work"
         )
     warm_lines = [
         line for line in output.splitlines()

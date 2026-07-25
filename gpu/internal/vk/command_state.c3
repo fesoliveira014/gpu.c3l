@@ -317,6 +317,7 @@ fn bool contains_command_reference(
     return false;
 }
 
+<* @require scratch.reference_count < scratch.references.len : "reference capacity" *>
 fn void append_command_reference(
     CommandScratch* scratch,
     CommandResourceReference reference,
