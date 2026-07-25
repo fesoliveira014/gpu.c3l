@@ -196,11 +196,10 @@ compatible pipeline switches can increase pipeline binds without increasing
 heap binds.
 
 Minimal pass begin accounts for exactly one native begin-rendering command and
-no dynamic-state commands. The convenience begin accounts for that begin plus
-ten viewport/raster/depth commands and, for a nonempty color domain, three
-color-array commands. A complete `cmd_set_graphics_state` replacement accounts
-for the same state commands; additional passes and draws scale only with their
-begin/end/draw commands unless the caller records another setter. The
+no dynamic-state commands. A complete `cmd_set_graphics_state` replacement
+accounts for ten viewport/raster/depth commands and, for a nonempty color
+domain, three color-array commands. Additional passes and draws scale only with
+their begin/end/draw commands unless the caller records another setter. The
 `{2, 16, 256}` pass-count matrix records one packet before the first pass and
 requires no hidden state replay, allocation, state diff, or dirty-bit work.
 
@@ -452,9 +451,9 @@ for collecting debug cost with a matching layer.
   covering completion point completes.
 - Cache pipelines; record topology, cull, front-face, depth-bias, viewport,
   scissor, and depth once with the complete setter, then use minimal begin for
-  compatible passes that reuse it. Use the convenience begin when pass and
-  packet should be one transactional operation; later permutations should
-  change state with complete or partial setters.
+  compatible passes that reuse it. For a fresh recording, begin the pass, bind
+  the compatible pipeline, then set the complete packet. Later permutations
+  should change state with complete or partial setters.
 - Create one allocator per concurrently recording worker and exact queue before
   timing. Allocator creation is cold setup; `DEVICE_BUSY` means its fixed command
   buffer count is already live, while `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`

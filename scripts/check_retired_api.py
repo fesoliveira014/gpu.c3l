@@ -123,6 +123,7 @@ FIXTURES = {
     "retired_compute_push_constant": "push_constant_size",
     "retired_raster_state": "RasterState",
     "retired_cmd_begin_render_pass_state": "state",
+    "cmd_begin_render_pass_with_state": "cmd_begin_render_pass_with_state",
     "retired_begin_commands_queue": "queue",
     "retired_reserve_generated_scratch_queue": "queue",
     "retired_release_generated_scratch_queue": "queue",

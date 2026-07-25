@@ -63,9 +63,9 @@ then free or reuse it.
 - Tiered threading: explicit caller-owned command allocators, thread-confined
   recording, thread-safe submission, and completion-driven command-buffer
   reclamation
-- Command-buffer graphics state: attachment-only render-pass begin, an atomic
-  begin-with-state convenience, and explicit complete/partial state that can be
-  reused across compatible pass boundaries
+- Command-buffer graphics state: attachment-only render-pass begin plus
+  explicit complete/partial state that can be reused across compatible pass
+  boundaries
 - Pipeline dedup cache + driver-cache save/load; swapchain with present-mode
   query; compare samplers, depth bias, MRT
 - Runs entirely on lavapipe (CPU Vulkan) — CI needs no GPU, and neither does

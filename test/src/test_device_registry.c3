@@ -195,17 +195,6 @@ fn void? command_pin_begin_render_pass(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? command_pin_begin_render_pass_with_state(
-    gpu::internal::vk::CommandRecord* record,
-    gpu::RenderPassDesc* desc,
-    gpu::GraphicsState* state,
-) {
-    (void)record;
-    (void)desc;
-    (void)state;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
-
 fn void? command_pin_set_viewport(
     gpu::internal::vk::CommandRecord* record,
     gpu::Viewport* viewport,
@@ -401,7 +390,6 @@ gpu::internal::vk::CommandOps command_pin_ops = {
     .set_graphics_state          = &command_pin_set_graphics_state,
     .dispatch                    = &command_pin_dispatch,
     .begin_render_pass           = &command_pin_begin_render_pass,
-    .begin_render_pass_with_state = &command_pin_begin_render_pass_with_state,
     .set_viewport                = &command_pin_set_viewport,
     .set_scissor                 = &command_pin_set_scissor,
     .end_render_pass             = &command_pin_end_render_pass,

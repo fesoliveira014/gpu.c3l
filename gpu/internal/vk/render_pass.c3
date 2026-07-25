@@ -555,15 +555,6 @@ fn void record_render_pass(
     record.state = gpu::internal::CommandState.RECORDING_RENDER_PASS;
 }
 
-fn void record_render_pass_with_state(
-    CommandRecord* commands,
-    PreparedRenderPass* pass,
-    LoweredGraphicsState* graphics,
-) {
-    record_render_pass(commands, pass);
-    emit_graphics_state(commands, graphics);
-}
-
 fn void? trusted_begin_render_pass(
     CommandRecord* commands,
     gpu::RenderPassDesc* desc,
@@ -589,46 +580,6 @@ fn void? full_begin_render_pass(
     );
     track_render_pass(commands, &pass)!;
     record_render_pass(commands, &pass);
-}
-
-fn void? trusted_begin_render_pass_with_state(
-    CommandRecord* commands,
-    gpu::RenderPassDesc* desc,
-    gpu::GraphicsState* state,
-) {
-    PreparedRenderPass pass = lower_render_pass(commands, desc)!;
-    LoweredGraphicsState graphics = lower_graphics_state(state)!;
-    record_render_pass_with_state(commands, &pass, &graphics);
-}
-
-fn void? full_begin_render_pass_with_state(
-    CommandRecord* commands,
-    gpu::RenderPassDesc* desc,
-    gpu::GraphicsState* state,
-) {
-    PreparedRenderPass pass = full_prepare_render_pass(
-        commands,
-        desc,
-        "cmd_begin_render_pass_with_state",
-    )!;
-    LoweredGraphicsState graphics = full_prepare_graphics_state(
-        device:    commands.device_state,
-        record:    commands,
-        operation: "cmd_begin_render_pass_with_state",
-        state:     state,
-    )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_render_pass(commands, &pass)!;
-    record_render_pass_with_state(commands, &pass, &graphics);
-    record.graphics_state_initialized = true;
-    record.color_state =
-        color_compatibility(&record.logical_pipeline.render);
-    record.color_state_initialized = true;
 }
 
 fn fault report_dynamic_state_rejection(

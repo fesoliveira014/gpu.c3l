@@ -415,8 +415,9 @@ fn void exercise_policy_matrix_render(
     }};
     graphics.color = { .targets = color_targets[..] };
     begin_command_family_observation(state);
+    gpu::cmd_begin_render_pass(&commands, pass)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
-    gpu::cmd_begin_render_pass_with_state(&commands, pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     gpu::reset_command_resolution_stats();
     gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     gpu::Viewport viewport = {

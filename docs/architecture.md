@@ -696,7 +696,6 @@ defined robustness behavior.
 ```text
 render_geometry_state(width, height)
 cmd_begin_render_pass(command_list, render_pass_desc)
-cmd_begin_render_pass_with_state(command_list, render_pass_desc, graphics_state)
 cmd_bind_pipeline(command_list, pipeline)
 cmd_set_graphics_state(command_list, graphics_state)
 cmd_set_raster_state(command_list, raster_state)
@@ -711,10 +710,8 @@ cmd_end_render_pass(command_list)
 
 Minimal pass begin validates, lowers, and tracks only attachments, then emits
 one native begin-rendering command. It does not change command-buffer graphics
-state. `cmd_begin_render_pass_with_state` is the transactional convenience:
-pass and state preparation completes before native mutation, then it emits the
-begin plus viewport, scissor, five raster commands, three depth commands, and
-three color-array commands for a nonempty color domain.
+state. A failed begin leaves the command outside a pass and retains no new
+attachment reference.
 
 `cmd_set_graphics_state` emits that complete packet before or during a pass on
 a graphics-capable command list after a compatible pipeline is bound. The
@@ -729,6 +726,12 @@ initialization. Dynamic state remains outside pipeline keys, so handle aliasing
 cannot overwrite caller-selected command state. Draws require an active
 graphics pipeline, push both roots unchanged, and perform no native pipeline
 creation.
+
+The canonical fresh sequence is begin, bind, set, draw, and end. If an
+incompatible pipeline remains selected from an earlier pass, bind the next
+compatible pipeline before begin. A failed complete-state update after begin
+leaves the pass and its attachment references active; callers may retry the
+setter, end the pass, or discard the recording.
 
 Direct, indirect, and generated compute and graphics work share that ABI rule:
 every root argument or generated-record root field is forwarded unchanged,

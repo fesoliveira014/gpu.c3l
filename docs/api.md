@@ -1275,8 +1275,7 @@ pass. After a compatible graphics pipeline is bound, `cmd_set_graphics_state`
 records a complete packet before or during a pass; `cmd_set_raster_state`,
 `cmd_set_depth_state`, `cmd_set_color_state`, `cmd_set_viewport`, and
 `cmd_set_scissor` record optional partial updates in either phase. A minimal
-pass begin leaves that state unchanged. The convenience begin records a
-complete packet after beginning the pass. Host-safe descriptor access and
+pass begin leaves that state unchanged. Host-safe descriptor access and
 lowering prerequisites are always checked. Under `FULL`, semantic state
 validation is atomic: invalid values return `INVALID_ARGUMENT` without
 emitting native state.
@@ -1365,11 +1364,6 @@ cmd_begin_render_pass(
     CommandList* commands,
     RenderPassDesc* desc,
 ) -> void?
-cmd_begin_render_pass_with_state(
-    CommandList* commands,
-    RenderPassDesc* desc,
-    GraphicsState* state,
-) -> void?
 cmd_set_graphics_state(CommandList* commands, GraphicsState* state) -> void?
 cmd_end_render_pass(CommandList* commands) -> void?
 ```
@@ -1401,13 +1395,8 @@ requirements. `FULL` additionally validates attachment usage, queue access,
 formats, dimensions, and compatibility. An accepted call tracks attachment
 references, emits one native begin-rendering command, and publishes the active
 pass. It neither requires nor emits a `GraphicsState` packet.
-
-`cmd_begin_render_pass_with_state` applies the same always-checked preparation
-to both inputs; `FULL` adds the complete semantic pass and graphics-state
-diagnostics before tracking or native mutation. It then begins rendering and
-emits the complete packet. Select a compatible graphics pipeline before this
-call. A rejected convenience call leaves command-list state, tracked
-references, and the native command buffer unchanged.
+A rejected begin leaves the command outside a pass, retains no new attachment
+reference, and emits no native begin.
 
 A complete packet emits viewport, scissor, five raster commands, and three
 depth commands in fixed order, followed by three color-array commands when the
@@ -1450,8 +1439,9 @@ gpu::ColorTargetState[1] color_targets = {
     gpu::color_blend_disabled(),
 };
 state.color = { .targets = color_targets[..] };
+gpu::cmd_begin_render_pass(&commands, &pass)!!;
 gpu::cmd_bind_pipeline(&commands, pipeline)!!;
-gpu::cmd_begin_render_pass_with_state(&commands, &pass, &state)!!;
+gpu::cmd_set_graphics_state(&commands, &state)!!;
 ```
 
 The helper faults `INVALID_ARGUMENT` before signed casts when either dimension
@@ -1489,8 +1479,8 @@ Authoritative recording/pass phase is always checked and faults
 Explicit command state survives compatible graphics pipeline and cache-alias
 handle switches and render-pass boundaries. An incompatible color-format
 domain invalidates color readiness while leaving the other command state
-intact. Minimal begin preserves state without re-emission; convenience begin
-and explicit setters replace it.
+intact. Minimal begin preserves state without re-emission; only explicit
+setters replace it.
 The current API intentionally exposes one viewport and one scissor only.
 
 `cmd_set_color_state` applies to the selected graphics pipeline. The packet
@@ -1502,12 +1492,15 @@ Draw and generated-draw paths reject an uninitialized domain. Every explicit
 nonempty packet emits again as exactly three native array commands; identical
 packets are not suppressed.
 
-This is a source-breaking experimental API. Migrate an old three-argument
-`cmd_begin_render_pass(commands, desc, state)` call to
-`cmd_begin_render_pass_with_state(commands, desc, state)`. Use the new
-two-argument `cmd_begin_render_pass(commands, desc)` when graphics state was
-already recorded on that command buffer. Initial partial setters may instead be
-folded into one complete packet recorded before the first pass.
+This is a source-breaking experimental API. Replace
+`cmd_begin_render_pass_with_state(commands, desc, state)` with independent
+begin and complete-state calls. For a fresh recording, begin the pass, bind the
+compatible graphics pipeline, set the complete packet, draw, and end. If an
+incompatible pipeline persists from an earlier pass, bind the next compatible
+pipeline before begin. A state fault after a successful begin leaves the pass
+and its attachment references active, so the caller may correct and retry the
+setter, end the pass, or discard the recording. Initial partial setters may
+instead be folded into one complete packet recorded before the first pass.
 
 Use `ClearColor.rgba` for normalized and floating-point attachments, and
 `ClearColor.uint_rgba` for unsigned-integer attachments. The inactive union

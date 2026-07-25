@@ -380,8 +380,9 @@ fn void offscreen_textured_triangle() @test {
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     graphics_state.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
-    gpu::cmd_begin_render_pass_with_state(&cmd, &pass, &graphics_state)!!;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    (gpu::GpuAddress)0,
@@ -563,18 +564,15 @@ fn void dynamic_viewport_scissor_pixels() @test {
             .write_mask = gpu::COLOR_WRITE_ALL,
         }};
         graphics_state.color = { .targets = color_targets[..] };
-        gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
         if (i == 0) {
             graphics_state.viewport = {
                 .width = (float)RT_SIZE / 2.0f, .height = (float)RT_SIZE, .max_depth = 1.0f,
             };
         }
         if (i == 0) {
-            gpu::cmd_begin_render_pass_with_state(
-                &cmd,
-                &pass,
-                &graphics_state,
-            )!!;
+            gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+            gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
+            gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
         } else {
             if (i == 2) {
                 gpu::ScissorRect half_scissor =
@@ -675,17 +673,17 @@ fn void dynamic_viewport_scissor_pixels() @test {
         "an explicit complete replacement restores full raster coverage");
 }
 
-fn void combined_and_individual_color_state_output_matches() @test {
+fn void complete_and_individual_color_state_output_matches() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation       = gpu::ContractValidation.FULL,
-        .enable_vulkan_validation  = true,
-        .application_name          = "gpu_color_output_test",
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_color_output_test",
     };
     gpu::Device? maybe_device = create_test_device(&runtime_desc);
     if (catch err = maybe_device) {
         assert(err == gpu::UNSUPPORTED_FEATURE,
             "color output fails only when live support is absent");
-        io::eprintfn("combined_and_individual_color_state_output_matches: unsupported, skipping");
+        io::eprintfn("complete_and_individual_color_state_output_matches: unsupported, skipping");
         return;
     }
     gpu::Device device = maybe_device;
@@ -808,9 +806,9 @@ fn void combined_and_individual_color_state_output_matches() @test {
             packets[state_index],
         };
         graphics.color = { .targets = color_targets[..] };
+        gpu::cmd_begin_render_pass(&commands, &pass)!!;
         gpu::cmd_bind_pipeline(&commands, pipeline)!!;
         if (individual_state) {
-            gpu::cmd_begin_render_pass(&commands, &pass)!!;
             gpu::cmd_set_viewport(&commands, &graphics.viewport)!!;
             gpu::cmd_set_scissor(&commands, &graphics.scissor)!!;
             gpu::cmd_set_raster_state(&commands, &graphics.raster)!!;
@@ -818,11 +816,7 @@ fn void combined_and_individual_color_state_output_matches() @test {
             gpu::ColorState color_state = { .targets = color_targets[..] };
             gpu::cmd_set_color_state(&commands, &color_state)!!;
         } else {
-            gpu::cmd_begin_render_pass_with_state(
-                &commands,
-                &pass,
-                &graphics,
-            )!!;
+            gpu::cmd_set_graphics_state(&commands, &graphics)!!;
         }
         gpu::cmd_draw(
             commands:       &commands,
@@ -868,12 +862,12 @@ fn void combined_and_individual_color_state_output_matches() @test {
     };
     usz center = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE / 2) * 4;
     for (usz state_index = 0; state_index < packets.len; state_index++) {
-        char[] combined_pixels =
+        char[] complete_pixels =
             pixels[RT_BYTES * state_index * 2 : RT_BYTES];
         char[] individual_pixels =
             pixels[RT_BYTES * (state_index * 2 + 1) : RT_BYTES];
-        assert(combined_pixels == individual_pixels,
-            "combined and individual color state render identical bytes");
+        assert(complete_pixels == individual_pixels,
+            "complete and individual color state render identical bytes");
         for (uint channel = 0; channel < 4; channel++) {
             uint actual = (uint)individual_pixels[center + channel];
             uint expected_value = expected[state_index * 4 + channel];
