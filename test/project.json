@@ -108,7 +108,7 @@
         "src/depth_abi.c3",
         "src/test_vk_threading.c3",
         "src/test_vk_queue_selection.c3",
-        "src/test_vk_submit_stats.c3",
+        "src/test_vk_submit.c3",
         "src/test_vk_completion.c3",
         "src/test_vk_debug_report.c3",
         "src/test_vk_validation_policy.c3",

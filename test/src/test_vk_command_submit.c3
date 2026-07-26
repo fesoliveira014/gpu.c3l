@@ -7,11 +7,6 @@ import vk;
 import std::atomic;
 
 
-fn ulong command_submit_count(gpu::Device* device) {
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    return vk::submit_stats(state).queue_submits;
-}
-
 fn void record_empty_executables(
     gpu::CommandAllocator* allocator,
     gpu::ExecutableCommandList[] out_lists,
@@ -21,41 +16,6 @@ fn void record_empty_executables(
         *out_list = gpu::end_commands(&commands)!!;
     }
 }
-
-fn bool submit_work_matches_exact(
-    vk::SubmitWorkCounters work,
-    ulong resolutions,
-    ulong duplicate_visits,
-    ulong command_mutex_acquisitions,
-    ulong rollback_mutex_acquisitions,
-    ulong native_submissions,
-) {
-    return work.authoritative_token_resolutions == resolutions
-        && work.duplicate_token_visits == duplicate_visits
-        && work.epoch_reset_cells == 0
-        && work.command_mutex_acquisitions == command_mutex_acquisitions
-        && work.queue_submission_mutex_acquisitions == 1
-        && work.rollback_mutex_acquisitions == rollback_mutex_acquisitions
-        && work.native_submissions == native_submissions;
-}
-
-fn bool submit_work_matches(
-    vk::SubmitWorkCounters work,
-    ulong inspected,
-    ulong command_mutex_acquisitions,
-    ulong rollback_mutex_acquisitions,
-    ulong native_submissions,
-) {
-    return submit_work_matches_exact(
-        work:                        work,
-        resolutions:                 inspected,
-        duplicate_visits:            inspected,
-        command_mutex_acquisitions:  command_mutex_acquisitions,
-        rollback_mutex_acquisitions: rollback_mutex_acquisitions,
-        native_submissions:          native_submissions,
-    );
-}
-
 
 fn void direct_command_tokens_fit_two_machine_words() @test {
     assert(gpu::CommandList::size == ulong::size * 2,
@@ -209,22 +169,11 @@ fn void stale_command_generation_faults_invalid_handle() @test {
     defer discard_test_executable(&commands_executable)!!;
     gpu::ExecutableCommandList live_commands = commands_executable;
     commands_executable.generation++;
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-
     gpu::ExecutableCommandList[1] stale_lists = { commands_executable };
     gpu::SubmitDesc stale_submit = { .command_lists = stale_lists[..] };
-    vk::reset_submit_work_counters(state);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &stale_submit));
     assert(rejected == gpu::INVALID_HANDLE,
         "stale command generation faults INVALID_HANDLE");
-    assert(submit_work_matches_exact(
-        work:                        vk::submit_work_counters(state),
-        resolutions:                 1,
-        duplicate_visits:            0,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 0,
-        native_submissions:          0,
-    ), "stale generation stops at the first authoritative resolution");
 
     gpu::ExecutableCommandList[1] live_lists = { live_commands };
     gpu::SubmitDesc live_submit = { .command_lists = live_lists[..] };
@@ -250,21 +199,10 @@ fn void foreign_device_command_faults_before_claim() @test {
     defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    vk::VkDeviceState* target_state = gpu::internal::device_slots[target.index].data.state;
-    vk::reset_submit_work_counters(target_state);
-
     assert(@catch(gpu::submit(target_queue, &submit)) == gpu::INVALID_HANDLE,
         "a live command owned by another device faults INVALID_HANDLE");
-    assert(lists[0].is_valid()
-            && submit_work_matches_exact(
-                work:                        vk::submit_work_counters(target_state),
-                resolutions:                 1,
-                duplicate_visits:            0,
-                command_mutex_acquisitions:  1,
-                rollback_mutex_acquisitions: 0,
-                native_submissions:          0,
-            ),
-        "foreign device ownership stops before command claim and preserves the token");
+    assert(lists[0].is_valid(),
+        "foreign device ownership preserves the executable token");
 
     gpu::CompletionPoint completion = gpu::submit(foreign_queue, &submit)!!;
     gpu::wait_completion(completion, ulong::max)!!;
@@ -288,17 +226,9 @@ fn void aliased_queue_roles_share_the_authoritative_queue() @test {
     defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    vk::reset_submit_work_counters(state);
-
     gpu::CompletionPoint completion = gpu::submit(compute, &submit)!!;
-    assert(submit_work_matches(
-        work:                        vk::submit_work_counters(state),
-        inspected:                   1,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 0,
-        native_submissions:          1,
-    ), "aliased semantic roles submit through one authoritative queue identity");
+    assert(completion.is_valid(),
+        "aliased semantic roles submit through one authoritative queue identity");
     gpu::wait_completion(completion, ulong::max)!!;
 }
 
@@ -329,23 +259,11 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
         "a submitted command record is not reused before retirement");
 
 
-    ulong before = command_submit_count(&device);
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::ExecutableCommandList[1] original_alias = { original_executable };
     gpu::SubmitDesc second = { .command_lists = original_alias[..] };
-    vk::reset_submit_work_counters(state);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &second));
     assert(rejected == gpu::COMMAND_RECORDING_ERROR,
         "a submitted alias faults on its authoritative phase");
-    assert(command_submit_count(&device) == before, "a consumed alias reaches no Vulkan queue submit");
-    assert(submit_work_matches_exact(
-        work:                        vk::submit_work_counters(state),
-        resolutions:                 1,
-        duplicate_visits:            0,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 0,
-        native_submissions:          0,
-    ), "a submitted public alias stops at the authoritative phase");
     gpu::wait_completion(original_completion)!!;
 
     gpu::CommandList reused = gpu::begin_commands(&allocator)!!;
@@ -426,22 +344,11 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[2] duplicates = { cmd_executable, cmd_executable };
     gpu::SubmitDesc bad = { .command_lists = duplicates[..] };
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::reset_submit_work_counters(state);
-    ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &bad));
     assert(rejected == gpu::COMMAND_RECORDING_ERROR, "duplicate tokens fault before submission");
-    assert(command_submit_count(&device) == before, "duplicate-token rejection records no queue submit");
-    vk::SubmitWorkCounters duplicate_work =
-        vk::submit_work_counters(state);
-    assert(submit_work_matches(
-        work:                        duplicate_work,
-        inspected:                   2,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 0,
-        native_submissions:          0,
-    ), "a two-token duplicate faults after one direct linear claim");
+    assert(cmd_executable.record.state
+            == gpu::internal::CommandState.EXECUTABLE,
+        "duplicate-token rejection preserves the command record");
 
     gpu::ExecutableCommandList[1] one = { cmd_executable };
     gpu::SubmitDesc good = { .command_lists = one[..] };
@@ -449,7 +356,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
+fn void submit_duplicate_positions_preserve_batch() @test {
     const uint BATCH_SIZE = 128;
     gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
@@ -475,77 +382,37 @@ fn void submit_duplicate_positions_stop_at_exact_linear_visit() @test {
             foreach (&list : unique) discard_test_executable(list)!!;
         }
     }
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    ulong submits_before = command_submit_count(&device);
-
     gpu::ExecutableCommandList[BATCH_SIZE] beginning = unique;
     beginning[1] = unique[0];
-    vk::reset_submit_work_counters(state);
     gpu::SubmitDesc beginning_desc = { .command_lists = beginning[..] };
     assert(@catch(gpu::submit(queue, &beginning_desc))
             == gpu::COMMAND_RECORDING_ERROR,
         "a duplicate at the beginning rejects the batch");
-    assert(submit_work_matches(
-        work:                        vk::submit_work_counters(state),
-        inspected:                   2,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 0,
-        native_submissions:          0,
-    ),
-        "a beginning duplicate stops after two visits");
 
     gpu::ExecutableCommandList[BATCH_SIZE] middle = unique;
     middle[BATCH_SIZE / 2] = unique[0];
-    vk::reset_submit_work_counters(state);
     gpu::SubmitDesc middle_desc = { .command_lists = middle[..] };
     assert(@catch(gpu::submit(queue, &middle_desc))
             == gpu::COMMAND_RECORDING_ERROR,
         "a duplicate in the middle rejects the batch");
-    assert(submit_work_matches(
-        work:                        vk::submit_work_counters(state),
-        inspected:                   BATCH_SIZE / 2 + 1,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 0,
-        native_submissions:          0,
-    ),
-        "a middle duplicate stops at its exact position");
 
     gpu::ExecutableCommandList[BATCH_SIZE] final = unique;
     final[BATCH_SIZE - 1] = unique[0];
-    vk::reset_submit_work_counters(state);
     gpu::SubmitDesc final_desc = { .command_lists = final[..] };
     assert(@catch(gpu::submit(queue, &final_desc))
             == gpu::COMMAND_RECORDING_ERROR,
         "a duplicate at the end rejects the batch");
-    assert(submit_work_matches(
-        work:                        vk::submit_work_counters(state),
-        inspected:                   BATCH_SIZE,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 0,
-        native_submissions:          0,
-    ),
-        "an end duplicate remains one visit per submitted item");
-    assert(command_submit_count(&device) == submits_before,
-        "all duplicate positions reject before native submit");
     foreach (list : unique) {
         assert(list.record.state
                 == gpu::internal::CommandState.EXECUTABLE,
             "duplicate faults preserve every command record as executable");
     }
 
-    vk::reset_submit_work_counters(state);
     gpu::SubmitDesc retry = { .command_lists = unique[..] };
     gpu::CompletionPoint completion = gpu::submit(queue, &retry)!!;
     consumed = true;
-    assert(submit_work_matches(
-        work:                        vk::submit_work_counters(state),
-        inspected:                   BATCH_SIZE,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 0,
-        native_submissions:          1,
-    ),
-        "a distinct retry uses a fresh epoch and visits every record once");
+    assert(completion.is_valid(),
+        "a distinct retry succeeds after every duplicate position");
     gpu::wait_completion(completion)!!;
 }
 
@@ -582,7 +449,7 @@ fn void duplicate_fault_allows_subset_retry_and_remaining_discards() @test {
     gpu::wait_completion(completion)!!;
 }
 
-fn void submit_valid_batch_sizes_visit_each_record_once() @test {
+fn void submit_accepts_valid_batch_sizes() @test {
     const uint MAX_BATCH_SIZE = 1_024;
     uint[5] batch_sizes = { 1, 8, 32, 128, 1_024 };
     gpu::RuntimeDesc desc = {};
@@ -601,31 +468,17 @@ fn void submit_valid_batch_sizes_visit_each_record_once() @test {
         &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-
     foreach (batch_size : batch_sizes) {
         gpu::ExecutableCommandList[MAX_BATCH_SIZE] lists;
         record_empty_executables(&allocator, lists[:batch_size]);
-        vk::reset_submit_work_counters(state);
-        ulong submits_before = command_submit_count(&device);
         gpu::SubmitDesc submit = {
             .command_lists = lists[:batch_size],
         };
 
         gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
 
-        vk::SubmitWorkCounters work =
-            vk::submit_work_counters(state);
-        assert(submit_work_matches(
-            work:                        work,
-            inspected:                   batch_size,
-            command_mutex_acquisitions:  1,
-            rollback_mutex_acquisitions: 0,
-            native_submissions:          1,
-        ), "a valid batch performs one direct claim and one native submit");
-        assert(command_submit_count(&device) == submits_before + 1,
-            "a valid batch performs one native queue submit");
+        assert(completion.is_valid(),
+            "each valid batch returns a completion point");
         gpu::wait_completion(completion)!!;
     }
 }
@@ -656,27 +509,17 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
     gpu::SubmitDesc submit = { .command_lists = duplicate[..] };
 
     state.next_submit_visit_epoch = ulong::max - 1;
-    vk::reset_submit_work_counters(state);
     assert(@catch(gpu::submit(queue, &submit))
             == gpu::COMMAND_RECORDING_ERROR,
         "the maximum epoch remains usable for duplicate detection");
-    vk::SubmitWorkCounters maximum =
-        vk::submit_work_counters(state);
-    assert(state.next_submit_visit_epoch == ulong::max
-            && maximum.duplicate_token_visits == 2
-            && maximum.epoch_reset_cells == 0,
+    assert(state.next_submit_visit_epoch == ulong::max,
         "the maximum epoch is used once without a rollover sweep");
 
-    vk::reset_submit_work_counters(state);
     assert(@catch(gpu::submit(queue, &submit))
             == gpu::COMMAND_RECORDING_ERROR,
         "the rollover epoch still detects an in-attempt duplicate");
-    vk::SubmitWorkCounters rollover =
-        vk::submit_work_counters(state);
-    assert(state.next_submit_visit_epoch == 1
-            && rollover.duplicate_token_visits == 2
-            && rollover.epoch_reset_cells == state.commands.next_new,
-        "rollover clears each allocated cell then uses epoch one");
+    assert(state.next_submit_visit_epoch == 1,
+        "rollover clears old stamps then uses epoch one");
     assert(!unused.used && unused.generation == unused_generation,
         "rollover preserves unused command-cell lifecycle state");
     assert(unvisited_live.submit_visit_epoch == 0,
@@ -699,7 +542,7 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
     gpu::wait_completion(completion)!!;
 }
 
-fn void empty_submit_preserves_duplicate_epoch_and_work() @test {
+fn void empty_submit_preserves_duplicate_epoch() @test {
     gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
@@ -710,21 +553,11 @@ fn void empty_submit_preserves_duplicate_epoch_and_work() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     state.next_submit_visit_epoch = 73;
-    vk::reset_submit_work_counters(state);
     gpu::SubmitDesc submit = {};
 
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
 
-    vk::SubmitWorkCounters work =
-        vk::submit_work_counters(state);
-    assert(state.next_submit_visit_epoch == 73
-            && submit_work_matches(
-                work:                        work,
-                inspected:                   0,
-                command_mutex_acquisitions:  0,
-                rollback_mutex_acquisitions: 0,
-                native_submissions:          1,
-            ),
+    assert(state.next_submit_visit_epoch == 73 && completion.is_valid(),
         "empty submit signals without allocating a duplicate epoch");
     gpu::wait_completion(completion)!!;
 }
@@ -748,11 +581,14 @@ fn void readiness_only_submit_validates_stale_swapchain() @test {
         .readiness        = readiness,
         .readiness_before = { .color_output },
     };
+    vk::QueueCompletionState* completion =
+        &state.queue_completions[state.graphics_completion_id];
+    ulong next_sequence_before = completion.next_sequence;
 
-    ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit));
     assert(rejected == gpu::INVALID_HANDLE, "stale readiness faults INVALID_HANDLE");
-    assert(command_submit_count(&device) == before, "stale readiness records no queue submit");
+    assert(completion.next_sequence == next_sequence_before,
+        "stale readiness reserves no queue completion");
 }
 
 fn void readiness_only_submit_rejects_malformed_identity() @test {
@@ -768,11 +604,16 @@ fn void readiness_only_submit_rejects_malformed_identity() @test {
         .readiness        = malformed,
         .readiness_before = { .color_output },
     };
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::QueueCompletionState* completion =
+        &state.queue_completions[state.graphics_completion_id];
+    ulong next_sequence_before = completion.next_sequence;
 
-    ulong before = command_submit_count(&device);
     fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit));
     assert(rejected == gpu::INVALID_HANDLE, "malformed readiness faults INVALID_HANDLE");
-    assert(command_submit_count(&device) == before, "malformed readiness records no queue submit");
+    assert(completion.next_sequence == next_sequence_before,
+        "malformed readiness reserves no queue completion");
 }
 
 fn void simultaneous_devices_submit_independently() @test {
@@ -1110,15 +951,8 @@ fn void submit_uses_record_queue_without_allocator_queue_reproof() @test {
 
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    vk::reset_submit_work_counters(state);
-
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
-    assert(submit_work_matches(
-        work:                        vk::submit_work_counters(state),
-        inspected:                   1,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 0,
-        native_submissions:          1,
-    ), "submit trusts the immutable command-record queue without allocator reproof");
+    assert(completion.is_valid(),
+        "submit trusts the immutable command-record queue without allocator reproof");
     gpu::wait_completion(completion, ulong::max)!!;
 }

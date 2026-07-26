@@ -1042,11 +1042,9 @@ fn bool? poll_queue_completion_with_query(
     SemaphoreCounterQueryFn query_fn,
 ) @private {
     if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
-        note_completion_cached_poll_hit(state);
         return true;
     }
     ulong current;
-    note_completion_counter_query(state);
     check_backend_result(
         state:     state,
         operation: "poll_completion",
@@ -1114,21 +1112,18 @@ fn void? vk_wait_completion_with_wait(
     ulong timeout_ns,
     SemaphoreWaitFn wait_fn,
 ) @private {
-    (void)state.submit_completion_wait_calls.add(1, AtomicOrdering.RELAXED);
     QueueCompletionState* completion = published_queue_completion_state(
         state,
         queue_id,
         sequence,
     )!;
     if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
-        note_completion_cached_wait_hit(state);
         return;
     }
     vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
         .set_semaphore_count(1)
         .set_semaphores((&completion.timeline)[:1])
         .set_values((&sequence)[:1]);
-    note_completion_wait_call(state);
     check_wait_backend_result(
         state:     state,
         operation: "wait_completion",

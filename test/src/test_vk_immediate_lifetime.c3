@@ -121,20 +121,12 @@ fn void unreferenced_destroy_is_immediate() @test {
     defer destroy_test_device(&device)!!;
     OwnedSpan owned = make_lifetime_span(&device, "immediate_unreferenced");
     gpu::GpuAllocation stale = owned.allocation;
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    vk::reset_completion_work_counters(state);
-
     gpu::free_allocation(&device, &owned.allocation)!!;
     owned.span = {};
 
-    vk::CompletionWorkCounters completion =
-        vk::completion_work_counters(state);
     assert(!owned.allocation.is_valid(), "successful release consumes the allocation token");
     assert(@catch(gpu::get_allocation_info(&device, stale)) == gpu::INVALID_HANDLE,
         "immediate release invalidates copied tokens without a lifecycle boundary");
-    assert(completion.native_counter_queries == 0
-        && completion.native_wait_calls == 0,
-        "quiescent release performs no native completion query or wait");
 }
 
 fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
@@ -223,7 +215,6 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         operation: "submit stalled queue work",
         result:    submit_result,
     )!!;
-    vk::reset_completion_work_counters(state);
     QuiescentReleaseWorkerArgs args = {
         .device     = &device,
         .allocation = owned.allocation,
@@ -268,8 +259,6 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         owned.allocation = {};
         owned.span = {};
     }
-    vk::CompletionWorkCounters work = vk::completion_work_counters(state);
-
     assert(signal_result == vk::Result.SUCCESS
         && fence_result == vk::Result.SUCCESS,
         "the stalled submission resumes and completes during cleanup");
@@ -277,8 +266,6 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         "quiescent release succeeds on the worker: %s", args.failure);
     assert(finished_before_signal,
         "quiescent release does not wait for unrelated queue or device idle");
-    assert(work.native_counter_queries == 0 && work.native_wait_calls == 0,
-        "quiescent release performs no native completion query or wait");
 }
 
 fn void recording_references_reject_allocation_release() @test {
@@ -459,14 +446,8 @@ fn void borrowed_attachment_view_reference_releases_after_completion_drain() @te
     assert(completion_state.retired_sequence.load(AtomicOrdering.ACQUIRE)
         == gpu::internal::completion_point_sequence(completion),
         "the explicit drain publishes the retired prefix");
-    vk::reset_completion_work_counters(state);
     assert(gpu::poll_completion(completion)!!,
         "the drained point uses the cached poll path");
-    vk::CompletionWorkCounters work = vk::completion_work_counters(state);
-    assert(work.native_counter_queries == 0
-        && work.retirement_lock_acquisitions == 0
-        && work.cached_poll_hits == 1,
-        "post-drain polling performs no native or retirement-lock work");
     vk::drain_completed_submitted_commands(state)!!;
     assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
         && queue_completion.submitted_count == 0,

@@ -169,20 +169,6 @@ struct VkDeviceState @public {
     gpu::DepthState            last_depth_state @if(env::TESTING);
     ulong                      texture_view_cell_lookups @if(env::TESTING);
     ulong                      texture_view_ownership_work_units @if(env::TESTING);
-    Atomic{ulong}              completion_native_counter_queries @if(env::TESTING);
-    Atomic{ulong}              completion_native_wait_calls @if(env::TESTING);
-    Atomic{ulong}              completion_retirement_passes @if(env::TESTING);
-    Atomic{ulong}              completion_retirement_lock_acquisitions @if(env::TESTING);
-    Atomic{ulong}              completion_cached_poll_hits @if(env::TESTING);
-    Atomic{ulong}              completion_cached_wait_hits @if(env::TESTING);
-    Atomic{ulong}              submit_completion_wait_calls;
-    Atomic{ulong}              submit_authoritative_token_resolutions @if(env::TESTING);
-    Atomic{ulong}              submit_duplicate_token_visits @if(env::TESTING);
-    Atomic{ulong}              submit_epoch_reset_cells @if(env::TESTING);
-    Atomic{ulong}              submit_command_mutex_acquisitions @if(env::TESTING);
-    Atomic{ulong}              submit_queue_submission_mutex_acquisitions @if(env::TESTING);
-    Atomic{ulong}              submit_rollback_mutex_acquisitions @if(env::TESTING);
-    Atomic{ulong}              submit_native_submissions @if(env::TESTING);
     CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
     void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
@@ -214,8 +200,6 @@ struct VkDeviceState @public {
     void*                     submission_checkpoint_user_data @if(env::TESTING);
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
-    Atomic{ulong}              submit_queue_submits;
-    Atomic{ulong}              submit_completion_point_publications;
 }
 
 struct GeneratedWorkSupport {
@@ -853,7 +837,6 @@ fn bool? device_destroy_ready_with_query(
             >= expected) continue;
 
         ulong current;
-        note_completion_counter_query(state);
         vk::Result result = query_fn(
             state.device,
             completion.timeline,

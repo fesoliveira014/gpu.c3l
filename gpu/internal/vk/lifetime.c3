@@ -159,60 +159,6 @@ fn CommandRecord* release_pending_command_locked(
     return next;
 }
 
-fn void note_completion_counter_query(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.completion_native_counter_queries.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_completion_wait_call(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.completion_native_wait_calls.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_completion_retirement_pass(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.completion_retirement_passes.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_completion_retirement_lock_acquisition(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.completion_retirement_lock_acquisitions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_completion_cached_poll_hit(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.completion_cached_poll_hits.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_completion_cached_wait_hit(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.completion_cached_wait_hits.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
 <* Retires no further than the published prefix. Requires retirement_mutex. *>
 fn void retire_queue_through_locked(
     VkDeviceState* state,
@@ -228,7 +174,6 @@ fn void retire_queue_through_locked(
     ulong retired = completion.retired_sequence.load(AtomicOrdering.RELAXED);
     if (target <= retired) return;
 
-    note_completion_retirement_pass(state);
     while (completion.submitted_head != null) {
         CommandRecord* record = completion.submitted_head;
         if (gpu::internal::completion_point_sequence(
@@ -253,7 +198,6 @@ fn void retire_observed_queue(
     QueueCompletionState* completion,
     ulong completed,
 ) @private {
-    note_completion_retirement_lock_acquisition(state);
     completion.retirement_mutex.lock()!!;
     defer completion.retirement_mutex.unlock();
     retire_queue_through_locked(state, completion, completed);
@@ -265,12 +209,10 @@ fn bool? query_pending_queue(
     SemaphoreCounterQueryFn query_fn,
     ulong* completed,
 ) @private {
-    note_completion_retirement_lock_acquisition(state);
     completion.retirement_mutex.lock()!!;
     defer completion.retirement_mutex.unlock();
     if (completion.submitted_head == null) return false;
 
-    note_completion_counter_query(state);
     check_device_result(
         state,
         query_fn(
@@ -384,13 +326,11 @@ fn void? drain_queue_if_needed_with_query(
     QueueCompletionState* completion,
     SemaphoreCounterQueryFn query_fn,
 ) {
-    note_completion_retirement_lock_acquisition(state);
     completion.retirement_mutex.lock()!!;
     defer completion.retirement_mutex.unlock();
     if (completion.submitted_count < SUBMITTED_COMMAND_DRAIN_THRESHOLD) return;
 
     ulong completed;
-    note_completion_counter_query(state);
     check_device_result(
         state,
         query_fn(
@@ -407,46 +347,6 @@ fn void? drain_submitted_commands_if_needed(VkDeviceState* state) {
         state,
         &real_semaphore_counter_query,
     );
-}
-
-fn CompletionWorkCounters completion_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .native_counter_queries = state.completion_native_counter_queries.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .native_wait_calls = state.completion_native_wait_calls.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .retirement_passes = state.completion_retirement_passes.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .retirement_lock_acquisitions =
-            state.completion_retirement_lock_acquisitions.load(
-                AtomicOrdering.RELAXED,
-            ),
-        .cached_poll_hits = state.completion_cached_poll_hits.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .cached_wait_hits = state.completion_cached_wait_hits.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
-}
-
-fn void reset_completion_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.completion_native_counter_queries.store(0, AtomicOrdering.RELAXED);
-    state.completion_native_wait_calls.store(0, AtomicOrdering.RELAXED);
-    state.completion_retirement_passes.store(0, AtomicOrdering.RELAXED);
-    state.completion_retirement_lock_acquisitions.store(
-        0,
-        AtomicOrdering.RELAXED,
-    );
-    state.completion_cached_poll_hits.store(0, AtomicOrdering.RELAXED);
-    state.completion_cached_wait_hits.store(0, AtomicOrdering.RELAXED);
 }
 
 fn void destroy_submitted_commands(VkDeviceState* state) {
