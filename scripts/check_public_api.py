@@ -375,6 +375,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "selected_queue_count(",
     "queue_count_for_kind(",
     "add_queue_role_identities(",
+    "shader_code_digest",
+    "shader_stage_valid",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
