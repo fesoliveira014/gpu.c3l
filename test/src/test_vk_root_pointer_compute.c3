@@ -154,11 +154,6 @@ fn void direct_reference_root_runtime_evidence() @test {
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::set_root_abi_evidence_enabled(state, true);
-    defer vk::set_root_abi_evidence_enabled(state, false);
-
     OwnedSpan input = allocate_owned_span(
         device:       &device,
         size:         uint::size,
@@ -203,7 +198,10 @@ fn void direct_reference_root_runtime_evidence() @test {
     gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
     gpu::PipelineHandle pipeline =
-        gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
+        vk::create_compute_pipeline_with_root_abi_evidence(
+            &device,
+            &pipeline_desc,
+        )!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     dispatch_root_probe(
@@ -226,11 +224,6 @@ fn void signed_root_runtime_evidence() @test {
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::set_root_abi_evidence_enabled(state, true);
-    defer vk::set_root_abi_evidence_enabled(state, false);
-
     OwnedSpan output = allocate_owned_span(
         device:       &device,
         size:         uint::size,
@@ -247,7 +240,10 @@ fn void signed_root_runtime_evidence() @test {
     gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
     gpu::PipelineHandle pipeline =
-        gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
+        vk::create_compute_pipeline_with_root_abi_evidence(
+            &device,
+            &pipeline_desc,
+        )!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     dispatch_root_probe(

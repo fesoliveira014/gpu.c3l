@@ -749,10 +749,10 @@ report device loss.
 Successful end consumes the recording token and returns the executable token.
 `submit` or explicit executable discard consumes the ended token.
 
-`VkRuntimeState`, `VkDeviceConfig`, and `VkDeviceState` carry contract mode and
-independent Vulkan-layer selection. Device creation stores them before
-policy-dependent subsystems initialize and selects one of two immutable command
-tables: TRUSTED or FULL.
+`VkRuntimeState.config` owns contract mode and independent Vulkan-layer
+selection. Device creation copies only the post-publication policy into
+`VkDeviceState` before policy-dependent subsystems initialize and selects one
+of two immutable command tables: TRUSTED or FULL.
 The authoritative record stores the selected table during begin; warm recording
 performs no policy lookup or branch. Both tables retain host
 pointer/slice/range safety, overflow protection, command-state and

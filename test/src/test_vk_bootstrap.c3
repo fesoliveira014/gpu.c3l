@@ -66,9 +66,6 @@ fn void device_create_destroy() @test {
     gpu::Device device = create_test_device(&desc)!!;
 
     assert(gpu::internal::device_slots[device.index].data.state != null, "backend state allocated");
-    assert(gpu::get_device_caps(&device)!!.buffer_device_address, "buffer_device_address cap true");
-    assert(gpu::get_device_caps(&device)!!.synchronization2, "synchronization2 cap true");
-    assert(gpu::get_device_caps(&device)!!.dynamic_rendering, "dynamic_rendering cap true");
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
     assert(
         caps.generated_work == (caps.max_generated_work_count > 0),

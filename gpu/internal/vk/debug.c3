@@ -368,7 +368,6 @@ fn void? vk_cmd_begin_label(CommandRecord* commands, ZString label, float[4] col
     info.p_label_name = (char*)label;
     info.color = color;
     state.device_dispatch.debug.cmd_begin_label(record.command_buffer, &info);
-    gpu::internal::note_command_native_call();
 }
 
 fn void? vk_cmd_end_label(CommandRecord* commands) @private {
@@ -378,5 +377,4 @@ fn void? vk_cmd_end_label(CommandRecord* commands) @private {
         && record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     state.device_dispatch.debug.cmd_end_label(record.command_buffer);
-    gpu::internal::note_command_native_call();
 }

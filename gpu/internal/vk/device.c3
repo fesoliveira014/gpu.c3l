@@ -19,12 +19,11 @@ alias SemaphoreCounterQueryFn @private = fn vk::Result (
     vk::Semaphore,
     ulong*,
 );
-alias GeneratedDispatchLayoutReadHook @private @if(env::TESTING) = fn void (void*);
-alias DeviceCreateHook @if(env::TESTING) = fn vk::Result (
-    void*,
-    vk::PhysicalDevice,
-    vk::DeviceCreateInfo*,
-    vk::Device*,
+alias DeviceCreateFn = fn vk::Result (
+    void* user_data,
+    vk::PhysicalDevice physical_device,
+    vk::DeviceCreateInfo* create_info,
+    vk::Device* device,
 );
 
 const ZString SWAPCHAIN_EXTENSION             = "VK_KHR_swapchain";
@@ -51,29 +50,15 @@ struct DeviceValidationPolicy {
     bool                    vulkan_layers;
 }
 
-struct VkDeviceConfig {
-    DeviceValidationPolicy    validation_policy;
-    bool                      enable_debug_names;
-    uint                      texture_heap_capacity;
-    uint                      sampler_heap_capacity;
-    uint                      texture_capacity;
-    uint                      pipeline_capacity;
-    char[]                    pipeline_cache_data;
-    gpu::DebugMessageCallback debug_callback;
-    void*                     debug_user_data;
-}
-
 struct DeviceCreationProbe {
     DeviceCreationCheckpoint fail_at;
     DeviceCreationCheckpoint reached;
     uint                     rollback_count;
-    DeviceCreateHook         native_device_create_hook @if(env::TESTING);
-    void*                    native_device_create_user_data @if(env::TESTING);
-    bool                     dynamic_color_support_override @if(env::TESTING);
-    bool                     dynamic_color_feature_chained @if(env::TESTING);
-    uint                     dynamic_color_blend_enable @if(env::TESTING);
-    uint                     dynamic_color_blend_equation @if(env::TESTING);
-    uint                     dynamic_color_write_mask @if(env::TESTING);
+}
+
+struct DeviceCreationOps {
+    void*          user_data;
+    DeviceCreateFn create;
 }
 
 struct VkPresentationState {
@@ -135,11 +120,6 @@ struct VkDeviceState @public {
     bool                       draw_indirect_count;
     GeneratedWorkSupport       generated_work;
     float                      max_sampler_anisotropy;
-    vk::Result                 sampler_create_result @if(env::TESTING);
-    float                      sampler_last_create_max_anisotropy @if(env::TESTING);
-    bool                       sampler_hash_override_enabled @if(env::TESTING);
-    ulong                      sampler_hash_override @if(env::TESTING);
-    ulong                      sampler_lookup_probes @if(env::TESTING);
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;
@@ -165,87 +145,7 @@ struct VkDeviceState @public {
     SamplerTable               samplers;
     VkPresentationState        presentation;
     VkShaderHeapState          shader_heap;
-    Atomic{ulong}              generated_preprocess_allocations;
-    Atomic{ulong}              generated_preprocess_reuses;
-    Atomic{ulong}              generated_recording_allocations;
-    ulong                      command_buffers_allocated;
-    ulong                      command_buffers_freed;
-    RecordingHostAllocator     recording_host_allocator @if(env::TESTING);
-    Atomic{ulong}              recording_command_pool_creations @if(env::TESTING);
-    Atomic{ulong}              recording_command_buffer_allocations @if(env::TESTING);
-    Atomic{ulong}              recording_command_buffer_frees @if(env::TESTING);
-    Atomic{ulong}              command_buffer_resets @if(env::TESTING);
-    Atomic{ulong}              recording_image_view_creations @if(env::TESTING);
-    Atomic{ulong}              recording_vma_allocations @if(env::TESTING);
-    Atomic{ulong}              generated_scratch_misses @if(env::TESTING);
-    Atomic{ulong}              generated_dispatch_emissions @if(env::TESTING);
-    Atomic{ulong}              generated_draw_emissions @if(env::TESTING);
-    Atomic{ulong}              generated_indexed_draw_emissions @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_state_validations @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_native_assemblies @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_native_emissions @if(env::TESTING);
-    bool                       dynamic_state_observation_enabled @if(env::TESTING);
-    ulong                      begin_rendering_emissions @if(env::TESTING);
-    ulong                      viewport_emissions @if(env::TESTING);
-    ulong                      scissor_emissions @if(env::TESTING);
-    ulong                      raster_state_emissions @if(env::TESTING);
-    ulong                      depth_state_emissions @if(env::TESTING);
-    vk::Viewport               last_viewport @if(env::TESTING);
-    vk::Rect2D                 last_scissor @if(env::TESTING);
-    gpu::DynamicRasterState    last_raster_state @if(env::TESTING);
-    gpu::DepthState            last_depth_state @if(env::TESTING);
-    ulong                      texture_view_cell_lookups @if(env::TESTING);
-    ulong                      texture_view_ownership_work_units @if(env::TESTING);
-    Atomic{ulong}              completion_native_counter_queries @if(env::TESTING);
-    Atomic{ulong}              completion_native_wait_calls @if(env::TESTING);
-    Atomic{ulong}              completion_retirement_passes @if(env::TESTING);
-    Atomic{ulong}              completion_retirement_lock_acquisitions @if(env::TESTING);
-    Atomic{ulong}              completion_cached_poll_hits @if(env::TESTING);
-    Atomic{ulong}              completion_cached_wait_hits @if(env::TESTING);
-    Atomic{ulong}              submit_completion_wait_calls;
-    Atomic{ulong}              submit_authoritative_token_resolutions @if(env::TESTING);
-    Atomic{ulong}              submit_duplicate_token_visits @if(env::TESTING);
-    Atomic{ulong}              submit_epoch_reset_cells @if(env::TESTING);
-    Atomic{ulong}              submit_command_mutex_acquisitions @if(env::TESTING);
-    Atomic{ulong}              submit_queue_submission_mutex_acquisitions @if(env::TESTING);
-    Atomic{ulong}              submit_rollback_mutex_acquisitions @if(env::TESTING);
-    Atomic{ulong}              submit_native_submissions @if(env::TESTING);
-    CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
-    void*                      completion_retirement_lock_user_data @if(env::TESTING);
-    ulong                      pipeline_shader_modules_created;
-    ulong                      pipelines_created;
-    ulong                      shader_reflection_validations @if(env::TESTING);
-    ulong                      pipeline_shader_create_attempts @if(env::TESTING);
-    bool                       root_abi_evidence_enabled @if(env::TESTING);
-    ulong                      shader_intern_probes @if(env::TESTING);
-    ulong                      shader_intern_bytes_compared @if(env::TESTING);
-    ulong                      shader_owned_bytes_cloned @if(env::TESTING);
-    ulong                      shader_owned_bytes_freed @if(env::TESTING);
-    ulong                      pipeline_key_probes @if(env::TESTING);
-    vk::Result                 pipeline_shader_create_result @if(env::TESTING);
-    vk::Result                 pipeline_native_create_result @if(env::TESTING);
-    uint                       pipeline_native_dynamic_state_count @if(env::TESTING);
-    uint                       pipeline_native_color_target_count @if(env::TESTING);
-    bool                       pipeline_native_color_states @if(env::TESTING);
-    bool                       pipeline_native_canonical_color_attachments @if(env::TESTING);
-    bool                       pipeline_cache_insert_failure @if(env::TESTING);
-    GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);
-    void*                       generated_dispatch_layout_read_user_data @if(env::TESTING);
-    vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);
-    TextureBarrierEmitHook     texture_barrier_emit_hook @if(env::TESTING);
-    void*                      texture_barrier_emit_user_data @if(env::TESTING);
-    BarrierEmitHook            barrier_emit_hook @if(env::TESTING);
-    void*                      barrier_emit_user_data @if(env::TESTING);
-    Atomic{ulong}              barrier_native_emissions @if(env::TESTING);
-    SubmissionCheckpointHook  submission_checkpoint_hook @if(env::TESTING);
-    void*                     submission_checkpoint_user_data @if(env::TESTING);
     HostAllocator              host_allocator;
-    // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
-    Atomic{ulong}              submit_queue_submits;
-    Atomic{ulong}              submit_completion_point_publications;
 }
 
 struct GeneratedWorkSupport {
@@ -426,20 +326,6 @@ fn CommandOps* select_command_ops(DeviceValidationPolicy policy) {
         : &TRUSTED_COMMAND_OPS;
 }
 
-fn VkDeviceConfig runtime_device_config(VkRuntimeState* state) {
-    return {
-        .validation_policy     = state.validation_policy,
-        .enable_debug_names    = state.debug_names,
-        .texture_heap_capacity = state.texture_heap_capacity,
-        .sampler_heap_capacity = state.sampler_heap_capacity,
-        .texture_capacity      = state.texture_capacity,
-        .pipeline_capacity     = state.pipeline_capacity,
-        .pipeline_cache_data   = state.pipeline_cache_data,
-        .debug_callback        = state.debug_callback,
-        .debug_user_data       = state.debug_user_data,
-    };
-}
-
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
     gpu::DeviceDesc* device_desc,
@@ -450,6 +336,7 @@ fn gpu::Device? create_vk_device(
         device_desc:      device_desc,
         retained_runtime: retained_runtime,
         probe:            null,
+        creation_ops:     null,
     );
 }
 
@@ -458,6 +345,7 @@ fn gpu::Device? create_vk_device_with_probe(
     gpu::DeviceDesc* device_desc,
     gpu::Runtime* retained_runtime,
     DeviceCreationProbe* probe,
+    DeviceCreationOps* creation_ops = null,
 ) {
     gpu::DeviceDesc normalized =
         gpu::internal::normalize_device_desc(device_desc)!;
@@ -466,7 +354,6 @@ fn gpu::Device? create_vk_device_with_probe(
     VkRuntimeState* runtime_state = runtime_data.state;
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
 
-    VkDeviceConfig config = runtime_device_config(runtime_state);
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = normalized.surface;
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null;
@@ -483,7 +370,7 @@ fn gpu::Device? create_vk_device_with_probe(
         }
     }
     return create_vk_device_from_runtime(
-        desc:                       &config,
+        config:                     &runtime_state.config,
         instance:                   runtime_state.instance,
         physical_device:            adapter_state.physical_device,
         retained_runtime:           retained_runtime,
@@ -496,6 +383,7 @@ fn gpu::Device? create_vk_device_with_probe(
         queue_request:              &normalized.queues,
         shader_heap_support:        &adapter_state.shader_heap,
         probe:                      probe,
+        creation_ops:               creation_ops,
     );
 }
 
@@ -506,12 +394,12 @@ fn void? validate_device_baseline_support(
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
     if (adapter_index >= runtime_state.adapters.len) return gpu::INVALID_HANDLE~;
 
-    VkDeviceConfig desc = runtime_device_config(runtime_state);
-    VkShaderHeapState shader_heap = resolve_shader_heap_state(&desc)!;
+    VkShaderHeapState shader_heap =
+        resolve_shader_heap_state(&runtime_state.config)!;
     VkDeviceState diagnostic_state = {
-        .debug_callback    = runtime_state.debug_callback,
-        .debug_user_data   = runtime_state.debug_user_data,
-        .validation_policy = runtime_state.validation_policy,
+        .debug_callback    = runtime_state.config.debug_callback,
+        .debug_user_data   = runtime_state.config.debug_user_data,
+        .validation_policy = runtime_state.config.validation,
     };
     validate_shader_heap_support(
         &diagnostic_state,
@@ -521,7 +409,7 @@ fn void? validate_device_baseline_support(
 }
 
 fn gpu::Device? create_vk_device_from_runtime(
-    VkDeviceConfig* desc,
+    RuntimeConfig* config,
     vk::Instance instance,
     vk::PhysicalDevice physical_device,
     gpu::Runtime* retained_runtime = null,
@@ -532,28 +420,26 @@ fn gpu::Device? create_vk_device_from_runtime(
     gpu::QueueRequest* queue_request = null,
     ShaderHeapSupport* shader_heap_support = null,
     DeviceCreationProbe* probe = null,
+    DeviceCreationOps* creation_ops = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     defer catch {
-        destroy_state(state, probe);
+        destroy_state(state);
         if (probe != null) probe.rollback_count++;
     }
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
-    $if env::TESTING:
-        install_recording_host_allocator(state);
-    $endif
-    state.debug_callback = desc.debug_callback;
-    state.debug_user_data = desc.debug_user_data;
-    state.debug_names = desc.enable_debug_names;
-    state.validation_policy = desc.validation_policy;
+    state.debug_callback = config.debug_callback;
+    state.debug_user_data = config.debug_user_data;
+    state.debug_names = config.debug_names;
+    state.validation_policy = config.validation;
     state.command_ops = select_command_ops(state.validation_policy);
     state.resource_mutex.init()!;
     state.pipeline_creation_mutex.init()!;
     state.texture_view_cache_mutex.init()!;
     state.command_mutex.init()!;
 
-    state.shader_heap = resolve_shader_heap_state(desc)!;
+    state.shader_heap = resolve_shader_heap_state(config)!;
 
     state.presentation.enabled = presentation_surface != null;
     if (state.presentation.enabled) state.presentation.queue_mutex.init()!;
@@ -629,16 +515,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     )!;
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         query_dynamic_raster_properties(state.physical_device);
-    $if env::TESTING:
-        if (probe != null && probe.dynamic_color_support_override) {
-            dynamic_color_features.extended_dynamic_state3color_blend_enable =
-                vk::FALSE;
-            dynamic_color_features.extended_dynamic_state3color_blend_equation =
-                vk::FALSE;
-            dynamic_color_features.extended_dynamic_state3color_write_mask =
-                vk::FALSE;
-        }
-    $endif
     check_required_features(
         base:               &features2.features,
         v11:                &features11,
@@ -709,7 +585,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         state:             state,
         families:          &families,
         line_polygon_mode: line_polygon_mode,
-        probe:             probe,
+        creation_ops:      creation_ops,
     )!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.LOGICAL_DEVICE)!;
     VkDeviceDispatchPlan dispatch_plan = {
@@ -806,14 +682,20 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.COMMAND_STORAGE)!;
     uint pipeline_capacity =
-        resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
+        resolve_descriptor_capacity(config.pipeline_capacity, gpu::MAX_PIPELINES)!;
     state.pipelines.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
     );
     state.pipelines.slots = mem::new_array(PipelineCell, pipeline_capacity);
     state.textures.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.TEXTURE);
-    state.textures.slots = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
+    state.textures.slots = mem::new_array(
+        TextureCell,
+        resolve_descriptor_capacity(
+            config.texture_capacity,
+            gpu::DEFAULT_TEXTURE_CAPACITY,
+        )!,
+    );
     state.attachment_views.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
         gpu::internal::ResourceOwnerKind.ATTACHMENT_VIEW,
@@ -829,7 +711,11 @@ fn gpu::Device? create_vk_device_from_runtime(
     create_sampler_table(state)!;
     create_descriptor_heap(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;
-    create_pipeline_shared(state, desc.pipeline_cache_data, pipeline_capacity)!;
+    create_pipeline_shared(
+        state,
+        config.pipeline_cache_data,
+        pipeline_capacity,
+    )!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PIPELINE_SHARED)!;
     CapsInputs caps_inputs = {
         .presentation_enabled = state.presentation.enabled,
@@ -842,7 +728,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.caps = build_caps(
         base:                    &features2.features,
         v12:                     &features12,
-        v13:                     &features13,
         physical_device:         state.physical_device,
         inputs:                  &caps_inputs,
         viewport_limits:         &state.viewport_limits,
@@ -898,7 +783,6 @@ fn bool? device_destroy_ready_with_query(
             >= expected) continue;
 
         ulong current;
-        note_completion_counter_query(state);
         vk::Result result = query_fn(
             state.device,
             completion.timeline,
@@ -954,7 +838,7 @@ fn bool report_teardown_leaks(VkDeviceState* state) =>
     contract_uses_full_validation(state.validation_policy);
 
 <* Reverse-order cleanup after accepted destruction, device loss, or partial creation. *>
-fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @private {
+fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
     if (state.device != null) {
         destroy_submitted_commands(state);
@@ -1110,15 +994,15 @@ fn bool heap_indexing_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDe
         && v12.descriptor_binding_update_unused_while_pending != 0;
 }
 
-fn VkShaderHeapState? resolve_shader_heap_state(VkDeviceConfig* desc) {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
+fn VkShaderHeapState? resolve_shader_heap_state(RuntimeConfig* config) {
+    if (config == null) return gpu::INVALID_ARGUMENT~;
     VkShaderHeapState state;
     state.texture_capacity = resolve_descriptor_capacity(
-        desc.texture_heap_capacity,
+        config.texture_heap_capacity,
         gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
     )!;
     state.sampler_capacity = resolve_descriptor_capacity(
-        desc.sampler_heap_capacity,
+        config.sampler_heap_capacity,
         gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     )!;
     return state;
@@ -1277,7 +1161,7 @@ fn IndexingHeapLimits query_indexing_heap_limits(vk::PhysicalDevice physical_dev
 
 fn bool candidate_satisfies(
     vk::PhysicalDevice candidate,
-    VkDeviceConfig* desc,
+    RuntimeConfig* config,
     ShaderHeapSupport* shader_heap,
 ) @private {
     vk::PhysicalDeviceProperties props;
@@ -1306,21 +1190,21 @@ fn bool candidate_satisfies(
     )) return false;
 
     uint? resolved_tex = resolve_descriptor_capacity(
-        desc.texture_heap_capacity,
+        config.texture_heap_capacity,
         gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
     );
     if (catch resolved_tex) return false;
     uint? resolved_smp = resolve_descriptor_capacity(
-        desc.sampler_heap_capacity,
+        config.sampler_heap_capacity,
         gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     );
     if (catch resolved_smp) return false;
     if (catch resolve_descriptor_capacity(
-        desc.texture_capacity,
+        config.texture_capacity,
         gpu::DEFAULT_TEXTURE_CAPACITY,
     )) return false;
     if (catch resolve_descriptor_capacity(
-        desc.pipeline_capacity,
+        config.pipeline_capacity,
         gpu::MAX_PIPELINES,
     )) return false;
 
@@ -1338,7 +1222,7 @@ fn void? create_logical_device(
     VkDeviceState* state,
     QueueFamilies* families,
     bool line_polygon_mode,
-    DeviceCreationProbe* probe = null,
+    DeviceCreationOps* creation_ops = null,
 ) @private {
     @pool() {
         uint family_capacity = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES
@@ -1383,7 +1267,7 @@ fn void? create_logical_device(
             state:             state,
             queue_infos:       queue_infos,
             line_polygon_mode: line_polygon_mode,
-            probe:             probe,
+            creation_ops:      creation_ops,
         );
     };
 }
@@ -1392,7 +1276,7 @@ fn void? create_logical_device_with_queue_infos(
     VkDeviceState* state,
     vk::DeviceQueueCreateInfo[] queue_infos,
     bool line_polygon_mode,
-    DeviceCreationProbe* probe,
+    DeviceCreationOps* creation_ops,
 ) @private {
 
     vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT generated_work_features =
@@ -1484,41 +1368,22 @@ fn void? create_logical_device_with_queue_infos(
         device_info = device_info.set_enabled_extension_names(extensions[:extension_count]);
     }
 
-    $if env::TESTING:
-        if (probe != null) {
-            probe.dynamic_color_feature_chained =
-                features13.p_next == &dynamic_color_features
-                    || (state.presentation.enabled
-                        && presentation_features.p_next
-                            == &dynamic_color_features);
-            probe.dynamic_color_blend_enable =
-                dynamic_color_features.extended_dynamic_state3color_blend_enable;
-            probe.dynamic_color_blend_equation =
-                dynamic_color_features.extended_dynamic_state3color_blend_equation;
-            probe.dynamic_color_write_mask =
-                dynamic_color_features.extended_dynamic_state3color_write_mask;
-        }
-    $endif
-
     vk::Result create_result;
-    $if env::TESTING:
-        if (probe != null && probe.native_device_create_hook != null) {
-            create_result = probe.native_device_create_hook(
-                probe.native_device_create_user_data,
-                state.physical_device,
-                &device_info,
-                &state.device,
-            );
-            check_backend_create_result(create_result)!;
-            return;
-        }
-    $endif
-    create_result = vk::create_device(
-        physical_device: state.physical_device,
-        p_create_info:   &device_info,
-        p_allocator:     null,
-        p_device:        &state.device,
-    );
+    if (creation_ops == null) {
+        create_result = vk::create_device(
+            physical_device: state.physical_device,
+            p_create_info:   &device_info,
+            p_allocator:     null,
+            p_device:        &state.device,
+        );
+    } else {
+        create_result = creation_ops.create(
+            user_data:       creation_ops.user_data,
+            physical_device: state.physical_device,
+            create_info:     &device_info,
+            device:          &state.device,
+        );
+    }
     check_backend_create_result(create_result)!;
 }
 
@@ -1555,7 +1420,6 @@ fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString na
 fn gpu::DeviceCaps build_caps(
     vk::PhysicalDeviceFeatures* base,
     vk::PhysicalDeviceVulkan12Features* v12,
-    vk::PhysicalDeviceVulkan13Features* v13,
     vk::PhysicalDevice physical_device,
     CapsInputs* inputs,
     ViewportLimits* viewport_limits,
@@ -1579,10 +1443,6 @@ fn gpu::DeviceCaps build_caps(
     *non_coherent_atom_size = (usz)props.limits.non_coherent_atom_size;
     return (gpu::DeviceCaps){
         .presentation_enabled       = inputs.presentation_enabled,
-        .buffer_device_address      = v12.buffer_device_address != 0,
-        .synchronization2           = v13.synchronization2 != 0,
-        .dynamic_rendering          = v13.dynamic_rendering != 0,
-        .shader_int64               = base.shader_int64 != 0,
         .draw_indirect_count        = v12.draw_indirect_count != 0,
         .generated_work             = inputs.generated_work.enabled,
         .async_compute              = inputs.async_compute,

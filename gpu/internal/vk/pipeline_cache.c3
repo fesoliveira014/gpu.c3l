@@ -233,7 +233,6 @@ fn uint find_entry(
     PipelineCacheTable* cache = &state.pipeline_cache;
     uint bucket = bucket_for(hash, (uint)cache.bucket_heads.len);
     for (uint cur = cache.bucket_heads[bucket]; cur != 0; ) {
-        note_pipeline_key_probe(state);
         PipelineCacheEntry* entry = &cache.entries[cur - 1];
         if (entry.hash == hash
             && key_equals(&entry.key, key)) {
@@ -248,11 +247,6 @@ fn uint? insert_entry(
     VkDeviceState* state,
     PipelineCacheEntry value,
 ) {
-    $if env::TESTING:
-        if (state.pipeline_cache_insert_failure) {
-            return gpu::SLOT_TABLE_FULL~;
-        }
-    $endif
     PipelineCacheTable* cache = &state.pipeline_cache;
     uint idx;
     if (cache.free_head != PIPELINE_FREE_NONE) {
@@ -285,65 +279,6 @@ fn void release_entry(VkDeviceState* state, uint entry_index) {
     state.pipeline_cache.free_head = entry_index + 1;
 }
 
-fn ulong pipeline_shader_module_create_count(VkDeviceState* state) {
-    return state.pipeline_shader_modules_created;
-}
-
-fn ulong shader_reflection_validation_count(VkDeviceState* state) @if(env::TESTING) {
-    return state.shader_reflection_validations;
-}
-
-fn ulong pipeline_shader_create_attempt_count(VkDeviceState* state) @if(env::TESTING) {
-    return state.pipeline_shader_create_attempts;
-}
-
-fn ulong pipeline_native_create_count(VkDeviceState* state) {
-    return state.pipelines_created;
-}
-
-struct GraphicsPipelineNativeObservation {
-    uint dynamic_state_count;
-    uint color_target_count;
-    bool color_states;
-    bool canonical_color_attachments;
-}
-
-fn GraphicsPipelineNativeObservation graphics_pipeline_native_observation(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .dynamic_state_count         =
-            state.pipeline_native_dynamic_state_count,
-        .color_target_count          =
-            state.pipeline_native_color_target_count,
-        .color_states                =
-            state.pipeline_native_color_states,
-        .canonical_color_attachments =
-            state.pipeline_native_canonical_color_attachments,
-    };
-}
-
-fn void set_pipeline_shader_create_result(
-    VkDeviceState* state,
-    vk::Result result,
-) @if(env::TESTING) {
-    state.pipeline_shader_create_result = result;
-}
-
-fn void set_pipeline_native_create_result(
-    VkDeviceState* state,
-    vk::Result result,
-) @if(env::TESTING) {
-    state.pipeline_native_create_result = result;
-}
-
-fn void set_pipeline_cache_insert_failure(
-    VkDeviceState* state,
-    bool enabled,
-) @if(env::TESTING) {
-    state.pipeline_cache_insert_failure = enabled;
-}
-
 <* Live entry count, exposed for dedup accounting in tests. *>
 fn uint pipeline_cache_entry_count(VkDeviceState* state) {
     uint count = 0;
@@ -369,53 +304,6 @@ fn bool pipeline_cache_index_consistent(VkDeviceState* state) {
         }
     }
     return linked == pipeline_cache_entry_count(state);
-}
-
-fn PipelineIdentityProbeResult? probe_pipeline_identity_boundary(
-    VkDeviceState* state,
-    gpu::ShaderDesc* desc,
-) @if(env::TESTING) {
-    ShaderIdentityInput input;
-    normalize_shader_input(
-        state:          state,
-        desc:           desc,
-        role:           gpu::internal::ShaderRole.COMPUTE,
-        operation:      "probe_pipeline_identity_boundary",
-        rejected_field: "ShaderDesc",
-        out_input:      &input,
-    )!;
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-
-    reset_pipeline_identity_stats(state);
-    ShaderId shader = retain_shader_identity_locked(state, &input)!;
-    PipelineIdentityStats interning = pipeline_identity_stats(state);
-    PipelineKey key = build_compute_key(shader);
-    ulong hash = hash_key(&key);
-    uint? inserted_optional = insert_entry(
-        state,
-        {
-            .hash = hash,
-            .key  = key,
-        },
-    );
-    if (catch insert_fault = inserted_optional) {
-        release_shader_identity_locked(state, shader)!;
-        return insert_fault~;
-    }
-    uint inserted = inserted_optional;
-
-    reset_pipeline_identity_stats(state);
-    uint found = find_entry(state, hash, &key);
-    if (found != inserted) {
-        release_entry(state, inserted);
-        return gpu::BACKEND_ERROR~;
-    }
-    release_entry(state, inserted);
-    return {
-        .interning = interning,
-        .lookup    = pipeline_identity_stats(state),
-    };
 }
 
 <* Spec-recommended pre-screen; the driver retry is the real safety net. *>

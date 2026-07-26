@@ -9,6 +9,8 @@ import std::atomic::types;
 import std::io;
 
 
+const uint SUBMISSION_CHECKPOINT_SPIN_LIMIT = 1_000_000;
+
 ulong rejected_user_completion_value;
 uint rejected_user_signal_count;
 uint counted_user_submit_calls;
@@ -26,15 +28,15 @@ Atomic{bool} distinct_native_overlap;
 
 struct SubmissionCheckpointGate {
     vk::SubmissionCheckpoint target;
-    gpu::CompletionPoint     point;
-    Atomic{bool}             entered;
-    Atomic{bool}             release;
+    Atomic{bool}              entered;
+    Atomic{bool}              release;
 }
 
 struct SubmissionCheckpointWorkerArgs {
-    vk::VkDeviceState*          state;
+    vk::VkDeviceState*         state;
     gpu::Queue                 queue;
     gpu::ExecutableCommandList executable;
+    SubmissionCheckpointGate*  gate;
     gpu::CompletionPoint       submitted;
 }
 
@@ -63,40 +65,6 @@ struct AllocatorSubmissionState {
     bool scratch_in_use;
 }
 
-fn bool submit_stats_work_matches_exact(
-    vk::SubmitWorkCounters work,
-    ulong resolutions,
-    ulong duplicate_visits,
-    ulong command_mutex_acquisitions,
-    ulong rollback_mutex_acquisitions,
-    ulong native_submissions,
-) {
-    return work.authoritative_token_resolutions == resolutions
-        && work.duplicate_token_visits == duplicate_visits
-        && work.epoch_reset_cells == 0
-        && work.command_mutex_acquisitions == command_mutex_acquisitions
-        && work.queue_submission_mutex_acquisitions == 1
-        && work.rollback_mutex_acquisitions == rollback_mutex_acquisitions
-        && work.native_submissions == native_submissions;
-}
-
-fn bool submit_stats_work_matches(
-    vk::SubmitWorkCounters work,
-    ulong inspected,
-    ulong command_mutex_acquisitions,
-    ulong rollback_mutex_acquisitions,
-    ulong native_submissions,
-) {
-    return submit_stats_work_matches_exact(
-        work:                        work,
-        resolutions:                 inspected,
-        duplicate_visits:            inspected,
-        command_mutex_acquisitions:  command_mutex_acquisitions,
-        rollback_mutex_acquisitions: rollback_mutex_acquisitions,
-        native_submissions:          native_submissions,
-    );
-}
-
 fn vk::Result accept_injected_publication_submit(
     vk::Queue queue,
     uint submit_count,
@@ -107,22 +75,18 @@ fn vk::Result accept_injected_publication_submit(
     (void)submits;
     (void)fence;
     assert(submit_count == 1,
-        "the publication seam observes one native submission");
+        "publication checkpoint observes one native submission");
     return vk::Result.SUCCESS;
 }
 
 fn void gate_submission_checkpoint(
     void* user_data,
     vk::SubmissionCheckpoint checkpoint,
-    gpu::CompletionPoint point,
 ) {
     SubmissionCheckpointGate* gate = (SubmissionCheckpointGate*)user_data;
     if (checkpoint != gate.target) return;
-    gate.point = point;
     gate.entered.store(true, AtomicOrdering.RELEASE);
-    while (!gate.release.load(AtomicOrdering.ACQUIRE)) {
-        thread::yield();
-    }
+    while (!gate.release.load(AtomicOrdering.ACQUIRE)) thread::yield();
 }
 
 fn int submission_checkpoint_worker(void* raw_args) {
@@ -130,19 +94,22 @@ fn int submission_checkpoint_worker(void* raw_args) {
         (SubmissionCheckpointWorkerArgs*)raw_args;
     gpu::ExecutableCommandList[1] lists = { args.executable };
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
-    args.submitted = vk::vk_submit_with(
-        args.state,
-        args.queue,
-        &desc,
-        &accept_injected_publication_submit,
-    )!!;
+    gpu::CompletionPoint? submitted = vk::vk_submit_with_checkpoint(
+        state:     args.state,
+        queue:     args.queue,
+        desc:      &desc,
+        submit_fn: &accept_injected_publication_submit,
+        checkpoint: &gate_submission_checkpoint,
+        user_data: args.gate,
+    );
+    if (catch submitted) return 1;
+    args.submitted = submitted;
     gpu::Device device = args.queue.device;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(
-        &device,
-    )!!;
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(&device)!!;
     release_submitted_executables(&operation, lists[..]);
-    args.executable = lists[0];
     gpu::internal::end_device_operation(&operation);
+    args.executable = lists[0];
     return 0;
 }
 
@@ -249,18 +216,18 @@ fn void assert_allocator_submission_state(
         "%s", message);
 }
 
-fn gpu::Device make_submit_stats_test_device() {
+fn gpu::Device make_submit_test_device() {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
-        .application_name  = "gpu_submit_stats_test",
+        .application_name  = "gpu_submit_test",
     };
     return create_test_device(&desc)!!;
 }
 
 fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
     const uint WORKER_COUNT = 2;
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -284,26 +251,15 @@ fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
         worker.create(&concurrent_submit_worker, &args[i])!!;
     }
     while (ready.load(AtomicOrdering.ACQUIRE) < WORKER_COUNT) thread::yield();
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::reset_submit_work_counters(state);
-    ulong submits_before = stats_of(&device).queue_submits;
     release.store(true, AtomicOrdering.RELEASE);
 
     foreach (i, &worker : workers) {
         assert(worker.join()!! == 0,
             "each concurrent submit succeeds");
     }
-    vk::SubmitWorkCounters work = vk::submit_work_counters(state);
-    assert(work.authoritative_token_resolutions == WORKER_COUNT
-            && work.duplicate_token_visits == WORKER_COUNT
-            && work.epoch_reset_cells == 0
-            && work.command_mutex_acquisitions == WORKER_COUNT
-            && work.queue_submission_mutex_acquisitions == WORKER_COUNT
-            && work.native_submissions == WORKER_COUNT,
-        "concurrent submits charge one visit under distinct serialized epochs");
-    assert(stats_of(&device).queue_submits == submits_before + WORKER_COUNT,
-        "both concurrent submits reach the native queue");
+    assert(args[0].submitted.is_valid() && args[1].submitted.is_valid()
+            && args[0].submitted != args[1].submitted,
+        "concurrent submits publish distinct completion points");
     foreach (&worker_args : args) {
         gpu::wait_completion(worker_args.submitted)!!;
     }
@@ -367,8 +323,6 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
         while (ready.load(AtomicOrdering.ACQUIRE) < workers.len) {
             thread::yield();
         }
-        vk::SubmitStats stats_before = vk::submit_stats(state);
-        vk::reset_submit_work_counters(state);
         distinct_native_entered.store(0, AtomicOrdering.RELAXED);
         distinct_native_active.store(0, AtomicOrdering.RELAXED);
         distinct_native_release.store(false, AtomicOrdering.RELAXED);
@@ -379,23 +333,11 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
             assert(worker.join()!! == 0,
                 "each distinct-queue submit succeeds");
         }
-        vk::SubmitWorkCounters work = vk::submit_work_counters(state);
         assert(distinct_native_overlap.load(AtomicOrdering.ACQUIRE)
                 && distinct_native_entered.load(AtomicOrdering.ACQUIRE) == 2,
             "distinct selected queues overlap at the native submit seam");
-        assert(work.authoritative_token_resolutions == 2
-                && work.duplicate_token_visits == 2
-                && work.command_mutex_acquisitions == 2
-                && work.queue_submission_mutex_acquisitions == 2
-                && work.native_submissions == 2
-                && work.epoch_reset_cells == 0
-                && work.rollback_mutex_acquisitions == 0,
-            "distinct submits preserve exact concurrent work accounting");
-        vk::SubmitStats stats_after = vk::submit_stats(state);
-        assert(stats_after.queue_submits == stats_before.queue_submits + 2
-                && stats_after.completion_point_publications
-                    == stats_before.completion_point_publications + 2,
-            "distinct submits publish exact atomic aggregate statistics");
+        assert(args[0].submitted.is_valid() && args[1].submitted.is_valid(),
+            "distinct submits publish completion points");
 
         foreach (worker_index, &worker_args : args) {
             vk::QueueCompletionState* completion =
@@ -424,13 +366,8 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
     );
 }
 
-fn vk::SubmitStats stats_of(gpu::Device* device) {
-    return vk::submit_stats(gpu::internal::device_slots[device.index].data.state);
-}
-
-<* A submit rejected before reaching the driver records no queue submit. *>
-fn void failed_submit_records_nothing() @test {
-    gpu::Device device = make_submit_stats_test_device();
+fn void validation_failure_preserves_recording_and_allocator_state() @test {
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
 
     gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -451,11 +388,8 @@ fn void failed_submit_records_nothing() @test {
     );
     gpu::SubmitDesc bad_submit = { .command_lists = not_executable[..] };
 
-    vk::SubmitStats before = stats_of(&device);
     fault submit_fault = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &bad_submit));
     assert(submit_fault == gpu::COMMAND_RECORDING_ERROR, "a not-yet-executable list rejects before touching the queue");
-    vk::SubmitStats after = stats_of(&device);
-    assert(after.queue_submits == before.queue_submits, "a rejected submit records no queue submit");
     assert_allocator_submission_state(
         actual:         allocator_submission_state(
             state,
@@ -528,23 +462,11 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
         gpu::SubmitDesc desc = { .command_lists = lists[..] };
         vk::VkDeviceState* state =
             gpu::internal::device_slots[device.index].data.state;
-        ulong submits_before = stats_of(&device).queue_submits;
-        vk::reset_submit_work_counters(state);
-
         assert(@catch(gpu::submit(graphics, &desc)) == gpu::INVALID_ARGUMENT,
             "an executable faults before native submit on a different queue");
-        assert(stats_of(&device).queue_submits == submits_before
-                && lists[0].is_valid()
+        assert(lists[0].is_valid()
                 && record.state == gpu::internal::CommandState.EXECUTABLE,
             "different-queue rejection preserves the token before native work");
-        assert(submit_stats_work_matches_exact(
-            work:                        vk::submit_work_counters(state),
-            resolutions:                 1,
-            duplicate_visits:            0,
-            command_mutex_acquisitions:  1,
-            rollback_mutex_acquisitions: 0,
-            native_submissions:          0,
-        ), "exact wrong-queue rejection stops before duplicate visitation");
         assert_allocator_submission_state(
             actual:         allocator_submission_state(
                 state,
@@ -667,19 +589,21 @@ fn vk::Result query_completion_counter(
 fn void prove_submission_publication_gap(
     vk::SubmissionCheckpoint checkpoint,
 ) {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, queue.id)!!;
-    gpu::CompletionPoint prior = vk::reserve_queue_completion(state, queue)!!;
+    gpu::CompletionPoint prior =
+        vk::reserve_queue_completion(state, queue)!!;
     vk::publish_queue_completion(state, prior)!!;
     gpu::CompletionPoint predicted = gpu::internal::make_completion_point(
         queue,
@@ -707,21 +631,23 @@ fn void prove_submission_publication_gap(
         index:      retained.allocation.index,
         generation: retained.allocation.generation,
     )!!;
+    SubmissionCheckpointGate gate = { .target = checkpoint };
     SubmissionCheckpointWorkerArgs args = {
         .state      = state,
         .queue      = queue,
         .executable = gpu::end_commands(&commands)!!,
+        .gate       = &gate,
     };
-    SubmissionCheckpointGate gate = { .target = checkpoint };
-    vk::set_submission_checkpoint_hook(
-        state,
-        &gate_submission_checkpoint,
-        &gate,
-    );
-    defer vk::set_submission_checkpoint_hook(state, null, null);
     Thread worker;
     worker.create(&submission_checkpoint_worker, &args)!!;
-    while (!gate.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    for (uint spin = 0;
+        spin < SUBMISSION_CHECKPOINT_SPIN_LIMIT
+            && !gate.entered.load(AtomicOrdering.ACQUIRE);
+        spin++) {
+        thread::yield();
+    }
+    assert(gate.entered.load(AtomicOrdering.ACQUIRE),
+        "submission reaches the requested publication checkpoint");
 
     bool native_accepted =
         checkpoint == vk::SubmissionCheckpoint.NATIVE_ACCEPTED;
@@ -736,17 +662,18 @@ fn void prove_submission_publication_gap(
         executables:    native_accepted ? 1 : 0,
         in_flight:      native_accepted ? 0 : 1,
         scratch_in_use: true,
-        message:        "each submission checkpoint has one exact allocator owner",
+        message:        "each checkpoint preserves one allocator owner",
     );
     assert(args.executable.is_valid(),
-        "the backend checkpoint precedes caller-token publication");
+        "caller token publication follows the internal checkpoint");
     assert(@catch(gpu::destroy_command_allocator(&allocator))
             == gpu::RESOURCE_IN_USE
         && allocator.handle.is_valid(),
-        "allocator destruction stays retryably blocked across submission publication");
+        "allocator destruction remains retryably blocked during publication");
 
     completion_counter_query_calls = 0;
-    completion_counter_value = gpu::internal::completion_point_sequence(predicted);
+    completion_counter_value =
+        gpu::internal::completion_point_sequence(predicted);
     completion_counter_result = vk::Result.SUCCESS;
     if (checkpoint == vk::SubmissionCheckpoint.TOKEN_PUBLISHED) {
         assert(vk::published_queue_completion_state(
@@ -754,7 +681,7 @@ fn void prove_submission_publication_gap(
             queue.id,
             gpu::internal::completion_point_sequence(predicted),
         )!! == completion,
-            "the token-publication checkpoint exposes the predicted point to observers");
+            "token publication exposes the point only after ownership transfer");
     } else {
         assert(@catch(vk::vk_poll_completion_with_query(
             state:    state,
@@ -762,9 +689,9 @@ fn void prove_submission_publication_gap(
             sequence: gpu::internal::completion_point_sequence(predicted),
             query_fn: &query_completion_counter,
         )) == gpu::INVALID_HANDLE,
-            "a predicted point remains private across the submission checkpoint");
+            "the reserved point remains private before token publication");
         assert(completion_counter_query_calls == 0,
-            "an unpublished predicted point reaches no native query");
+            "an unpublished point reaches no native completion query");
         assert(vk::vk_poll_completion_with_query(
             state:    state,
             queue_id: queue.id,
@@ -775,59 +702,53 @@ fn void prove_submission_publication_gap(
             == gpu::internal::completion_point_sequence(prior),
             "native progress is capped to the published prefix");
     }
-    uint expected_batches = checkpoint == vk::SubmissionCheckpoint.NATIVE_ACCEPTED
-        ? 0
-        : 1;
+
+    uint expected_batches = native_accepted ? 0 : 1;
     assert(completion.submitted_count == expected_batches,
-        "the checkpoint exposes only its intended batch-publication phase");
-    if (checkpoint != vk::SubmissionCheckpoint.NATIVE_ACCEPTED) {
-        vk::CommandRecord* submitted =
-            completion.submitted_head;
-        vk::CommandAllocatorSlot* submitted_allocator_slot =
+        "only completed ownership-transfer phases expose a submitted batch");
+    if (!native_accepted) {
+        vk::CommandRecord* submitted = completion.submitted_head;
+        vk::CommandAllocatorSlot* submitted_allocator =
             state.command_allocators.get(submitted.allocator)!!;
-        vk::CommandResourceReference* reference =
-            &submitted_allocator_slot.scratch[
-                submitted.allocator_buffer
-            ].references[0];
-        assert(submitted_allocator_slot.scratch[
-                submitted.allocator_buffer
-            ].reference_count == 1
+        vk::CommandScratch* scratch =
+            &submitted_allocator.scratch[submitted.allocator_buffer];
+        vk::CommandResourceReference* reference = &scratch.references[0];
+        assert(scratch.reference_count == 1
             && reference.owner == retained.allocation.owner
             && reference.index == retained.allocation.index
-            && reference.generation
-                == retained.allocation.generation,
-            "the submitted batch owns every transferred resource before observation");
+            && reference.generation == retained.allocation.generation,
+            "the submitted batch owns its resource before publication");
     }
     if (checkpoint == vk::SubmissionCheckpoint.BATCHES_PUBLISHED) {
         assert(@catch(gpu::free_allocation(
             &device,
             &retained.allocation,
         )) == gpu::RESOURCE_IN_USE,
-            "caller release during submitted ownership faults RESOURCE_IN_USE");
+            "submitted ownership rejects an early caller release");
         assert(retained.allocation.is_valid()
             && gpu::get_allocation_info(
                 &device,
                 retained.allocation,
             )!!.size == retained.span.size,
-            "rejected submitted release preserves the caller token and native resource");
+            "rejected release preserves the token and native allocation");
     }
 
     gate.release.store(true, AtomicOrdering.RELEASE);
     assert(worker.join()!! == 0 && args.submitted == predicted,
-        "submission resumes and publishes the predicted point");
+        "submission resumes and returns the reserved point");
     if (checkpoint != vk::SubmissionCheckpoint.TOKEN_PUBLISHED) {
         assert(completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
             == gpu::internal::completion_point_sequence(prior),
-            "resuming private publication does not invent native retirement");
+            "resuming publication does not invent native retirement");
     }
     assert(vk::vk_poll_completion_with_query(
         state:    state,
         queue_id: queue.id,
         sequence: gpu::internal::completion_point_sequence(args.submitted),
         query_fn: &query_completion_counter,
-    )!!, "a later observation retires the published submission");
+    )!!, "later observation retires the published submission");
     assert(completion.submitted_count == 0,
-        "full retirement releases the published command batch");
+        "retirement releases the published command batch");
     assert_allocator_submission_state(
         actual:         allocator_submission_state(
             state,
@@ -839,17 +760,10 @@ fn void prove_submission_publication_gap(
         executables:    0,
         in_flight:      0,
         scratch_in_use: false,
-        message:        "retirement returns the exact allocator buffer and scratch",
+        message:        "retirement returns the allocator buffer and scratch",
     );
     gpu::free_allocation(&device, &retained.allocation)!!;
     retained.span = {};
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(
-        &device,
-        true,
-    )!!;
-    assert(operation.slot.live_children.load(AtomicOrdering.ACQUIRE) == 1,
-        "publication regression leaves only the explicit command allocator live");
-    gpu::internal::end_device_operation(&operation);
 }
 
 fn void native_acceptance_remains_capped_before_batch_publication() @test {
@@ -871,7 +785,7 @@ fn void token_publication_follows_complete_ownership_transfer() @test {
 }
 
 fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
@@ -898,8 +812,6 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
         command_allocator.handle,
         allocator_buffer,
     );
-    vk::reset_submit_work_counters(state);
-
     assert(@catch(vk::vk_submit_with(
         state,
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
@@ -915,13 +827,6 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
         "native failure publishes no completion point");
     assert(rejected_user_completion_value == next_before + 1,
         "the rejected native submit used only the prospective sequence");
-    assert(submit_stats_work_matches(
-        work:                        vk::submit_work_counters(state),
-        inspected:                   1,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 1,
-        native_submissions:          1,
-    ), "native rejection performs one claim, one submit, and one rollback");
     assert(completion.submitted_count == 0
             && completion.submitted_head == null
             && completion.submitted_tail == null,
@@ -996,7 +901,7 @@ fn vk::Result accept_swapchain_submit(
 }
 
 fn void native_submit_failure_preserves_swapchain_readiness() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
@@ -1042,7 +947,7 @@ fn void native_submit_failure_preserves_swapchain_readiness() @test {
 }
 
 fn void swapchain_submit_path_guards_precede_native_mutation() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
@@ -1088,7 +993,6 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     ulong published_before = completion.published_sequence.load(
         AtomicOrdering.ACQUIRE,
     );
-    vk::SubmitStats stats_before = vk::submit_stats(state);
     accepted_swapchain_submit_calls = 0;
 
     gpu::SubmitDesc missing_stage = { .readiness = readiness };
@@ -1232,22 +1136,10 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
         published_before,
         AtomicOrdering.RELEASE,
     );
-    state.submit_queue_submits.store(
-        stats_before.queue_submits,
-        AtomicOrdering.RELEASE,
-    );
-    state.submit_completion_point_publications.store(
-        stats_before.completion_point_publications,
-        AtomicOrdering.RELEASE,
-    );
-    state.submit_completion_wait_calls.store(
-        stats_before.completion_wait_calls,
-        AtomicOrdering.RELEASE,
-    );
 }
 
 fn void completion_distance_backpressure_preserves_submit_state() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
@@ -1287,8 +1179,6 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     completion_counter_query_calls = 0;
     completion_counter_value = 0;
     completion_counter_result = vk::Result.SUCCESS;
-    vk::reset_submit_work_counters(state);
-
     assert(@catch(vk::vk_submit_with_queries(
         state:            state,
         queue:            gpu::get_queue(
@@ -1304,13 +1194,6 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
         "headroom is queried only when the cached value is insufficient");
     assert(counted_user_submit_calls == 0,
         "backpressure reaches no native queue submit");
-    assert(submit_stats_work_matches(
-        work:                        vk::submit_work_counters(state),
-        inspected:                   1,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 1,
-        native_submissions:          0,
-    ), "pre-native headroom rejection rolls back one complete claim");
     assert(completion.next_sequence == 2,
         "backpressure reserves no completion sequence");
     assert(lists[0].is_valid(),
@@ -1332,7 +1215,6 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
 
     completion_counter_query_calls = 0;
     completion_counter_value = 2;
-    vk::reset_submit_work_counters(state);
     assert(@catch(vk::vk_submit_with_queries(
         state:            state,
         queue:            gpu::get_queue(
@@ -1347,15 +1229,10 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     assert(completion_counter_query_calls == 1
         && completion.retired_sequence.load(AtomicOrdering.ACQUIRE) == 2,
         "a required headroom query advances the retired prefix");
+    assert(counted_user_submit_calls == 1,
+        "sufficient headroom reaches the injected native submit once");
     assert(lists[0].is_valid(),
         "native rejection after headroom preserves the executable token");
-    assert(submit_stats_work_matches(
-        work:                        vk::submit_work_counters(state),
-        inspected:                   1,
-        command_mutex_acquisitions:  1,
-        rollback_mutex_acquisitions: 1,
-        native_submissions:          1,
-    ), "native rejection after headroom remains one claim and rollback");
 
     completion.next_sequence = next_before;
     completion.retired_sequence.store(retired_before, AtomicOrdering.RELEASE);
@@ -1369,7 +1246,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
 }
 
 fn void completion_sequence_exhaustion_precedes_native_submit() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
@@ -1417,7 +1294,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
 }
 
 fn void native_device_loss_rolls_back_and_allows_discard() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
@@ -1652,7 +1529,7 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
 }
 
 fn void invalid_completion_wait_stage_preserves_token() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -1673,12 +1550,16 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
         .command_lists    = lists[..],
         .completion_waits = waits[..],
     };
-    ulong submits_before = stats_of(&device).queue_submits;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::QueueCompletionState* queue_completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    ulong next_sequence_before = queue_completion.next_sequence;
 
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
         "an empty completion wait destination stage is rejected");
-    assert(stats_of(&device).queue_submits == submits_before,
-        "invalid wait stages reach no native submit");
+    assert(queue_completion.next_sequence == next_sequence_before,
+        "invalid wait stages reserve no queue completion");
     assert(lists[0].is_valid(),
         "invalid wait stages preserve the executable token");
 
@@ -1706,7 +1587,7 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
 }
 
 fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -1738,12 +1619,12 @@ fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
     defer completion.queue_flags = selected_flags;
     completion.queue_flags = (vk::QueueFamilyFlags)(uint)
         vk::QueueFlagBits.TRANSFER_BIT;
-    ulong submits_before = stats_of(&device).queue_submits;
+    ulong next_sequence_before = completion.next_sequence;
 
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
         "a real submit rejects stages unsupported by the target queue");
-    assert(stats_of(&device).queue_submits == submits_before,
-        "queue-stage rejection reaches no native submit");
+    assert(completion.next_sequence == next_sequence_before,
+        "queue-stage rejection reserves no queue completion");
     assert(lists[0].is_valid(),
         "queue-stage rejection preserves the executable token");
 
@@ -1753,7 +1634,7 @@ fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
 }
 
 fn void same_queue_wait_elides_through_full_submit_path() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -1799,7 +1680,7 @@ fn void same_queue_wait_elides_through_full_submit_path() @test {
 }
 
 fn void invalid_readiness_handle_precedes_invalid_stage_mask() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
         &device,
@@ -1809,19 +1690,22 @@ fn void invalid_readiness_handle_precedes_invalid_stage_mask() @test {
         .readiness        = { .device = device },
         .readiness_before = { .host },
     };
-    ulong submits_before = stats_of(&device).queue_submits;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    ulong next_sequence_before = completion.next_sequence;
 
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_HANDLE,
         "invalid readiness identity precedes invalid stage shape");
-    assert(stats_of(&device).queue_submits == submits_before,
-        "readiness precedence is settled before native submission");
+    assert(completion.next_sequence == next_sequence_before,
+        "invalid readiness reserves no queue completion");
 }
 
 fn void empty_submit_returns_completion_point() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     gpu::SubmitDesc desc;
-    vk::SubmitStats before = stats_of(&device);
 
     gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;
 
@@ -1831,25 +1715,23 @@ fn void empty_submit_returns_completion_point() @test {
     assert(gpu::internal::completion_point_queue_id(point)
         == state.graphics_completion_id,
         "an empty submit targets the selected graphics queue");
-    assert(stats_of(&device).queue_submits == before.queue_submits + 1,
-        "an empty submit emits one completion signal");
-    vk::SubmitStats after = stats_of(&device);
-    assert(after.completion_point_publications
-        == before.completion_point_publications + 1,
-        "a successful submit publishes one scalar completion point");
-    assert(after.completion_point_allocations
-        == before.completion_point_allocations,
-        "publishing a scalar completion point allocates no table object");
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(
+            state,
+            gpu::internal::completion_point_queue_id(point),
+        )!!;
+    assert(completion.published_sequence.load(AtomicOrdering.ACQUIRE)
+            == gpu::internal::completion_point_sequence(point),
+        "an empty submit publishes the returned queue completion");
     gpu::wait_completion(point, 1_000_000_000)!!;
-    vk::SubmitStats waited = stats_of(&device);
-    assert(waited.completion_wait_calls == after.completion_wait_calls + 1,
-        "a completion wait records one blocking wait call");
+    assert(gpu::poll_completion(point)!!,
+        "the returned empty-submit completion becomes observable");
 }
 
 fn void foreign_completion_wait_rejects_before_native_submit() @test {
-    gpu::Device producer = make_submit_stats_test_device();
+    gpu::Device producer = make_submit_test_device();
     defer destroy_test_device(&producer)!!;
-    gpu::Device consumer = make_submit_stats_test_device();
+    gpu::Device consumer = make_submit_test_device();
     defer destroy_test_device(&consumer)!!;
 
     gpu::SubmitDesc producer_submit;
@@ -1874,12 +1756,19 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
         .command_lists    = lists[..],
         .completion_waits = waits[..],
     };
-    ulong submits_before = stats_of(&consumer).queue_submits;
+    vk::VkDeviceState* consumer_state =
+        gpu::internal::device_slots[consumer.index].data.state;
+    vk::QueueCompletionState* consumer_completion =
+        vk::queue_completion_state(
+            consumer_state,
+            command_queue.id,
+        )!!;
+    ulong next_sequence_before = consumer_completion.next_sequence;
 
     assert(@catch(submit_test_queue(&consumer, gpu::QueueKind.GRAPHICS, &desc)) == gpu::INVALID_HANDLE,
         "a completion point from another device is rejected");
-    assert(stats_of(&consumer).queue_submits == submits_before,
-        "foreign completion rejection reaches no native submit");
+    assert(consumer_completion.next_sequence == next_sequence_before,
+        "foreign completion rejection reserves no queue completion");
     assert(lists[0].is_valid(),
         "foreign completion rejection preserves the executable token");
 
@@ -1889,7 +1778,7 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
 }
 
 fn void unpublished_same_queue_wait_preserves_token() @test {
-    gpu::Device device = make_submit_stats_test_device();
+    gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;

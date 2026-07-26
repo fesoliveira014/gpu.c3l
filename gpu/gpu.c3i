@@ -243,10 +243,6 @@ enum QueueKind : int {
    hardcoding limits. *>
 struct DeviceCaps {
     bool presentation_enabled;
-    bool buffer_device_address;
-    bool synchronization2;
-    bool dynamic_rendering;
-    bool shader_int64;
     bool draw_indirect_count;
     // GPU-written root records and work arguments can execute without host
     // readback or CPU-loop emulation.
@@ -458,24 +454,6 @@ const Surface SURFACE_INVALID = {};
 const ulong RESOURCE_OWNER_KIND_COUNT = 10;
 const ulong MAX_DEVICE_RESOURCE_OWNER =
     ulong::max / RESOURCE_OWNER_KIND_COUNT;
-
-<* Test-only instrumentation for command resolution and native command
-   emission. Counters are process-wide relaxed atomics; compare snapshots only
-   after externally synchronizing the measured recording work. *>
-struct CommandResolutionStats @if(env::TESTING) {
-    ulong device_registry_resolutions;
-    ulong retained_pin_operations;
-    ulong command_table_lookups;
-    ulong pipeline_table_lookups;
-    ulong pipeline_cache_lookups;
-    // Counters for prohibited recording paths; always zero.
-    ulong encoder_cell_computations;
-    ulong encoder_lease_comparisons;
-    ulong recording_commands;
-    ulong native_commands;
-    ulong pipeline_bind_commands;
-    ulong descriptor_heap_set_bind_commands;
-}
 
 // A shader-visible 64-bit GPU address. Distinct from a plain ulong so it can't
 // be confused with sizes, offsets, or handles.

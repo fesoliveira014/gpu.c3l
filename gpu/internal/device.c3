@@ -94,33 +94,6 @@ struct DeviceOperation @private {
     bool                              owns_pin;
 }
 
-<* Private test counters for structural recording work. Compare
-   relaxed snapshots only around externally synchronized cold or warm work. *>
-struct RecordingWorkCounters @private @if(env::TESTING) {
-    ulong host_allocations;
-    ulong command_pool_creations;
-    ulong command_buffer_allocations;
-    ulong command_buffer_frees;
-    ulong command_buffer_resets;
-    ulong image_view_creations;
-    ulong vma_allocations;
-    ulong registry_lock_acquisitions;
-    ulong generated_scratch_misses;
-    ulong generated_dispatch_emissions;
-    ulong generated_draw_emissions;
-    ulong generated_indexed_draw_emissions;
-}
-
-Atomic{ulong} command_device_registry_resolutions @private @if(env::TESTING);
-Atomic{ulong} command_retained_pin_operations @private @if(env::TESTING);
-Atomic{ulong} command_table_lookups @private @if(env::TESTING);
-Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING);
-Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING);
-Atomic{ulong} command_recording_commands @private @if(env::TESTING);
-Atomic{ulong} command_native_commands @private @if(env::TESTING);
-Atomic{ulong} command_pipeline_bind_commands @private @if(env::TESTING);
-Atomic{ulong} command_descriptor_heap_set_bind_commands @private @if(env::TESTING);
-
 fn bool CommandListHandle.is_valid(self) =>
     self.owner != 0 && self.generation != 0;
 
@@ -141,95 +114,18 @@ fn uint command_token_device_identity(Device device) @private {
     return (uint)identity;
 }
 
-fn void note_command_device_registry_resolution() @private {
-    $if env::TESTING:
-        (void)command_device_registry_resolutions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_retained_pin_operation() @private {
-    $if env::TESTING:
-        (void)command_retained_pin_operations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_table_lookup() @private {
-    $if env::TESTING:
-        (void)command_table_lookups.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_pipeline_table_lookup() @private {
-    $if env::TESTING:
-        (void)command_pipeline_table_lookups.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_pipeline_cache_lookup() @private {
-    $if env::TESTING:
-        (void)command_pipeline_cache_lookups.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_recording_call() @private {
-    $if env::TESTING:
-        (void)command_recording_commands.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_native_call() @private {
-    $if env::TESTING:
-        (void)command_native_commands.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_pipeline_bind() @private {
-    $if env::TESTING:
-        (void)command_pipeline_bind_commands.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_descriptor_heap_set_bind() @private {
-    $if env::TESTING:
-        (void)command_descriptor_heap_set_bind_commands.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-
 DeviceSlot[MAX_DEVICES] device_slots @private;
 Atomic{bool} device_registry_lock @private;
 Atomic{ulong} device_resource_owner_counter @private;
-Atomic{ulong} device_registry_lock_acquisitions @private;
 
 fn void lock_device_registry() @private {
     while (device_registry_lock.set(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
-    (void)device_registry_lock_acquisitions.add(1, AtomicOrdering.RELAXED);
 }
 
 fn void unlock_device_registry() @private {
     (void)device_registry_lock.clear(AtomicOrdering.RELEASE);
-}
-
-fn ulong device_registry_lock_count() @private {
-    return device_registry_lock_acquisitions.load(AtomicOrdering.RELAXED);
-}
-
-fn void reset_device_registry_lock_count() @private @if(env::TESTING) {
-    device_registry_lock_acquisitions.store(0, AtomicOrdering.RELAXED);
 }
 
 fn ulong? allocate_device_resource_owner() @private {
@@ -297,8 +193,6 @@ fn DeviceOperation? borrow_retained_device_operation(
     Device* device,
     bool allow_lost = false,
 ) @private {
-    note_command_device_registry_resolution();
-    note_command_retained_pin_operation();
     if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
     if (device.reserved != 0 || device.index >= MAX_DEVICES) return gpu::INVALID_HANDLE~;
 

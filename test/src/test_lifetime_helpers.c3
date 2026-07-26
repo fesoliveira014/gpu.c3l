@@ -3,25 +3,10 @@ module gpu_test;
 import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
-import std::core::mem;
-import std::core::mem::alloc;
-
-alias ConfinedThreadAllocatorFn @if(env::TESTING) = fn void? (void*);
 
 struct OwnedSpan {
     gpu::GpuAllocation allocation;
     gpu::GpuSpan       span;
-}
-
-fn void? observe_confined_thread_allocator(
-    vk::RecordingHostAllocator* allocator,
-    ConfinedThreadAllocatorFn callback,
-    void* user_data,
-) @if(env::TESTING) {
-    Allocator previous = mem;
-    mem = allocator;
-    defer mem = previous;
-    callback(user_data)!;
 }
 
 fn gpu::Device? create_test_device(
@@ -332,35 +317,4 @@ fn void? readback_test_texture_data(
     gpu::invalidate_mapped_span(device, readback.span)!;
     char[] mapping = gpu::get_span_mapping(device, readback.span)!;
     out_data[..] = mapping[..];
-}
-
-fn void assert_warm_command_resolution(
-    gpu::CommandResolutionStats stats,
-    ulong expected_commands,
-    ulong expected_pipeline_lookups = 0,
-) @if(env::TESTING) {
-    assert(stats.device_registry_resolutions == 0,
-        "warm commands do not resolve the device registry");
-    assert(stats.retained_pin_operations == 0,
-        "warm commands do not borrow retained pins");
-    assert(stats.command_table_lookups == 0,
-        "warm commands use the stable record directly");
-    assert(stats.pipeline_table_lookups == expected_pipeline_lookups,
-        "warm commands perform the expected pipeline table lookups");
-    assert(stats.pipeline_cache_lookups == expected_pipeline_lookups,
-        "warm commands perform the expected pipeline cache lookups");
-    assert(stats.encoder_cell_computations == 0,
-        "warm commands perform no frontend encoder-cell computation");
-    assert(stats.encoder_lease_comparisons == 0,
-        "warm commands perform no packed-lease comparison");
-    assert(stats.recording_commands == expected_commands,
-        "the command counter observes each warm recording call");
-}
-
-fn void assert_shader_heap_bind_work(
-    gpu::CommandResolutionStats stats,
-    ulong expected_bind_points,
-) @if(env::TESTING) {
-    assert(stats.descriptor_heap_set_bind_commands == expected_bind_points,
-        "the descriptor set binds once per used bind point");
 }

@@ -8,8 +8,6 @@ import std::core::mem::allocators;
 
 // Headless (lavapipe): descriptor heap slot bookkeeping through the public API.
 
-const uint SAMPLER_LOOKUP_SCALE_OCCUPANCY = 65_536;
-
 struct DescriptorDiagnosticCapture {
     uint calls;
     fault expected_fault;
@@ -34,6 +32,50 @@ struct DescriptorBackendCapture {
     ZString expected_text;
     int expected_result;
     bool matched;
+}
+
+struct SamplerCreateCapture {
+    uint       calls;
+    vk::Result result;
+    float      max_anisotropy;
+}
+
+fn vk::Result capture_sampler_create(
+    void* user_data,
+    vk::Device device,
+    vk::SamplerCreateInfo* create_info,
+    vk::Sampler* out_sampler,
+) {
+    SamplerCreateCapture* capture = (SamplerCreateCapture*)user_data;
+    capture.calls++;
+    capture.max_anisotropy = create_info.max_anisotropy;
+    if (capture.result != vk::Result.SUCCESS) return capture.result;
+    return vk::create_sampler(
+        device:        device,
+        p_create_info: create_info,
+        p_allocator:   null,
+        p_sampler:     out_sampler,
+    );
+}
+
+fn gpu::SamplerIndex? intern_sampler_with_capture(
+    vk::VkDeviceState* state,
+    gpu::SamplerDesc* desc,
+    ulong hash,
+    SamplerCreateCapture* capture,
+) {
+    vk::SamplerKey key = vk::canonical_sampler_key(desc);
+    vk::SamplerCreateOps create_ops = {
+        .user_data = capture,
+        .create    = &capture_sampler_create,
+    };
+    return vk::intern_sampler_with(
+        state:      state,
+        desc:       desc,
+        key:        &key,
+        hash:       hash,
+        create_ops: &create_ops,
+    );
 }
 
 fn void capture_descriptor_backend_diagnostic(gpu::DebugMessage* message, void* user_data) {
@@ -173,30 +215,6 @@ fn void pipeline_layouts_share_heap_set_zero() @test {
         "graphics and compute layouts share the heap set-zero layout");
 }
 
-fn void sampler_lookup_scale_empty_bucket_miss_has_zero_work() @test {
-    gpu::Device device = make_heap_test_device(1, 1);
-    defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::SamplerTable table = vk::create_sampler_lookup_probe_table(
-        SAMPLER_LOOKUP_SCALE_OCCUPANCY,
-    );
-    defer vk::destroy_sampler_lookup_probe_table(&table);
-
-    vk::SamplerLookupProbeResult result =
-        vk::probe_sampler_lookup(state, &table);
-    assert(result.occupancy == SAMPLER_LOOKUP_SCALE_OCCUPANCY
-            && result.bucket_count == SAMPLER_LOOKUP_SCALE_OCCUPANCY * 2
-            && (result.bucket_count & (result.bucket_count - 1)) == 0,
-        "the scale probe publishes the exact sparse power-of-two table");
-    assert(result.probes >= 1 && result.probes <= 8,
-        "the scale probe hit examines at most eight candidates");
-    assert(result.empty_bucket_miss_probes == 0,
-        "a 65,536-entry empty-bucket miss examines zero candidates");
-    assert(vk::sampler_table_index_consistent(&table),
-        "the scale probe preserves the sampler bucket index");
-}
-
 fn void descriptor_sampler_failures_report_context() @test {
     gpu::Device device = make_heap_test_device(1, 1);
     defer destroy_test_device(&device)!!;
@@ -310,25 +328,15 @@ fn void texture_view_round_trip() @test {
         "created view and its raw shader index are valid");
     assert(live_descriptor_view_count(state, texture) == 1,
         "descriptor publication increments its owning texture once");
-    vk::reset_texture_view_accounting(state);
     gpu::destroy_texture_view(&device, view)!!;
-    vk::TextureViewAccountingCounters destroyed =
-        vk::texture_view_accounting(state);
-    assert(destroyed.cell_lookups == 1,
-        "successful texture-view destruction performs one cell lookup");
     assert(live_descriptor_view_count(state, texture) == 0,
         "successful texture-view destruction decrements its owner once");
 
-    vk::reset_texture_view_accounting(state);
     fault stale_fault = @catch(gpu::destroy_texture_view(&device, view));
     assert(stale_fault == gpu::INVALID_HANDLE,
         "destroying a stale view faults INVALID_HANDLE");
-    vk::TextureViewAccountingCounters stale =
-        vk::texture_view_accounting(state);
-    assert(stale.cell_lookups == 1,
-        "stale destruction performs one rejected cell lookup");
     assert(live_descriptor_view_count(state, texture) == 0,
-        "stale destruction leaves owner accounting unchanged");
+        "stale destruction leaves the owner count unchanged");
 }
 
 fn void texture_view_multi_layer_ranges_select_array_views() @test {
@@ -410,8 +418,6 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
         second_state,
         second_texture,
     );
-    vk::reset_texture_view_accounting(second_state);
-
     fault foreign = @catch(gpu::destroy_texture_view(&second_device, first_view));
     assert(foreign == gpu::INVALID_HANDLE,
         "a foreign texture view faults INVALID_HANDLE");
@@ -426,11 +432,6 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
         && live_descriptor_view_count(second_state, second_texture)
             == second_owner_before,
         "foreign release preserves both texture owner counts");
-    vk::TextureViewAccountingCounters rejected =
-        vk::texture_view_accounting(second_state);
-    assert(rejected.cell_lookups == 0,
-        "foreign device ownership rejects before backend cell lookup");
-
     gpu::destroy_texture_view(&first_device, first_view)!!;
     gpu::destroy_texture_view(&second_device, second_view)!!;
     gpu::destroy_texture(&first_device, first_texture)!!;
@@ -554,13 +555,11 @@ fn void texture_view_zero_owner_count_faults_before_destruction_mutation() @test
     };
     state.debug_callback = &capture_descriptor_backend_diagnostic;
     state.debug_user_data = &capture;
-    vk::reset_texture_view_accounting(state);
+    fault invariant = @catch(gpu::destroy_texture_view(&device, view));
 
-    fault accounting = @catch(gpu::destroy_texture_view(&device, view));
-
-    assert(accounting == gpu::BACKEND_ERROR
+    assert(invariant == gpu::BACKEND_ERROR
             && capture.calls == 1 && capture.matched,
-        "zero owner accounting emits one exact backend invariant fault");
+        "zero owner state emits one exact backend invariant fault");
     assert(cell.used == cell_before.used
             && cell.owner == cell_before.owner
             && cell.generation == cell_before.generation,
@@ -569,11 +568,6 @@ fn void texture_view_zero_owner_count_faults_before_destruction_mutation() @test
         "decrement invariant failure preserves the free list");
     assert(owner.live_descriptor_views == 0,
         "decrement invariant failure does not underflow the owner count");
-    vk::TextureViewAccountingCounters counters =
-        vk::texture_view_accounting(state);
-    assert(counters.cell_lookups == 1,
-        "decrement validation reuses the single resolved cell");
-
     state.debug_callback = null;
     owner.live_descriptor_views = 1;
     gpu::destroy_texture_view(&device, view)!!;
@@ -603,11 +597,9 @@ fn void texture_view_missing_owner_faults_before_destruction_mutation() @test {
     };
     state.debug_callback = &capture_descriptor_backend_diagnostic;
     state.debug_user_data = &capture;
-    vk::reset_texture_view_accounting(state);
+    fault invariant = @catch(gpu::destroy_texture_view(&device, view));
 
-    fault accounting = @catch(gpu::destroy_texture_view(&device, view));
-
-    assert(accounting == gpu::BACKEND_ERROR
+    assert(invariant == gpu::BACKEND_ERROR
             && capture.calls == 1 && capture.matched,
         "a missing live descriptor owner emits one exact backend fault");
     assert(cell.used == cell_before.used
@@ -618,11 +610,6 @@ fn void texture_view_missing_owner_faults_before_destruction_mutation() @test {
         "missing owner failure preserves the free list");
     assert(owner.live_descriptor_views == 1,
         "missing owner failure preserves the real owner count");
-    vk::TextureViewAccountingCounters counters =
-        vk::texture_view_accounting(state);
-    assert(counters.cell_lookups == 1,
-        "missing owner failure reuses the single resolved descriptor cell");
-
     state.debug_callback = null;
     cell.owner = owner_before;
     gpu::destroy_texture_view(&device, view)!!;
@@ -654,13 +641,13 @@ fn void texture_view_increment_invariant_faults_transactionally() @test {
         .layer_count = 1,
     };
 
-    fault accounting = @catch(gpu::create_texture_view(
+    fault invariant = @catch(gpu::create_texture_view(
         &device,
         texture,
         &desc,
     ));
 
-    assert(accounting == gpu::BACKEND_ERROR
+    assert(invariant == gpu::BACKEND_ERROR
             && capture.calls == 1 && capture.matched,
         "single increment overflow emits one exact backend invariant fault");
     assert(owner.live_descriptor_views == 8,
@@ -703,13 +690,13 @@ fn void texture_views_batch_increment_invariant_is_transactional() @test {
     };
     gpu::TextureView[2] views_before = views;
 
-    fault accounting = @catch(gpu::create_texture_views(
+    fault invariant = @catch(gpu::create_texture_views(
         &device,
         descs[..],
         views[..],
     ));
 
-    assert(accounting == gpu::BACKEND_ERROR
+    assert(invariant == gpu::BACKEND_ERROR
             && capture.calls == 1 && capture.matched,
         "repeated-owner batch overflow emits one exact invariant fault");
     assert(owner.live_descriptor_views == 7,
@@ -746,13 +733,13 @@ fn void texture_views_late_increment_invariant_rolls_back_cached_view() @test {
     };
     gpu::TextureView[2] views;
 
-    fault accounting = @catch(gpu::create_texture_views(
+    fault invariant = @catch(gpu::create_texture_views(
         &device,
         descs[..],
         views[..],
     ));
 
-    assert(accounting == gpu::BACKEND_ERROR,
+    assert(invariant == gpu::BACKEND_ERROR,
         "a later inconsistent owner rejects the complete batch");
     assert(cached_texture_view_count(state, first) == 0,
         "late increment validation rolls back an earlier cached native view");
@@ -848,7 +835,7 @@ fn void destroy_texture_unaffected_by_unrelated_descriptor() @test {
     gpu::destroy_texture(&device, texture_b)!!;
 }
 
-fn void texture_destroy_ownership_work_is_high_water_invariant() @test {
+fn void texture_destroy_ignores_descriptor_high_water() @test {
     gpu::Device device = make_heap_test_device(65_536, 1);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
@@ -858,16 +845,11 @@ fn void texture_destroy_ownership_work_is_high_water_invariant() @test {
     foreach (high_water : high_water_marks) {
         gpu::TextureHandle texture = make_heap_texture(&device);
         state.shader_heap.descriptors.texture_next_new = high_water;
-        vk::reset_texture_view_accounting(state);
 
         gpu::destroy_texture(&device, texture)!!;
 
-        vk::TextureViewAccountingCounters counters =
-            vk::texture_view_accounting(state);
-        assert(counters.cell_lookups == 0,
-            "texture destruction does not inspect descriptor cells");
-        assert(counters.ownership_work_units == 1,
-            "texture destruction charges one ownership decision at every high-water mark");
+        assert(@catch(state.textures.get(texture)) == gpu::INVALID_HANDLE,
+            "texture destruction succeeds at every descriptor high-water mark");
     }
 }
 
@@ -1317,7 +1299,7 @@ fn void sampler_hash_collisions_preserve_distinct_keys() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     const ulong COLLISION_HASH = 0x5a5a5a5a5a5a5a5a;
-    vk::set_sampler_hash_override(state, true, COLLISION_HASH);
+    SamplerCreateCapture capture;
 
     gpu::SamplerDesc first_desc = {
         .min_filter = gpu::Filter.NEAREST,
@@ -1347,61 +1329,91 @@ fn void sampler_hash_collisions_preserve_distinct_keys() @test {
             && !vk::sampler_key_equal(&second_key, &third_key),
         "the collision seam receives distinct canonical keys");
 
-    gpu::SamplerIndex first = gpu::intern_sampler(&device, &first_desc)!!;
-    gpu::SamplerIndex second = gpu::intern_sampler(&device, &second_desc)!!;
-    gpu::SamplerIndex third = gpu::intern_sampler(&device, &third_desc)!!;
+    gpu::SamplerIndex first = intern_sampler_with_capture(
+        state:   state,
+        desc:    &first_desc,
+        hash:    COLLISION_HASH,
+        capture: &capture,
+    )!!;
+    gpu::SamplerIndex second = intern_sampler_with_capture(
+        state:   state,
+        desc:    &second_desc,
+        hash:    COLLISION_HASH,
+        capture: &capture,
+    )!!;
+    gpu::SamplerIndex third = intern_sampler_with_capture(
+        state:   state,
+        desc:    &third_desc,
+        hash:    COLLISION_HASH,
+        capture: &capture,
+    )!!;
 
     assert(first != second && first != third && second != third,
         "full key equality preserves every forced-hash collision identity");
+    assert(capture.calls == 3,
+        "each distinct collision creates one native sampler");
     assert(state.samplers.count == 3
             && state.shader_heap.descriptors.sampler_next_new == 3,
         "a collision publishes exactly three cells and descriptors");
     assert(state.samplers.slots[0].native != null
             && state.samplers.slots[1].native != null
-            && state.samplers.slots[2].native != null,
-        "all colliding identities own native samplers");
+            && state.samplers.slots[2].native != null
+            && state.samplers.slots[0].native
+                != state.samplers.slots[1].native
+            && state.samplers.slots[0].native
+                != state.samplers.slots[2].native
+            && state.samplers.slots[1].native
+                != state.samplers.slots[2].native,
+        "all colliding identities own distinct native samplers");
     assert(state.samplers.slots[0].hash == state.samplers.slots[1].hash,
         "the distinct identities occupy one forced-hash chain");
 
-    vk::reset_sampler_lookup_stats(state);
     assert(vk::find_sampler_cell(
-            state: state,
             table: &state.samplers,
             hash:  COLLISION_HASH,
             key:   &third_key,
-        ) == 2
-        && vk::sampler_lookup_stats(state).lookup_probes == 1,
-        "collision-chain head lookup probes one candidate");
-    vk::reset_sampler_lookup_stats(state);
+        ) == 2,
+        "collision lookup resolves the third canonical key");
     assert(vk::find_sampler_cell(
-            state: state,
             table: &state.samplers,
             hash:  COLLISION_HASH,
             key:   &second_key,
-        ) == 1
-        && vk::sampler_lookup_stats(state).lookup_probes == 2,
-        "collision-chain middle lookup probes two candidates");
-    vk::reset_sampler_lookup_stats(state);
+        ) == 1,
+        "collision lookup resolves the second canonical key");
     assert(vk::find_sampler_cell(
-            state: state,
             table: &state.samplers,
             hash:  COLLISION_HASH,
             key:   &first_key,
-        ) == 0
-        && vk::sampler_lookup_stats(state).lookup_probes == 3,
-        "collision-chain tail lookup probes three candidates");
-    vk::reset_sampler_lookup_stats(state);
+        ) == 0,
+        "collision lookup resolves the first canonical key");
     assert(vk::find_sampler_cell(
-            state: state,
             table: &state.samplers,
             hash:  COLLISION_HASH,
             key:   &missing_key,
-        ) == vk::SAMPLER_CELL_NONE
-        && vk::sampler_lookup_stats(state).lookup_probes == 3,
-        "same-bucket miss probes the complete collision chain once");
+        ) == vk::SAMPLER_CELL_NONE,
+        "collision lookup rejects a missing canonical key");
+    assert(intern_sampler_with_capture(
+            state:   state,
+            desc:    &first_desc,
+            hash:    COLLISION_HASH,
+            capture: &capture,
+        )!! == first
+        && intern_sampler_with_capture(
+            state:   state,
+            desc:    &second_desc,
+            hash:    COLLISION_HASH,
+            capture: &capture,
+        )!! == second
+        && intern_sampler_with_capture(
+            state:   state,
+            desc:    &third_desc,
+            hash:    COLLISION_HASH,
+            capture: &capture,
+        )!! == third
+        && capture.calls == 3,
+        "forced-collision cache hits reuse indices and native samplers");
     assert(vk::sampler_table_index_consistent(&state.samplers),
         "the forced-collision bucket index is structurally consistent");
-    vk::set_sampler_hash_override(state, false, 0);
 }
 
 fn void sampler_native_create_failure_is_transactional() @test {
@@ -1420,22 +1432,35 @@ fn void sampler_native_create_failure_is_transactional() @test {
     ulong hash = vk::hash_sampler_key(&key);
     uint bucket = vk::sampler_bucket(hash, (uint)state.samplers.bucket_heads.len);
     uint bucket_head = state.samplers.bucket_heads[bucket];
+    SamplerCreateCapture capture = {
+        .result = vk::Result.ERROR_OUT_OF_HOST_MEMORY,
+    };
 
-    vk::set_sampler_create_result(
-        state,
-        vk::Result.ERROR_OUT_OF_HOST_MEMORY,
-    );
-    assert(@catch(gpu::intern_sampler(&device, &desc))
+    assert(@catch(intern_sampler_with_capture(
+            state:   state,
+            desc:    &desc,
+            hash:    hash,
+            capture: &capture,
+        ))
         == gpu::OUT_OF_HOST_MEMORY,
         "native sampler creation faults without publication");
+    assert(capture.calls == 1,
+        "the local native-create seam receives the failed attempt");
     assert(state.samplers.count == table_count
             && state.shader_heap.descriptors.sampler_next_new == heap_count,
         "native sampler creation failure preserves both counts");
     assert(state.samplers.bucket_heads[bucket] == bucket_head
             && vk::sampler_table_index_consistent(&state.samplers),
         "native sampler creation failure preserves the bucket index");
-    assert(gpu::intern_sampler(&device, &existing_desc)!! == existing,
-        "a pre-existing hashed hit survives native creation failure");
+    vk::SamplerKey existing_key = vk::canonical_sampler_key(&existing_desc);
+    assert(intern_sampler_with_capture(
+            state:   state,
+            desc:    &existing_desc,
+            hash:    vk::hash_sampler_key(&existing_key),
+            capture: &capture,
+        )!! == existing
+        && capture.calls == 1,
+        "a pre-existing hashed hit survives without another native create");
 
     gpu::SamplerIndex index = gpu::intern_sampler(&device, &desc)!!;
     assert(index.value == heap_count + 1,
@@ -1480,16 +1505,22 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
             .anisotropy_enable = true,
             .max_anisotropy = caps.max_sampler_anisotropy,
         };
-        gpu::intern_sampler(&device, &exact_anisotropy)!!;
-        assert(vk::sampler_last_create_max_anisotropy(state)
-                == caps.max_sampler_anisotropy,
+        vk::SamplerKey exact_key = vk::canonical_sampler_key(
+            &exact_anisotropy,
+        );
+        SamplerCreateCapture capture;
+        intern_sampler_with_capture(
+            state:   state,
+            desc:    &exact_anisotropy,
+            hash:    vk::hash_sampler_key(&exact_key),
+            capture: &capture,
+        )!!;
+        assert(capture.calls == 1
+                && capture.max_anisotropy == caps.max_sampler_anisotropy,
             "native sampler creation receives the exact accepted anisotropy value");
 
         uint sampler_count = state.samplers.count;
         uint sampler_heap_count = state.shader_heap.descriptors.sampler_next_new;
-        vk::reset_sampler_lookup_stats(state);
-        ulong sampler_lookup_probes =
-            vk::sampler_lookup_stats(state).lookup_probes;
         gpu::SamplerDesc over_anisotropy = exact_anisotropy;
         over_anisotropy.max_anisotropy = caps.max_sampler_anisotropy + 1.0f;
         assert(@catch(gpu::intern_sampler(&device, &over_anisotropy))
@@ -1497,12 +1528,8 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
             "over-limit anisotropy is rejected before Vulkan sampler interning");
         assert(state.samplers.count == sampler_count
                 && state.shader_heap.descriptors.sampler_next_new
-                    == sampler_heap_count
-                && vk::sampler_lookup_stats(state).lookup_probes
-                    == sampler_lookup_probes
-                && vk::sampler_last_create_max_anisotropy(state)
-                    == caps.max_sampler_anisotropy,
-            "over-limit anisotropy preserves lookup, table, heap, and native-create state");
+                    == sampler_heap_count,
+            "over-limit anisotropy preserves sampler table and heap state");
     }
 
     float bias_limit = caps.max_sampler_lod_bias;
@@ -1585,7 +1612,7 @@ fn void live_descriptors_block_device_destruction() @test {
     destroy_test_device(&device)!!;
 }
 
-fn void device_loss_teardown_accepts_live_texture_view_accounting() @test {
+fn void device_loss_teardown_accepts_live_texture_views() @test {
     gpu::Device device = make_heap_test_device(8, 1);
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     gpu::TextureViewDesc desc = {
@@ -1607,7 +1634,7 @@ fn void device_loss_teardown_accepts_live_texture_view_accounting() @test {
         "device-loss fixture owns one descriptor and one cached native view");
     assert(@catch(vk::check_backend_result(
         state:     state,
-        operation: "descriptor accounting teardown",
+        operation: "descriptor teardown",
         result:    vk::Result.ERROR_DEVICE_LOST,
     )) == gpu::DEVICE_LOST,
         "the fixture enters forced device-loss teardown");

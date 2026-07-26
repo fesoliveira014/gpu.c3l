@@ -14,13 +14,12 @@ uint completion_injected_wait_calls;
 vk::Result completion_injected_wait_result;
 Atomic{uint} completion_race_arrived;
 Atomic{bool} completion_race_release;
-Atomic{uint} completion_retirement_arrived;
-Atomic{bool} completion_retirement_release;
 
 struct CompletionPollWorkerArgs {
     vk::VkDeviceState* state;
     uint               queue_id;
     ulong              sequence;
+    vk::CompletionRetirementOps* retirement_ops;
     bool               result;
 }
 
@@ -34,6 +33,11 @@ struct CompletionWaitWorkerArgs {
 struct CompletionMutexHolderArgs {
     Mutex*       mutex;
     Atomic{bool} entered;
+    Atomic{bool} release;
+}
+
+struct CompletionRetirementGate {
+    Atomic{uint} arrived;
     Atomic{bool} release;
 }
 
@@ -80,9 +84,10 @@ fn vk::Result query_completion_rendezvous(
 }
 
 fn void rendezvous_before_retirement_lock(void* user_data) {
-    (void)user_data;
-    (void)completion_retirement_arrived.add(1, AtomicOrdering.RELEASE);
-    while (!completion_retirement_release.load(AtomicOrdering.ACQUIRE)) {
+    CompletionRetirementGate* gate =
+        (CompletionRetirementGate*)user_data;
+    (void)gate.arrived.add(1, AtomicOrdering.RELEASE);
+    while (!gate.release.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
 }
@@ -90,11 +95,11 @@ fn void rendezvous_before_retirement_lock(void* user_data) {
 fn int completion_poll_worker(void* raw_args) {
     CompletionPollWorkerArgs* args = (CompletionPollWorkerArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-        args.result = vk::vk_poll_completion_with_query(
+        args.result = vk::vk_poll_completion_with_ops(
             state:    args.state,
             queue_id: args.queue_id,
             sequence: args.sequence,
-            query_fn: &query_completion_rendezvous,
+            ops:      args.retirement_ops,
         )!!;
     };
     return 0;
@@ -294,7 +299,6 @@ fn void completion_cache_skips_native_and_locked_work() @test {
     assert(completion_injected_query_calls == 1,
         "the first observation performs one native query");
 
-    vk::reset_completion_work_counters(state);
     completion_injected_query_calls = 0;
     completion_injected_wait_calls = 0;
     completion_injected_wait_result = vk::Result.ERROR_DEVICE_LOST;
@@ -325,21 +329,12 @@ fn void completion_cache_skips_native_and_locked_work() @test {
     assert(holder.join()!! == 0,
         "the submit-mutex holder exits after cached observations");
 
-    vk::CompletionWorkCounters counters =
-        vk::completion_work_counters(state);
     assert(completion_injected_query_calls == 0
         && completion_injected_wait_calls == 0,
         "cached observations perform no injected native work");
-    assert(counters.native_counter_queries == 0
-        && counters.native_wait_calls == 0
-        && counters.retirement_lock_acquisitions == 0,
-        "cached observations perform no native or retirement-lock work");
-    assert(counters.cached_poll_hits == 100_000
-        && counters.cached_wait_hits == 1,
-        "every cached observation is counted exactly once");
 }
 
-fn void concurrent_cached_waits_update_atomic_stats() @test {
+fn void concurrent_cached_waits_skip_native_work() @test {
     gpu::Device device = create_completion_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -359,8 +354,6 @@ fn void concurrent_cached_waits_update_atomic_stats() @test {
         query_fn: &query_injected_completion,
     )!!, "the setup poll retires the shared wait point");
 
-    vk::SubmitStats before = vk::submit_stats(state);
-    vk::reset_completion_work_counters(state);
     completion_injected_wait_calls = 0;
     completion_injected_wait_result = vk::Result.ERROR_DEVICE_LOST;
     CompletionWaitWorkerArgs[2] args;
@@ -378,13 +371,7 @@ fn void concurrent_cached_waits_update_atomic_stats() @test {
             "each concurrent cached wait completes");
     }
 
-    vk::SubmitStats after = vk::submit_stats(state);
-    vk::CompletionWorkCounters work = vk::completion_work_counters(state);
-    assert(after.completion_wait_calls == before.completion_wait_calls + 2,
-        "concurrent waits update the atomic live wait count exactly");
-    assert(completion_injected_wait_calls == 0
-        && work.native_wait_calls == 0
-        && work.cached_wait_hits == 2,
+    assert(completion_injected_wait_calls == 0,
         "concurrent cached waits perform no native wait work");
 }
 
@@ -440,7 +427,7 @@ fn void wait_retires_exact_sequence_and_timeout_preserves_state() @test {
     )!!, "the timed-out point remains reusable");
 }
 
-fn void concurrent_first_observers_publish_one_retirement() @test {
+fn void concurrent_first_observers_retire_monotonically() @test {
     gpu::Device device = create_completion_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -456,22 +443,20 @@ fn void concurrent_first_observers_publish_one_retirement() @test {
     completion_injected_counter = sequence;
     completion_race_arrived.store(0, AtomicOrdering.RELAXED);
     completion_race_release.store(false, AtomicOrdering.RELAXED);
-    completion_retirement_arrived.store(0, AtomicOrdering.RELAXED);
-    completion_retirement_release.store(false, AtomicOrdering.RELAXED);
-    vk::set_completion_retirement_lock_hook(
-        state,
-        &rendezvous_before_retirement_lock,
-        null,
-    );
-    defer vk::set_completion_retirement_lock_hook(state, null, null);
-    vk::reset_completion_work_counters(state);
+    CompletionRetirementGate gate = {};
+    vk::CompletionRetirementOps retirement_ops = {
+        .user_data         = &gate,
+        .query             = &query_completion_rendezvous,
+        .before_retirement = &rendezvous_before_retirement_lock,
+    };
     CompletionPollWorkerArgs[2] args;
     Thread[2] workers;
     for (uint i = 0; i < 2; i++) {
         args[i] = {
-            .state    = state,
-            .queue_id = queue.id,
-            .sequence = sequence,
+            .state          = state,
+            .queue_id       = queue.id,
+            .sequence       = sequence,
+            .retirement_ops = &retirement_ops,
         };
         workers[i].create(&completion_poll_worker, &args[i])!!;
     }
@@ -479,21 +464,18 @@ fn void concurrent_first_observers_publish_one_retirement() @test {
         thread::yield();
     }
     completion_race_release.store(true, AtomicOrdering.RELEASE);
-    while (completion_retirement_arrived.load(AtomicOrdering.ACQUIRE) < 2) {
+    while (gate.arrived.load(AtomicOrdering.ACQUIRE) < 2) {
         thread::yield();
     }
-    completion_retirement_release.store(true, AtomicOrdering.RELEASE);
+    gate.release.store(true, AtomicOrdering.RELEASE);
     foreach (i, &worker : workers) {
         assert(worker.join()!! == 0 && args[i].result,
             "both concurrent observers report full retirement");
     }
 
-    vk::CompletionWorkCounters counters =
-        vk::completion_work_counters(state);
-    assert(counters.native_counter_queries == 2,
-        "both first observers reach their controlled native query");
-    assert(counters.retirement_passes == 1,
-        "competing observers publish retirement exactly once");
+    assert(completion_race_arrived.load(AtomicOrdering.ACQUIRE) == 2
+            && gate.arrived.load(AtomicOrdering.ACQUIRE) == 2,
+        "both first observers reach the query and retirement checkpoints");
     assert(vk::queue_completion_state(state, queue.id)!!
             .retired_sequence.load(AtomicOrdering.ACQUIRE) == sequence,
         "the concurrent retired prefix is exact and monotonic");

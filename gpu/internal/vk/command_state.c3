@@ -122,11 +122,8 @@ struct BoundPipeline {
 }
 
 struct NativePipelineBinding {
-    vk::Pipeline                  pipeline;
-    vk::PipelineLayout            layout;
-    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
-    uint                          cache_entry;
-    PipelineKind                  kind;
+    vk::Pipeline pipeline;
+    uint         cache_entry;
 }
 
 struct DescriptorHeapCommandBinding {
@@ -246,7 +243,6 @@ fn CommandRecord*? CommandTable.get(
     &self,
     gpu::internal::CommandListHandle handle,
 ) {
-    gpu::internal::note_command_table_lookup();
     if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = handle.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
@@ -280,10 +276,7 @@ fn CommandRecord*? resolve_command(
     gpu::CommandList* token,
 ) @if(env::TESTING) {
     CommandRecord* record =
-        gpu::internal::recording_command(
-            token,
-            count_command: false,
-        )!;
+        gpu::internal::recording_command(token)!;
     return record;
 }
 

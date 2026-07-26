@@ -226,7 +226,7 @@ VMA allocator through typed Vulkan state
 descriptor heaps
 caller-owned allocation and completion lifetimes
 pipeline cache
-debug and stats state
+debug routing and memory reporting
 ```
 
 Public shape:
@@ -679,9 +679,10 @@ The direct recording path retains the record-owned runtime `CommandOps`
 dispatch and fallible `cmd_*` signatures.
 
 Focused behavioral tests invoke every command family through both operation
-tables. Allocator, work, resolution, reference-state, fault, and native-emission
-observations are the authority for warm behavior; there is no source-policy
-scanner. Manual benchmark timing is always advisory.
+tables. Public output and faults, ownership and lifetime state, exact native
+lowering and emission, and validation-clean execution are the authority for
+warm behavior; there is no source-policy scanner. Manual benchmark timing is
+always advisory.
 
 The shader-visible descriptor heap is device-global and bound lazily on the
 first pipeline selection in a command record. Its descriptor-indexing set 0

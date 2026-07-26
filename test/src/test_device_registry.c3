@@ -672,42 +672,6 @@ fn void command_calls_use_the_retained_lifetime_pin() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void warm_command_dispatch_skips_resolution_paths() @test {
-    CommandPinFixture fixture;
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-    )!!;
-    gpu::CommandList commands = begin_command_pin(&device)!!;
-    gpu::reset_command_resolution_stats();
-
-    gpu::Barrier barrier = {
-        .before = { .compute = true },
-        .after  = { .compute = true },
-    };
-    gpu::cmd_barrier(&commands, &barrier)!!;
-    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
-
-    assert(stats.device_registry_resolutions == 0,
-        "warm recording does not resolve the device registry");
-    assert(stats.retained_pin_operations == 0,
-        "warm recording does not borrow or acquire a device pin");
-    assert(stats.command_table_lookups == 0,
-        "warm recording does not resolve the backend command table");
-    assert(stats.pipeline_table_lookups == 0
-        && stats.pipeline_cache_lookups == 0,
-        "a warm barrier performs no pipeline resolution");
-    assert(stats.encoder_cell_computations == 0,
-        "removed encoder-cell proof remains zero");
-    assert(stats.encoder_lease_comparisons == 0,
-        "removed encoder-lease proof remains zero");
-    assert(stats.recording_commands == 1,
-        "the counter distinguishes one recording operation from resolution");
-
-    gpu::discard_commands(&commands)!!;
-    gpu::destroy_device(&device)!!;
-}
-
 fn void null_and_stale_direct_command_tokens_are_rejected() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(

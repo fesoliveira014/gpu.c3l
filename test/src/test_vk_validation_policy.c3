@@ -167,26 +167,50 @@ fn void instance_plans_callback_names_and_layers_independently() @test {
         capture:       &capture,
     );
 
-    vk::VkInstanceDesc plan = vk::runtime_instance_desc(&desc, &messenger_info);
+    vk::RuntimeConfig config = {
+        .validation = {
+            .contract      = desc.contract_validation,
+            .vulkan_layers = desc.enable_vulkan_validation,
+        },
+        .debug_names    = desc.enable_debug_names,
+        .debug_callback = desc.debug_callback,
+    };
+    vk::VkInstanceDesc plan = vk::runtime_instance_desc(
+        config:           &config,
+        application_name: desc.application_name,
+        messenger_info:   &messenger_info,
+    );
     assert(!plan.enable_validation && !plan.enable_debug_utils,
         "contract and tracking policies request no instance instrumentation");
 
-    desc.debug_callback = &capture_policy_diagnostic;
-    plan = vk::runtime_instance_desc(&desc, &messenger_info);
+    config.debug_callback = &capture_policy_diagnostic;
+    plan = vk::runtime_instance_desc(
+        config:           &config,
+        application_name: desc.application_name,
+        messenger_info:   &messenger_info,
+    );
     assert(!plan.enable_validation && plan.enable_debug_utils,
         "callback-only planning requests debug utils without layers");
     assert(plan.debug_messenger_info == null,
         "callback-only planning does not chain the layer messenger");
 
-    desc.debug_callback = null;
-    desc.enable_debug_names = true;
-    plan = vk::runtime_instance_desc(&desc, &messenger_info);
+    config.debug_callback = null;
+    config.debug_names = true;
+    plan = vk::runtime_instance_desc(
+        config:           &config,
+        application_name: desc.application_name,
+        messenger_info:   &messenger_info,
+    );
     assert(!plan.enable_validation && plan.enable_debug_utils,
         "names-only planning requests debug utils without layers");
 
-    desc.enable_debug_names = false;
-    desc.enable_vulkan_validation = true;
-    plan = vk::runtime_instance_desc(&desc, &messenger_info);
+    config.debug_names = false;
+    config.validation.vulkan_layers = true;
+    plan = vk::runtime_instance_desc(
+        config:           &config,
+        application_name: desc.application_name,
+        messenger_info:   &messenger_info,
+    );
     assert(plan.enable_validation && plan.enable_debug_utils,
         "layer planning requests layers and debug utils");
     assert(plan.debug_messenger_info == &messenger_info,
@@ -395,12 +419,9 @@ fn void contract_diagnostics_and_callback_presence_are_independent() @test {
                 .access = { .read },
             },
         )!!;
-        gpu::reset_command_resolution_stats();
         fault misuse = @catch(gpu::cmd_texture_barrier(&commands, &barrier));
         assert(misuse == gpu::INVALID_ARGUMENT,
             "full command checks are independent of callback presence");
-        assert(gpu::command_resolution_stats().native_commands == 0,
-            "full rejection precedes native command emission");
         assert(capture.calls == (callback ? 1 : 0),
             "configured callbacks observe but never enable full checks");
         gpu::discard_commands(&commands)!!;
@@ -477,12 +498,9 @@ fn void trusted_commands_retain_the_mandatory_safety_floor() @test {
     )!!;
     defer discard_test_commands(&commands)!!;
 
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_copy_buffer(&commands, null))
         == gpu::INVALID_ARGUMENT,
         "trusted commands reject null host descriptors");
-    assert(gpu::command_resolution_stats().native_commands == 0,
-        "mandatory safety rejection performs no native call");
 }
 
 fn void trusted_rejects_foreign_and_stale_resources() @test {
@@ -810,10 +828,8 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
             &state.allocations.get(
                 owned.allocation,
             )!!.tracked_command_references;
-        vk::CommandBufferStats before = vk::command_buffer_stats(state);
         gpu::CommandList commands = record_policy_fill(&allocator, owned.span);
         vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-        vk::CommandBufferStats recorded = vk::command_buffer_stats(state);
         bool full = contract == gpu::ContractValidation.FULL;
         assert((record.scratch.reference_count == 1) == full,
             "device-loss setup reflects the selected contract mode");
@@ -822,19 +838,10 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
         assert(retained_counter.load(AtomicOrdering.RELAXED)
                 == (full ? (uint)1 : (uint)0),
             "device-loss setup retains exactly the selected resource work");
-        assert(recorded.allocated == before.allocated
-            && recorded.freed == before.freed
-            && recorded.pending == before.pending,
-            "device-loss recording reuses its allocator's native buffer");
         gpu::internal::mark_device_lost(&device);
         gpu::discard_commands(&commands)!!;
         assert(retained_counter.load(AtomicOrdering.RELAXED) == 0,
             "device-loss cleanup releases exactly the selected reference work");
-        vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
-        assert(discarded.allocated == recorded.allocated
-            && discarded.freed == recorded.freed
-            && discarded.pending == before.pending,
-            "lost-command discard performs no extra native allocation or free");
         gpu::destroy_command_allocator(&allocator)!!;
         destroy_test_device(&device)!!;
         assert(!device.is_valid(),

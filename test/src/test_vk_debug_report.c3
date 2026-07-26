@@ -218,8 +218,10 @@ fn void vulkan_debug_message_delivery_uses_consumer_synchronization() @test {
 fn void runtime_debug_messenger_failure_routes_structured_warning() @test {
     DebugCapture capture;
     vk::VkRuntimeState state = {
-        .debug_callback  = &capture_debug_message,
-        .debug_user_data = &capture,
+        .config = {
+            .debug_callback  = &capture_debug_message,
+            .debug_user_data = &capture,
+        },
     };
 
     vk::report_runtime_debug_messenger_failure(&state);

@@ -5,6 +5,7 @@ import gpu @public;
 import vk;
 import std::thread;
 import std::core::mem;
+import std::core::env;
 import std::atomic;
 import std::atomic::types;
 
@@ -15,16 +16,24 @@ alias QueueSubmit2Fn @private = fn vk::Result (
     vk::SubmitInfo2*,
     vk::Fence,
 );
-alias SubmissionCheckpointHook @if(env::TESTING) = fn void (
-    void*, SubmissionCheckpoint, gpu::CompletionPoint
+alias SubmissionCheckpointFn @private @if(env::TESTING) = fn void (
+    void*,
+    SubmissionCheckpoint,
 );
 
 const uint MAX_QUEUE_FAMILIES = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES + 4;
 
-enum SubmissionCheckpoint : uint {
+enum SubmissionCheckpoint : uint @if(env::TESTING) {
     NATIVE_ACCEPTED,
     BATCHES_PUBLISHED,
     TOKEN_PUBLISHED,
+}
+
+struct QueueSubmitOps @private {
+    QueueSubmit2Fn              submit;
+    SemaphoreCounterQueryFn     counter_query;
+    void*                       checkpoint_user_data @if(env::TESTING);
+    SubmissionCheckpointFn      checkpoint @if(env::TESTING);
 }
 
 struct QueueFamilies {
@@ -39,35 +48,6 @@ struct QueueFamilies {
     uint present_index;
     bool presentation;
     bool async_compute;
-}
-
-<* Submit accounting, whitebox-exposed via submit_stats. *>
-struct SubmitStats {
-    ulong queue_submits;
-    ulong completion_point_publications;
-    ulong completion_point_allocations;
-    ulong completion_wait_calls;
-}
-
-struct SubmitWorkCounters @if(env::TESTING) {
-    ulong authoritative_token_resolutions;
-    ulong duplicate_token_visits;
-    ulong epoch_reset_cells;
-    ulong command_mutex_acquisitions;
-    ulong queue_submission_mutex_acquisitions;
-    ulong rollback_mutex_acquisitions;
-    ulong native_submissions;
-}
-
-<* Advisory relaxed counters for completion-path work, whitebox-exposed via
-   completion_work_counters and reset_completion_work_counters. *>
-struct CompletionWorkCounters @if(env::TESTING) {
-    ulong native_counter_queries;
-    ulong native_wait_calls;
-    ulong retirement_passes;
-    ulong retirement_lock_acquisitions;
-    ulong cached_poll_hits;
-    ulong cached_wait_hits;
 }
 
 struct QueueCompletionState {
@@ -1016,7 +996,6 @@ fn void? require_queue_completion_headroom_with_query(
     ulong limit = state.max_timeline_semaphore_value_difference;
     if (prospective <= completed || prospective - completed <= limit) return;
 
-    note_completion_counter_query(state);
     vk::Result result = query_fn(
         state.device,
         completion.timeline,
@@ -1032,29 +1011,6 @@ fn void? require_queue_completion_headroom_with_query(
     if (prospective > completed && prospective - completed > limit) {
         return gpu::DEVICE_BUSY~;
     }
-}
-
-fn void reach_submission_checkpoint(
-    VkDeviceState* state,
-    SubmissionCheckpoint checkpoint,
-    gpu::CompletionPoint point,
-) @if(env::TESTING) {
-    if (state.submission_checkpoint_hook != null) {
-        state.submission_checkpoint_hook(
-            state.submission_checkpoint_user_data,
-            checkpoint,
-            point,
-        );
-    }
-}
-
-fn void set_submission_checkpoint_hook(
-    VkDeviceState* state,
-    SubmissionCheckpointHook hook,
-    void* user_data,
-) @if(env::TESTING) {
-    state.submission_checkpoint_hook = hook;
-    state.submission_checkpoint_user_data = user_data;
 }
 
 <* Reserve the next point while holding the queue's submission lock. *>
@@ -1198,122 +1154,9 @@ fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
     return native_queue_mutex_for(state, state.presentation.queue);
 }
 
-fn void note_submit_authoritative_resolution(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.submit_authoritative_token_resolutions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_submit_duplicate_token_visit(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.submit_duplicate_token_visits.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_submit_epoch_reset_cell(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.submit_epoch_reset_cells.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_submit_command_mutex_acquisition(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.submit_command_mutex_acquisitions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_submit_queue_submission_mutex_acquisition(
-    VkDeviceState* state,
-) @private {
-    $if env::TESTING:
-        (void)state.submit_queue_submission_mutex_acquisitions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_submit_rollback_mutex_acquisition(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.submit_rollback_mutex_acquisitions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_submit_native_submission(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.submit_native_submissions.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void reset_submit_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.submit_authoritative_token_resolutions.store(
-        0,
-        AtomicOrdering.RELAXED,
-    );
-    state.submit_duplicate_token_visits.store(0, AtomicOrdering.RELAXED);
-    state.submit_epoch_reset_cells.store(0, AtomicOrdering.RELAXED);
-    state.submit_command_mutex_acquisitions.store(0, AtomicOrdering.RELAXED);
-    state.submit_queue_submission_mutex_acquisitions.store(
-        0,
-        AtomicOrdering.RELAXED,
-    );
-    state.submit_rollback_mutex_acquisitions.store(0, AtomicOrdering.RELAXED);
-    state.submit_native_submissions.store(0, AtomicOrdering.RELAXED);
-}
-
-fn SubmitWorkCounters submit_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .authoritative_token_resolutions =
-            state.submit_authoritative_token_resolutions.load(
-                AtomicOrdering.RELAXED,
-            ),
-        .duplicate_token_visits =
-            state.submit_duplicate_token_visits.load(AtomicOrdering.RELAXED),
-        .epoch_reset_cells =
-            state.submit_epoch_reset_cells.load(AtomicOrdering.RELAXED),
-        .command_mutex_acquisitions =
-            state.submit_command_mutex_acquisitions.load(
-                AtomicOrdering.RELAXED,
-            ),
-        .queue_submission_mutex_acquisitions =
-            state.submit_queue_submission_mutex_acquisitions.load(
-                AtomicOrdering.RELAXED,
-            ),
-        .rollback_mutex_acquisitions =
-            state.submit_rollback_mutex_acquisitions.load(
-                AtomicOrdering.RELAXED,
-            ),
-        .native_submissions =
-            state.submit_native_submissions.load(AtomicOrdering.RELAXED),
-    };
-}
-
 fn ulong next_submit_visit_epoch_locked(VkDeviceState* state) @private {
     if (state.next_submit_visit_epoch == ulong::max) {
         foreach (&cell : state.commands.slots[:state.commands.next_new]) {
-            note_submit_epoch_reset_cell(state);
             if (cell.used) cell.record.submit_visit_epoch = 0;
         }
         state.next_submit_visit_epoch = 1;
@@ -1334,7 +1177,6 @@ fn CommandRecord*[]? claim_submit_records_locked(
 
     ulong epoch = next_submit_visit_epoch_locked(state);
     foreach (i, &token : tokens) {
-        note_submit_authoritative_resolution(state);
         CommandRecord* record =
             gpu::internal::direct_command_record(
                 token.record,
@@ -1350,7 +1192,6 @@ fn CommandRecord*[]? claim_submit_records_locked(
         }
         CommandRecord* backend = record;
         if (backend.queue != queue) return gpu::INVALID_ARGUMENT~;
-        note_submit_duplicate_token_visit(state);
         if (backend.submit_visit_epoch == epoch) {
             return gpu::COMMAND_RECORDING_ERROR~;
         }
@@ -1367,7 +1208,6 @@ fn void rollback_submit_claim(
     VkDeviceState* state,
     CommandRecord*[] records,
 ) @private {
-    note_submit_rollback_mutex_acquisition(state);
     state.command_mutex.lock()!!;
     defer state.command_mutex.unlock();
     foreach (record : records) {
@@ -1445,7 +1285,6 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
     }
 
     if (desc.command_lists.len > 0) {
-        note_submit_command_mutex_acquisition(state);
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
         inputs.records = claim_submit_records_locked(
@@ -1475,14 +1314,21 @@ fn usz append_completion_wait_infos(
     return next_wait;
 }
 
+fn void reach_submission_checkpoint(
+    QueueSubmitOps* ops,
+    SubmissionCheckpoint checkpoint,
+) @if(env::TESTING) {
+    if (ops.checkpoint == null) return;
+    ops.checkpoint(ops.checkpoint_user_data, checkpoint);
+}
+
 <* Submit executable command lists and signal the queue-owned completion
    timeline. Preparation and native failure leave every token retryable. *>
-fn gpu::CompletionPoint? vk_submit_with_queries(
+fn gpu::CompletionPoint? vk_submit_with_ops(
     VkDeviceState* state,
     gpu::Queue queue,
     gpu::SubmitDesc* desc,
-    QueueSubmit2Fn submit_fn,
-    SemaphoreCounterQueryFn counter_query_fn,
+    QueueSubmitOps* ops,
 ) @private {
     gpu::CompletionPoint submitted;
     vk::SemaphoreSubmitInfo[2] signal_infos;
@@ -1492,8 +1338,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         queue.id,
     )!;
     QueueSubmitScratch* scratch = completion.submit_scratch;
-    if (scratch == null) return gpu::BACKEND_ERROR~;
-    note_submit_queue_submission_mutex_acquisition(state);
+    if (scratch == null) unreachable();
     completion.submission_mutex.lock()!!;
     defer completion.submission_mutex.unlock();
 
@@ -1573,12 +1418,12 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     drain_queue_if_needed_with_query(
         state,
         completion,
-        counter_query_fn,
+        ops.counter_query,
     )!;
     require_queue_completion_headroom_with_query(
         state:      state,
         completion: completion,
-        query_fn:   counter_query_fn,
+        query_fn:   ops.counter_query,
     )!;
     gpu::CompletionPoint point = reserve_queue_completion_locked(
         state,
@@ -1586,8 +1431,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     )!;
     completion_signal.value = gpu::internal::completion_point_sequence(point);
 
-    note_submit_native_submission(state);
-    vk::Result result = submit_fn(
+    vk::Result result = ops.submit(
         completion.queue,
         1,
         &submit,
@@ -1604,9 +1448,8 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
 
     $if env::TESTING:
         reach_submission_checkpoint(
-            state,
+            ops,
             SubmissionCheckpoint.NATIVE_ACCEPTED,
-            point,
         );
     $endif
 
@@ -1620,16 +1463,10 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     completion.retirement_mutex.unlock();
     $if env::TESTING:
         reach_submission_checkpoint(
-            state,
+            ops,
             SubmissionCheckpoint.BATCHES_PUBLISHED,
-            point,
         );
     $endif
-    (void)state.submit_queue_submits.add(1, AtomicOrdering.RELAXED);
-    (void)state.submit_completion_point_publications.add(
-        1,
-        AtomicOrdering.RELAXED,
-    );
     if (swapchain != null) {
         commit_swapchain_submit(swapchain, point);
     }
@@ -1639,14 +1476,54 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     publish_queue_completion_locked(state, point)!!;
     $if env::TESTING:
         reach_submission_checkpoint(
-            state,
+            ops,
             SubmissionCheckpoint.TOKEN_PUBLISHED,
-            point,
         );
     $endif
     submitted = point;
     claimed = false;
     return submitted;
+}
+
+fn gpu::CompletionPoint? vk_submit_with_queries(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    gpu::SubmitDesc* desc,
+    QueueSubmit2Fn submit_fn,
+    SemaphoreCounterQueryFn counter_query_fn,
+) @private {
+    QueueSubmitOps ops = {
+        .submit        = submit_fn,
+        .counter_query = counter_query_fn,
+    };
+    return vk_submit_with_ops(
+        state: state,
+        queue: queue,
+        desc:  desc,
+        ops:   &ops,
+    );
+}
+
+fn gpu::CompletionPoint? vk_submit_with_checkpoint(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    gpu::SubmitDesc* desc,
+    QueueSubmit2Fn submit_fn,
+    SubmissionCheckpointFn checkpoint,
+    void* user_data,
+) @if(env::TESTING) {
+    QueueSubmitOps ops = {
+        .submit               = submit_fn,
+        .counter_query        = &real_semaphore_counter_query,
+        .checkpoint_user_data = user_data,
+        .checkpoint           = checkpoint,
+    };
+    return vk_submit_with_ops(
+        state: state,
+        queue: queue,
+        desc:  desc,
+        ops:   &ops,
+    );
 }
 
 fn gpu::CompletionPoint? vk_submit_with(
@@ -1670,22 +1547,4 @@ fn gpu::CompletionPoint? vk_submit(
     gpu::SubmitDesc* desc,
 ) {
     return vk_submit_with(state, queue, desc, &real_queue_submit2);
-}
-
-
-<* Snapshot of submit counters, exposed for whitebox accounting in tests. *>
-fn SubmitStats submit_stats(VkDeviceState* state) {
-    SubmitStats stats = {
-        .queue_submits = state.submit_queue_submits.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .completion_point_publications =
-            state.submit_completion_point_publications.load(
-                AtomicOrdering.RELAXED,
-            ),
-    };
-    stats.completion_wait_calls = state.submit_completion_wait_calls.load(
-        AtomicOrdering.RELAXED,
-    );
-    return stats;
 }

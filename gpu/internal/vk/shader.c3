@@ -4,11 +4,18 @@ import gpu::internal @public;
 import gpu @public;
 import vk;
 import spvreflect;
+import std::core::env;
 import std::core::mem;
 import std::core::mem::alloc;
-import std::core::env;
 
 typedef ShaderId = uint;
+
+alias ShaderModuleCreateFn @private = fn vk::Result (
+    void* user_data,
+    vk::Device device,
+    vk::ShaderModuleCreateInfo* create_info,
+    vk::ShaderModule* shader_module,
+);
 
 const ShaderId SHADER_ID_INVALID = (ShaderId)uint::max;
 const uint SHADER_FREE_NONE = 0;
@@ -45,83 +52,15 @@ struct PreparedShaderIdentity {
     bool     retained;
 }
 
-struct PipelineIdentityStats @if(env::TESTING) {
-    ulong shader_intern_probes;
-    ulong shader_intern_bytes_compared;
-    ulong shader_owned_bytes_cloned;
-    ulong shader_owned_bytes_freed;
-    ulong pipeline_key_probes;
-}
-
-struct PipelineIdentityProbeResult @if(env::TESTING) {
-    PipelineIdentityStats interning;
-    PipelineIdentityStats lookup;
-}
-
 struct PipelineShaderModule {
     vk::ShaderModule shader_module;
     char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
 }
 
-fn void note_shader_intern_probe(VkDeviceState* state) {
-    $if env::TESTING:
-        state.shader_intern_probes++;
-    $endif
-}
-
-fn void note_shader_intern_bytes_compared(
-    VkDeviceState* state,
-    usz byte_count,
-) {
-    $if env::TESTING:
-        state.shader_intern_bytes_compared += byte_count;
-    $endif
-}
-
-fn void note_shader_owned_bytes_cloned(
-    VkDeviceState* state,
-    usz byte_count,
-) {
-    $if env::TESTING:
-        state.shader_owned_bytes_cloned += byte_count;
-    $endif
-}
-
-fn void note_shader_owned_bytes_freed(
-    VkDeviceState* state,
-    usz byte_count,
-) {
-    $if env::TESTING:
-        state.shader_owned_bytes_freed += byte_count;
-    $endif
-}
-
-fn void note_pipeline_key_probe(VkDeviceState* state) {
-    $if env::TESTING:
-        state.pipeline_key_probes++;
-    $endif
-}
-
-fn void reset_pipeline_identity_stats(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.shader_intern_probes = 0;
-    state.shader_intern_bytes_compared = 0;
-    state.shader_owned_bytes_cloned = 0;
-    state.shader_owned_bytes_freed = 0;
-    state.pipeline_key_probes = 0;
-}
-
-fn PipelineIdentityStats pipeline_identity_stats(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .shader_intern_probes          = state.shader_intern_probes,
-        .shader_intern_bytes_compared  = state.shader_intern_bytes_compared,
-        .shader_owned_bytes_cloned     = state.shader_owned_bytes_cloned,
-        .shader_owned_bytes_freed      = state.shader_owned_bytes_freed,
-        .pipeline_key_probes           = state.pipeline_key_probes,
-    };
+struct ShaderModuleCreateOps @private {
+    void*                   user_data;
+    ShaderModuleCreateFn    create;
+    bool allow_alternate_root_abi @if(env::TESTING);
 }
 
 fn uint shader_store_bucket(ulong hash, uint bucket_count) {
@@ -152,7 +91,6 @@ fn bool unlink_shader_store_entry(ShaderStore* store, uint index) {
 }
 
 fn bool shader_store_entry_equals(
-    VkDeviceState* state,
     ShaderStoreEntry* entry,
     ShaderIdentityInput* input,
 ) {
@@ -160,7 +98,6 @@ fn bool shader_store_entry_equals(
         || entry.spirv.len != input.spirv.len
         || ((ZString)&entry.entry_point[0]).str_view()
             != ((ZString)&input.entry_point[0]).str_view()) return false;
-    note_shader_intern_bytes_compared(state, input.spirv.len);
     return mem::equals(entry.spirv, input.spirv);
 }
 
@@ -175,10 +112,9 @@ fn ShaderId? retain_shader_identity_locked(
         (uint)store.bucket_heads.len,
     );
     for (uint current = store.bucket_heads[bucket]; current != 0; ) {
-        note_shader_intern_probe(state);
         ShaderStoreEntry* entry = &store.entries[current - 1];
         if (entry.hash == input.hash
-            && shader_store_entry_equals(state, entry, input)) {
+            && shader_store_entry_equals(entry, input)) {
             if (entry.refcount == uint::max) return gpu::SLOT_TABLE_FULL~;
             entry.refcount++;
             return (ShaderId)(current - 1);
@@ -202,7 +138,6 @@ fn ShaderId? retain_shader_identity_locked(
         (sz)input.spirv.len,
     );
     mem::copy(spirv.ptr, input.spirv.ptr, input.spirv.len);
-    note_shader_owned_bytes_cloned(state, input.spirv.len);
     ShaderStoreEntry entry = {
         .hash     = input.hash,
         .spirv    = spirv,
@@ -236,7 +171,6 @@ fn void? release_shader_identity_locked(
         entry.refcount++;
         return gpu::INVALID_ARGUMENT~;
     }
-    note_shader_owned_bytes_freed(state, entry.spirv.len);
     alloc::free(state.host_allocator, entry.spirv.ptr);
     *entry = { .next_free = state.shader_store.free_head };
     state.shader_store.free_head = index + 1;
@@ -352,7 +286,6 @@ fn void destroy_shader_store(VkDeviceState* state) {
     if (state.shader_store.entries.ptr != null) {
         foreach (&entry : state.shader_store.entries[:state.shader_store.next_new]) {
             if (entry.used && entry.spirv.ptr != null) {
-                note_shader_owned_bytes_freed(state, entry.spirv.len);
                 alloc::free(state.host_allocator, entry.spirv.ptr);
             }
         }
@@ -628,18 +561,11 @@ fn void? check_root_push_abi(
     gpu::internal::ShaderRole role,
 ) @private {
     if (root_push_abi_mismatch(
-        reflect_module,
-        entry_point,
-        role,
-        false,
+        reflect_module:  reflect_module,
+        entry_point:     entry_point,
+        role:            role,
+        allow_alternate: false,
     ) != RootAbiMismatch.NONE) return gpu::SHADER_INVALID~;
-}
-
-fn void set_root_abi_evidence_enabled(
-    VkDeviceState* state,
-    bool enabled,
-) @private @if(env::TESTING) {
-    state.root_abi_evidence_enabled = enabled;
 }
 
 fn void? copy_entry_point(char* dst, ZString source) @private {
@@ -653,23 +579,23 @@ fn void? copy_entry_point(char* dst, ZString source) @private {
     dst[i] = 0;
 }
 
-fn vk::Result create_pipeline_shader_module_native(
-    VkDeviceState* state,
+fn vk::Result create_shader_module_real(
+    void* user_data,
+    vk::Device device,
     vk::ShaderModuleCreateInfo* info,
     vk::ShaderModule* out_shader,
-) {
-    $if env::TESTING:
-        state.pipeline_shader_create_attempts++;
-        if (state.pipeline_shader_create_result != vk::Result.SUCCESS) {
-            return state.pipeline_shader_create_result;
-        }
-    $endif
+) @private {
+    (void)user_data;
     return vk::create_shader_module(
-        device:          state.device,
+        device:          device,
         p_create_info:   info,
         p_allocator:     null,
         p_shader_module: out_shader,
     );
+}
+
+fn ShaderModuleCreateOps shader_module_create_ops_real() @private {
+    return { .create = &create_shader_module_real };
 }
 
 fn fault report_shader_contract_failure(
@@ -762,11 +688,12 @@ fn void? normalize_shader_input(
 }
 
 <* Reflect one normalized shader and create its temporary native module. *>
-fn PipelineShaderModule? create_pipeline_shader_module(
+fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
     VkDeviceState* state,
     ShaderIdentityInput* code,
     ZString operation,
     ZString rejected_field,
+    ShaderModuleCreateOps* create_ops,
 ) {
     PipelineShaderModule shader;
     mem::copy(
@@ -793,10 +720,6 @@ fn PipelineShaderModule? create_pipeline_shader_module(
         )~;
     }
     defer reflect_module.destroy();
-
-    $if env::TESTING:
-        state.shader_reflection_validations++;
-    $endif
 
     spvreflect::EntryPoint* entry =
         reflect_module.get_entry_point((ZString)&shader.entry_point[0]);
@@ -847,15 +770,16 @@ fn PipelineShaderModule? create_pipeline_shader_module(
             invariant:      "selected-entry descriptor bindings must match the gpu heap convention",
         )~;
     }
-    bool allow_alternate_root = false;
+    bool allow_alternate_root_abi = false;
     $if env::TESTING:
-        allow_alternate_root = state.root_abi_evidence_enabled;
+        allow_alternate_root_abi =
+            create_ops.allow_alternate_root_abi;
     $endif
     RootAbiMismatch root_mismatch = root_push_abi_mismatch(
-        reflect_module,
-        selected_entry_point,
-        code.role,
-        allow_alternate_root,
+        reflect_module:  reflect_module,
+        entry_point:     selected_entry_point,
+        role:            code.role,
+        allow_alternate: allow_alternate_root_abi,
     );
     if (root_mismatch != RootAbiMismatch.NONE) {
         return report_shader_contract_failure(
@@ -876,14 +800,14 @@ fn PipelineShaderModule? create_pipeline_shader_module(
             .set_code(aligned_code.ptr);
         check_shader_create_device_result(
             state: state,
-            result: create_pipeline_shader_module_native(
-                state,
-                &info,
-                &shader.shader_module,
+            result: create_ops.create(
+                user_data:     create_ops.user_data,
+                device:        state.device,
+                create_info:   &info,
+                shader_module: &shader.shader_module,
             ),
         )!;
     };
-    state.pipeline_shader_modules_created++;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.SHADER_MODULE,
@@ -891,6 +815,22 @@ fn PipelineShaderModule? create_pipeline_shader_module(
         name:          code.debug_name,
     );
     return shader;
+}
+
+fn PipelineShaderModule? create_pipeline_shader_module(
+    VkDeviceState* state,
+    ShaderIdentityInput* code,
+    ZString operation,
+    ZString rejected_field,
+) {
+    ShaderModuleCreateOps create_ops = shader_module_create_ops_real();
+    return create_pipeline_shader_module_with_ops(
+        state:          state,
+        code:           code,
+        operation:      operation,
+        rejected_field: rejected_field,
+        create_ops:      &create_ops,
+    );
 }
 
 fn void destroy_pipeline_shader_module(

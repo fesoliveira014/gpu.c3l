@@ -110,18 +110,6 @@ struct DynamicStateRejection {
     ZString invariant;
 }
 
-struct DynamicStateObservation @if(env::TESTING) {
-    ulong                   begin_rendering_emissions;
-    ulong                   viewport_emissions;
-    ulong                   scissor_emissions;
-    ulong                   raster_state_emissions;
-    ulong                   depth_state_emissions;
-    vk::Viewport            viewport;
-    vk::Rect2D              scissor;
-    gpu::DynamicRasterState raster;
-    gpu::DepthState         depth;
-}
-
 fn vk::AttachmentLoadOp load_op_to_vk(gpu::LoadOp op) @private {
     switch (op) {
         case gpu::LoadOp.LOAD:      return vk::AttachmentLoadOp.LOAD;
@@ -171,33 +159,22 @@ fn void emit_raster_state(
     gpu::DynamicRasterState* raster,
 ) @private {
     CommandRecord* record = commands;
-    $if env::TESTING:
-        VkDeviceState* state = commands.device_state;
-        if (state.dynamic_state_observation_enabled) {
-            state.raster_state_emissions++;
-            state.last_raster_state = *raster;
-        }
-    $endif
     vk::cmd_set_primitive_topology(
         record.command_buffer,
         topology_to_vk(raster.topology),
     );
-    gpu::internal::note_command_native_call();
     vk::cmd_set_cull_mode(
         record.command_buffer,
         (vk::CullModeFlags)cull_mode_to_vk(raster.cull_mode),
     );
-    gpu::internal::note_command_native_call();
     vk::cmd_set_front_face(
         record.command_buffer,
         front_face_to_vk(raster.front_face),
     );
-    gpu::internal::note_command_native_call();
     vk::cmd_set_depth_bias_enable(
         record.command_buffer,
         raster.depth_bias_enable ? vk::TRUE : vk::FALSE,
     );
-    gpu::internal::note_command_native_call();
     float depth_bias_constant = 0.0f;
     float depth_bias_clamp = 0.0f;
     float depth_bias_slope = 0.0f;
@@ -212,7 +189,6 @@ fn void emit_raster_state(
         depth_bias_clamp:           depth_bias_clamp,
         depth_bias_slope_factor:    depth_bias_slope,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void emit_depth_state(
@@ -220,28 +196,18 @@ fn void emit_depth_state(
     gpu::DepthState* depth,
 ) @private {
     CommandRecord* record = commands;
-    $if env::TESTING:
-        VkDeviceState* state = commands.device_state;
-        if (state.dynamic_state_observation_enabled) {
-            state.depth_state_emissions++;
-            state.last_depth_state = *depth;
-        }
-    $endif
     vk::cmd_set_depth_test_enable(
         record.command_buffer,
         depth.test_enable ? vk::TRUE : vk::FALSE,
     );
-    gpu::internal::note_command_native_call();
     vk::cmd_set_depth_write_enable(
         record.command_buffer,
         depth.write_enable ? vk::TRUE : vk::FALSE,
     );
-    gpu::internal::note_command_native_call();
     vk::cmd_set_depth_compare_op(
         record.command_buffer,
         compare_op_to_vk(depth.compare),
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn PreparedRenderPass? lower_render_pass(
@@ -544,13 +510,6 @@ fn void record_render_pass(
         rendering.p_depth_attachment = &pass.depth_attachment;
     }
     vk::cmd_begin_rendering(cb, &rendering);
-    gpu::internal::note_command_native_call();
-    $if env::TESTING:
-        VkDeviceState* state = commands.device_state;
-        if (state.dynamic_state_observation_enabled) {
-            state.begin_rendering_emissions++;
-        }
-    $endif
     record.active_render = pass.compatibility;
     record.state = gpu::internal::CommandState.RECORDING_RENDER_PASS;
 }
@@ -774,7 +733,7 @@ fn void? validate_viewport(
     }
 }
 
-fn vk::Viewport lower_viewport(gpu::Viewport* viewport) @private {
+fn vk::Viewport lower_viewport(gpu::Viewport* viewport) {
     return {
         .x         = viewport.x,
         .y         = viewport.y,
@@ -790,15 +749,7 @@ fn void emit_viewport(
     vk::Viewport* viewport,
 ) @private {
     CommandRecord* record = commands;
-    $if env::TESTING:
-        VkDeviceState* state = commands.device_state;
-        if (state.dynamic_state_observation_enabled) {
-            state.viewport_emissions++;
-            state.last_viewport = *viewport;
-        }
-    $endif
     vk::cmd_set_viewport(record.command_buffer, 0, 1, viewport);
-    gpu::internal::note_command_native_call();
 }
 
 fn bool graphics_state_settable(gpu::internal::CommandState state) =>
@@ -879,7 +830,7 @@ fn void? validate_scissor(
     }
 }
 
-fn vk::Rect2D lower_scissor(gpu::ScissorRect* scissor) @private {
+fn vk::Rect2D lower_scissor(gpu::ScissorRect* scissor) {
     return {
         .offset = { .x = scissor.x, .y = scissor.y },
         .extent = {
@@ -980,7 +931,7 @@ fn void? validate_depth_state(
 
 fn LoweredGraphicsState? lower_graphics_state(
     gpu::GraphicsState* state,
-) @private {
+) {
     if (state == null) return gpu::INVALID_ARGUMENT~;
     return {
         .viewport = lower_viewport(&state.viewport),
@@ -1032,15 +983,7 @@ fn void emit_scissor(
     vk::Rect2D* scissor,
 ) @private {
     CommandRecord* record = commands;
-    $if env::TESTING:
-        VkDeviceState* state = commands.device_state;
-        if (state.dynamic_state_observation_enabled) {
-            state.scissor_emissions++;
-            state.last_scissor = *scissor;
-        }
-    $endif
     vk::cmd_set_scissor(record.command_buffer, 0, 1, scissor);
-    gpu::internal::note_command_native_call();
 }
 
 fn void emit_graphics_state(
@@ -1079,7 +1022,7 @@ fn bool color_compatibility_matches(
 
 fn LoweredColorState? lower_color_state(
     gpu::ColorState* state,
-) @private {
+) {
     if (state == null
         || state.targets.len > gpu::MAX_COLOR_ATTACHMENTS
         || (state.targets.len > 0 && state.targets.ptr == null)) {
@@ -1138,21 +1081,18 @@ fn void emit_color_state(
         state.count,
         &state.blend_enables[0],
     );
-    gpu::internal::note_command_native_call();
     dispatch.set_blend_equation(
         record.command_buffer,
         0,
         state.count,
         &state.blend_equations[0],
     );
-    gpu::internal::note_command_native_call();
     dispatch.set_write_mask(
         record.command_buffer,
         0,
         state.count,
         &state.write_masks[0],
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn fault color_state_rejection(
@@ -1336,37 +1276,6 @@ fn void? full_set_graphics_state(
     record.color_state_initialized = true;
 }
 
-fn void reset_dynamic_state_observation(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.dynamic_state_observation_enabled = true;
-    state.begin_rendering_emissions = 0;
-    state.viewport_emissions = 0;
-    state.scissor_emissions = 0;
-    state.raster_state_emissions = 0;
-    state.depth_state_emissions = 0;
-    state.last_viewport = {};
-    state.last_scissor = {};
-    state.last_raster_state = {};
-    state.last_depth_state = {};
-}
-
-fn DynamicStateObservation dynamic_state_observation(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .begin_rendering_emissions = state.begin_rendering_emissions,
-        .viewport_emissions        = state.viewport_emissions,
-        .scissor_emissions         = state.scissor_emissions,
-        .raster_state_emissions    = state.raster_state_emissions,
-        .depth_state_emissions     = state.depth_state_emissions,
-        .viewport                  = state.last_viewport,
-        .scissor                   = state.last_scissor,
-        .raster                    = state.last_raster_state,
-        .depth                     = state.last_depth_state,
-    };
-}
-
 fn void? trusted_set_scissor(
     CommandRecord* commands,
     gpu::ScissorRect* scissor,
@@ -1400,7 +1309,6 @@ fn void? vk_cmd_end_render_pass(CommandRecord* commands) @private {
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     vk::cmd_end_rendering(record.command_buffer);
-    gpu::internal::note_command_native_call();
     record.active_render = {};
     record.state = gpu::internal::CommandState.RECORDING;
 }
@@ -1536,10 +1444,6 @@ fn void push_graphics_roots(
         .vertex_root_gpu   = vertex_root,
         .fragment_root_gpu = fragment_root,
     };
-    $if env::TESTING:
-        last_vertex_root.store((ulong)push.vertex_root_gpu, AtomicOrdering.RELAXED);
-        last_fragment_root.store((ulong)push.fragment_root_gpu, AtomicOrdering.RELAXED);
-    $endif
     uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT
         | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     vk::cmd_push_constants(
@@ -1550,7 +1454,6 @@ fn void push_graphics_roots(
         size:           GRAPHICS_ROOT_PUSH_SIZE,
         p_values:       &push,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn BoundPipeline? graphics_pipeline_snapshot(CommandRecord* record) {
@@ -1574,7 +1477,6 @@ fn void record_draw(
         first_vertex:   0,
         first_instance: 0,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw(
@@ -1741,7 +1643,6 @@ fn void record_indexed_draw(
         vertex_offset:  0,
         first_instance: 0,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw_indexed(
@@ -1881,7 +1782,6 @@ fn void record_indirect_draw(
         draw_count:     draw.draw_count,
         stride:         gpu::DrawIndirectCommand::size,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw_indirect(
@@ -1932,7 +1832,6 @@ fn void bind_index_buffer(
             ? vk::IndexType.UINT16
             : vk::IndexType.UINT32,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
@@ -2068,7 +1967,6 @@ fn void record_indexed_indirect_draw(
         draw_count:     draw.draw_count,
         stride:         gpu::DrawIndexedIndirectCommand::size,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw_indexed_indirect(
@@ -2284,7 +2182,6 @@ fn void record_indexed_indirect_count_draw(
         max_draw_count:      draw.max_draw_count,
         stride:              gpu::DrawIndexedIndirectCommand::size,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_draw_indexed_indirect_count(
@@ -2406,7 +2303,7 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (max_draw_count == 0) return draw;
-    if (draw.layout == null) return gpu::BACKEND_ERROR~;
+    draw.layout = required_generated_work_layout(draw.layout)!;
     draw.records = lower_generated_work_records(
         state:       state,
         records:     &records,
@@ -2447,7 +2344,7 @@ fn PreparedGeneratedDraw? full_prepare_generated_draw(
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (max_draw_count == 0) return draw;
-    if (draw.layout == null) return gpu::BACKEND_ERROR~;
+    draw.layout = required_generated_work_layout(draw.layout)!;
     draw.records = validate_and_lower_generated_work_records(
         state:       state,
         record:      record,
@@ -2571,7 +2468,7 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (max_draw_count == 0) return draw;
-    if (draw.layout == null) return gpu::BACKEND_ERROR~;
+    draw.layout = required_generated_work_layout(draw.layout)!;
     draw.records = lower_generated_work_records(
         state:       state,
         records:     &records,
@@ -2623,7 +2520,7 @@ fn PreparedGeneratedIndexedDraw? full_prepare_generated_indexed_draw(
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (max_draw_count == 0) return draw;
-    if (draw.layout == null) return gpu::BACKEND_ERROR~;
+    draw.layout = required_generated_work_layout(draw.layout)!;
     draw.records = validate_and_lower_generated_work_records(
         state:       state,
         record:      record,

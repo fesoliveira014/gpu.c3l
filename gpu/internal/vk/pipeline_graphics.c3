@@ -6,7 +6,21 @@ import vk;
 import std::thread;
 import std::core::mem;
 
+alias GraphicsPipelineCreateFn @private = fn vk::Result (
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCache pipeline_cache,
+    vk::GraphicsPipelineCreateInfo* create_info,
+    vk::Pipeline* pipeline,
+);
+
 const uint GRAPHICS_ROOT_PUSH_SIZE = gpu::GraphicsRootPush::size;
+
+struct GraphicsPipelineCreateOps @private {
+    ShaderModuleCreateOps    shader_module;
+    void*                    user_data;
+    GraphicsPipelineCreateFn create;
+}
 
 fn vk::PrimitiveTopology topology_to_vk(gpu::PrimitiveTopology topology) @private {
     switch (topology) {
@@ -239,64 +253,43 @@ fn void? validate_graphics_pipeline_desc(
     check_polygon_mode_support(desc.polygon_mode, state.caps.line_polygon_mode)!;
 }
 
-fn vk::Result create_graphics_pipeline_native(
-    VkDeviceState* state,
+fn vk::Result create_graphics_pipeline_real(
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCache pipeline_cache,
     vk::GraphicsPipelineCreateInfo* info,
     vk::Pipeline* out_pipeline,
-) {
-    $if env::TESTING:
-        state.pipeline_native_dynamic_state_count =
-            info.p_dynamic_state.dynamic_state_count;
-        state.pipeline_native_color_target_count =
-            info.p_color_blend_state.attachment_count;
-        bool blend_enable = false;
-        bool blend_equation = false;
-        bool write_mask = false;
-        for (uint i = 0;
-            i < info.p_dynamic_state.dynamic_state_count;
-            i++) {
-            switch (info.p_dynamic_state.p_dynamic_states[i]) {
-                case vk::DynamicState.COLOR_BLEND_ENABLE_EXT:
-                    blend_enable = true;
-                case vk::DynamicState.COLOR_BLEND_EQUATION_EXT:
-                    blend_equation = true;
-                case vk::DynamicState.COLOR_WRITE_MASK_EXT:
-                    write_mask = true;
-                default:
-            }
-        }
-        state.pipeline_native_color_states =
-            blend_enable && blend_equation && write_mask;
-        state.pipeline_native_canonical_color_attachments =
-            info.p_color_blend_state.attachment_count > 0;
-        for (uint i = 0;
-            i < info.p_color_blend_state.attachment_count;
-            i++) {
-            vk::PipelineColorBlendAttachmentState* attachment =
-                &info.p_color_blend_state.p_attachments[i];
-            state.pipeline_native_canonical_color_attachments =
-                state.pipeline_native_canonical_color_attachments
-                && attachment.blend_enable == vk::FALSE
-                && attachment.src_color_blend_factor == vk::BlendFactor.ONE
-                && attachment.dst_color_blend_factor == vk::BlendFactor.ZERO
-                && attachment.color_blend_op == vk::BlendOp.ADD
-                && attachment.src_alpha_blend_factor == vk::BlendFactor.ONE
-                && attachment.dst_alpha_blend_factor == vk::BlendFactor.ZERO
-                && attachment.alpha_blend_op == vk::BlendOp.ADD
-                && attachment.color_write_mask
-                    == color_write_mask_to_vk(gpu::COLOR_WRITE_ALL);
-        }
-        if (state.pipeline_native_create_result != vk::Result.SUCCESS) {
-            return state.pipeline_native_create_result;
-        }
-    $endif
+) @private {
+    (void)user_data;
     return vk::create_graphics_pipelines(
-        device:            state.device,
-        pipeline_cache:    state.driver_cache,
+        device:            device,
+        pipeline_cache:    pipeline_cache,
         create_info_count: 1,
         p_create_infos:    info,
         p_allocator:       null,
         p_pipelines:       out_pipeline,
+    );
+}
+
+fn GraphicsPipelineCreateOps graphics_pipeline_create_ops_real() @private {
+    return {
+        .shader_module = shader_module_create_ops_real(),
+        .create        = &create_graphics_pipeline_real,
+    };
+}
+
+fn vk::Result create_graphics_pipeline_native(
+    VkDeviceState* state,
+    vk::GraphicsPipelineCreateInfo* info,
+    vk::Pipeline* out_pipeline,
+    GraphicsPipelineCreateOps* create_ops,
+) {
+    return create_ops.create(
+        user_data:      create_ops.user_data,
+        device:         state.device,
+        pipeline_cache: state.driver_cache,
+        create_info:    info,
+        pipeline:       out_pipeline,
     );
 }
 
@@ -313,6 +306,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     ZString debug_name,
     PreparedShaderIdentity* prepared_vertex_shader,
     PreparedShaderIdentity* prepared_fragment_shader,
+    GraphicsPipelineCreateOps* create_ops,
 ) {
     PipelineKey key = *requested_key;
     ulong hash = hash_key(&key);
@@ -352,11 +346,12 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         debug_name: vertex_desc.debug_name,
         out_input:  &vertex_code,
     );
-    PipelineShaderModule vertex_shader = create_pipeline_shader_module(
+    PipelineShaderModule vertex_shader = create_pipeline_shader_module_with_ops(
         state:          state,
         code:           &vertex_code,
         operation:      operation,
         rejected_field: vertex_field,
+        create_ops:      &create_ops.shader_module,
     )!;
     defer destroy_pipeline_shader_module(state, &vertex_shader);
     ShaderIdentityInput fragment_code;
@@ -366,11 +361,12 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         debug_name: fragment_desc.debug_name,
         out_input:  &fragment_code,
     );
-    PipelineShaderModule fragment_shader = create_pipeline_shader_module(
+    PipelineShaderModule fragment_shader = create_pipeline_shader_module_with_ops(
         state:          state,
         code:           &fragment_code,
         operation:      operation,
         rejected_field: fragment_field,
+        create_ops:      &create_ops.shader_module,
     )!;
     defer destroy_pipeline_shader_module(state, &fragment_shader);
     @pool() {
@@ -489,12 +485,12 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         check_pipeline_create_device_result(
             state: state,
             result: create_graphics_pipeline_native(
-                state,
-                &pipe_info,
-                &pipeline,
+                state:        state,
+                info:         &pipe_info,
+                out_pipeline: &pipeline,
+                create_ops:   create_ops,
             ),
         )!;
-        state.pipelines_created++;
         set_object_name(
             state:         state,
             object_type:   vk::ObjectType.PIPELINE,
@@ -550,9 +546,10 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     };
 }
 
-fn gpu::PipelineHandle? vk_create_graphics_pipeline(
+fn gpu::PipelineHandle? vk_create_graphics_pipeline_with_ops(
     VkDeviceState* state,
     gpu::GraphicsPipelineDesc* desc,
+    GraphicsPipelineCreateOps* create_ops,
 ) {
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
@@ -610,5 +607,19 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
         debug_name:               desc.debug_name,
         prepared_vertex_shader:   &prepared[0],
         prepared_fragment_shader: &prepared[1],
+        create_ops:               create_ops,
+    );
+}
+
+fn gpu::PipelineHandle? vk_create_graphics_pipeline(
+    VkDeviceState* state,
+    gpu::GraphicsPipelineDesc* desc,
+) {
+    GraphicsPipelineCreateOps create_ops =
+        graphics_pipeline_create_ops_real();
+    return vk_create_graphics_pipeline_with_ops(
+        state:      state,
+        desc:       desc,
+        create_ops: &create_ops,
     );
 }

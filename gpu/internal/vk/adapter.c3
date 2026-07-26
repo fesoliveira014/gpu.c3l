@@ -98,13 +98,13 @@ fn gpu::AdapterQueueInfo query_adapter_queues(vk::PhysicalDevice physical_device
 
 fn bool device_baseline_supported(
     vk::PhysicalDevice physical_device,
-    VkDeviceConfig* config,
+    RuntimeConfig* config,
     ShaderHeapSupport* shader_heap,
 ) {
     if (config == null || shader_heap == null) return false;
     return candidate_satisfies(
         candidate:   physical_device,
-        desc:        config,
+        config:      config,
         shader_heap: shader_heap,
     );
 }
@@ -129,7 +129,7 @@ fn ShaderHeapSupport query_shader_heap_support(
 fn void initialize_adapter(
     VkAdapterState* adapter,
     vk::PhysicalDevice physical_device,
-    VkDeviceConfig* config,
+    RuntimeConfig* config,
 ) {
     adapter.physical_device = physical_device;
     vk::get_physical_device_properties(physical_device, &adapter.properties);
@@ -218,10 +218,13 @@ fn void? enumerate_vk_adapters(VkRuntimeState* state) {
         ),
     )!;
 
-    VkDeviceConfig config = runtime_device_config(state);
     state.adapters = mem::new_array(VkAdapterState, (usz)count);
     foreach (i, physical_device : physical_devices[:count]) {
-        initialize_adapter(&state.adapters[i], physical_device, &config);
+        initialize_adapter(
+            &state.adapters[i],
+            physical_device,
+            &state.config,
+        );
     }
 }
 

@@ -4,11 +4,8 @@ import gpu::internal @public;
 import gpu @public;
 import vk;
 
-alias TextureBarrierEmitHook @if(env::TESTING) = fn void (
-    void*, vk::ImageMemoryBarrier2*
-);
-alias BarrierEmitHook @if(env::TESTING) = fn void (
-    void*, vk::DependencyInfo*
+alias BarrierEmitFn = fn void (
+    void*, vk::CommandBuffer, vk::DependencyInfo*
 );
 alias SemaphoreWaitFn @private = fn vk::Result (
     vk::Device,
@@ -67,21 +64,9 @@ struct TextureBarrierRejection {
     ZString invariant;
 }
 
-struct TextureBarrierWorkCounters @if(env::TESTING) {
-    ulong helper_calls;
-    ulong handle_resolutions;
-    ulong access_validations;
-    ulong range_resolutions;
-    ulong state_validations;
-    ulong native_assemblies;
-    ulong native_emissions;
-}
-
-struct BarrierWorkCounters @if(env::TESTING) {
-    ulong native_memory_emissions;
-    ulong native_image_emissions;
-    ulong texture_helper_calls;
-    ulong texture_handle_resolutions;
+struct BarrierEmitOps {
+    void*         user_data;
+    BarrierEmitFn emit;
 }
 
 fn bool texture_format_is_depth_stencil(gpu::Format format) @private {
@@ -528,42 +513,6 @@ fn vk::ImageSubresourceRange? resolve_texture_barrier_range(
     };
 }
 
-fn void note_texture_barrier_helper(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.texture_barrier_helper_calls.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_texture_barrier_access_validation(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.texture_barrier_access_validations.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_texture_barrier_range_resolution(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.texture_barrier_range_resolutions.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_texture_barrier_state_validation(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.texture_barrier_state_validations.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_texture_barrier_native_assembly(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.texture_barrier_native_assemblies.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_texture_barrier_native_emission(VkDeviceState* state) @private {
-    $if env::TESTING:
-        (void)state.texture_barrier_native_emissions.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
 fn fault report_texture_barrier_rejection(
     VkDeviceState* state,
     gpu::TextureBarrier* barrier,
@@ -595,7 +544,6 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
     TextureSlot* slot,
     ZString operation,
 ) {
-    note_texture_barrier_access_validation(state);
     validate_texture_queue_access(
         state:       state,
         queue_roles: record.queue.roles,
@@ -604,7 +552,6 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         operation:   operation,
     )!;
 
-    note_texture_barrier_range_resolution(state);
     vk::ImageSubresourceRange? range_result = resolve_texture_barrier_range(
         barrier.view,
         slot,
@@ -628,7 +575,6 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         record.queue.id,
     )!;
 
-    note_texture_barrier_state_validation(state);
     TextureBarrierRejection rejection = texture_state_rejection(
         texture_state: barrier.before,
         slot:          slot,
@@ -650,7 +596,6 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         paired_stages: barrier.after.stages,
     );
 
-    note_texture_barrier_state_validation(state);
     rejection = texture_state_rejection(
         texture_state: barrier.after,
         slot:          slot,
@@ -672,7 +617,6 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         paired_stages: barrier.before.stages,
     );
 
-    note_texture_barrier_native_assembly(state);
     vk::ImageMemoryBarrier2 native = vk::image_memory_barrier2()
         .set_src_stage_mask(before.stages)
         .set_src_access_mask(before.access)
@@ -693,7 +637,6 @@ fn LoweredTextureBarrier? validate_track_and_lower_texture_barrier(
     gpu::TextureBarrier* barrier,
     ZString operation,
 ) {
-    note_texture_barrier_helper(state);
     if (barrier == null) {
         TextureBarrierRejection rejection = {
             .field     = "TextureBarrier",
@@ -734,9 +677,23 @@ fn LoweredTextureBarrier? validate_track_and_lower_texture_barrier(
     );
 }
 
-fn void? vk_cmd_barrier(
+fn void real_barrier_emit(
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::DependencyInfo* dependency,
+) @private {
+    (void)user_data;
+    vk::cmd_pipeline_barrier2(command_buffer, dependency);
+}
+
+fn BarrierEmitOps barrier_emit_ops_real() @private {
+    return { .emit = &real_barrier_emit };
+}
+
+fn void? vk_cmd_barrier_with_ops(
     CommandRecord* commands,
     gpu::Barrier* barrier,
+    BarrierEmitOps* ops,
 ) @private {
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
@@ -784,12 +741,13 @@ fn void? vk_cmd_barrier(
         barrier,
         state.generated_work.enabled,
     );
-    emit_barrier(commands, &native_barrier);
+    emit_barrier(commands, &native_barrier, ops);
 }
 
-fn void? trusted_barrier(
+fn void? trusted_barrier_with_ops(
     CommandRecord* commands,
     gpu::Barrier* barrier,
+    BarrierEmitOps* ops,
 ) {
     if (barrier == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = commands;
@@ -801,36 +759,35 @@ fn void? trusted_barrier(
         barrier,
         state.generated_work.enabled,
     );
-    emit_barrier(commands, &native_barrier);
+    emit_barrier(commands, &native_barrier, ops);
 }
 
 fn void emit_barrier(
     CommandRecord* commands,
     vk::MemoryBarrier2* native_barrier,
+    BarrierEmitOps* ops,
 ) {
-    VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
     vk::DependencyInfo dependency =
         vk::dependency_info().set_memory_barriers(native_barrier[:1]);
-    $if env::TESTING:
-        (void)state.barrier_native_emissions.add(1, AtomicOrdering.RELAXED);
-        if (state.barrier_emit_hook != null) {
-            state.barrier_emit_hook(
-                state.barrier_emit_user_data,
-                &dependency,
-            );
-        }
-    $endif
-    vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-    gpu::internal::note_command_native_call();
+    ops.emit(ops.user_data, record.command_buffer, &dependency);
+}
+
+fn void? trusted_barrier(
+    CommandRecord* commands,
+    gpu::Barrier* barrier,
+) {
+    BarrierEmitOps ops = barrier_emit_ops_real();
+    return trusted_barrier_with_ops(commands, barrier, &ops);
 }
 
 fn void? full_barrier(
     CommandRecord* commands,
     gpu::Barrier* barrier,
 ) {
+    BarrierEmitOps ops = barrier_emit_ops_real();
     if (commands == null) return gpu::INVALID_ARGUMENT~;
-    return vk_cmd_barrier(commands, barrier);
+    return vk_cmd_barrier_with_ops(commands, barrier, &ops);
 }
 
 fn LoweredTextureBarrier? lower_texture_barrier_trusted(
@@ -877,41 +834,30 @@ fn LoweredTextureBarrier? lower_texture_barrier_trusted(
 fn void emit_texture_barrier(
     CommandRecord* commands,
     LoweredTextureBarrier* lowered,
+    BarrierEmitOps* ops,
 ) {
-    VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
     vk::DependencyInfo dependency = vk::dependency_info()
         .set_image_memory_barriers((&lowered.native)[:1]);
-    note_texture_barrier_native_emission(state);
-    $if env::TESTING:
-        if (state.texture_barrier_emit_hook != null) {
-            state.texture_barrier_emit_hook(
-                state.texture_barrier_emit_user_data,
-                &lowered.native,
-            );
-        } else {
-            vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-        }
-    $else
-        vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-    $endif
-    gpu::internal::note_command_native_call();
+    ops.emit(ops.user_data, record.command_buffer, &dependency);
 }
 
-fn void? trusted_texture_barrier(
+fn void? trusted_texture_barrier_with_ops(
     CommandRecord* commands,
     gpu::TextureBarrier* barrier,
+    BarrierEmitOps* ops,
 ) {
     LoweredTextureBarrier lowered = lower_texture_barrier_trusted(
         commands,
         barrier,
     )!;
-    emit_texture_barrier(commands, &lowered);
+    emit_texture_barrier(commands, &lowered, ops);
 }
 
-fn void? full_texture_barrier(
+fn void? full_texture_barrier_with_ops(
     CommandRecord* commands,
     gpu::TextureBarrier* barrier,
+    BarrierEmitOps* ops,
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     VkDeviceState* state = commands.device_state;
@@ -927,97 +873,47 @@ fn void? full_texture_barrier(
         barrier:   barrier,
         operation: "cmd_texture_barrier",
     )!;
-    emit_texture_barrier(commands, &lowered);
+    emit_texture_barrier(commands, &lowered, ops);
 }
 
-fn TextureBarrierWorkCounters texture_barrier_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .helper_calls = state.texture_barrier_helper_calls.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .handle_resolutions = state.textures.get_calls.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .access_validations = state.texture_barrier_access_validations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .range_resolutions = state.texture_barrier_range_resolutions.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .state_validations = state.texture_barrier_state_validations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .native_assemblies = state.texture_barrier_native_assemblies.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .native_emissions = state.texture_barrier_native_emissions.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
+fn void? trusted_texture_barrier(
+    CommandRecord* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    BarrierEmitOps ops = barrier_emit_ops_real();
+    return trusted_texture_barrier_with_ops(commands, barrier, &ops);
 }
 
-fn void reset_texture_barrier_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.texture_barrier_helper_calls.store(0, AtomicOrdering.RELAXED);
-    state.textures.get_calls.store(0, AtomicOrdering.RELAXED);
-    state.texture_barrier_access_validations.store(0, AtomicOrdering.RELAXED);
-    state.texture_barrier_range_resolutions.store(0, AtomicOrdering.RELAXED);
-    state.texture_barrier_state_validations.store(0, AtomicOrdering.RELAXED);
-    state.texture_barrier_native_assemblies.store(0, AtomicOrdering.RELAXED);
-    state.texture_barrier_native_emissions.store(0, AtomicOrdering.RELAXED);
+fn void? full_texture_barrier(
+    CommandRecord* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    BarrierEmitOps ops = barrier_emit_ops_real();
+    return full_texture_barrier_with_ops(commands, barrier, &ops);
 }
 
-fn void set_texture_barrier_emit_hook(
-    VkDeviceState* state,
-    TextureBarrierEmitHook hook,
-    void* user_data,
+fn void? barrier_with_injected_ops(
+    CommandRecord* commands,
+    gpu::Barrier* barrier,
+    BarrierEmitOps* ops,
 ) @if(env::TESTING) {
-    state.texture_barrier_emit_hook = hook;
-    state.texture_barrier_emit_user_data = user_data;
+    if (commands.device_state.validation_policy.contract
+            == gpu::ContractValidation.FULL) {
+        return vk_cmd_barrier_with_ops(commands, barrier, ops);
+    }
+    return trusted_barrier_with_ops(commands, barrier, ops);
 }
 
-fn BarrierWorkCounters barrier_work_counters(
-    VkDeviceState* state,
+fn void? texture_barrier_with_injected_ops(
+    CommandRecord* commands,
+    gpu::TextureBarrier* barrier,
+    BarrierEmitOps* ops,
 ) @if(env::TESTING) {
-    return {
-        .native_memory_emissions = state.barrier_native_emissions.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .native_image_emissions =
-            state.texture_barrier_native_emissions.load(
-                AtomicOrdering.RELAXED,
-            ),
-        .texture_helper_calls = state.texture_barrier_helper_calls.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .texture_handle_resolutions = state.textures.get_calls.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
-}
-
-fn void reset_barrier_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.barrier_native_emissions.store(0, AtomicOrdering.RELAXED);
-    state.texture_barrier_native_emissions.store(
-        0,
-        AtomicOrdering.RELAXED,
-    );
-    state.texture_barrier_helper_calls.store(0, AtomicOrdering.RELAXED);
-    state.textures.get_calls.store(0, AtomicOrdering.RELAXED);
-}
-
-fn void set_barrier_emit_hook(
-    VkDeviceState* state,
-    BarrierEmitHook hook,
-    void* user_data,
-) @if(env::TESTING) {
-    state.barrier_emit_hook = hook;
-    state.barrier_emit_user_data = user_data;
+    if (commands.device_state.validation_policy.contract
+            == gpu::ContractValidation.FULL) {
+        return full_texture_barrier_with_ops(commands, barrier, ops);
+    }
+    return trusted_texture_barrier_with_ops(commands, barrier, ops);
 }
 
 fn vk::Semaphore? create_private_timeline(VkDeviceState* state) @private {
@@ -1036,6 +932,36 @@ fn vk::Semaphore? create_private_timeline(VkDeviceState* state) @private {
     return semaphore;
 }
 
+fn bool? poll_queue_completion_with_ops(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    uint queue_id,
+    ulong sequence,
+    CompletionRetirementOps* ops,
+) @private {
+    if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
+        return true;
+    }
+    ulong current;
+    check_backend_result(
+        state:     state,
+        operation: "poll_completion",
+        result:    ops.query(
+            state.device,
+            completion.timeline,
+            &current,
+        ),
+    )!;
+    if (current < sequence) return false;
+    retire_observed_completion_and_drain_with_ops(
+        state:             state,
+        observed_queue_id: queue_id,
+        observed_completed: current,
+        ops:               ops,
+    )!;
+    return completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence;
+}
+
 fn bool? poll_queue_completion_with_query(
     VkDeviceState* state,
     QueueCompletionState* completion,
@@ -1043,29 +969,14 @@ fn bool? poll_queue_completion_with_query(
     ulong sequence,
     SemaphoreCounterQueryFn query_fn,
 ) @private {
-    if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
-        note_completion_cached_poll_hit(state);
-        return true;
-    }
-    ulong current;
-    note_completion_counter_query(state);
-    check_backend_result(
-        state:     state,
-        operation: "poll_completion",
-        result:    query_fn(
-            state.device,
-            completion.timeline,
-            &current,
-        ),
-    )!;
-    if (current < sequence) return false;
-    retire_observed_completion_and_drain_with_query(
-        state:             state,
-        observed_queue_id: queue_id,
-        observed_completed: current,
-        query_fn:          query_fn,
-    )!;
-    return completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence;
+    CompletionRetirementOps ops = { .query = query_fn };
+    return poll_queue_completion_with_ops(
+        state:      state,
+        completion: completion,
+        queue_id:   queue_id,
+        sequence:   sequence,
+        ops:        &ops,
+    );
 }
 
 fn bool? vk_poll_completion_with_query(
@@ -1085,6 +996,26 @@ fn bool? vk_poll_completion_with_query(
         queue_id:   queue_id,
         sequence:   sequence,
         query_fn:   query_fn,
+    );
+}
+
+fn bool? vk_poll_completion_with_ops(
+    VkDeviceState* state,
+    uint queue_id,
+    ulong sequence,
+    CompletionRetirementOps* ops,
+) {
+    QueueCompletionState* completion = published_queue_completion_state(
+        state,
+        queue_id,
+        sequence,
+    )!;
+    return poll_queue_completion_with_ops(
+        state:      state,
+        completion: completion,
+        queue_id:   queue_id,
+        sequence:   sequence,
+        ops:        ops,
     );
 }
 
@@ -1116,21 +1047,18 @@ fn void? vk_wait_completion_with_wait(
     ulong timeout_ns,
     SemaphoreWaitFn wait_fn,
 ) @private {
-    (void)state.submit_completion_wait_calls.add(1, AtomicOrdering.RELAXED);
     QueueCompletionState* completion = published_queue_completion_state(
         state,
         queue_id,
         sequence,
     )!;
     if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
-        note_completion_cached_wait_hit(state);
         return;
     }
     vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
         .set_semaphore_count(1)
         .set_semaphores((&completion.timeline)[:1])
         .set_values((&sequence)[:1]);
-    note_completion_wait_call(state);
     check_wait_backend_result(
         state:     state,
         operation: "wait_completion",

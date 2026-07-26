@@ -5,7 +5,6 @@ import gpu @public;
 import vk;
 import vma;
 import std::thread;
-import std::core::mem;
 import std::core::env;
 import std::atomic;
 import std::atomic::types;
@@ -32,9 +31,25 @@ alias EndCommandBufferFn @private = fn vk::Result (
     void*,
     vk::CommandBuffer,
 );
+alias GeneratedDispatchLayoutReadFn @private @if(env::TESTING) =
+    fn vk::IndirectCommandsLayoutEXT (
+        void*,
+        BoundPipeline*,
+    );
+alias PipelineBindFn @private = fn void (
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::PipelineBindPoint bind_point,
+    vk::Pipeline pipeline,
+);
 
 const uint MAX_COMMAND_ALLOCATORS = 256;
 const uint COMMAND_ALLOCATOR_FREE_NONE = 0;
+
+struct PipelineBindOps {
+    void*          user_data;
+    PipelineBindFn bind;
+}
 
 struct GeneratedPreprocessBuffer {
     vk::Buffer             buffer;
@@ -48,25 +63,6 @@ struct GeneratedPreprocessBuffer {
     uint                   reservation_index;
     bool                   reservation_owned;
     bool                   reservation_in_use;
-}
-
-struct CommandRecordingStats {
-    ulong preprocess_allocations;
-    ulong preprocess_reuses;
-    ulong recording_allocations;
-}
-
-struct RecordingHostAllocatorSnapshot @if(env::TESTING) {
-    ulong allocations;
-    ulong resizes;
-    ulong releases;
-}
-
-struct RecordingHostAllocator (std::core::mem::alloc::Allocator) @if(env::TESTING) {
-    HostAllocator inner;
-    Atomic{ulong} allocations;
-    Atomic{ulong} resizes;
-    Atomic{ulong} releases;
 }
 
 struct PreparedBufferCopy {
@@ -107,17 +103,10 @@ struct PreparedGeneratedDispatch {
     uint                           max_count;
 }
 
-struct RootPushObservation @if(env::TESTING) {
-    gpu::GpuAddress compute;
-    ulong           compute_layout;
-    gpu::GpuAddress vertex;
-    gpu::GpuAddress fragment;
+struct GeneratedDispatchLayoutReadOps @private @if(env::TESTING) {
+    void*                         user_data;
+    GeneratedDispatchLayoutReadFn read;
 }
-
-Atomic{ulong} last_compute_root @if(env::TESTING);
-Atomic{ulong} last_compute_layout @if(env::TESTING);
-Atomic{ulong} last_vertex_root @if(env::TESTING);
-Atomic{ulong} last_fragment_root @if(env::TESTING);
 
 struct CommandPoolOps @private {
     void*                    user_data;
@@ -176,37 +165,6 @@ struct CommandAllocatorTable {
     ulong                  owner;
     uint                   free_head;
     uint                   next_new;
-}
-
-fn void*? RecordingHostAllocator.acquire(
-    &self,
-    sz size,
-    AllocInitType init_type,
-    sz alignment,
-) @dynamic @if(env::TESTING) {
-    void* pointer = self.inner.acquire(size, init_type, alignment)!;
-    (void)self.allocations.add(1, AtomicOrdering.RELAXED);
-    return pointer;
-}
-
-fn void*? RecordingHostAllocator.resize(
-    &self,
-    void* old_pointer,
-    sz size,
-    sz alignment,
-) @dynamic @if(env::TESTING) {
-    void* pointer = self.inner.resize(old_pointer, size, alignment)!;
-    (void)self.resizes.add(1, AtomicOrdering.RELAXED);
-    return pointer;
-}
-
-fn void RecordingHostAllocator.release(
-    &self,
-    void* old_pointer,
-    bool aligned,
-) @dynamic @if(env::TESTING) {
-    self.inner.release(old_pointer, aligned);
-    (void)self.releases.add(1, AtomicOrdering.RELAXED);
 }
 
 fn gpu::CommandAllocatorHandle? CommandAllocatorTable.alloc(
@@ -272,127 +230,6 @@ fn void? CommandAllocatorTable.free(
     self.free_head = handle.index + 1;
 }
 
-fn void install_recording_host_allocator(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.recording_host_allocator = {
-        .inner = state.host_allocator,
-    };
-    // VkDeviceState stays address-stable while this interior pointer is installed.
-    state.host_allocator = &state.recording_host_allocator;
-}
-
-fn RecordingHostAllocatorSnapshot recording_host_allocator_snapshot(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .allocations = state.recording_host_allocator.allocations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .resizes = state.recording_host_allocator.resizes.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .releases = state.recording_host_allocator.releases.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
-}
-
-fn void reset_root_push_observation() @if(env::TESTING) {
-    last_compute_root.store(0, AtomicOrdering.RELAXED);
-    last_compute_layout.store(0, AtomicOrdering.RELAXED);
-    last_vertex_root.store(0, AtomicOrdering.RELAXED);
-    last_fragment_root.store(0, AtomicOrdering.RELAXED);
-}
-
-fn RootPushObservation root_push_observation() @if(env::TESTING) {
-    return {
-        .compute = (gpu::GpuAddress)last_compute_root.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .compute_layout = last_compute_layout.load(AtomicOrdering.RELAXED),
-        .vertex = (gpu::GpuAddress)last_vertex_root.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .fragment = (gpu::GpuAddress)last_fragment_root.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
-}
-
-fn void note_command_buffer_reset(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.command_buffer_resets.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_buffer_allocation(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.recording_command_buffer_allocations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_pool_creation(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.recording_command_pool_creations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_buffer_free(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.recording_command_buffer_frees.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_recording_vma_allocation(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.recording_vma_allocations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_generated_scratch_miss(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.generated_scratch_misses.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_generated_native_emission(
-    VkDeviceState* state,
-    gpu::GeneratedWorkKind kind,
-) {
-    $if env::TESTING:
-        switch (kind) {
-            case gpu::GeneratedWorkKind.DISPATCH:
-                (void)state.generated_dispatch_emissions.add(
-                    1,
-                    AtomicOrdering.RELAXED,
-                );
-            case gpu::GeneratedWorkKind.DRAW:
-                (void)state.generated_draw_emissions.add(
-                    1,
-                    AtomicOrdering.RELAXED,
-                );
-            case gpu::GeneratedWorkKind.DRAW_INDEXED:
-                (void)state.generated_indexed_draw_emissions.add(
-                    1,
-                    AtomicOrdering.RELAXED,
-                );
-        }
-    $endif
-}
-
 fn vk::CommandPoolCreateFlags command_allocator_pool_create_flags() {
     return (vk::CommandPoolCreateFlags)(
         (uint)vk::CommandPoolCreateFlagBits.TRANSIENT_BIT
@@ -412,7 +249,6 @@ fn vk::CommandPool? create_command_pool_real(void* user_data, vk::Device device,
         p_allocator:   null,
         p_command_pool: &pool,
     ))!;
-    note_command_pool_creation(state);
     return pool;
 }
 
@@ -447,12 +283,6 @@ fn void destroy_command_allocator_slot_with_ops(
         state,
         slot.reservations,
     );
-    if (slot.pool != null
-        && slot.command_buffers.len > 0
-        && slot.command_buffers[0] != null) {
-        state.command_buffers_freed += slot.command_buffers.len;
-        note_command_buffer_free(state);
-    }
     if (slot.pool != null) ops.destroy(ops.user_data, state.device, slot.pool);
     if (slot.command_buffers.ptr != null) {
         alloc::free(state.host_allocator, slot.command_buffers.ptr);
@@ -593,8 +423,6 @@ fn void? initialize_command_allocator_slot_with_ops(
         &allocate_info,
         slot.command_buffers.ptr,
     ))!;
-    state.command_buffers_allocated += capacity;
-    note_command_buffer_allocation(state);
 }
 
 fn void? initialize_command_allocator_slot(
@@ -775,12 +603,8 @@ fn vk::MemoryRequirements? generated_scratch_requirements(
     gpu::GeneratedScratchDesc* desc,
 ) {
     PipelineSlot* slot = state.pipelines.get(desc.pipeline)!;
-    if (slot.entry >= state.pipeline_cache.entries.len
-        || !state.pipeline_cache.entries[slot.entry].used) {
-        return gpu::INVALID_HANDLE~;
-    }
-    PipelineKind pipeline_kind = (PipelineKind)state.pipeline_cache
-        .entries[slot.entry].key.kind;
+    PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
+    PipelineKind pipeline_kind = (PipelineKind)entry.key.kind;
     vk::IndirectCommandsLayoutEXT layout;
     switch (desc.kind) {
         case gpu::GeneratedWorkKind.DRAW:
@@ -801,7 +625,7 @@ fn vk::MemoryRequirements? generated_scratch_requirements(
         default:
             return gpu::INVALID_ARGUMENT~;
     }
-    if (layout == null) return gpu::BACKEND_ERROR~;
+    layout = required_generated_work_layout(layout)!;
 
     vk::GeneratedCommandsPipelineInfoEXT pipeline_info =
         vk::generated_commands_pipeline_info_ext()
@@ -1148,7 +972,6 @@ fn void? vk_begin_commands_with_ops(
         command_buffer,
         {},
     ))!;
-    note_command_buffer_reset(state);
     vk::CommandBufferBeginInfo begin = vk::command_buffer_begin_info()
         .set_flags(vk::CommandBufferUsageFlagBits.ONE_TIME_SUBMIT_BIT);
     check_device_result(state, ops.begin(
@@ -1223,10 +1046,7 @@ fn CommandRecord*? begin_commands_with_injected_ops(
         ops:          ops,
     )!;
     CommandRecord* record =
-        gpu::internal::recording_command(
-            out_commands,
-            count_command: false,
-        )!;
+        gpu::internal::recording_command(out_commands)!;
     return record;
 }
 
@@ -1466,7 +1286,6 @@ fn void record_buffer_copy(
         region_count:   1,
         p_regions:      &region,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_copy_buffer(
@@ -1573,7 +1392,6 @@ fn void record_buffer_fill(
         size:           (vk::DeviceSize)fill.span.size,
         data:           fill.value,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_fill_buffer(
@@ -1863,7 +1681,6 @@ fn void record_buffer_to_texture_copy(
         region_count:    1,
         p_regions:       &copy.region,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void record_texture_to_buffer_copy(
@@ -1881,7 +1698,6 @@ fn void record_texture_to_buffer_copy(
         region_count:    1,
         p_regions:       &copy.region,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_copy_buffer_to_texture(
@@ -2011,10 +1827,8 @@ fn ResolvedSpan? validate_and_lower_indirect_span(
 
 fn BoundPipeline? bound_pipeline_snapshot(CommandRecord* record) {
     BoundPipeline pipeline = record.logical_pipeline;
-    if (!pipeline.handle.is_valid() || pipeline.pipeline == null
-        || pipeline.layout == null) {
-        return gpu::INVALID_RESOURCE_STATE~;
-    }
+    if (!pipeline.handle.is_valid()) return gpu::INVALID_RESOURCE_STATE~;
+    if (pipeline.pipeline == null || pipeline.layout == null) unreachable();
     return pipeline;
 }
 
@@ -2103,11 +1917,6 @@ fn BoundPipeline? lower_bound_pipeline(
     validate_descriptor_heap_binding(state)!;
     PipelineCell* cell = state.pipelines.get_cell(pipeline)!;
     PipelineSlot* slot = &cell.value;
-    gpu::internal::note_command_pipeline_cache_lookup();
-    if (slot.entry >= state.pipeline_cache.entries.len
-        || !state.pipeline_cache.entries[slot.entry].used) {
-        return gpu::INVALID_HANDLE~;
-    }
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
     return {
         .handle                    = pipeline,
@@ -2150,9 +1959,24 @@ fn void? track_bound_pipeline(
     );
 }
 
-fn void? record_bound_pipeline(
+fn void bind_pipeline_real(
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::PipelineBindPoint bind_point,
+    vk::Pipeline pipeline,
+) @private {
+    (void)user_data;
+    vk::cmd_bind_pipeline(command_buffer, bind_point, pipeline);
+}
+
+fn PipelineBindOps pipeline_bind_ops_real() @private {
+    return { .bind = &bind_pipeline_real };
+}
+
+fn void? record_bound_pipeline_with_ops(
     CommandRecord* commands,
     BoundPipeline* bound,
+    PipelineBindOps* ops,
 ) {
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
@@ -2163,18 +1987,18 @@ fn void? record_bound_pipeline(
         ? vk::PipelineBindPoint.COMPUTE
         : vk::PipelineBindPoint.GRAPHICS;
     bool native_match = native.pipeline != null
-        && native.kind == bound.kind
+        && native.pipeline == bound.pipeline
         && native.cache_entry == bound.cache_entry;
     if (!native_match) {
-        vk::cmd_bind_pipeline(record.command_buffer, bind_point, bound.pipeline);
-        gpu::internal::note_command_pipeline_bind();
-        gpu::internal::note_command_native_call();
+        ops.bind(
+            user_data:     ops.user_data,
+            command_buffer: record.command_buffer,
+            bind_point:    bind_point,
+            pipeline:      bound.pipeline,
+        );
         *native = {
-            .pipeline                  = bound.pipeline,
-            .layout                    = bound.layout,
-            .generated_dispatch_layout = bound.generated_dispatch_layout,
-            .cache_entry               = bound.cache_entry,
-            .kind                      = bound.kind,
+            .pipeline    = bound.pipeline,
+            .cache_entry = bound.cache_entry,
         };
     }
     bind_descriptor_heap(
@@ -2184,6 +2008,14 @@ fn void? record_bound_pipeline(
         bind_point: bind_point,
     )!;
     record.logical_pipeline = *bound;
+}
+
+fn void? record_bound_pipeline(
+    CommandRecord* commands,
+    BoundPipeline* bound,
+) {
+    PipelineBindOps ops = pipeline_bind_ops_real();
+    return record_bound_pipeline_with_ops(commands, bound, &ops);
 }
 
 fn void update_full_color_state_for_bind(
@@ -2201,17 +2033,19 @@ fn void update_full_color_state_for_bind(
     }
 }
 
-fn void? trusted_bind_pipeline(
+fn void? trusted_bind_pipeline_with_ops(
     CommandRecord* commands,
     gpu::PipelineHandle pipeline,
+    PipelineBindOps* ops,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
-    record_bound_pipeline(commands, &bound)!;
+    record_bound_pipeline_with_ops(commands, &bound, ops)!;
 }
 
-fn void? full_bind_pipeline(
+fn void? full_bind_pipeline_with_ops(
     CommandRecord* commands,
     gpu::PipelineHandle pipeline,
+    PipelineBindOps* ops,
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
     CommandRecord* record = commands;
@@ -2221,8 +2055,36 @@ fn void? full_bind_pipeline(
         checkpoint,
     );
     track_bound_pipeline(commands, &bound)!;
-    record_bound_pipeline(commands, &bound)!;
+    record_bound_pipeline_with_ops(commands, &bound, ops)!;
     update_full_color_state_for_bind(record, &bound);
+}
+
+fn void? trusted_bind_pipeline(
+    CommandRecord* commands,
+    gpu::PipelineHandle pipeline,
+) {
+    PipelineBindOps ops = pipeline_bind_ops_real();
+    return trusted_bind_pipeline_with_ops(commands, pipeline, &ops);
+}
+
+fn void? full_bind_pipeline(
+    CommandRecord* commands,
+    gpu::PipelineHandle pipeline,
+) {
+    PipelineBindOps ops = pipeline_bind_ops_real();
+    return full_bind_pipeline_with_ops(commands, pipeline, &ops);
+}
+
+fn void? bind_pipeline_with_injected_ops(
+    CommandRecord* commands,
+    gpu::PipelineHandle pipeline,
+    PipelineBindOps* ops,
+) @if(env::TESTING) {
+    if (commands.device_state.validation_policy.contract
+            == gpu::ContractValidation.FULL) {
+        return full_bind_pipeline_with_ops(commands, pipeline, ops);
+    }
+    return trusted_bind_pipeline_with_ops(commands, pipeline, ops);
 }
 
 fn void push_compute_root(
@@ -2231,10 +2093,6 @@ fn void push_compute_root(
     gpu::GpuAddress root,
 ) @private {
     gpu::RootPush push = { .root_gpu = root };
-    $if env::TESTING:
-        last_compute_root.store((ulong)push.root_gpu, AtomicOrdering.RELAXED);
-        last_compute_layout.store((ulong)pipeline.layout, AtomicOrdering.RELAXED);
-    $endif
     vk::cmd_push_constants(
         command_buffer: record.command_buffer,
         layout:         pipeline.layout,
@@ -2243,7 +2101,6 @@ fn void push_compute_root(
         size:           gpu::RootPush::size,
         p_values:       &push,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? vk_cmd_dispatch(
@@ -2282,7 +2139,6 @@ fn void? vk_cmd_dispatch(
         group_count_y:  groups.y,
         group_count_z:  groups.z,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_dispatch(
@@ -2302,7 +2158,6 @@ fn void? trusted_dispatch(
         group_count_y:  groups.y,
         group_count_z:  groups.z,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? full_dispatch(
@@ -2392,7 +2247,6 @@ fn void record_dispatch_indirect(
         dispatch.args.slot.buffer,
         (vk::DeviceSize)dispatch.args.offset,
     );
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_dispatch_indirect(
@@ -2495,17 +2349,6 @@ fn ResolvedSpan? validate_and_lower_generated_work_records(
     return resolved;
 }
 
-fn void set_generated_dispatch_layout_read_hook(
-    VkDeviceState* state,
-    GeneratedDispatchLayoutReadHook hook,
-    void* user_data,
-) @if(env::TESTING) {
-    state.generated_dispatch_layout_read_hook = hook;
-    state.generated_dispatch_layout_read_user_data = user_data;
-    state.generated_dispatch_layout_read_observed =
-        (vk::IndirectCommandsLayoutEXT)null;
-}
-
 fn void? execute_generated_work(
     VkDeviceState* state,
     CommandRecord* record,
@@ -2555,31 +2398,22 @@ fn void? execute_generated_work(
         vk::FALSE,
         &info,
     );
-    note_generated_native_emission(state, kind);
-    gpu::internal::note_command_native_call();
 }
 
-fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
-    VkDeviceState* state,
-    BoundPipeline* pipeline,
+fn vk::IndirectCommandsLayoutEXT? required_generated_work_layout(
+    vk::IndirectCommandsLayoutEXT layout,
 ) {
-    $if env::TESTING:
-        if (state.generated_dispatch_layout_read_hook != null) {
-            state.generated_dispatch_layout_read_hook(
-                state.generated_dispatch_layout_read_user_data,
-            );
-        }
-    $endif
-    vk::IndirectCommandsLayoutEXT layout =
-        pipeline.generated_dispatch_layout;
-    $if env::TESTING:
-        state.generated_dispatch_layout_read_observed = layout;
-    $endif
     if (layout == null) return gpu::BACKEND_ERROR~;
     return layout;
 }
 
-fn PreparedGeneratedDispatch? lower_generated_dispatch(
+fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
+    BoundPipeline* pipeline,
+) {
+    return required_generated_work_layout(pipeline.generated_dispatch_layout);
+}
+
+fn PreparedGeneratedDispatch? lower_generated_dispatch_inputs(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2611,10 +2445,45 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
         arg_size: uint::size,
         count:    1,
     )!;
-    dispatch.layout = snapshot_generated_dispatch_layout(
-        state,
-        &dispatch.pipeline,
+    return dispatch;
+}
+
+fn PreparedGeneratedDispatch? lower_generated_dispatch(
+    CommandRecord* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+) {
+    PreparedGeneratedDispatch dispatch = lower_generated_dispatch_inputs(
+        commands:           commands,
+        records:            records,
+        count_span:         count_span,
+        max_dispatch_count: max_dispatch_count,
     )!;
+    if (dispatch.max_count == 0) return dispatch;
+    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
+    return dispatch;
+}
+
+fn PreparedGeneratedDispatch? lower_generated_dispatch_with_layout_read_ops(
+    CommandRecord* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+    GeneratedDispatchLayoutReadOps* layout_read,
+) @if(env::TESTING) {
+    PreparedGeneratedDispatch dispatch = lower_generated_dispatch_inputs(
+        commands:           commands,
+        records:            records,
+        count_span:         count_span,
+        max_dispatch_count: max_dispatch_count,
+    )!;
+    if (dispatch.max_count == 0) return dispatch;
+    dispatch.layout = layout_read.read(
+        layout_read.user_data,
+        &dispatch.pipeline,
+    );
+    dispatch.layout = required_generated_work_layout(dispatch.layout)!;
     return dispatch;
 }
 
@@ -2661,10 +2530,7 @@ fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
         operation:      "cmd_dispatch_generated",
         rejected_field: "count_span",
     )!;
-    dispatch.layout = snapshot_generated_dispatch_layout(
-        state,
-        &dispatch.pipeline,
-    )!;
+    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
     return dispatch;
 }
 
@@ -2709,6 +2575,26 @@ fn void? record_generated_dispatch(
         count:         &dispatch.count,
         max_count:     dispatch.max_count,
     )!;
+}
+
+fn void? trusted_dispatch_generated_with_layout_read_ops(
+    CommandRecord* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+    GeneratedDispatchLayoutReadOps* layout_read,
+    vk::IndirectCommandsLayoutEXT* prepared_layout,
+) @if(env::TESTING) {
+    PreparedGeneratedDispatch dispatch =
+        lower_generated_dispatch_with_layout_read_ops(
+            commands:           commands,
+            records:            records,
+            count_span:         count_span,
+            max_dispatch_count: max_dispatch_count,
+            layout_read:        layout_read,
+        )!;
+    *prepared_layout = dispatch.layout;
+    record_generated_dispatch(commands, &dispatch)!;
 }
 
 fn void? trusted_dispatch_generated(
@@ -2766,20 +2652,6 @@ fn void recycle_generated_preprocess_indices_locked(
         }
         indices[i] = 0;
     }
-}
-
-fn CommandRecordingStats command_recording_stats(VkDeviceState* state) {
-    return {
-        .preprocess_allocations = state.generated_preprocess_allocations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .preprocess_reuses = state.generated_preprocess_reuses.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .recording_allocations = state.generated_recording_allocations.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
 }
 
 fn void free_generated_preprocess_buffers(
@@ -2847,8 +2719,6 @@ fn GeneratedPreprocessBuffer? allocate_generated_preprocess_buffer(
     buffer.size = size;
     if (buffer.address == 0) return gpu::BACKEND_ERROR~;
     owns_pair = false;
-    (void)state.generated_preprocess_allocations.add(1, AtomicOrdering.RELAXED);
-    note_recording_vma_allocation(state);
     return buffer;
 }
 
@@ -2866,7 +2736,6 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     defer slot.mutex.unlock();
     if (record.scratch.generated_preprocess_count
             >= record.scratch.generated_preprocess_indices.len) {
-        note_generated_scratch_miss(state);
         return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
     }
     foreach (index, &reserved : slot.reservations) {
@@ -2878,123 +2747,9 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
         record.scratch.generated_preprocess_indices[
             record.scratch.generated_preprocess_count++
         ] = (uint)index;
-        (void)state.generated_preprocess_reuses.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
         return reserved;
     }
-    note_generated_scratch_miss(state);
     return gpu::GENERATED_SCRATCH_EXHAUSTED~;
-}
-
-<* Snapshot test recording work after externally synchronizing the measured
-   interval. *>
-fn gpu::internal::RecordingWorkCounters command_recording_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    RecordingHostAllocatorSnapshot allocator =
-        recording_host_allocator_snapshot(state);
-    gpu::internal::RecordingWorkCounters counters = {
-        .host_allocations = allocator.allocations + allocator.resizes,
-        .command_pool_creations = state.recording_command_pool_creations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .command_buffer_allocations = state
-            .recording_command_buffer_allocations.load(
-                AtomicOrdering.RELAXED,
-            ),
-        .command_buffer_frees = state.recording_command_buffer_frees.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .command_buffer_resets = state.command_buffer_resets.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .image_view_creations = state.recording_image_view_creations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .vma_allocations = state.recording_vma_allocations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .registry_lock_acquisitions = gpu::internal::device_registry_lock_count(),
-    };
-    $if env::TESTING:
-        counters.generated_scratch_misses = state.generated_scratch_misses.load(
-            AtomicOrdering.RELAXED,
-        );
-        counters.generated_dispatch_emissions =
-            state.generated_dispatch_emissions.load(AtomicOrdering.RELAXED);
-        counters.generated_draw_emissions = state.generated_draw_emissions.load(
-            AtomicOrdering.RELAXED,
-        );
-        counters.generated_indexed_draw_emissions =
-            state.generated_indexed_draw_emissions.load(
-                AtomicOrdering.RELAXED,
-            );
-    $endif
-    return counters;
-}
-
-<* Reset test recording-work counters while recording is quiescent. *>
-fn void reset_command_recording_work_counters(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.recording_host_allocator.allocations.store(
-        0,
-        AtomicOrdering.RELAXED,
-    );
-    state.recording_host_allocator.resizes.store(0, AtomicOrdering.RELAXED);
-    state.recording_host_allocator.releases.store(0, AtomicOrdering.RELAXED);
-    state.recording_command_pool_creations.store(0, AtomicOrdering.RELAXED);
-    state.recording_command_buffer_allocations.store(
-        0,
-        AtomicOrdering.RELAXED,
-    );
-    state.recording_command_buffer_frees.store(0, AtomicOrdering.RELAXED);
-    state.command_buffer_resets.store(0, AtomicOrdering.RELAXED);
-    state.recording_image_view_creations.store(0, AtomicOrdering.RELAXED);
-    state.recording_vma_allocations.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::reset_device_registry_lock_count();
-    $if env::TESTING:
-        state.generated_scratch_misses.store(0, AtomicOrdering.RELAXED);
-        state.generated_dispatch_emissions.store(0, AtomicOrdering.RELAXED);
-        state.generated_draw_emissions.store(0, AtomicOrdering.RELAXED);
-        state.generated_indexed_draw_emissions.store(
-            0,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn gpu::internal::RecordingWorkCounters command_recording_work_delta(
-    gpu::internal::RecordingWorkCounters after,
-    gpu::internal::RecordingWorkCounters before,
-) @if(env::TESTING) {
-    return {
-        .host_allocations = after.host_allocations - before.host_allocations,
-        .command_pool_creations = after.command_pool_creations
-            - before.command_pool_creations,
-        .command_buffer_allocations = after.command_buffer_allocations
-            - before.command_buffer_allocations,
-        .command_buffer_frees = after.command_buffer_frees
-            - before.command_buffer_frees,
-        .command_buffer_resets = after.command_buffer_resets
-            - before.command_buffer_resets,
-        .image_view_creations = after.image_view_creations
-            - before.image_view_creations,
-        .vma_allocations = after.vma_allocations - before.vma_allocations,
-        .registry_lock_acquisitions = after.registry_lock_acquisitions
-            - before.registry_lock_acquisitions,
-        .generated_scratch_misses = after.generated_scratch_misses
-            - before.generated_scratch_misses,
-        .generated_dispatch_emissions = after.generated_dispatch_emissions
-            - before.generated_dispatch_emissions,
-        .generated_draw_emissions = after.generated_draw_emissions
-            - before.generated_draw_emissions,
-        .generated_indexed_draw_emissions =
-            after.generated_indexed_draw_emissions
-                - before.generated_indexed_draw_emissions,
-    };
 }
 
 fn vk::IndirectCommandsLayoutEXT? create_generated_work_layout(

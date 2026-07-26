@@ -43,11 +43,6 @@ struct PendingTextureWrite {
     vk::ImageView view;
 }
 
-struct TextureViewAccountingCounters @if(env::TESTING) {
-    ulong cell_lookups;
-    ulong ownership_work_units;
-}
-
 fn void? report_descriptor_backend_failure(
     VkDeviceState* state,
     ZString operation,
@@ -265,33 +260,10 @@ fn vk::ImageLayout texture_descriptor_layout(
     );
 }
 
-fn void reset_texture_view_accounting(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    state.texture_view_cell_lookups = 0;
-    state.texture_view_ownership_work_units = 0;
-}
-
-fn TextureViewAccountingCounters texture_view_accounting(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    return {
-        .cell_lookups         = state.texture_view_cell_lookups,
-        .ownership_work_units = state.texture_view_ownership_work_units,
-    };
-}
-
 fn TextureDescriptorCell*? texture_cell_get(
     VkDeviceState* state,
     gpu::TextureView view,
 ) @private {
-    $if env::TESTING:
-        state.texture_view_cell_lookups++;
-    $endif
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     if (!view.index.is_valid()) return gpu::INVALID_HANDLE~;
     uint slot = texture_index_slot(view.index);
@@ -305,16 +277,12 @@ fn TextureDescriptorCell*? texture_cell_get(
 }
 
 fn bool texture_has_live_descriptor_views(
-    VkDeviceState* state,
     TextureSlot* texture,
 ) @private {
-    $if env::TESTING:
-        state.texture_view_ownership_work_units++;
-    $endif
     return texture.live_descriptor_views != 0;
 }
 
-fn void? report_texture_view_accounting_failure(
+fn void? report_texture_view_owner_invariant_failure(
     VkDeviceState* state,
     ZString operation,
     ZString backend_text,
@@ -338,7 +306,7 @@ fn void? validate_texture_view_increment(
     uint capacity = (uint)state.shader_heap.descriptors.texture_cells.len;
     if (pending_count > capacity
         || owner.live_descriptor_views > capacity - pending_count) {
-        return report_texture_view_accounting_failure(
+        return report_texture_view_owner_invariant_failure(
             state,
             operation,
             "texture view owner count exceeds descriptor heap capacity",
@@ -352,7 +320,7 @@ fn void? validate_texture_view_decrement(
 ) @private {
     if (!contract_uses_full_validation(state.validation_policy)
         || owner.live_descriptor_views != 0) return;
-    return report_texture_view_accounting_failure(
+    return report_texture_view_owner_invariant_failure(
         state,
         "destroy_texture_view",
         "texture view owner count is zero for a live descriptor",
@@ -456,8 +424,6 @@ fn void? bind_descriptor_heap(
         dynamic_offset_count:  0,
         p_dynamic_offsets:     null,
     );
-    gpu::internal::note_command_descriptor_heap_set_bind();
-    gpu::internal::note_command_native_call();
     if (bind_point == vk::PipelineBindPoint.COMPUTE) {
         binding.compute_set_bound = true;
     } else {
@@ -846,7 +812,7 @@ fn void? vk_destroy_texture_view(
     TextureDescriptorCell* cell = resolved;
     TextureSlot*? resolved_owner = state.textures.get(cell.owner);
     if (catch resolved_owner) {
-        return report_texture_view_accounting_failure(
+        return report_texture_view_owner_invariant_failure(
             state,
             "destroy_texture_view",
             "live texture descriptor owner is missing",

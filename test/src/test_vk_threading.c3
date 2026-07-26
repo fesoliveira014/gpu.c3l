@@ -611,22 +611,12 @@ fn void full_validation_rejects_cross_thread_shared_allocator() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    gpu::internal::RecordingWorkCounters before =
-        vk::command_recording_work_counters(state);
-
     AllocatorBeginArgs args = { .allocator = &allocator };
     Thread worker;
     worker.create(&allocator_begin_worker, &args)!!;
     int result = worker.join()!!;
-    gpu::internal::RecordingWorkCounters after =
-        vk::command_recording_work_counters(state);
-
     assert(result == 1 && args.result == gpu::RESOURCE_IN_USE,
         "FULL validation rejects a second recording thread on one allocator");
-    assert(after.command_buffer_resets == before.command_buffer_resets,
-        "cross-thread rejection does not reset or begin a native buffer");
 }
 
 fn void allocator_migrates_after_last_end_and_discard() @test {

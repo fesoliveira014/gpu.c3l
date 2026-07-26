@@ -217,55 +217,6 @@ fn void? destroy_surface(Surface* surface) {
     gpu::internal::runtime_release_surface(&runtime)!!;
 }
 
-<* Reset process-wide command instrumentation before a synchronized test
-   interval. Do not call while another thread records commands. *>
-fn void reset_command_resolution_stats() @if(env::TESTING) {
-    gpu::internal::command_device_registry_resolutions.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_retained_pin_operations.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_table_lookups.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_pipeline_table_lookups.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_pipeline_cache_lookups.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_recording_commands.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_native_commands.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_pipeline_bind_commands.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_descriptor_heap_set_bind_commands.store(0, AtomicOrdering.RELAXED);
-}
-
-<* Snapshot process-wide command instrumentation with relaxed loads.
-   recording_commands counts live-record entry-point attempts;
-   native_commands counts every Vulkan command emitted by those paths. *>
-fn CommandResolutionStats command_resolution_stats() @if(env::TESTING) {
-    return {
-        .device_registry_resolutions = gpu::internal::command_device_registry_resolutions.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .retained_pin_operations = gpu::internal::command_retained_pin_operations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .command_table_lookups = gpu::internal::command_table_lookups.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .pipeline_table_lookups = gpu::internal::command_pipeline_table_lookups.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .pipeline_cache_lookups = gpu::internal::command_pipeline_cache_lookups.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .recording_commands = gpu::internal::command_recording_commands.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .native_commands = gpu::internal::command_native_commands.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .pipeline_bind_commands = gpu::internal::command_pipeline_bind_commands.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .descriptor_heap_set_bind_commands = gpu::internal::command_descriptor_heap_set_bind_commands.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
-}
-
 <* Snapshot the selected device's capabilities. *>
 fn DeviceCaps? get_device_caps(Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -1042,7 +993,7 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
    Runtime failures: failure preserves the token. *>
 fn void? discard_commands(CommandList* commands) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands, count_command: false)!;
+        gpu::internal::recording_command(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
         allow_lost: true,
