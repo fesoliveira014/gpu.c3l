@@ -160,7 +160,6 @@ function gpu::end_commands
 function gpu::enumerate_adapters
 function gpu::flush_mapped_span
 function gpu::free_allocation
-function gpu::render_geometry_state
 function gpu::full_validation_runtime_desc
 function gpu::get_adapter_diagnostics
 function gpu::get_adapter_info
@@ -184,6 +183,7 @@ function gpu::poll_completion
 function gpu::premultiplied_alpha_blend
 function gpu::present
 function gpu::release_generated_scratch
+function gpu::render_geometry_state
 function gpu::reserve_generated_scratch
 function gpu::resize_swapchain
 function gpu::sampled_at
