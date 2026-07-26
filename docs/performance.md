@@ -51,9 +51,13 @@ The Vulkan targets cover:
 - `lifecycle_bench`: submission, completed-point polling, destruction, and
   submission batches;
 - `pipeline_cache_bench`: pipeline alias creation, duplicate lookup, and
-  dynamic raster-state recording;
+  complete `GraphicsState` packet recording across raster permutations;
 - `async_overlap_bench`: serialized and independent graphics/compute work,
   with an explicit not-applicable result on single-queue devices.
+
+The pipeline-cache command timing is an advisory complete-packet measurement.
+Raster-only and complete-packet recording costs are not comparable, and the
+measurement has no threshold, parsed schema, or CI gate.
 
 The CPU-only command-wrapper baseline needs no Vulkan loader, ICD, VMA, or
 native library:

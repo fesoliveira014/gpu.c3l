@@ -37,9 +37,12 @@ page doesn't explain it, that's a bug in this page — file an issue.
   and survives render-pass boundaries. Minimal begin does not change or replay
   it. For a fresh recording, begin the pass, bind a compatible graphics
   pipeline, and apply a complete `GraphicsState`. Under `FULL`, regular and
-  generated draws reject a recording that has only partial updates. When an
-  incompatible pipeline remains selected from an earlier pass, bind the next
-  compatible pipeline before beginning. `render_geometry_state`
+  generated draws reject a recording that has only viewport/scissor overrides.
+  Raster, depth, and color changes mutate and resend the caller-owned complete
+  packet after a compatible pipeline bind. Neither pass begin nor pipeline
+  binding replays that state. When an incompatible pipeline remains selected
+  from an earlier pass, bind the next compatible pipeline before beginning.
+  `render_geometry_state`
   supplies conventional viewport/raster/depth state and an empty color packet;
   color passes must replace `GraphicsState.color` with a packet matching the
   pipeline's ordered color-format domain. The old

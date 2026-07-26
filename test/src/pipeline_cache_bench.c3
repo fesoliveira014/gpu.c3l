@@ -4,7 +4,7 @@ import gpu;
 import std::io;
 import std::time;
 
-// Advisory, not gating: request one alias for each command-time raster-state
+// Advisory, not gating: record one complete packet for each raster-state
 // permutation, then measure duplicate singular cache lookup. The raster matrix
 // must remain one format-only graphics pipeline identity.
 
@@ -29,7 +29,7 @@ fn gpu::DynamicRasterState raster_permutation(uint index) {
     return raster;
 }
 
-fn double record_raster_matrix(
+fn double record_complete_packet_matrix(
     gpu::CommandAllocator* allocator,
     gpu::PipelineHandle pipeline,
     gpu::DynamicRasterState[] rasters,
@@ -79,7 +79,10 @@ fn double record_raster_matrix(
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
     gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     std::time::Clock start = std::time::clock::now();
-    foreach (&raster : rasters) gpu::cmd_set_raster_state(&commands, raster)!!;
+    foreach (&raster : rasters) {
+        graphics.raster = *raster;
+        gpu::cmd_set_graphics_state(&commands, &graphics)!!;
+    }
     long elapsed_ns = (long)start.to_now();
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
@@ -89,7 +92,7 @@ fn double record_raster_matrix(
 
 fn int main() {
     io::printfn(
-        "iterations=raster=%d;duplicate=%d units=ns/create,ns/state",
+        "iterations=complete_packet=%d;duplicate=%d units=ns/create,ns/packet",
         BENCH_RASTER_PERMUTATION_COUNT,
         BENCH_DUPLICATE_COUNT,
     );
@@ -148,15 +151,15 @@ fn int main() {
         cold_ns_per_create,
     );
 
-    double raster_ns_per_state = record_raster_matrix(
+    double packet_ns = record_complete_packet_matrix(
         allocator: &allocator,
         pipeline: aliases[0],
         rasters:  rasters[..],
     );
     io::printfn(
-        "raster recording: %d states, %.1f ns/state",
+        "complete packet recording: %d packets, %.1f ns/packet",
         BENCH_RASTER_PERMUTATION_COUNT,
-        raster_ns_per_state,
+        packet_ns,
     );
 
     long dup_elapsed_ns = 0;

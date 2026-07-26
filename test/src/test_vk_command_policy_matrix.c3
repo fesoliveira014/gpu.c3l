@@ -315,12 +315,6 @@ fn void exercise_policy_matrix_render(
         .height = 8,
     };
     gpu::cmd_set_scissor(&commands, &scissor)!!;
-    gpu::DepthState depth;
-    gpu::cmd_set_depth_state(&commands, &depth)!!;
-    gpu::DynamicRasterState raster;
-    gpu::cmd_set_raster_state(&commands, &raster)!!;
-    gpu::ColorState color = { .targets = color_targets[..] };
-    gpu::cmd_set_color_state(&commands, &color)!!;
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,

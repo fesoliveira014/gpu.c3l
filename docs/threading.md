@@ -208,10 +208,10 @@ ownership transfers.
   later commands validate the cached generation without resolving the table.
   Graphics and compute native snapshots belong to the confined command record
   independently, so bind-point switches preserve each selection without shared
-  mutable state. Complete and partial graphics state belongs to that same
-  confined record: it may be recorded before or during a pass, survives pass
-  boundaries without shared publication, and resets only when the native
-  command buffer is reused.
+  mutable state. Complete graphics state and narrow viewport/scissor overrides
+  belong to that same confined record: they may be recorded before or during a
+  pass, survive pass boundaries without shared publication, and reset only
+  when the native command buffer is reused.
 - Destruction must happen-after the last use of the handle on any thread.
 - Attachment-view slots live in a fixed table and retain their texture. Render
   recording reads immutable view metadata without the shader-visible view-cache

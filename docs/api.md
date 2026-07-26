@@ -958,7 +958,7 @@ destroy_pipeline(Device* device, PipelineHandle pipeline) -> void?
 `PolygonMode.LINE` is optional. Query `DeviceCaps.line_polygon_mode` before
 using it; unsupported LINE creation returns `UNSUPPORTED_FEATURE`.
 `PrimitiveTopology.LINES` remains available independently with FILL mode and is
-selected with `cmd_set_raster_state`.
+selected through `GraphicsState.raster.topology`.
 
 `color_formats` carries at most `MAX_COLOR_ATTACHMENTS` (8) entries and defines
 the pipeline's ordered color-target domain. The matching blend equations and
@@ -1256,9 +1256,8 @@ Transfer/render helper descriptors (`BufferCopyDesc`, `BufferTextureCopyDesc`,
 ```text
 cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) -> void?
 cmd_set_graphics_state(CommandList* commands, GraphicsState* state) -> void?
-cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
-cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
-cmd_set_color_state(CommandList* commands, ColorState* color) -> void?
+cmd_set_viewport(CommandList* commands, Viewport* viewport) -> void?
+cmd_set_scissor(CommandList* commands, ScissorRect* scissor) -> void?
 cmd_dispatch(
     CommandList* commands,
     GpuAddress root,
@@ -1285,20 +1284,20 @@ application deliberately relies on defined robustness behavior.
 
 Graphics state belongs to a graphics-capable command buffer, not to one render
 pass. After a compatible graphics pipeline is bound, `cmd_set_graphics_state`
-records a complete packet before or during a pass; `cmd_set_raster_state`,
-`cmd_set_depth_state`, `cmd_set_color_state`, `cmd_set_viewport`, and
-`cmd_set_scissor` record optional partial updates in either phase. A minimal
-pass begin leaves that state unchanged. Host-safe descriptor access and
-lowering prerequisites are always checked. Under `FULL`, semantic state
-validation is atomic: invalid values return `INVALID_ARGUMENT` without
-emitting native state.
+records a complete viewport, scissor, raster, depth, and color packet before
+or during a pass. `cmd_set_viewport` and `cmd_set_scissor` are the only narrow
+overrides and may also be recorded in either phase. A minimal pass begin leaves
+graphics state unchanged, and neither pass begin nor pipeline bind emits or
+replays it. Host-safe descriptor access and lowering prerequisites are always
+checked. Under `FULL`, complete-packet validation is atomic: invalid values
+return `INVALID_ARGUMENT` before any native state is emitted.
 
 Under `ContractValidation.FULL`, regular and generated graphics draws return
 `COMMAND_RECORDING_ERROR` until one complete packet has succeeded in the
-current command-buffer recording. Partial setters do not establish that
-initialization, compatible pipeline switches and pass boundaries do not clear
-it, incompatible color-format domains clear color readiness, and command-buffer
-reset clears all readiness.
+current command-buffer recording. Viewport/scissor overrides do not establish
+that initialization. Compatible pipeline switches and pass boundaries do not
+clear it, incompatible color-format domains clear color readiness, and
+command-buffer reset clears all readiness.
 Trusted command entries retain this requirement as a caller contract without a
 warm validation branch. A wrong active pipeline kind returns
 `INVALID_ARGUMENT`.
@@ -1399,8 +1398,9 @@ depth commands in fixed order, followed by three color-array commands when the
 selected pipeline has color targets. There is no state diffing or dirty-bit
 cache. `cmd_set_graphics_state` safely lowers and emits the same complete
 replacement before or during a pass; select a compatible graphics pipeline
-first. `FULL` diagnoses invalid values and a non-graphics queue. The five
-partial setters remain available in both phases:
+first. `FULL` prepares and validates every component before the first native
+call and diagnoses invalid values and a non-graphics queue. The only narrow
+state commands are viewport and scissor:
 
 ```text
 Viewport
@@ -1419,9 +1419,6 @@ ScissorRect
 
 cmd_set_viewport(CommandList* commands, Viewport* viewport) -> void?
 cmd_set_scissor(CommandList* commands, ScissorRect* scissor) -> void?
-cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) -> void?
-cmd_set_depth_state(CommandList* commands, DepthState* depth) -> void?
-cmd_set_color_state(CommandList* commands, ColorState* color) -> void?
 ```
 
 A conventional starting packet can be constructed from the pass dimensions:
@@ -1439,6 +1436,21 @@ gpu::cmd_begin_render_pass(&commands, &pass)!!;
 gpu::cmd_bind_pipeline(&commands, pipeline)!!;
 gpu::cmd_set_graphics_state(&commands, &state)!!;
 ```
+
+Keep a fully initialized `GraphicsState` as caller-owned cached state. To
+change raster, depth, or color behavior, mutate that packet, bind the graphics
+pipeline whose color domain it targets, and record the complete replacement:
+
+```c3
+state.raster = next_raster;
+state.depth = next_depth;
+state.color.targets = next_targets[..];
+gpu::cmd_bind_pipeline(&commands, next_pipeline)!;
+gpu::cmd_set_graphics_state(&commands, &state)!;
+```
+
+All slice backing storage, including `next_targets`, must remain live through
+the call. The library does not retain the packet or its slices.
 
 The helper faults `INVALID_ARGUMENT` before signed casts when either dimension
 is zero or exceeds `int::max`. It returns a full-area viewport and scissor, the
@@ -1475,18 +1487,19 @@ Authoritative recording/pass phase is always checked and faults
 Explicit command state survives compatible graphics pipeline and cache-alias
 handle switches and render-pass boundaries. An incompatible color-format
 domain invalidates color readiness while leaving the other command state
-intact. Minimal begin preserves state without re-emission; only explicit
-setters replace it.
+intact. Minimal begin and pipeline bind preserve state without hidden
+re-emission. A complete packet replaces all graphics state; viewport and
+scissor are the only independently replaceable components.
 The current API intentionally exposes one viewport and one scissor only.
 
-`cmd_set_color_state` applies to the selected graphics pipeline. The packet
-target count and order must match that pipeline's ordered color-format domain.
-`FULL` validates the complete packet before any native call, including
-integer-format blend rejection. A compatible pipeline alias or pass boundary
-preserves initialization; binding a different color-format domain clears it.
-Draw and generated-draw paths reject an uninitialized domain. Every explicit
-nonempty packet emits again as exactly three native array commands; identical
-packets are not suppressed.
+The complete packet's color target count and order must match the selected
+graphics pipeline's ordered color-format domain. `FULL` validates the whole
+packet before any native call, including integer-format blend rejection. A
+compatible pipeline alias or pass boundary preserves initialization; binding a
+different color-format domain clears it. Draw and generated-draw paths reject
+an uninitialized domain. Every complete packet emits the deterministic full
+sequence again, including exactly three native color-array commands for a
+nonempty domain; identical packets are not suppressed.
 
 This is a source-breaking experimental API. Replace
 `cmd_begin_render_pass_with_state(commands, desc, state)` with independent
@@ -1495,8 +1508,9 @@ compatible graphics pipeline, set the complete packet, draw, and end. If an
 incompatible pipeline persists from an earlier pass, bind the next compatible
 pipeline before begin. A state fault after a successful begin leaves the pass
 and its attachment references active, so the caller may correct and retry the
-setter, end the pass, or discard the recording. Initial partial setters may
-instead be folded into one complete packet recorded before the first pass.
+complete packet, end the pass, or discard the recording. Raster, depth, and
+color changes migrate by mutating a fully initialized caller-owned packet and
+recording it after the compatible pipeline bind.
 
 Use `ClearColor.rgba` for normalized and floating-point attachments, and
 `ClearColor.uint_rgba` for unsigned-integer attachments. The inactive union

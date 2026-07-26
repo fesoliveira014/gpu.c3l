@@ -464,14 +464,15 @@ fn void dynamic_viewport_scissor_pixels() @test {
         .vertex_shader   = vert,
         .fragment_shader = frag,
         .color_formats   = pipeline_color_formats[..],
+        .depth_format    = gpu::Format.D32_FLOAT,
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::TextureHandle[4] targets;
+    gpu::TextureHandle[5] targets;
     for (uint i = 0; i < targets.len; i++) targets[i] = make_render_target(&device);
     defer for (uint i = 0; i < targets.len; i++) gpu::destroy_texture(&device, targets[i])!!;
-    gpu::AttachmentViewHandle[4] target_views;
+    gpu::AttachmentViewHandle[5] target_views;
     for (uint i = 0; i < target_views.len; i++) {
         target_views[i] = create_test_attachment_view(
             &device,
@@ -481,6 +482,20 @@ fn void dynamic_viewport_scissor_pixels() @test {
     defer for (uint i = 0; i < target_views.len; i++) {
         destroy_test_attachment_view(&device, &target_views[i])!!;
     }
+    gpu::TextureDesc depth_desc = {
+        .access = { .graphics, .transfer },
+        .width  = RT_SIZE,
+        .height = RT_SIZE,
+        .format = gpu::Format.D32_FLOAT,
+        .usage  = { .depth_attach },
+    };
+    gpu::TextureHandle depth = gpu::create_texture(&device, &depth_desc)!!;
+    defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(
+        &device,
+        depth,
+    )!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
 
     OwnedSpan readback = allocate_owned_span(
         device:       &device,
@@ -528,6 +543,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
     defer discard_test_commands(&cmd)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
+    record_depth_to_attach(&cmd, depth);
     for (uint i = 0; i < targets.len; i++) {
         gpu::TextureBarrier to_attach = {
             .texture = targets[i],
@@ -546,7 +562,18 @@ fn void dynamic_viewport_scissor_pixels() @test {
             .store_op = gpu::StoreOp.STORE,
             .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
         }};
-        gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
+        gpu::DepthTargetDesc depth_target = {
+            .view     = depth_view,
+            .load_op  = gpu::LoadOp.CLEAR,
+            .store_op = gpu::StoreOp.STORE,
+            .clear    = { .depth = 1.0f },
+        };
+        gpu::RenderPassDesc pass = {
+            .colors = colors[..],
+            .depth  = &depth_target,
+            .width  = RT_SIZE,
+            .height = RT_SIZE,
+        };
         gpu::GraphicsState graphics_state =
             gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
         gpu::ColorTargetState[1] color_targets = {{
@@ -574,6 +601,30 @@ fn void dynamic_viewport_scissor_pixels() @test {
                 gpu::cmd_set_scissor(&cmd, &half_scissor)!!;
             } else if (i == 3) {
                 gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
+            } else if (i == 4) {
+                gpu::GraphicsState invalid = graphics_state;
+                invalid.viewport.width = (float)RT_SIZE / 2.0f;
+                invalid.scissor.width = RT_SIZE / 2;
+                invalid.raster.cull_mode = gpu::CullMode.BACK;
+                invalid.depth = {
+                    .test_enable = true,
+                    .compare     = gpu::CompareOp.NEVER,
+                };
+                gpu::ColorTargetState[1] invalid_color_targets = {{
+                    .write_mask = gpu::COLOR_WRITE_ALL,
+                }};
+                uint invalid_write_mask = 1u << 8;
+                mem::copy(
+                    &invalid_color_targets[0].write_mask,
+                    &invalid_write_mask,
+                    uint::size,
+                );
+                invalid.color.targets = invalid_color_targets[..];
+                assert(@catch(gpu::cmd_set_graphics_state(
+                    &cmd,
+                    &invalid,
+                )) == gpu::INVALID_ARGUMENT,
+                    "late color validation rejects the complete packet");
             }
             gpu::cmd_begin_render_pass(&cmd, &pass)!!;
         }
@@ -660,9 +711,13 @@ fn void dynamic_viewport_scissor_pixels() @test {
     char* reset_pixels = viewport_pixels + RT_BYTES * 3;
     assert(reset_pixels[right_green] != 0,
         "an explicit complete replacement restores full raster coverage");
+    char* atomic_pixels = viewport_pixels + RT_BYTES * 4;
+    assert(atomic_pixels[left_green] != 0
+        && atomic_pixels[right_green] != 0,
+        "late color failure emits no viewport, scissor, raster, or depth state");
 }
 
-fn void complete_and_individual_color_state_output_matches() @test {
+fn void repeated_complete_color_state_output_matches() @test {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
@@ -672,7 +727,7 @@ fn void complete_and_individual_color_state_output_matches() @test {
     if (catch err = maybe_device) {
         assert(err == gpu::UNSUPPORTED_FEATURE,
             "color output fails only when live support is absent");
-        io::eprintfn("complete_and_individual_color_state_output_matches: unsupported, skipping");
+        io::eprintfn("repeated_complete_color_state_output_matches: unsupported, skipping");
         return;
     }
     gpu::Device device = maybe_device;
@@ -760,7 +815,6 @@ fn void complete_and_individual_color_state_output_matches() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     foreach (i, target : targets) {
         usz state_index = (usz)i / 2;
-        bool individual_state = i % 2 == 1;
         gpu::TextureBarrier to_attachment = {
             .texture = target,
             .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -790,16 +844,7 @@ fn void complete_and_individual_color_state_output_matches() @test {
         graphics.color = { .targets = color_targets[..] };
         gpu::cmd_begin_render_pass(&commands, &pass)!!;
         gpu::cmd_bind_pipeline(&commands, pipeline)!!;
-        if (individual_state) {
-            gpu::cmd_set_viewport(&commands, &graphics.viewport)!!;
-            gpu::cmd_set_scissor(&commands, &graphics.scissor)!!;
-            gpu::cmd_set_raster_state(&commands, &graphics.raster)!!;
-            gpu::cmd_set_depth_state(&commands, &graphics.depth)!!;
-            gpu::ColorState color_state = { .targets = color_targets[..] };
-            gpu::cmd_set_color_state(&commands, &color_state)!!;
-        } else {
-            gpu::cmd_set_graphics_state(&commands, &graphics)!!;
-        }
+        gpu::cmd_set_graphics_state(&commands, &graphics)!!;
         gpu::cmd_draw(
             commands:       &commands,
             vertex_root:    test_span_address(&device, vertices.span),
@@ -844,14 +889,14 @@ fn void complete_and_individual_color_state_output_matches() @test {
     };
     usz center = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE / 2) * 4;
     for (usz state_index = 0; state_index < packets.len; state_index++) {
-        char[] complete_pixels =
+        char[] first_pixels =
             pixels[RT_BYTES * state_index * 2 : RT_BYTES];
-        char[] individual_pixels =
+        char[] repeated_pixels =
             pixels[RT_BYTES * (state_index * 2 + 1) : RT_BYTES];
-        assert(complete_pixels == individual_pixels,
-            "complete and individual color state render identical bytes");
+        assert(first_pixels == repeated_pixels,
+            "repeated complete color state renders identical bytes");
         for (uint channel = 0; channel < 4; channel++) {
-            uint actual = (uint)individual_pixels[center + channel];
+            uint actual = (uint)repeated_pixels[center + channel];
             uint expected_value = expected[state_index * 4 + channel];
             uint difference = actual >= expected_value
                 ? actual - expected_value

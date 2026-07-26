@@ -309,9 +309,6 @@ fn void pin_commands_and_completion() {
     );
     (void)gpu::cmd_begin_render_pass(&commands, &render_pass);
     (void)gpu::cmd_set_graphics_state(&commands, &graphics_state);
-    (void)gpu::cmd_set_color_state(&commands, &color_state);
-    (void)gpu::cmd_set_depth_state(&commands, &depth);
-    (void)gpu::cmd_set_raster_state(&commands, &raster);
     (void)gpu::cmd_set_viewport(&commands, &viewport);
     (void)gpu::cmd_set_scissor(&commands, &scissor);
     (void)gpu::cmd_draw(

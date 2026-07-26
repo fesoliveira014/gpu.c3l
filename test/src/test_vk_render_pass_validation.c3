@@ -1606,11 +1606,13 @@ fn void full_color_validation_rejects_before_mutation() @test {
         gpu::color_blend_disabled(),
         gpu::alpha_blend(),
     };
-    gpu::ColorState color = { .targets = targets[..] };
+    gpu::GraphicsState graphics =
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+    graphics.color = { .targets = targets[..] };
 
-    assert(@catch(gpu::cmd_set_color_state(
+    assert(@catch(gpu::cmd_set_graphics_state(
         &fixture.commands,
-        &color,
+        &graphics,
     )) == gpu::INVALID_ARGUMENT,
         "FULL rejects blending on an integer target");
     assert(record.state == phase_before
@@ -1631,18 +1633,16 @@ fn void full_color_validation_rejects_before_mutation() @test {
         &invalid_write_mask,
         uint::size,
     );
-    assert(@catch(gpu::cmd_set_color_state(
+    assert(@catch(gpu::cmd_set_graphics_state(
         &fixture.commands,
-        &color,
+        &graphics,
     )) == gpu::INVALID_ARGUMENT,
         "FULL rejects write-mask bits outside RGBA");
     targets[0] = gpu::color_blend_disabled();
-    gpu::ColorState short_color = {
-        .targets = targets[:1],
-    };
-    assert(@catch(gpu::cmd_set_color_state(
+    graphics.color.targets = targets[:1];
+    assert(@catch(gpu::cmd_set_graphics_state(
         &fixture.commands,
-        &short_color,
+        &graphics,
     )) == gpu::INVALID_ARGUMENT,
         "FULL rejects color target counts that differ from the bound pipeline");
 }
@@ -1731,14 +1731,16 @@ fn void dynamic_color_domain_persists_until_incompatible_bind() @test {
     gpu::ColorTargetState[1] targets = {
         gpu::premultiplied_alpha_blend(),
     };
-    gpu::ColorState color = { .targets = targets[..] };
+    gpu::GraphicsState graphics =
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+    graphics.color = { .targets = targets[..] };
 
-    gpu::cmd_set_color_state(&fixture.commands, &color)!!;
+    gpu::cmd_set_graphics_state(&fixture.commands, &graphics)!!;
     assert(record.color_state_initialized
         && record.color_state.count == 1
         && record.color_state.formats[0] == gpu::Format.RGBA8_UNORM
-        && !record.graphics_state_initialized,
-        "a color packet records its domain without initializing graphics");
+        && record.graphics_state_initialized,
+        "a complete packet initializes graphics and records its color domain");
 
     gpu::ColorTargetDesc[1] attachments = {{ .view = fixture.view }};
     gpu::RenderPassDesc pass = {
@@ -1794,8 +1796,10 @@ fn void dynamic_color_initialization_gates_direct_and_generated_draws() @test {
     gpu::ColorTargetState[1] targets = {
         gpu::additive_blend(),
     };
-    gpu::ColorState color = { .targets = targets[..] };
-    gpu::cmd_set_color_state(&fixture.commands, &color)!!;
+    gpu::GraphicsState graphics =
+        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+    graphics.color = { .targets = targets[..] };
+    gpu::cmd_set_graphics_state(&fixture.commands, &graphics)!!;
     vk::validate_color_execution_state_for_test(
         fixture.state,
         record,

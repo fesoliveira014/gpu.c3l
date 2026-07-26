@@ -1115,26 +1115,6 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
     return record.ops.dispatch(record, root, groups);
 }
 
-<* Set dynamic depth state before or during a pass.
-   Preconditions: the command list is graphics-capable and the enum is valid.
-   Always checked: token phase and required pointer.
-   FULL diagnostics: queue and enum misuse; failure preserves prior state. *>
-fn void? cmd_set_depth_state(CommandList* commands, DepthState* depth) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    if (depth == null) return INVALID_ARGUMENT~;
-    return record.ops.set_depth_state(record, depth);
-}
-
-<* Set raster state before or during a pass.
-   Preconditions: the queue, enums, polygon mode, and depth-bias values are valid.
-   Always checked: token phase and required pointer.
-   FULL diagnostics: queue, enum, feature, and finite-value misuse. *>
-fn void? cmd_set_raster_state(CommandList* commands, DynamicRasterState* raster) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    if (raster == null) return INVALID_ARGUMENT~;
-    return record.ops.set_raster_state(record, raster);
-}
-
 <* Set one dynamic viewport before or during a pass.
    Preconditions: values are finite, representable, within device bounds, and height is nonzero.
    Always checked: token phase and required pointer.
@@ -1404,22 +1384,6 @@ fn void? cmd_set_graphics_state(
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
     return record.ops.set_graphics_state(record, state);
-}
-
-<* Replace complete blend and write-mask state for the bound graphics pipeline.
-   Preconditions: a compatible graphics pipeline is selected and values are valid.
-   Always checked: token phase, host-safe input, and safe lowering.
-   FULL diagnostics: pipeline, target-domain, enum, and blend misuse. *>
-fn void? cmd_set_color_state(
-    CommandList* commands,
-    ColorState* state,
-) {
-    gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
-    if (!gpu::internal::color_state_host_safe(state)) {
-        return INVALID_ARGUMENT~;
-    }
-    return record.ops.set_color_state(record, state);
 }
 
 <* End the active render pass without adding synchronization.

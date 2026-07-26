@@ -1981,11 +1981,13 @@ fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test 
         gpu::additive_blend(),
         gpu::color_blend_disabled(red_green),
     };
+    gpu::GraphicsState graphics =
+        gpu::render_geometry_state(16, 16)!!;
     foreach (i, pipeline : pipelines) {
         gpu::cmd_bind_pipeline(&commands, pipeline)!!;
         gpu::ColorTargetState[1] targets = { packets[i] };
-        gpu::ColorState color = { .targets = targets[..] };
-        gpu::cmd_set_color_state(&commands, &color)!!;
+        graphics.color.targets = targets[..];
+        gpu::cmd_set_graphics_state(&commands, &graphics)!!;
     }
     gpu::discard_commands(&commands)!!;
 
