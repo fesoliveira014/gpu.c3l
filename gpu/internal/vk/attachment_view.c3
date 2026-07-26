@@ -143,9 +143,7 @@ fn gpu::AttachmentViewHandle? vk_create_attachment_view(
                 p_view:        &native,
             ),
         )!;
-        $if env::TESTING
-                || $feature(COMMAND_RESOLUTION_STATS)
-                || $feature(COMMAND_RECORDING_WORK_STATS):
+        $if env::TESTING:
             (void)state.recording_image_view_creations.add(
                 1,
                 AtomicOrdering.RELAXED,

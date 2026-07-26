@@ -1,11 +1,8 @@
 module gpu_bench;
 
-import gpu::internal @public;
 import gpu;
-import gpu::internal::vk @public;
 import std::io;
 import std::time;
-import std::core::mem;
 
 // Advisory, not gating: request one alias for each command-time raster-state
 // permutation, then measure duplicate singular cache lookup. The raster matrix
@@ -16,51 +13,6 @@ const char[*] BENCH_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 
 const uint BENCH_RASTER_PERMUTATION_COUNT = 200;
 const uint BENCH_DUPLICATE_COUNT          = 200_000;
-const usz BENCH_SHADER_SMALL_BYTES        = 1_024;
-const usz BENCH_SHADER_MEDIUM_BYTES       = 64 * 1_024;
-const usz BENCH_SHADER_LARGE_BYTES        = 1_024 * 1_024;
-
-fn void probe_owned_shader_identity(
-    vk::VkDeviceState* state,
-    usz byte_count,
-) {
-    char[] spirv = mem::new_array(char, (sz)byte_count);
-    defer mem::free(spirv.ptr);
-    foreach (&byte : spirv) *byte = 0;
-    mem::copy(spirv.ptr, BENCH_VERT_SPIRV[..].ptr, 20);
-    gpu::ShaderDesc desc = {
-        .spirv       = spirv,
-        .entry_point = "main",
-    };
-    gpu::ShaderDesc code = desc;
-    std::time::Clock start = std::time::clock::now();
-    vk::PipelineIdentityProbeResult result =
-        vk::probe_pipeline_identity_boundary(state, &code)!!;
-    long elapsed_ns = (long)start.to_now();
-    assert(result.interning.shader_owned_bytes_cloned == byte_count,
-        "the interning boundary owns the complete synthetic shader");
-    assert(result.lookup.pipeline_key_probes <= 1,
-        "the post-intern lookup compares at most one compact key");
-    assert(result.lookup.shader_intern_probes == 0
-            && result.lookup.shader_intern_bytes_compared == 0
-            && result.lookup.shader_owned_bytes_cloned == 0,
-        "the post-intern lookup performs no shader identity work");
-    assert(result.lookup.shader_owned_bytes_freed == byte_count,
-        "the probe releases its owned shader identity");
-    io::printfn(
-        "identity size_bytes=%d intern_probes=%d intern_bytes_compared=%d owned_bytes_cloned=%d lookup_shader_intern_probes=%d lookup_shader_bytes_compared=%d lookup_owned_bytes_cloned=%d pipeline_key_probes=%d owned_bytes_freed=%d elapsed_ns=%d",
-        byte_count,
-        result.interning.shader_intern_probes,
-        result.interning.shader_intern_bytes_compared,
-        result.interning.shader_owned_bytes_cloned,
-        result.lookup.shader_intern_probes,
-        result.lookup.shader_intern_bytes_compared,
-        result.lookup.shader_owned_bytes_cloned,
-        result.lookup.pipeline_key_probes,
-        result.lookup.shader_owned_bytes_freed,
-        elapsed_ns,
-    );
-}
 
 fn gpu::DynamicRasterState raster_permutation(uint index) {
     gpu::DynamicRasterState raster = {
@@ -179,9 +131,6 @@ fn int main() {
     gpu::DynamicRasterState[BENCH_RASTER_PERMUTATION_COUNT] rasters;
     foreach (i, &raster : rasters) *raster = raster_permutation((uint)i);
 
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    ulong native_before = vk::pipeline_native_create_count(state);
     gpu::PipelineHandle[BENCH_RASTER_PERMUTATION_COUNT] aliases;
     std::time::Clock cold_start = std::time::clock::now();
     foreach (&pipeline : aliases) {
@@ -193,15 +142,8 @@ fn int main() {
     long cold_elapsed_ns = (long)cold_start.to_now();
     double cold_ns_per_create = (double)cold_elapsed_ns
         / (double)BENCH_RASTER_PERMUTATION_COUNT;
-    ulong native_creates = vk::pipeline_native_create_count(state) - native_before;
-    uint cache_entries = vk::pipeline_cache_entry_count(state);
-    assert(native_creates == 1, "raster permutations compile one native pipeline");
-    assert(cache_entries == 1, "raster permutations share one cache entry");
     io::printfn(
-        "phase 1 (raster matrix, requested=%d native=%d cache_entries=%d aliases=%d): %.1f ns/create",
-        BENCH_RASTER_PERMUTATION_COUNT,
-        native_creates,
-        cache_entries,
+        "raster matrix: %d aliases, %.1f ns/create",
         BENCH_RASTER_PERMUTATION_COUNT,
         cold_ns_per_create,
     );
@@ -212,9 +154,8 @@ fn int main() {
         rasters:  rasters[..],
     );
     io::printfn(
-        "raster recording (requested=%d native=%d): %.1f ns/state",
+        "raster recording: %d states, %.1f ns/state",
         BENCH_RASTER_PERMUTATION_COUNT,
-        native_creates,
         raster_ns_per_state,
     );
 
@@ -235,10 +176,6 @@ fn int main() {
         BENCH_DUPLICATE_COUNT,
         dup_ns_per_create,
     );
-
-    probe_owned_shader_identity(state, BENCH_SHADER_SMALL_BYTES);
-    probe_owned_shader_identity(state, BENCH_SHADER_MEDIUM_BYTES);
-    probe_owned_shader_identity(state, BENCH_SHADER_LARGE_BYTES);
 
     foreach (handle : aliases) gpu::destroy_pipeline(&device, handle)!!;
 

@@ -56,21 +56,13 @@ struct CommandRecordingStats {
     ulong recording_allocations;
 }
 
-struct RecordingHostAllocatorSnapshot @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+struct RecordingHostAllocatorSnapshot @if(env::TESTING) {
     ulong allocations;
     ulong resizes;
     ulong releases;
 }
 
-struct RecordingHostAllocator (std::core::mem::alloc::Allocator) @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+struct RecordingHostAllocator (std::core::mem::alloc::Allocator) @if(env::TESTING) {
     HostAllocator inner;
     Atomic{ulong} allocations;
     Atomic{ulong} resizes;
@@ -191,11 +183,7 @@ fn void*? RecordingHostAllocator.acquire(
     sz size,
     AllocInitType init_type,
     sz alignment,
-) @dynamic @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+) @dynamic @if(env::TESTING) {
     void* pointer = self.inner.acquire(size, init_type, alignment)!;
     (void)self.allocations.add(1, AtomicOrdering.RELAXED);
     return pointer;
@@ -206,11 +194,7 @@ fn void*? RecordingHostAllocator.resize(
     void* old_pointer,
     sz size,
     sz alignment,
-) @dynamic @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+) @dynamic @if(env::TESTING) {
     void* pointer = self.inner.resize(old_pointer, size, alignment)!;
     (void)self.resizes.add(1, AtomicOrdering.RELAXED);
     return pointer;
@@ -220,11 +204,7 @@ fn void RecordingHostAllocator.release(
     &self,
     void* old_pointer,
     bool aligned,
-) @dynamic @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+) @dynamic @if(env::TESTING) {
     self.inner.release(old_pointer, aligned);
     (void)self.releases.add(1, AtomicOrdering.RELAXED);
 }
@@ -294,11 +274,7 @@ fn void? CommandAllocatorTable.free(
 
 fn void install_recording_host_allocator(
     VkDeviceState* state,
-) @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+) @if(env::TESTING) {
     state.recording_host_allocator = {
         .inner = state.host_allocator,
     };
@@ -308,11 +284,7 @@ fn void install_recording_host_allocator(
 
 fn RecordingHostAllocatorSnapshot recording_host_allocator_snapshot(
     VkDeviceState* state,
-) @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+) @if(env::TESTING) {
     return {
         .allocations = state.recording_host_allocator.allocations.load(
             AtomicOrdering.RELAXED,
@@ -349,17 +321,13 @@ fn RootPushObservation root_push_observation() @if(env::TESTING) {
 }
 
 fn void note_command_buffer_reset(VkDeviceState* state) {
-    $if env::TESTING
-            || $feature(COMMAND_RESOLUTION_STATS)
-            || $feature(COMMAND_RECORDING_WORK_STATS):
+    $if env::TESTING:
         (void)state.command_buffer_resets.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 
 fn void note_command_buffer_allocation(VkDeviceState* state) {
-    $if env::TESTING
-            || $feature(COMMAND_RESOLUTION_STATS)
-            || $feature(COMMAND_RECORDING_WORK_STATS):
+    $if env::TESTING:
         (void)state.recording_command_buffer_allocations.add(
             1,
             AtomicOrdering.RELAXED,
@@ -368,9 +336,7 @@ fn void note_command_buffer_allocation(VkDeviceState* state) {
 }
 
 fn void note_command_pool_creation(VkDeviceState* state) {
-    $if env::TESTING
-            || $feature(COMMAND_RESOLUTION_STATS)
-            || $feature(COMMAND_RECORDING_WORK_STATS):
+    $if env::TESTING:
         (void)state.recording_command_pool_creations.add(
             1,
             AtomicOrdering.RELAXED,
@@ -379,9 +345,7 @@ fn void note_command_pool_creation(VkDeviceState* state) {
 }
 
 fn void note_command_buffer_free(VkDeviceState* state) {
-    $if env::TESTING
-            || $feature(COMMAND_RESOLUTION_STATS)
-            || $feature(COMMAND_RECORDING_WORK_STATS):
+    $if env::TESTING:
         (void)state.recording_command_buffer_frees.add(
             1,
             AtomicOrdering.RELAXED,
@@ -390,9 +354,7 @@ fn void note_command_buffer_free(VkDeviceState* state) {
 }
 
 fn void note_recording_vma_allocation(VkDeviceState* state) {
-    $if env::TESTING
-            || $feature(COMMAND_RESOLUTION_STATS)
-            || $feature(COMMAND_RECORDING_WORK_STATS):
+    $if env::TESTING:
         (void)state.recording_vma_allocations.add(
             1,
             AtomicOrdering.RELAXED,
@@ -401,7 +363,7 @@ fn void note_recording_vma_allocation(VkDeviceState* state) {
 }
 
 fn void note_generated_scratch_miss(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)state.generated_scratch_misses.add(1, AtomicOrdering.RELAXED);
     $endif
 }
@@ -410,7 +372,7 @@ fn void note_generated_native_emission(
     VkDeviceState* state,
     gpu::GeneratedWorkKind kind,
 ) {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         switch (kind) {
             case gpu::GeneratedWorkKind.DISPATCH:
                 (void)state.generated_dispatch_emissions.add(
@@ -2926,15 +2888,11 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     return gpu::GENERATED_SCRATCH_EXHAUSTED~;
 }
 
-<* Snapshot test/benchmark recording work after externally synchronizing the
-   measured interval. *>
+<* Snapshot test recording work after externally synchronizing the measured
+   interval. *>
 fn gpu::internal::RecordingWorkCounters command_recording_work_counters(
     VkDeviceState* state,
-) @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+) @if(env::TESTING) {
     RecordingHostAllocatorSnapshot allocator =
         recording_host_allocator_snapshot(state);
     gpu::internal::RecordingWorkCounters counters = {
@@ -2960,7 +2918,7 @@ fn gpu::internal::RecordingWorkCounters command_recording_work_counters(
         ),
         .registry_lock_acquisitions = gpu::internal::device_registry_lock_count(),
     };
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         counters.generated_scratch_misses = state.generated_scratch_misses.load(
             AtomicOrdering.RELAXED,
         );
@@ -2977,14 +2935,10 @@ fn gpu::internal::RecordingWorkCounters command_recording_work_counters(
     return counters;
 }
 
-<* Reset test/benchmark recording-work counters while recording is quiescent. *>
+<* Reset test recording-work counters while recording is quiescent. *>
 fn void reset_command_recording_work_counters(
     VkDeviceState* state,
-) @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+) @if(env::TESTING) {
     state.recording_host_allocator.allocations.store(
         0,
         AtomicOrdering.RELAXED,
@@ -3001,7 +2955,7 @@ fn void reset_command_recording_work_counters(
     state.recording_image_view_creations.store(0, AtomicOrdering.RELAXED);
     state.recording_vma_allocations.store(0, AtomicOrdering.RELAXED);
     gpu::internal::reset_device_registry_lock_count();
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         state.generated_scratch_misses.store(0, AtomicOrdering.RELAXED);
         state.generated_dispatch_emissions.store(0, AtomicOrdering.RELAXED);
         state.generated_draw_emissions.store(0, AtomicOrdering.RELAXED);
@@ -3015,11 +2969,7 @@ fn void reset_command_recording_work_counters(
 fn gpu::internal::RecordingWorkCounters command_recording_work_delta(
     gpu::internal::RecordingWorkCounters after,
     gpu::internal::RecordingWorkCounters before,
-) @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+) @if(env::TESTING) {
     return {
         .host_allocations = after.host_allocations - before.host_allocations,
         .command_pool_creations = after.command_pool_creations

@@ -298,38 +298,32 @@ These belong in testing documentation, not in core code.
 
 ## 12. Continuous integration
 
-`.github/workflows/ci.yml` — one workflow, three jobs, `bash` on all:
+`.github/workflows/ci.yml` defines Linux and Windows jobs:
 
 ```text
 linux (ubuntu-24.04, blocking):
     pinned c3c release, glslc, mesa-vulkan-drivers (lavapipe)
+    public consumer and platform-surface compilation
     generator unit tests, gen_abi.py --check, build_shaders.py
-    benchmark executable builds and schema tests (no benchmark execution)
-    deterministic behavioral performance targets
-    full test-target sweep under VK_DRIVER_FILES (any failure fails the job)
-    c3c docgen API reference, uploaded as the api-reference artifact
-
-docs-walkthrough (ubuntu-24.04, blocking):
-    executes docs/getting_started.md verbatim via scripts/run_doc.py on a
-    bare runner — the walkthrough is its own regression test
+    manual benchmark builds (no execution or output parsing)
+    smoke link/run and consolidated Vulkan C3 tests under VK_DRIVER_FILES
+    unparsed c3c docgen reference artifact
 
 windows (windows-2022, blocking):
     pinned c3c release, Vulkan SDK, MSVC env
     VMA static lib built in-job (build-vma-windows.sh)
+    public consumer and platform-surface compilation
     generator unit tests, gen_abi.py --check, build_shaders.py
-    link proof (smoke), pure-CPU targets, benchmark executable builds and
-    schema tests (no benchmark execution), and deterministic behavioral targets
+    manual benchmark builds (no execution or output parsing)
+    link proof (smoke) and pure-CPU targets
     lavapipe (mesa-dist-win) registered under the HKLM Vulkan driver key,
-    then the full Vulkan sweep — any non-capability-gated failure fails the job
+    then the consolidated Vulkan C3 tests
 ```
 
-Behavioral counter and ownership assertions are blocking on both platforms.
-Nanosecond comparisons are advisory unless a runner, driver, and comparison
-profile are explicitly pinned. Capability-gated scenarios always print
-`EXERCISED` or `NOT EXERCISED`; portable lanes accept declared unavailability,
-while `REQUIRED_GPU_CAPABILITIES` makes selected execution states mandatory.
-The pinned Windows mesa-dist-win lane requires `generated-work` and
-`generated-scratch-reservation`; the portable Linux lane does not.
+Behavior, ownership, output/readback, rollback, and Vulkan validation
+assertions are blocking on both platforms. Manual benchmark timings are always
+advisory. Capability-specific C3 tests query support and handle unavailable
+features directly; CI does not parse their stdout as a policy schema.
 
 The c3c version is pinned once, in the workflow's `C3C_VERSION` env var
 (currently 0.8.0). Tool downloads are cached by version key. Compiler upgrades

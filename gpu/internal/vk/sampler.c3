@@ -21,12 +21,12 @@ struct SamplerTable {
     uint          count;
 }
 
-struct SamplerLookupStats @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+struct SamplerLookupStats @if(env::TESTING) {
     ulong lookup_probes;
 }
 
 struct SamplerLookupProbeResult
-    @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+    @if(env::TESTING) {
     uint  occupancy;
     uint  bucket_count;
     ulong probes;
@@ -48,19 +48,19 @@ fn void link_sampler_cell(SamplerTable* table, uint index) {
 
 fn void note_sampler_lookup_probe(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+) @if(env::TESTING) {
     state.sampler_lookup_probes++;
 }
 
 fn void reset_sampler_lookup_stats(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+) @if(env::TESTING) {
     state.sampler_lookup_probes = 0;
 }
 
 fn SamplerLookupStats sampler_lookup_stats(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+) @if(env::TESTING) {
     return { .lookup_probes = state.sampler_lookup_probes };
 }
 
@@ -84,7 +84,7 @@ fn uint find_sampler_cell(
         (uint)table.bucket_heads.len,
     )];
     while (current != 0) {
-        $if env::TESTING || $feature(SAMPLER_INTERN_STATS):
+        $if env::TESTING:
             note_sampler_lookup_probe(state);
         $endif
         SamplerCell* cell = &table.slots[current - 1];
@@ -98,7 +98,7 @@ fn uint find_sampler_cell(
 
 fn bool sampler_table_index_consistent(
     SamplerTable* table,
-) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+) @if(env::TESTING) {
     @pool() {
         bool[] visited = mem::talloc_array(bool, (sz)table.count);
         for (uint index = 0; index < table.count; index++) {
@@ -127,7 +127,7 @@ fn bool sampler_table_index_consistent(
 
 fn SamplerTable create_sampler_lookup_probe_table(
     uint occupancy,
-) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+) @if(env::TESTING) {
     SamplerTable table = {
         .slots        = mem::new_array(SamplerCell, occupancy),
         .bucket_heads = mem::new_array(uint, next_pow2(occupancy * 2)),
@@ -147,7 +147,7 @@ fn SamplerTable create_sampler_lookup_probe_table(
 
 fn void destroy_sampler_lookup_probe_table(
     SamplerTable* table,
-) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+) @if(env::TESTING) {
     mem::free(table.slots.ptr);
     mem::free(table.bucket_heads.ptr);
     *table = {};
@@ -156,7 +156,7 @@ fn void destroy_sampler_lookup_probe_table(
 fn SamplerLookupProbeResult probe_sampler_lookup(
     VkDeviceState* state,
     SamplerTable* table,
-) @if(env::TESTING || $feature(SAMPLER_INTERN_STATS)) {
+) @if(env::TESTING) {
     SamplerLookupProbeResult result = {
         .occupancy    = table.count,
         .bucket_count = (uint)table.bucket_heads.len,

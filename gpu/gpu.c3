@@ -217,9 +217,9 @@ fn void? destroy_surface(Surface* surface) {
     gpu::internal::runtime_release_surface(&runtime)!!;
 }
 
-<* Reset process-wide command instrumentation before a synchronized test or
-   benchmark interval. Do not call while another thread records commands. *>
-fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+<* Reset process-wide command instrumentation before a synchronized test
+   interval. Do not call while another thread records commands. *>
+fn void reset_command_resolution_stats() @if(env::TESTING) {
     gpu::internal::command_device_registry_resolutions.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_retained_pin_operations.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_table_lookups.store(0, AtomicOrdering.RELAXED);
@@ -234,7 +234,7 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
 <* Snapshot process-wide command instrumentation with relaxed loads.
    recording_commands counts live-record entry-point attempts;
    native_commands counts every Vulkan command emitted by those paths. *>
-fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+fn CommandResolutionStats command_resolution_stats() @if(env::TESTING) {
     return {
         .device_registry_resolutions = gpu::internal::command_device_registry_resolutions.load(
             AtomicOrdering.RELAXED,

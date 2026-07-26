@@ -1,8 +1,6 @@
 module gpu_bench;
 
-import gpu::internal @public;
 import gpu @public;
-import gpu::internal::vk @public;
 import std::io;
 import std::time;
 
@@ -10,6 +8,9 @@ const uint SUBMISSION_ITERATIONS = 256;
 const uint COMPLETION_POLL_ITERATIONS = 100_000;
 const uint DESTRUCTION_ITERATIONS = 300;
 const uint LIFECYCLE_REPETITIONS = 5;
+const uint MAX_SUBMIT_BATCH_SIZE = 1_024;
+const uint SUBMIT_BATCH_ITERATIONS = 5;
+const uint[5] SUBMIT_BATCH_SIZES = { 1, 8, 32, 128, 1_024 };
 
 struct SubmissionFixture {
     gpu::ExecutableCommandList[1] commands;
@@ -34,6 +35,15 @@ fn gpu::ExecutableCommandList record_empty(gpu::CommandAllocator* allocator) {
     return gpu::end_commands(&commands)!!;
 }
 
+fn void record_submit_batch(
+    gpu::CommandAllocator* allocator,
+    gpu::ExecutableCommandList[] out_lists,
+) {
+    foreach (&out_list : out_lists) {
+        *out_list = record_empty(allocator);
+    }
+}
+
 fn double measure_submissions(
     gpu::CommandAllocator* allocator,
     gpu::Queue queue,
@@ -56,22 +66,39 @@ fn double measure_submissions(
     return (double)elapsed_ns / (double)SUBMISSION_ITERATIONS;
 }
 
-fn double measure_completed_polls(
-    gpu::CompletionPoint point,
-    vk::VkDeviceState* state,
-    ulong* native_queries,
-    ulong* retirement_locks,
+fn double measure_submit_batch(
+    gpu::CommandAllocator* allocator,
+    gpu::Queue queue,
+    uint batch_size,
 ) {
-    vk::reset_completion_work_counters(state);
+    long elapsed_ns = 0;
+    for (uint i = 0; i < SUBMIT_BATCH_ITERATIONS; i++) {
+        gpu::ExecutableCommandList[MAX_SUBMIT_BATCH_SIZE] lists;
+        record_submit_batch(allocator, lists[:batch_size]);
+        gpu::SubmitDesc submit = {
+            .command_lists = lists[:batch_size],
+        };
+
+        std::time::Clock start = std::time::clock::now();
+        gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+        elapsed_ns += (long)start.to_now();
+
+        foreach (list : lists[:batch_size]) {
+            assert(!list.is_valid(),
+                "successful submission consumes every executable token");
+        }
+        gpu::wait_completion(completion)!!;
+    }
+    return (double)elapsed_ns / (double)SUBMIT_BATCH_ITERATIONS;
+}
+
+fn double measure_completed_polls(gpu::CompletionPoint point) {
     bool all_complete = true;
     std::time::Clock start = std::time::clock::now();
     for (uint i = 0; i < COMPLETION_POLL_ITERATIONS; i++) {
         all_complete = gpu::poll_completion(point)!! && all_complete;
     }
     long elapsed_ns = (long)start.to_now();
-    vk::CompletionWorkCounters work = vk::completion_work_counters(state);
-    *native_queries += work.native_counter_queries;
-    *retirement_locks += work.retirement_lock_acquisitions;
     assert(all_complete, "completed point remains complete");
     return (double)elapsed_ns / (double)COMPLETION_POLL_ITERATIONS;
 }
@@ -87,28 +114,17 @@ fn gpu::TextureHandle create_bench_texture(gpu::Device* device) {
     return gpu::create_texture(device, &desc)!!;
 }
 
-fn double measure_texture_destruction(
-    gpu::Device* device,
-    ulong* completion_queries,
-    ulong* completion_waits,
-) {
+fn double measure_texture_destruction(gpu::Device* device) {
     gpu::TextureHandle[DESTRUCTION_ITERATIONS] textures;
     foreach (&texture : textures) {
         *texture = create_bench_texture(device);
     }
 
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::reset_completion_work_counters(state);
     std::time::Clock start = std::time::clock::now();
     foreach (texture : textures) {
         gpu::destroy_texture(device, texture)!!;
     }
     long elapsed_ns = (long)start.to_now();
-    vk::CompletionWorkCounters completion =
-        vk::completion_work_counters(state);
-    *completion_queries += completion.native_counter_queries;
-    *completion_waits += completion.native_wait_calls;
     return (double)elapsed_ns / (double)DESTRUCTION_ITERATIONS;
 }
 
@@ -120,80 +136,33 @@ fn int main() {
     defer destroy_bench_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocatorDesc allocator_desc = {
-        .command_buffer_capacity = SUBMISSION_ITERATIONS,
+        .command_buffer_capacity = MAX_SUBMIT_BATCH_SIZE,
     };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        device: &device,
-        queue:  queue,
-        desc:   &allocator_desc,
+        &device,
+        queue,
+        &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
 
     gpu::CompletionPoint warm_completion;
     (void)measure_submissions(&allocator, queue, &warm_completion);
-    ulong warm_native_queries;
-    ulong warm_retirement_locks;
-    (void)measure_completed_polls(
-        point:            warm_completion,
-        state:            state,
-        native_queries:   &warm_native_queries,
-        retirement_locks: &warm_retirement_locks,
-    );
-    ulong warm_destruction_queries;
-    ulong warm_completion_waits;
-    (void)measure_texture_destruction(
-        device:            &device,
-        completion_queries: &warm_destruction_queries,
-        completion_waits:   &warm_completion_waits,
-    );
-
-    vk::SubmitStats submit_before = vk::submit_stats(state);
+    (void)measure_completed_polls(warm_completion);
+    (void)measure_texture_destruction(&device);
 
     double[LIFECYCLE_REPETITIONS] submission_results;
     double[LIFECYCLE_REPETITIONS] poll_results;
     double[LIFECYCLE_REPETITIONS] destruction_results;
     gpu::CompletionPoint completion;
-    ulong destruction_queries;
-    ulong destruction_completion_waits;
-    ulong cached_poll_native_queries;
-    ulong cached_poll_retirement_locks;
     for (uint i = 0; i < LIFECYCLE_REPETITIONS; i++) {
         submission_results[i] = measure_submissions(
             &allocator,
             queue,
             &completion,
         );
-        poll_results[i] = measure_completed_polls(
-            point:            completion,
-            state:            state,
-            native_queries:   &cached_poll_native_queries,
-            retirement_locks: &cached_poll_retirement_locks,
-        );
-        destruction_results[i] = measure_texture_destruction(
-            device:             &device,
-            completion_queries: &destruction_queries,
-            completion_waits:   &destruction_completion_waits,
-        );
+        poll_results[i] = measure_completed_polls(completion);
+        destruction_results[i] = measure_texture_destruction(&device);
     }
-    vk::SubmitStats submit_after = vk::submit_stats(state);
-    ulong point_publications = submit_after.completion_point_publications
-        - submit_before.completion_point_publications;
-    ulong point_allocations = submit_after.completion_point_allocations
-        - submit_before.completion_point_allocations;
-    assert(point_publications
-        == (ulong)SUBMISSION_ITERATIONS * LIFECYCLE_REPETITIONS,
-        "every measured submit publishes one completion point");
-    assert(point_allocations == 0,
-        "scalar completion publication performs no table allocation");
-    assert(destruction_queries == 0
-        && destruction_completion_waits == 0,
-        "immediate destruction performs no completion query or wait");
-    assert(cached_poll_native_queries == 0,
-        "cached completed polls perform no native counter queries");
-    assert(cached_poll_retirement_locks == 0,
-        "cached completed polls acquire no retirement lock");
 
     io::printfn(
         "submission: iterations=%d repetitions=%d median=%.1f ns/submit",
@@ -213,13 +182,19 @@ fn int main() {
         LIFECYCLE_REPETITIONS,
         lifecycle_median(destruction_results),
     );
-    io::printfn(
-        "invariants: point_allocations=%d destruction_queries=%d destruction_completion_waits=%d cached_poll_queries=%d retirement_locks=%d",
-        point_allocations,
-        destruction_queries,
-        destruction_completion_waits,
-        cached_poll_native_queries,
-        cached_poll_retirement_locks,
-    );
+    foreach (batch_size : SUBMIT_BATCH_SIZES) {
+        double ns_per_submit = measure_submit_batch(
+            &allocator,
+            queue,
+            batch_size,
+        );
+        io::printfn(
+            "submit batch: size=%d iterations=%d %.1f ns/submit %.3f ns/list",
+            batch_size,
+            SUBMIT_BATCH_ITERATIONS,
+            ns_per_submit,
+            ns_per_submit / (double)batch_size,
+        );
+    }
     return 0;
 }

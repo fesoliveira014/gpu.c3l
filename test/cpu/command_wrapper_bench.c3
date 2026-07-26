@@ -337,18 +337,14 @@ fn void measure_copy_buffer(
 fn void print_samples(
     String operation,
     WrapperBenchSamples* samples,
-    ulong observation_value,
 ) {
     double direct_median = sample_median(samples.direct);
     double public_median = sample_median(samples.public);
-    ulong checksum = (ulong)WRAPPER_BENCH_ITERATIONS
-        * (ulong)WRAPPER_BENCH_REPETITIONS * 2 * observation_value;
     io::printfn(
-        "command_path_cpu operation=%s iterations=%d repetitions=%d checksum=%d direct_min_ns=%.6f direct_median_ns=%.6f direct_max_ns=%.6f public_min_ns=%.6f public_median_ns=%.6f public_max_ns=%.6f ratio=%.6f",
+        "%s: %d iterations x %d, direct %.3f/%.3f/%.3f ns, public %.3f/%.3f/%.3f ns, %.2fx",
         operation,
         WRAPPER_BENCH_ITERATIONS,
         WRAPPER_BENCH_REPETITIONS,
-        checksum,
         sample_min(samples.direct),
         direct_median,
         sample_max(samples.direct),
@@ -400,15 +396,11 @@ fn int main() {
     ulong observed = @volatile_load(wrapper_bench_observation);
     assert(observed == expected, "every direct and public invocation is observed");
 
-    print_samples("dispatch", &dispatch, DISPATCH_OBSERVATION);
-    print_samples("draw", &draw, DRAW_OBSERVATION);
-    print_samples("barrier", &barrier, BARRIER_OBSERVATION);
-    print_samples("viewport", &viewport, VIEWPORT_OBSERVATION);
-    print_samples("copy_buffer", &copy_buffer, COPY_BUFFER_OBSERVATION);
-    io::printfn(
-        "command_path_cpu_check operations=5 observed=%d expected=%d status=pass",
-        observed,
-        expected,
-    );
+    print_samples("dispatch", &dispatch);
+    print_samples("draw", &draw);
+    print_samples("barrier", &barrier);
+    print_samples("viewport", &viewport);
+    print_samples("copy buffer", &copy_buffer);
+    io::printn("completed five command wrapper measurements");
     return 0;
 }

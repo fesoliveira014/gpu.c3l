@@ -84,8 +84,8 @@ Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
 ## Start here
 
 - **[Getting started](docs/getting_started.md)** — empty directory to a
-  running GPU compute program; the walkthrough is executed by CI, so it
-  cannot rot.
+  running GPU compute program, backed by the compiled
+  [`examples/getting_started`](examples/getting_started/) project.
 - **[gpu.c3l-samples](https://github.com/fesoliveira014/gpu.c3l-samples)** —
   18 runnable samples plus two helper self-tests: triangle → textured cube →
   GPU-driven culling → shadow mapping → deferred shading → PBR → stress/perf
@@ -105,7 +105,7 @@ gpu.c3l/
 │       └── vk/        Vulkan backend (private `gpu::internal::vk`)
 ├── lib/               vendored bindings: vk.c3l, vma.c3l, spvreflect.c3l
 ├── include/shaders/   GLSL includes consumed by shaders
-├── scripts/           ABI, shader, and documentation checks
+├── scripts/           ABI generation/checking and shader builds
 ├── tools/gen_shader_abi/
 ├── test/              whitebox test suite (compiles library sources directly)
 └── docs/

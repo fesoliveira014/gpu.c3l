@@ -55,7 +55,8 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
   - **Depends on:** Gate A.
   - **Contract:** imports remain inert; adapters are borrowed from a runtime; runtime destruction rejects live surfaces or devices; backend and driver versions are diagnostic only.
   - **Edges:** no adapter, repeated enumeration, stale adapter after runtime destruction, multiple runtimes, and transactional runtime creation failure.
-  - **Verify:** import-only fixtures for every public module; CPU handle tests; native enumeration with two runtimes; `scripts/check_public_api.py`.
+  - **Verify:** import-only fixtures for every public module, CPU handle tests,
+    and native enumeration with two runtimes.
 
 ### 1.2 Plain semantic device descriptions
 
@@ -335,7 +336,8 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
   - **Depends on:** Milestones 1–6.
   - **Contract:** no parallel profile, legacy alias, backend-shaped escape hatch, `BufferHandle`, `ShaderHandle`, `FrameToken`, public semaphore, readback ticket, `DescriptorHeapMode`, or `TextureLayout` remains.
   - **Edges:** recursive imports and generated interface output must not accidentally expose private backend declarations.
-  - **Verify:** `scripts/check_public_api.py`, generated docs scan, compile-pass canonical fixture, compile-fail retired-symbol fixtures, and full test suite.
+  - **Verify:** compiler-checked public consumers, the canonical fixture, and
+    the full C3/Vulkan test suite.
 
 ### 7.2 Canonicalize and audit strict samples
 
@@ -355,11 +357,17 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
 
 ### 7.4 Strict correctness and performance evidence
 
-- [x] Replace obsolete benchmarks and publish reproducible baselines for allocation, pipeline creation, command recording, submission, completion polling, barriers, indirect work, and destruction in `test/src/`, `scripts/run_benchmarks.py`, and `docs/performance.md`.
+- [x] Replace obsolete benchmarks with manual C3 executables for allocation,
+  pipeline creation, command recording, submission, completion polling,
+  barriers, indirect work, and destruction, documented in
+  `docs/performance.md`.
   - **Depends on:** 7.1–7.3.
   - **Contract:** hot command recording has no registry lock, hidden per-command allocation, or draw-time compilation; completion points have no per-point allocation; destruction has no wait or deferred work.
   - **Edges:** separate debug validation cost, cold/warm pipeline cache, CPU-only evidence, driver variability, and hardware metadata.
-  - **Verify:** benchmark schema checks, repeated native runs with adapter/driver/API metadata, allocation/lock instrumentation, and regression thresholds. Complete Gate B review after this evidence is available.
+  - **Verify:** direct C3/Vulkan correctness tests plus repeated advisory native
+    runs with adapter, driver, and API context. Use output/readback assertions
+    and test-only allocation/lock observations without timing thresholds.
+    Complete Gate B review after this evidence is available.
 
 ## Milestone 8 — Compatibility extension
 

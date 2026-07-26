@@ -49,7 +49,7 @@ struct SubmitStats {
     ulong completion_wait_calls;
 }
 
-struct SubmitWorkCounters @if(env::TESTING || $feature(SUBMIT_WORK_STATS)) {
+struct SubmitWorkCounters @if(env::TESTING) {
     ulong authoritative_token_resolutions;
     ulong duplicate_token_visits;
     ulong epoch_reset_cells;
@@ -61,7 +61,7 @@ struct SubmitWorkCounters @if(env::TESTING || $feature(SUBMIT_WORK_STATS)) {
 
 <* Advisory relaxed counters for completion-path work, whitebox-exposed via
    completion_work_counters and reset_completion_work_counters. *>
-struct CompletionWorkCounters @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS)) {
+struct CompletionWorkCounters @if(env::TESTING) {
     ulong native_counter_queries;
     ulong native_wait_calls;
     ulong retirement_passes;
@@ -1199,7 +1199,7 @@ fn Mutex* present_queue_mutex_for(VkDeviceState* state) @private {
 }
 
 fn void note_submit_authoritative_resolution(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
+    $if env::TESTING:
         (void)state.submit_authoritative_token_resolutions.add(
             1,
             AtomicOrdering.RELAXED,
@@ -1208,7 +1208,7 @@ fn void note_submit_authoritative_resolution(VkDeviceState* state) @private {
 }
 
 fn void note_submit_duplicate_token_visit(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
+    $if env::TESTING:
         (void)state.submit_duplicate_token_visits.add(
             1,
             AtomicOrdering.RELAXED,
@@ -1217,7 +1217,7 @@ fn void note_submit_duplicate_token_visit(VkDeviceState* state) @private {
 }
 
 fn void note_submit_epoch_reset_cell(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
+    $if env::TESTING:
         (void)state.submit_epoch_reset_cells.add(
             1,
             AtomicOrdering.RELAXED,
@@ -1226,7 +1226,7 @@ fn void note_submit_epoch_reset_cell(VkDeviceState* state) @private {
 }
 
 fn void note_submit_command_mutex_acquisition(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
+    $if env::TESTING:
         (void)state.submit_command_mutex_acquisitions.add(
             1,
             AtomicOrdering.RELAXED,
@@ -1237,7 +1237,7 @@ fn void note_submit_command_mutex_acquisition(VkDeviceState* state) @private {
 fn void note_submit_queue_submission_mutex_acquisition(
     VkDeviceState* state,
 ) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
+    $if env::TESTING:
         (void)state.submit_queue_submission_mutex_acquisitions.add(
             1,
             AtomicOrdering.RELAXED,
@@ -1246,7 +1246,7 @@ fn void note_submit_queue_submission_mutex_acquisition(
 }
 
 fn void note_submit_rollback_mutex_acquisition(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
+    $if env::TESTING:
         (void)state.submit_rollback_mutex_acquisitions.add(
             1,
             AtomicOrdering.RELAXED,
@@ -1255,7 +1255,7 @@ fn void note_submit_rollback_mutex_acquisition(VkDeviceState* state) @private {
 }
 
 fn void note_submit_native_submission(VkDeviceState* state) @private {
-    $if env::TESTING || $feature(SUBMIT_WORK_STATS):
+    $if env::TESTING:
         (void)state.submit_native_submissions.add(
             1,
             AtomicOrdering.RELAXED,
@@ -1265,7 +1265,7 @@ fn void note_submit_native_submission(VkDeviceState* state) @private {
 
 fn void reset_submit_work_counters(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(SUBMIT_WORK_STATS)) {
+) @if(env::TESTING) {
     state.submit_authoritative_token_resolutions.store(
         0,
         AtomicOrdering.RELAXED,
@@ -1283,7 +1283,7 @@ fn void reset_submit_work_counters(
 
 fn SubmitWorkCounters submit_work_counters(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(SUBMIT_WORK_STATS)) {
+) @if(env::TESTING) {
     return {
         .authoritative_token_resolutions =
             state.submit_authoritative_token_resolutions.load(

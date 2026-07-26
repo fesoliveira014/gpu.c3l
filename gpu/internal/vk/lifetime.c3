@@ -166,7 +166,7 @@ fn CommandRecord* release_pending_command_locked(
 }
 
 fn void note_completion_counter_query(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+    $if env::TESTING:
         (void)state.completion_native_counter_queries.add(
             1,
             AtomicOrdering.RELAXED,
@@ -175,7 +175,7 @@ fn void note_completion_counter_query(VkDeviceState* state) {
 }
 
 fn void note_completion_wait_call(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+    $if env::TESTING:
         (void)state.completion_native_wait_calls.add(
             1,
             AtomicOrdering.RELAXED,
@@ -184,7 +184,7 @@ fn void note_completion_wait_call(VkDeviceState* state) {
 }
 
 fn void note_completion_retirement_pass(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+    $if env::TESTING:
         (void)state.completion_retirement_passes.add(
             1,
             AtomicOrdering.RELAXED,
@@ -193,7 +193,7 @@ fn void note_completion_retirement_pass(VkDeviceState* state) {
 }
 
 fn void note_completion_retirement_lock_acquisition(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+    $if env::TESTING:
         (void)state.completion_retirement_lock_acquisitions.add(
             1,
             AtomicOrdering.RELAXED,
@@ -202,7 +202,7 @@ fn void note_completion_retirement_lock_acquisition(VkDeviceState* state) {
 }
 
 fn void note_completion_cached_poll_hit(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+    $if env::TESTING:
         (void)state.completion_cached_poll_hits.add(
             1,
             AtomicOrdering.RELAXED,
@@ -211,7 +211,7 @@ fn void note_completion_cached_poll_hit(VkDeviceState* state) {
 }
 
 fn void note_completion_cached_wait_hit(VkDeviceState* state) {
-    $if env::TESTING || $feature(COMPLETION_RETIREMENT_STATS):
+    $if env::TESTING:
         (void)state.completion_cached_wait_hits.add(
             1,
             AtomicOrdering.RELAXED,
@@ -417,7 +417,7 @@ fn void? drain_submitted_commands_if_needed(VkDeviceState* state) {
 
 fn CompletionWorkCounters completion_work_counters(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS)) {
+) @if(env::TESTING) {
     return {
         .native_counter_queries = state.completion_native_counter_queries.load(
             AtomicOrdering.RELAXED,
@@ -443,7 +443,7 @@ fn CompletionWorkCounters completion_work_counters(
 
 fn void reset_completion_work_counters(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS)) {
+) @if(env::TESTING) {
     state.completion_native_counter_queries.store(0, AtomicOrdering.RELAXED);
     state.completion_native_wait_calls.store(0, AtomicOrdering.RELAXED);
     state.completion_retirement_passes.store(0, AtomicOrdering.RELAXED);

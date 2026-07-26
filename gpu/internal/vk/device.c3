@@ -139,7 +139,7 @@ struct VkDeviceState @public {
     float                      sampler_last_create_max_anisotropy @if(env::TESTING);
     bool                       sampler_hash_override_enabled @if(env::TESTING);
     ulong                      sampler_hash_override @if(env::TESTING);
-    ulong                      sampler_lookup_probes @if(env::TESTING || $feature(SAMPLER_INTERN_STATS));
+    ulong                      sampler_lookup_probes @if(env::TESTING);
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;
@@ -170,17 +170,17 @@ struct VkDeviceState @public {
     Atomic{ulong}              generated_recording_allocations;
     ulong                      command_buffers_allocated;
     ulong                      command_buffers_freed;
-    RecordingHostAllocator     recording_host_allocator @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
-    Atomic{ulong}              recording_command_pool_creations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
-    Atomic{ulong}              recording_command_buffer_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
-    Atomic{ulong}              recording_command_buffer_frees @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
-    Atomic{ulong}              command_buffer_resets @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
-    Atomic{ulong}              recording_image_view_creations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
-    Atomic{ulong}              recording_vma_allocations @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS) || $feature(COMMAND_RECORDING_WORK_STATS));
-    Atomic{ulong}              generated_scratch_misses @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-    Atomic{ulong}              generated_dispatch_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-    Atomic{ulong}              generated_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-    Atomic{ulong}              generated_indexed_draw_emissions @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+    RecordingHostAllocator     recording_host_allocator @if(env::TESTING);
+    Atomic{ulong}              recording_command_pool_creations @if(env::TESTING);
+    Atomic{ulong}              recording_command_buffer_allocations @if(env::TESTING);
+    Atomic{ulong}              recording_command_buffer_frees @if(env::TESTING);
+    Atomic{ulong}              command_buffer_resets @if(env::TESTING);
+    Atomic{ulong}              recording_image_view_creations @if(env::TESTING);
+    Atomic{ulong}              recording_vma_allocations @if(env::TESTING);
+    Atomic{ulong}              generated_scratch_misses @if(env::TESTING);
+    Atomic{ulong}              generated_dispatch_emissions @if(env::TESTING);
+    Atomic{ulong}              generated_draw_emissions @if(env::TESTING);
+    Atomic{ulong}              generated_indexed_draw_emissions @if(env::TESTING);
     Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
     Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);
@@ -197,22 +197,22 @@ struct VkDeviceState @public {
     vk::Rect2D                 last_scissor @if(env::TESTING);
     gpu::DynamicRasterState    last_raster_state @if(env::TESTING);
     gpu::DepthState            last_depth_state @if(env::TESTING);
-    ulong                      texture_view_cell_lookups @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS));
-    ulong                      texture_view_ownership_work_units @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS));
-    Atomic{ulong}              completion_native_counter_queries @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
-    Atomic{ulong}              completion_native_wait_calls @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
-    Atomic{ulong}              completion_retirement_passes @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
-    Atomic{ulong}              completion_retirement_lock_acquisitions @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
-    Atomic{ulong}              completion_cached_poll_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
-    Atomic{ulong}              completion_cached_wait_hits @if(env::TESTING || $feature(COMPLETION_RETIREMENT_STATS));
+    ulong                      texture_view_cell_lookups @if(env::TESTING);
+    ulong                      texture_view_ownership_work_units @if(env::TESTING);
+    Atomic{ulong}              completion_native_counter_queries @if(env::TESTING);
+    Atomic{ulong}              completion_native_wait_calls @if(env::TESTING);
+    Atomic{ulong}              completion_retirement_passes @if(env::TESTING);
+    Atomic{ulong}              completion_retirement_lock_acquisitions @if(env::TESTING);
+    Atomic{ulong}              completion_cached_poll_hits @if(env::TESTING);
+    Atomic{ulong}              completion_cached_wait_hits @if(env::TESTING);
     Atomic{ulong}              submit_completion_wait_calls;
-    Atomic{ulong}              submit_authoritative_token_resolutions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
-    Atomic{ulong}              submit_duplicate_token_visits @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
-    Atomic{ulong}              submit_epoch_reset_cells @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
-    Atomic{ulong}              submit_command_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
-    Atomic{ulong}              submit_queue_submission_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
-    Atomic{ulong}              submit_rollback_mutex_acquisitions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
-    Atomic{ulong}              submit_native_submissions @if(env::TESTING || $feature(SUBMIT_WORK_STATS));
+    Atomic{ulong}              submit_authoritative_token_resolutions @if(env::TESTING);
+    Atomic{ulong}              submit_duplicate_token_visits @if(env::TESTING);
+    Atomic{ulong}              submit_epoch_reset_cells @if(env::TESTING);
+    Atomic{ulong}              submit_command_mutex_acquisitions @if(env::TESTING);
+    Atomic{ulong}              submit_queue_submission_mutex_acquisitions @if(env::TESTING);
+    Atomic{ulong}              submit_rollback_mutex_acquisitions @if(env::TESTING);
+    Atomic{ulong}              submit_native_submissions @if(env::TESTING);
     CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
     void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
@@ -220,11 +220,11 @@ struct VkDeviceState @public {
     ulong                      shader_reflection_validations @if(env::TESTING);
     ulong                      pipeline_shader_create_attempts @if(env::TESTING);
     bool                       root_abi_evidence_enabled @if(env::TESTING);
-    ulong                      shader_intern_probes @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
-    ulong                      shader_intern_bytes_compared @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
-    ulong                      shader_owned_bytes_cloned @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
-    ulong                      shader_owned_bytes_freed @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
-    ulong                      pipeline_key_probes @if(env::TESTING || $feature(PIPELINE_CACHE_STATS));
+    ulong                      shader_intern_probes @if(env::TESTING);
+    ulong                      shader_intern_bytes_compared @if(env::TESTING);
+    ulong                      shader_owned_bytes_cloned @if(env::TESTING);
+    ulong                      shader_owned_bytes_freed @if(env::TESTING);
+    ulong                      pipeline_key_probes @if(env::TESTING);
     vk::Result                 pipeline_shader_create_result @if(env::TESTING);
     vk::Result                 pipeline_native_create_result @if(env::TESTING);
     uint                       pipeline_native_dynamic_state_count @if(env::TESTING);
@@ -540,9 +540,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         if (probe != null) probe.rollback_count++;
     }
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
-    $if env::TESTING
-            || $feature(COMMAND_RESOLUTION_STATS)
-            || $feature(COMMAND_RECORDING_WORK_STATS):
+    $if env::TESTING:
         install_recording_host_allocator(state);
     $endif
     state.debug_callback = desc.debug_callback;

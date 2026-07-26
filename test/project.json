@@ -3,7 +3,8 @@
   // Whitebox harness: compiles the library sources directly (list mirrors
   // manifest.json — c3c has no single-star glob) so no gpu.c3l resolution or
   // symlinks are needed. Bindings resolve from ../lib by real directory name.
-  // Consumer-style resolution is exercised by the gpu.c3l-samples repo.
+  // Consumer-style resolution is exercised by examples/getting_started and
+  // the gpu.c3l-samples repository.
   "warnings": [ "no-unused" ],
   "dependency-search-paths": [ "../lib" ],
   "dependencies": [ "vk", "vma", "spvreflect" ],
@@ -22,33 +23,16 @@
       "type": "executable",
       "sources": [ "src/smoke.c3" ]
     },
-    "benchmark_info": {
-      "type": "executable",
-      "sources": [ "src/benchmark_info.c3" ]
-    },
-    "allocation_bench": {
-      "type": "executable",
-      "sources": [ "src/allocation_bench.c3" ]
-    },
     // Advisory pipeline-cache lookup timing; executable so it never gates CI.
     // Needs an ICD — pin lavapipe via VK_DRIVER_FILES when running this target.
     "pipeline_cache_bench": {
       "type": "executable",
-      "features": [ "PIPELINE_CACHE_STATS" ],
       "sources": [ "src/pipeline_cache_bench.c3" ]
-    },
-    // Advisory command recording timing; executable so it never gates
-    // CI. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
-    "command_record_bench": {
-      "type": "executable",
-      "features": [ "COMMAND_RESOLUTION_STATS" ],
-      "sources": [ "src/command_record_bench.c3" ]
     },
     // Advisory direct Vulkan/public command-path and submitted lifecycle
     // calibration. Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
     "command_path_baseline_bench": {
       "type": "executable",
-      "features": [ "COMMAND_RECORDING_WORK_STATS" ],
       "sources": [
         "src/command_path_baseline_bench.c3",
         "src/command_path_baseline_native.c3"
@@ -58,15 +42,7 @@
     // timing; executable so it never gates CI. Needs an ICD.
     "lifecycle_bench": {
       "type": "executable",
-      "features": [ "COMPLETION_RETIREMENT_STATS" ],
       "sources": [ "src/lifecycle_bench.c3" ]
-    },
-    // Advisory public submit timing with exact authoritative-work evidence.
-    // Needs an ICD; the runner builds with -O1.
-    "submit_batch_bench": {
-      "type": "executable",
-      "features": [ "SUBMIT_WORK_STATS", "COMMAND_RECORDING_WORK_STATS" ],
-      "sources": [ "src/submit_batch_bench.c3" ]
     },
     // Advisory resource operation timing across worker counts 1/2/4;
     // executable so it never gates CI. Needs an ICD — pin lavapipe via
@@ -75,24 +51,11 @@
       "type": "executable",
       "sources": [ "src/resource_create_bench.c3" ]
     },
-    // Advisory texture-descriptor churn and sampler lookup timing across
-    // worker counts 1/2/4; executable so it never gates CI.
-    // Needs an ICD — pin lavapipe via VK_DRIVER_FILES.
-    "descriptor_churn_bench": {
-      "type": "executable",
-      "features": [ "TEXTURE_VIEW_ACCOUNTING_STATS", "SAMPLER_INTERN_STATS" ],
-      "sources": [ "src/descriptor_churn_bench.c3" ]
-    },
     // Advisory explicit caller-owned upload throughput across worker and
     // payload combinations; executable so timing never gates CI. Needs an ICD.
     "upload_throughput_bench": {
       "type": "executable",
-      "sources": [ "src/upload_throughput_bench.c3", "src/upload_bench_observation.c3" ]
-    },
-    // Stable classification helpers for upload benchmark output.
-    "upload_bench_observation": {
-      "type": "test",
-      "sources": [ "src/test_upload_bench_observation.c3", "src/upload_bench_observation.c3" ]
+      "sources": [ "src/upload_throughput_bench.c3" ]
     },
     // Advisory async-compute/graphics overlap observation: chained vs
     // independent submission across queues, timestamp-pool-backed where
@@ -103,92 +66,74 @@
       "type": "executable",
       "sources": [ "src/async_overlap_bench.c3", "src/overlap_abi.c3" ]
     },
-    "vk_device_desc": {
+    "vk_core": {
       "type": "test",
-      "sources": [ "src/test_vk_device_desc.c3", "src/test_vk_dispatch.c3" ]
+      "sources": [
+        "src/test_vk_device_desc.c3",
+        "src/test_vk_dispatch.c3",
+        "src/test_vk_features.c3",
+        "src/test_vk_runtime.c3",
+        "src/test_vk_bootstrap.c3",
+        "src/test_vk_public_contract.c3",
+        "src/test_vk_result_mapping.c3",
+        "src/test_vk_command_allocator.c3",
+        "src/test_vk_vma_allocator.c3",
+        "src/test_vk_buffer.c3",
+        "src/test_vk_buffer_table.c3",
+        "src/test_vk_span_resolver.c3",
+        "src/test_vk_allocation.c3",
+        "src/submitted_command_fixture.c3",
+        "src/test_vk_command_submit.c3",
+        "src/test_vk_command_validation.c3",
+        "src/test_vk_render_pass_validation.c3",
+        "src/test_vk_texture_transition.c3",
+        "src/test_vk_texture.c3",
+        "src/test_vk_dedicated_texture.c3",
+        "src/test_attachment_view_table.c3",
+        "src/test_vk_descriptor_heap.c3",
+        "src/test_vk_root_pointer_compute.c3",
+        "src/root_pointer_abi.c3",
+        "src/test_vk_texture_heap.c3",
+        "src/test_vk_texture_upload.c3",
+        "src/bindless_abi.c3",
+        "src/offscreen_abi.c3",
+        "src/test_vk_shader_reflection.c3",
+        "src/test_vk_offscreen_triangle.c3",
+        "src/test_vk_performance_invariants.c3",
+        "src/test_command_path_native_work.c3",
+        "src/test_vk_pipeline_cache.c3",
+        "src/test_vk_pipeline_cache_io.c3",
+        "src/test_vk_immediate_lifetime.c3",
+        "src/test_vk_indexed_draw.c3",
+        "src/test_vk_depth_attachment.c3",
+        "src/test_vk_multisample_render.c3",
+        "src/depth_abi.c3",
+        "src/test_vk_threading.c3",
+        "src/test_vk_queue_selection.c3",
+        "src/test_vk_submit_stats.c3",
+        "src/test_vk_completion.c3",
+        "src/test_vk_debug_report.c3",
+        "src/test_vk_validation_policy.c3",
+        "src/test_vk_command_policy_matrix.c3"
+      ]
     },
-    // Vulkan bootstrap: the feature gate needs no ICD; the create/destroy test
-    // needs one — pin lavapipe via VK_DRIVER_FILES when running this target.
-    "vk_bootstrap": {
+    "vk_wsi": {
       "type": "test",
-      "sources": [ "src/test_vk_features.c3", "src/test_vk_runtime.c3", "src/test_vk_bootstrap.c3", "src/test_vk_public_contract.c3", "src/test_vk_result_mapping.c3", "src/test_vk_command_allocator.c3", "src/root_pointer_abi.c3", "src/test_vk_vma_allocator.c3", "src/test_vk_buffer.c3", "src/test_vk_buffer_table.c3", "src/test_vk_span_resolver.c3" ]
+      "sources": [
+        "src/test_vk_swapchain.c3",
+        "src/test_vk_wsi_diagnostics.c3"
+      ]
     },
-    "vk_allocation": {
+    "vk_optional_generated_work": {
       "type": "test",
-      "sources": [ "src/test_vk_allocation.c3", "src/submitted_command_fixture.c3" ]
-    },
-    "vk_command": {
-      "type": "test",
-      "sources": [ "src/test_vk_command_submit.c3", "src/test_generated_scratch.c3", "src/test_vk_command_validation.c3", "src/test_vk_render_pass_validation.c3", "src/test_vk_texture_transition.c3", "src/offscreen_abi.c3" ]
-    },
-    "vk_texture": {
-      "type": "test",
-      "sources": [ "src/test_vk_texture.c3", "src/test_vk_dedicated_texture.c3", "src/test_attachment_view_table.c3" ]
-    },
-    "vk_descriptor_heap": {
-      "type": "test",
-      "sources": [ "src/test_vk_descriptor_heap.c3" ]
-    },
-    "vk_root_pointer": {
-      "type": "test",
-      "sources": [ "src/test_vk_root_pointer_compute.c3", "src/root_pointer_abi.c3" ]
-    },
-    "vk_texture_heap": {
-      "type": "test",
-      "sources": [ "src/test_vk_texture_heap.c3", "src/test_vk_texture_upload.c3", "src/bindless_abi.c3", "src/offscreen_abi.c3" ]
-    },
-    "vk_shader_reflection": {
-      "type": "test",
-      "sources": [ "src/test_vk_shader_reflection.c3" ]
-    },
-    "vk_offscreen": {
-      "type": "test",
-      "sources": [ "src/test_vk_offscreen_triangle.c3", "src/offscreen_abi.c3" ]
-    },
-    "vk_performance": {
-      "type": "test",
-      "sources": [ "src/test_vk_performance_invariants.c3", "src/test_command_path_native_work.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
-    },
-    "vk_allocator_observation": {
-      "type": "test",
-      "sources": [ "src/test_vk_allocator_observation.c3" ]
-    },
-    "vk_swapchain": {
-      "type": "test",
-      "sources": [ "src/test_vk_swapchain.c3", "src/test_vk_wsi_diagnostics.c3" ]
-    },
-    "vk_pipeline_cache": {
-      "type": "test",
-      "sources": [ "src/test_vk_pipeline_cache.c3", "src/test_vk_pipeline_cache_io.c3", "src/test_vk_immediate_lifetime.c3", "src/submitted_command_fixture.c3", "src/offscreen_abi.c3", "src/root_pointer_abi.c3" ]
-    },
-    "vk_indirect": {
-      "type": "test",
-      "sources": [ "src/test_vk_indirect_draw.c3", "src/indirect_abi.c3", "src/generated_work_abi.c3", "src/root_pointer_abi.c3", "src/offscreen_abi.c3" ]
-    },
-    // Indexed-draw pixel equivalence; needs an ICD — pin lavapipe via VK_DRIVER_FILES.
-    "vk_indexed_draw": {
-      "type": "test",
-      "sources": [ "src/test_vk_indexed_draw.c3" ]
-    },
-    "vk_depth": {
-      "type": "test",
-      "sources": [ "src/test_vk_depth_attachment.c3", "src/test_vk_multisample_render.c3", "src/depth_abi.c3" ]
-    },
-    "vk_threading": {
-      "type": "test",
-      "sources": [ "src/test_vk_threading.c3", "src/root_pointer_abi.c3" ]
-    },
-    "vk_queue": {
-      "type": "test",
-      "sources": [ "src/test_vk_queue_selection.c3", "src/test_vk_submit_stats.c3", "src/test_vk_completion.c3" ]
-    },
-    "vk_debug": {
-      "type": "test",
-      "sources": [ "src/test_vk_debug_report.c3" ]
-    },
-    "vk_validation_policy": {
-      "type": "test",
-      "sources": [ "src/test_vk_validation_policy.c3", "src/test_vk_command_policy_matrix.c3" ]
+      "sources": [
+        "src/test_generated_scratch.c3",
+        "src/test_vk_indirect_draw.c3",
+        "src/indirect_abi.c3",
+        "src/generated_work_abi.c3",
+        "src/root_pointer_abi.c3",
+        "src/offscreen_abi.c3"
+      ]
     }
   }
 }

@@ -43,7 +43,7 @@ struct PendingTextureWrite {
     vk::ImageView view;
 }
 
-struct TextureViewAccountingCounters @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS)) {
+struct TextureViewAccountingCounters @if(env::TESTING) {
     ulong cell_lookups;
     ulong ownership_work_units;
 }
@@ -267,7 +267,7 @@ fn vk::ImageLayout texture_descriptor_layout(
 
 fn void reset_texture_view_accounting(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS)) {
+) @if(env::TESTING) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     state.texture_view_cell_lookups = 0;
@@ -276,7 +276,7 @@ fn void reset_texture_view_accounting(
 
 fn TextureViewAccountingCounters texture_view_accounting(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS)) {
+) @if(env::TESTING) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     return {
@@ -289,7 +289,7 @@ fn TextureDescriptorCell*? texture_cell_get(
     VkDeviceState* state,
     gpu::TextureView view,
 ) @private {
-    $if env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS):
+    $if env::TESTING:
         state.texture_view_cell_lookups++;
     $endif
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
@@ -308,7 +308,7 @@ fn bool texture_has_live_descriptor_views(
     VkDeviceState* state,
     TextureSlot* texture,
 ) @private {
-    $if env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS):
+    $if env::TESTING:
         state.texture_view_ownership_work_units++;
     $endif
     return texture.live_descriptor_views != 0;
