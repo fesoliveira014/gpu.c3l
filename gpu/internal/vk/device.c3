@@ -169,11 +169,6 @@ struct VkDeviceState @public {
     ulong                      shader_reflection_validations @if(env::TESTING);
     ulong                      pipeline_shader_create_attempts @if(env::TESTING);
     bool                       root_abi_evidence_enabled @if(env::TESTING);
-    ulong                      shader_intern_probes @if(env::TESTING);
-    ulong                      shader_intern_bytes_compared @if(env::TESTING);
-    ulong                      shader_owned_bytes_cloned @if(env::TESTING);
-    ulong                      shader_owned_bytes_freed @if(env::TESTING);
-    ulong                      pipeline_key_probes @if(env::TESTING);
     vk::Result                 pipeline_shader_create_result @if(env::TESTING);
     vk::Result                 pipeline_native_create_result @if(env::TESTING);
     uint                       pipeline_native_dynamic_state_count @if(env::TESTING);

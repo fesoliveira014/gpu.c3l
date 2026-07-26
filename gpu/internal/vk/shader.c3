@@ -45,83 +45,9 @@ struct PreparedShaderIdentity {
     bool     retained;
 }
 
-struct PipelineIdentityStats @if(env::TESTING) {
-    ulong shader_intern_probes;
-    ulong shader_intern_bytes_compared;
-    ulong shader_owned_bytes_cloned;
-    ulong shader_owned_bytes_freed;
-    ulong pipeline_key_probes;
-}
-
-struct PipelineIdentityProbeResult @if(env::TESTING) {
-    PipelineIdentityStats interning;
-    PipelineIdentityStats lookup;
-}
-
 struct PipelineShaderModule {
     vk::ShaderModule shader_module;
     char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
-}
-
-fn void note_shader_intern_probe(VkDeviceState* state) {
-    $if env::TESTING:
-        state.shader_intern_probes++;
-    $endif
-}
-
-fn void note_shader_intern_bytes_compared(
-    VkDeviceState* state,
-    usz byte_count,
-) {
-    $if env::TESTING:
-        state.shader_intern_bytes_compared += byte_count;
-    $endif
-}
-
-fn void note_shader_owned_bytes_cloned(
-    VkDeviceState* state,
-    usz byte_count,
-) {
-    $if env::TESTING:
-        state.shader_owned_bytes_cloned += byte_count;
-    $endif
-}
-
-fn void note_shader_owned_bytes_freed(
-    VkDeviceState* state,
-    usz byte_count,
-) {
-    $if env::TESTING:
-        state.shader_owned_bytes_freed += byte_count;
-    $endif
-}
-
-fn void note_pipeline_key_probe(VkDeviceState* state) {
-    $if env::TESTING:
-        state.pipeline_key_probes++;
-    $endif
-}
-
-fn void reset_pipeline_identity_stats(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.shader_intern_probes = 0;
-    state.shader_intern_bytes_compared = 0;
-    state.shader_owned_bytes_cloned = 0;
-    state.shader_owned_bytes_freed = 0;
-    state.pipeline_key_probes = 0;
-}
-
-fn PipelineIdentityStats pipeline_identity_stats(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .shader_intern_probes          = state.shader_intern_probes,
-        .shader_intern_bytes_compared  = state.shader_intern_bytes_compared,
-        .shader_owned_bytes_cloned     = state.shader_owned_bytes_cloned,
-        .shader_owned_bytes_freed      = state.shader_owned_bytes_freed,
-        .pipeline_key_probes           = state.pipeline_key_probes,
-    };
 }
 
 fn uint shader_store_bucket(ulong hash, uint bucket_count) {
@@ -152,7 +78,6 @@ fn bool unlink_shader_store_entry(ShaderStore* store, uint index) {
 }
 
 fn bool shader_store_entry_equals(
-    VkDeviceState* state,
     ShaderStoreEntry* entry,
     ShaderIdentityInput* input,
 ) {
@@ -160,7 +85,6 @@ fn bool shader_store_entry_equals(
         || entry.spirv.len != input.spirv.len
         || ((ZString)&entry.entry_point[0]).str_view()
             != ((ZString)&input.entry_point[0]).str_view()) return false;
-    note_shader_intern_bytes_compared(state, input.spirv.len);
     return mem::equals(entry.spirv, input.spirv);
 }
 
@@ -175,10 +99,9 @@ fn ShaderId? retain_shader_identity_locked(
         (uint)store.bucket_heads.len,
     );
     for (uint current = store.bucket_heads[bucket]; current != 0; ) {
-        note_shader_intern_probe(state);
         ShaderStoreEntry* entry = &store.entries[current - 1];
         if (entry.hash == input.hash
-            && shader_store_entry_equals(state, entry, input)) {
+            && shader_store_entry_equals(entry, input)) {
             if (entry.refcount == uint::max) return gpu::SLOT_TABLE_FULL~;
             entry.refcount++;
             return (ShaderId)(current - 1);
@@ -202,7 +125,6 @@ fn ShaderId? retain_shader_identity_locked(
         (sz)input.spirv.len,
     );
     mem::copy(spirv.ptr, input.spirv.ptr, input.spirv.len);
-    note_shader_owned_bytes_cloned(state, input.spirv.len);
     ShaderStoreEntry entry = {
         .hash     = input.hash,
         .spirv    = spirv,
@@ -236,7 +158,6 @@ fn void? release_shader_identity_locked(
         entry.refcount++;
         return gpu::INVALID_ARGUMENT~;
     }
-    note_shader_owned_bytes_freed(state, entry.spirv.len);
     alloc::free(state.host_allocator, entry.spirv.ptr);
     *entry = { .next_free = state.shader_store.free_head };
     state.shader_store.free_head = index + 1;
@@ -352,7 +273,6 @@ fn void destroy_shader_store(VkDeviceState* state) {
     if (state.shader_store.entries.ptr != null) {
         foreach (&entry : state.shader_store.entries[:state.shader_store.next_new]) {
             if (entry.used && entry.spirv.ptr != null) {
-                note_shader_owned_bytes_freed(state, entry.spirv.len);
                 alloc::free(state.host_allocator, entry.spirv.ptr);
             }
         }
