@@ -3,6 +3,10 @@
   "dependency-search-paths": [ "../../..", "../../lib" ],
   "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
   "output": "build",
+  // The vendored VulkanMemoryAllocator.lib is built /MD (release CRT); linking
+  // c3c's dynamic-debug default against it mixes debug/release STL DLLs, which
+  // crashes in VMA's std::mutex when the runtimes drift apart.
+  "wincrt": "dynamic",
   "targets": {
     "hello_gpu": {
       "type": "executable",
