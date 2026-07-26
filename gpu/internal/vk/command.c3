@@ -31,6 +31,11 @@ alias EndCommandBufferFn @private = fn vk::Result (
     void*,
     vk::CommandBuffer,
 );
+alias GeneratedDispatchLayoutReadFn @private @if(env::TESTING) =
+    fn vk::IndirectCommandsLayoutEXT (
+        void*,
+        BoundPipeline*,
+    );
 
 const uint MAX_COMMAND_ALLOCATORS = 256;
 const uint COMMAND_ALLOCATOR_FREE_NONE = 0;
@@ -85,6 +90,11 @@ struct PreparedGeneratedDispatch {
     gpu::GpuSpan                   count_span;
     vk::IndirectCommandsLayoutEXT layout;
     uint                           max_count;
+}
+
+struct GeneratedDispatchLayoutReadOps @private @if(env::TESTING) {
+    void*                         user_data;
+    GeneratedDispatchLayoutReadFn read;
 }
 
 struct CommandPoolOps @private {
@@ -2280,17 +2290,6 @@ fn ResolvedSpan? validate_and_lower_generated_work_records(
     return resolved;
 }
 
-fn void set_generated_dispatch_layout_read_hook(
-    VkDeviceState* state,
-    GeneratedDispatchLayoutReadHook hook,
-    void* user_data,
-) @if(env::TESTING) {
-    state.generated_dispatch_layout_read_hook = hook;
-    state.generated_dispatch_layout_read_user_data = user_data;
-    state.generated_dispatch_layout_read_observed =
-        (vk::IndirectCommandsLayoutEXT)null;
-}
-
 fn void? execute_generated_work(
     VkDeviceState* state,
     CommandRecord* record,
@@ -2343,26 +2342,15 @@ fn void? execute_generated_work(
 }
 
 fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
-    VkDeviceState* state,
     BoundPipeline* pipeline,
 ) {
-    $if env::TESTING:
-        if (state.generated_dispatch_layout_read_hook != null) {
-            state.generated_dispatch_layout_read_hook(
-                state.generated_dispatch_layout_read_user_data,
-            );
-        }
-    $endif
     vk::IndirectCommandsLayoutEXT layout =
         pipeline.generated_dispatch_layout;
-    $if env::TESTING:
-        state.generated_dispatch_layout_read_observed = layout;
-    $endif
     if (layout == null) return gpu::BACKEND_ERROR~;
     return layout;
 }
 
-fn PreparedGeneratedDispatch? lower_generated_dispatch(
+fn PreparedGeneratedDispatch? lower_generated_dispatch_inputs(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2394,10 +2382,46 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
         arg_size: uint::size,
         count:    1,
     )!;
-    dispatch.layout = snapshot_generated_dispatch_layout(
-        state,
-        &dispatch.pipeline,
+    return dispatch;
+}
+
+fn PreparedGeneratedDispatch? lower_generated_dispatch(
+    CommandRecord* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+) {
+    PreparedGeneratedDispatch dispatch = lower_generated_dispatch_inputs(
+        commands:           commands,
+        records:            records,
+        count_span:         count_span,
+        max_dispatch_count: max_dispatch_count,
     )!;
+    if (dispatch.max_count == 0) return dispatch;
+    dispatch.layout =
+        snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
+    return dispatch;
+}
+
+fn PreparedGeneratedDispatch? lower_generated_dispatch_with_layout_read_ops(
+    CommandRecord* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+    GeneratedDispatchLayoutReadOps* layout_read,
+) @if(env::TESTING) {
+    PreparedGeneratedDispatch dispatch = lower_generated_dispatch_inputs(
+        commands:           commands,
+        records:            records,
+        count_span:         count_span,
+        max_dispatch_count: max_dispatch_count,
+    )!;
+    if (dispatch.max_count == 0) return dispatch;
+    dispatch.layout = layout_read.read(
+        layout_read.user_data,
+        &dispatch.pipeline,
+    );
+    if (dispatch.layout == null) return gpu::BACKEND_ERROR~;
     return dispatch;
 }
 
@@ -2444,10 +2468,8 @@ fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
         operation:      "cmd_dispatch_generated",
         rejected_field: "count_span",
     )!;
-    dispatch.layout = snapshot_generated_dispatch_layout(
-        state,
-        &dispatch.pipeline,
-    )!;
+    dispatch.layout =
+        snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
     return dispatch;
 }
 
@@ -2492,6 +2514,26 @@ fn void? record_generated_dispatch(
         count:         &dispatch.count,
         max_count:     dispatch.max_count,
     )!;
+}
+
+fn void? trusted_dispatch_generated_with_layout_read_ops(
+    CommandRecord* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+    GeneratedDispatchLayoutReadOps* layout_read,
+    vk::IndirectCommandsLayoutEXT* prepared_layout,
+) @if(env::TESTING) {
+    PreparedGeneratedDispatch dispatch =
+        lower_generated_dispatch_with_layout_read_ops(
+            commands:           commands,
+            records:            records,
+            count_span:         count_span,
+            max_dispatch_count: max_dispatch_count,
+            layout_read:        layout_read,
+        )!;
+    *prepared_layout = dispatch.layout;
+    record_generated_dispatch(commands, &dispatch)!;
 }
 
 fn void? trusted_dispatch_generated(

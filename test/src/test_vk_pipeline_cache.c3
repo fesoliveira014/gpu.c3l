@@ -70,12 +70,15 @@ struct CacheShaders {
 struct GeneratedLayoutGate {
     Atomic{bool} entered;
     Atomic{bool} release;
+    vk::IndirectCommandsLayoutEXT captured;
 }
 
 struct GeneratedDispatchRecordArgs {
     gpu::CommandList commands;
     gpu::GpuSpan     records;
     gpu::GpuSpan     count;
+    GeneratedLayoutGate* gate;
+    vk::IndirectCommandsLayoutEXT prepared_layout;
     fault            failure;
 }
 
@@ -166,22 +169,36 @@ fn uint? fail_pipeline_cache_insert(
     return gpu::SLOT_TABLE_FULL~;
 }
 
-fn void block_generated_layout_read(void* raw_gate) {
+fn vk::IndirectCommandsLayoutEXT capture_generated_layout_read(
+    void* raw_gate,
+    vk::BoundPipeline* pipeline,
+) {
     GeneratedLayoutGate* gate = (GeneratedLayoutGate*)raw_gate;
+    gate.captured = pipeline.generated_dispatch_layout;
     gate.entered.store(true, AtomicOrdering.RELEASE);
     while (!gate.release.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    return gate.captured;
 }
 
 fn int record_generated_dispatch(void* raw_args) {
     GeneratedDispatchRecordArgs* args =
         (GeneratedDispatchRecordArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-        if (catch dispatch_fault = gpu::cmd_dispatch_generated(
-            commands:           &args.commands,
-            records:            args.records,
-            count_span:         args.count,
-            max_dispatch_count: 1,
-        )) {
+        gpu::internal::vk::CommandRecord* record =
+            gpu::internal::recording_command(&args.commands)!!;
+        vk::GeneratedDispatchLayoutReadOps layout_read = {
+            .user_data = args.gate,
+            .read      = &capture_generated_layout_read,
+        };
+        if (catch dispatch_fault =
+            vk::trusted_dispatch_generated_with_layout_read_ops(
+                commands:           record,
+                records:            args.records,
+                count_span:         args.count,
+                max_dispatch_count: 1,
+                layout_read:        &layout_read,
+                prepared_layout:    &args.prepared_layout,
+            )) {
             args.failure = dispatch_fault;
             return 1;
         }
@@ -1631,23 +1648,22 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, pipeline);
 
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(&commands)!!;
     vk::IndirectCommandsLayoutEXT expected_layout =
-        state.pipelines.slots[pipeline.index].value.generated_dispatch_layout;
+        record.logical_pipeline.generated_dispatch_layout;
     GeneratedLayoutGate gate;
-    vk::set_generated_dispatch_layout_read_hook(
-        state,
-        &block_generated_layout_read,
-        &gate,
-    );
-    defer vk::set_generated_dispatch_layout_read_hook(state, null, null);
     GeneratedDispatchRecordArgs args = {
         .commands = commands,
         .records  = records.span,
         .count    = count.span,
+        .gate     = &gate,
     };
     Thread worker;
     worker.create(&record_generated_dispatch, &args)!!;
     while (!gate.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    assert(gate.captured == expected_layout,
+        "generated dispatch captures the bind-time pipeline layout");
 
     gpu::ShaderDesc alternate_desc = {
         .spirv       = CACHE_ALT_COMP_SPIRV[..],
@@ -1673,8 +1689,8 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
     assert(worker_result == 0,
         "generated dispatch recording resumes after concurrent creation: %s",
         args.failure);
-    assert(state.generated_dispatch_layout_read_observed == expected_layout,
-        "recording reads the original pipeline slot's generated layout");
+    assert(args.prepared_layout == gate.captured,
+        "prepared dispatch retains the layout captured before concurrent creation");
     gpu::discard_commands(&commands)!!;
     gpu::release_generated_scratch(
         &allocator,

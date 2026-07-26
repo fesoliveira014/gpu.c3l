@@ -19,7 +19,6 @@ alias SemaphoreCounterQueryFn @private = fn vk::Result (
     vk::Semaphore,
     ulong*,
 );
-alias GeneratedDispatchLayoutReadHook @private @if(env::TESTING) = fn void (void*);
 alias DeviceCreateFn = fn vk::Result (
     void* user_data,
     vk::PhysicalDevice physical_device,
@@ -146,9 +145,6 @@ struct VkDeviceState @public {
     SamplerTable               samplers;
     VkPresentationState        presentation;
     VkShaderHeapState          shader_heap;
-    GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);
-    void*                       generated_dispatch_layout_read_user_data @if(env::TESTING);
-    vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
 }
