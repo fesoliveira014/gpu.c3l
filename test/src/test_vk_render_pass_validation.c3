@@ -941,6 +941,37 @@ fn void alternating_bind_points_preserve_native_caches() @test {
         "suppressed binds still publish the complete logical snapshot");
 }
 
+fn void distinct_pipelines_on_one_bind_point_emit_distinct_binds() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    gpu::PipelineHandle other = review_distinct_compute_pipeline(&device);
+    defer gpu::destroy_pipeline(&device, other)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    PipelineBindCapture capture;
+    bind_pipeline_with_capture(&commands, compute.pipeline, &capture)!!;
+    bind_pipeline_with_capture(&commands, other, &capture)!!;
+
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    assert(capture.calls == 2 && capture.compute_calls == 2,
+        "a different pipeline on one bind point is never suppressed");
+    assert(capture.pipelines[0] != capture.pipelines[1],
+        "the two binds name distinct native pipelines");
+    assert(record.native_compute_pipeline.pipeline == capture.pipelines[1],
+        "the native cache retains the last emitted pipeline");
+    assert(record.logical_pipeline.handle == other,
+        "the logical snapshot follows the last bind");
+}
+
 fn void command_buffer_reuse_resets_graphics_and_descriptor_state() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;

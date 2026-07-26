@@ -329,6 +329,13 @@ fn void runtime_owned_configuration_reaches_device_creation() @test {
     defer gpu::destroy_runtime(&runtime)!!;
     desc = {};
     cache_data[0] = 9;
+    gpu::internal::vk::VkRuntimeState* runtime_state =
+        gpu::internal::resolve_runtime(&runtime).state;
+    assert(
+        runtime_state.config.pipeline_cache_data.len == cache_data.len
+            && runtime_state.config.pipeline_cache_data[0] == 1,
+        "caller mutation cannot change the runtime cache copy"
+    );
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
