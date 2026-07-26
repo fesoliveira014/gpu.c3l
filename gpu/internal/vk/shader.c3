@@ -10,6 +10,13 @@ import std::core::env;
 
 typedef ShaderId = uint;
 
+alias ShaderModuleCreateFn @private = fn vk::Result (
+    void*,
+    vk::Device,
+    vk::ShaderModuleCreateInfo*,
+    vk::ShaderModule*,
+);
+
 const ShaderId SHADER_ID_INVALID = (ShaderId)uint::max;
 const uint SHADER_FREE_NONE = 0;
 const uint SHADER_STORE_MAX_PIPELINE_CAPACITY = 0x20000000;
@@ -48,6 +55,12 @@ struct PreparedShaderIdentity {
 struct PipelineShaderModule {
     vk::ShaderModule shader_module;
     char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
+}
+
+struct ShaderModuleCreateOps @private {
+    void*                user_data;
+    ShaderModuleCreateFn create;
+    bool                  allow_alternate_root_abi;
 }
 
 fn uint shader_store_bucket(ulong hash, uint bucket_count) {
@@ -548,18 +561,11 @@ fn void? check_root_push_abi(
     gpu::internal::ShaderRole role,
 ) @private {
     if (root_push_abi_mismatch(
-        reflect_module,
-        entry_point,
-        role,
-        false,
+        reflect_module:  reflect_module,
+        entry_point:     entry_point,
+        role:            role,
+        allow_alternate: false,
     ) != RootAbiMismatch.NONE) return gpu::SHADER_INVALID~;
-}
-
-fn void set_root_abi_evidence_enabled(
-    VkDeviceState* state,
-    bool enabled,
-) @private @if(env::TESTING) {
-    state.root_abi_evidence_enabled = enabled;
 }
 
 fn void? copy_entry_point(char* dst, ZString source) @private {
@@ -573,23 +579,23 @@ fn void? copy_entry_point(char* dst, ZString source) @private {
     dst[i] = 0;
 }
 
-fn vk::Result create_pipeline_shader_module_native(
-    VkDeviceState* state,
+fn vk::Result create_shader_module_real(
+    void* user_data,
+    vk::Device device,
     vk::ShaderModuleCreateInfo* info,
     vk::ShaderModule* out_shader,
-) {
-    $if env::TESTING:
-        state.pipeline_shader_create_attempts++;
-        if (state.pipeline_shader_create_result != vk::Result.SUCCESS) {
-            return state.pipeline_shader_create_result;
-        }
-    $endif
+) @private {
+    (void)user_data;
     return vk::create_shader_module(
-        device:          state.device,
+        device:          device,
         p_create_info:   info,
         p_allocator:     null,
         p_shader_module: out_shader,
     );
+}
+
+fn ShaderModuleCreateOps shader_module_create_ops_real() @private {
+    return { .create = &create_shader_module_real };
 }
 
 fn fault report_shader_contract_failure(
@@ -682,11 +688,12 @@ fn void? normalize_shader_input(
 }
 
 <* Reflect one normalized shader and create its temporary native module. *>
-fn PipelineShaderModule? create_pipeline_shader_module(
+fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
     VkDeviceState* state,
     ShaderIdentityInput* code,
     ZString operation,
     ZString rejected_field,
+    ShaderModuleCreateOps* create_ops,
 ) {
     PipelineShaderModule shader;
     mem::copy(
@@ -767,15 +774,11 @@ fn PipelineShaderModule? create_pipeline_shader_module(
             invariant:      "selected-entry descriptor bindings must match the gpu heap convention",
         )~;
     }
-    bool allow_alternate_root = false;
-    $if env::TESTING:
-        allow_alternate_root = state.root_abi_evidence_enabled;
-    $endif
     RootAbiMismatch root_mismatch = root_push_abi_mismatch(
-        reflect_module,
-        selected_entry_point,
-        code.role,
-        allow_alternate_root,
+        reflect_module:  reflect_module,
+        entry_point:     selected_entry_point,
+        role:            code.role,
+        allow_alternate: create_ops.allow_alternate_root_abi,
     );
     if (root_mismatch != RootAbiMismatch.NONE) {
         return report_shader_contract_failure(
@@ -794,10 +797,14 @@ fn PipelineShaderModule? create_pipeline_shader_module(
         vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
             .set_code_size(code.spirv.len)
             .set_code(aligned_code.ptr);
+        $if env::TESTING:
+            state.pipeline_shader_create_attempts++;
+        $endif
         check_shader_create_device_result(
             state: state,
-            result: create_pipeline_shader_module_native(
-                state,
+            result: create_ops.create(
+                create_ops.user_data,
+                state.device,
                 &info,
                 &shader.shader_module,
             ),
@@ -811,6 +818,22 @@ fn PipelineShaderModule? create_pipeline_shader_module(
         name:          code.debug_name,
     );
     return shader;
+}
+
+fn PipelineShaderModule? create_pipeline_shader_module(
+    VkDeviceState* state,
+    ShaderIdentityInput* code,
+    ZString operation,
+    ZString rejected_field,
+) {
+    ShaderModuleCreateOps create_ops = shader_module_create_ops_real();
+    return create_pipeline_shader_module_with_ops(
+        state:          state,
+        code:           code,
+        operation:      operation,
+        rejected_field: rejected_field,
+        create_ops:      &create_ops,
+    );
 }
 
 fn void destroy_pipeline_shader_module(

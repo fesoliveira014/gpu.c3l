@@ -6,7 +6,21 @@ import vk;
 import std::thread;
 import std::core::mem;
 
+alias GraphicsPipelineCreateFn @private = fn vk::Result (
+    void*,
+    vk::Device,
+    vk::PipelineCache,
+    vk::GraphicsPipelineCreateInfo*,
+    vk::Pipeline*,
+);
+
 const uint GRAPHICS_ROOT_PUSH_SIZE = gpu::GraphicsRootPush::size;
+
+struct GraphicsPipelineCreateOps @private {
+    ShaderModuleCreateOps    shader_module;
+    void*                    user_data;
+    GraphicsPipelineCreateFn create;
+}
 
 fn vk::PrimitiveTopology topology_to_vk(gpu::PrimitiveTopology topology) @private {
     switch (topology) {
@@ -239,10 +253,36 @@ fn void? validate_graphics_pipeline_desc(
     check_polygon_mode_support(desc.polygon_mode, state.caps.line_polygon_mode)!;
 }
 
+fn vk::Result create_graphics_pipeline_real(
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCache pipeline_cache,
+    vk::GraphicsPipelineCreateInfo* info,
+    vk::Pipeline* out_pipeline,
+) @private {
+    (void)user_data;
+    return vk::create_graphics_pipelines(
+        device:            device,
+        pipeline_cache:    pipeline_cache,
+        create_info_count: 1,
+        p_create_infos:    info,
+        p_allocator:       null,
+        p_pipelines:       out_pipeline,
+    );
+}
+
+fn GraphicsPipelineCreateOps graphics_pipeline_create_ops_real() @private {
+    return {
+        .shader_module = shader_module_create_ops_real(),
+        .create        = &create_graphics_pipeline_real,
+    };
+}
+
 fn vk::Result create_graphics_pipeline_native(
     VkDeviceState* state,
     vk::GraphicsPipelineCreateInfo* info,
     vk::Pipeline* out_pipeline,
+    GraphicsPipelineCreateOps* create_ops,
 ) {
     $if env::TESTING:
         state.pipeline_native_dynamic_state_count =
@@ -286,17 +326,13 @@ fn vk::Result create_graphics_pipeline_native(
                 && attachment.color_write_mask
                     == color_write_mask_to_vk(gpu::COLOR_WRITE_ALL);
         }
-        if (state.pipeline_native_create_result != vk::Result.SUCCESS) {
-            return state.pipeline_native_create_result;
-        }
     $endif
-    return vk::create_graphics_pipelines(
-        device:            state.device,
-        pipeline_cache:    state.driver_cache,
-        create_info_count: 1,
-        p_create_infos:    info,
-        p_allocator:       null,
-        p_pipelines:       out_pipeline,
+    return create_ops.create(
+        create_ops.user_data,
+        state.device,
+        state.driver_cache,
+        info,
+        out_pipeline,
     );
 }
 
@@ -313,6 +349,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     ZString debug_name,
     PreparedShaderIdentity* prepared_vertex_shader,
     PreparedShaderIdentity* prepared_fragment_shader,
+    GraphicsPipelineCreateOps* create_ops,
 ) {
     PipelineKey key = *requested_key;
     ulong hash = hash_key(&key);
@@ -352,11 +389,12 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         debug_name: vertex_desc.debug_name,
         out_input:  &vertex_code,
     );
-    PipelineShaderModule vertex_shader = create_pipeline_shader_module(
+    PipelineShaderModule vertex_shader = create_pipeline_shader_module_with_ops(
         state:          state,
         code:           &vertex_code,
         operation:      operation,
         rejected_field: vertex_field,
+        create_ops:      &create_ops.shader_module,
     )!;
     defer destroy_pipeline_shader_module(state, &vertex_shader);
     ShaderIdentityInput fragment_code;
@@ -366,11 +404,12 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         debug_name: fragment_desc.debug_name,
         out_input:  &fragment_code,
     );
-    PipelineShaderModule fragment_shader = create_pipeline_shader_module(
+    PipelineShaderModule fragment_shader = create_pipeline_shader_module_with_ops(
         state:          state,
         code:           &fragment_code,
         operation:      operation,
         rejected_field: fragment_field,
+        create_ops:      &create_ops.shader_module,
     )!;
     defer destroy_pipeline_shader_module(state, &fragment_shader);
     @pool() {
@@ -489,9 +528,10 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         check_pipeline_create_device_result(
             state: state,
             result: create_graphics_pipeline_native(
-                state,
-                &pipe_info,
-                &pipeline,
+                state:        state,
+                info:         &pipe_info,
+                out_pipeline: &pipeline,
+                create_ops:   create_ops,
             ),
         )!;
         state.pipelines_created++;
@@ -550,9 +590,10 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     };
 }
 
-fn gpu::PipelineHandle? vk_create_graphics_pipeline(
+fn gpu::PipelineHandle? vk_create_graphics_pipeline_with_ops(
     VkDeviceState* state,
     gpu::GraphicsPipelineDesc* desc,
+    GraphicsPipelineCreateOps* create_ops,
 ) {
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
@@ -610,5 +651,19 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
         debug_name:               desc.debug_name,
         prepared_vertex_shader:   &prepared[0],
         prepared_fragment_shader: &prepared[1],
+        create_ops:               create_ops,
+    );
+}
+
+fn gpu::PipelineHandle? vk_create_graphics_pipeline(
+    VkDeviceState* state,
+    gpu::GraphicsPipelineDesc* desc,
+) {
+    GraphicsPipelineCreateOps create_ops =
+        graphics_pipeline_create_ops_real();
+    return vk_create_graphics_pipeline_with_ops(
+        state:      state,
+        desc:       desc,
+        create_ops: &create_ops,
     );
 }

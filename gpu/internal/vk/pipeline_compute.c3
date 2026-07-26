@@ -5,6 +5,20 @@ import gpu @public;
 import vk;
 import std::thread;
 import std::atomic::types;
+import std::core::env;
+
+alias ComputePipelineCreateFn @private = fn vk::Result (
+    void*,
+    vk::Device,
+    vk::PipelineCache,
+    vk::ComputePipelineCreateInfo*,
+    vk::Pipeline*,
+);
+alias PipelineCacheInsertFn @private = fn uint? (
+    void*,
+    VkDeviceState*,
+    PipelineCacheEntry,
+);
 
 // Concrete slot table avoids a c3c 0.8.0 generic-instantiation codegen failure.
 const uint PIPELINE_FREE_NONE = 0;
@@ -29,6 +43,13 @@ struct PipelineTable {
     ulong          owner;
     uint           free_head;
     uint           next_new;
+}
+
+struct ComputePipelineCreateOps @private {
+    ShaderModuleCreateOps   shader_module;
+    void*                   user_data;
+    ComputePipelineCreateFn create;
+    PipelineCacheInsertFn   insert_cache_entry;
 }
 
 fn gpu::PipelineHandle? PipelineTable.alloc(&self, PipelineSlot value) {
@@ -98,24 +119,39 @@ fn bool pipeline_handle_capacity_available(VkDeviceState* state, usz required) {
     return (usz)state.pipelines.available_count() >= required;
 }
 
-fn vk::Result create_compute_pipeline_native(
-    VkDeviceState* state,
+fn vk::Result create_compute_pipeline_real(
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCache pipeline_cache,
     vk::ComputePipelineCreateInfo* info,
     vk::Pipeline* out_pipeline,
-) {
-    $if env::TESTING:
-        if (state.pipeline_native_create_result != vk::Result.SUCCESS) {
-            return state.pipeline_native_create_result;
-        }
-    $endif
+) @private {
+    (void)user_data;
     return vk::create_compute_pipelines(
-        device:            state.device,
-        pipeline_cache:    state.driver_cache,
+        device:            device,
+        pipeline_cache:    pipeline_cache,
         create_info_count: 1,
         p_create_infos:    info,
         p_allocator:       null,
         p_pipelines:       out_pipeline,
     );
+}
+
+fn uint? insert_pipeline_cache_entry_real(
+    void* user_data,
+    VkDeviceState* state,
+    PipelineCacheEntry value,
+) @private {
+    (void)user_data;
+    return insert_entry(state, value);
+}
+
+fn ComputePipelineCreateOps compute_pipeline_create_ops_real() @private {
+    return {
+        .shader_module      = shader_module_create_ops_real(),
+        .create             = &create_compute_pipeline_real,
+        .insert_cache_entry = &insert_pipeline_cache_entry_real,
+    };
 }
 
 <* Consume one retained shader identity, transferring it to a new cache entry
@@ -124,6 +160,7 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     VkDeviceState* state,
     gpu::ComputePipelineDesc* desc,
     PreparedShaderIdentity* prepared_shader,
+    ComputePipelineCreateOps* create_ops,
 ) {
     PipelineKey key = build_compute_key(prepared_shader.id);
     ulong hash = hash_key(&key);
@@ -156,11 +193,12 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         debug_name: desc.shader.debug_name,
         out_input:  &code,
     );
-    PipelineShaderModule shader = create_pipeline_shader_module(
+    PipelineShaderModule shader = create_pipeline_shader_module_with_ops(
         state:          state,
         code:           &code,
         operation:      "create_compute_pipeline",
         rejected_field: "ComputePipelineDesc.shader",
+        create_ops:      &create_ops.shader_module,
     )!;
     defer destroy_pipeline_shader_module(state, &shader);
 
@@ -174,7 +212,13 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     vk::Pipeline pipeline;
     check_pipeline_create_device_result(
         state: state,
-        result: create_compute_pipeline_native(state, &pipe_info, &pipeline),
+        result: create_ops.create(
+            create_ops.user_data,
+            state.device,
+            state.driver_cache,
+            &pipe_info,
+            &pipeline,
+        ),
     )!;
     state.pipelines_created++;
     set_object_name(
@@ -193,9 +237,10 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
         state.pipeline_cache.entries[raced].refcount++;
         release_prepared_shader_locked(state, prepared_shader)!!;
         entry_index = raced;
-    } else if (try idx = insert_entry(
-        state: state,
-        value: {
+    } else if (try idx = create_ops.insert_cache_entry(
+        create_ops.user_data,
+        state,
+        {
             .hash                      = hash,
             .key                       = key,
             .pipeline                  = pipeline,
@@ -223,9 +268,10 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     return gpu::SLOT_TABLE_FULL~;
 }
 
-fn gpu::PipelineHandle? vk_create_compute_pipeline(
+fn gpu::PipelineHandle? vk_create_compute_pipeline_with_ops(
     VkDeviceState* state,
     gpu::ComputePipelineDesc* desc,
+    ComputePipelineCreateOps* create_ops,
 ) {
     state.pipeline_creation_mutex.lock()!!;
     defer state.pipeline_creation_mutex.unlock();
@@ -252,7 +298,39 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(
         state:           state,
         desc:            desc,
         prepared_shader: &prepared,
+        create_ops:      create_ops,
     );
+}
+
+fn gpu::PipelineHandle? vk_create_compute_pipeline(
+    VkDeviceState* state,
+    gpu::ComputePipelineDesc* desc,
+) {
+    ComputePipelineCreateOps create_ops = compute_pipeline_create_ops_real();
+    return vk_create_compute_pipeline_with_ops(
+        state:      state,
+        desc:       desc,
+        create_ops: &create_ops,
+    );
+}
+
+fn gpu::PipelineHandle? create_compute_pipeline_with_root_abi_evidence(
+    gpu::Device* device,
+    gpu::ComputePipelineDesc* desc,
+) @if(env::TESTING) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return gpu::INVALID_ARGUMENT~;
+    ComputePipelineCreateOps create_ops = compute_pipeline_create_ops_real();
+    create_ops.shader_module.allow_alternate_root_abi = true;
+    gpu::PipelineHandle pipeline = vk_create_compute_pipeline_with_ops(
+        state:      operation.state,
+        desc:       desc,
+        create_ops: &create_ops,
+    )!;
+    gpu::internal::retain_device_children(&operation);
+    return pipeline;
 }
 
 fn void? vk_destroy_pipeline(

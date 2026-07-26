@@ -162,14 +162,10 @@ struct VkDeviceState @public {
     ulong                      pipelines_created;
     ulong                      shader_reflection_validations @if(env::TESTING);
     ulong                      pipeline_shader_create_attempts @if(env::TESTING);
-    bool                       root_abi_evidence_enabled @if(env::TESTING);
-    vk::Result                 pipeline_shader_create_result @if(env::TESTING);
-    vk::Result                 pipeline_native_create_result @if(env::TESTING);
     uint                       pipeline_native_dynamic_state_count @if(env::TESTING);
     uint                       pipeline_native_color_target_count @if(env::TESTING);
     bool                       pipeline_native_color_states @if(env::TESTING);
     bool                       pipeline_native_canonical_color_attachments @if(env::TESTING);
-    bool                       pipeline_cache_insert_failure @if(env::TESTING);
     GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);
     void*                       generated_dispatch_layout_read_user_data @if(env::TESTING);
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);

@@ -115,6 +115,57 @@ fn void capture_pipeline_shader_diagnostic(
             == capture.expected_invariant.str_view();
 }
 
+fn vk::Result return_shader_module_create_result(
+    void* user_data,
+    vk::Device device,
+    vk::ShaderModuleCreateInfo* create_info,
+    vk::ShaderModule* out_shader,
+) {
+    (void)device;
+    (void)create_info;
+    (void)out_shader;
+    return *(vk::Result*)user_data;
+}
+
+fn vk::Result return_compute_pipeline_create_result(
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCache pipeline_cache,
+    vk::ComputePipelineCreateInfo* create_info,
+    vk::Pipeline* out_pipeline,
+) {
+    (void)device;
+    (void)pipeline_cache;
+    (void)create_info;
+    (void)out_pipeline;
+    return *(vk::Result*)user_data;
+}
+
+fn vk::Result return_graphics_pipeline_create_result(
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCache pipeline_cache,
+    vk::GraphicsPipelineCreateInfo* create_info,
+    vk::Pipeline* out_pipeline,
+) {
+    (void)device;
+    (void)pipeline_cache;
+    (void)create_info;
+    (void)out_pipeline;
+    return *(vk::Result*)user_data;
+}
+
+fn uint? fail_pipeline_cache_insert(
+    void* user_data,
+    vk::VkDeviceState* state,
+    vk::PipelineCacheEntry value,
+) {
+    (void)user_data;
+    (void)state;
+    (void)value;
+    return gpu::SLOT_TABLE_FULL~;
+}
+
 fn void block_generated_layout_read(void* raw_gate) {
     GeneratedLayoutGate* gate = (GeneratedLayoutGate*)raw_gate;
     gate.entered.store(true, AtomicOrdering.RELEASE);
@@ -876,14 +927,20 @@ fn void pipeline_creation_faults_release_owned_shader_identity() @test {
     gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc desc = { .shader = shader };
 
-    vk::set_pipeline_shader_create_result(
-        state,
-        vk::Result.ERROR_OUT_OF_HOST_MEMORY,
-    );
-    assert(@catch(gpu::create_compute_pipeline(&device, &desc))
+    vk::Result shader_create_result = vk::Result.ERROR_OUT_OF_HOST_MEMORY;
+    vk::ComputePipelineCreateOps shader_create_ops =
+        vk::compute_pipeline_create_ops_real();
+    shader_create_ops.shader_module = {
+        .user_data = &shader_create_result,
+        .create    = &return_shader_module_create_result,
+    };
+    assert(@catch(vk::vk_create_compute_pipeline_with_ops(
+        state:      state,
+        desc:       &desc,
+        create_ops: &shader_create_ops,
+    ))
             == gpu::OUT_OF_HOST_MEMORY,
         "native shader creation preserves host OOM");
-    vk::set_pipeline_shader_create_result(state, vk::Result.SUCCESS);
     assert(vk::shader_store_live_count(state) == 0
             && cache_entry_count(&device) == 0,
         "native shader failure retains no store or cache entry");
@@ -892,14 +949,18 @@ fn void pipeline_creation_faults_release_owned_shader_identity() @test {
             && !state.shader_store.entries[0].used,
         "native shader failure returns its shader slot to the free list");
 
-    vk::set_pipeline_native_create_result(
-        state,
-        vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
-    );
-    assert(@catch(gpu::create_compute_pipeline(&device, &desc))
+    vk::Result pipeline_create_result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY;
+    vk::ComputePipelineCreateOps pipeline_create_ops =
+        vk::compute_pipeline_create_ops_real();
+    pipeline_create_ops.user_data = &pipeline_create_result;
+    pipeline_create_ops.create = &return_compute_pipeline_create_result;
+    assert(@catch(vk::vk_create_compute_pipeline_with_ops(
+        state:      state,
+        desc:       &desc,
+        create_ops: &pipeline_create_ops,
+    ))
             == gpu::OUT_OF_DEVICE_MEMORY,
         "native pipeline creation preserves device OOM");
-    vk::set_pipeline_native_create_result(state, vk::Result.SUCCESS);
     assert(vk::shader_store_live_count(state) == 0
             && cache_entry_count(&device) == 0,
         "native pipeline failure retains no store or cache entry");
@@ -908,11 +969,16 @@ fn void pipeline_creation_faults_release_owned_shader_identity() @test {
             && !state.shader_store.entries[0].used,
         "native pipeline failure reuses and releases the same shader slot");
 
-    vk::set_pipeline_cache_insert_failure(state, true);
-    assert(@catch(gpu::create_compute_pipeline(&device, &desc))
+    vk::ComputePipelineCreateOps cache_insert_ops =
+        vk::compute_pipeline_create_ops_real();
+    cache_insert_ops.insert_cache_entry = &fail_pipeline_cache_insert;
+    assert(@catch(vk::vk_create_compute_pipeline_with_ops(
+        state:      state,
+        desc:       &desc,
+        create_ops: &cache_insert_ops,
+    ))
             == gpu::SLOT_TABLE_FULL,
         "cache insertion failure preserves SLOT_TABLE_FULL");
-    vk::set_pipeline_cache_insert_failure(state, false);
     assert(vk::shader_store_live_count(state) == 0
             && cache_entry_count(&device) == 0,
         "cache insertion failure retains no store or cache entry");
@@ -1851,15 +1917,16 @@ fn void graphics_pipeline_declares_exact_native_color_state() @test {
         .fragment_shader = shaders.frag,
         .color_formats   = color_formats[..],
     };
-    vk::set_pipeline_native_create_result(
-        state,
-        vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
-    );
-    fault create_fault = @catch(vk::vk_create_graphics_pipeline(
-        state,
-        &desc,
+    vk::Result create_result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY;
+    vk::GraphicsPipelineCreateOps create_ops =
+        vk::graphics_pipeline_create_ops_real();
+    create_ops.user_data = &create_result;
+    create_ops.create = &return_graphics_pipeline_create_result;
+    fault create_fault = @catch(vk::vk_create_graphics_pipeline_with_ops(
+        state:      state,
+        desc:       &desc,
+        create_ops: &create_ops,
     ));
-    vk::set_pipeline_native_create_result(state, vk::Result.SUCCESS);
 
     assert(create_fault == gpu::OUT_OF_DEVICE_MEMORY,
         "the injected native failure reaches graphics pipeline creation");

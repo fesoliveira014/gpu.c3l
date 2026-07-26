@@ -247,11 +247,6 @@ fn uint? insert_entry(
     VkDeviceState* state,
     PipelineCacheEntry value,
 ) {
-    $if env::TESTING:
-        if (state.pipeline_cache_insert_failure) {
-            return gpu::SLOT_TABLE_FULL~;
-        }
-    $endif
     PipelineCacheTable* cache = &state.pipeline_cache;
     uint idx;
     if (cache.free_head != PIPELINE_FREE_NONE) {
@@ -320,27 +315,6 @@ fn GraphicsPipelineNativeObservation graphics_pipeline_native_observation(
         .canonical_color_attachments =
             state.pipeline_native_canonical_color_attachments,
     };
-}
-
-fn void set_pipeline_shader_create_result(
-    VkDeviceState* state,
-    vk::Result result,
-) @if(env::TESTING) {
-    state.pipeline_shader_create_result = result;
-}
-
-fn void set_pipeline_native_create_result(
-    VkDeviceState* state,
-    vk::Result result,
-) @if(env::TESTING) {
-    state.pipeline_native_create_result = result;
-}
-
-fn void set_pipeline_cache_insert_failure(
-    VkDeviceState* state,
-    bool enabled,
-) @if(env::TESTING) {
-    state.pipeline_cache_insert_failure = enabled;
 }
 
 <* Live entry count, exposed for dedup accounting in tests. *>
