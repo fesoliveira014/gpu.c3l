@@ -709,6 +709,9 @@ fn void shader_store_collision_verification_is_exact() @test {
             && distinct_id != alternate_role_id
             && alternate_entry_id != alternate_role_id,
         "bytes, entry point, and role distinguish colliding shader identities");
+    assert(collision_stats.shader_intern_probes == 6
+            && collision_stats.shader_intern_bytes_compared == first.spirv.len,
+        "colliding identities probe the chain and compare the payload once");
     assert(collision_stats.shader_owned_bytes_cloned == first.spirv.len * 4,
         "collision-separated identities each own one complete clone");
     assert(vk::shader_store_live_count(state) == 4,
