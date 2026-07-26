@@ -9,6 +9,8 @@ import std::atomic::types;
 import std::io;
 
 
+const uint SUBMISSION_CHECKPOINT_SPIN_LIMIT = 1_000_000;
+
 ulong rejected_user_completion_value;
 uint rejected_user_signal_count;
 uint counted_user_submit_calls;
@@ -23,6 +25,20 @@ Atomic{uint} distinct_native_entered;
 Atomic{uint} distinct_native_active;
 Atomic{bool} distinct_native_release;
 Atomic{bool} distinct_native_overlap;
+
+struct SubmissionCheckpointGate {
+    vk::SubmissionCheckpoint target;
+    Atomic{bool}              entered;
+    Atomic{bool}              release;
+}
+
+struct SubmissionCheckpointWorkerArgs {
+    vk::VkDeviceState*         state;
+    gpu::Queue                 queue;
+    gpu::ExecutableCommandList executable;
+    SubmissionCheckpointGate*  gate;
+    gpu::CompletionPoint       submitted;
+}
 
 struct ConcurrentSubmitWorkerArgs {
     gpu::Queue                  queue;
@@ -47,6 +63,54 @@ struct AllocatorSubmissionState {
     uint executables;
     uint in_flight;
     bool scratch_in_use;
+}
+
+fn vk::Result accept_injected_publication_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)submits;
+    (void)fence;
+    assert(submit_count == 1,
+        "publication checkpoint observes one native submission");
+    return vk::Result.SUCCESS;
+}
+
+fn void gate_submission_checkpoint(
+    void* user_data,
+    vk::SubmissionCheckpoint checkpoint,
+) {
+    SubmissionCheckpointGate* gate = (SubmissionCheckpointGate*)user_data;
+    if (checkpoint != gate.target) return;
+    gate.entered.store(true, AtomicOrdering.RELEASE);
+    while (!gate.release.load(AtomicOrdering.ACQUIRE)) thread::yield();
+}
+
+fn int submission_checkpoint_worker(void* raw_args) {
+    SubmissionCheckpointWorkerArgs* args =
+        (SubmissionCheckpointWorkerArgs*)raw_args;
+    gpu::ExecutableCommandList[1] lists = { args.executable };
+    gpu::SubmitDesc desc = { .command_lists = lists[..] };
+    gpu::CompletionPoint? submitted = vk::vk_submit_with_checkpoint(
+        state:     args.state,
+        queue:     args.queue,
+        desc:      &desc,
+        submit_fn: &accept_injected_publication_submit,
+        checkpoint: &gate_submission_checkpoint,
+        user_data: args.gate,
+    );
+    if (catch submitted) return 1;
+    args.submitted = submitted;
+    gpu::Device device = args.queue.device;
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(&device)!!;
+    release_submitted_executables(&operation, lists[..]);
+    gpu::internal::end_device_operation(&operation);
+    args.executable = lists[0];
+    return 0;
 }
 
 fn int concurrent_submit_worker(void* raw_args) {
@@ -520,6 +584,204 @@ fn vk::Result query_completion_counter(
     completion_counter_query_calls++;
     *value = completion_counter_value;
     return completion_counter_result;
+}
+
+fn void prove_submission_publication_gap(
+    vk::SubmissionCheckpoint checkpoint,
+) {
+    gpu::Device device = make_submit_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    gpu::CompletionPoint prior =
+        vk::reserve_queue_completion(state, queue)!!;
+    vk::publish_queue_completion(state, prior)!!;
+    gpu::CompletionPoint predicted = gpu::internal::make_completion_point(
+        queue,
+        gpu::internal::completion_point_sequence(prior) + 1,
+    )!!;
+
+    OwnedSpan retained = allocate_owned_span(
+        device:       &device,
+        size:         256,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .graphics },
+        debug_name:   "publication_retained_resource",
+    )!!;
+
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    uint allocator_buffer = record.allocator_buffer;
+    vk::CommandAllocatorSlot* allocator_slot =
+        state.command_allocators.get(allocator.handle)!!;
+    uint available_while_owned = allocator_slot.available_count;
+    vk::track_command_reference(
+        state:      state,
+        record:     record,
+        owner:      retained.allocation.owner,
+        index:      retained.allocation.index,
+        generation: retained.allocation.generation,
+    )!!;
+    SubmissionCheckpointGate gate = { .target = checkpoint };
+    SubmissionCheckpointWorkerArgs args = {
+        .state      = state,
+        .queue      = queue,
+        .executable = gpu::end_commands(&commands)!!,
+        .gate       = &gate,
+    };
+    Thread worker;
+    worker.create(&submission_checkpoint_worker, &args)!!;
+    for (uint spin = 0;
+        spin < SUBMISSION_CHECKPOINT_SPIN_LIMIT
+            && !gate.entered.load(AtomicOrdering.ACQUIRE);
+        spin++) {
+        thread::yield();
+    }
+    assert(gate.entered.load(AtomicOrdering.ACQUIRE),
+        "submission reaches the requested publication checkpoint");
+
+    bool native_accepted =
+        checkpoint == vk::SubmissionCheckpoint.NATIVE_ACCEPTED;
+    assert_allocator_submission_state(
+        actual:         allocator_submission_state(
+            state,
+            allocator.handle,
+            allocator_buffer,
+        ),
+        available:      available_while_owned,
+        recordings:     0,
+        executables:    native_accepted ? 1 : 0,
+        in_flight:      native_accepted ? 0 : 1,
+        scratch_in_use: true,
+        message:        "each checkpoint preserves one allocator owner",
+    );
+    assert(args.executable.is_valid(),
+        "caller token publication follows the internal checkpoint");
+    assert(@catch(gpu::destroy_command_allocator(&allocator))
+            == gpu::RESOURCE_IN_USE
+        && allocator.handle.is_valid(),
+        "allocator destruction remains retryably blocked during publication");
+
+    completion_counter_query_calls = 0;
+    completion_counter_value =
+        gpu::internal::completion_point_sequence(predicted);
+    completion_counter_result = vk::Result.SUCCESS;
+    if (checkpoint == vk::SubmissionCheckpoint.TOKEN_PUBLISHED) {
+        assert(vk::published_queue_completion_state(
+            state,
+            queue.id,
+            gpu::internal::completion_point_sequence(predicted),
+        )!! == completion,
+            "token publication exposes the point only after ownership transfer");
+    } else {
+        assert(@catch(vk::vk_poll_completion_with_query(
+            state:    state,
+            queue_id: queue.id,
+            sequence: gpu::internal::completion_point_sequence(predicted),
+            query_fn: &query_completion_counter,
+        )) == gpu::INVALID_HANDLE,
+            "the reserved point remains private before token publication");
+        assert(completion_counter_query_calls == 0,
+            "an unpublished point reaches no native completion query");
+        assert(vk::vk_poll_completion_with_query(
+            state:    state,
+            queue_id: queue.id,
+            sequence: gpu::internal::completion_point_sequence(prior),
+            query_fn: &query_completion_counter,
+        )!!, "the prior point can observe newer native progress");
+        assert(completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
+            == gpu::internal::completion_point_sequence(prior),
+            "native progress is capped to the published prefix");
+    }
+
+    uint expected_batches = native_accepted ? 0 : 1;
+    assert(completion.submitted_count == expected_batches,
+        "only completed ownership-transfer phases expose a submitted batch");
+    if (!native_accepted) {
+        vk::CommandRecord* submitted = completion.submitted_head;
+        vk::CommandAllocatorSlot* submitted_allocator =
+            state.command_allocators.get(submitted.allocator)!!;
+        vk::CommandScratch* scratch =
+            &submitted_allocator.scratch[submitted.allocator_buffer];
+        vk::CommandResourceReference* reference = &scratch.references[0];
+        assert(scratch.reference_count == 1
+            && reference.owner == retained.allocation.owner
+            && reference.index == retained.allocation.index
+            && reference.generation == retained.allocation.generation,
+            "the submitted batch owns its resource before publication");
+    }
+    if (checkpoint == vk::SubmissionCheckpoint.BATCHES_PUBLISHED) {
+        assert(@catch(gpu::free_allocation(
+            &device,
+            &retained.allocation,
+        )) == gpu::RESOURCE_IN_USE,
+            "submitted ownership rejects an early caller release");
+        assert(retained.allocation.is_valid()
+            && gpu::get_allocation_info(
+                &device,
+                retained.allocation,
+            )!!.size == retained.span.size,
+            "rejected release preserves the token and native allocation");
+    }
+
+    gate.release.store(true, AtomicOrdering.RELEASE);
+    assert(worker.join()!! == 0 && args.submitted == predicted,
+        "submission resumes and returns the reserved point");
+    if (checkpoint != vk::SubmissionCheckpoint.TOKEN_PUBLISHED) {
+        assert(completion.retired_sequence.load(AtomicOrdering.ACQUIRE)
+            == gpu::internal::completion_point_sequence(prior),
+            "resuming publication does not invent native retirement");
+    }
+    assert(vk::vk_poll_completion_with_query(
+        state:    state,
+        queue_id: queue.id,
+        sequence: gpu::internal::completion_point_sequence(args.submitted),
+        query_fn: &query_completion_counter,
+    )!!, "later observation retires the published submission");
+    assert(completion.submitted_count == 0,
+        "retirement releases the published command batch");
+    assert_allocator_submission_state(
+        actual:         allocator_submission_state(
+            state,
+            allocator.handle,
+            allocator_buffer,
+        ),
+        available:      available_while_owned + 1,
+        recordings:     0,
+        executables:    0,
+        in_flight:      0,
+        scratch_in_use: false,
+        message:        "retirement returns the allocator buffer and scratch",
+    );
+    gpu::free_allocation(&device, &retained.allocation)!!;
+    retained.span = {};
+}
+
+fn void native_acceptance_remains_capped_before_batch_publication() @test {
+    prove_submission_publication_gap(
+        vk::SubmissionCheckpoint.NATIVE_ACCEPTED,
+    );
+}
+
+fn void batch_publication_remains_private_before_point_publication() @test {
+    prove_submission_publication_gap(
+        vk::SubmissionCheckpoint.BATCHES_PUBLISHED,
+    );
+}
+
+fn void token_publication_follows_complete_ownership_transfer() @test {
+    prove_submission_publication_gap(
+        vk::SubmissionCheckpoint.TOKEN_PUBLISHED,
+    );
 }
 
 fn void native_submit_failure_rolls_back_completion_and_tokens() @test {

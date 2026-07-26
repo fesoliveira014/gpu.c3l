@@ -427,7 +427,7 @@ fn void wait_retires_exact_sequence_and_timeout_preserves_state() @test {
     )!!, "the timed-out point remains reusable");
 }
 
-fn void concurrent_first_observers_publish_one_retirement() @test {
+fn void concurrent_first_observers_retire_monotonically() @test {
     gpu::Device device = create_completion_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(

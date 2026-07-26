@@ -3,9 +3,10 @@ module gpu::internal::vk @private;
 import gpu::internal @public;
 import gpu @public;
 import vk;
+import std::core::env;
 import std::atomic::types;
 
-alias BeforeCompletionRetirementFn = fn void (void*);
+alias BeforeCompletionRetirementFn @if(env::TESTING) = fn void (void*);
 
 const uint SUBMITTED_COMMAND_DRAIN_THRESHOLD = 64;
 
@@ -17,9 +18,9 @@ struct CommandResourceReference {
 }
 
 struct CompletionRetirementOps {
-    void*                        user_data;
-    SemaphoreCounterQueryFn      query;
-    BeforeCompletionRetirementFn before_retirement;
+    void* user_data @if(env::TESTING);
+    SemaphoreCounterQueryFn query;
+    BeforeCompletionRetirementFn before_retirement @if(env::TESTING);
 }
 
 fn bool same_resource_reference(
@@ -270,9 +271,11 @@ fn void? retire_observed_completion_and_drain_with_ops(
     ulong observed_completed,
     CompletionRetirementOps* ops,
 ) {
-    if (ops.before_retirement != null) {
-        ops.before_retirement(ops.user_data);
-    }
+    $if env::TESTING:
+        if (ops.before_retirement != null) {
+            ops.before_retirement(ops.user_data);
+        }
+    $endif
     (void)queue_completion_state(state, observed_queue_id)!;
     query_pending_queues_before_retirement(
         state:              state,
