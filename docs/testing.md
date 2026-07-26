@@ -408,7 +408,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Commands | exact 16-byte x64 direct token size and deterministic stale/wrong-phase/consumed diagnostics, including copied tokens after device-slot reuse; submit-only foreign-device rejection; one authoritative state through begin/end/submit/rollback/discard/retirement; one backend claim with exact linear direct-token visits and duplicate visits; authoritative record-queue validation without allocator reproof; retryable failure; intrusive exact-queue retirement; timeline signal/wait; invalid state; completion-safe exact-allocator command-buffer reset/reuse; explicit generated-scratch capacity faults; FULL regular/generated draw initialization; complete and partial state updates before or during passes; retired queue-based signatures; and zero warm allocation or execution-time pipeline creation. |
 | Compute | root pointer shader read/write, readback, active-pipeline kind validation, and exact zero/nonzero root push behavior. |
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
-| Graphics | offscreen clear/draw/readback for opaque, alpha, premultiplied, additive, and masked writes; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; transactional convenience rejection without native or command-state mutation; exact ten-command viewport/raster/depth prefix and three-command color packets; state reuse across compatible pipeline switches and pass boundaries and reset on command-buffer reuse; optional partial updates; FULL regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; incompatible color-domain invalidation; and pipeline-alias persistence. |
+| Graphics | offscreen clear/draw/readback for opaque, alpha, premultiplied, additive, and masked writes; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; begin rejection before mutation; state failure after begin with retry, discard, attachment release, and allocator reuse; exact ten-command viewport/raster/depth prefix and three-command color packets; state reuse across compatible pipeline switches and pass boundaries and reset on command-buffer reuse; optional partial updates; FULL regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; incompatible color-domain invalidation; and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
 | Pipeline cache | cache create/reuse, blob save/load, warm start, raster- and color-state aliasing across five command color packets, ordered color-format separation, transactional batches, and singleton compute/generated-dispatch layouts. |
 | Threading | one explicit allocator per concurrent worker, same-allocator bounded-full rejection, synchronized allocator migration and executable handoff, one-thread-at-a-time alias confinement, no device-wide recording lock, no temp-pool setup, historical worker churn, private command-buffer/generated-scratch reuse, parallel record, same-queue submit/present serialization, distinct-queue submission concurrency, and prior-point retirement across a later publication gap. |
@@ -621,10 +621,9 @@ receives a distinct reserved address, and reuse occurs only after a list is
 discarded.
 The command target enables test-only resolution counters and measures complete
 recording sequences. Minimal pass begin reports one native begin-rendering
-command and no dynamic-state commands. Convenience begin reports that command
-followed by exactly ten viewport/raster/depth commands and three color-array
-commands for a nonempty color domain. A complete `cmd_set_graphics_state`
-replacement reports the same state commands, while additional compatible
+command and no dynamic-state commands. A complete `cmd_set_graphics_state`
+replacement reports exactly ten viewport/raster/depth commands and three
+color-array commands for a nonempty color domain, while additional compatible
 passes and draws add only their begin/end/draw commands unless another setter
 is recorded. The `{2, 16, 256}` matrix rejects hidden pass-boundary replay,
 default, or state-diff work. Every warm command performs one static
@@ -875,9 +874,9 @@ Graphics:
 ```text
 construct a complete GraphicsState for the render area
 include one ColorTargetState per pipeline color format, or none for depth-only
-bind the compatible graphics pipeline
-record that packet, or use transactional begin-with-state
 begin the pass
+bind the compatible graphics pipeline
+record the complete packet
 clear to known color
 render primitive
 copy the render target to readback storage
@@ -887,10 +886,11 @@ compare with tolerance for floating formats
 
 Separate state tests reuse a complete packet across passes, replace it
 explicitly, exercise each optional partial setter before and during a pass, and
-prove reset clears checked initialization. Invalid convenience input must leave
-active-pass metadata, tracked references, initialization, and native command
-emission unchanged. FULL regular and generated draws both reject a missing
-complete packet before native execution.
+prove reset clears checked initialization. Invalid pass input must leave the
+recording outside a pass without new references or native emission. Invalid
+complete state after a successful begin must preserve the active pass and
+attachment references for retry, end, or discard. FULL regular and generated
+draws both reject a missing complete packet before native execution.
 
 ## 13. Leak verification
 

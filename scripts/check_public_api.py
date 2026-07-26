@@ -94,6 +94,9 @@ FORBIDDEN_TEXT = {
     '"name":"full_render_graphics_state"': (
         "retired ambiguous graphics-state helper"
     ),
+    '"name":"cmd_begin_render_pass_with_state"': (
+        "retired combined render-pass state operation"
+    ),
     '"name":"request_resource_agnostic_texture_sync"': (
         "retired texture layout profile request"
     ),
@@ -366,6 +369,7 @@ RETIRED_SOURCE_SYMBOLS = (
     "selected_queue_count(",
     "queue_count_for_kind(",
     "add_queue_role_identities(",
+    "cmd_begin_render_pass_with_state(",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -448,6 +452,8 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "graphics_ids",
     "compute_ids",
     "transfer_ids",
+    "render_pass_with_state",
+    "RenderPassWithState",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
@@ -1252,39 +1258,6 @@ def validate_document(document: dict) -> list[str]:
         if begin_render_pass.get("return_type", {}).get("name") != "void?":
             failures.append(
                 "cmd_begin_render_pass must return void?"
-            )
-
-    begin_render_pass_with_state = functions.get(
-        "cmd_begin_render_pass_with_state"
-    )
-    if begin_render_pass_with_state is None:
-        failures.append("missing cmd_begin_render_pass_with_state")
-    else:
-        parameter_names = tuple(
-            member.get("name")
-            for member in begin_render_pass_with_state.get("members", [])
-        )
-        parameter_types = tuple(
-            member.get("type", {}).get("name")
-            for member in begin_render_pass_with_state.get("members", [])
-        )
-        if (
-            parameter_names != ("commands", "desc", "state")
-            or parameter_types != (
-                "CommandList*",
-                "RenderPassDesc*",
-                "GraphicsState*",
-            )
-        ):
-            failures.append(
-                "cmd_begin_render_pass_with_state has the wrong parameters"
-            )
-        if (
-            begin_render_pass_with_state.get("return_type", {}).get("name")
-            != "void?"
-        ):
-            failures.append(
-                "cmd_begin_render_pass_with_state must return void?"
             )
 
     end_render_pass = functions.get("cmd_end_render_pass")

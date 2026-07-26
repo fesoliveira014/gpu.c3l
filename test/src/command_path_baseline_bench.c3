@@ -267,10 +267,12 @@ fn void prepare_render_commands(
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     graphics.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(direct, pass)!!;
     gpu::cmd_bind_pipeline(direct, pipeline)!!;
+    gpu::cmd_set_graphics_state(direct, &graphics)!!;
+    gpu::cmd_begin_render_pass(library, pass)!!;
     gpu::cmd_bind_pipeline(library, pipeline)!!;
-    gpu::cmd_begin_render_pass_with_state(direct, pass, &graphics)!!;
-    gpu::cmd_begin_render_pass_with_state(library, pass, &graphics)!!;
+    gpu::cmd_set_graphics_state(library, &graphics)!!;
 }
 
 fn OperationResult measure_dispatch(

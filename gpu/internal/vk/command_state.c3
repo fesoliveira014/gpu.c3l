@@ -19,7 +19,6 @@ alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, gpu::Gr
 alias CmdSetColorStateFn @private            = fn void? (CommandRecord*, gpu::ColorState*);
 alias CmdDispatchFn @private                 = fn void? (CommandRecord*, gpu::GpuAddress, gpu::Vec3u);
 alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, gpu::RenderPassDesc*);
-alias CmdBeginRenderPassWithStateFn @private = fn void? (CommandRecord*, gpu::RenderPassDesc*, gpu::GraphicsState*);
 alias CmdSetViewportFn @private              = fn void? (CommandRecord*, gpu::Viewport*);
 alias CmdSetScissorFn @private               = fn void? (CommandRecord*, gpu::ScissorRect*);
 alias CmdEndRenderPassFn @private            = fn void? (CommandRecord*);
@@ -173,7 +172,6 @@ struct CommandOps @public {
     CmdSetColorStateFn            set_color_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
-    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;
     CmdEndRenderPassFn            end_render_pass;

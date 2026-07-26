@@ -35,16 +35,16 @@ page doesn't explain it, that's a bug in this page — file an issue.
   described per pass begin (`RenderPassDesc`) and that is the whole model.
 - **Graphics state has no implicit default.** It belongs to the command buffer
   and survives render-pass boundaries. Minimal begin does not change or replay
-  it. Record a complete `GraphicsState` before or during the first pass, or use
-  `cmd_begin_render_pass_with_state`; under `FULL`, regular and generated draws
-  reject a recording that has only partial updates. Bind a compatible graphics
-  pipeline before applying a complete packet. `render_geometry_state`
+  it. For a fresh recording, begin the pass, bind a compatible graphics
+  pipeline, and apply a complete `GraphicsState`. Under `FULL`, regular and
+  generated draws reject a recording that has only partial updates. When an
+  incompatible pipeline remains selected from an earlier pass, bind the next
+  compatible pipeline before beginning. `render_geometry_state`
   supplies conventional viewport/raster/depth state and an empty color packet;
   color passes must replace `GraphicsState.color` with a packet matching the
   pipeline's ordered color-format domain. The old
   `full_render_graphics_state` name is retired because it implied that the
-  empty color packet was complete. Migrate an old three-argument
-  `cmd_begin_render_pass` call to the named convenience.
+  empty color packet was complete.
 - **Texture history is caller-owned.** `TextureBarrier.before` asserts the
   layout, stages, and access established by earlier ordering.
   `TextureState.layout` is an operational requirement for native use, not
@@ -225,9 +225,9 @@ Anything the device can answer at runtime lives in `DeviceCaps` (filled at
 not reported.
 
 Viewport dimensions and coordinate bounds are an intentional exception: the
-backend consumes them privately to validate convenience-begin state,
-`cmd_set_graphics_state`, and `cmd_set_viewport`, while callers can submit a
-value and receive `INVALID_ARGUMENT` without preflighting a public cap.
+backend consumes them privately to validate `cmd_set_graphics_state` and
+`cmd_set_viewport`, while callers can submit a value and receive
+`INVALID_ARGUMENT` without preflighting a public cap.
 Negative viewport height, in-range negative coordinates, reversed depth,
 off-pass overscan, and empty scissors are supported; zero viewport height is
 rejected. These limits can be promoted into `DeviceCaps` later if a caller-side

@@ -618,13 +618,11 @@ vk::Pipeline
 ```
 
 Minimal dynamic-rendering begin emits only `vkCmdBeginRendering` and leaves
-command-buffer graphics state unchanged. The convenience begin follows it with
+command-buffer graphics state unchanged. `cmd_set_graphics_state` emits
 viewport, scissor, five raster commands, and three depth commands as one fixed
 ten-command prefix, then three color-array commands for a nonempty color
-domain. It does not compare against cached state or skip unchanged fields.
-`cmd_set_graphics_state` emits the same complete packet before or during a
-pass; the individual setters emit their corresponding subset in either
-recording phase.
+domain. It does not compare against cached state or skip unchanged fields. The
+individual setters emit their corresponding subset before or during a pass.
 
 Under `FULL`, state validation checks finite viewport values, selected-device
 viewport dimensions and coordinate bounds, independently bounded depth
@@ -979,12 +977,11 @@ vkCmdBeginRendering
 publish active compatibility and retained references
 ```
 
-The convenience begin also rejects a host-unsafe state pointer and validates
-and lowers the complete packet before tracking or native mutation. After
-`vkCmdBeginRendering`, it emits the ten-command viewport/raster/depth prefix
-and three color-array commands for a nonempty color domain, then publishes FULL
-graphics-state initialization. Any preparation failure leaves command-list
-state, tracked references, and the native command buffer unchanged.
+Complete graphics state is a separate command after a compatible graphics
+pipeline is selected. If state preparation fails after
+`vkCmdBeginRendering`, the active pass and its attachment references remain
+published while no state command is emitted. The caller may retry the setter,
+end the pass, or discard the recording.
 
 Render pass end:
 

@@ -1535,24 +1535,6 @@ fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     return record.ops.begin_render_pass(record, desc);
 }
 
-<* Begin a render pass and set complete graphics state atomically.
-   Preconditions: a compatible graphics pipeline is bound, and the pass and
-   complete graphics state are valid.
-   Always checked: token phase, host-safe inputs, identities, and safe lowering.
-   FULL diagnostics: pipeline, pass, queue, attachment, and graphics-state misuse. *>
-fn void? cmd_begin_render_pass_with_state(
-    CommandList* commands,
-    RenderPassDesc* desc,
-    GraphicsState* state,
-) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    if (!gpu::internal::render_pass_desc_host_safe(desc)
-        || !gpu::internal::graphics_state_host_safe(state)) {
-        return INVALID_ARGUMENT~;
-    }
-    return record.ops.begin_render_pass_with_state(record, desc, state);
-}
-
 <* Replace complete graphics state before or during a pass.
    Preconditions: a compatible graphics pipeline is bound, the queue is
    graphics-capable, and all state values are valid.

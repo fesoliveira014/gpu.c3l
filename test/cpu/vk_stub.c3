@@ -57,11 +57,6 @@ alias CmdBeginRenderPassFn @private = fn void? (
     CommandRecord*,
     gpu::RenderPassDesc*,
 );
-alias CmdBeginRenderPassWithStateFn @private = fn void? (
-    CommandRecord*,
-    gpu::RenderPassDesc*,
-    gpu::GraphicsState*,
-);
 alias CmdSetViewportFn @private = fn void? (
     CommandRecord*,
     gpu::Viewport*,
@@ -173,7 +168,6 @@ struct CommandOps @public {
     CmdSetColorStateFn            set_color_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
-    CmdBeginRenderPassWithStateFn begin_render_pass_with_state;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;
     CmdEndRenderPassFn            end_render_pass;

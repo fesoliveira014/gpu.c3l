@@ -240,12 +240,9 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
     graphics_state.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_bind_pipeline(&commands, pipeline)!!;
-    gpu::cmd_begin_render_pass_with_state(
-        &commands,
-        &pass,
-        &graphics_state,
-    )!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    test_span_address(
