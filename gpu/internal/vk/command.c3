@@ -2163,18 +2163,15 @@ fn void? record_bound_pipeline(
         ? vk::PipelineBindPoint.COMPUTE
         : vk::PipelineBindPoint.GRAPHICS;
     bool native_match = native.pipeline != null
-        && native.kind == bound.kind
+        && native.pipeline == bound.pipeline
         && native.cache_entry == bound.cache_entry;
     if (!native_match) {
         vk::cmd_bind_pipeline(record.command_buffer, bind_point, bound.pipeline);
         gpu::internal::note_command_pipeline_bind();
         gpu::internal::note_command_native_call();
         *native = {
-            .pipeline                  = bound.pipeline,
-            .layout                    = bound.layout,
-            .generated_dispatch_layout = bound.generated_dispatch_layout,
-            .cache_entry               = bound.cache_entry,
-            .kind                      = bound.kind,
+            .pipeline    = bound.pipeline,
+            .cache_entry = bound.cache_entry,
         };
     }
     bind_descriptor_heap(

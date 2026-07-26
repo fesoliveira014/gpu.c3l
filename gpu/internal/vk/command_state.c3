@@ -122,11 +122,8 @@ struct BoundPipeline {
 }
 
 struct NativePipelineBinding {
-    vk::Pipeline                  pipeline;
-    vk::PipelineLayout            layout;
-    vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
-    uint                          cache_entry;
-    PipelineKind                  kind;
+    vk::Pipeline pipeline;
+    uint         cache_entry;
 }
 
 struct DescriptorHeapCommandBinding {
