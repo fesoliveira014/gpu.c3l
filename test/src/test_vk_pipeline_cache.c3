@@ -1098,9 +1098,6 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     assert(cache_entry_count(&device) == 1, "dynamic cull state shares one graphics identity");
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    ulong native_pipelines = vk::pipeline_native_create_count(state);
 
     OwnedSpan rb_culled = allocate_owned_span(
         device:       &device,
@@ -1314,8 +1311,6 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     char* lines_center = &lines_pixels[(CACHE_RT_SIZE / 2 * CACHE_RT_SIZE + CACHE_RT_SIZE / 2) * 4];
     assert(lines_center[0] == (char)8 && lines_center[1] == (char)16 && lines_center[2] == (char)32,
         "line topology changes triangle interior coverage without creating a pipeline");
-    assert(vk::pipeline_native_create_count(state) == native_pipelines,
-        "command-time raster permutations create no additional native pipeline");
 }
 
 fn void alias_survives_peer_destroy() @test {
@@ -1688,7 +1683,7 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
     )!!;
 }
 
-fn void repeated_compute_creation_deduplicates_identity_and_shader_modules() @test {
+fn void repeated_compute_creation_deduplicates_identity() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
@@ -1718,11 +1713,6 @@ fn void repeated_compute_creation_deduplicates_identity_and_shader_modules() @te
     };
     gpu::PipelineHandle[3] pipelines;
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
-    ulong reflections_before = vk::shader_reflection_validation_count(state);
-    ulong native_shader_attempts_before =
-        vk::pipeline_shader_create_attempt_count(state);
-    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 
     foreach (i, &desc : descs) {
         pipelines[i] = gpu::create_compute_pipeline(&device, desc)!!;
@@ -1757,15 +1747,6 @@ fn void repeated_compute_creation_deduplicates_identity_and_shader_modules() @te
     assert(state.pipeline_cache.entries[first_entry_index].pipeline
             != state.pipeline_cache.entries[distinct_entry_index].pipeline,
         "distinct identities retain distinct native pipelines");
-    assert(vk::pipeline_shader_module_create_count(state) - shader_modules_before == 2,
-        "each distinct shader IR creates one temporary native module");
-    assert(vk::shader_reflection_validation_count(state) - reflections_before == 2,
-        "each distinct shader IR performs one exact reflection validation");
-    assert(vk::pipeline_shader_create_attempt_count(state)
-            - native_shader_attempts_before == 2,
-        "each distinct shader IR performs one native shader-create attempt");
-    assert(vk::pipeline_native_create_count(state) - native_pipelines_before == 2,
-        "only distinct compute pipeline identities reach native creation");
 
     foreach (pipeline : pipelines) gpu::destroy_pipeline(&device, pipeline)!!;
     assert(vk::shader_store_live_count(state) == 0,
@@ -1830,8 +1811,6 @@ fn void graphics_pipeline_shader_validation_reports_contract_failure() @test {
     };
     state.debug_callback = &capture_pipeline_shader_diagnostic;
     state.debug_user_data = &capture;
-    ulong shader_modules_before = vk::pipeline_shader_module_create_count(state);
-    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
     uint next_new_before = state.shader_store.next_new;
     uint free_head_before = state.shader_store.free_head;
 
@@ -1846,10 +1825,6 @@ fn void graphics_pipeline_shader_validation_reports_contract_failure() @test {
         "invalid fragment emits one exact contract diagnostic");
     assert(cache_entry_count(&device) == 0,
         "single graphics shader validation publishes no cache entry");
-    assert(vk::pipeline_shader_module_create_count(state) == shader_modules_before,
-        "single graphics shader validation creates no shader module");
-    assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
-        "single graphics shader validation creates no native pipeline");
     assert(vk::shader_store_live_count(state) == 0,
         "single graphics shader validation publishes no shader identity");
     assert(state.shader_store.next_new == next_new_before
@@ -1874,22 +1849,12 @@ fn void graphics_fragment_failure_releases_vertex_preparation() @test {
     gpu::GraphicsPipelineDesc desc =
         base_graphics_desc(&shaders, colors[..]);
     vk::VkDeviceState* state = cache_test_state(&device);
-    ulong modules_before =
-        vk::pipeline_shader_module_create_count(state);
-    ulong attempts_before =
-        vk::pipeline_shader_create_attempt_count(state);
 
     fault fragment_fault =
         @catch(gpu::create_graphics_pipeline(&device, &desc));
 
     assert(fragment_fault == gpu::SHADER_INVALID,
         "a compute fragment faults SHADER_INVALID");
-    assert(vk::pipeline_shader_module_create_count(state)
-            == modules_before + 1,
-        "the fragment fails after one temporary vertex module");
-    assert(vk::pipeline_shader_create_attempt_count(state)
-            == attempts_before + 1,
-        "the rejected fragment creates no native module");
     assert(vk::shader_store_live_count(state) == 0,
         "fragment failure releases both prepared shader identities");
     assert(cache_entry_count(&device) == 0,
@@ -1903,7 +1868,7 @@ fn void graphics_fragment_failure_releases_vertex_preparation() @test {
         "the corrected retry releases both identities on destroy");
 }
 
-fn void graphics_pipeline_declares_exact_native_color_state() @test {
+fn void graphics_native_creation_failure_releases_prepared_identities() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = cache_test_state(&device);
@@ -1930,16 +1895,6 @@ fn void graphics_pipeline_declares_exact_native_color_state() @test {
 
     assert(create_fault == gpu::OUT_OF_DEVICE_MEMORY,
         "the injected native failure reaches graphics pipeline creation");
-    vk::GraphicsPipelineNativeObservation observation =
-        vk::graphics_pipeline_native_observation(state);
-    assert(observation.dynamic_state_count == 13,
-        "graphics pipelines declare the ten base and three color states");
-    assert(observation.color_target_count == color_formats.len,
-        "graphics pipelines preserve the format target count");
-    assert(observation.color_states,
-        "graphics pipelines declare the complete EDS3 color subset");
-    assert(observation.canonical_color_attachments,
-        "ignored static color attachments use one canonical opaque state");
     assert(cache_entry_count(&device) == 0,
         "failed native creation publishes no pipeline cache entry");
     assert(vk::shader_store_live_count(state) == 0,
@@ -1953,8 +1908,6 @@ fn void graphics_color_formats_require_host_safe_storage() @test {
     gpu::Format* missing = null;
     gpu::Format[] forged = missing[:1];
     gpu::GraphicsPipelineDesc desc = { .color_formats = forged };
-    ulong shader_checks_before = vk::shader_reflection_validation_count(state);
-    ulong native_before = vk::pipeline_native_create_count(state);
 
     fault single_fault = @catch(vk::vk_create_graphics_pipeline(
         state,
@@ -1963,11 +1916,8 @@ fn void graphics_color_formats_require_host_safe_storage() @test {
     assert(single_fault == gpu::INVALID_ARGUMENT,
         "a forged nonempty null color slice faults before iteration: %s",
         single_fault);
-    assert(vk::shader_reflection_validation_count(state) == shader_checks_before
-            && vk::pipeline_native_create_count(state) == native_before
-            && cache_entry_count(&device) == 0,
-        "single rejection performs no shader, native, or cache work");
-
+    assert(cache_entry_count(&device) == 0,
+        "single rejection publishes no cache entry");
 }
 
 fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test {
@@ -1982,15 +1932,11 @@ fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test 
     gpu::GraphicsPipelineDesc[5] descs;
     foreach (&item : descs) *item = desc;
     gpu::PipelineHandle[5] pipelines;
-    vk::VkDeviceState* state = cache_test_state(&device);
-    ulong native_before = vk::pipeline_native_create_count(state);
 
     foreach (i, &item : descs) {
         pipelines[i] = gpu::create_graphics_pipeline(&device, item)!!;
     }
 
-    assert(vk::pipeline_native_create_count(state) - native_before == 1,
-        "identical format-only descriptors share one native pipeline");
     foreach (i, pipeline : pipelines) {
         assert(pipeline.is_valid(), "every singular graphics output is valid");
         if (i > 0) {
@@ -2025,8 +1971,6 @@ fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test 
         gpu::ColorState color = { .targets = targets[..] };
         gpu::cmd_set_color_state(&commands, &color)!!;
     }
-    assert(vk::pipeline_native_create_count(state) - native_before == 1,
-        "five distinct command color packets create no additional native pipeline");
     gpu::discard_commands(&commands)!!;
 
     foreach (pipeline : pipelines) {

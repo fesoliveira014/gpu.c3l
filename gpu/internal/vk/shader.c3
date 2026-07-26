@@ -6,7 +6,6 @@ import vk;
 import spvreflect;
 import std::core::mem;
 import std::core::mem::alloc;
-import std::core::env;
 
 typedef ShaderId = uint;
 
@@ -721,10 +720,6 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
     }
     defer reflect_module.destroy();
 
-    $if env::TESTING:
-        state.shader_reflection_validations++;
-    $endif
-
     spvreflect::EntryPoint* entry =
         reflect_module.get_entry_point((ZString)&shader.entry_point[0]);
     if (entry == null) {
@@ -797,9 +792,6 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
         vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
             .set_code_size(code.spirv.len)
             .set_code(aligned_code.ptr);
-        $if env::TESTING:
-            state.pipeline_shader_create_attempts++;
-        $endif
         check_shader_create_device_result(
             state: state,
             result: create_ops.create(
@@ -810,7 +802,6 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
             ),
         )!;
     };
-    state.pipeline_shader_modules_created++;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.SHADER_MODULE,

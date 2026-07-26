@@ -220,7 +220,6 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
             &pipeline,
         ),
     )!;
-    state.pipelines_created++;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.PIPELINE,

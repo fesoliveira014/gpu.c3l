@@ -279,44 +279,6 @@ fn void release_entry(VkDeviceState* state, uint entry_index) {
     state.pipeline_cache.free_head = entry_index + 1;
 }
 
-fn ulong pipeline_shader_module_create_count(VkDeviceState* state) {
-    return state.pipeline_shader_modules_created;
-}
-
-fn ulong shader_reflection_validation_count(VkDeviceState* state) @if(env::TESTING) {
-    return state.shader_reflection_validations;
-}
-
-fn ulong pipeline_shader_create_attempt_count(VkDeviceState* state) @if(env::TESTING) {
-    return state.pipeline_shader_create_attempts;
-}
-
-fn ulong pipeline_native_create_count(VkDeviceState* state) {
-    return state.pipelines_created;
-}
-
-struct GraphicsPipelineNativeObservation {
-    uint dynamic_state_count;
-    uint color_target_count;
-    bool color_states;
-    bool canonical_color_attachments;
-}
-
-fn GraphicsPipelineNativeObservation graphics_pipeline_native_observation(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .dynamic_state_count         =
-            state.pipeline_native_dynamic_state_count,
-        .color_target_count          =
-            state.pipeline_native_color_target_count,
-        .color_states                =
-            state.pipeline_native_color_states,
-        .canonical_color_attachments =
-            state.pipeline_native_canonical_color_attachments,
-    };
-}
-
 <* Live entry count, exposed for dedup accounting in tests. *>
 fn uint pipeline_cache_entry_count(VkDeviceState* state) {
     uint count = 0;

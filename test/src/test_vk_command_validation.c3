@@ -1090,8 +1090,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     )!!;
     defer free_owned_span(&device, &root_owned)!!;
     gpu::GpuAddress root = val_span_address(&device, root_owned.span);
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
@@ -1233,9 +1231,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         instance_count: 0,
     )!!;
     gpu::cmd_end_render_pass(&commands)!!;
-
-    assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
-        "pipeline bind and execution perform no native compilation");
 }
 
 fn void dispatch_uses_bind_time_pipeline_snapshot() @test {

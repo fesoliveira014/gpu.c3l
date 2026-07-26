@@ -284,49 +284,6 @@ fn vk::Result create_graphics_pipeline_native(
     vk::Pipeline* out_pipeline,
     GraphicsPipelineCreateOps* create_ops,
 ) {
-    $if env::TESTING:
-        state.pipeline_native_dynamic_state_count =
-            info.p_dynamic_state.dynamic_state_count;
-        state.pipeline_native_color_target_count =
-            info.p_color_blend_state.attachment_count;
-        bool blend_enable = false;
-        bool blend_equation = false;
-        bool write_mask = false;
-        for (uint i = 0;
-            i < info.p_dynamic_state.dynamic_state_count;
-            i++) {
-            switch (info.p_dynamic_state.p_dynamic_states[i]) {
-                case vk::DynamicState.COLOR_BLEND_ENABLE_EXT:
-                    blend_enable = true;
-                case vk::DynamicState.COLOR_BLEND_EQUATION_EXT:
-                    blend_equation = true;
-                case vk::DynamicState.COLOR_WRITE_MASK_EXT:
-                    write_mask = true;
-                default:
-            }
-        }
-        state.pipeline_native_color_states =
-            blend_enable && blend_equation && write_mask;
-        state.pipeline_native_canonical_color_attachments =
-            info.p_color_blend_state.attachment_count > 0;
-        for (uint i = 0;
-            i < info.p_color_blend_state.attachment_count;
-            i++) {
-            vk::PipelineColorBlendAttachmentState* attachment =
-                &info.p_color_blend_state.p_attachments[i];
-            state.pipeline_native_canonical_color_attachments =
-                state.pipeline_native_canonical_color_attachments
-                && attachment.blend_enable == vk::FALSE
-                && attachment.src_color_blend_factor == vk::BlendFactor.ONE
-                && attachment.dst_color_blend_factor == vk::BlendFactor.ZERO
-                && attachment.color_blend_op == vk::BlendOp.ADD
-                && attachment.src_alpha_blend_factor == vk::BlendFactor.ONE
-                && attachment.dst_alpha_blend_factor == vk::BlendFactor.ZERO
-                && attachment.alpha_blend_op == vk::BlendOp.ADD
-                && attachment.color_write_mask
-                    == color_write_mask_to_vk(gpu::COLOR_WRITE_ALL);
-        }
-    $endif
     return create_ops.create(
         create_ops.user_data,
         state.device,
@@ -534,7 +491,6 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
                 create_ops:   create_ops,
             ),
         )!;
-        state.pipelines_created++;
         set_object_name(
             state:         state,
             object_type:   vk::ObjectType.PIPELINE,
