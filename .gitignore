@@ -10,6 +10,10 @@ obj/
 *.dll
 *.dylib
 
+# Python cache output
+__pycache__/
+*.py[cod]
+
 # ...but keep vendored native libs under the manifest's linklib-dir
 !linked-libs/**
 

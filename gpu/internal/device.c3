@@ -94,13 +94,9 @@ struct DeviceOperation @private {
     bool                              owns_pin;
 }
 
-<* Private test and benchmark counters for structural recording work. Compare
+<* Private test counters for structural recording work. Compare
    relaxed snapshots only around externally synchronized cold or warm work. *>
-struct RecordingWorkCounters @private @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+struct RecordingWorkCounters @private @if(env::TESTING) {
     ulong host_allocations;
     ulong command_pool_creations;
     ulong command_buffer_allocations;
@@ -115,15 +111,15 @@ struct RecordingWorkCounters @private @if(
     ulong generated_indexed_draw_emissions;
 }
 
-Atomic{ulong} command_device_registry_resolutions @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_retained_pin_operations @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_recording_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_native_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_pipeline_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
-Atomic{ulong} command_descriptor_heap_set_bind_commands @private @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS));
+Atomic{ulong} command_device_registry_resolutions @private @if(env::TESTING);
+Atomic{ulong} command_retained_pin_operations @private @if(env::TESTING);
+Atomic{ulong} command_table_lookups @private @if(env::TESTING);
+Atomic{ulong} command_pipeline_table_lookups @private @if(env::TESTING);
+Atomic{ulong} command_pipeline_cache_lookups @private @if(env::TESTING);
+Atomic{ulong} command_recording_commands @private @if(env::TESTING);
+Atomic{ulong} command_native_commands @private @if(env::TESTING);
+Atomic{ulong} command_pipeline_bind_commands @private @if(env::TESTING);
+Atomic{ulong} command_descriptor_heap_set_bind_commands @private @if(env::TESTING);
 
 fn bool CommandListHandle.is_valid(self) =>
     self.owner != 0 && self.generation != 0;
@@ -146,7 +142,7 @@ fn uint command_token_device_identity(Device device) @private {
 }
 
 fn void note_command_device_registry_resolution() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)command_device_registry_resolutions.add(
             1,
             AtomicOrdering.RELAXED,
@@ -155,7 +151,7 @@ fn void note_command_device_registry_resolution() @private {
 }
 
 fn void note_command_retained_pin_operation() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)command_retained_pin_operations.add(
             1,
             AtomicOrdering.RELAXED,
@@ -164,13 +160,13 @@ fn void note_command_retained_pin_operation() @private {
 }
 
 fn void note_command_table_lookup() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)command_table_lookups.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 
 fn void note_command_pipeline_table_lookup() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)command_pipeline_table_lookups.add(
             1,
             AtomicOrdering.RELAXED,
@@ -179,7 +175,7 @@ fn void note_command_pipeline_table_lookup() @private {
 }
 
 fn void note_command_pipeline_cache_lookup() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)command_pipeline_cache_lookups.add(
             1,
             AtomicOrdering.RELAXED,
@@ -188,25 +184,25 @@ fn void note_command_pipeline_cache_lookup() @private {
 }
 
 fn void note_command_recording_call() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)command_recording_commands.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 
 fn void note_command_native_call() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)command_native_commands.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 
 fn void note_command_pipeline_bind() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)command_pipeline_bind_commands.add(1, AtomicOrdering.RELAXED);
     $endif
 }
 
 fn void note_command_descriptor_heap_set_bind() @private {
-    $if env::TESTING || $feature(COMMAND_RESOLUTION_STATS):
+    $if env::TESTING:
         (void)command_descriptor_heap_set_bind_commands.add(1, AtomicOrdering.RELAXED);
     $endif
 }
@@ -232,11 +228,7 @@ fn ulong device_registry_lock_count() @private {
     return device_registry_lock_acquisitions.load(AtomicOrdering.RELAXED);
 }
 
-fn void reset_device_registry_lock_count() @private @if(
-    env::TESTING
-    || $feature(COMMAND_RESOLUTION_STATS)
-    || $feature(COMMAND_RECORDING_WORK_STATS)
-) {
+fn void reset_device_registry_lock_count() @private @if(env::TESTING) {
     device_registry_lock_acquisitions.store(0, AtomicOrdering.RELAXED);
 }
 

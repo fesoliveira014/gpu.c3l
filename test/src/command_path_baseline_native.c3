@@ -5,9 +5,8 @@ import gpu @public;
 import vk;
 
 struct CommandPathNativeContext {
-    CommandRecord*  record;
+    CommandRecord*     record;
     vk::PipelineLayout pipeline_layout;
-    bool              generated_work;
 }
 
 struct CommandPathNativeCopy {
@@ -21,17 +20,13 @@ struct CommandPathNativeCopy {
 fn CommandPathNativeContext? command_path_native_context(
     gpu::CommandList* commands,
 ) {
-    gpu::internal::vk::CommandRecord* root =
-        gpu::internal::recording_command(
-            commands,
-            count_command: false,
-        )!;
-    CommandRecord* record = root;
-    VkDeviceState* state = root.device_state;
+    CommandRecord* record = gpu::internal::recording_command(
+        commands,
+        count_command: false,
+    )!;
     return {
-        .record            = record,
-        .pipeline_layout   = record.logical_pipeline.layout,
-        .generated_work    = state.generated_work.enabled,
+        .record          = record,
+        .pipeline_layout = record.logical_pipeline.layout,
     };
 }
 
@@ -40,11 +35,14 @@ fn CommandPathNativeCopy? command_path_native_copy(
     gpu::GpuSpan src,
     gpu::GpuSpan dst,
 ) {
-    VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
     if (state == null) return gpu::INVALID_HANDLE~;
     ResolvedSpan resolved_src = resolve_span(state, &src)!;
     ResolvedSpan resolved_dst = resolve_span(state, &dst)!;
-    if (resolved_src.size != resolved_dst.size) return gpu::INVALID_ARGUMENT~;
+    if (resolved_src.size != resolved_dst.size) {
+        return gpu::INVALID_ARGUMENT~;
+    }
     return {
         .src_buffer = resolved_src.slot.buffer,
         .dst_buffer = resolved_dst.slot.buffer,
@@ -58,7 +56,6 @@ fn void command_path_direct_dispatch(
     CommandPathNativeContext* context,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
-    ulong* native_calls,
 ) {
     gpu::RootPush push = { .root_gpu = root };
     vk::cmd_push_constants(
@@ -75,82 +72,11 @@ fn void command_path_direct_dispatch(
         group_count_y:  groups.y,
         group_count_z:  groups.z,
     );
-    *native_calls += 2;
-}
-
-fn void command_path_direct_draw(
-    CommandPathNativeContext* context,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    uint vertex_count,
-    uint instance_count,
-    ulong* native_calls,
-) {
-    gpu::GraphicsRootPush push = {
-        .vertex_root_gpu   = vertex_root,
-        .fragment_root_gpu = fragment_root,
-    };
-    uint stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT
-        | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
-    vk::cmd_push_constants(
-        command_buffer: context.record.command_buffer,
-        layout:         context.pipeline_layout,
-        stage_flags:    (vk::ShaderStageFlags)stages,
-        offset:         0,
-        size:           gpu::GraphicsRootPush::size,
-        p_values:       &push,
-    );
-    vk::cmd_draw(
-        command_buffer: context.record.command_buffer,
-        vertex_count:   vertex_count,
-        instance_count: instance_count,
-        first_vertex:   0,
-        first_instance: 0,
-    );
-    *native_calls += 2;
-}
-
-fn void command_path_direct_barrier(
-    CommandPathNativeContext* context,
-    gpu::Barrier* barrier,
-    ulong* native_calls,
-) {
-    vk::MemoryBarrier2 native_barrier = barrier_to_vk(
-        barrier,
-        context.generated_work,
-    );
-    vk::DependencyInfo dependency =
-        vk::dependency_info().set_memory_barriers((&native_barrier)[:1]);
-    vk::cmd_pipeline_barrier2(context.record.command_buffer, &dependency);
-    (*native_calls)++;
-}
-
-fn void command_path_direct_viewport(
-    CommandPathNativeContext* context,
-    gpu::Viewport* viewport,
-    ulong* native_calls,
-) {
-    vk::Viewport native = {
-        .x         = viewport.x,
-        .y         = viewport.y,
-        .width     = viewport.width,
-        .height    = viewport.height,
-        .min_depth = viewport.min_depth,
-        .max_depth = viewport.max_depth,
-    };
-    vk::cmd_set_viewport(
-        command_buffer: context.record.command_buffer,
-        first_viewport: 0,
-        viewport_count: 1,
-        p_viewports:    &native,
-    );
-    (*native_calls)++;
 }
 
 fn void command_path_direct_copy_buffer(
     CommandPathNativeContext* context,
     CommandPathNativeCopy* copy,
-    ulong* native_calls,
 ) {
     vk::BufferCopy region = {
         .src_offset = copy.src_offset,
@@ -164,5 +90,4 @@ fn void command_path_direct_copy_buffer(
         region_count:   1,
         p_regions:      &region,
     );
-    (*native_calls)++;
 }

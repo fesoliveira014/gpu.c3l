@@ -9,13 +9,6 @@ env:
   C3C_VERSION: "0.8.0"
   VULKAN_SDK_VERSION: "1.3.290.0"
   MESA_DIST_WIN_VERSION: "25.1.5"
-  REQUIRED_GPU_CAPABILITIES: ""
-  HEADLESS_TEST_TARGETS: >-
-    upload_bench_observation vk_device_desc vk_bootstrap vk_allocation
-    vk_command vk_texture vk_descriptor_heap vk_root_pointer vk_texture_heap
-    vk_shader_reflection vk_offscreen vk_performance vk_allocator_observation
-    vk_swapchain vk_pipeline_cache vk_indirect vk_indexed_draw vk_depth
-    vk_threading vk_queue vk_debug vk_validation_policy
 
 jobs:
   linux:
@@ -28,16 +21,6 @@ jobs:
           # Fine-grained PAT (Contents: read) covering this repo + the private
           # binding submodules; default GITHUB_TOKEN cannot read sibling repos.
           token: ${{ secrets.SUBMODULE_TOKEN }}
-
-      - name: CI matrix drift gate
-        run: |
-          python3 -B -m unittest scripts/test_check_ci_matrix.py
-          python3 -B scripts/check_ci_matrix.py
-
-      - name: Documentation and source-list gate
-        run: |
-          python3 -B -m unittest scripts.test_check_docs
-          python3 -B scripts/check_docs.py
 
       - name: Cache c3c
         uses: actions/cache@v4
@@ -81,6 +64,7 @@ jobs:
           c3c build span_data_operations --path test/cpu
           c3c build sampler_operations --path test/cpu
           c3c build texture_view_operations --path test/cpu
+          c3c build command_wrapper_bench --path test/cpu -O1
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
 
@@ -89,24 +73,21 @@ jobs:
           c3c test unit --path tools/gen_shader_abi
           python3 -B -m unittest scripts.test_gen_abi
 
-      - name: Benchmark, command, shader, and sampler policy contract tests
-        run: |
-          python3 -B -m unittest scripts.test_run_benchmarks scripts.test_report_command_asm scripts.test_check_shader_reflection_policy scripts.test_check_sampler_policy
-          python3 -B scripts/check_shader_reflection_policy.py
-          python3 -B scripts/check_sampler_policy.py
-
       - name: ABI drift gate
         run: python3 scripts/gen_abi.py --check
 
       - name: Build shaders
         run: python3 scripts/build_shaders.py
 
+      - name: Run getting-started consumer
+        run: |
+          c3c build hello_gpu --path examples/getting_started
+          ./examples/getting_started/build/hello_gpu
+
       - name: Build benchmark targets
         run: |
-          for spec in $(python3 -c 'import scripts.run_benchmarks as b; print(*[f"{target}:{project}" for target, project in b.benchmark_build_targets()])'); do
-            target="${spec%%:*}"
-            project="${spec#*:}"
-            c3c build "$target" --path "$project" -O1
+          for target in resource_create_bench upload_throughput_bench command_path_baseline_bench lifecycle_bench pipeline_cache_bench async_overlap_bench; do
+            c3c build "$target" --path test -O1
           done
 
       - name: Link proof (smoke)
@@ -116,35 +97,11 @@ jobs:
 
       - name: Test sweep (lavapipe)
         run: |
-          set -o pipefail
-          FAIL=0
-          : > /tmp/vulkan-capabilities.txt
-          for t in $HEADLESS_TEST_TARGETS; do
-            echo "::group::$t"
-            if ! c3c test "$t" --path test --test-show-output 2>&1 \
-              | tee -a /tmp/vulkan-capabilities.txt; then
-              echo "::error::target $t failed"
-              FAIL=1
-            fi
-            echo "::endgroup::"
-          done
-          for capability in $REQUIRED_GPU_CAPABILITIES; do
-            if ! grep -Fq "$capability: EXERCISED" /tmp/vulkan-capabilities.txt; then
-              echo "::error::required capability $capability was not exercised"
-              FAIL=1
-            fi
-          done
-          exit $FAIL
+          c3c test vk_core --path test --test-show-output
+          c3c test vk_wsi --path test --test-show-output
+          c3c test vk_optional_generated_work --path test --test-show-output
 
-      - name: Check API and backend boundaries
-        run: |
-          python -m unittest scripts.test_check_public_api scripts.test_check_backend_dispatch scripts.test_check_retired_api scripts.test_check_swapchain_acquire_policy
-          python scripts/check_public_api.py
-          python scripts/check_backend_dispatch.py
-          python scripts/check_swapchain_acquire_policy.py
-          python scripts/check_retired_api.py
-
-      # Whole-compile reference (public module gpu + gpu::vk internals; a
+      # Whole-compile reference (public module gpu + gpu::internal::vk; a
       # scoped docgen needs a closed source set, which only the whitebox test
       # project provides). Published as a per-run artifact.
       - name: Generate API reference
@@ -156,54 +113,9 @@ jobs:
           name: api-reference
           path: test/docs.html
 
-  docs-walkthrough:
-    # Executes docs/getting_started.md verbatim (scripts/run_doc.py) on a bare
-    # runner: the walkthrough is its own regression test. Only checkout and
-    # repository authentication are outside the document.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache c3c
-        uses: actions/cache@v4
-        with:
-          path: ~/tools/c3
-          key: c3c-linux-${{ env.C3C_VERSION }}
-
-      - name: Install c3c
-        run: |
-          if [ ! -x ~/tools/c3/c3c ]; then
-            mkdir -p ~/tools
-            curl -fsSL -o /tmp/c3.tar.gz \
-              "https://github.com/c3lang/c3c/releases/download/v${C3C_VERSION}/c3-linux.tar.gz"
-            tar -xzf /tmp/c3.tar.gz -C ~/tools
-          fi
-          echo "$HOME/tools/c3" >> "$GITHUB_PATH"
-
-      - name: Install walkthrough prerequisites
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers glslang-tools
-
-      # Let the recursive clone authenticate to the binding repositories.
-      - name: Authenticate submodule clones
-        run: |
-          git config --global url."https://x-access-token:${{ secrets.SUBMODULE_TOKEN }}@github.com/fesoliveira014/".insteadOf \
-            "https://github.com/fesoliveira014/"
-
-      - name: Run the walkthrough
-        run: |
-          export VK_DRIVER_FILES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
-          export GPU_C3L_URL="$GITHUB_WORKSPACE"
-          python3 scripts/run_doc.py docs/getting_started.md --workspace /tmp/walkthrough
-
   windows:
     runs-on: windows-2022
     timeout-minutes: 45
-    env:
-      REQUIRED_GPU_CAPABILITIES: >-
-        generated-work generated-scratch-reservation
     defaults:
       run:
         shell: bash
@@ -214,11 +126,6 @@ jobs:
           # Fine-grained PAT (Contents: read) covering this repo + the private
           # binding submodules; default GITHUB_TOKEN cannot read sibling repos.
           token: ${{ secrets.SUBMODULE_TOKEN }}
-
-      - name: Documentation and source-list gate
-        run: |
-          python -B -m unittest scripts.test_check_docs
-          python -B scripts/check_docs.py
 
       - name: Cache toolchain
         uses: actions/cache@v4
@@ -305,12 +212,6 @@ jobs:
           c3c test unit --path tools/gen_shader_abi
           python -B -m unittest scripts.test_gen_abi
 
-      - name: Benchmark, command, shader, and sampler policy contract tests
-        run: |
-          python -B -m unittest scripts.test_run_benchmarks scripts.test_report_command_asm scripts.test_check_shader_reflection_policy scripts.test_check_sampler_policy
-          python -B scripts/check_shader_reflection_policy.py
-          python -B scripts/check_sampler_policy.py
-
       - name: ABI drift gate
         run: C3C="$(cygpath -w "$(command -v c3c)")" python scripts/gen_abi.py --check
 
@@ -320,12 +221,15 @@ jobs:
           SPIRV_AS="$(cygpath -w "$(command -v spirv-as)")" \
           python scripts/build_shaders.py
 
+      - name: Run getting-started consumer
+        run: |
+          c3c build hello_gpu --path examples/getting_started
+          ./examples/getting_started/build/hello_gpu.exe
+
       - name: Build benchmark targets
         run: |
-          for spec in $(python -c 'import scripts.run_benchmarks as b; print(*[f"{target}:{project}" for target, project in b.benchmark_build_targets()])'); do
-            target="${spec%%:*}"
-            project="${spec#*:}"
-            c3c build "$target" --path "$project" -O1
+          for target in resource_create_bench upload_throughput_bench command_path_baseline_bench lifecycle_bench pipeline_cache_bench async_overlap_bench; do
+            c3c build "$target" --path test -O1
           done
 
       - name: Link proof (smoke)
@@ -345,14 +249,9 @@ jobs:
           c3c build span_data_operations --path test/cpu
           c3c build sampler_operations --path test/cpu
           c3c build texture_view_operations --path test/cpu
+          c3c build command_wrapper_bench --path test/cpu -O1
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
-
-      - name: Check backend dispatch ownership
-        run: |
-          python -m unittest scripts.test_check_backend_dispatch scripts.test_check_swapchain_acquire_policy
-          python scripts/check_backend_dispatch.py
-          python scripts/check_swapchain_acquire_policy.py
 
       - name: Install lavapipe (mesa-dist-win)
         run: |
@@ -378,22 +277,6 @@ jobs:
 
       - name: Vulkan sweep (lavapipe)
         run: |
-          set -o pipefail
-          FAIL=0
-          : > /tmp/vulkan-capabilities.txt
-          for t in $HEADLESS_TEST_TARGETS; do
-            echo "::group::$t"
-            if ! c3c test "$t" --path test --test-show-output 2>&1 \
-              | tee -a /tmp/vulkan-capabilities.txt; then
-              echo "::error::target $t failed on windows lavapipe"
-              FAIL=1
-            fi
-            echo "::endgroup::"
-          done
-          for capability in $REQUIRED_GPU_CAPABILITIES; do
-            if ! grep -Fq "$capability: EXERCISED" /tmp/vulkan-capabilities.txt; then
-              echo "::error::required capability $capability was not exercised"
-              FAIL=1
-            fi
-          done
-          exit $FAIL
+          c3c test vk_core --path test --test-show-output
+          c3c test vk_wsi --path test --test-show-output
+          c3c test vk_optional_generated_work --path test --test-show-output

@@ -1,8 +1,6 @@
 module gpu_bench;
 
-import gpu::internal @public;
 import gpu @public;
-import gpu::internal::vk @public;
 import std::io;
 import std::thread;
 import std::time;
@@ -14,6 +12,9 @@ import std::core::mem::allocators;
 const uint BENCH_ITERS_PER_WORKER = 300;
 const uint[3] BENCH_WORKER_COUNTS = { 1, 2, 4 };
 const uint BENCH_MAX_WORKERS = 4;
+const uint CPU_WRITE_ITERATIONS = 4_000;
+const uint DESCRIPTOR_ITERATIONS = 320;
+const uint DESCRIPTOR_BATCH_SIZE = 16;
 
 enum BenchPhase : int {
     TEXTURE,
@@ -101,7 +102,7 @@ fn double run_phase_worker_count(gpu::Device* device, BenchPhase phase, uint wor
     return (double)elapsed_ns / (double)total_ops;
 }
 
-fn void run_phase(gpu::Device* device, vk::VkDeviceState* state, BenchPhase phase) {
+fn void run_phase(gpu::Device* device, BenchPhase phase) {
     (void)run_phase_worker_count(device, phase, 1);
     double baseline_ns_per_op = 0;
     foreach (workers : BENCH_WORKER_COUNTS) {
@@ -111,8 +112,84 @@ fn void run_phase(gpu::Device* device, vk::VkDeviceState* state, BenchPhase phas
         io::printfn("phase %s workers=%d: %.1f ns/op, %.2fx scaling vs 1 thread",
             phase_name(phase), workers, ns_per_op, scaling);
     }
-    uint leaks = vk::report_resource_leaks(state);
-    io::printfn("phase %s: leaks=%d", phase_name(phase), leaks);
+}
+
+fn void run_cpu_write_allocations(gpu::Device* device) {
+    gpu::GpuAllocation[CPU_WRITE_ITERATIONS] allocations;
+    gpu::AllocationDesc desc = {
+        .size         = 64,
+        .alignment    = 16,
+        .memory_class = gpu::MemoryClass.CPU_WRITE,
+        .access       = { .graphics, .compute, .transfer },
+        .debug_name   = "cpu_write_bench",
+    };
+
+    std::time::Clock allocation_start = std::time::clock::now();
+    foreach (&allocation : allocations) {
+        *allocation = gpu::allocate_memory(device, &desc)!!;
+    }
+    long allocation_ns = (long)allocation_start.to_now();
+
+    std::time::Clock free_start = std::time::clock::now();
+    foreach (&allocation : allocations) {
+        gpu::free_allocation(device, allocation)!!;
+    }
+    long free_ns = (long)free_start.to_now();
+
+    io::printfn(
+        "cpu-write allocations: %d iterations, %.1f ns/allocate, %.1f ns/free",
+        CPU_WRITE_ITERATIONS,
+        (double)allocation_ns / CPU_WRITE_ITERATIONS,
+        (double)free_ns / CPU_WRITE_ITERATIONS,
+    );
+}
+
+fn void run_descriptor_churn(gpu::Device* device) {
+    gpu::TextureDesc texture_desc = {
+        .access = { .graphics, .compute },
+        .width  = 4,
+        .height = 4,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled, .storage },
+    };
+    gpu::TextureHandle texture =
+        gpu::create_texture(device, &texture_desc)!!;
+    defer gpu::destroy_texture(device, texture)!!;
+
+    std::time::Clock single_start = std::time::clock::now();
+    for (uint i = 0; i < DESCRIPTOR_ITERATIONS; i++) {
+        gpu::TextureView view =
+            gpu::create_texture_view(device, texture, null)!!;
+        gpu::destroy_texture_view(device, view)!!;
+    }
+    long single_ns = (long)single_start.to_now();
+
+    gpu::TextureViewCreateDesc[DESCRIPTOR_BATCH_SIZE] descs;
+    foreach (&desc : descs) *desc = { .texture = texture };
+    gpu::TextureView[DESCRIPTOR_BATCH_SIZE] views;
+    std::time::Clock batch_start = std::time::clock::now();
+    for (uint i = 0; i < DESCRIPTOR_ITERATIONS / DESCRIPTOR_BATCH_SIZE; i++) {
+        gpu::create_texture_views(device, descs[..], views[..])!!;
+        foreach (view : views) {
+            gpu::destroy_texture_view(device, view)!!;
+        }
+    }
+    long batch_ns = (long)batch_start.to_now();
+
+    gpu::SamplerDesc sampler_desc;
+    std::time::Clock sampler_start = std::time::clock::now();
+    for (uint i = 0; i < DESCRIPTOR_ITERATIONS; i++) {
+        (void)gpu::intern_sampler(device, &sampler_desc)!!;
+    }
+    long sampler_ns = (long)sampler_start.to_now();
+
+    io::printfn(
+        "descriptor churn: %d views, %.1f ns/single, %.1f ns/batched, %.1f ns/sampler-hit",
+        DESCRIPTOR_ITERATIONS,
+        (double)single_ns / DESCRIPTOR_ITERATIONS,
+        (double)batch_ns / DESCRIPTOR_ITERATIONS,
+        (double)sampler_ns / DESCRIPTOR_ITERATIONS,
+    );
 }
 
 fn int main() {
@@ -122,11 +199,12 @@ fn int main() {
     };
     gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
-    run_phase(&device, state, BenchPhase.TEXTURE);
-    run_phase(&device, state, BenchPhase.ALLOCATION);
-    run_phase(&device, state, BenchPhase.MIXED);
+    run_phase(&device, BenchPhase.TEXTURE);
+    run_phase(&device, BenchPhase.ALLOCATION);
+    run_phase(&device, BenchPhase.MIXED);
+    run_cpu_write_allocations(&device);
+    run_descriptor_churn(&device);
 
     return 0;
 }

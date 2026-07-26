@@ -374,7 +374,7 @@ fn bool pipeline_cache_index_consistent(VkDeviceState* state) {
 fn PipelineIdentityProbeResult? probe_pipeline_identity_boundary(
     VkDeviceState* state,
     gpu::ShaderDesc* desc,
-) @if(env::TESTING || $feature(PIPELINE_CACHE_STATS)) {
+) @if(env::TESTING) {
     ShaderIdentityInput input;
     normalize_shader_input(
         state:          state,

@@ -459,10 +459,10 @@ const ulong RESOURCE_OWNER_KIND_COUNT = 10;
 const ulong MAX_DEVICE_RESOURCE_OWNER =
     ulong::max / RESOURCE_OWNER_KIND_COUNT;
 
-<* Test and benchmark instrumentation for command resolution and native command
+<* Test-only instrumentation for command resolution and native command
    emission. Counters are process-wide relaxed atomics; compare snapshots only
    after externally synchronizing the measured recording work. *>
-struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_STATS)) {
+struct CommandResolutionStats @if(env::TESTING) {
     ulong device_registry_resolutions;
     ulong retained_pin_operations;
     ulong command_table_lookups;

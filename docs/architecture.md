@@ -681,8 +681,7 @@ dispatch and fallible `cmd_*` signatures.
 Focused behavioral tests invoke every command family through both operation
 tables. Allocator, work, resolution, reference-state, fault, and native-emission
 observations are the authority for warm behavior; there is no source-policy
-scanner. Timing is blocking only for an explicitly pinned runner, driver, and
-comparison profile.
+scanner. Manual benchmark timing is always advisory.
 
 The shader-visible descriptor heap is device-global and bound lazily on the
 first pipeline selection in a command record. Its descriptor-indexing set 0

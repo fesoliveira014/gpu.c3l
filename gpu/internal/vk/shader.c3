@@ -45,7 +45,7 @@ struct PreparedShaderIdentity {
     bool     retained;
 }
 
-struct PipelineIdentityStats @if(env::TESTING || $feature(PIPELINE_CACHE_STATS)) {
+struct PipelineIdentityStats @if(env::TESTING) {
     ulong shader_intern_probes;
     ulong shader_intern_bytes_compared;
     ulong shader_owned_bytes_cloned;
@@ -53,7 +53,7 @@ struct PipelineIdentityStats @if(env::TESTING || $feature(PIPELINE_CACHE_STATS))
     ulong pipeline_key_probes;
 }
 
-struct PipelineIdentityProbeResult @if(env::TESTING || $feature(PIPELINE_CACHE_STATS)) {
+struct PipelineIdentityProbeResult @if(env::TESTING) {
     PipelineIdentityStats interning;
     PipelineIdentityStats lookup;
 }
@@ -64,7 +64,7 @@ struct PipelineShaderModule {
 }
 
 fn void note_shader_intern_probe(VkDeviceState* state) {
-    $if env::TESTING || $feature(PIPELINE_CACHE_STATS):
+    $if env::TESTING:
         state.shader_intern_probes++;
     $endif
 }
@@ -73,7 +73,7 @@ fn void note_shader_intern_bytes_compared(
     VkDeviceState* state,
     usz byte_count,
 ) {
-    $if env::TESTING || $feature(PIPELINE_CACHE_STATS):
+    $if env::TESTING:
         state.shader_intern_bytes_compared += byte_count;
     $endif
 }
@@ -82,7 +82,7 @@ fn void note_shader_owned_bytes_cloned(
     VkDeviceState* state,
     usz byte_count,
 ) {
-    $if env::TESTING || $feature(PIPELINE_CACHE_STATS):
+    $if env::TESTING:
         state.shader_owned_bytes_cloned += byte_count;
     $endif
 }
@@ -91,20 +91,20 @@ fn void note_shader_owned_bytes_freed(
     VkDeviceState* state,
     usz byte_count,
 ) {
-    $if env::TESTING || $feature(PIPELINE_CACHE_STATS):
+    $if env::TESTING:
         state.shader_owned_bytes_freed += byte_count;
     $endif
 }
 
 fn void note_pipeline_key_probe(VkDeviceState* state) {
-    $if env::TESTING || $feature(PIPELINE_CACHE_STATS):
+    $if env::TESTING:
         state.pipeline_key_probes++;
     $endif
 }
 
 fn void reset_pipeline_identity_stats(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(PIPELINE_CACHE_STATS)) {
+) @if(env::TESTING) {
     state.shader_intern_probes = 0;
     state.shader_intern_bytes_compared = 0;
     state.shader_owned_bytes_cloned = 0;
@@ -114,7 +114,7 @@ fn void reset_pipeline_identity_stats(
 
 fn PipelineIdentityStats pipeline_identity_stats(
     VkDeviceState* state,
-) @if(env::TESTING || $feature(PIPELINE_CACHE_STATS)) {
+) @if(env::TESTING) {
     return {
         .shader_intern_probes          = state.shader_intern_probes,
         .shader_intern_bytes_compared  = state.shader_intern_bytes_compared,
