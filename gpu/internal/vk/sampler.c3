@@ -5,14 +5,14 @@ import gpu @public;
 import vk;
 import std::core::mem;
 
-const uint SAMPLER_CELL_NONE = uint::max;
-
 alias SamplerCreateFn @private = fn vk::Result (
-    void*,
-    vk::Device,
-    vk::SamplerCreateInfo*,
-    vk::Sampler*,
+    void* user_data,
+    vk::Device device,
+    vk::SamplerCreateInfo* create_info,
+    vk::Sampler* sampler,
 );
+
+const uint SAMPLER_CELL_NONE = uint::max;
 
 struct SamplerCell {
     ulong             hash;
@@ -209,10 +209,10 @@ fn gpu::SamplerIndex? intern_sampler_with(
 
     vk::Sampler native;
     vk::Result create_result = create_ops.create(
-        create_ops.user_data,
-        state.device,
-        &sampler_info,
-        &native,
+        user_data:   create_ops.user_data,
+        device:      state.device,
+        create_info: &sampler_info,
+        sampler:     &native,
     );
     check_backend_result(
         state:     state,

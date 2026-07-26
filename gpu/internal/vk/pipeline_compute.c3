@@ -8,11 +8,11 @@ import std::atomic::types;
 import std::core::env;
 
 alias ComputePipelineCreateFn @private = fn vk::Result (
-    void*,
-    vk::Device,
-    vk::PipelineCache,
-    vk::ComputePipelineCreateInfo*,
-    vk::Pipeline*,
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCache pipeline_cache,
+    vk::ComputePipelineCreateInfo* create_info,
+    vk::Pipeline* pipeline,
 );
 alias PipelineCacheInsertFn @private = fn uint? (
     void*,
@@ -213,11 +213,11 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     check_pipeline_create_device_result(
         state: state,
         result: create_ops.create(
-            create_ops.user_data,
-            state.device,
-            state.driver_cache,
-            &pipe_info,
-            &pipeline,
+            user_data:      create_ops.user_data,
+            device:         state.device,
+            pipeline_cache: state.driver_cache,
+            create_info:    &pipe_info,
+            pipeline:       &pipeline,
         ),
     )!;
     set_object_name(

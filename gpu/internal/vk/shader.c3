@@ -10,10 +10,10 @@ import std::core::mem::alloc;
 typedef ShaderId = uint;
 
 alias ShaderModuleCreateFn @private = fn vk::Result (
-    void*,
-    vk::Device,
-    vk::ShaderModuleCreateInfo*,
-    vk::ShaderModule*,
+    void* user_data,
+    vk::Device device,
+    vk::ShaderModuleCreateInfo* create_info,
+    vk::ShaderModule* shader_module,
 );
 
 const ShaderId SHADER_ID_INVALID = (ShaderId)uint::max;
@@ -795,10 +795,10 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
         check_shader_create_device_result(
             state: state,
             result: create_ops.create(
-                create_ops.user_data,
-                state.device,
-                &info,
-                &shader.shader_module,
+                user_data:     create_ops.user_data,
+                device:        state.device,
+                create_info:   &info,
+                shader_module: &shader.shader_module,
             ),
         )!;
     };

@@ -7,11 +7,11 @@ import std::thread;
 import std::core::mem;
 
 alias GraphicsPipelineCreateFn @private = fn vk::Result (
-    void*,
-    vk::Device,
-    vk::PipelineCache,
-    vk::GraphicsPipelineCreateInfo*,
-    vk::Pipeline*,
+    void* user_data,
+    vk::Device device,
+    vk::PipelineCache pipeline_cache,
+    vk::GraphicsPipelineCreateInfo* create_info,
+    vk::Pipeline* pipeline,
 );
 
 const uint GRAPHICS_ROOT_PUSH_SIZE = gpu::GraphicsRootPush::size;
@@ -285,11 +285,11 @@ fn vk::Result create_graphics_pipeline_native(
     GraphicsPipelineCreateOps* create_ops,
 ) {
     return create_ops.create(
-        create_ops.user_data,
-        state.device,
-        state.driver_cache,
-        info,
-        out_pipeline,
+        user_data:      create_ops.user_data,
+        device:         state.device,
+        pipeline_cache: state.driver_cache,
+        create_info:    info,
+        pipeline:       out_pipeline,
     );
 }
 

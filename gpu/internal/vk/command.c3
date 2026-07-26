@@ -36,9 +36,20 @@ alias GeneratedDispatchLayoutReadFn @private @if(env::TESTING) =
         void*,
         BoundPipeline*,
     );
+alias PipelineBindFn @private = fn void (
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::PipelineBindPoint bind_point,
+    vk::Pipeline pipeline,
+);
 
 const uint MAX_COMMAND_ALLOCATORS = 256;
 const uint COMMAND_ALLOCATOR_FREE_NONE = 0;
+
+struct PipelineBindOps {
+    void*          user_data;
+    PipelineBindFn bind;
+}
 
 struct GeneratedPreprocessBuffer {
     vk::Buffer             buffer;
@@ -1948,9 +1959,24 @@ fn void? track_bound_pipeline(
     );
 }
 
-fn void? record_bound_pipeline(
+fn void bind_pipeline_real(
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::PipelineBindPoint bind_point,
+    vk::Pipeline pipeline,
+) @private {
+    (void)user_data;
+    vk::cmd_bind_pipeline(command_buffer, bind_point, pipeline);
+}
+
+fn PipelineBindOps pipeline_bind_ops_real() @private {
+    return { .bind = &bind_pipeline_real };
+}
+
+fn void? record_bound_pipeline_with_ops(
     CommandRecord* commands,
     BoundPipeline* bound,
+    PipelineBindOps* ops,
 ) {
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
@@ -1964,7 +1990,12 @@ fn void? record_bound_pipeline(
         && native.pipeline == bound.pipeline
         && native.cache_entry == bound.cache_entry;
     if (!native_match) {
-        vk::cmd_bind_pipeline(record.command_buffer, bind_point, bound.pipeline);
+        ops.bind(
+            user_data:     ops.user_data,
+            command_buffer: record.command_buffer,
+            bind_point:    bind_point,
+            pipeline:      bound.pipeline,
+        );
         *native = {
             .pipeline    = bound.pipeline,
             .cache_entry = bound.cache_entry,
@@ -1977,6 +2008,14 @@ fn void? record_bound_pipeline(
         bind_point: bind_point,
     )!;
     record.logical_pipeline = *bound;
+}
+
+fn void? record_bound_pipeline(
+    CommandRecord* commands,
+    BoundPipeline* bound,
+) {
+    PipelineBindOps ops = pipeline_bind_ops_real();
+    return record_bound_pipeline_with_ops(commands, bound, &ops);
 }
 
 fn void update_full_color_state_for_bind(
@@ -1994,17 +2033,19 @@ fn void update_full_color_state_for_bind(
     }
 }
 
-fn void? trusted_bind_pipeline(
+fn void? trusted_bind_pipeline_with_ops(
     CommandRecord* commands,
     gpu::PipelineHandle pipeline,
+    PipelineBindOps* ops,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
-    record_bound_pipeline(commands, &bound)!;
+    record_bound_pipeline_with_ops(commands, &bound, ops)!;
 }
 
-fn void? full_bind_pipeline(
+fn void? full_bind_pipeline_with_ops(
     CommandRecord* commands,
     gpu::PipelineHandle pipeline,
+    PipelineBindOps* ops,
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
     CommandRecord* record = commands;
@@ -2014,8 +2055,36 @@ fn void? full_bind_pipeline(
         checkpoint,
     );
     track_bound_pipeline(commands, &bound)!;
-    record_bound_pipeline(commands, &bound)!;
+    record_bound_pipeline_with_ops(commands, &bound, ops)!;
     update_full_color_state_for_bind(record, &bound);
+}
+
+fn void? trusted_bind_pipeline(
+    CommandRecord* commands,
+    gpu::PipelineHandle pipeline,
+) {
+    PipelineBindOps ops = pipeline_bind_ops_real();
+    return trusted_bind_pipeline_with_ops(commands, pipeline, &ops);
+}
+
+fn void? full_bind_pipeline(
+    CommandRecord* commands,
+    gpu::PipelineHandle pipeline,
+) {
+    PipelineBindOps ops = pipeline_bind_ops_real();
+    return full_bind_pipeline_with_ops(commands, pipeline, &ops);
+}
+
+fn void? bind_pipeline_with_injected_ops(
+    CommandRecord* commands,
+    gpu::PipelineHandle pipeline,
+    PipelineBindOps* ops,
+) @if(env::TESTING) {
+    if (commands.device_state.validation_policy.contract
+            == gpu::ContractValidation.FULL) {
+        return full_bind_pipeline_with_ops(commands, pipeline, ops);
+    }
+    return trusted_bind_pipeline_with_ops(commands, pipeline, ops);
 }
 
 fn void push_compute_root(

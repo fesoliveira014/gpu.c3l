@@ -13,6 +13,48 @@ struct ReviewValidationCapture {
     uint errors;
 }
 
+struct PipelineBindCapture {
+    vk::Pipeline[4] pipelines;
+    uint            calls;
+    uint            graphics_calls;
+    uint            compute_calls;
+}
+
+fn void capture_pipeline_bind(
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::PipelineBindPoint bind_point,
+    vk::Pipeline pipeline,
+) {
+    (void)command_buffer;
+    PipelineBindCapture* capture = (PipelineBindCapture*)user_data;
+    if (capture.calls < capture.pipelines.len) {
+        capture.pipelines[capture.calls] = pipeline;
+    }
+    capture.calls++;
+    if (bind_point == vk::PipelineBindPoint.COMPUTE) {
+        capture.compute_calls++;
+    } else if (bind_point == vk::PipelineBindPoint.GRAPHICS) {
+        capture.graphics_calls++;
+    }
+}
+
+fn void? bind_pipeline_with_capture(
+    gpu::CommandList* commands,
+    gpu::PipelineHandle pipeline,
+    PipelineBindCapture* capture,
+) {
+    vk::PipelineBindOps ops = {
+        .user_data = capture,
+        .bind      = &capture_pipeline_bind,
+    };
+    return vk::bind_pipeline_with_injected_ops(
+        vk::resolve_command(commands)!,
+        pipeline,
+        &ops,
+    );
+}
+
 fn void capture_review_validation_error(
     gpu::DebugMessage* message,
     void* user_data,
@@ -703,11 +745,29 @@ fn void pipeline_render_compatibility_rejects_before_mutation() @test {
     gpu::cmd_set_graphics_state(&in_pass, &graphics_state)!!;
     vk::CommandRecord* in_pass_record = vk::resolve_command(&in_pass)!!;
     uint in_pass_references = in_pass_record.scratch.reference_count;
-    assert(@catch(gpu::cmd_bind_pipeline(&in_pass, draw.graphics))
+    vk::NativePipelineBinding in_pass_graphics_before =
+        in_pass_record.native_graphics_pipeline;
+    vk::NativePipelineBinding in_pass_compute_before =
+        in_pass_record.native_compute_pipeline;
+    PipelineBindCapture failed_bind_capture;
+    assert(@catch(bind_pipeline_with_capture(
+        &in_pass,
+        draw.graphics,
+        &failed_bind_capture,
+    ))
         == gpu::INVALID_ARGUMENT,
         "binding rejects a pipeline incompatible with the active render pass");
-    assert(in_pass_record.logical_pipeline.handle == compatible,
-        "in-pass incompatibility leaves the active pipeline unchanged");
+    assert(failed_bind_capture.calls == 0
+            && in_pass_record.logical_pipeline.handle == compatible
+            && in_pass_record.native_graphics_pipeline.pipeline
+                == in_pass_graphics_before.pipeline
+            && in_pass_record.native_graphics_pipeline.cache_entry
+                == in_pass_graphics_before.cache_entry
+            && in_pass_record.native_compute_pipeline.pipeline
+                == in_pass_compute_before.pipeline
+            && in_pass_record.native_compute_pipeline.cache_entry
+                == in_pass_compute_before.cache_entry,
+        "in-pass incompatibility emits no bind and preserves every pipeline cache");
     assert(in_pass_record.scratch.reference_count == in_pass_references,
         "in-pass incompatibility retains no pipeline reference");
     gpu::cmd_end_render_pass(&in_pass)!!;
@@ -813,11 +873,72 @@ fn void graphics_alias_updates_logical_handle() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
-    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    gpu::cmd_bind_pipeline(&commands, alias_pipeline)!!;
+    PipelineBindCapture capture;
+    bind_pipeline_with_capture(
+        &commands,
+        draw.graphics,
+        &capture,
+    )!!;
+    bind_pipeline_with_capture(
+        &commands,
+        alias_pipeline,
+        &capture,
+    )!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    assert(capture.calls == 1 && capture.graphics_calls == 1,
+        "graphics aliases sharing one cache entry emit one native bind");
     assert(record.logical_pipeline.handle == alias_pipeline,
         "graphics aliases still advance the logical public handle");
+}
+
+fn void alternating_bind_points_preserve_native_caches() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    PipelineBindCapture capture;
+    bind_pipeline_with_capture(
+        &commands,
+        compute.pipeline,
+        &capture,
+    )!!;
+    bind_pipeline_with_capture(
+        &commands,
+        draw.graphics,
+        &capture,
+    )!!;
+    bind_pipeline_with_capture(
+        &commands,
+        compute.pipeline,
+        &capture,
+    )!!;
+    bind_pipeline_with_capture(
+        &commands,
+        draw.graphics,
+        &capture,
+    )!!;
+
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    assert(capture.calls == 2
+            && capture.compute_calls == 1
+            && capture.graphics_calls == 1,
+        "alternating bind points retain independent native suppression caches");
+    assert(record.native_compute_pipeline.pipeline == capture.pipelines[0]
+            && record.native_graphics_pipeline.pipeline == capture.pipelines[1],
+        "both native caches preserve their last emitted pipelines");
+    assert(record.logical_pipeline.handle == draw.graphics,
+        "suppressed binds still publish the complete logical snapshot");
 }
 
 fn void command_buffer_reuse_resets_graphics_and_descriptor_state() @test {
@@ -882,6 +1003,16 @@ fn void command_buffer_reuse_resets_graphics_and_descriptor_state() @test {
     gpu::CommandList reused = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&reused)!!;
     vk::CommandRecord* reused_record = vk::resolve_command(&reused)!!;
+    assert(!reused_record.logical_pipeline.handle.is_valid()
+            && reused_record.logical_pipeline.pipeline == null
+            && reused_record.logical_pipeline.layout == null
+            && reused_record.logical_pipeline.generated_dispatch_layout == null
+            && reused_record.logical_pipeline.cache_entry == 0
+            && reused_record.native_graphics_pipeline.pipeline == null
+            && reused_record.native_graphics_pipeline.cache_entry == 0
+            && reused_record.native_compute_pipeline.pipeline == null
+            && reused_record.native_compute_pipeline.cache_entry == 0,
+        "command-buffer reuse clears logical and both native pipeline caches");
     assert(!reused_record.graphics_state_initialized
         && !reused_record.color_state_initialized
         && reused_record.color_state.count == 0,
