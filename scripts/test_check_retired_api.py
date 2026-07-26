@@ -130,6 +130,65 @@ class RetiredApiCheckTests(unittest.TestCase):
             self.assertTrue(any("TextureDesc.dimension/depth" in item for item in failures))
             self.assertTrue(any("publish_sampler" in item for item in failures))
 
+    def test_live_scan_rejects_retired_device_request_protocol(self) -> None:
+        source = (
+            "gpu::DeviceRequest request = gpu::strict_device_request();\n"
+            "gpu::request_presentation(&request, &surface);\n"
+            "gpu::request_queues(&request, queues);\n"
+            "gpu::DeviceRequestSupport support = "
+            "gpu::supports_device_request(&adapter, &request)!;\n"
+            "bool enabled = caps.strict_enabled;\n"
+            "bool supported = info.strict_supported;\n"
+        )
+        expected_markers = {
+            "DeviceRequest",
+            "DeviceRequestSupport",
+            "strict_device_request",
+            "request_presentation",
+            "request_queues",
+            "supports_device_request",
+            "DeviceCaps.strict_enabled",
+            "AdapterInfo.strict_supported",
+        }
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            path = root / "test" / "src" / "retired_device_request.c3"
+            path.parent.mkdir(parents=True)
+            path.write_text(source, encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                failures = check_retired_api.find_live_retired_usages((path,))
+        self.assertEqual(
+            {failure.rsplit(": ", 1)[1] for failure in failures},
+            expected_markers,
+        )
+
+    def test_live_scan_allows_device_request_migration_references_only(self) -> None:
+        migration = (
+            "### Breaking migration\n\n"
+            "`strict_device_request()` is replaced by `DeviceDesc`.\n\n"
+            "Do not restore publish_sampler.\n\n"
+            "## Next section\n"
+        )
+        stale_spec = "`DeviceRequest` remains the canonical request.\n"
+        with tempfile.TemporaryDirectory() as temp_directory:
+            root = Path(temp_directory)
+            api = root / "docs" / "api.md"
+            spec = root / "docs" / "specs" / "current.md"
+            spec.parent.mkdir(parents=True)
+            api.write_text(migration, encoding="utf-8")
+            spec.write_text(stale_spec, encoding="utf-8")
+            with mock.patch.object(check_retired_api, "ROOT", root):
+                failures = check_retired_api.find_live_retired_usages(
+                    (root / "docs",),
+                )
+        self.assertEqual(
+            failures,
+            [
+                "docs/api.md:5: publish_sampler",
+                "docs/specs/current.md:1: DeviceRequest",
+            ],
+        )
+
     def test_live_scan_reports_retired_runtime_desc_initializers_only(self) -> None:
         source = (
             "gpu::RuntimeDesc desc = { .enable_validation = true };\n"
