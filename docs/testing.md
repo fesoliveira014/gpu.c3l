@@ -185,6 +185,8 @@ c3c test unit --path tools/gen_shader_abi
 python3 -B -m unittest scripts.test_gen_abi
 python3 scripts/gen_abi.py --check
 python3 scripts/build_shaders.py
+c3c build hello_gpu --path examples/getting_started
+./examples/getting_started/build/hello_gpu
 for target in resource_create_bench upload_throughput_bench command_path_baseline_bench lifecycle_bench pipeline_cache_bench async_overlap_bench; do
     c3c build "$target" --path test -O1
 done
