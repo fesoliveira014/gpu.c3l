@@ -342,6 +342,18 @@ RETIRED_SOURCE_SYMBOLS = (
     "strict_heap_offset_commands",
     "note_command_strict_heap_buffer_bind",
     "note_command_strict_heap_offset",
+    "DEVICE_REQUEST_",
+    "DeviceCapability",
+    "compose_device_request(",
+    "empty_device_request(",
+    "validate_device_request(",
+    "device_request_is_well_formed(",
+    "requests_strict(",
+    "requested_surface(",
+    "requested_queue_requirements(",
+    "encode_queue_requirements(",
+    "decode_queue_requirements(",
+    "strict_heap",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -381,6 +393,20 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "requests_dynamic_color_state",
     "vk_supports_dynamic_color_state",
     "query_dynamic_color_state_support",
+    "DeviceRequest",
+    "StrictHeapSupport",
+    "VkStrictHeapState",
+    "StrictHeapCommandBinding",
+    "strict_heap",
+    "strict_requested",
+    "strict_adapter_supported",
+    "strict_enabled",
+    "strict_supported",
+    "strict_pipeline_set_layout",
+    "validate_strict_device_request_support",
+    "validate_device_request",
+    "requested_queue_requirements",
+    "requests_strict",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (

@@ -387,6 +387,14 @@ fn void adapter_baseline_support_inherits_runtime_device_config() @test {
                 runtime_state,
                 adapter.adapter_index,
             )!!;
+        } else {
+            assert(
+                @catch(gpu::internal::vk::validate_device_baseline_support(
+                    runtime_state,
+                    adapter.adapter_index,
+                )) == gpu::UNSUPPORTED_FEATURE,
+                "creation preflight agrees with cached unsupported baseline"
+            );
         }
 
         gpu::internal::vk::VkDeviceConfig invalid_config = config;
@@ -463,7 +471,7 @@ fn void public_creation_reports_cached_baseline_capacity_failure() @test {
 
         assert(rejected == gpu::UNSUPPORTED_FEATURE,
             "public creation rejects the cached baseline capacity failure");
-        assert(capture.matched,
+        assert(capture.calls == 1 && capture.matched,
             "public creation reports the exact cached capacity diagnostic");
         return;
     }
