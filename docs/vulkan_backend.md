@@ -100,7 +100,7 @@ extendedDynamicState3ColorWriteMask
 `dynamicPrimitiveTopologyUnrestricted` is reported by
 `VkPhysicalDeviceExtendedDynamicState3PropertiesEXT`. The backend requires it
 to be `VK_TRUE` but cannot enable it. Requiring it
-allows `cmd_set_raster_state` to switch topology classes without compiling
+allows `GraphicsState.raster` to switch topology classes without compiling
 pipeline variants. The backend separately requires and enables the extension
 name and all three color-state feature bits. Vulkan 1.3 supplies the promoted
 topology, cull, front-face, and depth-bias core commands.
@@ -624,7 +624,8 @@ command-buffer graphics state unchanged. `cmd_set_graphics_state` emits
 viewport, scissor, five raster commands, and three depth commands as one fixed
 ten-command prefix, then three color-array commands for a nonempty color
 domain. It does not compare against cached state or skip unchanged fields. The
-individual setters emit their corresponding subset before or during a pass.
+viewport and scissor overrides each emit only their corresponding native
+command before or during a pass and do not establish complete readiness.
 
 Under `FULL`, state validation checks finite viewport values, selected-device
 viewport dimensions and coordinate bounds, independently bounded depth
@@ -644,23 +645,18 @@ validation.
 Topology, cull mode, front face, depth bias, viewport, scissor, depth state,
 blend equations, and write masks are absent from `PipelineKey` and
 `PipelineSlot`. `PipelineKey` stores the ordered color formats, depth format,
-sample count, polygon mode, and shader identity. `cmd_set_color_state`
-validates a complete selected format domain before emitting
-`vkCmdSetColorBlendEnableEXT`,
-`vkCmdSetColorBlendEquationEXT`, and `vkCmdSetColorWriteMaskEXT`. Compatible
-passes and pipeline aliases preserve initialization, incompatible format
-domains clear it, and no bind or pass boundary replays state. Explicit pipeline binding
-emits the native pipeline and heap binds when the selected bind point's cache
-entry changes; graphics and compute selections are independent, and rebinding
-the same entry or an alias emits neither. `cmd_set_raster_state`
-emits the promoted Vulkan 1.3 topology,
-cull, front-face, depth-bias-enable, and depth-bias commands as one validated
-operation on a graphics-capable command list before or during a render pass.
-`cmd_set_depth_state` emits the
-Vulkan 1.3 dynamic depth commands. Draw and dispatch only validate active
-state, push roots, and execute; they never create a native pipeline. Dynamic
-state survives pipeline switches and pass boundaries; minimal pass begin does
-not replay it. There is no backend-generated default or trusted draw-time
+sample count, polygon mode, and shader identity. `cmd_set_graphics_state`
+validates the complete selected format domain before emitting the promoted
+Vulkan 1.3 raster and depth commands plus
+`vkCmdSetColorBlendEnableEXT`, `vkCmdSetColorBlendEquationEXT`, and
+`vkCmdSetColorWriteMaskEXT`. Compatible passes and pipeline aliases preserve
+initialization, while incompatible format domains clear color readiness.
+Explicit pipeline binding emits the native pipeline and heap binds when the
+selected bind point's cache entry changes; graphics and compute selections are
+independent, and rebinding the same entry or an alias emits neither. Pipeline
+bind and pass boundaries never replay graphics state. Draw and dispatch only
+validate active state, push roots, and execute; they never create a native
+pipeline. There is no backend-generated default or trusted draw-time
 initialization branch.
 Multi-viewport arrays are outside the portable contract.
 

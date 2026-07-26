@@ -1204,9 +1204,11 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::DepthState invalid_depth = {};
     int invalid_compare = 99;
     mem::copy(&invalid_depth.compare, &invalid_compare, int::size);
-    fault invalid_depth_fault = @catch(gpu::cmd_set_depth_state(
+    gpu::GraphicsState invalid_graphics_state = graphics_state;
+    invalid_graphics_state.depth = invalid_depth;
+    fault invalid_depth_fault = @catch(gpu::cmd_set_graphics_state(
         &commands,
-        &invalid_depth,
+        &invalid_graphics_state,
     ));
     assert(invalid_depth_fault == gpu::INVALID_ARGUMENT,
         "invalid depth state faults before replacing valid command state");
@@ -1304,7 +1306,7 @@ fn void dispatch_uses_bind_time_pipeline_snapshot() @test {
     }
 }
 
-fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
+fn void complete_graphics_state_validation_is_atomic_and_command_scoped() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     ValDrawCtx draw = make_val_draw_ctx(&device);
@@ -1322,7 +1324,6 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    gpu::DynamicRasterState raster = {};
     gpu::GraphicsState graphics_state =
         gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     gpu::ColorTargetState[1] color_targets = {
@@ -1330,9 +1331,10 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
     };
     graphics_state.color.targets = color_targets[..];
 
-    gpu::cmd_set_raster_state(&commands, &raster)!!;
+    gpu::cmd_set_viewport(&commands, &graphics_state.viewport)!!;
+    gpu::cmd_set_scissor(&commands, &graphics_state.scissor)!!;
     assert(!vk::resolve_command(&commands)!!.graphics_state_initialized,
-        "partial pre-pass state does not establish initialization");
+        "narrow pre-pass overrides do not establish initialization");
 
     record_val_target_to_attach(&commands, target);
     gpu::ColorTargetDesc[1] colors = {{
@@ -1354,7 +1356,7 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
         vertex_count:   0,
         instance_count: 0,
     )) == gpu::COMMAND_RECORDING_ERROR,
-        "FULL draw rejects partial-only graphics state");
+        "FULL draw rejects narrow-override-only graphics state");
     gpu::cmd_end_render_pass(&commands)!!;
 
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
@@ -1368,8 +1370,8 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
         gpu::PrimitiveTopology.POINTS,
     };
     foreach (topology : topologies) {
-        raster = { .topology = topology };
-        gpu::cmd_set_raster_state(&commands, &raster)!!;
+        graphics_state.raster = { .topology = topology };
+        gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     }
     gpu::CullMode[3] cull_modes = {
         gpu::CullMode.NONE,
@@ -1377,25 +1379,22 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
         gpu::CullMode.BACK,
     };
     foreach (cull_mode : cull_modes) {
-        raster = { .cull_mode = cull_mode };
-        gpu::cmd_set_raster_state(&commands, &raster)!!;
+        graphics_state.raster = { .cull_mode = cull_mode };
+        gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     }
     gpu::FrontFace[2] front_faces = {
         gpu::FrontFace.COUNTER_CLOCKWISE,
         gpu::FrontFace.CLOCKWISE,
     };
     foreach (front_face : front_faces) {
-        raster = { .front_face = front_face };
-        gpu::cmd_set_raster_state(&commands, &raster)!!;
+        graphics_state.raster = { .front_face = front_face };
+        gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     }
 
-    assert(@catch(gpu::cmd_set_raster_state(&commands, null))
-            == gpu::INVALID_ARGUMENT,
-        "null raster state faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_set_graphics_state(&commands, null))
             == gpu::INVALID_ARGUMENT,
         "null graphics state faults INVALID_ARGUMENT");
-    raster = {
+    gpu::DynamicRasterState raster = {
         .topology            = gpu::PrimitiveTopology.LINES,
         .cull_mode           = gpu::CullMode.BACK,
         .front_face          = gpu::FrontFace.CLOCKWISE,
@@ -1404,7 +1403,8 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
         .depth_bias_slope    = 2.0f,
         .depth_bias_clamp    = 3.0f,
     };
-    gpu::cmd_set_raster_state(&commands, &raster)!!;
+    graphics_state.raster = raster;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    {},
@@ -1416,23 +1416,26 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
     gpu::DynamicRasterState invalid = raster;
     int invalid_topology = 99;
     mem::copy(&invalid.topology, &invalid_topology, int::size);
-    assert(@catch(gpu::cmd_set_raster_state(&commands, &invalid))
+    graphics_state.raster = invalid;
+    assert(@catch(gpu::cmd_set_graphics_state(&commands, &graphics_state))
             == gpu::INVALID_ARGUMENT,
-        "invalid topology faults before replacing valid raster state");
+        "invalid topology faults before replacing valid graphics state");
 
     invalid = raster;
     invalid.depth_bias_slope = float::nan;
-    assert(@catch(gpu::cmd_set_raster_state(&commands, &invalid))
+    graphics_state.raster = invalid;
+    assert(@catch(gpu::cmd_set_graphics_state(&commands, &graphics_state))
             == gpu::INVALID_ARGUMENT,
         "enabled non-finite depth bias faults INVALID_ARGUMENT");
 
     invalid.depth_bias_enable = false;
-    gpu::cmd_set_raster_state(&commands, &invalid)!!;
+    graphics_state.raster = invalid;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
 
     gpu::cmd_end_render_pass(&commands)!!;
 }
 
-fn void full_graphics_state_setters_reject_non_graphics_recording_roles() @test {
+fn void full_graphics_state_commands_reject_non_graphics_recording_roles() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -1453,12 +1456,8 @@ fn void full_graphics_state_setters_reject_non_graphics_recording_roles() @test 
         && @catch(gpu::cmd_set_viewport(&commands, &graphics.viewport))
             == gpu::INVALID_ARGUMENT
         && @catch(gpu::cmd_set_scissor(&commands, &graphics.scissor))
-            == gpu::INVALID_ARGUMENT
-        && @catch(gpu::cmd_set_raster_state(&commands, &graphics.raster))
-            == gpu::INVALID_ARGUMENT
-        && @catch(gpu::cmd_set_depth_state(&commands, &graphics.depth))
             == gpu::INVALID_ARGUMENT,
-        "FULL rejects graphics-state setters on non-graphics command lists");
+        "FULL rejects graphics-state commands on non-graphics command lists");
     assert(!record.graphics_state_initialized,
         "queue-role rejection precedes native state and initialization");
 }

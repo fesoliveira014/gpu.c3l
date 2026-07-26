@@ -148,24 +148,6 @@ fn void? command_pin_bind_pipeline(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? command_pin_set_depth_state(
-    gpu::internal::vk::CommandRecord* record,
-    gpu::DepthState* depth,
-) {
-    (void)record;
-    (void)depth;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
-
-fn void? command_pin_set_raster_state(
-    gpu::internal::vk::CommandRecord* record,
-    gpu::DynamicRasterState* raster,
-) {
-    (void)record;
-    (void)raster;
-    return gpu::UNSUPPORTED_FEATURE~;
-}
-
 fn void? command_pin_set_graphics_state(
     gpu::internal::vk::CommandRecord* record,
     gpu::GraphicsState* state,
@@ -385,8 +367,6 @@ gpu::internal::vk::CommandOps command_pin_ops = {
     .barrier                     = &command_pin_barrier,
     .texture_barrier             = &command_pin_texture_barrier,
     .bind_pipeline               = &command_pin_bind_pipeline,
-    .set_depth_state             = &command_pin_set_depth_state,
-    .set_raster_state            = &command_pin_set_raster_state,
     .set_graphics_state          = &command_pin_set_graphics_state,
     .dispatch                    = &command_pin_dispatch,
     .begin_render_pass           = &command_pin_begin_render_pass,

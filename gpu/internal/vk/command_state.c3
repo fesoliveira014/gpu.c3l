@@ -13,10 +13,7 @@ alias CmdCopyTextureToBufferFn @private      = fn void? (CommandRecord*, gpu::Te
 alias CmdBarrierFn @private                  = fn void? (CommandRecord*, gpu::Barrier*);
 alias CmdTextureBarrierFn @private           = fn void? (CommandRecord*, gpu::TextureBarrier*);
 alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, gpu::PipelineHandle);
-alias CmdSetDepthStateFn @private            = fn void? (CommandRecord*, gpu::DepthState*);
-alias CmdSetRasterStateFn @private           = fn void? (CommandRecord*, gpu::DynamicRasterState*);
 alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, gpu::GraphicsState*);
-alias CmdSetColorStateFn @private            = fn void? (CommandRecord*, gpu::ColorState*);
 alias CmdDispatchFn @private                 = fn void? (CommandRecord*, gpu::GpuAddress, gpu::Vec3u);
 alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, gpu::RenderPassDesc*);
 alias CmdSetViewportFn @private              = fn void? (CommandRecord*, gpu::Viewport*);
@@ -163,10 +160,7 @@ struct CommandOps @public {
     CmdBarrierFn                  barrier;
     CmdTextureBarrierFn           texture_barrier;
     CmdBindPipelineFn             bind_pipeline;
-    CmdSetDepthStateFn            set_depth_state;
-    CmdSetRasterStateFn           set_raster_state;
     CmdSetGraphicsStateFn         set_graphics_state;
-    CmdSetColorStateFn            set_color_state;
     CmdDispatchFn                 dispatch;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;

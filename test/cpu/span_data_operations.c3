@@ -49,9 +49,9 @@ fn void check_span_data_operations(
 
     gpu::PipelineHandle pipeline = {};
     gpu::GpuAddress root = {};
-    gpu::DepthState depth = {};
+    gpu::GraphicsState graphics = {};
     (void)gpu::cmd_bind_pipeline(commands, pipeline);
-    (void)gpu::cmd_set_depth_state(commands, &depth);
+    (void)gpu::cmd_set_graphics_state(commands, &graphics);
     (void)gpu::cmd_dispatch(
         commands: commands,
         root:     root,

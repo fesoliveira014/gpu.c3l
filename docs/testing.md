@@ -141,7 +141,9 @@ details, not public interfaces or output schemas.
 
 CI may build the manual benchmark executables to catch compiler drift, but
 does not execute or parse them. See [Performance](performance.md) for direct
-commands and interpretation.
+commands and interpretation. In particular, `pipeline_cache_bench` records
+complete cached `GraphicsState` packets across raster permutations; its timing
+is advisory and is not compared with raster-only measurements.
 
 ## CI
 

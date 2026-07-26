@@ -712,9 +712,6 @@ render_geometry_state(width, height)
 cmd_begin_render_pass(command_list, render_pass_desc)
 cmd_bind_pipeline(command_list, pipeline)
 cmd_set_graphics_state(command_list, graphics_state)
-cmd_set_raster_state(command_list, raster_state)
-cmd_set_depth_state(command_list, depth_state)
-cmd_set_color_state(command_list, color_state)
 cmd_set_viewport(command_list, viewport)
 cmd_set_scissor(command_list, scissor)
 cmd_draw(command_list, vertex_root, fragment_root, vertex_count, instance_count)
@@ -728,18 +725,19 @@ state. A failed begin leaves the command outside a pass and retains no new
 attachment reference.
 
 `cmd_set_graphics_state` emits that complete packet before or during a pass on
-a graphics-capable command list after a compatible pipeline is bound. The
-raster, depth, color, viewport, and scissor setters remain optional partial
-updates in either recording phase. Graphics state persists across compatible
-pipeline binds and render-pass boundaries until another setter supplies it; an
-incompatible color-format domain clears color readiness, and a minimal begin
-never replays or replaces it. Under `FULL`,
-regular and generated draws require one successful complete packet in the
-current command-buffer recording. Fresh command-buffer reuse clears that
-initialization. Dynamic state remains outside pipeline keys, so handle aliasing
-cannot overwrite caller-selected command state. Draws require an active
-graphics pipeline, push both roots unchanged, and perform no native pipeline
-creation.
+a graphics-capable command list after a compatible pipeline is bound. Callers
+change raster, depth, or color by mutating a fully initialized cached
+`GraphicsState` and recording another complete packet. `cmd_set_viewport` and
+`cmd_set_scissor` are the only narrow overrides and remain valid in either
+recording phase. Graphics state persists across compatible pipeline binds and
+render-pass boundaries; an incompatible color-format domain clears color
+readiness. Neither a minimal begin nor pipeline bind replays or replaces state.
+Under `FULL`, regular and generated draws require one successful complete
+packet in the current command-buffer recording. Fresh command-buffer reuse
+clears that initialization. Dynamic state remains outside pipeline keys, so
+handle aliasing cannot overwrite caller-selected command state. Draws require
+an active graphics pipeline, push both roots unchanged, and perform no native
+pipeline creation.
 
 The canonical fresh sequence is begin, bind, set, draw, and end. If an
 incompatible pipeline remains selected from an earlier pass, bind the next

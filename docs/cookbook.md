@@ -160,10 +160,11 @@ Shader side indexes per-draw data with `gl_DrawID`.
 
 For several compatible passes, record the complete packet once with
 `cmd_set_graphics_state`, then use two-argument `cmd_begin_render_pass` for
-each pass. Minimal begin does not replay the packet; record another complete or
-partial setter only when state changes. Under `ContractValidation.FULL`, the
-first regular or generated draw still requires one successful complete packet
-in that command-buffer recording.
+each pass. Minimal begin and pipeline bind do not replay the packet. Mutate and
+record another complete packet when raster, depth, or color changes; use
+`cmd_set_viewport` or `cmd_set_scissor` only for narrow overrides. Under
+`ContractValidation.FULL`, the first regular or generated draw still requires
+one successful complete packet in that command-buffer recording.
 Running example: `gpu_driven_draw_sdl`, `frustum_culling`.
 
 ## 7. Split submits linked by a completion point
@@ -400,11 +401,12 @@ gpu::GraphicsState state =
 state.color = opaque;
 ```
 
-The target array is caller-owned and may be reused after the call. Record a
-complete packet after selecting a compatible pipeline and before its first
-draw. Compatible pipeline switches and pass boundaries preserve it; record
-again only when the application wants a new state. Use
-`cmd_set_color_state` when changing only the color portion.
+The target array is caller-owned, must remain live through the state call, and
+may be reused afterward. Record a complete packet after selecting a compatible
+pipeline and before its first draw. Compatible pipeline switches and pass
+boundaries preserve it. For later raster, depth, or color changes, mutate the
+cached `GraphicsState`, bind the pipeline required by the new color domain,
+then record the complete packet again.
 
 ```c3
 gpu::AttachmentViewHandle albedo_view = gpu::create_attachment_view(
@@ -432,6 +434,20 @@ gpu::cmd_begin_render_pass(&cmd, &pass)!;
 gpu::cmd_bind_pipeline(&cmd, pipeline)!;
 gpu::cmd_set_graphics_state(&cmd, &state)!;
 ```
+
+For example, a later material or pass transition updates the cached packet
+before validating it against the next pipeline:
+
+```c3
+state.raster = next_raster;
+state.depth = next_depth;
+state.color.targets = next_targets[..];
+gpu::cmd_bind_pipeline(&cmd, next_pipeline)!;
+gpu::cmd_set_graphics_state(&cmd, &state)!;
+```
+
+Keep `next_targets` live through the call. The library neither retains the
+packet nor deduplicates or replays it.
 
 Create the depth attachment view the same way. After the covering completion
 point finishes, destroy every attachment view before destroying its texture.

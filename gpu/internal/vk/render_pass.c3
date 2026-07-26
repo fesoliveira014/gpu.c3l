@@ -1202,43 +1202,6 @@ fn LoweredColorState? full_prepare_color_state(
     return lower_color_state(color);
 }
 
-fn void? trusted_set_color_state(
-    CommandRecord* commands,
-    gpu::ColorState* state,
-) {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    LoweredColorState color = lower_color_state(state)!;
-    emit_color_state(commands, &color);
-}
-
-fn void? full_set_color_state(
-    CommandRecord* commands,
-    gpu::ColorState* state,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    VkDeviceState* device = commands.device_state;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_graphics_state_queue(record)!;
-    LoweredColorState color =
-        full_prepare_color_state(
-            state:     device,
-            record:    record,
-            color:     state,
-            operation: "cmd_set_color_state",
-        )!;
-    emit_color_state(commands, &color);
-    record.color_state =
-        color_compatibility(&record.logical_pipeline.render);
-    record.color_state_initialized = true;
-}
-
 fn void? trusted_set_graphics_state(
     CommandRecord* commands,
     gpu::GraphicsState* state,
@@ -1311,93 +1274,6 @@ fn void? vk_cmd_end_render_pass(CommandRecord* commands) @private {
     vk::cmd_end_rendering(record.command_buffer);
     record.active_render = {};
     record.state = gpu::internal::CommandState.RECORDING;
-}
-
-fn void? vk_cmd_set_depth_state(
-    CommandRecord* commands,
-    gpu::DepthState* depth,
-) @private {
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    if (depth == null || !compare_op_valid(depth.compare)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    emit_depth_state(commands, depth);
-}
-
-fn void? trusted_set_depth_state(
-    CommandRecord* commands,
-    gpu::DepthState* depth,
-) {
-    if (depth == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    emit_depth_state(commands, depth);
-}
-
-fn void? full_set_depth_state(
-    CommandRecord* commands,
-    gpu::DepthState* depth,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_graphics_state_queue(record)!;
-    return vk_cmd_set_depth_state(commands, depth);
-}
-
-fn void? vk_cmd_set_raster_state(
-    CommandRecord* commands,
-    gpu::DynamicRasterState* raster,
-) @private {
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    if (raster == null
-        || !primitive_topology_valid(raster.topology)
-        || !cull_mode_valid(raster.cull_mode)
-        || !front_face_valid(raster.front_face)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (raster.depth_bias_enable
-        && (!math::is_finite(raster.depth_bias_constant)
-            || !math::is_finite(raster.depth_bias_slope)
-            || !math::is_finite(raster.depth_bias_clamp))) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    emit_raster_state(commands, raster);
-}
-
-fn void? trusted_set_raster_state(
-    CommandRecord* commands,
-    gpu::DynamicRasterState* raster,
-) {
-    if (raster == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    emit_raster_state(commands, raster);
-}
-
-fn void? full_set_raster_state(
-    CommandRecord* commands,
-    gpu::DynamicRasterState* raster,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_graphics_state_queue(record)!;
-    return vk_cmd_set_raster_state(commands, raster);
 }
 
 fn void? validate_color_execution_state(

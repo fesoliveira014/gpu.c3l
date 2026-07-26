@@ -303,7 +303,8 @@ fn void depth_test_occludes_both_orders() @test {
             instance_count: 1,
         )!!;
         gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
-        gpu::cmd_set_depth_state(&cmd, &tested)!!;
+        graphics_state.depth = tested;
+        gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
         gpu::cmd_draw(
             commands:       &cmd,
             vertex_root:    test_span_address(&device, second_verts),
@@ -407,7 +408,8 @@ fn void depth_write_toggle_honored() @test {
         instance_count: 1,
     )!!;
     gpu::cmd_bind_pipeline(&cmd, far_pipeline)!!;
-    gpu::cmd_set_depth_state(&cmd, &tested)!!;
+    graphics_state.depth = tested;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, far_verts),
@@ -504,7 +506,8 @@ fn void depth_state_variants_share_entry() @test {
         instance_count: 1,
     )!!;
     gpu::cmd_bind_pipeline(&cmd, test_off)!!;
-    gpu::cmd_set_depth_state(&cmd, &untested)!!;
+    graphics_state.depth = untested;
+    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
     gpu::cmd_draw(
         commands:       &cmd,
         vertex_root:    test_span_address(&device, far_verts),
