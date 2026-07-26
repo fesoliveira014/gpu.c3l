@@ -7,6 +7,13 @@ import std::core::mem;
 
 const uint SAMPLER_CELL_NONE = uint::max;
 
+alias SamplerCreateFn @private = fn vk::Result (
+    void*,
+    vk::Device,
+    vk::SamplerCreateInfo*,
+    vk::Sampler*,
+);
+
 struct SamplerCell {
     ulong             hash;
     SamplerKey        key;
@@ -21,16 +28,9 @@ struct SamplerTable {
     uint          count;
 }
 
-struct SamplerLookupStats @if(env::TESTING) {
-    ulong lookup_probes;
-}
-
-struct SamplerLookupProbeResult
-    @if(env::TESTING) {
-    uint  occupancy;
-    uint  bucket_count;
-    ulong probes;
-    ulong empty_bucket_miss_probes;
+struct SamplerCreateOps @private {
+    void*           user_data;
+    SamplerCreateFn create;
 }
 
 fn uint sampler_bucket(ulong hash, uint bucket_count) {
@@ -46,35 +46,7 @@ fn void link_sampler_cell(SamplerTable* table, uint index) {
     table.bucket_heads[bucket] = index + 1;
 }
 
-fn void note_sampler_lookup_probe(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.sampler_lookup_probes++;
-}
-
-fn void reset_sampler_lookup_stats(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.sampler_lookup_probes = 0;
-}
-
-fn SamplerLookupStats sampler_lookup_stats(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return { .lookup_probes = state.sampler_lookup_probes };
-}
-
-fn ulong sampler_key_hash(VkDeviceState* state, SamplerKey* key) {
-    $if env::TESTING:
-        if (state.sampler_hash_override_enabled) {
-            return state.sampler_hash_override;
-        }
-    $endif
-    return hash_sampler_key(key);
-}
-
 fn uint find_sampler_cell(
-    VkDeviceState* state,
     SamplerTable* table,
     ulong hash,
     SamplerKey* key,
@@ -84,9 +56,6 @@ fn uint find_sampler_cell(
         (uint)table.bucket_heads.len,
     )];
     while (current != 0) {
-        $if env::TESTING:
-            note_sampler_lookup_probe(state);
-        $endif
         SamplerCell* cell = &table.slots[current - 1];
         if (cell.hash == hash && sampler_key_equal(&cell.key, key)) {
             return current - 1;
@@ -123,89 +92,6 @@ fn bool sampler_table_index_consistent(
         }
         return linked_count == table.count;
     };
-}
-
-fn SamplerTable create_sampler_lookup_probe_table(
-    uint occupancy,
-) @if(env::TESTING) {
-    SamplerTable table = {
-        .slots        = mem::new_array(SamplerCell, occupancy),
-        .bucket_heads = mem::new_array(uint, next_pow2(occupancy * 2)),
-    };
-    for (uint index = 0; index < occupancy; index++) {
-        SamplerKey key = { .mip_lod_bias = (float)(index + 1) };
-        table.slots[index] = {
-            .hash  = hash_sampler_key(&key),
-            .key   = key,
-            .index = { .value = index + 1 },
-        };
-        link_sampler_cell(&table, index);
-        table.count++;
-    }
-    return table;
-}
-
-fn void destroy_sampler_lookup_probe_table(
-    SamplerTable* table,
-) @if(env::TESTING) {
-    mem::free(table.slots.ptr);
-    mem::free(table.bucket_heads.ptr);
-    *table = {};
-}
-
-fn SamplerLookupProbeResult probe_sampler_lookup(
-    VkDeviceState* state,
-    SamplerTable* table,
-) @if(env::TESTING) {
-    SamplerLookupProbeResult result = {
-        .occupancy    = table.count,
-        .bucket_count = (uint)table.bucket_heads.len,
-    };
-    if (table.count == 0) return result;
-
-    SamplerCell* expected = &table.slots[0];
-    reset_sampler_lookup_stats(state);
-    uint found = find_sampler_cell(
-        state: state,
-        table: table,
-        hash:  expected.hash,
-        key:   &expected.key,
-    );
-    result.probes = sampler_lookup_stats(state).lookup_probes;
-    if (found != 0) result.probes = 0;
-    bool observed_empty_bucket;
-    foreach (uint bucket, uint head : table.bucket_heads) {
-        if (head != 0) continue;
-        SamplerKey missing_key;
-        reset_sampler_lookup_stats(state);
-        uint missing = find_sampler_cell(
-            state: state,
-            table: table,
-            hash:  (ulong)bucket,
-            key:   &missing_key,
-        );
-        if (missing != SAMPLER_CELL_NONE) {
-            result.empty_bucket_miss_probes = ulong::max;
-        } else {
-            result.empty_bucket_miss_probes =
-                sampler_lookup_stats(state).lookup_probes;
-        }
-        observed_empty_bucket = true;
-        break;
-    }
-    if (!observed_empty_bucket) {
-        result.empty_bucket_miss_probes = ulong::max;
-    }
-    return result;
-}
-
-fn void set_sampler_hash_override(
-    VkDeviceState* state,
-    bool enabled,
-    ulong hash,
-) @if(env::TESTING) {
-    state.sampler_hash_override_enabled = enabled;
-    state.sampler_hash_override = hash;
 }
 
 fn vk::Filter sampler_filter_to_vk(gpu::Filter filter) @private {
@@ -254,34 +140,36 @@ fn void destroy_sampler_table(VkDeviceState* state) @private {
     *table = {};
 }
 
-fn void set_sampler_create_result(
-    VkDeviceState* state,
-    vk::Result result,
-) @if(env::TESTING) {
-    state.sampler_create_result = result;
+fn vk::Result create_sampler_real(
+    void* user_data,
+    vk::Device device,
+    vk::SamplerCreateInfo* create_info,
+    vk::Sampler* out_sampler,
+) @private {
+    (void)user_data;
+    return vk::create_sampler(
+        device:        device,
+        p_create_info: create_info,
+        p_allocator:   null,
+        p_sampler:     out_sampler,
+    );
 }
 
-fn float sampler_last_create_max_anisotropy(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return state.sampler_last_create_max_anisotropy;
-}
-
-fn gpu::SamplerIndex? vk_intern_sampler(
+fn gpu::SamplerIndex? intern_sampler_with(
     VkDeviceState* state,
     gpu::SamplerDesc* desc,
-) {
-    SamplerKey key = canonical_sampler_key(desc);
+    SamplerKey* key,
+    ulong hash,
+    SamplerCreateOps* create_ops,
+) @private {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
 
     SamplerTable* table = &state.samplers;
-    ulong hash = sampler_key_hash(state, &key);
     uint existing = find_sampler_cell(
-        state: state,
         table: table,
         hash:  hash,
-        key:   &key,
+        key:   key,
     );
     if (existing != SAMPLER_CELL_NONE) return table.slots[existing].index;
     if (table.count >= table.slots.len) return gpu::SLOT_TABLE_FULL~;
@@ -320,28 +208,12 @@ fn gpu::SamplerIndex? vk_intern_sampler(
         .set_max_lod(key.max_lod);
 
     vk::Sampler native;
-    vk::Result create_result;
-    $if env::TESTING:
-        state.sampler_last_create_max_anisotropy = sampler_info.max_anisotropy;
-        create_result = state.sampler_create_result;
-        if (create_result == vk::Result.SUCCESS) {
-            create_result = vk::create_sampler(
-                device:        state.device,
-                p_create_info: &sampler_info,
-                p_allocator:   null,
-                p_sampler:     &native,
-            );
-        } else {
-            state.sampler_create_result = vk::Result.SUCCESS;
-        }
-    $else
-        create_result = vk::create_sampler(
-            device:        state.device,
-            p_create_info: &sampler_info,
-            p_allocator:   null,
-            p_sampler:     &native,
-        );
-    $endif
+    vk::Result create_result = create_ops.create(
+        create_ops.user_data,
+        state.device,
+        &sampler_info,
+        &native,
+    );
     check_backend_result(
         state:     state,
         operation: "intern_sampler",
@@ -360,7 +232,7 @@ fn gpu::SamplerIndex? vk_intern_sampler(
     uint cell_index = table.count;
     table.slots[cell_index] = {
         .hash   = hash,
-        .key    = key,
+        .key    = *key,
         .native = native,
         .index  = index,
     };
@@ -368,4 +240,21 @@ fn gpu::SamplerIndex? vk_intern_sampler(
     table.count++;
     heap.sampler_next_new++;
     return index;
+}
+
+fn gpu::SamplerIndex? vk_intern_sampler(
+    VkDeviceState* state,
+    gpu::SamplerDesc* desc,
+) {
+    SamplerKey key = canonical_sampler_key(desc);
+    SamplerCreateOps create_ops = {
+        .create = &create_sampler_real,
+    };
+    return intern_sampler_with(
+        state:      state,
+        desc:       desc,
+        key:        &key,
+        hash:       hash_sampler_key(&key),
+        create_ops: &create_ops,
+    );
 }

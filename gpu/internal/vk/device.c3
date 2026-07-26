@@ -121,11 +121,6 @@ struct VkDeviceState @public {
     bool                       draw_indirect_count;
     GeneratedWorkSupport       generated_work;
     float                      max_sampler_anisotropy;
-    vk::Result                 sampler_create_result @if(env::TESTING);
-    float                      sampler_last_create_max_anisotropy @if(env::TESTING);
-    bool                       sampler_hash_override_enabled @if(env::TESTING);
-    ulong                      sampler_hash_override @if(env::TESTING);
-    ulong                      sampler_lookup_probes @if(env::TESTING);
     BufferTable                buffers;
     AllocationTable            allocations;
     Mutex                      resource_mutex;
