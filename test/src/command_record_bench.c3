@@ -143,10 +143,10 @@ fn double record_hazard_barriers(
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::Barrier barrier = {
         .before = { .compute = true },
-        .after = { .compute = true },
-        .hazards = {
-            .draw_arguments = true,
-            .depth_stencil = true,
+        .after = {
+            .compute      = true,
+            .depth_output = true,
+            .indirect     = true,
         },
     };
     gpu::reset_command_resolution_stats();

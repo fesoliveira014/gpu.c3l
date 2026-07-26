@@ -293,8 +293,8 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
     defer discard_test_executable(&graphics_executable)!!;
     gpu::ExecutableCommandList[1] graphics_lists = { graphics_executable };
     gpu::CompletionWait[1] waits = {{
-        .point     = compute_completion,
-        .consumers = { .draw_arguments },
+        .point  = compute_completion,
+        .before = { .indirect },
     }};
     gpu::SubmitDesc graphics_submit = {
         .command_lists    = graphics_lists[..],
@@ -576,9 +576,8 @@ fn void compute_generated_indexed_indirect_draw() @test {
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
     gpu::CompletionWait[1] waits = {{
-        .point     = producer_done,
-        .before    = { .transfer },
-        .consumers = { .draw_arguments },
+        .point  = producer_done,
+        .before = { .transfer, .indirect },
     }};
     gpu::SubmitDesc submit = {
         .command_lists    = lists[..],
@@ -992,8 +991,8 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
                 .compute = true,
                 .vertex_shader = true,
                 .fragment_shader = true,
+                .indirect = true,
             },
-            .hazards = { .draw_arguments = true },
         };
         gpu::cmd_barrier(&commands, &generated_ready)!!;
     }
@@ -1337,8 +1336,8 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     gpu::CompletionWait[1] waits;
     if (cross_family_generated_wait) {
         waits[0] = {
-            .point     = generated_records_ready,
-            .consumers = { .draw_arguments },
+            .point  = generated_records_ready,
+            .before = { .indirect },
         };
         submit.completion_waits = waits[..];
     }
@@ -1639,8 +1638,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     )!!;
     gpu::Barrier args_ready = {
         .before = { .compute = true },
-        .after = { .compute = true },
-        .hazards = { .draw_arguments = true },
+        .after = { .compute = true, .indirect = true },
     };
     gpu::cmd_barrier(&cmd, &args_ready)!!;
     bind_test_compute_pipeline(&cmd, double_pipeline);

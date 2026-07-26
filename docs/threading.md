@@ -257,8 +257,9 @@ through the matching destroy return; no callback occurs afterward.
 Each selected queue identity owns one private timeline. A successful `submit`
 signals its next value and returns a `CompletionPoint` for that queue. Same-queue
 submissions are ordered by the queue. Cross-queue dependencies are explicit in
-`SubmitDesc.completion_waits`; each wait names its first ordinary stages and/or
-draw-argument consumer, and no application work boundary adds waits or signals.
+`SubmitDesc.completion_waits`; each wait names its first destination stages,
+including `indirect` for argument consumption, and no application work boundary
+adds waits or signals.
 Same-queue waits are still scope-validated before the redundant native wait is
 elided.
 

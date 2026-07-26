@@ -1,8 +1,7 @@
 module gpu::internal @private;
 
 import gpu;
-const uint STAGE_MASK_BITS @private = 0x01FF;
-const uint COMPLETION_CONSUMER_BITS @private = 0x0001;
+const uint STAGE_MASK_BITS @private = 0x03FF;
 
 
 
@@ -16,23 +15,6 @@ fn bool stage_mask_valid(StageMask stages) @private {
 
 fn bool submit_wait_stage_mask_valid(StageMask stages) @private {
     return stage_mask_valid(stages) && !stages.host && !stages.present;
-}
-
-fn bool completion_wait_scope_valid(
-    StageMask stages,
-    CompletionConsumerFlags consumers,
-) @private {
-    uint stage_bits = (uint)stages;
-    uint consumer_bits = (uint)consumers;
-    if ((stage_bits == 0 && consumer_bits == 0)
-        || (stage_bits & STAGE_MASK_BITS) != stage_bits
-        || (consumer_bits & COMPLETION_CONSUMER_BITS) != consumer_bits
-        || stages.host
-        || stages.present) {
-        return false;
-    }
-    if (stages.all && (stage_bits != 1 || consumer_bits != 0)) return false;
-    return true;
 }
 
 fn bool texture_layout_valid(TextureLayout layout) @private {

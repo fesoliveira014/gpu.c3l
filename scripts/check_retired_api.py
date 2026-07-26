@@ -63,7 +63,10 @@ FIXTURES = {
     "global_barrier": "GlobalBarrier",
     "stage": "Stage",
     "hazard": "Hazard",
-    "hazard_descriptors": "descriptors",
+    "completion_consumer_flags": "CompletionConsumerFlags",
+    "hazard_flags": "HazardFlags",
+    "completion_wait_consumers": "consumers",
+    "barrier_hazards": "hazards",
     "texture_use": "TextureUse",
     "prior_use": "prior_use",
     "cmd_buffer_barrier": "cmd_buffer_barrier",
@@ -172,6 +175,8 @@ INVALID_MEMBER_TYPES = {
     "retired_compute_push_constant": "ComputePipelineDesc",
     "color_target_state_format": "ColorTargetState",
     "prior_use": "AcquiredImage",
+    "completion_wait_consumers": "CompletionWait",
+    "barrier_hazards": "Barrier",
 }
 
 ENUM_VALUES = {
@@ -187,7 +192,6 @@ ENUM_VALUES = {
 
 FIELD_OR_METHODS = {
     "timeline_caps": "DeviceCaps.timeline_semaphore",
-    "hazard_descriptors": "HazardFlags.descriptors",
     "descriptor_buffer_caps": "DeviceCaps.descriptor_buffer",
     "descriptor_indexing_caps": "DeviceCaps.descriptor_indexing",
     "max_texture_descriptors_caps": "DeviceCaps.max_texture_descriptors",

@@ -1383,23 +1383,8 @@ def valid_document() -> dict:
                                 "color_output",
                                 "depth_output",
                                 "present",
+                                "indirect",
                             ))
-                        ],
-                    },
-                    {
-                        "name": "HazardFlags",
-                        "kind": "bitstruct",
-                        "base_type": {"name": "uint"},
-                        "members": [
-                            {
-                                "name": name,
-                                "type": {"name": "bool"},
-                                "bit_range": [bit, bit],
-                            }
-                            for name, bit in (
-                                ("draw_arguments", 0),
-                                ("depth_stencil", 2),
-                            )
                         ],
                     },
                     {
@@ -1408,7 +1393,6 @@ def valid_document() -> dict:
                         "members": [
                             {"name": "before", "type": {"name": "StageMask"}},
                             {"name": "after", "type": {"name": "StageMask"}},
-                            {"name": "hazards", "type": {"name": "HazardFlags"}},
                         ],
                     },
                     {
@@ -1516,16 +1500,6 @@ def valid_document() -> dict:
                     },
                     {"name": "ExecutableCommandList", "kind": "struct"},
                     {
-                        "name": "CompletionConsumerFlags",
-                        "kind": "bitstruct",
-                        "base_type": {"name": "uint"},
-                        "members": [{
-                            "name": "draw_arguments",
-                            "type": {"name": "bool"},
-                            "bit_range": [0, 0],
-                        }],
-                    },
-                    {
                         "name": "CompletionWait",
                         "kind": "struct",
                         "members": [
@@ -1536,12 +1510,6 @@ def valid_document() -> dict:
                             {
                                 "name": "before",
                                 "type": {"name": "StageMask"},
-                            },
-                            {
-                                "name": "consumers",
-                                "type": {
-                                    "name": "CompletionConsumerFlags",
-                                },
                             },
                         ],
                     },
@@ -2077,7 +2045,7 @@ method gpu::Runtime.is_valid
             entry for entry in types
             if entry["name"] == "CompletionWait"
         )
-        completion_wait["members"][1]["type"]["name"] = "HazardFlags"
+        completion_wait["members"][1]["type"]["name"] = "TextureAccess"
         submit_desc = next(
             entry for entry in types
             if entry["name"] == "SubmitDesc"
@@ -2085,7 +2053,7 @@ method gpu::Runtime.is_valid
         submit_desc["members"][1]["type"]["name"] = "CompletionPoint[]"
         failures = check_public_api.validate_document(document)
         self.assertIn(
-            "CompletionWait must match the exact consumer-scoped schema",
+            "CompletionWait must match the exact stage-scoped schema",
             failures,
         )
         self.assertIn(
@@ -2680,40 +2648,33 @@ method gpu::Runtime.is_valid
                 )
 
     def test_rejects_global_barrier_flag_schema_drift(self) -> None:
-        for name in (
-            "StageMask",
-            "HazardFlags",
-            "CompletionConsumerFlags",
-        ):
-            with self.subTest(name=name):
+        for index in (0, -1):
+            with self.subTest(index=index):
                 document = valid_document()
                 flags = next(
                     entry for entry in document["modules"]["gpu"]["types"]
-                    if entry["name"] == name
+                    if entry["name"] == "StageMask"
                 )
-                flags["members"][0]["bit_range"] = [1, 1]
+                flags["members"][index]["bit_range"] = [1, 1]
                 self.assertIn(
-                    f"{name} must match the exact semantic flag schema",
+                    "StageMask must match the exact semantic flag schema",
                     check_public_api.validate_document(document),
                 )
 
-    def test_rejects_retired_descriptor_hazard(self) -> None:
-        document = valid_document()
-        hazard = next(
-            entry for entry in document["modules"]["gpu"]["types"]
-            if entry["name"] == "HazardFlags"
-        )
-        hazard["members"].insert(1, {
-            "name": "descriptors",
-            "type": {"name": "bool"},
-            "bit_range": [1, 1],
-        })
-        failures = check_public_api.validate_document(document)
-        self.assertIn("retired descriptor hazard", failures)
-        self.assertIn(
-            "HazardFlags must match the exact semantic flag schema",
-            failures,
-        )
+    def test_rejects_retired_synchronization_types(self) -> None:
+        for name in ("HazardFlags", "CompletionConsumerFlags"):
+            with self.subTest(name=name):
+                document = valid_document()
+                document["modules"]["gpu"]["types"].append({
+                    "name": name,
+                    "kind": "bitstruct",
+                    "base_type": {"name": "uint"},
+                    "members": [],
+                })
+                self.assertIn(
+                    f"retired synchronization type {name}",
+                    check_public_api.validate_document(document),
+                )
 
     def test_rejects_retired_generic_barrier_symbols(self) -> None:
         for name, kind, failure in (
@@ -2843,7 +2804,7 @@ method gpu::Runtime.is_valid
             *barrier["members"],
         ]
         self.assertIn(
-            "Barrier must contain only semantic stage masks and hazard flags",
+            "Barrier must contain only semantic stage masks",
             check_public_api.validate_document(document),
         )
 

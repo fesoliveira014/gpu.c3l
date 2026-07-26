@@ -303,10 +303,28 @@
         "hazard.c3"
       ]
     },
-    "hazard_descriptors": {
+    "completion_consumer_flags": {
       "type": "object-files",
       "sources": [
-        "hazard_descriptors.c3"
+        "completion_consumer_flags.c3"
+      ]
+    },
+    "hazard_flags": {
+      "type": "object-files",
+      "sources": [
+        "hazard_flags.c3"
+      ]
+    },
+    "completion_wait_consumers": {
+      "type": "object-files",
+      "sources": [
+        "completion_wait_consumers.c3"
+      ]
+    },
+    "barrier_hazards": {
+      "type": "object-files",
+      "sources": [
+        "barrier_hazards.c3"
       ]
     },
     "texture_use": {

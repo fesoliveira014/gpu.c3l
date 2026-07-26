@@ -128,7 +128,7 @@ fn void both_modes_reject_null_command_record() @test {
     }
 }
 
-fn void trusted_rejects_retired_descriptor_hazard_bit() @test {
+fn void trusted_keeps_barrier_stage_shape_as_caller_contract() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(
         contract:      gpu::ContractValidation.TRUSTED,
@@ -146,14 +146,11 @@ fn void trusted_rejects_retired_descriptor_hazard_bit() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
-        .before  = { .compute = true },
-        .after   = { .compute = true },
-        .hazards = (gpu::HazardFlags)0x2u,
+        .before = { .all = true, .compute = true },
+        .after  = { .compute = true },
     };
 
-    fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
-    assert(rejected == gpu::INVALID_ARGUMENT,
-        "trusted validation rejects the retired descriptor hazard bit");
+    gpu::cmd_barrier(&commands, &barrier)!!;
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
@@ -392,7 +389,11 @@ fn void contract_diagnostics_and_callback_presence_are_independent() @test {
         gpu::TextureBarrier barrier = gpu::texture_transition(
             texture: texture,
             before:  { .layout = gpu::TextureLayout.UNDEFINED },
-            after:   gpu::sampled_at({ .fragment_shader }),
+            after:   {
+                .layout = gpu::TextureLayout.SAMPLED,
+                .stages = { .indirect },
+                .access = { .read },
+            },
         )!!;
         gpu::reset_command_resolution_stats();
         fault misuse = @catch(gpu::cmd_texture_barrier(&commands, &barrier));
@@ -441,7 +442,11 @@ fn void trusted_callback_and_names_enable_no_command_checks() @test {
         gpu::TextureBarrier barrier = gpu::texture_transition(
             texture: texture,
             before:  { .layout = gpu::TextureLayout.UNDEFINED },
-            after:   gpu::sampled_at({ .fragment_shader }),
+            after:   {
+                .layout = gpu::TextureLayout.SAMPLED,
+                .stages = { .indirect },
+                .access = { .read },
+            },
         )!!;
         gpu::cmd_texture_barrier(&commands, &barrier)!!;
         assert(capture.calls == 0,

@@ -202,8 +202,8 @@ generated-command records, wait at their first real consumer instead of using
 
 ```c3
 gpu::CompletionWait[1] indirect_waits = {{
-    .point     = sim_done,
-    .consumers = { .draw_arguments },
+    .point  = sim_done,
+    .before = { .indirect },
 }};
 ```
 

@@ -805,25 +805,26 @@ fn void semantic_barrier_stage_masks_map_exactly() @test {
     gpu::StageMask stages = {
         .compute = true,
         .color_output = true,
+        .depth_output = true,
+        .indirect = true,
     };
     ulong expected = (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
-        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
     assert((ulong)gpu::internal::vk::barrier_before_stages_to_vk(stages) == expected,
         "combined semantic producer stages map exactly");
 
-    gpu::HazardFlags hazards = {
-        .draw_arguments = true,
-        .depth_stencil = true,
-    };
-    expected |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT
-        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
-        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-    assert((ulong)gpu::internal::vk::barrier_after_stages_to_vk(stages, hazards) == expected,
-        "special consumer hazards extend the destination stage scope");
-
     ulong generated_expected = expected
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
-    assert((ulong)gpu::internal::vk::barrier_after_stages_to_vk(stages, hazards, true)
+    assert((ulong)gpu::internal::vk::barrier_before_stages_to_vk(stages, true)
+            == generated_expected,
+        "generated work adds command preprocessing to indirect producer stages");
+    assert((ulong)gpu::internal::vk::barrier_after_stages_to_vk(stages) == expected,
+        "destination stages use the same semantic stage vocabulary");
+
+    assert((ulong)gpu::internal::vk::barrier_after_stages_to_vk(stages, true)
             == generated_expected,
         "generated work adds the command-preprocess destination stage");
 
@@ -832,7 +833,7 @@ fn void semantic_barrier_stage_masks_map_exactly() @test {
             == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
         "all maps to the broad execution scope");
     gpu::StageMask present = { .present = true };
-    assert(gpu::internal::vk::barrier_after_stages_to_vk(present, {})
+    assert(gpu::internal::vk::barrier_after_stages_to_vk(present)
             == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
         "presentation maps to the broad execution scope");
 }
@@ -900,6 +901,32 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             graphics_only,
         )!! == depth,
         "depth-output submission waits map to both test stages");
+    assert(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .indirect },
+            graphics_only,
+        )!! == vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
+        "graphics queues accept indirect completion waits");
+    assert(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .indirect },
+            compute_only,
+        )!! == vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
+        "compute queues accept indirect completion waits");
+    ulong generated_indirect =
+        (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
+    assert((ulong)gpu::internal::vk::submit_wait_stages_to_vk(
+            { .indirect },
+            graphics_only,
+            true,
+        )!! == generated_indirect,
+        "generated work adds command preprocessing to indirect waits");
+    ulong shader_indirect = (ulong)vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+    assert((ulong)gpu::internal::vk::submit_wait_stages_to_vk(
+            { .vertex_shader, .indirect },
+            graphics_only,
+        )!! == shader_indirect,
+        "ordinary and indirect completion stages compose exactly");
 
     assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk({}, graphics_only))
             == gpu::INVALID_ARGUMENT,
@@ -934,78 +961,17 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             compute_only,
         )) == gpu::INVALID_ARGUMENT,
         "compute-only queues reject graphics destinations");
-    gpu::StageMask unknown = (gpu::StageMask)(1u << 9);
+    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .indirect },
+            transfer_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "transfer-only queues reject indirect destinations");
+    gpu::StageMask unknown = (gpu::StageMask)(1u << 10);
     assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
             unknown,
             graphics_only,
         )) == gpu::INVALID_ARGUMENT,
         "unknown submission wait stage bits are invalid");
-}
-
-fn void submit_wait_consumer_scopes_validate_and_map_exactly() @test {
-    vk::QueueFlags transfer_only =
-        (vk::QueueFlags)(uint)vk::QueueFlagBits.TRANSFER_BIT;
-    vk::QueueFlags compute_only =
-        (vk::QueueFlags)(uint)vk::QueueFlagBits.COMPUTE_BIT;
-    vk::QueueFlags graphics_only =
-        (vk::QueueFlags)(uint)vk::QueueFlagBits.GRAPHICS_BIT;
-    gpu::CompletionConsumerFlags draw_arguments = { .draw_arguments };
-    ulong indirect =
-        (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
-
-    assert((ulong)gpu::internal::vk::submit_wait_scope_to_vk(
-            stages:         {},
-            consumers:      draw_arguments,
-            flags:          graphics_only,
-            generated_work_enabled: false,
-        )!! == indirect,
-        "graphics queues accept draw-argument-only completion waits");
-    assert((ulong)gpu::internal::vk::submit_wait_scope_to_vk(
-            stages:         {},
-            consumers:      draw_arguments,
-            flags:          compute_only,
-            generated_work_enabled: false,
-        )!! == indirect,
-        "compute queues accept draw-argument-only completion waits");
-    ulong generated = indirect
-        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
-    assert((ulong)gpu::internal::vk::submit_wait_scope_to_vk(
-            stages:         {},
-            consumers:      draw_arguments,
-            flags:          graphics_only,
-            generated_work_enabled: true,
-        )!! == generated,
-        "generated work adds the command-preprocess completion-wait stage");
-    ulong mixed = indirect
-        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT;
-    assert((ulong)gpu::internal::vk::submit_wait_scope_to_vk(
-            stages:         { .vertex_shader },
-            consumers:      draw_arguments,
-            flags:          graphics_only,
-            generated_work_enabled: false,
-        )!! == mixed,
-        "ordinary and draw-argument consumers lower to their exact union");
-    assert(@catch(gpu::internal::vk::submit_wait_scope_to_vk(
-            stages:         {},
-            consumers:      draw_arguments,
-            flags:          transfer_only,
-            generated_work_enabled: false,
-        )) == gpu::INVALID_ARGUMENT,
-        "transfer-only queues reject draw-argument consumers");
-    assert(@catch(gpu::internal::vk::submit_wait_scope_to_vk(
-            stages:         { .all },
-            consumers:      draw_arguments,
-            flags:          graphics_only,
-            generated_work_enabled: false,
-        )) == gpu::INVALID_ARGUMENT,
-        "all cannot be combined with a special completion consumer");
-    assert(@catch(gpu::internal::vk::submit_wait_scope_to_vk(
-            stages:         {},
-            consumers:      (gpu::CompletionConsumerFlags)(1u << 1),
-            flags:          graphics_only,
-            generated_work_enabled: false,
-        )) == gpu::INVALID_ARGUMENT,
-        "unknown completion consumer bits are invalid");
 }
 
 fn void semantic_barrier_access_masks_map_exactly() @test {
@@ -1014,18 +980,17 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
         .transfer = true,
         .compute = true,
         .color_output = true,
+        .depth_output = true,
+        .indirect = true,
     };
     ulong before_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_HOST_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
-        | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     assert((ulong)gpu::internal::vk::barrier_before_access_to_vk(stages) == before_expected,
         "producer stages make their writes available");
 
-    gpu::HazardFlags hazards = {
-        .draw_arguments = true,
-        .depth_stencil = true,
-    };
     ulong after_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_HOST_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_TRANSFER_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT
@@ -1036,18 +1001,18 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
         | (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages, hazards)
+    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages)
             == after_expected,
-        "consumer stages and special hazards map to required access scopes");
+        "consumer stages map to required access scopes");
 
     ulong generated_expected = after_expected
         | (ulong)vk::AccessFlagBits2.ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV;
-    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages, hazards, true)
+    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages, true)
             == generated_expected,
         "generated work adds command-preprocess reads without dropping indirect reads");
 
     gpu::StageMask present = { .present = true };
-    assert(gpu::internal::vk::barrier_after_access_to_vk(present, {})
+    assert(gpu::internal::vk::barrier_after_access_to_vk(present)
             == vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT,
         "presentation consumes memory");
 }
@@ -1055,10 +1020,7 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
 fn void semantic_barrier_native_wiring_preserves_direction() @test {
     gpu::Barrier barrier = {
         .before = { .host = true },
-        .after = { .compute = true },
-        .hazards = {
-            .draw_arguments = true,
-        },
+        .after = { .compute = true, .indirect = true },
     };
     vk::MemoryBarrier2 native = gpu::internal::vk::barrier_to_vk(&barrier);
 
@@ -1072,13 +1034,13 @@ fn void semantic_barrier_native_wiring_preserves_direction() @test {
         (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
     assert((ulong)native.dst_stage_mask == expected_dst_stages,
-        "the destination stages come from Barrier.after and hazards");
+        "the destination stages come from Barrier.after");
     ulong expected_dst_access =
         (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT;
     assert((ulong)native.dst_access_mask == expected_dst_access,
-        "the destination access comes from Barrier.after and hazards");
+        "the destination access comes from Barrier.after");
 
     vk::MemoryBarrier2 generated = gpu::internal::vk::barrier_to_vk(&barrier, true);
     assert((ulong)generated.dst_stage_mask
@@ -1119,28 +1081,10 @@ fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
     assert(!gpu::internal::vk::barrier_masks_valid(&present_and_specific),
         "present cannot be combined with a device stage");
 
-    gpu::Barrier present_with_hazard = {
-        .before = { .color_output = true },
-        .after = { .present = true },
-        .hazards = { .draw_arguments = true },
-    };
-    assert(!gpu::internal::vk::barrier_masks_valid(&present_with_hazard),
-        "presentation cannot carry a special hazard");
-
     gpu::Barrier unknown_stage = valid;
-    unknown_stage.before = (gpu::StageMask)((uint)valid.before | 0x200u);
+    unknown_stage.before = (gpu::StageMask)((uint)valid.before | 0x400u);
     assert(!gpu::internal::vk::barrier_masks_valid(&unknown_stage),
         "mixed known and unknown stage-mask bits are invalid");
-
-    gpu::Barrier unknown_hazard = valid;
-    unknown_hazard.hazards = (gpu::HazardFlags)0x8u;
-    assert(!gpu::internal::vk::barrier_masks_valid(&unknown_hazard),
-        "unknown hazard bits are invalid");
-
-    gpu::Barrier retired_descriptor_hazard = valid;
-    retired_descriptor_hazard.hazards = (gpu::HazardFlags)0x2u;
-    assert(!gpu::internal::vk::barrier_masks_valid(&retired_descriptor_hazard),
-        "the retired descriptor hazard bit remains invalid");
 }
 
 fn void semantic_barrier_queue_flags_reject_unsupported_stages() @test {
@@ -1182,35 +1126,33 @@ fn void semantic_barrier_queue_flags_reject_unsupported_stages() @test {
 
     gpu::Barrier draw_arguments = {
         .before = { .transfer = true },
-        .after = { .transfer = true },
-        .hazards = { .draw_arguments = true },
+        .after = { .indirect = true },
     };
     assert(!gpu::internal::vk::barrier_queue_flags_valid(
             &draw_arguments,
             transfer_only,
         ),
-        "transfer-only queues reject indirect-command hazards");
+        "transfer-only queues reject indirect-command stages");
     assert(gpu::internal::vk::barrier_queue_flags_valid(
             &draw_arguments,
             compute_only,
         ),
-        "compute-capable families accept indirect-command hazards");
+        "compute-capable families accept indirect-command stages");
 
     gpu::Barrier depth_stencil = {
         .before = { .transfer = true },
-        .after = { .transfer = true },
-        .hazards = { .depth_stencil = true },
+        .after = { .depth_output = true },
     };
     assert(!gpu::internal::vk::barrier_queue_flags_valid(
             &depth_stencil,
             compute_only,
         ),
-        "compute-only queues reject depth/stencil hazards");
+        "compute-only queues reject depth-output stages");
     assert(gpu::internal::vk::barrier_queue_flags_valid(
             &depth_stencil,
             graphics_only,
         ),
-        "graphics-capable families accept depth/stencil hazards");
+        "graphics-capable families accept depth-output stages");
 }
 
 fn void index_type_validation_rejects_unknown_values() @test {

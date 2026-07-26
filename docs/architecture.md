@@ -537,10 +537,12 @@ The pipeline cache fronts a serializable driver cache:
 ### Synchronization
 
 Each successful submission returns a reusable `CompletionPoint`. Cross-queue
-submission dependencies use consumer-scoped `SubmitDesc.completion_waits`:
-ordinary stages compose with a narrow draw-argument consumer. Same-queue order
-is implicit after point and scope validation. Swapchain readiness remains
-stage-scoped. Native timelines and swapchain semaphores remain backend-private.
+submission dependencies use stage-scoped `SubmitDesc.completion_waits`;
+`before.indirect` names indirect and generated-command input consumption.
+Same-queue order is implicit after point and scope validation. Swapchain
+readiness remains stage-scoped but rejects `indirect`, which does not describe
+image consumption. Native timelines and swapchain semaphores remain
+backend-private.
 Texture layout transitions remain resource-specific because a global barrier
 carries neither texture identity nor subresource range.
 
@@ -777,7 +779,8 @@ cmd_texture_barrier(command_list, TextureBarrier)
 
 `Barrier` declares a global semantic dependency between nonempty stage masks.
 It carries no resource identity, address, range, layout, or queue family;
-special draw-argument, descriptor, and depth/stencil hazards are explicit.
+`indirect` and `depth_output` carry their corresponding destination access
+scopes without side-channel hazard flags.
 `TextureBarrier` declares a texture, subresource range, and compositional
 previous and next states. A `TextureState` carries an independent
 `TextureLayout`, `StageMask`, and read/write `TextureAccess`; sampled and

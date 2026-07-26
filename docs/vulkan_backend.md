@@ -317,8 +317,7 @@ per-list index exhaustion returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` before
 native mutation. Discard and completion return each buffer to its owning
 allocator. `release_generated_scratch` removes one quiescent allocator's
 pipeline/kind reservation.
-A barrier with
-`hazards.draw_arguments` includes both indirect-command and generated
+A barrier with `after.indirect` includes both indirect-command and generated
 command-preprocess reads when this capability is enabled.
 
 The shader-visible heap adds runtime arrays, non-uniform sampled/storage indexing,
@@ -817,7 +816,7 @@ and generated reservation remain the intentional cold allocation points.
 
 Use synchronization2 for barriers.
 
-Translation helpers map semantic global stage/hazard masks and compositional
+Translation helpers map semantic global stage masks and compositional
 texture layout/stage/access states to synchronization2 scopes.
 
 Barrier commands:
@@ -827,13 +826,16 @@ cmd_barrier -> vk::MemoryBarrier2
 cmd_texture_barrier -> vk::ImageMemoryBarrier2
 ```
 
-`cmd_barrier` emits one global memory barrier. Under `FULL`, normal access scopes follow from
-its producer and consumer stages; draw-argument and depth/stencil cache paths
-are enabled only by their hazard flags. Invalid,
-contradictory, consumer-incompatible, or queue-unsupported scopes fault before
-recording under every policy. `FULL` additionally emits the detailed public
-contract diagnostic; `TRUSTED` returns the same fault without diagnostic work.
-Cross-queue ordering remains a submission completion-wait concern.
+`cmd_barrier` emits one global memory barrier. Normal access scopes follow from
+its producer and consumer stages. `after.indirect` adds indirect-command read
+access and, when generated work is enabled, command-preprocess read access;
+`before.indirect` contributes execution stages without source access.
+`depth_output` supplies depth/stencil execution and attachment access.
+Under `FULL`, invalid, contradictory, or queue-unsupported scopes fault with a
+detailed public contract diagnostic before recording. Under `TRUSTED`, stage
+shape and queue compatibility are caller contracts; null barriers and invalid
+command state still fault. Cross-queue ordering remains a submission
+completion-wait concern.
 
 A global barrier emits one `VkMemoryBarrier2` and no
 `VkImageMemoryBarrier2`. Because it has no texture identity or subresource
@@ -863,10 +865,11 @@ directions use it directly. Device creation does not select an alternate
 policy.
 
 The layout also enforces immutable texture usage, format class, WSI ownership,
-and a compatible recording queue. `host` and `present` stage bits are invalid
-inside `TextureState`; unknown layout, stage, or access bits fault before
-recording. View format must be undefined or exactly match the texture. Zero
-mip/layer counts mean the remaining range and are normalized once.
+and a compatible recording queue. Under `FULL`, `host`, `present`, and
+`indirect` stage bits are invalid inside `TextureState`; unknown layout, stage,
+or access bits fault before recording. View format must be undefined or exactly
+match the texture. Zero mip/layer counts mean the remaining range and are
+normalized once.
 
 FULL texture barriers perform one handle resolution, one range
 normalization, two state validations/lowerings, one native assembly, and one
@@ -915,10 +918,10 @@ two words. Reservation and publication allocate nothing.
 
 Every public `submit(queue, desc)` signals one sequence on the selected queue
 and returns its point. Empty batches are valid. Completion waits resolve to the
-owning private timeline and use the exact validated union of
-`CompletionWait.before` and its semantic consumers. `draw_arguments` lowers to
-`VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT`. When generated work is enabled, the
-same semantic also includes `VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_NV`
+owning private timeline and use the exact validated `CompletionWait.before`
+mask. `indirect` lowers to `VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT`. When
+generated work is enabled, the same semantic also includes
+`VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_NV`
 because implicit preprocessing reads generated records before indirect execution.
 Waits owned by the target queue are validated and elided.
 The queue mutex covers sequence reservation and `vkQueueSubmit2`, satisfying
@@ -938,7 +941,6 @@ SubmitDesc
 CompletionWait
     CompletionPoint point
     StageMask before
-    CompletionConsumerFlags consumers
 ```
 
 Host poll and wait reject unpublished sequences. Each selected queue owns an
