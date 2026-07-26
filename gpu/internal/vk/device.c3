@@ -146,12 +146,6 @@ struct VkDeviceState @public {
     SamplerTable               samplers;
     VkPresentationState        presentation;
     VkShaderHeapState          shader_heap;
-    Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_state_validations @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_native_assemblies @if(env::TESTING);
-    Atomic{ulong}              texture_barrier_native_emissions @if(env::TESTING);
     bool                       dynamic_state_observation_enabled @if(env::TESTING);
     ulong                      begin_rendering_emissions @if(env::TESTING);
     ulong                      viewport_emissions @if(env::TESTING);
@@ -179,11 +173,6 @@ struct VkDeviceState @public {
     GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);
     void*                       generated_dispatch_layout_read_user_data @if(env::TESTING);
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);
-    TextureBarrierEmitHook     texture_barrier_emit_hook @if(env::TESTING);
-    void*                      texture_barrier_emit_user_data @if(env::TESTING);
-    BarrierEmitHook            barrier_emit_hook @if(env::TESTING);
-    void*                      barrier_emit_user_data @if(env::TESTING);
-    Atomic{ulong}              barrier_native_emissions @if(env::TESTING);
     SubmissionCheckpointHook  submission_checkpoint_hook @if(env::TESTING);
     void*                     submission_checkpoint_user_data @if(env::TESTING);
     HostAllocator              host_allocator;

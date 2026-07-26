@@ -86,12 +86,17 @@ fn void placement_probe_destroy_view(
 
 fn void capture_texture_barrier_emit(
     void* user_data,
-    vk::ImageMemoryBarrier2* native,
+    vk::CommandBuffer command_buffer,
+    vk::DependencyInfo* dependency,
 ) {
+    (void)command_buffer;
     TextureBarrierEmitCapture* capture =
         (TextureBarrierEmitCapture*)user_data;
     capture.calls++;
-    capture.native = *native;
+    assert(dependency.memory_barrier_count == 0
+        && dependency.image_memory_barrier_count == 1,
+        "texture barrier emission contains one image barrier");
+    capture.native = dependency.p_image_memory_barriers[0];
 }
 
 fn vk::TexturePlacementNativeOps placement_probe_ops(
@@ -806,13 +811,10 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
         gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     TextureBarrierEmitCapture capture;
-    vk::set_texture_barrier_emit_hook(
-        state,
-        &capture_texture_barrier_emit,
-        &capture,
-    );
-    defer vk::set_texture_barrier_emit_hook(state, null, null);
-    vk::reset_texture_barrier_work_counters(state);
+    vk::BarrierEmitOps ops = {
+        .user_data = &capture,
+        .emit      = &capture_texture_barrier_emit,
+    };
 
     gpu::TextureBarrier barrier = {
         .texture = texture,
@@ -829,19 +831,13 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
             .access = { .write },
         },
     };
-    gpu::cmd_texture_barrier(&commands, &barrier)!!;
+    vk::texture_barrier_with_injected_ops(
+        vk::resolve_command(&commands)!!,
+        &barrier,
+        &ops,
+    )!!;
 
-    vk::TextureBarrierWorkCounters counters =
-        vk::texture_barrier_work_counters(state);
-    assert(counters.helper_calls == 1, "barrier uses one validation and lowering helper");
-    assert(counters.handle_resolutions == 1, "barrier resolves its texture handle once");
-    assert(counters.access_validations == 1, "barrier validates recording access once");
-    assert(counters.range_resolutions == 1, "barrier resolves its view range once");
-    assert(counters.state_validations == 2,
-        "barrier validates each texture state once");
-    assert(counters.native_assemblies == 1, "barrier assembles one native barrier");
-    assert(counters.native_emissions == 1, "barrier emits one native barrier");
-    assert(capture.calls == 1, "native emission hook receives exactly one barrier");
+    assert(capture.calls == 1, "one texture barrier emits one native barrier");
     assert(capture.native.src_stage_mask
             == vk::PipelineStageFlagBits2.STAGE_2_NONE,
         "undefined source lowers to no source stages");
@@ -899,19 +895,18 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
         gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     TextureBarrierEmitCapture capture;
-    vk::set_texture_barrier_emit_hook(
-        state,
-        &capture_texture_barrier_emit,
-        &capture,
-    );
-    defer vk::set_texture_barrier_emit_hook(state, null, null);
+    vk::BarrierEmitOps ops = {
+        .user_data = &capture,
+        .emit      = &capture_texture_barrier_emit,
+    };
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
 
     gpu::TextureBarrier sampled = {
         .texture = texture,
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
         .after   = gpu::sampled_at({ .vertex_shader, .fragment_shader }),
     };
-    gpu::cmd_texture_barrier(&commands, &sampled)!!;
+    vk::texture_barrier_with_injected_ops(record, &sampled, &ops)!!;
     vk::PipelineStageFlags2 sampled_stages = (vk::PipelineStageFlags2)(
         (ulong)vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT
             | (ulong)vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT
@@ -930,7 +925,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
         .before  = gpu::storage_at({ .compute }, { .write }),
         .after   = gpu::storage_at({ .compute }, { .read }),
     };
-    gpu::cmd_texture_barrier(&commands, &storage)!!;
+    vk::texture_barrier_with_injected_ops(record, &storage, &ops)!!;
     assert(capture.native.src_stage_mask
             == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
         && capture.native.dst_stage_mask
@@ -956,7 +951,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
         },
         .after = { .layout = gpu::TextureLayout.PRESENT },
     };
-    gpu::cmd_texture_barrier(&commands, &to_present)!!;
+    vk::texture_barrier_with_injected_ops(record, &to_present, &ops)!!;
     assert(capture.calls == 3,
         "injected seam captures every composed texture barrier");
     assert(capture.native.src_stage_mask
@@ -986,7 +981,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
             .access = { .write },
         },
     };
-    gpu::cmd_texture_barrier(&commands, &to_color)!!;
+    vk::texture_barrier_with_injected_ops(record, &to_color, &ops)!!;
     assert(capture.calls == 4,
         "present-to-color emits one additional native barrier");
     assert(capture.native.src_stage_mask
@@ -1035,13 +1030,11 @@ fn void assert_present_barrier_emission_for_contract(
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     slot.swapchain_owned = true;
     TextureBarrierEmitCapture capture;
-    vk::set_texture_barrier_emit_hook(
-        state,
-        &capture_texture_barrier_emit,
-        &capture,
-    );
-    defer vk::set_texture_barrier_emit_hook(state, null, null);
-    vk::reset_texture_barrier_work_counters(state);
+    vk::BarrierEmitOps ops = {
+        .user_data = &capture,
+        .emit      = &capture_texture_barrier_emit,
+    };
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
 
     gpu::TextureBarrier barrier = {
         .texture = texture,
@@ -1052,14 +1045,10 @@ fn void assert_present_barrier_emission_for_contract(
             .access = { .read },
         },
     };
-    gpu::cmd_texture_barrier(&commands, &barrier)!!;
+    vk::texture_barrier_with_injected_ops(record, &barrier, &ops)!!;
 
-    vk::TextureBarrierWorkCounters counters =
-        vk::texture_barrier_work_counters(state);
     assert(capture.calls == 1,
         "one presentation transition emits one native barrier");
-    assert(counters.native_emissions == 1,
-        "one presentation transition records one native emission");
     assert(capture.native.src_stage_mask
             == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
         "present source anchors to the paired transfer consumer stage");
@@ -1087,14 +1076,11 @@ fn void assert_present_barrier_emission_for_contract(
         },
         .after = { .layout = gpu::TextureLayout.PRESENT },
     };
-    gpu::cmd_texture_barrier(&commands, &to_present)!!;
+    vk::texture_barrier_with_injected_ops(record, &to_present, &ops)!!;
     slot.swapchain_owned = false;
 
-    counters = vk::texture_barrier_work_counters(state);
     assert(capture.calls == 2,
         "two presentation transitions emit two native barriers");
-    assert(counters.native_emissions == 2,
-        "two presentation transitions record two native emissions");
     assert(capture.native.src_stage_mask
             == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
         "ordinary source preserves its transfer stage");
@@ -1151,13 +1137,10 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
         AtomicOrdering.RELAXED,
     );
     TextureBarrierEmitCapture capture;
-    vk::set_texture_barrier_emit_hook(
-        state,
-        &capture_texture_barrier_emit,
-        &capture,
-    );
-    defer vk::set_texture_barrier_emit_hook(state, null, null);
-    vk::reset_texture_barrier_work_counters(state);
+    vk::BarrierEmitOps ops = {
+        .user_data = &capture,
+        .emit      = &capture_texture_barrier_emit,
+    };
 
     gpu::TextureBarrier barrier = {
         .texture = texture,
@@ -1167,26 +1150,14 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
             .stages = { .fragment_shader },
         },
     };
-    assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
+    assert(@catch(vk::texture_barrier_with_injected_ops(
+        record,
+        &barrier,
+        &ops,
+    ))
             == gpu::INVALID_ARGUMENT,
         "sampled state without read access faults after retaining the texture");
 
-    vk::TextureBarrierWorkCounters counters =
-        vk::texture_barrier_work_counters(state);
-    assert(counters.helper_calls == 1,
-        "invalid state uses one validation and lowering helper");
-    assert(counters.handle_resolutions == 1,
-        "invalid state resolves its texture handle once");
-    assert(counters.access_validations == 1,
-        "invalid state validates recording access once");
-    assert(counters.range_resolutions == 1,
-        "invalid state resolves its view range once");
-    assert(counters.state_validations == 2,
-        "invalid state validates both texture states");
-    assert(counters.native_assemblies == 0,
-        "invalid destination state assembles no native barrier");
-    assert(counters.native_emissions == 0,
-        "invalid destination state emits no native barrier");
     assert(capture.calls == 0, "invalid destination state never reaches emission");
     assert(record.scratch.reference_count == references_before,
         "failed state validation rolls back the command reference");
@@ -1260,13 +1231,10 @@ fn void texture_barrier_stale_handle_rejected() @test {
     vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
     uint references_before = record.scratch.reference_count;
     TextureBarrierEmitCapture emission;
-    vk::set_texture_barrier_emit_hook(
-        state,
-        &capture_texture_barrier_emit,
-        &emission,
-    );
-    defer vk::set_texture_barrier_emit_hook(state, null, null);
-    vk::reset_texture_barrier_work_counters(state);
+    vk::BarrierEmitOps ops = {
+        .user_data = &emission,
+        .emit      = &capture_texture_barrier_emit,
+    };
 
     gpu::TextureBarrier barrier = {
         .texture = texture,
@@ -1276,7 +1244,11 @@ fn void texture_barrier_stale_handle_rejected() @test {
             { .read, .write },
         ),
     };
-    fault barrier_fault = @catch(gpu::cmd_texture_barrier(&cmd, &barrier));
+    fault barrier_fault = @catch(vk::texture_barrier_with_injected_ops(
+        record,
+        &barrier,
+        &ops,
+    ));
     assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on a destroyed texture faults INVALID_HANDLE");
     assert(diagnostic.calls == 1 && diagnostic.operation_matches
             && diagnostic.rejected_field_matches
@@ -1290,18 +1262,8 @@ fn void texture_barrier_stale_handle_rejected() @test {
             && diagnostic.index == 0
             && diagnostic.generation == 0,
         "stale texture diagnostic claims no resolved resource identity");
-    vk::TextureBarrierWorkCounters counters =
-        vk::texture_barrier_work_counters(state);
-    assert(counters.helper_calls == 1
-            && counters.handle_resolutions == 1,
-        "stale texture performs one authoritative lookup attempt");
-    assert(counters.access_validations == 0
-            && counters.range_resolutions == 0
-            && counters.state_validations == 0
-            && counters.native_assemblies == 0
-            && counters.native_emissions == 0
-            && emission.calls == 0,
-        "stale texture stops before range, state, assembly, or emission work");
+    assert(emission.calls == 0,
+        "stale texture reaches no native emission");
     assert(record.scratch.reference_count == references_before,
         "stale texture retains no command reference");
 

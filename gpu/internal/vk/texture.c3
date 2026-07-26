@@ -112,7 +112,6 @@ struct TextureTable {
     ulong         owner;
     uint          free_head;
     uint          next_new;
-    Atomic{ulong} get_calls @if(env::TESTING);
 }
 
 fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {
@@ -143,9 +142,6 @@ fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {
 }
 
 fn TextureSlot*? TextureTable.get(&self, gpu::TextureHandle h) {
-    $if env::TESTING:
-        (void)self.get_calls.add(1, AtomicOrdering.RELAXED);
-    $endif
     if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;

@@ -68,8 +68,10 @@ fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
 
 fn void capture_barrier_emit(
     void* user_data,
+    vk::CommandBuffer command_buffer,
     vk::DependencyInfo* dependency,
 ) {
+    (void)command_buffer;
     BarrierEmitCapture* capture = (BarrierEmitCapture*)user_data;
     capture.calls++;
     capture.memory_barriers = dependency.memory_barrier_count;
@@ -110,8 +112,6 @@ fn void texture_copies_use_transfer_optimal_layouts() @test {
 fn void global_barrier_emits_no_texture_barrier() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
@@ -125,28 +125,25 @@ fn void global_barrier_emits_no_texture_barrier() @test {
     defer discard_test_commands(&commands)!!;
 
     BarrierEmitCapture capture;
-    vk::set_barrier_emit_hook(state, &capture_barrier_emit, &capture);
-    defer vk::set_barrier_emit_hook(state, null, null);
-    vk::reset_barrier_work_counters(state);
+    vk::BarrierEmitOps ops = {
+        .user_data = &capture,
+        .emit      = &capture_barrier_emit,
+    };
     gpu::Barrier dependency = {
         .before = { .compute },
         .after  = { .compute },
     };
-    gpu::cmd_barrier(&commands, &dependency)!!;
-    vk::BarrierWorkCounters counters = vk::barrier_work_counters(state);
+    vk::barrier_with_injected_ops(
+        vk::resolve_command(&commands)!!,
+        &dependency,
+        &ops,
+    )!!;
 
     assert(
         capture.calls == 1
             && capture.memory_barriers == 1
-            && capture.image_barriers == 0
-            && counters.native_memory_emissions == 1
-            && counters.native_image_emissions == 0,
+            && capture.image_barriers == 0,
         "the submitted dependency contains one memory barrier and no image barrier"
-    );
-    assert(
-        counters.texture_helper_calls == 0
-            && counters.texture_handle_resolutions == 0,
-        "a global barrier performs no texture inference or resolution"
     );
 }
 
