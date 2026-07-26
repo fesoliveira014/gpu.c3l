@@ -1,7 +1,9 @@
 # Getting started
 
-This walkthrough builds a minimal compute program on Linux or Windows. CI
-compiles and runs the embedded project on lavapipe.
+This walkthrough builds a minimal compute program on Linux or Windows. The
+canonical compilable copy lives in
+[`examples/getting_started`](../examples/getting_started/), and CI compiles
+and runs it on lavapipe.
 
 ## 1. Toolchain
 
@@ -49,7 +51,7 @@ Create a directory and vendor the library. `gpu.c3l` brings its own
 backend bindings (`vk`, `vma`, `spvreflect`) as submodules, so clone
 recursively:
 
-```sh run
+```sh
 mkdir -p hello_gpu/lib hello_gpu/src hello_gpu/shaders
 cd hello_gpu
 git clone --quiet --recurse-submodules "${GPU_C3L_URL:-https://github.com/fesoliveira014/gpu.c3l}" lib/gpu.c3l
@@ -65,7 +67,7 @@ building the program. Follow the `windows-x64 setup` section in
 Wire it up. Two search paths — your `lib/` for `gpu`, and the library's
 own `lib/` for the bindings it vendors:
 
-```json file=hello_gpu/project.json
+```json
 {
   "langrev": "1",
   "dependency-search-paths": [ "lib", "lib/gpu.c3l/lib" ],
@@ -129,7 +131,7 @@ textures.
 
 The root struct below is this program's whole binding model:
 
-```glsl file=hello_gpu/shaders/doubler.comp.glsl
+```glsl
 #version 460
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
@@ -157,7 +159,7 @@ void main() {
 
 Compile it to SPIR-V:
 
-```sh run
+```sh
 cd hello_gpu
 glslangValidator --target-env vulkan1.3 -o shaders/doubler.comp.spv shaders/doubler.comp.glsl
 ```
@@ -168,7 +170,7 @@ The C3 side declares the same 24-byte root struct, stores it in a caller-owned
 `CPU_WRITE` allocation, and hands its GPU address to `cmd_dispatch`. Errors are
 C3 optionals throughout — `!` propagates, no error codes to check:
 
-```c3 file=hello_gpu/src/main.c3
+```c3
 module hello_gpu;
 
 import gpu;
@@ -314,7 +316,7 @@ the GPU; without that wait (or a successful poll), it would return
 
 ## 5. Build and run
 
-```sh run
+```sh
 cd hello_gpu
 c3c build hello_gpu
 ./build/hello_gpu

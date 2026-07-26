@@ -1,0 +1,12 @@
+{
+  "langrev": "1",
+  "dependency-search-paths": [ "../../..", "../../lib" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
+  "output": "build",
+  "targets": {
+    "hello_gpu": {
+      "type": "executable",
+      "sources": [ "src/main.c3" ]
+    }
+  }
+}
