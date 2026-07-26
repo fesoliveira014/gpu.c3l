@@ -1122,9 +1122,9 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
 }
 
 <* Record a global semantic execution and memory barrier.
-   Preconditions: stages and hazards are known, consistent, and queue-supported.
+   Preconditions: stages are known, consistent, and queue-supported.
    Always checked: token identity, authoritative phase, and required pointer.
-   FULL diagnostics: stage, hazard, and queue-support misuse. *>
+   FULL diagnostics: stage and queue-support misuse. *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
@@ -1631,10 +1631,7 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     }
     foreach (wait : desc.completion_waits) {
         gpu::internal::validate_completion_point(&operation, &device, wait.point)!;
-        if (!gpu::internal::completion_wait_scope_valid(
-            wait.before,
-            wait.consumers,
-        )) {
+        if (!gpu::internal::submit_wait_stage_mask_valid(wait.before)) {
             return INVALID_ARGUMENT~;
         }
     }
@@ -1644,7 +1641,8 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
             return INVALID_HANDLE~;
         }
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
-        if (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)) {
+        if (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
+            || desc.readiness_before.indirect) {
             return INVALID_ARGUMENT~;
         }
     } else if ((uint)desc.readiness_before != 0) {

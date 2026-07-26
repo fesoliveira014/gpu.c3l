@@ -63,7 +63,10 @@ FIXTURES = {
     "global_barrier": "GlobalBarrier",
     "stage": "Stage",
     "hazard": "Hazard",
-    "hazard_descriptors": "descriptors",
+    "completion_consumer_flags": "CompletionConsumerFlags",
+    "hazard_flags": "HazardFlags",
+    "completion_wait_consumers": "consumers",
+    "barrier_hazards": "hazards",
     "texture_use": "TextureUse",
     "prior_use": "prior_use",
     "cmd_buffer_barrier": "cmd_buffer_barrier",
@@ -172,6 +175,8 @@ INVALID_MEMBER_TYPES = {
     "retired_compute_push_constant": "ComputePipelineDesc",
     "color_target_state_format": "ColorTargetState",
     "prior_use": "AcquiredImage",
+    "completion_wait_consumers": "CompletionWait",
+    "barrier_hazards": "Barrier",
 }
 
 ENUM_VALUES = {
@@ -187,7 +192,6 @@ ENUM_VALUES = {
 
 FIELD_OR_METHODS = {
     "timeline_caps": "DeviceCaps.timeline_semaphore",
-    "hazard_descriptors": "HazardFlags.descriptors",
     "descriptor_buffer_caps": "DeviceCaps.descriptor_buffer",
     "descriptor_indexing_caps": "DeviceCaps.descriptor_indexing",
     "max_texture_descriptors_caps": "DeviceCaps.max_texture_descriptors",
@@ -279,6 +283,27 @@ LIVE_RETIRED_PATTERNS = {
     ),
     "create_graphics_pipelines": re.compile(
         r"(?<!vk::)\bcreate_graphics_pipelines\b"
+    ),
+    "CompletionConsumerFlags": re.compile(
+        r"\bCompletionConsumerFlags\b"
+    ),
+    "HazardFlags": re.compile(
+        r"\bHazardFlags\b"
+    ),
+    "COMPLETION_CONSUMER_BITS": re.compile(
+        r"\bCOMPLETION_CONSUMER_BITS\b"
+    ),
+    "completion_wait_scope_valid": re.compile(
+        r"\bcompletion_wait_scope_valid\b"
+    ),
+    "BARRIER_HAZARD_BITS": re.compile(
+        r"\bBARRIER_HAZARD_BITS\b"
+    ),
+    "barrier_hazards_known": re.compile(
+        r"\bbarrier_hazards_known\b"
+    ),
+    "submit_wait_scope_to_vk": re.compile(
+        r"\bsubmit_wait_scope_to_vk\b"
     ),
 }
 README_RETIRED_PATTERNS = {

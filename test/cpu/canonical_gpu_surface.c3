@@ -162,10 +162,10 @@ fn void pin_commands_and_completion() {
     };
     gpu::Barrier barrier = {
         .before = { .compute = true },
-        .after  = { .compute = true },
-        .hazards = {
-            .draw_arguments = true,
-            .depth_stencil  = true,
+        .after  = {
+            .compute      = true,
+            .depth_output = true,
+            .indirect     = true,
         },
     };
     gpu::TextureHandle texture = {};

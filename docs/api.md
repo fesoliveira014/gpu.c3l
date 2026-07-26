@@ -1075,10 +1075,6 @@ CompletionPoint
 CompletionWait
     CompletionPoint point
     StageMask before
-    CompletionConsumerFlags consumers
-
-CompletionConsumerFlags
-    bool draw_arguments
 
 Queue
     Device device
@@ -1219,17 +1215,19 @@ the next reuse after completion or discard.
 
 `SubmitDesc.completion_waits` accepts published points from the same device.
 Each `CompletionWait` names the first destination consumers of the dependency.
-`before` selects ordinary stages and `consumers.draw_arguments` selects indirect
-draw, indirect dispatch, indirect count, and implicitly preprocessed generated
-command records. At least one stage or consumer is required. `host` and
-`present` are invalid; `all` is allowed only by itself and cannot be combined
-with a consumer. Unknown or unsupported masks fault `INVALID_ARGUMENT`.
-Draw-argument consumers require a graphics- or compute-capable destination
-queue. Cross-queue points become waits on their queue-owned timelines with the
-exact requested union. Published points from the target queue are validated and
-then elided because queue order is inherent. Stale, unpublished, malformed, and
-foreign-device points fault `INVALID_HANDLE` before native submission and
-preserve every command token.
+`before.indirect` selects indirect draw, indirect dispatch, indirect count, and
+implicitly preprocessed generated-command records. The mask must be nonempty;
+`host` and `present` are invalid, and `all` is allowed only by itself. Unknown or
+unsupported masks fault `INVALID_ARGUMENT`. `indirect` requires a graphics- or
+compute-capable destination queue. Cross-queue points become waits on their
+queue-owned timelines with the exact requested mask. Published points from the
+target queue are validated and then elided because queue order is inherent.
+Stale, unpublished, malformed, and foreign-device points fault
+`INVALID_HANDLE` before native submission and preserve every command token.
+
+`SubmitDesc.readiness_before` names the first stage that consumes an acquired
+swapchain image. It rejects `indirect` under every validation policy; select the
+actual image-consuming transfer, shader, color-output, or depth-output stage.
 If outstanding queue progress reaches the device's timeline-value-difference
 limit, submission faults retryable `DEVICE_BUSY` before reserving a sequence.
 
@@ -1703,7 +1701,7 @@ queue, count, and index-type precondition violations.
 Each GPU-written `DispatchIndirectCommand` component must not exceed the
 corresponding `DeviceCaps.max_compute_work_group_count` component. Ordering
 between argument writes and indirect consumption is the caller's barrier with
-`hazards.draw_arguments` set.
+`after.indirect` set.
 
 The count variant requires `DeviceCaps.draw_indirect_count` and faults
 `UNSUPPORTED_FEATURE` without it.
@@ -1764,18 +1762,11 @@ StageMask
     color_output
     depth_output
     present
-
-HazardFlags
-    draw_arguments
-    depth_stencil
-
-CompletionConsumerFlags
-    draw_arguments
+    indirect
 
 Barrier
     StageMask before
     StageMask after
-    HazardFlags hazards
 
 cmd_barrier(CommandList* commands, Barrier* barrier) -> void?
 ```
@@ -1783,17 +1774,19 @@ cmd_barrier(CommandList* commands, Barrier* barrier) -> void?
 `Barrier` is a global execution and memory dependency. It has no resource
 handle, address, range, layout, or queue-family field. As preconditions, each
 stage mask is nonempty; `all` and `present` are each exclusive; bits are known;
-and hazards and stages are consistent with the recording queue. `FULL`
-diagnoses those semantic violations with `INVALID_ARGUMENT`. Required pointer
-and authoritative phase checks remain active under every policy.
+and stages are consistent with the recording queue. `FULL` diagnoses those
+semantic violations with `INVALID_ARGUMENT`. Under `TRUSTED`, stage shape and
+queue compatibility remain caller contracts; null-barrier and authoritative
+command-state checks remain active.
 
 Normal host, transfer, shader, color-output, and depth-output access scopes are
-derived from the stage masks. `draw_arguments` and `depth_stencil` opt into
-special consumer data paths. The former descriptor-hazard bit remains invalid
-and raw masks containing it fault `INVALID_ARGUMENT` under every policy; it is
-not reinterpreted as `depth_stencil`. Descriptor-set publication has no public
-GPU memory-hazard bit. The library does not infer barriers. Cross-queue
-dependencies use `SubmitDesc.completion_waits`, not `cmd_barrier`.
+derived from the stage masks. `after.indirect` adds indirect-command reads and,
+when generated work is enabled, command-preprocess reads. `before.indirect`
+adds the matching execution scope without inventing source access.
+`depth_output` supplies the depth/stencil execution and read/write scope.
+Descriptor-set publication has no public GPU memory-hazard bit. The library
+does not infer barriers. Cross-queue dependencies use
+`SubmitDesc.completion_waits`, not `cmd_barrier`.
 
 Texture transitions remain explicit and semantic:
 
@@ -1856,10 +1849,11 @@ The semantic matrix is exact:
 | `PRESENT` | `VK_IMAGE_LAYOUT_PRESENT_SRC_KHR` | empty | empty | swapchain-owned non-depth texture; graphics queue |
 
 Known bits, legal layouts, and stage/access consistency are caller
-preconditions. Texture states cannot name the global-only `host` or `present`
-stage bits. `FULL` diagnoses those semantic violations with
-`INVALID_ARGUMENT`; `TRUSTED` does not promise that
-diagnostic. Same-state transitions remain valid explicit memory dependencies.
+preconditions. Texture states cannot name the global-only `host`, `present`, or
+`indirect` stage bits. `FULL` diagnoses those semantic violations with
+`INVALID_ARGUMENT`; under `TRUSTED`, layout, stage, access, and queue
+compatibility remain caller contracts. Same-state transitions remain valid
+explicit memory dependencies.
 Sampled depth/stencil textures lower to the appropriate read-only depth/stencil
 layout.
 

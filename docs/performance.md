@@ -467,9 +467,9 @@ for collecting debug cost with a matching layer.
   command list is discarded or completed.
 - Queue overlap depends on topology, driver scheduling, and workload balance;
   treat it as an observation, not a guarantee. For cross-queue dependencies,
-  choose the earliest real consumer in `CompletionWait.before` and
-  `CompletionWait.consumers`; an unnecessarily broad `.all` mask can reduce
-  available overlap. Use `consumers.draw_arguments` for GPU-produced indirect,
-  count, and implicitly preprocessed generated-command input. The Vulkan backend
-  includes command-preprocess scope automatically when generated work is enabled.
+  choose the earliest real consumer in `CompletionWait.before`; an
+  unnecessarily broad `.all` mask can reduce available overlap. Use
+  `before.indirect` for GPU-produced indirect, count, and implicitly
+  preprocessed generated-command input. The Vulkan backend includes
+  command-preprocess scope automatically when generated work is enabled.
   Narrower waits permit overlap but do not guarantee it.

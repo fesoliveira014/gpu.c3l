@@ -1133,9 +1133,25 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
         "invalid readiness stage preserves the one-shot token");
 
+    gpu::SubmitDesc indirect_stage = {
+        .readiness        = readiness,
+        .readiness_before = { .indirect },
+    };
+    assert(@catch(vk::vk_submit_with(
+        state,
+        graphics,
+        &indirect_stage,
+        &accept_swapchain_submit,
+    )) == gpu::INVALID_ARGUMENT,
+        "readiness rejects an indirect destination stage");
+    assert(accepted_swapchain_submit_calls == 0,
+        "indirect readiness reaches no native submit");
+    assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
+        "indirect readiness preserves the one-shot token");
+
     gpu::CompletionWait[1] invalid_waits = {{
-        .point     = prior,
-        .consumers = (gpu::CompletionConsumerFlags)(1u << 1),
+        .point  = prior,
+        .before = (gpu::StageMask)(1u << 10),
     }};
     gpu::SubmitDesc invalid_scope = {
         .completion_waits = invalid_waits[..],
@@ -1605,8 +1621,8 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
         gpu::CompletionPoint produced = gpu::submit(compute, &producer)!!;
         gpu::wait_completion(produced)!!;
         gpu::CompletionWait[1] waits = {{
-            .point     = produced,
-            .consumers = { .draw_arguments },
+            .point  = produced,
+            .before = { .indirect },
         }};
         gpu::SubmitDesc consumer = { .completion_waits = waits[..] };
         draw_argument_wait_submit_calls = 0;
@@ -1666,31 +1682,30 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
     assert(lists[0].is_valid(),
         "invalid wait stages preserve the executable token");
 
-    waits[0].consumers = (gpu::CompletionConsumerFlags)(1u << 1);
+    waits[0].before = (gpu::StageMask)(1u << 10);
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
-        "unknown completion consumer bits are rejected");
+        "unknown completion stage bits are rejected");
     assert(lists[0].is_valid(),
-        "unknown completion consumers preserve the executable token");
+        "unknown completion stages preserve the executable token");
 
     waits[0] = {
-        .point     = prior,
-        .before    = { .all },
-        .consumers = { .draw_arguments },
+        .point  = prior,
+        .before = { .all, .indirect },
     };
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
-        "all cannot be combined with a completion consumer");
+        "all cannot be combined with another completion stage");
     assert(lists[0].is_valid(),
         "contradictory completion scopes preserve the executable token");
 
     waits[0] = {
-        .point     = prior,
-        .consumers = { .draw_arguments },
+        .point  = prior,
+        .before = { .indirect },
     };
     gpu::CompletionPoint completion = gpu::submit(queue, &desc)!!;
     gpu::wait_completion(completion, 1_000_000_000)!!;
 }
 
-fn void queue_incompatible_completion_consumer_rejects_through_submit() @test {
+fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
     gpu::Device device = make_submit_stats_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -1708,8 +1723,8 @@ fn void queue_incompatible_completion_consumer_rejects_through_submit() @test {
     defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::CompletionWait[1] waits = {{
-        .point     = prior,
-        .consumers = { .draw_arguments },
+        .point  = prior,
+        .before = { .indirect },
     }};
     gpu::SubmitDesc desc = {
         .command_lists    = lists[..],
@@ -1726,11 +1741,11 @@ fn void queue_incompatible_completion_consumer_rejects_through_submit() @test {
     ulong submits_before = stats_of(&device).queue_submits;
 
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
-        "a real submit rejects consumers unsupported by the target queue");
+        "a real submit rejects stages unsupported by the target queue");
     assert(stats_of(&device).queue_submits == submits_before,
-        "queue-consumer rejection reaches no native submit");
+        "queue-stage rejection reaches no native submit");
     assert(lists[0].is_valid(),
-        "queue-consumer rejection preserves the executable token");
+        "queue-stage rejection preserves the executable token");
 
     completion.queue_flags = selected_flags;
     gpu::CompletionPoint completed = gpu::submit(queue, &desc)!!;
@@ -1755,8 +1770,8 @@ fn void same_queue_wait_elides_through_full_submit_path() @test {
     defer discard_test_executable(&executable)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::CompletionWait[1] waits = {{
-        .point     = prior,
-        .consumers = { .draw_arguments },
+        .point  = prior,
+        .before = { .indirect },
     }};
     gpu::SubmitDesc desc = {
         .command_lists    = lists[..],

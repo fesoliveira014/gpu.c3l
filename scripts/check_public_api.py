@@ -388,6 +388,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "shader_code_digest",
     "shader_stage_valid",
     "cmd_begin_render_pass_with_state(",
+    "completion_wait_scope_valid(",
+    "COMPLETION_CONSUMER_BITS",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -482,6 +484,9 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "pipeline_creation_should_fail",
     "pipeline_prepare_poison",
     "poison_unprepared_shader_identities",
+    "submit_wait_scope_to_vk",
+    "barrier_hazards_known",
+    "BARRIER_HAZARD_BITS",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
@@ -1682,8 +1687,6 @@ def validate_document(document: dict) -> list[str]:
         ("BufferTextureCopyDesc", "struct"),
         ("TextureBufferCopyDesc", "struct"),
         ("StageMask", "bitstruct"),
-        ("HazardFlags", "bitstruct"),
-        ("CompletionConsumerFlags", "bitstruct"),
         ("Barrier", "struct"),
         ("TextureLayout", "enum"),
         ("TextureAccess", "bitstruct"),
@@ -1696,6 +1699,10 @@ def validate_document(document: dict) -> list[str]:
         definition = types.get(name)
         if definition is None or definition.get("kind") != kind:
             failures.append(f"missing {name} {kind}")
+
+    for retired_name in ("HazardFlags", "CompletionConsumerFlags"):
+        if retired_name in types:
+            failures.append(f"retired synchronization type {retired_name}")
 
     texture_compatibility = types.get("TextureCompatibility", {})
     if texture_compatibility.get("base_type", {}).get("name") != "uint128":
@@ -1888,9 +1895,8 @@ def validate_document(document: dict) -> list[str]:
             (
                 ("before", "StageMask"),
                 ("after", "StageMask"),
-                ("hazards", "HazardFlags"),
             ),
-            "Barrier must contain only semantic stage masks and hazard flags",
+            "Barrier must contain only semantic stage masks",
         ),
         "TextureLayout": (
             (
@@ -1990,13 +1996,7 @@ def validate_document(document: dict) -> list[str]:
             "color_output",
             "depth_output",
             "present",
-        ),
-        "HazardFlags": (
-            ("draw_arguments", 0),
-            ("depth_stencil", 2),
-        ),
-        "CompletionConsumerFlags": (
-            "draw_arguments",
+            "indirect",
         ),
         "TextureAccess": (
             "read",
@@ -2052,9 +2052,8 @@ def validate_document(document: dict) -> list[str]:
     if member_schema(types.get("CompletionWait")) != (
         ("point", "CompletionPoint"),
         ("before", "StageMask"),
-        ("consumers", "CompletionConsumerFlags"),
     ):
-        failures.append("CompletionWait must match the exact consumer-scoped schema")
+        failures.append("CompletionWait must match the exact stage-scoped schema")
 
     submit_desc = types.get("SubmitDesc")
     submit_schema = member_schema(submit_desc)

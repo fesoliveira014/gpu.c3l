@@ -748,8 +748,6 @@ fn void? vk_cmd_barrier(
     if (rejected_field != null) {
         if (rejected_field.str_view() == "Barrier") {
             invariant = "barrier must be non-null";
-        } else if (rejected_field.str_view() == "Barrier.hazards") {
-            invariant = "hazard flags must be known and match the consumer stages";
         } else {
             invariant = "stage mask must be nonempty and noncontradictory";
         }
@@ -763,9 +761,7 @@ fn void? vk_cmd_barrier(
             completion.queue_flags,
         );
         if (rejected_field != null) {
-            invariant = rejected_field.str_view() == "Barrier.hazards"
-                ? "hazard flags must be supported by the recording queue"
-                : "stage mask must be supported by the recording queue";
+            invariant = "stage mask must be supported by the recording queue";
         }
     }
     if (rejected_field != null) {
@@ -796,9 +792,6 @@ fn void? trusted_barrier(
     gpu::Barrier* barrier,
 ) {
     if (barrier == null) return gpu::INVALID_ARGUMENT~;
-    if (!barrier_hazards_known(barrier.hazards)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;

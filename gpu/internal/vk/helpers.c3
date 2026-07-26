@@ -8,7 +8,6 @@ import vk;
 // Vulkan 1.3 in the (variant<<29)|(major<<22)|(minor<<12)|patch layout. The
 // binding ships no API_VERSION_1_3 constant.
 const uint API_VERSION_1_3 = (1u << 22) | (3u << 12);
-const uint BARRIER_HAZARD_BITS = 0x0005;
 
 enum WsiResultKind : int {
     SURFACE,
@@ -283,7 +282,10 @@ fn void? check_wait(vk::Result result) @private {
     return public_fault~;
 }
 
-fn vk::PipelineStageFlags2 barrier_before_stages_to_vk(gpu::StageMask stages) {
+fn vk::PipelineStageFlags2 barrier_before_stages_to_vk(
+    gpu::StageMask stages,
+    bool generated_work = false,
+) {
     if (stages.all || stages.present) {
         return vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT;
     }
@@ -310,26 +312,20 @@ fn vk::PipelineStageFlags2 barrier_before_stages_to_vk(gpu::StageMask stages) {
         mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
             | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT;
     }
-    return (vk::PipelineStageFlags2)mask;
-}
-
-fn vk::PipelineStageFlags2 barrier_after_stages_to_vk(
-    gpu::StageMask stages,
-    gpu::HazardFlags hazards,
-    bool generated_work = false,
-) {
-    ulong mask = (ulong)barrier_before_stages_to_vk(stages);
-    if (hazards.draw_arguments) {
+    if (stages.indirect) {
         mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
         if (generated_work) {
             mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
         }
     }
-    if (hazards.depth_stencil) {
-        mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
-            | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-    }
     return (vk::PipelineStageFlags2)mask;
+}
+
+fn vk::PipelineStageFlags2 barrier_after_stages_to_vk(
+    gpu::StageMask stages,
+    bool generated_work = false,
+) {
+    return barrier_before_stages_to_vk(stages, generated_work);
 }
 
 fn vk::AccessFlags2 barrier_before_access_to_vk(gpu::StageMask stages) {
@@ -356,7 +352,6 @@ fn vk::AccessFlags2 barrier_before_access_to_vk(gpu::StageMask stages) {
 
 fn vk::AccessFlags2 barrier_after_access_to_vk(
     gpu::StageMask stages,
-    gpu::HazardFlags hazards,
     bool generated_work = false,
 ) {
     ulong mask;
@@ -384,15 +379,11 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
     if (stages.present) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT;
     }
-    if (hazards.draw_arguments) {
+    if (stages.indirect) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT;
         if (generated_work) {
             mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV;
         }
-    }
-    if (hazards.depth_stencil) {
-        mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
-            | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     }
     return (vk::AccessFlags2)mask;
 }
@@ -402,16 +393,17 @@ fn vk::MemoryBarrier2 barrier_to_vk(
     bool generated_work = false,
 ) {
     return vk::memory_barrier2()
-        .set_src_stage_mask(barrier_before_stages_to_vk(barrier.before))
+        .set_src_stage_mask(barrier_before_stages_to_vk(
+            barrier.before,
+            generated_work,
+        ))
         .set_src_access_mask(barrier_before_access_to_vk(barrier.before))
         .set_dst_stage_mask(barrier_after_stages_to_vk(
             barrier.after,
-            barrier.hazards,
             generated_work,
         ))
         .set_dst_access_mask(barrier_after_access_to_vk(
             barrier.after,
-            barrier.hazards,
             generated_work,
         ));
 }
@@ -420,21 +412,10 @@ fn bool barrier_stage_mask_valid(gpu::StageMask stages) @private {
     return gpu::internal::stage_mask_valid(stages);
 }
 
-fn bool barrier_hazards_known(gpu::HazardFlags hazards) {
-    uint raw = (uint)hazards;
-    return (raw & BARRIER_HAZARD_BITS) == raw;
-}
-
 fn ZString barrier_masks_rejected_field(gpu::Barrier* barrier) {
     if (barrier == null) return "Barrier";
     if (!barrier_stage_mask_valid(barrier.before)) return "Barrier.before";
     if (!barrier_stage_mask_valid(barrier.after)) return "Barrier.after";
-    uint hazards = (uint)barrier.hazards;
-    if (!barrier_hazards_known(barrier.hazards)
-        || (hazards != 0
-            && (barrier.before.present || barrier.after.present))) {
-        return "Barrier.hazards";
-    }
     return null;
 }
 
@@ -465,6 +446,7 @@ fn bool barrier_stage_mask_supported(
         && !graphics) {
         return false;
     }
+    if (stages.indirect && !graphics && !compute) return false;
     return true;
 }
 
@@ -472,6 +454,7 @@ fn bool barrier_stage_mask_supported(
 fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
     gpu::StageMask stages,
     vk::QueueFlags flags,
+    bool generated_work = false,
 ) {
     if (!barrier_stage_mask_valid(stages)
         || stages.host
@@ -479,37 +462,7 @@ fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
         || !barrier_stage_mask_supported(stages, flags)) {
         return gpu::INVALID_ARGUMENT~;
     }
-    return barrier_before_stages_to_vk(stages);
-}
-
-<* Validate and lower every first consumer of a completion wait. *>
-fn vk::PipelineStageFlags2? submit_wait_scope_to_vk(
-    gpu::StageMask stages,
-    gpu::CompletionConsumerFlags consumers,
-    vk::QueueFlags flags,
-    bool generated_work_enabled,
-) {
-    if (!gpu::internal::completion_wait_scope_valid(stages, consumers)
-        || !barrier_stage_mask_supported(stages, flags)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    bool graphics = queue_flags_include(flags, vk::QueueFlagBits.GRAPHICS_BIT);
-    bool compute = queue_flags_include(flags, vk::QueueFlagBits.COMPUTE_BIT);
-    if (consumers.draw_arguments && !graphics && !compute) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-
-    ulong mask;
-    if ((uint)stages != 0) {
-        mask = (ulong)barrier_before_stages_to_vk(stages);
-    }
-    if (consumers.draw_arguments) {
-        mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
-        if (generated_work_enabled) {
-            mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
-        }
-    }
-    return (vk::PipelineStageFlags2)mask;
+    return barrier_before_stages_to_vk(stages, generated_work);
 }
 
 fn ZString barrier_queue_rejected_field(
@@ -521,13 +474,6 @@ fn ZString barrier_queue_rejected_field(
     }
     if (!barrier_stage_mask_supported(barrier.after, flags)) {
         return "Barrier.after";
-    }
-    bool graphics = queue_flags_include(flags, vk::QueueFlagBits.GRAPHICS_BIT);
-    bool compute = queue_flags_include(flags, vk::QueueFlagBits.COMPUTE_BIT);
-    bool shader_queue = graphics || compute;
-    if ((barrier.hazards.draw_arguments && !shader_queue)
-        || (barrier.hazards.depth_stencil && !graphics)) {
-        return "Barrier.hazards";
     }
     return null;
 }

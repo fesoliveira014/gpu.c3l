@@ -2446,7 +2446,7 @@ fn void barrier_contradictory_mask_faults() @test {
     defer discard_test_executable(&executable)!!;
 }
 
-fn void barrier_retired_descriptor_hazard_faults() @test {
+fn void barrier_unknown_stage_bit_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
@@ -2455,14 +2455,13 @@ fn void barrier_retired_descriptor_hazard_faults() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
-        .before  = { .compute = true },
-        .after   = { .compute = true },
-        .hazards = (gpu::HazardFlags)0x2u,
+        .before = (gpu::StageMask)(1u << 10),
+        .after  = { .compute = true },
     };
 
     fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
     assert(rejected == gpu::INVALID_ARGUMENT,
-        "the retired descriptor hazard bit faults INVALID_ARGUMENT");
+        "an unknown stage bit faults INVALID_ARGUMENT");
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;
@@ -2588,13 +2587,11 @@ fn void barrier_hazard_matrix_submits() @test {
         },
         {
             .before = { .compute = true },
-            .after = { .compute = true },
-            .hazards = { .draw_arguments = true },
+            .after = { .compute = true, .indirect = true },
         },
         {
             .before = { .compute = true },
-            .after = { .compute = true },
-            .hazards = { .depth_stencil = true },
+            .after = { .compute = true, .depth_output = true },
         },
         {
             .before = {

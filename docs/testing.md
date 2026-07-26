@@ -72,7 +72,7 @@ allocation range, alignment, access, and class validation without Vulkan
 caller-owned allocation and completion lifetime contracts
 MemoryClass policy table completeness
 Format translation table completeness through pure tables if separated
-global barrier stage/hazard/queue validation and exact Vulkan scope mapping
+global barrier stage/queue validation and exact Vulkan scope mapping
 single-profile texture-layout mapping completeness and exact Vulkan lowering
 shader ABI scalar widths plus generated-work record sizes, offsets, and strides
 TextureView owner/generation validation and descriptor-heap free-list reuse
@@ -141,7 +141,7 @@ completion-point signaling, retired-prefix publication, cached polls/waits,
 and deterministic publication/concurrent-retirement races
 exact ordinary/generated completion-wait stage lowering and distinct-family
 compute-producer to graphics generated-work execution when topology permits
-global semantic barrier hazard matrix submission
+global semantic barrier stage matrix submission
 copy upload -> readback
 root-pointer compute shader
 TextureView publication and raw TextureIndex sampling in compute
@@ -609,7 +609,7 @@ outcomes plus zero-through-one compact-key probes for 1 KiB, 64 KiB, and 1 MiB i
 lookup-side counters require zero shader probes, byte comparisons, and clones
 after interning, mirroring the blocking `vk_pipeline_cache` scale test; elapsed
 boundary time remains advisory. Command recording covers ordinary and
-semantic-hazard barriers, indirect dispatch, and capability-gated generated
+stage-only memory-hazard barriers, indirect dispatch, and capability-gated generated
 dispatch with the sole direct representation. The target runs the two contract
 modes and reports direct recording/executable token sizes,
 authoritative-record, cell, and total fixed-storage sizes plus lists containing

@@ -1091,7 +1091,7 @@ struct RenderPassDesc {
 const ulong TIMEOUT_INFINITE = ulong::max;
 const CompletionPoint COMPLETION_POINT_INVALID = {};
 
-<* Execution scopes for a global barrier. `all` and `present` are exclusive. *>
+<* Execution scopes. `all` and `present` are exclusive. *>
 bitstruct StageMask : uint {
     bool all             : 0;
     bool host            : 1;
@@ -1102,18 +1102,7 @@ bitstruct StageMask : uint {
     bool color_output    : 6;
     bool depth_output    : 7;
     bool present         : 8;
-}
-
-<* Explicit invalidation for special GPU data paths.
-   Bit 1 is retired and remains invalid. *>
-bitstruct HazardFlags : uint {
-    bool draw_arguments : 0;
-    bool depth_stencil  : 2;
-}
-
-<* Special command consumers not represented by ordinary execution stages. *>
-bitstruct CompletionConsumerFlags : uint {
-    bool draw_arguments : 0;
+    bool indirect        : 9;
 }
 
 <* Texture layout for explicit transitions. *>
@@ -1143,16 +1132,14 @@ struct CompletionPoint {
 
 <* A published queue completion and its first destination consumers. *>
 struct CompletionWait {
-    CompletionPoint         point;
-    StageMask               before;
-    CompletionConsumerFlags consumers;
+    CompletionPoint point;
+    StageMask       before;
 }
 
 <* Global execution and memory dependency with no resource identity or range. *>
 struct Barrier {
-    StageMask   before;
-    StageMask   after;
-    HazardFlags hazards;
+    StageMask before;
+    StageMask after;
 }
 
 <* Layout, execution stages, and access intent for one texture use. The zero
