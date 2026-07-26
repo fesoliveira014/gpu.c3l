@@ -499,7 +499,7 @@ fn gpu::Device? create_vk_device_with_probe(
         presentation_surface_owner: requested_surface.is_valid()
             ? &requested_surface
             : null,
-        queue_requirements:         &normalized.queues,
+        queue_request:              &normalized.queues,
         shader_heap_support:        &adapter_state.shader_heap,
         probe:                      probe,
     );
@@ -535,7 +535,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     VkRuntimeState* runtime_state = null,
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null,
     gpu::Surface* presentation_surface_owner = null,
-    gpu::QueueRequirements* queue_requirements = null,
+    gpu::QueueRequest* queue_request = null,
     ShaderHeapSupport* shader_heap_support = null,
     DeviceCreationProbe* probe = null,
 ) @private {
@@ -579,13 +579,13 @@ fn gpu::Device? create_vk_device_from_runtime(
     families = presentation_surface == null
         ? select_queue_families(
             physical_device: state.physical_device,
-            requirements:    queue_requirements,
+            request:         queue_request,
         )!
         : select_queue_families_for_surface(
             runtime:         runtime_state,
             physical_device: state.physical_device,
             surface:         presentation_surface,
-            requirements:    queue_requirements,
+            request:         queue_request,
         )!;
 
     bool swapchain_maintenance_extension = state.presentation.enabled
@@ -858,17 +858,26 @@ fn gpu::Device? create_vk_device_from_runtime(
         non_coherent_atom_size:  &state.non_coherent_atom_size,
     );
 
-    gpu::QueueRequirements requirements = queue_requirements == null
-        ? gpu::internal::default_queue_requirements()
-        : *queue_requirements;
+    gpu::QueueRequest request = queue_request == null
+        ? gpu::internal::default_queue_request()
+        : *queue_request;
     gpu::internal::QueueSelection queue_selection =
         gpu::internal::queue_selection_from_native_ids(
-            requirements: requirements,
-            graphics:     families.graphics_ids[:families.counts.graphics],
-            compute:      families.compute_ids[:families.counts.compute],
-            transfer:     families.transfer_ids[:families.counts.transfer],
+            request:  request,
+            graphics: native_queue_id(
+                families.graphics,
+                families.graphics_index,
+            ),
+            compute: native_queue_id(
+                families.compute,
+                families.compute_index,
+            ),
+            transfer: native_queue_id(
+                families.transfer,
+                families.transfer_index,
+            ),
         )!;
-    state.caps.queues = queue_selection.counts;
+    state.caps.queues = queue_selection.selected;
     create_queue_completions(state, &queue_selection)!;
 
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
@@ -1340,9 +1349,7 @@ fn void? create_logical_device(
     DeviceCreationProbe* probe = null,
 ) @private {
     @pool() {
-        uint family_capacity = families.counts.graphics
-            + families.counts.compute
-            + families.counts.transfer
+        uint family_capacity = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES
             + (state.presentation.enabled ? 1 : 0);
         uint[] selected_families =
             mem::talloc_array(uint, (sz)family_capacity);

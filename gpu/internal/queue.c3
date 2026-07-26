@@ -1,32 +1,29 @@
 module gpu::internal @private;
 
 import gpu;
+
 const uint QUEUE_ROLE_COUNT @private = 3;
 const uint QUEUE_ROLE_MASK @private = 0x7;
-const uint COMPLETION_QUEUE_BITS @private = 10;
+const uint COMPLETION_QUEUE_BITS @private = 2;
 const ulong COMPLETION_QUEUE_MASK @private =
     (1ull << COMPLETION_QUEUE_BITS) - 1;
 const ulong MAX_COMPLETION_SEQUENCE @private =
     ulong::max >> COMPLETION_QUEUE_BITS;
-const uint MAX_SELECTED_QUEUE_IDENTITIES @private =
-    gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE * QUEUE_ROLE_COUNT;
+const uint MAX_SELECTED_QUEUE_IDENTITIES @private = QUEUE_ROLE_COUNT;
 const uint MAX_SUBMIT_COMPLETION_WAITS @private = 1024;
 const uint MAX_SUBMIT_COMMAND_LISTS @private = 1024;
-$assert(MAX_SELECTED_QUEUE_IDENTITIES - 1 <= ushort::max);
 $assert(MAX_SELECTED_QUEUE_IDENTITIES <= 1 << COMPLETION_QUEUE_BITS);
 
 
 struct QueueSelection @private {
-    QueueCounts counts;
+    QueueRoles selected;
     QueueRoles distinct;
     uint identity_count;
-    ushort[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] graphics_ids;
-    ushort[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] compute_ids;
-    ushort[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] transfer_ids;
+    ushort graphics_id;
+    ushort compute_id;
+    ushort transfer_id;
     QueueRoles[MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
 }
-
-
 
 fn Device completion_point_device(CompletionPoint point) @private {
     return point.device;
@@ -86,163 +83,156 @@ fn bool queue_roles_violate_distinct(
             && (roles.graphics || roles.compute));
 }
 
-fn uint queue_count_for_kind(QueueCounts counts, QueueKind kind) @private {
+fn bool queue_role_is_selected(QueueRoles selected, QueueKind kind) @private {
     switch (kind) {
-        case QueueKind.GRAPHICS: return counts.graphics;
-        case QueueKind.COMPUTE:  return counts.compute;
-        case QueueKind.TRANSFER: return counts.transfer;
+        case QueueKind.GRAPHICS: return selected.graphics;
+        case QueueKind.COMPUTE:  return selected.compute;
+        case QueueKind.TRANSFER: return selected.transfer;
     }
 }
 
 fn uint queue_selection_id(
     QueueSelection* selection,
     QueueKind kind,
-    uint index,
 ) @private {
     switch (kind) {
-        case QueueKind.GRAPHICS: return (uint)selection.graphics_ids[index];
-        case QueueKind.COMPUTE:  return (uint)selection.compute_ids[index];
-        case QueueKind.TRANSFER: return (uint)selection.transfer_ids[index];
+        case QueueKind.GRAPHICS: return (uint)selection.graphics_id;
+        case QueueKind.COMPUTE:  return (uint)selection.compute_id;
+        case QueueKind.TRANSFER: return (uint)selection.transfer_id;
     }
 }
 
 fn QueueRoles queue_selection_roles(
     QueueSelection* selection,
     QueueKind kind,
-    uint index,
 ) @private {
-    return selection.identity_roles[queue_selection_id(selection, kind, index)];
+    return selection.identity_roles[queue_selection_id(selection, kind)];
 }
 
-fn void? add_queue_role_identities(
+fn void? add_queue_role_identity(
     QueueSelection* selection,
     QueueKind kind,
-    ulong[] native_ids,
+    ulong native_id,
     ulong[] identity_keys,
 ) @private {
-    foreach (index, native_id : native_ids) {
-        uint identity = selection.identity_count;
-        for (uint known = 0; known < selection.identity_count; known++) {
-            if (identity_keys[known] == native_id) {
-                identity = known;
-                break;
-            }
+    uint identity = selection.identity_count;
+    for (uint known = 0; known < selection.identity_count; known++) {
+        if (identity_keys[known] == native_id) {
+            identity = known;
+            break;
         }
-        if (identity == selection.identity_count) {
-            if (selection.identity_count == MAX_SELECTED_QUEUE_IDENTITIES) {
-                return gpu::INVALID_ARGUMENT~;
-            }
-            identity_keys[identity] = native_id;
-            selection.identity_count++;
+    }
+    if (identity == selection.identity_count) {
+        if (selection.identity_count == MAX_SELECTED_QUEUE_IDENTITIES) {
+            return gpu::INVALID_ARGUMENT~;
         }
+        identity_keys[identity] = native_id;
+        selection.identity_count++;
+    }
 
-        QueueRoles* roles = &selection.identity_roles[identity];
-        switch (kind) {
-            case QueueKind.GRAPHICS:
-                if (roles.graphics) return gpu::INVALID_ARGUMENT~;
-                roles.graphics = true;
-                selection.graphics_ids[index] = (ushort)identity;
-            case QueueKind.COMPUTE:
-                if (roles.compute) return gpu::INVALID_ARGUMENT~;
-                roles.compute = true;
-                selection.compute_ids[index] = (ushort)identity;
-            case QueueKind.TRANSFER:
-                if (roles.transfer) return gpu::INVALID_ARGUMENT~;
-                roles.transfer = true;
-                selection.transfer_ids[index] = (ushort)identity;
-        }
+    QueueRoles* roles = &selection.identity_roles[identity];
+    switch (kind) {
+        case QueueKind.GRAPHICS:
+            if (roles.graphics) return gpu::INVALID_ARGUMENT~;
+            roles.graphics = true;
+            selection.graphics_id = (ushort)identity;
+        case QueueKind.COMPUTE:
+            if (roles.compute) return gpu::INVALID_ARGUMENT~;
+            roles.compute = true;
+            selection.compute_id = (ushort)identity;
+        case QueueKind.TRANSFER:
+            if (roles.transfer) return gpu::INVALID_ARGUMENT~;
+            roles.transfer = true;
+            selection.transfer_id = (ushort)identity;
     }
 }
 
 fn QueueSelection? queue_selection_from_native_ids(
-    QueueRequirements requirements,
-    ulong[] graphics,
-    ulong[] compute,
-    ulong[] transfer,
+    QueueRequest request,
+    ulong graphics,
+    ulong compute,
+    ulong transfer,
 ) @private {
-    if (!gpu::internal::queue_requirements_are_valid(requirements)) return gpu::INVALID_ARGUMENT~;
-    if (graphics.len != (usz)requirements.counts.graphics
-        || compute.len != (usz)requirements.counts.compute
-        || transfer.len != (usz)requirements.counts.transfer) {
+    if (!gpu::internal::queue_request_is_valid(request)) {
         return gpu::INVALID_ARGUMENT~;
     }
 
     QueueSelection selection = {
-        .counts   = requirements.counts,
-        .distinct = requirements.distinct,
+        .selected = request.required,
+        .distinct = request.distinct,
     };
     ulong[MAX_SELECTED_QUEUE_IDENTITIES] identity_keys;
-    add_queue_role_identities(
-        selection:     &selection,
-        kind:          QueueKind.GRAPHICS,
-        native_ids:    graphics,
-        identity_keys: identity_keys[..],
-    )!;
-    add_queue_role_identities(
-        selection:     &selection,
-        kind:          QueueKind.COMPUTE,
-        native_ids:    compute,
-        identity_keys: identity_keys[..],
-    )!;
-    add_queue_role_identities(
-        selection:     &selection,
-        kind:          QueueKind.TRANSFER,
-        native_ids:    transfer,
-        identity_keys: identity_keys[..],
-    )!;
+    if (request.required.graphics) {
+        add_queue_role_identity(
+            selection:     &selection,
+            kind:          QueueKind.GRAPHICS,
+            native_id:     graphics,
+            identity_keys: identity_keys[..],
+        )!;
+    }
+    if (request.required.compute) {
+        add_queue_role_identity(
+            selection:     &selection,
+            kind:          QueueKind.COMPUTE,
+            native_id:     compute,
+            identity_keys: identity_keys[..],
+        )!;
+    }
+    if (request.required.transfer) {
+        add_queue_role_identity(
+            selection:     &selection,
+            kind:          QueueKind.TRANSFER,
+            native_id:     transfer,
+            identity_keys: identity_keys[..],
+        )!;
+    }
 
     for (uint identity = 0; identity < selection.identity_count; identity++) {
         QueueRoles roles = selection.identity_roles[identity];
-        if (queue_roles_violate_distinct(roles, requirements.distinct)) {
+        if (queue_roles_violate_distinct(roles, request.distinct)) {
             return gpu::UNSUPPORTED_FEATURE~;
         }
     }
     return selection;
 }
 
-fn QueueSelection? queue_selection_for_requirements(
-    QueueRequirements requirements,
+fn QueueSelection? queue_selection_for_request(
+    QueueRequest request,
     bool compute_aliases_graphics,
     bool transfer_aliases_graphics,
     bool transfer_aliases_compute,
 ) @private {
-    if (!gpu::internal::queue_requirements_are_valid(requirements)) return gpu::INVALID_ARGUMENT~;
-    if (requirements.counts.graphics > 1
-        || requirements.counts.compute > 1
-        || requirements.counts.transfer > 1) {
-        return gpu::UNSUPPORTED_FEATURE~;
+    if (!gpu::internal::queue_request_is_valid(request)) {
+        return gpu::INVALID_ARGUMENT~;
     }
 
     ulong next_native_id;
     ulong graphics_native_id;
     ulong compute_native_id;
     ulong transfer_native_id;
-    if (requirements.counts.graphics > 0) {
+    if (request.required.graphics) {
         graphics_native_id = next_native_id++;
     }
-    if (requirements.counts.compute > 0) {
-        compute_native_id = requirements.counts.graphics > 0
+    if (request.required.compute) {
+        compute_native_id = request.required.graphics
             && compute_aliases_graphics
             ? graphics_native_id
             : next_native_id++;
     }
-    if (requirements.counts.transfer > 0) {
-        if (requirements.counts.graphics > 0 && transfer_aliases_graphics) {
+    if (request.required.transfer) {
+        if (request.required.graphics && transfer_aliases_graphics) {
             transfer_native_id = graphics_native_id;
-        } else if (requirements.counts.compute > 0 && transfer_aliases_compute) {
+        } else if (request.required.compute && transfer_aliases_compute) {
             transfer_native_id = compute_native_id;
         } else {
             transfer_native_id = next_native_id++;
         }
     }
-    ulong[1] graphics = { graphics_native_id };
-    ulong[1] compute = { compute_native_id };
-    ulong[1] transfer = { transfer_native_id };
     return queue_selection_from_native_ids(
-        requirements: requirements,
-        graphics:     graphics[:requirements.counts.graphics],
-        compute:      compute[:requirements.counts.compute],
-        transfer:     transfer[:requirements.counts.transfer],
+        request:  request,
+        graphics: graphics_native_id,
+        compute:  compute_native_id,
+        transfer: transfer_native_id,
     );
 }
 
@@ -251,94 +241,74 @@ fn QueueSelection queue_selection_for_aliases(
     bool transfer_aliases_graphics,
     bool transfer_aliases_compute,
 ) @private {
-    return queue_selection_for_requirements(
-        requirements:               gpu::internal::default_queue_requirements(),
-        compute_aliases_graphics:    compute_aliases_graphics,
-        transfer_aliases_graphics:   transfer_aliases_graphics,
-        transfer_aliases_compute:    transfer_aliases_compute,
+    return queue_selection_for_request(
+        request:                    gpu::internal::default_queue_request(),
+        compute_aliases_graphics:   compute_aliases_graphics,
+        transfer_aliases_graphics:  transfer_aliases_graphics,
+        transfer_aliases_compute:   transfer_aliases_compute,
     )!!;
 }
 
 fn QueueSelection default_queue_selection(DeviceCaps* caps = null) @private {
     bool async_compute = caps != null && caps.async_compute;
-    return queue_selection_for_requirements(
-        requirements:               gpu::internal::default_queue_requirements(),
-        compute_aliases_graphics:    !async_compute,
-        transfer_aliases_graphics:   true,
-        transfer_aliases_compute:    !async_compute,
+    return queue_selection_for_request(
+        request:                    gpu::internal::default_queue_request(),
+        compute_aliases_graphics:   !async_compute,
+        transfer_aliases_graphics:  true,
+        transfer_aliases_compute:   !async_compute,
     )!!;
 }
 
 fn bool queue_selection_is_well_formed(QueueSelection* selection) @private {
     if (selection == null) return false;
-    QueueRequirements requirements = {
-        .counts   = selection.counts,
+    QueueRequest request = {
+        .required = selection.selected,
         .distinct = selection.distinct,
     };
-    if (!gpu::internal::queue_requirements_are_valid(requirements)
+    if (!gpu::internal::queue_request_is_valid(request)
         || selection.identity_count == 0
         || selection.identity_count > MAX_SELECTED_QUEUE_IDENTITIES) {
         return false;
     }
 
     QueueRoles[MAX_SELECTED_QUEUE_IDENTITIES] expected_roles;
-    for (uint index = 0; index < selection.counts.graphics; index++) {
-        uint identity = queue_selection_id(selection, QueueKind.GRAPHICS, index);
-        if (identity >= selection.identity_count
-            || expected_roles[identity].graphics) {
-            return false;
-        }
+    if (selection.selected.graphics) {
+        uint identity = queue_selection_id(selection, QueueKind.GRAPHICS);
+        if (identity >= selection.identity_count) return false;
         expected_roles[identity].graphics = true;
     }
-    for (uint index = 0; index < selection.counts.compute; index++) {
-        uint identity = queue_selection_id(selection, QueueKind.COMPUTE, index);
-        if (identity >= selection.identity_count
-            || expected_roles[identity].compute) {
-            return false;
-        }
+    if (selection.selected.compute) {
+        uint identity = queue_selection_id(selection, QueueKind.COMPUTE);
+        if (identity >= selection.identity_count) return false;
         expected_roles[identity].compute = true;
     }
-    for (uint index = 0; index < selection.counts.transfer; index++) {
-        uint identity = queue_selection_id(selection, QueueKind.TRANSFER, index);
-        if (identity >= selection.identity_count
-            || expected_roles[identity].transfer) {
-            return false;
-        }
+    if (selection.selected.transfer) {
+        uint identity = queue_selection_id(selection, QueueKind.TRANSFER);
+        if (identity >= selection.identity_count) return false;
         expected_roles[identity].transfer = true;
     }
 
     for (uint identity = 0; identity < selection.identity_count; identity++) {
         QueueRoles roles = expected_roles[identity];
         if ((uint)roles == 0
-            || !queue_roles_equal(roles, selection.identity_roles[identity])) {
-            return false;
-        }
-        if (queue_roles_violate_distinct(roles, selection.distinct)) {
+            || !queue_roles_equal(roles, selection.identity_roles[identity])
+            || queue_roles_violate_distinct(roles, selection.distinct)) {
             return false;
         }
     }
     return true;
 }
 
-fn QueueSelection* selected_queues(gpu::internal::DeviceOperation* operation) @private {
+fn QueueSelection* selected_queues(
+    gpu::internal::DeviceOperation* operation,
+) @private {
     return &operation.data.queues;
 }
 
-fn QueueCounts selected_queue_counts(gpu::internal::DeviceOperation* operation) @private {
-    return selected_queues(operation).counts;
-}
-
-fn uint selected_queue_count(gpu::internal::DeviceOperation* operation, QueueKind kind) @private {
-    return queue_count_for_kind(selected_queue_counts(operation), kind);
-}
-
-fn QueueRoles selected_queue_role_mask(gpu::internal::DeviceOperation* operation) @private {
-    QueueCounts counts = selected_queue_counts(operation);
-    return {
-        .graphics = counts.graphics > 0,
-        .compute  = counts.compute > 0,
-        .transfer = counts.transfer > 0,
-    };
+fn QueueRoles selected_queue_role_mask(
+    gpu::internal::DeviceOperation* operation,
+) @private {
+    return selected_queues(operation).selected;
 }
 
 fn bool queue_roles_are_known(QueueRoles roles) @private {
@@ -389,34 +359,42 @@ fn bool queue_access_is_valid(
         && queue_roles_are_subset(access, selected_queue_role_mask(operation));
 }
 
-fn void? validate_queue_access(gpu::internal::DeviceOperation* operation, QueueRoles access) @private {
-    if (!queue_access_is_valid(operation, access)) return gpu::INVALID_ARGUMENT~;
+fn void? validate_queue_access(
+    gpu::internal::DeviceOperation* operation,
+    QueueRoles access,
+) @private {
+    if (!queue_access_is_valid(operation, access)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
 }
 
 fn void? validate_selected_queue_kind(
     gpu::internal::DeviceOperation* operation,
     QueueKind kind,
 ) @private {
-    if (selected_queue_count(operation, kind) == 0) return gpu::INVALID_ARGUMENT~;
+    if (!queue_role_is_selected(selected_queue_role_mask(operation), kind)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
 }
 
 fn uint selected_queue_id(
     gpu::internal::DeviceOperation* operation,
     QueueKind kind,
-    uint index,
 ) @private {
-    return queue_selection_id(selected_queues(operation), kind, index);
+    return queue_selection_id(selected_queues(operation), kind);
 }
 
 fn QueueRoles selected_queue_roles(
     gpu::internal::DeviceOperation* operation,
     QueueKind kind,
-    uint index,
 ) @private {
-    return queue_selection_roles(selected_queues(operation), kind, index);
+    return queue_selection_roles(selected_queues(operation), kind);
 }
 
-fn bool queue_id_is_selected(gpu::internal::DeviceOperation* operation, Queue queue) @private {
+fn bool queue_id_is_selected(
+    gpu::internal::DeviceOperation* operation,
+    Queue queue,
+) @private {
     QueueSelection* selection = selected_queues(operation);
     return queue.id < selection.identity_count
         && queue_roles_equal(queue.roles, selection.identity_roles[queue.id]);

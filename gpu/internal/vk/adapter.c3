@@ -78,15 +78,18 @@ fn gpu::AdapterQueueInfo query_adapter_queues(vk::PhysicalDevice physical_device
             families.ptr,
         );
         foreach (&family : families[:count]) {
+            if (family.queue_count == 0) continue;
             uint flags = (uint)family.queue_flags;
             if ((flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0) {
-                info.graphics_count += family.queue_count;
+                info.available.graphics = true;
             }
             if ((flags & (uint)vk::QueueFlagBits.COMPUTE_BIT) != 0) {
-                info.compute_count += family.queue_count;
+                info.available.compute = true;
             }
-            if ((flags & (uint)vk::QueueFlagBits.TRANSFER_BIT) != 0) {
-                info.transfer_count += family.queue_count;
+            if ((flags & ((uint)vk::QueueFlagBits.GRAPHICS_BIT
+                    | (uint)vk::QueueFlagBits.COMPUTE_BIT
+                    | (uint)vk::QueueFlagBits.TRANSFER_BIT)) != 0) {
+                info.available.transfer = true;
             }
         }
     };

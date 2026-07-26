@@ -95,7 +95,7 @@ Adapter enumeration is explicit. `AdapterInfo` reports GPU-shaped information:
 - vendor and device identity;
 - integrated, discrete, virtual, or software class;
 - semantic memory information;
-- queue roles and counts;
+- queue-role availability;
 - strict support;
 - general limits.
 
@@ -176,7 +176,9 @@ C3 explicit casts can manufacture the underlying bits of a handle. Runtime owner
 
 ## Queues
 
-`DeviceDesc` contains semantic queue requirements. A description identifies roles, counts, and whether a role must use a distinct queue. The backend maps these requirements to native families and indices.
+`DeviceDesc` contains a semantic `QueueRequest`. A description identifies
+required roles and which roles may not alias another requested role. The backend
+maps these requirements to native families and indices.
 
 `Queue` is a device-owned generational handle. A queue reports its semantic roles, not native family data. One queue may satisfy several roles.
 

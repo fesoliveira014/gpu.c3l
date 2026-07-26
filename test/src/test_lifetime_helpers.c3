@@ -171,8 +171,8 @@ fn void? destroy_test_device(gpu::Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device, true)!;
     if (operation.data.runtime_retained) runtime = operation.data.runtime;
     gpu::internal::end_device_operation(&operation);
-    gpu::QueueCounts? counts_result = gpu::get_queue_counts(device);
-    if (catch err = counts_result) {
+    gpu::DeviceCaps? caps_result = gpu::get_device_caps(device);
+    if (catch err = caps_result) {
         if (err == gpu::DEVICE_LOST) {
             gpu::destroy_device(device)!;
             if (runtime.is_valid()) gpu::destroy_runtime(&runtime)!;
@@ -180,14 +180,14 @@ fn void? destroy_test_device(gpu::Device* device) {
         }
         return err~;
     }
-    gpu::QueueCounts counts = counts_result;
-    if (counts.graphics > 0) {
+    gpu::QueueRoles queues = caps_result.queues;
+    if (queues.graphics) {
         wait_test_queue(device, gpu::QueueKind.GRAPHICS)!;
     }
-    if (counts.compute > 0) {
+    if (queues.compute) {
         wait_test_queue(device, gpu::QueueKind.COMPUTE)!;
     }
-    if (counts.transfer > 0) {
+    if (queues.transfer) {
         wait_test_queue(device, gpu::QueueKind.TRANSFER)!;
     }
     gpu::destroy_device(device)!;

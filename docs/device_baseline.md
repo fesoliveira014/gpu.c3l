@@ -31,9 +31,9 @@ non-presenting device; presentation and explicit queue topology are ordinary
 descriptor fields. `supports_device_desc` is an optional read-only adapter
 selection query rather than a prerequisite for creation.
 
-`DeviceDesc` currently carries `QueueRequirements`. A later change reduces the
-public model to one queue per role and replaces the count-based requirements;
-the packed request protocol is not preserved for that migration.
+`DeviceDesc.queues` requests semantic roles and any roles that must use distinct
+queue identities. The public model selects at most one queue per semantic role;
+native queue families and indices remain private.
 
 The pointer-first, shader-visible device baseline is implicit and mandatory.
 There is no request bit, capability group, or alternative public device

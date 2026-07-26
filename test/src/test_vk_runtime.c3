@@ -23,7 +23,7 @@ fn void runtimes_enumerate_vulkan_adapters_independently() @test {
     gpu::AdapterDiagnostics diagnostics = gpu::get_adapter_diagnostics(&first_adapter)!!;
     assert(first_info.name.len > 0, "adapter names are populated");
     assert(second_info.name == first_info.name, "both runtimes report the same adapter");
-    assert(first_info.queues.graphics_count > 0, "graphics queue availability is semantic");
+    assert(first_info.queues.available.graphics, "graphics queue availability is semantic");
     assert(diagnostics.backend_name == "Vulkan", "backend identity stays in diagnostics");
     assert(diagnostics.backend_version.major >= 1, "the native API version is diagnostic data");
     assert(diagnostics.driver_name.len > 0, "driver identity is available for logging");

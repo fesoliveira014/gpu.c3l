@@ -79,6 +79,12 @@ def valid_document() -> dict:
                         ("adapter", "Adapter*"),
                         ("desc", "DeviceDesc*"),
                     ),
+                    api_function(
+                        "get_queue",
+                        "Queue?",
+                        ("device", "Device*"),
+                        ("kind", "QueueKind"),
+                    ),
                     {
                         "name": "begin_commands",
                         "return_type": {"name": "CommandList?"},
@@ -1068,6 +1074,20 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "QueueRequest",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "required",
+                                "type": {"name": "QueueRoles"},
+                            },
+                            {
+                                "name": "distinct",
+                                "type": {"name": "QueueRoles"},
+                            },
+                        ],
+                    },
+                    {
                         "name": "DeviceDesc",
                         "kind": "struct",
                         "members": [
@@ -1077,7 +1097,7 @@ def valid_document() -> dict:
                             },
                             {
                                 "name": "queues",
-                                "type": {"name": "QueueRequirements"},
+                                "type": {"name": "QueueRequest"},
                             },
                         ],
                     },
@@ -1096,9 +1116,23 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "AdapterQueueInfo",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "available",
+                                "type": {"name": "QueueRoles"},
+                            },
+                        ],
+                    },
+                    {
                         "name": "DeviceCaps",
                         "kind": "struct",
                         "members": [
+                            {
+                                "name": "queues",
+                                "type": {"name": "QueueRoles"},
+                            },
                             {
                                 "name": "texture_heap_capacity",
                                 "type": {"name": "uint"},

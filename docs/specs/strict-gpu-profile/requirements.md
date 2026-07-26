@@ -64,7 +64,8 @@ Evolve the canonical `gpu` API in place into a pointer-first, bindless, explicit
 
 ### Queues and commands
 
-- Device requests describe queue roles and counts without backend family indices.
+- Device requests describe required queue roles and explicit non-aliasing
+  requirements without backend family indices.
 - Applications retrieve explicit queue handles from the created device.
 - Command recording begins from an explicit allocator bound to one exact queue.
 - Allocator-owned recording storage and native command pools remain backend-opaque; different allocators may record concurrently.

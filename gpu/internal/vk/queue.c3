@@ -20,7 +20,6 @@ alias SubmissionCheckpointHook @if(env::TESTING) = fn void (
 );
 
 const uint MAX_QUEUE_FAMILIES = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES + 4;
-const uint MAX_SELECTED_QUEUE_INDICES = 3;
 
 enum SubmissionCheckpoint : uint {
     NATIVE_ACCEPTED,
@@ -40,35 +39,6 @@ struct QueueFamilies {
     uint present_index;
     bool presentation;
     bool async_compute;
-    gpu::QueueCounts counts;
-    gpu::QueueRoles distinct;
-    ulong[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] graphics_ids;
-    ulong[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] compute_ids;
-    ulong[gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE] transfer_ids;
-}
-struct QueueChoice {
-    gpu::QueueRoles selected;
-    uint graphics;
-    uint graphics_index;
-    uint compute;
-    uint compute_index;
-    uint transfer;
-    uint transfer_index;
-    uint present;
-    uint present_index;
-    bool presentation;
-    bool async_compute;
-}
-
-
-struct QueueCandidatePool {
-    uint count;
-    ulong[] ids;
-    uint[] owners;
-    uint[] graphics;
-    uint[] compute;
-    uint[] transfer;
-    gpu::QueueCounts candidate_counts;
 }
 
 <* Submit accounting, whitebox-exposed via submit_stats. *>
@@ -209,153 +179,6 @@ fn bool queue_family_is_transfer_only(
         && (flags & (uint)vk::QueueFlagBits.COMPUTE_BIT) == 0;
 }
 
-fn uint available_queue_count(
-    vk::QueueFamilyProperties[] families,
-    gpu::QueueKind kind,
-) @private {
-    uint count;
-    foreach (properties : families) {
-        bool supported;
-        switch (kind) {
-            case gpu::QueueKind.GRAPHICS:
-                supported = queue_family_supports_graphics(properties);
-            case gpu::QueueKind.COMPUTE:
-                supported = queue_family_supports_compute(properties);
-            case gpu::QueueKind.TRANSFER:
-                supported = queue_family_supports_transfer(properties);
-        }
-        if (!supported) continue;
-        uint remaining = gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE - count;
-        count += properties.queue_count < remaining
-            ? properties.queue_count
-            : remaining;
-        if (count == gpu::internal::MAX_REQUESTED_QUEUES_PER_ROLE) break;
-    }
-    return count;
-}
-
-fn ulong native_queue_id(uint family, uint index) @private {
-    return ((ulong)family << 32) | (ulong)index;
-}
-
-fn uint native_queue_family(ulong id) @private => (uint)(id >> 32);
-fn uint native_queue_index(ulong id) @private => (uint)id;
-
-fn uint required_queue_count(
-    gpu::QueueRequirements requirements,
-    gpu::QueueKind kind,
-) @private {
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS: return requirements.counts.graphics;
-        case gpu::QueueKind.COMPUTE:  return requirements.counts.compute;
-        case gpu::QueueKind.TRANSFER: return requirements.counts.transfer;
-    }
-}
-
-fn uint selected_native_queue_count(
-    QueueFamilies* selection,
-    gpu::QueueKind kind,
-) @private {
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS: return selection.counts.graphics;
-        case gpu::QueueKind.COMPUTE:  return selection.counts.compute;
-        case gpu::QueueKind.TRANSFER: return selection.counts.transfer;
-    }
-}
-
-fn ulong selected_native_queue(
-    QueueFamilies* selection,
-    gpu::QueueKind kind,
-    uint index,
-) @private {
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS: return selection.graphics_ids[index];
-        case gpu::QueueKind.COMPUTE:  return selection.compute_ids[index];
-        case gpu::QueueKind.TRANSFER: return selection.transfer_ids[index];
-    }
-}
-
-fn ulong representative_native_queue(
-    QueueFamilies* selection,
-    gpu::QueueKind kind,
-) @private {
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS:
-            return native_queue_id(selection.graphics, selection.graphics_index);
-        case gpu::QueueKind.COMPUTE:
-            return native_queue_id(selection.compute, selection.compute_index);
-        case gpu::QueueKind.TRANSFER:
-            return native_queue_id(selection.transfer, selection.transfer_index);
-    }
-}
-
-fn bool queue_kind_is_distinct(
-    gpu::QueueRoles distinct,
-    gpu::QueueKind kind,
-) @private {
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS: return distinct.graphics;
-        case gpu::QueueKind.COMPUTE:  return distinct.compute;
-        case gpu::QueueKind.TRANSFER: return distinct.transfer;
-    }
-}
-
-fn bool queue_kinds_must_not_alias(
-    gpu::QueueRoles distinct,
-    gpu::QueueKind first,
-    gpu::QueueKind second,
-) @private {
-    return first != second
-        && (queue_kind_is_distinct(distinct, first)
-            || queue_kind_is_distinct(distinct, second));
-}
-
-fn bool selected_role_contains(
-    QueueFamilies* selection,
-    gpu::QueueKind kind,
-    ulong id,
-) @private {
-    uint count = selected_native_queue_count(selection, kind);
-    for (uint index = 0; index < count; index++) {
-        if (selected_native_queue(selection, kind, index) == id) return true;
-    }
-    return false;
-}
-
-fn bool selected_queue_conflicts(
-    QueueFamilies* selection,
-    gpu::QueueKind kind,
-    ulong id,
-) @private {
-    gpu::QueueKind[3] kinds = {
-        gpu::QueueKind.GRAPHICS,
-        gpu::QueueKind.COMPUTE,
-        gpu::QueueKind.TRANSFER,
-    };
-    foreach (other : kinds) {
-        if (queue_kinds_must_not_alias(selection.distinct, kind, other)
-            && selected_role_contains(selection, other, id)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-fn void append_selected_native_queue(
-    QueueFamilies* selection,
-    gpu::QueueKind kind,
-    ulong id,
-) @private {
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS:
-            selection.graphics_ids[selection.counts.graphics++] = id;
-        case gpu::QueueKind.COMPUTE:
-            selection.compute_ids[selection.counts.compute++] = id;
-        case gpu::QueueKind.TRANSFER:
-            selection.transfer_ids[selection.counts.transfer++] = id;
-    }
-}
-
 fn bool queue_family_supports_kind(
     vk::QueueFamilyProperties properties,
     gpu::QueueKind kind,
@@ -370,571 +193,49 @@ fn bool queue_family_supports_kind(
     }
 }
 
-fn void? fill_selected_queue_role(
-    QueueFamilies* selection,
+fn bool queue_role_is_available(
     vk::QueueFamilyProperties[] families,
     gpu::QueueKind kind,
-    uint target_count,
 ) @private {
-    foreach (family, properties : families) {
-        if (!queue_family_supports_kind(properties, kind)) continue;
-        for (uint index = 0;
-            index < properties.queue_count
-                && selected_native_queue_count(selection, kind) < target_count;
-            index++) {
-            ulong id = native_queue_id((uint)family, index);
-            if (selected_role_contains(selection, kind, id)
-                || selected_queue_conflicts(selection, kind, id)) {
-                continue;
-            }
-            append_selected_native_queue(selection, kind, id);
-        }
-    }
-    if (selected_native_queue_count(selection, kind) != target_count) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-}
-
-fn uint queue_candidate_count(
-    QueueCandidatePool* pool,
-    gpu::QueueKind kind,
-) @private {
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS: return pool.candidate_counts.graphics;
-        case gpu::QueueKind.COMPUTE:  return pool.candidate_counts.compute;
-        case gpu::QueueKind.TRANSFER: return pool.candidate_counts.transfer;
-    }
-}
-
-fn uint queue_candidate_capacity(
-    QueueCandidatePool* pool,
-    gpu::QueueKind kind,
-) @private {
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS: return (uint)pool.graphics.len;
-        case gpu::QueueKind.COMPUTE:  return (uint)pool.compute.len;
-        case gpu::QueueKind.TRANSFER: return (uint)pool.transfer.len;
-    }
-}
-
-fn QueueCandidatePool create_queue_candidate_pool(
-    gpu::QueueRequirements requirements,
-) @private {
-    uint slot_capacity = requirements.counts.graphics
-        + requirements.counts.compute
-        + requirements.counts.transfer;
-    uint candidate_capacity = slot_capacity * 3;
-    QueueCandidatePool pool = {
-        .ids    = mem::talloc_array(ulong, (sz)candidate_capacity),
-        .owners = mem::talloc_array(uint, (sz)candidate_capacity),
-    };
-    if (requirements.counts.graphics > 0) {
-        pool.graphics = mem::talloc_array(uint, (sz)slot_capacity);
-    }
-    if (requirements.counts.compute > 0) {
-        pool.compute = mem::talloc_array(uint, (sz)slot_capacity);
-    }
-    if (requirements.counts.transfer > 0) {
-        pool.transfer = mem::talloc_array(uint, (sz)slot_capacity);
-    }
-    return pool;
-}
-
-fn uint queue_candidate_index(
-    QueueCandidatePool* pool,
-    gpu::QueueKind kind,
-    uint index,
-) @private {
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS: return pool.graphics[index];
-        case gpu::QueueKind.COMPUTE:  return pool.compute[index];
-        case gpu::QueueKind.TRANSFER: return pool.transfer[index];
-    }
-}
-
-fn uint queue_candidate_pool_index(
-    QueueCandidatePool* pool,
-    ulong id,
-) @private {
-    for (uint index = 0; index < pool.count; index++) {
-        if (pool.ids[index] == id) return index;
-    }
-    uint index = pool.count++;
-    pool.ids[index] = id;
-    return index;
-}
-
-fn bool queue_candidates_contain(
-    QueueCandidatePool* pool,
-    gpu::QueueKind kind,
-    uint candidate,
-) @private {
-    uint count = queue_candidate_count(pool, kind);
-    for (uint index = 0; index < count; index++) {
-        if (queue_candidate_index(pool, kind, index) == candidate) return true;
-    }
-    return false;
-}
-
-fn void append_queue_candidate(
-    QueueCandidatePool* pool,
-    gpu::QueueKind kind,
-    ulong id,
-) @private {
-    if (queue_candidate_count(pool, kind)
-        == queue_candidate_capacity(pool, kind)) {
-        return;
-    }
-    uint candidate = queue_candidate_pool_index(pool, id);
-    if (queue_candidates_contain(pool, kind, candidate)) return;
-    switch (kind) {
-        case gpu::QueueKind.GRAPHICS:
-            pool.graphics[pool.candidate_counts.graphics++] = candidate;
-        case gpu::QueueKind.COMPUTE:
-            pool.compute[pool.candidate_counts.compute++] = candidate;
-        case gpu::QueueKind.TRANSFER:
-            pool.transfer[pool.candidate_counts.transfer++] = candidate;
-    }
-}
-
-fn void collect_queue_candidates(
-    QueueCandidatePool* pool,
-    QueueFamilies* selection,
-    vk::QueueFamilyProperties[] families,
-    gpu::QueueRequirements requirements,
-) @private {
-    gpu::QueueKind[3] kinds = {
-        gpu::QueueKind.GRAPHICS,
-        gpu::QueueKind.COMPUTE,
-        gpu::QueueKind.TRANSFER,
-    };
-    foreach (kind : kinds) {
-        if (required_queue_count(requirements, kind) == 0) continue;
-        append_queue_candidate(
-            pool,
-            kind,
-            representative_native_queue(selection, kind),
-        );
-        foreach (family, properties : families) {
-            if (!queue_family_supports_kind(properties, kind)) continue;
-            for (uint index = 0;
-                index < properties.queue_count
-                    && queue_candidate_count(pool, kind)
-                        < queue_candidate_capacity(pool, kind);
-                index++) {
-                append_queue_candidate(
-                    pool,
-                    kind,
-                    native_queue_id((uint)family, index),
-                );
-            }
-        }
-    }
-}
-
-fn bool try_assign_queue_slot(
-    QueueCandidatePool* pool,
-    gpu::QueueKind[] slot_kinds,
-    uint slot,
-    uint[] slot_candidates,
-    bool[] visited,
-    uint[] pending_slots,
-    uint[] parent_slots,
-    bool[] visited_slots,
-) @private {
-    for (uint index = 0; index < slot_candidates.len; index++) {
-        visited_slots[index] = false;
-    }
-
-    uint pending_index;
-    uint pending_count = 1;
-    pending_slots[0] = slot;
-    visited_slots[slot] = true;
-    while (pending_index < pending_count) {
-        uint current_slot = pending_slots[pending_index++];
-        gpu::QueueKind kind = slot_kinds[current_slot];
-        uint candidate_count = queue_candidate_count(pool, kind);
-        for (uint index = 0; index < candidate_count; index++) {
-            uint candidate = queue_candidate_index(pool, kind, index);
-            if (visited[candidate]) continue;
-            visited[candidate] = true;
-
-            uint owner = pool.owners[candidate];
-            if (owner == 0) {
-                uint assigned_slot = current_slot;
-                uint replacement = candidate;
-                while (true) {
-                    uint previous;
-                    if (assigned_slot != slot) {
-                        previous = slot_candidates[assigned_slot];
-                    }
-                    pool.owners[replacement] = assigned_slot + 1;
-                    slot_candidates[assigned_slot] = replacement;
-                    if (assigned_slot == slot) return true;
-                    replacement = previous;
-                    assigned_slot = parent_slots[assigned_slot];
-                }
-            }
-
-            uint owned_slot = owner - 1;
-            if (visited_slots[owned_slot]) continue;
-            visited_slots[owned_slot] = true;
-            parent_slots[owned_slot] = current_slot;
-            pending_slots[pending_count++] = owned_slot;
+    foreach (properties : families) {
+        if (properties.queue_count > 0
+            && queue_family_supports_kind(properties, kind)) {
+            return true;
         }
     }
     return false;
 }
 
-fn void set_representative_native_queue(
+fn bool queue_role_is_selected(
+    gpu::QueueRoles selected,
+    gpu::QueueKind kind,
+) @private {
+    switch (kind) {
+        case gpu::QueueKind.GRAPHICS: return selected.graphics;
+        case gpu::QueueKind.COMPUTE:  return selected.compute;
+        case gpu::QueueKind.TRANSFER: return selected.transfer;
+    }
+}
+
+fn ulong native_queue_id(uint family, uint index) @private {
+    return ((ulong)family << 32) | (ulong)index;
+}
+
+fn uint native_queue_family(ulong id) @private => (uint)(id >> 32);
+fn uint native_queue_index(ulong id) @private => (uint)id;
+
+fn ulong selected_native_queue(
     QueueFamilies* selection,
     gpu::QueueKind kind,
-    ulong id,
 ) @private {
-    uint family = native_queue_family(id);
-    uint index = native_queue_index(id);
     switch (kind) {
         case gpu::QueueKind.GRAPHICS:
-            selection.graphics = family;
-            selection.graphics_index = index;
+            return native_queue_id(selection.graphics, selection.graphics_index);
         case gpu::QueueKind.COMPUTE:
-            selection.compute = family;
-            selection.compute_index = index;
+            return native_queue_id(selection.compute, selection.compute_index);
         case gpu::QueueKind.TRANSFER:
-            selection.transfer = family;
-            selection.transfer_index = index;
+            return native_queue_id(selection.transfer, selection.transfer_index);
     }
-}
-
-fn uint requested_distinct_role_count(
-    gpu::QueueRequirements requirements,
-) @private {
-    return (requirements.distinct.graphics ? 1 : 0)
-        + (requirements.distinct.compute ? 1 : 0)
-        + (requirements.distinct.transfer ? 1 : 0);
-}
-
-fn bool requests_multiple_queues(
-    gpu::QueueRequirements requirements,
-) @private {
-    return requirements.counts.graphics > 1
-        || requirements.counts.compute > 1
-        || requirements.counts.transfer > 1;
-}
-
-fn void? assign_mutually_distinct_queues(
-    QueueFamilies* selection,
-    vk::QueueFamilyProperties[] families,
-    gpu::QueueRequirements requirements,
-) @private {
-    QueueCandidatePool pool = create_queue_candidate_pool(requirements);
-    collect_queue_candidates(
-        pool:         &pool,
-        selection:    selection,
-        families:     families,
-        requirements: requirements,
-    );
-
-    uint slot_count = requirements.counts.graphics
-        + requirements.counts.compute
-        + requirements.counts.transfer;
-    gpu::QueueKind[] slot_kinds =
-        mem::talloc_array(gpu::QueueKind, (sz)slot_count);
-    uint[] slot_candidates = mem::talloc_array(uint, (sz)slot_count);
-    uint next_slot;
-    gpu::QueueKind[3] kinds = {
-        gpu::QueueKind.GRAPHICS,
-        gpu::QueueKind.COMPUTE,
-        gpu::QueueKind.TRANSFER,
-    };
-    foreach (kind : kinds) {
-        uint count = required_queue_count(requirements, kind);
-        if (queue_candidate_count(&pool, kind) < count) {
-            return gpu::UNSUPPORTED_FEATURE~;
-        }
-        for (uint index = 0; index < count; index++) {
-            slot_kinds[next_slot++] = kind;
-        }
-    }
-
-    bool[] visited = mem::talloc_array(bool, (sz)pool.count);
-    uint[] pending_slots = mem::talloc_array(uint, (sz)slot_count);
-    uint[] parent_slots = mem::talloc_array(uint, (sz)slot_count);
-    bool[] visited_slots = mem::talloc_array(bool, (sz)slot_count);
-    for (uint candidate = 0; candidate < pool.count; candidate++) {
-        pool.owners[candidate] = 0;
-    }
-    for (uint slot = 0; slot < slot_count; slot++) {
-        for (uint candidate = 0; candidate < pool.count; candidate++) {
-            visited[candidate] = false;
-        }
-        if (!try_assign_queue_slot(
-            pool:            &pool,
-            slot_kinds:       slot_kinds,
-            slot:             slot,
-            slot_candidates: slot_candidates,
-            visited:          visited,
-            pending_slots:    pending_slots,
-            parent_slots:     parent_slots,
-            visited_slots:    visited_slots,
-        )) {
-            return gpu::UNSUPPORTED_FEATURE~;
-        }
-    }
-
-    selection.counts = {};
-    selection.distinct = requirements.distinct;
-    for (uint slot = 0; slot < slot_count; slot++) {
-        append_selected_native_queue(
-            selection,
-            slot_kinds[slot],
-            pool.ids[slot_candidates[slot]],
-        );
-    }
-    foreach (kind : kinds) {
-        if (selected_native_queue_count(selection, kind) == 0) continue;
-        set_representative_native_queue(
-            selection,
-            kind,
-            selected_native_queue(selection, kind, 0),
-        );
-    }
-    selection.async_compute = selection.counts.graphics > 0
-        && selection.counts.compute > 0
-        && selected_native_queue(selection, gpu::QueueKind.GRAPHICS, 0)
-            != selected_native_queue(selection, gpu::QueueKind.COMPUTE, 0);
-}
-
-fn void? fill_selected_queue_role_from_pool(
-    QueueFamilies* selection,
-    QueueCandidatePool* pool,
-    gpu::QueueKind kind,
-    uint target_count,
-) @private {
-    uint candidate_count = queue_candidate_count(pool, kind);
-    for (uint index = 0;
-        index < candidate_count
-            && selected_native_queue_count(selection, kind) < target_count;
-        index++) {
-        ulong id = pool.ids[queue_candidate_index(pool, kind, index)];
-        if (selected_role_contains(selection, kind, id)
-            || selected_queue_conflicts(selection, kind, id)) {
-            continue;
-        }
-        append_selected_native_queue(selection, kind, id);
-    }
-    if (selected_native_queue_count(selection, kind) != target_count) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-}
-
-fn void? assign_one_distinct_queue_role(
-    QueueFamilies* selection,
-    vk::QueueFamilyProperties[] families,
-    gpu::QueueRequirements requirements,
-) @private {
-    gpu::QueueKind distinct_kind;
-    gpu::QueueKind[2] other_kinds;
-    if (requirements.distinct.graphics) {
-        distinct_kind = gpu::QueueKind.GRAPHICS;
-        other_kinds = {
-            gpu::QueueKind.COMPUTE,
-            gpu::QueueKind.TRANSFER,
-        };
-    } else if (requirements.distinct.compute) {
-        distinct_kind = gpu::QueueKind.COMPUTE;
-        other_kinds = {
-            gpu::QueueKind.GRAPHICS,
-            gpu::QueueKind.TRANSFER,
-        };
-    } else {
-        distinct_kind = gpu::QueueKind.TRANSFER;
-        other_kinds = {
-            gpu::QueueKind.GRAPHICS,
-            gpu::QueueKind.COMPUTE,
-        };
-    }
-
-    QueueCandidatePool pool = create_queue_candidate_pool(requirements);
-    collect_queue_candidates(
-        pool:         &pool,
-        selection:    selection,
-        families:     families,
-        requirements: requirements,
-    );
-    uint distinct_required = required_queue_count(requirements, distinct_kind);
-    uint first_required = required_queue_count(requirements, other_kinds[0]);
-    uint second_required = required_queue_count(requirements, other_kinds[1]);
-    uint first_available = queue_candidate_count(&pool, other_kinds[0]);
-    uint second_available = queue_candidate_count(&pool, other_kinds[1]);
-    if (queue_candidate_count(&pool, distinct_kind) < distinct_required
-        || first_available < first_required
-        || second_available < second_required) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-
-    uint first_slack = first_available - first_required;
-    uint second_slack = second_available - second_required;
-    uint[4] category_counts;
-    uint distinct_available = queue_candidate_count(&pool, distinct_kind);
-    for (uint index = 0; index < distinct_available; index++) {
-        uint candidate = queue_candidate_index(&pool, distinct_kind, index);
-        uint category;
-        if (queue_candidates_contain(&pool, other_kinds[0], candidate)) {
-            category |= 1;
-        }
-        if (queue_candidates_contain(&pool, other_kinds[1], candidate)) {
-            category |= 2;
-        }
-        category_counts[category]++;
-    }
-
-    uint[4] quotas;
-    quotas[0] = category_counts[0] < distinct_required
-        ? category_counts[0]
-        : distinct_required;
-    uint remaining = distinct_required - quotas[0];
-    bool found = remaining == 0;
-    uint max_both = category_counts[3];
-    if (max_both > remaining) max_both = remaining;
-    if (max_both > first_slack) max_both = first_slack;
-    if (max_both > second_slack) max_both = second_slack;
-    for (uint both = 0; !found && both <= max_both; both++) {
-        uint after_both = remaining - both;
-        uint first_capacity = category_counts[1];
-        uint second_capacity = category_counts[2];
-        uint first_remaining_slack = first_slack - both;
-        uint second_remaining_slack = second_slack - both;
-        if (first_capacity > first_remaining_slack) {
-            first_capacity = first_remaining_slack;
-        }
-        if (second_capacity > second_remaining_slack) {
-            second_capacity = second_remaining_slack;
-        }
-        if (after_both > first_capacity + second_capacity) continue;
-        uint first = after_both > second_capacity
-            ? after_both - second_capacity
-            : 0;
-        if (first > first_capacity) continue;
-        quotas[1] = first;
-        quotas[2] = after_both - first;
-        quotas[3] = both;
-        found = true;
-    }
-    if (!found) return gpu::UNSUPPORTED_FEATURE~;
-
-    selection.counts = {};
-    selection.distinct = requirements.distinct;
-    for (uint index = 0; index < distinct_available; index++) {
-        uint candidate = queue_candidate_index(&pool, distinct_kind, index);
-        uint category;
-        if (queue_candidates_contain(&pool, other_kinds[0], candidate)) {
-            category |= 1;
-        }
-        if (queue_candidates_contain(&pool, other_kinds[1], candidate)) {
-            category |= 2;
-        }
-        if (quotas[category] == 0) continue;
-        append_selected_native_queue(
-            selection,
-            distinct_kind,
-            pool.ids[candidate],
-        );
-        quotas[category]--;
-    }
-    fill_selected_queue_role_from_pool(
-        selection:    selection,
-        pool:         &pool,
-        kind:         other_kinds[0],
-        target_count: first_required,
-    )!;
-    fill_selected_queue_role_from_pool(
-        selection:    selection,
-        pool:         &pool,
-        kind:         other_kinds[1],
-        target_count: second_required,
-    )!;
-
-    gpu::QueueKind[3] kinds = {
-        gpu::QueueKind.GRAPHICS,
-        gpu::QueueKind.COMPUTE,
-        gpu::QueueKind.TRANSFER,
-    };
-    foreach (kind : kinds) {
-        if (selected_native_queue_count(selection, kind) == 0) continue;
-        set_representative_native_queue(
-            selection,
-            kind,
-            selected_native_queue(selection, kind, 0),
-        );
-    }
-    selection.async_compute = selection.counts.graphics > 0
-        && selection.counts.compute > 0
-        && selected_native_queue(selection, gpu::QueueKind.GRAPHICS, 0)
-            != selected_native_queue(selection, gpu::QueueKind.COMPUTE, 0);
-}
-
-fn void? assign_requested_queues(
-    QueueFamilies* selection,
-    vk::QueueFamilyProperties[] families,
-    gpu::QueueRequirements requirements,
-) @private {
-    selection.counts = {};
-    if (requests_multiple_queues(requirements)
-        && requested_distinct_role_count(requirements) >= 2) {
-        @pool() {
-            assign_mutually_distinct_queues(selection, families, requirements)!;
-        };
-        return;
-    }
-
-    if (requests_multiple_queues(requirements)
-        && requested_distinct_role_count(requirements) == 1) {
-        @pool() {
-            assign_one_distinct_queue_role(selection, families, requirements)!;
-        };
-        return;
-    }
-
-    selection.distinct = requirements.distinct;
-    gpu::QueueKind[3] kinds = {
-        gpu::QueueKind.GRAPHICS,
-        gpu::QueueKind.COMPUTE,
-        gpu::QueueKind.TRANSFER,
-    };
-    foreach (kind : kinds) {
-        if (required_queue_count(requirements, kind) > 0) {
-            append_selected_native_queue(
-                selection,
-                kind,
-                representative_native_queue(selection, kind),
-            );
-        }
-    }
-    foreach (kind : kinds) {
-        if (!queue_kind_is_distinct(requirements.distinct, kind)) continue;
-        fill_selected_queue_role(
-            selection:    selection,
-            families:     families,
-            kind:         kind,
-            target_count: required_queue_count(requirements, kind),
-        )!;
-    }
-    foreach (kind : kinds) {
-        if (queue_kind_is_distinct(requirements.distinct, kind)) continue;
-        fill_selected_queue_role(
-            selection:    selection,
-            families:     families,
-            kind:         kind,
-            target_count: required_queue_count(requirements, kind),
-        )!;
-    }
-}
-
-fn uint selectable_queue_count(uint count) @private {
-    return count < MAX_SELECTED_QUEUE_INDICES
-        ? count
-        : MAX_SELECTED_QUEUE_INDICES;
 }
 
 fn bool graphics_compute_alias(QueueFamilies selection) @private {
@@ -958,53 +259,26 @@ fn bool compute_transfer_alias(QueueFamilies selection) @private {
         && selection.compute_index == selection.transfer_index;
 }
 
-fn bool queue_choice_graphics_compute_alias(QueueChoice selection) @private {
-    return selection.selected.graphics
-        && selection.selected.compute
-        && selection.graphics == selection.compute
-        && selection.graphics_index == selection.compute_index;
-}
-
-fn bool queue_choice_graphics_transfer_alias(QueueChoice selection) @private {
-    return selection.selected.graphics
-        && selection.selected.transfer
-        && selection.graphics == selection.transfer
-        && selection.graphics_index == selection.transfer_index;
-}
-
-fn bool queue_choice_compute_transfer_alias(QueueChoice selection) @private {
-    return selection.selected.compute
-        && selection.selected.transfer
-        && selection.compute == selection.transfer
-        && selection.compute_index == selection.transfer_index;
-}
-
-fn bool selection_satisfies_requirements(
-    QueueChoice selection,
-    gpu::QueueRequirements requirements,
+fn bool selection_satisfies_request(
+    QueueFamilies selection,
+    gpu::QueueRequest request,
 ) @private {
-    bool graphics_alias = requirements.counts.graphics > 0
-        && ((requirements.counts.compute > 0
-                && queue_choice_graphics_compute_alias(selection))
-            || (requirements.counts.transfer > 0
-                && queue_choice_graphics_transfer_alias(selection)));
-    bool compute_alias = requirements.counts.compute > 0
-        && ((requirements.counts.graphics > 0
-                && queue_choice_graphics_compute_alias(selection))
-            || (requirements.counts.transfer > 0
-                && queue_choice_compute_transfer_alias(selection)));
-    bool transfer_alias = requirements.counts.transfer > 0
-        && ((requirements.counts.graphics > 0
-                && queue_choice_graphics_transfer_alias(selection))
-            || (requirements.counts.compute > 0
-                && queue_choice_compute_transfer_alias(selection)));
-    return !(requirements.distinct.graphics && graphics_alias)
-        && !(requirements.distinct.compute && compute_alias)
-        && !(requirements.distinct.transfer && transfer_alias);
+    bool graphics_alias = request.required.graphics
+        && ((request.required.compute && graphics_compute_alias(selection))
+            || (request.required.transfer && graphics_transfer_alias(selection)));
+    bool compute_alias = request.required.compute
+        && ((request.required.graphics && graphics_compute_alias(selection))
+            || (request.required.transfer && compute_transfer_alias(selection)));
+    bool transfer_alias = request.required.transfer
+        && ((request.required.graphics && graphics_transfer_alias(selection))
+            || (request.required.compute && compute_transfer_alias(selection)));
+    return !(request.distinct.graphics && graphics_alias)
+        && !(request.distinct.compute && compute_alias)
+        && !(request.distinct.transfer && transfer_alias);
 }
 
 fn bool assign_presentation_queue(
-    QueueChoice* selection,
+    QueueFamilies* selection,
     bool[] presentation_support,
 ) @private {
     if (selection.selected.graphics
@@ -1038,36 +312,7 @@ fn bool assign_presentation_queue(
     return false;
 }
 
-fn uint compute_selection_tier(
-    QueueChoice selection,
-    vk::QueueFamilyProperties[] families,
-) @private {
-    if (!selection.selected.compute) return 0;
-    if (selection.selected.graphics
-        && selection.graphics == selection.compute) {
-        return selection.graphics_index == selection.compute_index ? 2 : 0;
-    }
-    uint compute_flags = (uint)families[selection.compute].queue_flags;
-    bool graphics_capable =
-        (compute_flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0;
-    if (!selection.selected.graphics) return graphics_capable ? 1 : 0;
-    return graphics_capable ? 3 : 1;
-}
-
-fn uint transfer_selection_tier(
-    QueueChoice selection,
-    vk::QueueFamilyProperties[] families,
-) @private {
-    if (!selection.selected.transfer) return 0;
-    if (queue_family_is_transfer_only(families[selection.transfer])) return 0;
-    if (queue_choice_graphics_transfer_alias(selection)) return 1;
-    if (queue_choice_compute_transfer_alias(selection)) return 2;
-    if (selection.selected.graphics && selection.graphics == selection.transfer) return 3;
-    if (selection.selected.compute && selection.compute == selection.transfer) return 4;
-    return 5;
-}
-
-fn uint presentation_selection_tier(QueueChoice selection) @private {
+fn uint presentation_selection_tier(QueueFamilies selection) @private {
     if (!selection.presentation) return 0;
     if (selection.selected.graphics
         && selection.present == selection.graphics
@@ -1087,21 +332,94 @@ fn uint presentation_selection_tier(QueueChoice selection) @private {
     return 3;
 }
 
-fn bool selection_is_preferred(
-    QueueChoice candidate,
-    QueueChoice current,
+fn uint selected_native_identity_count(QueueFamilies selection) @private {
+    uint count;
+    if (selection.selected.graphics) count++;
+    if (selection.selected.compute && !graphics_compute_alias(selection)) count++;
+    if (selection.selected.transfer
+        && !graphics_transfer_alias(selection)
+        && !compute_transfer_alias(selection)) {
+        count++;
+    }
+    return count;
+}
+
+fn uint compute_preference_tier(
+    QueueFamilies selection,
     vk::QueueFamilyProperties[] families,
 ) @private {
-    uint candidate_tier = compute_selection_tier(candidate, families);
-    uint current_tier = compute_selection_tier(current, families);
+    if (!selection.selected.compute) return 0;
+    if (selection.selected.graphics
+        && selection.graphics == selection.compute) {
+        return selection.graphics_index == selection.compute_index ? 2 : 0;
+    }
+    uint compute_flags = (uint)families[selection.compute].queue_flags;
+    bool graphics_capable =
+        (compute_flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0;
+    if (!selection.selected.graphics) return graphics_capable ? 1 : 0;
+    return graphics_capable ? 3 : 1;
+}
+
+fn uint transfer_preference_tier(
+    QueueFamilies selection,
+    vk::QueueFamilyProperties[] families,
+) @private {
+    if (!selection.selected.transfer) return 0;
+    if (queue_family_is_transfer_only(families[selection.transfer])) return 0;
+    if (graphics_transfer_alias(selection)) return 1;
+    if (compute_transfer_alias(selection)) return 2;
+    if (selection.selected.graphics
+        && selection.graphics == selection.transfer) {
+        return 3;
+    }
+    if (selection.selected.compute
+        && selection.compute == selection.transfer) {
+        return 4;
+    }
+    return 5;
+}
+
+fn uint distinct_selection_tier(
+    QueueFamilies selection,
+    vk::QueueFamilyProperties[] families,
+    gpu::QueueRequest request,
+) @private {
+    uint tier;
+    if (request.distinct.compute) {
+        uint flags = (uint)families[selection.compute].queue_flags;
+        if ((flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0) tier++;
+    }
+    if (request.distinct.transfer
+        && !queue_family_is_transfer_only(families[selection.transfer])) {
+        tier++;
+    }
+    return tier;
+}
+
+fn bool selection_is_preferred(
+    QueueFamilies candidate,
+    QueueFamilies current,
+    vk::QueueFamilyProperties[] families,
+    gpu::QueueRequest request,
+) @private {
+    uint candidate_tier = presentation_selection_tier(candidate);
+    uint current_tier = presentation_selection_tier(current);
     if (candidate_tier != current_tier) return candidate_tier < current_tier;
 
-    candidate_tier = transfer_selection_tier(candidate, families);
-    current_tier = transfer_selection_tier(current, families);
+    candidate_tier = distinct_selection_tier(candidate, families, request);
+    current_tier = distinct_selection_tier(current, families, request);
     if (candidate_tier != current_tier) return candidate_tier < current_tier;
 
-    candidate_tier = presentation_selection_tier(candidate);
-    current_tier = presentation_selection_tier(current);
+    candidate_tier = compute_preference_tier(candidate, families);
+    current_tier = compute_preference_tier(current, families);
+    if (candidate_tier != current_tier) return candidate_tier < current_tier;
+
+    candidate_tier = transfer_preference_tier(candidate, families);
+    current_tier = transfer_preference_tier(current, families);
+    if (candidate_tier != current_tier) return candidate_tier < current_tier;
+
+    candidate_tier = selected_native_identity_count(candidate);
+    current_tier = selected_native_identity_count(current);
     if (candidate_tier != current_tier) return candidate_tier < current_tier;
 
     if (candidate.selected.graphics
@@ -1138,38 +456,40 @@ fn bool selection_is_preferred(
     return false;
 }
 
+fn uint selectable_queue_count(uint count) @private {
+    return count < gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES
+        ? count
+        : gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES;
+}
+
 fn QueueFamilies? pick_queue_families_impl(
     vk::QueueFamilyProperties[] families,
     bool[] presentation_support,
     bool require_presentation,
-    gpu::QueueRequirements requirements,
+    gpu::QueueRequest request,
 ) @private {
-    if (!gpu::internal::queue_requirements_are_valid(requirements)) {
+    if (!gpu::internal::queue_request_is_valid(request)) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (require_presentation && requirements.counts.graphics == 0) {
+    if (require_presentation && !request.required.graphics) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (available_queue_count(families, gpu::QueueKind.GRAPHICS)
-            < requirements.counts.graphics
-        || available_queue_count(families, gpu::QueueKind.COMPUTE)
-            < requirements.counts.compute
-        || available_queue_count(families, gpu::QueueKind.TRANSFER)
-            < requirements.counts.transfer) {
+    if ((request.required.graphics
+            && !queue_role_is_available(families, gpu::QueueKind.GRAPHICS))
+        || (request.required.compute
+            && !queue_role_is_available(families, gpu::QueueKind.COMPUTE))
+        || (request.required.transfer
+            && !queue_role_is_available(families, gpu::QueueKind.TRANSFER))) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     if (require_presentation && presentation_support.len != families.len) {
         return gpu::INVALID_ARGUMENT~;
     }
 
-    QueueChoice base = {
-        .selected = {
-            .graphics = requirements.counts.graphics > 0,
-            .compute  = requirements.counts.compute > 0,
-            .transfer = requirements.counts.transfer > 0,
-        },
+    QueueFamilies base = {
+        .selected = request.required,
     };
-    QueueChoice best;
+    QueueFamilies best;
     bool found;
     usz graphics_family_count = base.selected.graphics ? families.len : 1;
     for (usz graphics_family = 0;
@@ -1199,21 +519,26 @@ fn QueueFamilies? pick_queue_families_impl(
                 for (uint compute_index = 0;
                     compute_index < compute_count;
                     compute_index++) {
-                    usz transfer_family_count = base.selected.transfer ? families.len : 1;
+                    usz transfer_family_count =
+                        base.selected.transfer ? families.len : 1;
                     for (usz transfer_family = 0;
                         transfer_family < transfer_family_count;
                         transfer_family++) {
                         if (base.selected.transfer
-                            && !queue_family_supports_transfer(families[transfer_family])) {
+                            && !queue_family_supports_transfer(
+                                families[transfer_family],
+                            )) {
                             continue;
                         }
                         uint transfer_count = base.selected.transfer
-                            ? selectable_queue_count(families[transfer_family].queue_count)
+                            ? selectable_queue_count(
+                                families[transfer_family].queue_count,
+                            )
                             : 1;
                         for (uint transfer_index = 0;
                             transfer_index < transfer_count;
                             transfer_index++) {
-                            QueueChoice candidate = base;
+                            QueueFamilies candidate = base;
                             if (candidate.selected.graphics) {
                                 candidate.graphics = (uint)graphics_family;
                                 candidate.graphics_index = graphics_index;
@@ -1229,25 +554,25 @@ fn QueueFamilies? pick_queue_families_impl(
                             candidate.async_compute =
                                 candidate.selected.graphics
                                 && candidate.selected.compute
-                                && !queue_choice_graphics_compute_alias(candidate);
-                            if (!selection_satisfies_requirements(
+                                && !graphics_compute_alias(candidate);
+                            if (!selection_satisfies_request(
                                 candidate,
-                                requirements,
+                                request,
                             )) {
                                 continue;
                             }
-                            if (require_presentation) {
-                                if (!assign_presentation_queue(
+                            if (require_presentation
+                                && !assign_presentation_queue(
                                     &candidate,
                                     presentation_support,
                                 )) {
-                                    continue;
-                                }
+                                continue;
                             }
                             if (!found || selection_is_preferred(
-                                candidate,
-                                best,
-                                families,
+                                candidate: candidate,
+                                current:   best,
+                                families:  families,
+                                request:   request,
                             )) {
                                 best = candidate;
                                 found = true;
@@ -1259,52 +584,38 @@ fn QueueFamilies? pick_queue_families_impl(
         }
     }
     if (!found) return gpu::UNSUPPORTED_FEATURE~;
-    QueueFamilies selection = {
-        .selected       = best.selected,
-        .graphics       = best.graphics,
-        .graphics_index = best.graphics_index,
-        .compute        = best.compute,
-        .compute_index  = best.compute_index,
-        .transfer       = best.transfer,
-        .transfer_index = best.transfer_index,
-        .present        = best.present,
-        .present_index  = best.present_index,
-        .presentation   = best.presentation,
-        .async_compute  = best.async_compute,
-    };
-    assign_requested_queues(&selection, families, requirements)!;
-    return selection;
+    return best;
 }
 
-fn QueueFamilies? pick_queue_families_for_requirements(
+fn QueueFamilies? pick_queue_families_for_request(
     vk::QueueFamilyProperties[] families,
-    gpu::QueueRequirements requirements,
+    gpu::QueueRequest request,
 ) {
     return pick_queue_families_impl(
         families:             families,
         presentation_support: {},
         require_presentation: false,
-        requirements:         requirements,
+        request:              request,
     );
 }
 
-fn QueueFamilies? pick_queue_families_for_surface_requirements(
+fn QueueFamilies? pick_queue_families_for_surface_request(
     vk::QueueFamilyProperties[] families,
     bool[] presentation_support,
-    gpu::QueueRequirements requirements,
+    gpu::QueueRequest request,
 ) {
     return pick_queue_families_impl(
         families:             families,
         presentation_support: presentation_support,
         require_presentation: true,
-        requirements:         requirements,
+        request:              request,
     );
 }
 
 fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
-    return pick_queue_families_for_requirements(
+    return pick_queue_families_for_request(
         families,
-        gpu::internal::default_queue_requirements(),
+        gpu::internal::default_queue_request(),
     );
 }
 
@@ -1312,10 +623,10 @@ fn QueueFamilies? pick_queue_families_for_surface(
     vk::QueueFamilyProperties[] families,
     bool[] presentation_support,
 ) {
-    return pick_queue_families_for_surface_requirements(
+    return pick_queue_families_for_surface_request(
         families,
         presentation_support,
-        gpu::internal::default_queue_requirements(),
+        gpu::internal::default_queue_request(),
     );
 }
 
@@ -1337,21 +648,6 @@ fn uint requested_queue_count(
         && selection.transfer == family
         && count <= selection.transfer_index) {
         count = selection.transfer_index + 1;
-    }
-    gpu::QueueKind[3] kinds = {
-        gpu::QueueKind.GRAPHICS,
-        gpu::QueueKind.COMPUTE,
-        gpu::QueueKind.TRANSFER,
-    };
-    foreach (kind : kinds) {
-        uint selected_count = selected_native_queue_count(selection, kind);
-        for (uint index = 0; index < selected_count; index++) {
-            ulong id = selected_native_queue(selection, kind, index);
-            uint queue_index = native_queue_index(id);
-            if (native_queue_family(id) == family && count <= queue_index) {
-                count = queue_index + 1;
-            }
-        }
     }
     if (include_presentation
         && selection.presentation
@@ -1389,22 +685,6 @@ fn uint selected_device_queue_families(
     if (selection.selected.transfer) {
         count = append_queue_family(out_families, count, selection.transfer);
     }
-    gpu::QueueKind[3] kinds = {
-        gpu::QueueKind.GRAPHICS,
-        gpu::QueueKind.COMPUTE,
-        gpu::QueueKind.TRANSFER,
-    };
-    foreach (kind : kinds) {
-        uint selected_count = selected_native_queue_count(selection, kind);
-        for (uint index = 0; index < selected_count; index++) {
-            ulong id = selected_native_queue(selection, kind, index);
-            count = append_queue_family(
-                out_families,
-                count,
-                native_queue_family(id),
-            );
-        }
-    }
     if (include_presentation && selection.presentation) {
         count = append_queue_family(out_families, count, selection.present);
     }
@@ -1413,7 +693,7 @@ fn uint selected_device_queue_families(
 
 fn QueueFamilies? select_queue_families(
     vk::PhysicalDevice physical_device,
-    gpu::QueueRequirements* requirements = null,
+    gpu::QueueRequest* request = null,
 ) {
     uint count = 0;
     vk::get_physical_device_queue_family_properties(physical_device, &count, null);
@@ -1422,9 +702,9 @@ fn QueueFamilies? select_queue_families(
     @pool() {
         vk::QueueFamilyProperties[] families = mem::talloc_array(vk::QueueFamilyProperties, (sz)count);
         vk::get_physical_device_queue_family_properties(physical_device, &count, families.ptr);
-        return requirements == null
+        return request == null
             ? pick_queue_families(families[:count])
-            : pick_queue_families_for_requirements(families[:count], *requirements);
+            : pick_queue_families_for_request(families[:count], *request);
     };
 }
 
@@ -1432,7 +712,7 @@ fn QueueFamilies? select_queue_families_for_surface(
     VkRuntimeState* runtime,
     vk::PhysicalDevice physical_device,
     vk::SurfaceKHR surface,
-    gpu::QueueRequirements* requirements = null,
+    gpu::QueueRequest* request = null,
 ) {
     if (runtime == null || runtime.dispatch.surface.get_surface_support == null) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -1460,58 +740,40 @@ fn QueueFamilies? select_queue_families_for_surface(
             ))!;
             presentation_support[index] = supported != 0;
         }
-        return requirements == null
+        return request == null
             ? pick_queue_families_for_surface(families[:count], presentation_support)
-            : pick_queue_families_for_surface_requirements(
+            : pick_queue_families_for_surface_request(
                 families[:count],
                 presentation_support,
-                *requirements,
+                *request,
             );
     };
 }
 
-fn bool? vk_supports_queue_requirements(
+fn bool? vk_supports_queue_request(
     VkRuntimeState* state,
     uint adapter_index,
-    gpu::QueueRequirements* requirements,
+    gpu::QueueRequest* request,
     void* backend_surface,
 ) {
-    if (state == null || requirements == null || adapter_index >= state.adapters.len) {
+    if (state == null || request == null || adapter_index >= state.adapters.len) {
         return gpu::INVALID_HANDLE~;
     }
 
     vk::PhysicalDevice physical_device = state.adapters[adapter_index].physical_device;
     QueueFamilies? selection = backend_surface == null
-        ? select_queue_families(physical_device, requirements)
+        ? select_queue_families(physical_device, request)
         : select_queue_families_for_surface(
             runtime:         state,
             physical_device: physical_device,
             surface:         (vk::SurfaceKHR)backend_surface,
-            requirements:    requirements,
+            request:         request,
         );
     if (catch selection_fault = selection) {
         if (selection_fault == gpu::UNSUPPORTED_FEATURE) return false;
         return selection_fault~;
     }
     return true;
-}
-
-fn uint append_selected_role_families(
-    QueueFamilies* selection,
-    gpu::QueueKind kind,
-    uint[] out_families,
-    uint count,
-) @private {
-    uint selected_count = selected_native_queue_count(selection, kind);
-    for (uint index = 0; index < selected_count; index++) {
-        ulong id = selected_native_queue(selection, kind, index);
-        count = append_queue_family(
-            out_families,
-            count,
-            native_queue_family(id),
-        );
-    }
-    return count;
 }
 
 fn uint resource_queue_families(
@@ -1522,30 +784,12 @@ fn uint resource_queue_families(
     uint count;
     if (access.graphics) {
         count = append_queue_family(out_families, count, state.graphics_family);
-        count = append_selected_role_families(
-            selection:    &state.queues,
-            kind:         gpu::QueueKind.GRAPHICS,
-            out_families: out_families,
-            count:        count,
-        );
     }
     if (access.compute) {
         count = append_queue_family(out_families, count, state.compute_family);
-        count = append_selected_role_families(
-            selection:    &state.queues,
-            kind:         gpu::QueueKind.COMPUTE,
-            out_families: out_families,
-            count:        count,
-        );
     }
     if (access.transfer) {
         count = append_queue_family(out_families, count, state.transfer_family);
-        count = append_selected_role_families(
-            selection:    &state.queues,
-            kind:         gpu::QueueKind.TRANSFER,
-            out_families: out_families,
-            count:        count,
-        );
     }
     return count;
 }
@@ -1562,19 +806,6 @@ fn uint used_queue_families(VkDeviceState* state, uint[] out_families) {
     if (state.selected_queue_roles.transfer) {
         count = append_queue_family(out_families, count, state.transfer_family);
     }
-    gpu::QueueKind[3] kinds = {
-        gpu::QueueKind.GRAPHICS,
-        gpu::QueueKind.COMPUTE,
-        gpu::QueueKind.TRANSFER,
-    };
-    foreach (kind : kinds) {
-        count = append_selected_role_families(
-            selection:    &state.queues,
-            kind:         kind,
-            out_families: out_families,
-            count:        count,
-        );
-    }
     return count;
 }
 
@@ -1590,12 +821,6 @@ fn uint swapchain_queue_families(
             count,
             state.graphics_family,
         );
-        count = append_selected_role_families(
-            selection:    &state.queues,
-            kind:         gpu::QueueKind.GRAPHICS,
-            out_families: out_families,
-            count:        count,
-        );
     }
     return append_queue_family(
         out_families,
@@ -1609,29 +834,28 @@ fn void? bind_queue_completion_role(
     gpu::internal::QueueSelection* selection,
     gpu::QueueKind kind,
 ) @private {
-    uint count = selected_native_queue_count(&state.queues, kind);
-    for (uint index = 0; index < count; index++) {
-        uint identity = gpu::internal::queue_selection_id(selection, kind, index);
-        ulong native_id = selected_native_queue(&state.queues, kind, index);
-        QueueCompletionState* completion = &state.queue_completions[identity];
-        if (completion.bound) {
-            if (completion.native_id != native_id) return gpu::BACKEND_ERROR~;
-            continue;
-        }
+    if (!queue_role_is_selected(selection.selected, kind)) return;
 
-        completion.queue_flags = query_queue_family_flags(
-            state.physical_device,
-            native_queue_family(native_id),
-        )!;
-        completion.native_id = native_id;
-        completion.bound = true;
-        vk::get_device_queue(
-            device:             state.device,
-            queue_family_index: native_queue_family(native_id),
-            queue_index:        native_queue_index(native_id),
-            p_queue:            &completion.queue,
-        );
+    uint identity = gpu::internal::queue_selection_id(selection, kind);
+    ulong native_id = selected_native_queue(&state.queues, kind);
+    QueueCompletionState* completion = &state.queue_completions[identity];
+    if (completion.bound) {
+        if (completion.native_id != native_id) return gpu::BACKEND_ERROR~;
+        return;
     }
+
+    completion.queue_flags = query_queue_family_flags(
+        state.physical_device,
+        native_queue_family(native_id),
+    )!;
+    completion.native_id = native_id;
+    completion.bound = true;
+    vk::get_device_queue(
+        device:             state.device,
+        queue_family_index: native_queue_family(native_id),
+        queue_index:        native_queue_index(native_id),
+        p_queue:            &completion.queue,
+    );
 }
 
 fn void? create_queue_completions(
@@ -1669,25 +893,22 @@ fn void? create_queue_completions(
         gpu::QueueKind.TRANSFER,
     )!;
 
-    if (selection.counts.graphics > 0) {
+    if (selection.selected.graphics) {
         state.graphics_completion_id = gpu::internal::queue_selection_id(
             selection,
             gpu::QueueKind.GRAPHICS,
-            0,
         );
     }
-    if (selection.counts.compute > 0) {
+    if (selection.selected.compute) {
         state.compute_completion_id = gpu::internal::queue_selection_id(
             selection,
             gpu::QueueKind.COMPUTE,
-            0,
         );
     }
-    if (selection.counts.transfer > 0) {
+    if (selection.selected.transfer) {
         state.transfer_completion_id = gpu::internal::queue_selection_id(
             selection,
             gpu::QueueKind.TRANSFER,
-            0,
         );
     }
 

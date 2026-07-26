@@ -14,9 +14,9 @@ fn Device create_allocation_stub_device(
 ) {
     state.resource_owner =
         gpu::internal::allocate_device_resource_owner()!!;
-    QueueSelection queues = gpu::internal::queue_selection_for_requirements(
-        requirements: {
-            .counts = { .compute = 1 },
+    QueueSelection queues = gpu::internal::queue_selection_for_request(
+        request: {
+            .required = { .compute },
         },
         compute_aliases_graphics:  false,
         transfer_aliases_graphics: false,

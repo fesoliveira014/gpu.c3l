@@ -23,7 +23,6 @@ BENCHMARK_TARGETS = (
     "submit_batch_bench",
     "pipeline_cache_bench",
     "async_overlap_bench",
-    "completion_wait_scope_bench",
 )
 
 BENCHMARK_METHODS = {
@@ -62,10 +61,6 @@ BENCHMARK_METHODS = {
         "ns/create, ns/state; exact identity work",
     ),
     "async_overlap_bench": ("calibration=2; measured=5", "ms"),
-    "completion_wait_scope_bench": (
-        "16 producer/indirect-consumer pairs per scope",
-        "ms; advisory all/draw_arguments ratio",
-    ),
 }
 
 C3_BUILD_FLAGS = ("-O1",)

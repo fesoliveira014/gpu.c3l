@@ -47,6 +47,9 @@ SHARED_PRIVATE_BACKEND_TYPES = {
 
 FORBIDDEN_TEXT = {
     "devicerequest": "retired packed DeviceRequest",
+    "queuerequirements": "retired queue count request",
+    "queuecounts": "retired selected queue counts",
+    '"name":"get_queue_counts"': "retired selected queue count query",
     '"name":"strict_device_request"': "retired strict request builder",
     '"name":"request_presentation"': "retired presentation request builder",
     '"name":"request_queues"': "retired queue request builder",
@@ -351,6 +354,18 @@ RETIRED_SOURCE_SYMBOLS = (
     "encode_queue_requirements(",
     "decode_queue_requirements(",
     "strict_heap",
+    "QueueRequirements",
+    "QueueCounts",
+    "get_queue_counts(",
+    "MAX_REQUESTED_QUEUES_PER_ROLE",
+    "queue_requirements_are_zero(",
+    "queue_requirements_are_valid(",
+    "default_queue_requirements(",
+    "queue_selection_for_requirements(",
+    "selected_queue_counts(",
+    "selected_queue_count(",
+    "queue_count_for_kind(",
+    "add_queue_role_identities(",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -404,6 +419,35 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "validate_device_request",
     "requested_queue_requirements",
     "requests_strict",
+    "QueueChoice",
+    "QueueCandidatePool",
+    "MAX_SELECTED_QUEUE_INDICES",
+    "queue_candidate",
+    "queue_choice_",
+    "available_queue_count",
+    "required_queue_count",
+    "selected_native_queue_count",
+    "representative_native_queue",
+    "append_selected_native_queue",
+    "append_selected_role_families",
+    "fill_selected_queue_role",
+    "assign_requested_queues",
+    "assign_mutually_distinct_queues",
+    "assign_one_distinct_queue_role",
+    "try_assign_queue_slot",
+    "selected_role_contains",
+    "selected_queue_conflicts",
+    "queue_kind_is_distinct",
+    "queue_kinds_must_not_alias",
+    "compute_selection_tier",
+    "transfer_selection_tier",
+    "selection_satisfies_requirements",
+    "requested_distinct_role_count",
+    "requests_multiple_queues",
+    "vk_supports_queue_requirements",
+    "graphics_ids",
+    "compute_ids",
+    "transfer_ids",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
@@ -1073,10 +1117,23 @@ def validate_document(document: dict) -> list[str]:
 
     device_desc_schema = (
         ("surface", "Surface"),
-        ("queues", "QueueRequirements"),
+        ("queues", "QueueRequest"),
     )
     if member_schema(types.get("DeviceDesc")) != device_desc_schema:
         failures.append("DeviceDesc must match the exact semantic schema")
+
+    queue_request_schema = (
+        ("required", "QueueRoles"),
+        ("distinct", "QueueRoles"),
+    )
+    if member_schema(types.get("QueueRequest")) != queue_request_schema:
+        failures.append("QueueRequest must match the exact semantic schema")
+
+    adapter_queue_info_schema = (
+        ("available", "QueueRoles"),
+    )
+    if member_schema(types.get("AdapterQueueInfo")) != adapter_queue_info_schema:
+        failures.append("AdapterQueueInfo must expose semantic availability")
 
     device_support_schema = (
         ("supported", "bool"),
@@ -1095,9 +1152,24 @@ def validate_document(document: dict) -> list[str]:
             failures.append(f"DeviceCaps.{field} must be a uint")
     if device_caps_fields.get("generated_work") != "bool":
         failures.append("DeviceCaps.generated_work must be a bool")
+    if device_caps_fields.get("queues") != "QueueRoles":
+        failures.append("DeviceCaps.queues must be QueueRoles")
     for field in ("max_sampler_lod_bias", "max_sampler_anisotropy"):
         if device_caps_fields.get(field) != "float":
             failures.append(f"DeviceCaps.{field} must be a float")
+
+    get_queue = functions.get("get_queue")
+    if get_queue is None:
+        failures.append("missing get_queue")
+    else:
+        parameter_types = tuple(
+            member.get("type", {}).get("name")
+            for member in get_queue.get("members", [])
+        )
+        if parameter_types != ("Device*", "QueueKind"):
+            failures.append("get_queue must take Device* and QueueKind")
+        if get_queue.get("return_type", {}).get("name") != "Queue?":
+            failures.append("get_queue must return Queue?")
 
     begin_commands = functions.get("begin_commands")
     if begin_commands is None:

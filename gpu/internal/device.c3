@@ -511,13 +511,11 @@ fn Device? register_device(
         registered_surface = *presentation_surface;
     }
     caps.presentation_enabled = registered_surface.is_valid();
-    if (queues.counts.graphics == 0
-        && queues.counts.compute == 0
-        && queues.counts.transfer == 0) {
+    if ((uint)queues.selected == 0) {
         queues = default_queue_selection(&caps);
     }
     if (!queue_selection_is_well_formed(&queues)) return gpu::INVALID_ARGUMENT~;
-    caps.queues = queues.counts;
+    caps.queues = queues.selected;
 
     lock_device_registry();
     defer unlock_device_registry();

@@ -42,10 +42,10 @@ fn void public_device_desc_defaults_are_equivalent_and_reusable() @test {
         second_zero,
     };
     foreach (device : devices) {
-        QueueCounts queues = gpu::get_queue_counts(&device)!!;
-        assert(queues.graphics == 1);
-        assert(queues.compute == 1);
-        assert(queues.transfer == 1);
+        QueueRoles queues = gpu::get_device_caps(&device)!!.queues;
+        assert(queues.graphics);
+        assert(queues.compute);
+        assert(queues.transfer);
         gpu::destroy_device(&device)!!;
     }
     gpu::destroy_runtime(&runtime)!!;

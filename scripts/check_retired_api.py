@@ -25,6 +25,10 @@ FIXTURES = {
     "request_presentation": "request_presentation",
     "request_queues": "request_queues",
     "supports_device_request": "supports_device_request",
+    "queue_counts": "QueueCounts",
+    "queue_requirements": "QueueRequirements",
+    "get_queue_counts": "get_queue_counts",
+    "indexed_get_queue": "get_queue",
     "strict_enabled_caps": "strict_enabled",
     "strict_supported_adapter_info": "strict_supported",
     "backend_kind": "BackendKind",
@@ -543,6 +547,18 @@ def has_expected_diagnostic(
             and diagnostic_points_to_retired_member(
                 target,
                 retired_symbol,
+                diagnostic,
+            )
+        )
+    if target == "indexed_get_queue":
+        return (
+            message == (
+                "This argument would exceed the number of parameters, "
+                "did you add too many arguments?"
+            )
+            and diagnostic_points_to_retired_member(
+                target,
+                "0",
                 diagnostic,
             )
         )

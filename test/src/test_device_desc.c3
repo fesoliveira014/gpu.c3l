@@ -3,19 +3,17 @@ module gpu_test;
 import gpu::internal @public;
 import gpu @public;
 
-fn bool queue_requirements_equal(
-    gpu::QueueRequirements first,
-    gpu::QueueRequirements second,
+fn bool queue_requests_equal(
+    gpu::QueueRequest first,
+    gpu::QueueRequest second,
 ) {
-    return first.counts.graphics == second.counts.graphics
-        && first.counts.compute == second.counts.compute
-        && first.counts.transfer == second.counts.transfer
+    return (uint)first.required == (uint)second.required
         && (uint)first.distinct == (uint)second.distinct;
 }
 
 fn bool device_desc_equal(gpu::DeviceDesc first, gpu::DeviceDesc second) {
     return (ulong)first.surface == (ulong)second.surface
-        && queue_requirements_equal(first.queues, second.queues);
+        && queue_requests_equal(first.queues, second.queues);
 }
 
 fn void null_and_zero_device_desc_use_default_queues() @test {
@@ -25,11 +23,11 @@ fn void null_and_zero_device_desc_use_default_queues() @test {
     gpu::DeviceDesc zero_normalized =
         gpu::internal::normalize_device_desc(&zero)!!;
 
-    assert(null_normalized.queues.counts.graphics == 1);
-    assert(null_normalized.queues.counts.compute == 1);
-    assert(null_normalized.queues.counts.transfer == 1);
+    assert(null_normalized.queues.required.graphics);
+    assert(null_normalized.queues.required.compute);
+    assert(null_normalized.queues.required.transfer);
     assert((uint)null_normalized.queues.distinct == 0);
-    assert(queue_requirements_equal(
+    assert(queue_requests_equal(
         zero_normalized.queues,
         null_normalized.queues,
     ));
@@ -44,10 +42,7 @@ fn void normalization_preserves_explicit_desc_without_mutation() @test {
             .generation = 11,
         },
         .queues = {
-            .counts   = {
-                .graphics = 1,
-                .compute  = 1,
-            },
+            .required = { .graphics, .compute },
             .distinct = { .compute },
         },
     };
@@ -61,18 +56,20 @@ fn void normalization_preserves_explicit_desc_without_mutation() @test {
 }
 
 fn void normalization_rejects_invalid_queue_descriptions() @test {
-    gpu::DeviceDesc too_many = {
-        .queues = { .counts = { .graphics = 256 } },
-    };
     gpu::DeviceDesc missing_role = {
         .queues = {
-            .counts   = { .graphics = 1 },
+            .required = { .graphics },
             .distinct = { .compute },
         },
     };
     gpu::DeviceDesc unknown_role = {
         .queues = {
-            .counts   = { .graphics = 1 },
+            .required = (gpu::QueueRoles)8,
+        },
+    };
+    gpu::DeviceDesc unknown_distinct = {
+        .queues = {
+            .required = { .graphics },
             .distinct = (gpu::QueueRoles)8,
         },
     };
@@ -81,14 +78,14 @@ fn void normalization_rejects_invalid_queue_descriptions() @test {
             .index      = 1,
             .generation = 1,
         },
-        .queues = { .counts = { .compute = 1 } },
+        .queues = { .required = { .compute } },
     };
 
-    assert(@catch(gpu::internal::normalize_device_desc(&too_many))
-        == gpu::INVALID_ARGUMENT);
     assert(@catch(gpu::internal::normalize_device_desc(&missing_role))
         == gpu::INVALID_ARGUMENT);
     assert(@catch(gpu::internal::normalize_device_desc(&unknown_role))
+        == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::internal::normalize_device_desc(&unknown_distinct))
         == gpu::INVALID_ARGUMENT);
     assert(@catch(gpu::internal::normalize_device_desc(
         &presentation_without_graphics,

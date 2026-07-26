@@ -183,7 +183,7 @@ or object naming.
 ## 5. Adapter enumeration and device selection
 
 Runtime creation enumerates every physical adapter once and caches semantic
-memory totals, queue counts, general limits, required baseline feature/limit
+memory totals, available queue roles, general limits, required baseline feature/limit
 facts, and separate backend diagnostics. Public enumeration and queries
 allocate nothing. Cached strings remain valid until runtime destruction.
 
@@ -224,8 +224,8 @@ backend prefers the representative graphics queue, then compute or transfer
 representatives, and otherwise uses a private queue. Split
 graphics/presentation families use concurrent sharing. `supports_presentation`
 reports the complete surface and presentation capability.
-`supports_device_desc` additionally preflights the descriptor's queue counts,
-distinct-role constraints, graphics minimum, and presentation topology without
+`supports_device_desc` additionally preflights the descriptor's required roles,
+distinct-role constraints, presentation graphics requirement, and topology without
 enabling state. Surface formats and present modes remain swapchain-creation
 concerns.
 
@@ -327,9 +327,8 @@ update-unused-while-pending. Generic buffer device address and generated-work
 feature/dispatch paths remain independent.
 
 Logical-device queue families form an ordered set. The backend visits the
-representative graphics, compute, and transfer queues, then every selected
-identity in the same role order, and finally the presentation queue when
-present. It appends only the first occurrence of each family. Vulkan
+selected graphics, compute, and transfer queues, then the presentation queue
+when present. It appends only the first occurrence of each family. Vulkan
 receives one `DeviceQueueCreateInfo` per resulting family. Its `queueCount` is
 the highest selected or presentation queue index in that family plus one, with
 one priority value per allocated index.

@@ -283,21 +283,17 @@ QueueKind.TRANSFER
 Queue { device, id, roles }
 ```
 
-`DeviceDesc.queues` carries semantic queue counts and optional distinct-role
-requirements. An all-zero `QueueRequirements` selects one queue under each
-role, with cross-role aliasing allowed. Any other value is an explicit queue
-topology. The backend chooses native families and indices privately. The core
-stores every selected identity and its canonical role mask; unsupported counts
-or alias constraints make the descriptor unsupported.
+`DeviceDesc.queues` carries required semantic roles and optional distinct-role
+constraints. An all-zero `QueueRequest` selects graphics, compute, and transfer,
+with cross-role aliasing allowed. Any other value is an explicit semantic
+topology. A distinct role must also be required and cannot alias another
+required role. The backend chooses native families and indices privately;
+unavailable roles or distinctness constraints make the descriptor unsupported.
 
-The descriptor currently uses `QueueRequirements`; queue multiplicity and
-role-local indexing remain part of the queue model described below.
-
-`get_queue_counts` reports selected counts by role. `get_queue` returns a
-device-owned identity for a role/index pair, and aliased roles return the same
-identity with a shared role mask. The Vulkan backend allocates every selected
-native identity. Each identity owns a private completion timeline and monotonic
-submission sequence. Command entry points take `QueueKind`.
+`get_queue` returns the single device-owned identity selected for a role, and
+aliased roles return the same identity with a shared role mask. Each selected
+identity owns a private completion timeline and monotonic submission sequence.
+Command entry points take `QueueKind`.
 
 `AllocationDesc` and `TextureDesc` declare a non-empty `QueueRoles` access
 set. The backend stores it as immutable resource
