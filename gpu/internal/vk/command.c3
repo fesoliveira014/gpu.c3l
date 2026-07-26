@@ -592,12 +592,8 @@ fn vk::MemoryRequirements? generated_scratch_requirements(
     gpu::GeneratedScratchDesc* desc,
 ) {
     PipelineSlot* slot = state.pipelines.get(desc.pipeline)!;
-    if (slot.entry >= state.pipeline_cache.entries.len
-        || !state.pipeline_cache.entries[slot.entry].used) {
-        return gpu::INVALID_HANDLE~;
-    }
-    PipelineKind pipeline_kind = (PipelineKind)state.pipeline_cache
-        .entries[slot.entry].key.kind;
+    PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
+    PipelineKind pipeline_kind = (PipelineKind)entry.key.kind;
     vk::IndirectCommandsLayoutEXT layout;
     switch (desc.kind) {
         case gpu::GeneratedWorkKind.DRAW:
@@ -618,7 +614,7 @@ fn vk::MemoryRequirements? generated_scratch_requirements(
         default:
             return gpu::INVALID_ARGUMENT~;
     }
-    if (layout == null) return gpu::BACKEND_ERROR~;
+    layout = required_generated_work_layout(layout);
 
     vk::GeneratedCommandsPipelineInfoEXT pipeline_info =
         vk::generated_commands_pipeline_info_ext()
@@ -1820,10 +1816,8 @@ fn ResolvedSpan? validate_and_lower_indirect_span(
 
 fn BoundPipeline? bound_pipeline_snapshot(CommandRecord* record) {
     BoundPipeline pipeline = record.logical_pipeline;
-    if (!pipeline.handle.is_valid() || pipeline.pipeline == null
-        || pipeline.layout == null) {
-        return gpu::INVALID_RESOURCE_STATE~;
-    }
+    if (!pipeline.handle.is_valid()) return gpu::INVALID_RESOURCE_STATE~;
+    if (pipeline.pipeline == null || pipeline.layout == null) unreachable();
     return pipeline;
 }
 
@@ -1912,10 +1906,6 @@ fn BoundPipeline? lower_bound_pipeline(
     validate_descriptor_heap_binding(state)!;
     PipelineCell* cell = state.pipelines.get_cell(pipeline)!;
     PipelineSlot* slot = &cell.value;
-    if (slot.entry >= state.pipeline_cache.entries.len
-        || !state.pipeline_cache.entries[slot.entry].used) {
-        return gpu::INVALID_HANDLE~;
-    }
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
     return {
         .handle                    = pipeline,
@@ -2341,13 +2331,17 @@ fn void? execute_generated_work(
     );
 }
 
-fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
+fn vk::IndirectCommandsLayoutEXT required_generated_work_layout(
+    vk::IndirectCommandsLayoutEXT layout,
+) {
+    if (layout == null) unreachable();
+    return layout;
+}
+
+fn vk::IndirectCommandsLayoutEXT snapshot_generated_dispatch_layout(
     BoundPipeline* pipeline,
 ) {
-    vk::IndirectCommandsLayoutEXT layout =
-        pipeline.generated_dispatch_layout;
-    if (layout == null) return gpu::BACKEND_ERROR~;
-    return layout;
+    return required_generated_work_layout(pipeline.generated_dispatch_layout);
 }
 
 fn PreparedGeneratedDispatch? lower_generated_dispatch_inputs(
@@ -2398,8 +2392,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
         max_dispatch_count: max_dispatch_count,
     )!;
     if (dispatch.max_count == 0) return dispatch;
-    dispatch.layout =
-        snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
+    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline);
     return dispatch;
 }
 
@@ -2421,7 +2414,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_with_layout_read_ops(
         layout_read.user_data,
         &dispatch.pipeline,
     );
-    if (dispatch.layout == null) return gpu::BACKEND_ERROR~;
+    dispatch.layout = required_generated_work_layout(dispatch.layout);
     return dispatch;
 }
 
@@ -2468,8 +2461,7 @@ fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
         operation:      "cmd_dispatch_generated",
         rejected_field: "count_span",
     )!;
-    dispatch.layout =
-        snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
+    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline);
     return dispatch;
 }
 

@@ -1312,7 +1312,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         queue.id,
     )!;
     QueueSubmitScratch* scratch = completion.submit_scratch;
-    if (scratch == null) return gpu::BACKEND_ERROR~;
+    if (scratch == null) unreachable();
     completion.submission_mutex.lock()!!;
     defer completion.submission_mutex.unlock();
 
