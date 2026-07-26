@@ -57,13 +57,13 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
   - **Edges:** no adapter, repeated enumeration, stale adapter after runtime destruction, multiple runtimes, and transactional runtime creation failure.
   - **Verify:** import-only fixtures for every public module; CPU handle tests; native enumeration with two runtimes; `scripts/check_public_api.py`.
 
-### 1.2 Immutable semantic device requests
+### 1.2 Plain semantic device descriptions
 
-- [x] Add canonical `DeviceRequest`, strict request construction, semantic support queries, and transactional request validation in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/device_request.c3`, `gpu/internal/vk/adapter.c3`, and `gpu/internal/vk/device.c3`.
+- [x] Add canonical `DeviceDesc`, optional semantic support queries, and transactional description validation in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/device_desc.c3`, `gpu/internal/vk/adapter.c3`, and `gpu/internal/vk/device.c3`.
   - **Depends on:** 1.1.
-  - **Contract:** support, requested capabilities, and enabled capabilities are separate; request contents become immutable at creation; unsupported requirements identify the unmet semantic requirement; no API-version selector is public.
-  - **Edges:** strict-only, empty, unsupported, duplicate contribution, and failure after temporary native allocation.
-  - **Verify:** pure-CPU request composition tests and native successful/failing device creation tests with leak checks.
+  - **Contract:** the pointer-first baseline is mandatory and implicit; support queries and creation consume the same immutable description; unsupported descriptions identify the unmet semantic requirement; no API-version selector is public.
+  - **Edges:** omitted, null, and zero-initialized descriptions; surface and queue requirements; an unsupported baseline; and failure after temporary native allocation.
+  - **Verify:** pure-CPU description normalization and support tests plus native successful and failing device creation tests with leak checks.
 
 ### 1.3 Runtime-owned platform surfaces
 

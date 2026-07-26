@@ -820,6 +820,21 @@ destruction and have no individual destroy operation. Repeated interning is idem
 
 ### Breaking migration
 
+The packed device-request builder has been retired. Migrate its operations as
+follows:
+
+| Retired API | Replacement |
+| --- | --- |
+| `DeviceRequest` and `strict_device_request()` | `DeviceDesc`; omit it or pass null for the default headless description |
+| `request_presentation()` | Set `DeviceDesc.surface` |
+| `request_queues()` | Set `DeviceDesc.queues` |
+| `supports_device_request()` | `supports_device_desc()` |
+| `DeviceRequestSupport` | `DeviceSupport` |
+
+Pass the resulting description directly to `create_device`. The pointer-first
+baseline is mandatory and implicit, so no strict-capability bit or builder call
+is needed.
+
 Texture shape is implicitly 2D, view format is always the texture's format,
 and sampler interning now returns the shader index in one call:
 

@@ -387,6 +387,14 @@ fn void adapter_baseline_support_inherits_runtime_device_config() @test {
                 runtime_state,
                 adapter.adapter_index,
             )!!;
+        } else {
+            assert(
+                @catch(gpu::internal::vk::validate_device_baseline_support(
+                    runtime_state,
+                    adapter.adapter_index,
+                )) == gpu::UNSUPPORTED_FEATURE,
+                "creation preflight agrees with cached unsupported baseline"
+            );
         }
 
         gpu::internal::vk::VkDeviceConfig invalid_config = config;
