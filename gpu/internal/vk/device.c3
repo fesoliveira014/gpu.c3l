@@ -146,13 +146,9 @@ struct VkDeviceState @public {
     SamplerTable               samplers;
     VkPresentationState        presentation;
     VkShaderHeapState          shader_heap;
-    CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
-    void*                      completion_retirement_lock_user_data @if(env::TESTING);
     GeneratedDispatchLayoutReadHook generated_dispatch_layout_read_hook @if(env::TESTING);
     void*                       generated_dispatch_layout_read_user_data @if(env::TESTING);
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout_read_observed @if(env::TESTING);
-    SubmissionCheckpointHook  submission_checkpoint_hook @if(env::TESTING);
-    void*                     submission_checkpoint_user_data @if(env::TESTING);
     HostAllocator              host_allocator;
     // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
 }

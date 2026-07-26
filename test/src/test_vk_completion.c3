@@ -14,13 +14,12 @@ uint completion_injected_wait_calls;
 vk::Result completion_injected_wait_result;
 Atomic{uint} completion_race_arrived;
 Atomic{bool} completion_race_release;
-Atomic{uint} completion_retirement_arrived;
-Atomic{bool} completion_retirement_release;
 
 struct CompletionPollWorkerArgs {
     vk::VkDeviceState* state;
     uint               queue_id;
     ulong              sequence;
+    vk::CompletionRetirementOps* retirement_ops;
     bool               result;
 }
 
@@ -34,6 +33,11 @@ struct CompletionWaitWorkerArgs {
 struct CompletionMutexHolderArgs {
     Mutex*       mutex;
     Atomic{bool} entered;
+    Atomic{bool} release;
+}
+
+struct CompletionRetirementGate {
+    Atomic{uint} arrived;
     Atomic{bool} release;
 }
 
@@ -80,9 +84,10 @@ fn vk::Result query_completion_rendezvous(
 }
 
 fn void rendezvous_before_retirement_lock(void* user_data) {
-    (void)user_data;
-    (void)completion_retirement_arrived.add(1, AtomicOrdering.RELEASE);
-    while (!completion_retirement_release.load(AtomicOrdering.ACQUIRE)) {
+    CompletionRetirementGate* gate =
+        (CompletionRetirementGate*)user_data;
+    (void)gate.arrived.add(1, AtomicOrdering.RELEASE);
+    while (!gate.release.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
 }
@@ -90,11 +95,11 @@ fn void rendezvous_before_retirement_lock(void* user_data) {
 fn int completion_poll_worker(void* raw_args) {
     CompletionPollWorkerArgs* args = (CompletionPollWorkerArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-        args.result = vk::vk_poll_completion_with_query(
+        args.result = vk::vk_poll_completion_with_ops(
             state:    args.state,
             queue_id: args.queue_id,
             sequence: args.sequence,
-            query_fn: &query_completion_rendezvous,
+            ops:      args.retirement_ops,
         )!!;
     };
     return 0;
@@ -438,21 +443,20 @@ fn void concurrent_first_observers_publish_one_retirement() @test {
     completion_injected_counter = sequence;
     completion_race_arrived.store(0, AtomicOrdering.RELAXED);
     completion_race_release.store(false, AtomicOrdering.RELAXED);
-    completion_retirement_arrived.store(0, AtomicOrdering.RELAXED);
-    completion_retirement_release.store(false, AtomicOrdering.RELAXED);
-    vk::set_completion_retirement_lock_hook(
-        state,
-        &rendezvous_before_retirement_lock,
-        null,
-    );
-    defer vk::set_completion_retirement_lock_hook(state, null, null);
+    CompletionRetirementGate gate = {};
+    vk::CompletionRetirementOps retirement_ops = {
+        .user_data         = &gate,
+        .query             = &query_completion_rendezvous,
+        .before_retirement = &rendezvous_before_retirement_lock,
+    };
     CompletionPollWorkerArgs[2] args;
     Thread[2] workers;
     for (uint i = 0; i < 2; i++) {
         args[i] = {
-            .state    = state,
-            .queue_id = queue.id,
-            .sequence = sequence,
+            .state          = state,
+            .queue_id       = queue.id,
+            .sequence       = sequence,
+            .retirement_ops = &retirement_ops,
         };
         workers[i].create(&completion_poll_worker, &args[i])!!;
     }
@@ -460,17 +464,17 @@ fn void concurrent_first_observers_publish_one_retirement() @test {
         thread::yield();
     }
     completion_race_release.store(true, AtomicOrdering.RELEASE);
-    while (completion_retirement_arrived.load(AtomicOrdering.ACQUIRE) < 2) {
+    while (gate.arrived.load(AtomicOrdering.ACQUIRE) < 2) {
         thread::yield();
     }
-    completion_retirement_release.store(true, AtomicOrdering.RELEASE);
+    gate.release.store(true, AtomicOrdering.RELEASE);
     foreach (i, &worker : workers) {
         assert(worker.join()!! == 0 && args[i].result,
             "both concurrent observers report full retirement");
     }
 
     assert(completion_race_arrived.load(AtomicOrdering.ACQUIRE) == 2
-            && completion_retirement_arrived.load(AtomicOrdering.ACQUIRE) == 2,
+            && gate.arrived.load(AtomicOrdering.ACQUIRE) == 2,
         "both first observers reach the query and retirement checkpoints");
     assert(vk::queue_completion_state(state, queue.id)!!
             .retired_sequence.load(AtomicOrdering.ACQUIRE) == sequence,

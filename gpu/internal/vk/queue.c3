@@ -15,17 +15,7 @@ alias QueueSubmit2Fn @private = fn vk::Result (
     vk::SubmitInfo2*,
     vk::Fence,
 );
-alias SubmissionCheckpointHook @if(env::TESTING) = fn void (
-    void*, SubmissionCheckpoint, gpu::CompletionPoint
-);
-
 const uint MAX_QUEUE_FAMILIES = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES + 4;
-
-enum SubmissionCheckpoint : uint {
-    NATIVE_ACCEPTED,
-    BATCHES_PUBLISHED,
-    TOKEN_PUBLISHED,
-}
 
 struct QueueFamilies {
     gpu::QueueRoles selected;
@@ -1004,29 +994,6 @@ fn void? require_queue_completion_headroom_with_query(
     }
 }
 
-fn void reach_submission_checkpoint(
-    VkDeviceState* state,
-    SubmissionCheckpoint checkpoint,
-    gpu::CompletionPoint point,
-) @if(env::TESTING) {
-    if (state.submission_checkpoint_hook != null) {
-        state.submission_checkpoint_hook(
-            state.submission_checkpoint_user_data,
-            checkpoint,
-            point,
-        );
-    }
-}
-
-fn void set_submission_checkpoint_hook(
-    VkDeviceState* state,
-    SubmissionCheckpointHook hook,
-    void* user_data,
-) @if(env::TESTING) {
-    state.submission_checkpoint_hook = hook;
-    state.submission_checkpoint_user_data = user_data;
-}
-
 <* Reserve the next point while holding the queue's submission lock. *>
 fn gpu::CompletionPoint? reserve_queue_completion_locked(
     VkDeviceState* state,
@@ -1453,14 +1420,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         )!;
     }
 
-    $if env::TESTING:
-        reach_submission_checkpoint(
-            state,
-            SubmissionCheckpoint.NATIVE_ACCEPTED,
-            point,
-        );
-    $endif
-
     completion.retirement_mutex.lock()!!;
     publish_pending_commands_locked(
         state,
@@ -1469,13 +1428,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         point,
     );
     completion.retirement_mutex.unlock();
-    $if env::TESTING:
-        reach_submission_checkpoint(
-            state,
-            SubmissionCheckpoint.BATCHES_PUBLISHED,
-            point,
-        );
-    $endif
     if (swapchain != null) {
         commit_swapchain_submit(swapchain, point);
     }
@@ -1483,13 +1435,6 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         record.state = gpu::internal::CommandState.SUBMITTED;
     }
     publish_queue_completion_locked(state, point)!!;
-    $if env::TESTING:
-        reach_submission_checkpoint(
-            state,
-            SubmissionCheckpoint.TOKEN_PUBLISHED,
-            point,
-        );
-    $endif
     submitted = point;
     claimed = false;
     return submitted;

@@ -932,12 +932,12 @@ fn vk::Semaphore? create_private_timeline(VkDeviceState* state) @private {
     return semaphore;
 }
 
-fn bool? poll_queue_completion_with_query(
+fn bool? poll_queue_completion_with_ops(
     VkDeviceState* state,
     QueueCompletionState* completion,
     uint queue_id,
     ulong sequence,
-    SemaphoreCounterQueryFn query_fn,
+    CompletionRetirementOps* ops,
 ) @private {
     if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
         return true;
@@ -946,20 +946,37 @@ fn bool? poll_queue_completion_with_query(
     check_backend_result(
         state:     state,
         operation: "poll_completion",
-        result:    query_fn(
+        result:    ops.query(
             state.device,
             completion.timeline,
             &current,
         ),
     )!;
     if (current < sequence) return false;
-    retire_observed_completion_and_drain_with_query(
+    retire_observed_completion_and_drain_with_ops(
         state:             state,
         observed_queue_id: queue_id,
         observed_completed: current,
-        query_fn:          query_fn,
+        ops:               ops,
     )!;
     return completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence;
+}
+
+fn bool? poll_queue_completion_with_query(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    uint queue_id,
+    ulong sequence,
+    SemaphoreCounterQueryFn query_fn,
+) @private {
+    CompletionRetirementOps ops = { .query = query_fn };
+    return poll_queue_completion_with_ops(
+        state:      state,
+        completion: completion,
+        queue_id:   queue_id,
+        sequence:   sequence,
+        ops:        &ops,
+    );
 }
 
 fn bool? vk_poll_completion_with_query(
@@ -979,6 +996,26 @@ fn bool? vk_poll_completion_with_query(
         queue_id:   queue_id,
         sequence:   sequence,
         query_fn:   query_fn,
+    );
+}
+
+fn bool? vk_poll_completion_with_ops(
+    VkDeviceState* state,
+    uint queue_id,
+    ulong sequence,
+    CompletionRetirementOps* ops,
+) {
+    QueueCompletionState* completion = published_queue_completion_state(
+        state,
+        queue_id,
+        sequence,
+    )!;
+    return poll_queue_completion_with_ops(
+        state:      state,
+        completion: completion,
+        queue_id:   queue_id,
+        sequence:   sequence,
+        ops:        ops,
     );
 }
 

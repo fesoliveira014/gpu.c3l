@@ -3,10 +3,9 @@ module gpu::internal::vk @private;
 import gpu::internal @public;
 import gpu @public;
 import vk;
-import std::core::env;
 import std::atomic::types;
 
-alias CompletionRetirementLockHook @if(env::TESTING) = fn void (void*);
+alias BeforeCompletionRetirementFn = fn void (void*);
 
 const uint SUBMITTED_COMMAND_DRAIN_THRESHOLD = 64;
 
@@ -15,6 +14,12 @@ struct CommandResourceReference {
     uint          index;
     uint          generation;
     Atomic{uint}* retained_counter;
+}
+
+struct CompletionRetirementOps {
+    void*                        user_data;
+    SemaphoreCounterQueryFn      query;
+    BeforeCompletionRetirementFn before_retirement;
 }
 
 fn bool same_resource_reference(
@@ -259,37 +264,38 @@ fn void? query_pending_queues_before_retirement(
 
 <* Every first successful completion observation drains all pending queue
    identities before publishing retired prefixes; cached hits rely on this. *>
-fn void? retire_observed_completion_and_drain_with_query(
+fn void? retire_observed_completion_and_drain_with_ops(
     VkDeviceState* state,
     uint observed_queue_id,
     ulong observed_completed,
-    SemaphoreCounterQueryFn query_fn,
+    CompletionRetirementOps* ops,
 ) {
-    $if env::TESTING:
-        if (state.completion_retirement_lock_hook != null) {
-            state.completion_retirement_lock_hook(
-                state.completion_retirement_lock_user_data,
-            );
-        }
-    $endif
-
+    if (ops.before_retirement != null) {
+        ops.before_retirement(ops.user_data);
+    }
     (void)queue_completion_state(state, observed_queue_id)!;
     query_pending_queues_before_retirement(
         state:              state,
         has_observed:       true,
         observed_queue_id:  observed_queue_id,
         observed_completed: observed_completed,
-        query_fn:           query_fn,
+        query_fn:           ops.query,
     )!;
 }
 
-fn void set_completion_retirement_lock_hook(
+fn void? retire_observed_completion_and_drain_with_query(
     VkDeviceState* state,
-    CompletionRetirementLockHook hook,
-    void* user_data,
-) @if(env::TESTING) {
-    state.completion_retirement_lock_hook = hook;
-    state.completion_retirement_lock_user_data = user_data;
+    uint observed_queue_id,
+    ulong observed_completed,
+    SemaphoreCounterQueryFn query_fn,
+) {
+    CompletionRetirementOps ops = { .query = query_fn };
+    retire_observed_completion_and_drain_with_ops(
+        state:              state,
+        observed_queue_id:  observed_queue_id,
+        observed_completed: observed_completed,
+        ops:                &ops,
+    )!;
 }
 
 fn void? drain_completed_submitted_commands_with_query(
