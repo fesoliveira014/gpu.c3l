@@ -109,39 +109,38 @@ Backend name, native API version, driver name, and driver version are available 
 
 The root API contains no `PlatformKind` plus untyped native-handle pair. SDL integration remains outside the core package.
 
-Presentation support is queried against an adapter and a surface before device creation. Adding presentation to a device request names the surface requirements that the selected queues must satisfy.
+Presentation support is queried against an adapter and a surface before device creation. Setting the surface in a device description names the presentation requirements that the selected queues must satisfy.
 
-## Device request composition
+## Device description and support
 
-`DeviceRequest` is a canonical `gpu` value with private capability storage. Public modules contribute requirements through functions rather than exposing a root enum containing every extension concept.
+`DeviceDesc` is a plain `gpu` value containing a surface and semantic queue requirements. The pointer-first core baseline is mandatory and implicit; callers neither select it through public capability bits nor enable it through a builder.
 
 The intended flow is:
 
 ```text
 runtime = create_runtime(...)
 adapters = enumerate_adapters(runtime)
-request = strict_device_request()
-gpu::compat adds descriptor-set requirements when requested
-supports_device_request(adapter, request)
-device = create_device(adapter, request)
+desc = DeviceDesc(surface, queues)
+support = supports_device_desc(adapter, desc)
+device = create_device(adapter, desc)
 ```
 
-A compatibility-only request originates from `gpu::compat` but still produces `gpu::Device`.
+The support query is optional. An omitted, null, or zero-initialized description requests a headless device with the default queue topology.
 
-All contributed capability groups are explicit requirements. Applications query support before adding a group when they want conditional behavior. Merely detecting support or importing a module enables nothing.
+All description fields are explicit requirements. Merely detecting support or importing a module enables nothing. Future compatibility requirements must use a separate, explicitly specified contract and cannot weaken the core baseline.
 
-`RuntimeDesc` owns backend-neutral device defaults. Adapter strict-support caching and `supports_device_request` evaluate those defaults together with the explicit request, so a supported result describes the same configuration that `create_device` will attempt.
+`RuntimeDesc` owns backend-neutral device defaults. Adapter baseline-support caching and `supports_device_desc` evaluate those defaults together with the description, so a supported result describes the same configuration that `create_device` will attempt.
 
 Device creation:
 
 1. resolves the adapter;
-2. validates the complete semantic request;
+2. validates the implicit baseline and complete semantic description;
 3. selects backend features and queues;
 4. allocates private state;
-5. initializes only the requested capability state;
+5. initializes the required core state;
 6. publishes the device slot.
 
-Failure before publication releases all temporary state. No partial device or partially enabled request is observable.
+Failure before publication releases all temporary state. No partial device is observable.
 
 ## Multi-device ownership
 
@@ -177,7 +176,9 @@ C3 explicit casts can manufacture the underlying bits of a handle. Runtime owner
 
 ## Queues
 
-`DeviceRequest` contains semantic queue requirements. A request identifies roles, counts, and whether a role must use a distinct queue. The backend maps these requirements to native families and indices.
+`DeviceDesc` contains a semantic `QueueRequest`. A description identifies
+required roles and which roles may not alias another requested role. The backend
+maps these requirements to native families and indices.
 
 `Queue` is a device-owned generational handle. A queue reports its semantic roles, not native family data. One queue may satisfy several roles.
 
@@ -496,7 +497,7 @@ Diagnostic backend information may report backend name, API version, driver name
 
 ## Implementation order
 
-1. Replace the runtime singleton with `Runtime`, adapters, device requests, multiple device slots, explicit queues, and runtime-owned surfaces.
+1. Replace the runtime singleton with `Runtime`, adapters, device descriptions, multiple device slots, explicit queues, and runtime-owned surfaces.
 2. Move the backend onto per-device shared state and implement non-blocking, retryable destruction.
 3. Introduce queue-owned completion points; remove the root frame lifecycle, public semaphores, and readback tickets; migrate presentation and readback.
 4. Introduce allocations, spans, placed and dedicated textures, immediate lifetime rules, and future allocator extension points.
