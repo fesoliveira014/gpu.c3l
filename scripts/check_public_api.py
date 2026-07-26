@@ -377,6 +377,7 @@ RETIRED_SOURCE_SYMBOLS = (
     "add_queue_role_identities(",
     "shader_code_digest",
     "shader_stage_valid",
+    "cmd_begin_render_pass_with_state(",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -459,6 +460,8 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "graphics_ids",
     "compute_ids",
     "transfer_ids",
+    "render_pass_with_state",
+    "RenderPassWithState",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
