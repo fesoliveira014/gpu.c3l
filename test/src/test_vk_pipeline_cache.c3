@@ -709,6 +709,9 @@ fn void shader_store_collision_verification_is_exact() @test {
             && distinct_id != alternate_role_id
             && alternate_entry_id != alternate_role_id,
         "bytes, entry point, and role distinguish colliding shader identities");
+    assert(collision_stats.shader_intern_probes == 6
+            && collision_stats.shader_intern_bytes_compared == first.spirv.len,
+        "colliding identities probe the chain and compare the payload once");
     assert(collision_stats.shader_owned_bytes_cloned == first.spirv.len * 4,
         "collision-separated identities each own one complete clone");
     assert(vk::shader_store_live_count(state) == 4,
@@ -1824,6 +1827,54 @@ fn void graphics_pipeline_declares_exact_native_color_state() @test {
         "failed native dynamic creation releases prepared shader identities");
 }
 
+fn void out_of_range_polygon_mode_rejects_before_backend_work() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = cache_test_state(&device);
+    CacheShaders shaders = make_cache_shaders();
+
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, pipeline_colors[..]);
+    int out_of_range = 99;
+    mem::copy(&desc.polygon_mode, &out_of_range, int::size);
+    ulong shader_checks_before = vk::shader_reflection_validation_count(state);
+    ulong native_before = vk::pipeline_native_create_count(state);
+
+    fault rejected = @catch(gpu::create_graphics_pipeline(&device, &desc));
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "an out-of-range polygon mode faults INVALID_ARGUMENT: %s",
+        rejected);
+    assert(vk::shader_reflection_validation_count(state) == shader_checks_before
+            && vk::pipeline_native_create_count(state) == native_before
+            && cache_entry_count(&device) == 0,
+        "immutable state rejection performs no shader, native, or cache work");
+}
+
+fn void depth_format_in_color_formats_rejects_before_backend_work() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = cache_test_state(&device);
+    CacheShaders shaders = make_cache_shaders();
+
+    gpu::Format[1] depth_colors = {
+        gpu::Format.D32_FLOAT,
+    };
+    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, depth_colors[..]);
+    ulong shader_checks_before = vk::shader_reflection_validation_count(state);
+    ulong native_before = vk::pipeline_native_create_count(state);
+
+    fault rejected = @catch(gpu::create_graphics_pipeline(&device, &desc));
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "a depth format in color_formats faults INVALID_ARGUMENT: %s",
+        rejected);
+    assert(vk::shader_reflection_validation_count(state) == shader_checks_before
+            && vk::pipeline_native_create_count(state) == native_before
+            && cache_entry_count(&device) == 0,
+        "color format rejection performs no shader, native, or cache work");
+}
+
 fn void graphics_color_formats_require_host_safe_storage() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
@@ -1845,7 +1896,6 @@ fn void graphics_color_formats_require_host_safe_storage() @test {
             && vk::pipeline_native_create_count(state) == native_before
             && cache_entry_count(&device) == 0,
         "single rejection performs no shader, native, or cache work");
-
 }
 
 fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test {
