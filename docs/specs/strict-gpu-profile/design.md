@@ -95,7 +95,7 @@ Adapter enumeration is explicit. `AdapterInfo` reports GPU-shaped information:
 - vendor and device identity;
 - integrated, discrete, virtual, or software class;
 - semantic memory information;
-- queue roles and counts;
+- queue-role availability;
 - strict support;
 - general limits.
 

@@ -344,6 +344,41 @@ fn uint selected_native_identity_count(QueueFamilies selection) @private {
     return count;
 }
 
+fn uint compute_preference_tier(
+    QueueFamilies selection,
+    vk::QueueFamilyProperties[] families,
+) @private {
+    if (!selection.selected.compute) return 0;
+    if (selection.selected.graphics
+        && selection.graphics == selection.compute) {
+        return selection.graphics_index == selection.compute_index ? 2 : 0;
+    }
+    uint compute_flags = (uint)families[selection.compute].queue_flags;
+    bool graphics_capable =
+        (compute_flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0;
+    if (!selection.selected.graphics) return graphics_capable ? 1 : 0;
+    return graphics_capable ? 3 : 1;
+}
+
+fn uint transfer_preference_tier(
+    QueueFamilies selection,
+    vk::QueueFamilyProperties[] families,
+) @private {
+    if (!selection.selected.transfer) return 0;
+    if (queue_family_is_transfer_only(families[selection.transfer])) return 0;
+    if (graphics_transfer_alias(selection)) return 1;
+    if (compute_transfer_alias(selection)) return 2;
+    if (selection.selected.graphics
+        && selection.graphics == selection.transfer) {
+        return 3;
+    }
+    if (selection.selected.compute
+        && selection.compute == selection.transfer) {
+        return 4;
+    }
+    return 5;
+}
+
 fn uint distinct_selection_tier(
     QueueFamilies selection,
     vk::QueueFamilyProperties[] families,
@@ -371,12 +406,20 @@ fn bool selection_is_preferred(
     uint current_tier = presentation_selection_tier(current);
     if (candidate_tier != current_tier) return candidate_tier < current_tier;
 
-    candidate_tier = selected_native_identity_count(candidate);
-    current_tier = selected_native_identity_count(current);
-    if (candidate_tier != current_tier) return candidate_tier < current_tier;
-
     candidate_tier = distinct_selection_tier(candidate, families, request);
     current_tier = distinct_selection_tier(current, families, request);
+    if (candidate_tier != current_tier) return candidate_tier < current_tier;
+
+    candidate_tier = compute_preference_tier(candidate, families);
+    current_tier = compute_preference_tier(current, families);
+    if (candidate_tier != current_tier) return candidate_tier < current_tier;
+
+    candidate_tier = transfer_preference_tier(candidate, families);
+    current_tier = transfer_preference_tier(current, families);
+    if (candidate_tier != current_tier) return candidate_tier < current_tier;
+
+    candidate_tier = selected_native_identity_count(candidate);
+    current_tier = selected_native_identity_count(current);
     if (candidate_tier != current_tier) return candidate_tier < current_tier;
 
     if (candidate.selected.graphics
