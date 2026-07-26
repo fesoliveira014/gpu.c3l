@@ -20,11 +20,11 @@ alias SemaphoreCounterQueryFn @private = fn vk::Result (
     ulong*,
 );
 alias GeneratedDispatchLayoutReadHook @private @if(env::TESTING) = fn void (void*);
-alias DeviceCreateHook @if(env::TESTING) = fn vk::Result (
-    void*,
-    vk::PhysicalDevice,
-    vk::DeviceCreateInfo*,
-    vk::Device*,
+alias DeviceCreateFn = fn vk::Result (
+    void* user_data,
+    vk::PhysicalDevice physical_device,
+    vk::DeviceCreateInfo* create_info,
+    vk::Device* device,
 );
 
 const ZString SWAPCHAIN_EXTENSION             = "VK_KHR_swapchain";
@@ -55,13 +55,11 @@ struct DeviceCreationProbe {
     DeviceCreationCheckpoint fail_at;
     DeviceCreationCheckpoint reached;
     uint                     rollback_count;
-    DeviceCreateHook         native_device_create_hook @if(env::TESTING);
-    void*                    native_device_create_user_data @if(env::TESTING);
-    bool                     dynamic_color_support_override @if(env::TESTING);
-    bool                     dynamic_color_feature_chained @if(env::TESTING);
-    uint                     dynamic_color_blend_enable @if(env::TESTING);
-    uint                     dynamic_color_blend_equation @if(env::TESTING);
-    uint                     dynamic_color_write_mask @if(env::TESTING);
+}
+
+struct DeviceCreationOps {
+    void*          user_data;
+    DeviceCreateFn create;
 }
 
 struct VkPresentationState {
@@ -424,6 +422,7 @@ fn gpu::Device? create_vk_device(
         device_desc:      device_desc,
         retained_runtime: retained_runtime,
         probe:            null,
+        creation_ops:     null,
     );
 }
 
@@ -432,6 +431,7 @@ fn gpu::Device? create_vk_device_with_probe(
     gpu::DeviceDesc* device_desc,
     gpu::Runtime* retained_runtime,
     DeviceCreationProbe* probe,
+    DeviceCreationOps* creation_ops = null,
 ) {
     gpu::DeviceDesc normalized =
         gpu::internal::normalize_device_desc(device_desc)!;
@@ -469,6 +469,7 @@ fn gpu::Device? create_vk_device_with_probe(
         queue_request:              &normalized.queues,
         shader_heap_support:        &adapter_state.shader_heap,
         probe:                      probe,
+        creation_ops:               creation_ops,
     );
 }
 
@@ -505,11 +506,12 @@ fn gpu::Device? create_vk_device_from_runtime(
     gpu::QueueRequest* queue_request = null,
     ShaderHeapSupport* shader_heap_support = null,
     DeviceCreationProbe* probe = null,
+    DeviceCreationOps* creation_ops = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
     defer catch {
-        destroy_state(state, probe);
+        destroy_state(state);
         if (probe != null) probe.rollback_count++;
     }
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
@@ -602,16 +604,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     )!;
     vk::PhysicalDeviceExtendedDynamicState3PropertiesEXT dynamic_properties =
         query_dynamic_raster_properties(state.physical_device);
-    $if env::TESTING:
-        if (probe != null && probe.dynamic_color_support_override) {
-            dynamic_color_features.extended_dynamic_state3color_blend_enable =
-                vk::FALSE;
-            dynamic_color_features.extended_dynamic_state3color_blend_equation =
-                vk::FALSE;
-            dynamic_color_features.extended_dynamic_state3color_write_mask =
-                vk::FALSE;
-        }
-    $endif
     check_required_features(
         base:               &features2.features,
         v11:                &features11,
@@ -682,7 +674,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         state:             state,
         families:          &families,
         line_polygon_mode: line_polygon_mode,
-        probe:             probe,
+        creation_ops:      creation_ops,
     )!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.LOGICAL_DEVICE)!;
     VkDeviceDispatchPlan dispatch_plan = {
@@ -936,7 +928,7 @@ fn bool report_teardown_leaks(VkDeviceState* state) =>
     contract_uses_full_validation(state.validation_policy);
 
 <* Reverse-order cleanup after accepted destruction, device loss, or partial creation. *>
-fn void destroy_state(VkDeviceState* state, DeviceCreationProbe* probe = null) @private {
+fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
     if (state.device != null) {
         destroy_submitted_commands(state);
@@ -1320,7 +1312,7 @@ fn void? create_logical_device(
     VkDeviceState* state,
     QueueFamilies* families,
     bool line_polygon_mode,
-    DeviceCreationProbe* probe = null,
+    DeviceCreationOps* creation_ops = null,
 ) @private {
     @pool() {
         uint family_capacity = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES
@@ -1365,7 +1357,7 @@ fn void? create_logical_device(
             state:             state,
             queue_infos:       queue_infos,
             line_polygon_mode: line_polygon_mode,
-            probe:             probe,
+            creation_ops:      creation_ops,
         );
     };
 }
@@ -1374,7 +1366,7 @@ fn void? create_logical_device_with_queue_infos(
     VkDeviceState* state,
     vk::DeviceQueueCreateInfo[] queue_infos,
     bool line_polygon_mode,
-    DeviceCreationProbe* probe,
+    DeviceCreationOps* creation_ops,
 ) @private {
 
     vk::PhysicalDeviceDeviceGeneratedCommandsFeaturesEXT generated_work_features =
@@ -1466,41 +1458,22 @@ fn void? create_logical_device_with_queue_infos(
         device_info = device_info.set_enabled_extension_names(extensions[:extension_count]);
     }
 
-    $if env::TESTING:
-        if (probe != null) {
-            probe.dynamic_color_feature_chained =
-                features13.p_next == &dynamic_color_features
-                    || (state.presentation.enabled
-                        && presentation_features.p_next
-                            == &dynamic_color_features);
-            probe.dynamic_color_blend_enable =
-                dynamic_color_features.extended_dynamic_state3color_blend_enable;
-            probe.dynamic_color_blend_equation =
-                dynamic_color_features.extended_dynamic_state3color_blend_equation;
-            probe.dynamic_color_write_mask =
-                dynamic_color_features.extended_dynamic_state3color_write_mask;
-        }
-    $endif
-
     vk::Result create_result;
-    $if env::TESTING:
-        if (probe != null && probe.native_device_create_hook != null) {
-            create_result = probe.native_device_create_hook(
-                probe.native_device_create_user_data,
-                state.physical_device,
-                &device_info,
-                &state.device,
-            );
-            check_backend_create_result(create_result)!;
-            return;
-        }
-    $endif
-    create_result = vk::create_device(
-        physical_device: state.physical_device,
-        p_create_info:   &device_info,
-        p_allocator:     null,
-        p_device:        &state.device,
-    );
+    if (creation_ops == null) {
+        create_result = vk::create_device(
+            physical_device: state.physical_device,
+            p_create_info:   &device_info,
+            p_allocator:     null,
+            p_device:        &state.device,
+        );
+    } else {
+        create_result = creation_ops.create(
+            user_data:       creation_ops.user_data,
+            physical_device: state.physical_device,
+            create_info:     &device_info,
+            device:          &state.device,
+        );
+    }
     check_backend_create_result(create_result)!;
 }
 

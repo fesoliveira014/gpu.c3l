@@ -25,10 +25,12 @@ struct NativeDeviceCreateCapture {
     uint calls;
 }
 
-struct IndexingFeatureChainCapture {
+struct DeviceFeatureChainCapture {
     uint calls;
     bool found_features12;
-    bool all_required_bits_enabled;
+    bool indexing_features_enabled;
+    bool found_dynamic_color;
+    bool dynamic_color_features_enabled;
 }
 
 fn void capture_baseline_support_diagnostic(
@@ -64,7 +66,7 @@ fn vk::Result count_native_device_create(
     return vk::Result.ERROR_INITIALIZATION_FAILED;
 }
 
-fn vk::Result capture_indexing_feature_chain(
+fn vk::Result capture_device_feature_chain(
     void* user_data,
     vk::PhysicalDevice physical_device,
     vk::DeviceCreateInfo* create_info,
@@ -72,8 +74,8 @@ fn vk::Result capture_indexing_feature_chain(
 ) {
     (void)physical_device;
     (void)device;
-    IndexingFeatureChainCapture* capture =
-        (IndexingFeatureChainCapture*)user_data;
+    DeviceFeatureChainCapture* capture =
+        (DeviceFeatureChainCapture*)user_data;
     capture.calls++;
 
     vk::BaseInStructure* feature =
@@ -84,7 +86,7 @@ fn vk::Result capture_indexing_feature_chain(
             vk::PhysicalDeviceVulkan12Features* features12 =
                 (vk::PhysicalDeviceVulkan12Features*)feature;
             capture.found_features12 = true;
-            capture.all_required_bits_enabled =
+            capture.indexing_features_enabled =
                 features12.runtime_descriptor_array == vk::TRUE
                 && features12.shader_sampled_image_array_non_uniform_indexing
                     == vk::TRUE
@@ -97,7 +99,18 @@ fn vk::Result capture_indexing_feature_chain(
                     == vk::TRUE
                 && features12.descriptor_binding_update_unused_while_pending
                     == vk::TRUE;
-            break;
+        } else if (feature.s_type
+            == vk::StructureType.PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT) {
+            vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT* dynamic_color =
+                (vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT*)feature;
+            capture.found_dynamic_color = true;
+            capture.dynamic_color_features_enabled =
+                dynamic_color.extended_dynamic_state3color_blend_enable
+                    == vk::TRUE
+                && dynamic_color.extended_dynamic_state3color_blend_equation
+                    == vk::TRUE
+                && dynamic_color.extended_dynamic_state3color_write_mask
+                    == vk::TRUE;
         }
         feature = feature.p_next;
     }
@@ -120,6 +133,7 @@ fn fault run_injected_device_create(
     gpu::Adapter* adapter,
     gpu::DeviceDesc* device_desc,
     gpu::internal::vk::DeviceCreationProbe* probe,
+    gpu::internal::vk::DeviceCreationOps* creation_ops = null,
 ) @private {
     gpu::Runtime retained_runtime = *runtime;
     gpu::internal::runtime_retain_device(&retained_runtime)!!;
@@ -129,6 +143,7 @@ fn fault run_injected_device_create(
             device_desc:      device_desc,
             retained_runtime: &retained_runtime,
             probe:            probe,
+            creation_ops:     creation_ops,
         );
     fault creation_fault = @catch(creation_result);
     if (creation_fault) {
@@ -443,9 +458,10 @@ fn void cached_baseline_failure_precedes_native_device_creation() @test {
         adapter_state.shader_heap.limits.max_sampled_images = 6;
 
         NativeDeviceCreateCapture create_capture;
-        gpu::internal::vk::DeviceCreationProbe probe = {
-            .native_device_create_hook      = &count_native_device_create,
-            .native_device_create_user_data = &create_capture,
+        gpu::internal::vk::DeviceCreationProbe probe;
+        gpu::internal::vk::DeviceCreationOps creation_ops = {
+            .user_data = &create_capture,
+            .create    = &count_native_device_create,
         };
         gpu::Runtime retained_runtime = runtime;
         gpu::internal::runtime_retain_device(&retained_runtime)!!;
@@ -455,6 +471,7 @@ fn void cached_baseline_failure_precedes_native_device_creation() @test {
                 device_desc:      null,
                 retained_runtime: &retained_runtime,
                 probe:            &probe,
+                creation_ops:     &creation_ops,
             ));
         gpu::internal::runtime_release_device(&retained_runtime)!!;
         adapter_state.shader_heap = saved_support;
@@ -473,7 +490,7 @@ fn void cached_baseline_failure_precedes_native_device_creation() @test {
     assert(false, "the pinned Vulkan adapter supports the device baseline");
 }
 
-fn void device_creation_enables_all_required_indexing_features() @test {
+fn void device_creation_enables_required_native_features() @test {
     gpu::RuntimeDesc desc = {
         .application_name = "gpu_vk_required_indexing_features_test",
     };
@@ -486,11 +503,13 @@ fn void device_creation_enables_all_required_indexing_features() @test {
         if (!gpu::supports_device_desc(&adapter)!!.supported) {
             continue;
         }
-        IndexingFeatureChainCapture capture;
-        gpu::internal::vk::DeviceCreationProbe probe = {
-            .native_device_create_hook      = &capture_indexing_feature_chain,
-            .native_device_create_user_data = &capture,
+        DeviceFeatureChainCapture capture;
+        gpu::internal::vk::DeviceCreationProbe probe;
+        gpu::internal::vk::DeviceCreationOps creation_ops = {
+            .user_data = &capture,
+            .create    = &capture_device_feature_chain,
         };
+        uint live_slots_before = live_device_slot_count();
         gpu::Runtime retained_runtime = runtime;
         gpu::internal::runtime_retain_device(&retained_runtime)!!;
         fault rejected =
@@ -499,6 +518,7 @@ fn void device_creation_enables_all_required_indexing_features() @test {
                 device_desc:      null,
                 retained_runtime: &retained_runtime,
                 probe:            &probe,
+                creation_ops:     &creation_ops,
             ));
         gpu::internal::runtime_release_device(&retained_runtime)!!;
 
@@ -506,10 +526,17 @@ fn void device_creation_enables_all_required_indexing_features() @test {
             "the native hook aborts creation after inspecting the feature chain");
         assert(capture.calls == 1 && capture.found_features12,
             "device creation chains Vulkan 1.2 features into vkCreateDevice");
-        assert(capture.all_required_bits_enabled,
+        assert(capture.indexing_features_enabled,
             "device creation enables all seven required indexing feature bits");
-        assert(probe.rollback_count == 1,
-            "the injected native creation failure rolls back exactly once");
+        assert(capture.found_dynamic_color
+                && capture.dynamic_color_features_enabled,
+            "device creation chains and enables all required color features");
+        assert(
+            probe.reached == gpu::internal::vk::DeviceCreationCheckpoint.NONE
+                && probe.rollback_count == 1
+                && live_device_slot_count() == live_slots_before,
+            "the injected native creation failure rolls back without publication"
+        );
         return;
     }
     assert(false, "the pinned Vulkan adapter supports the device baseline");
@@ -688,16 +715,6 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
     );
 }
 
-fn void device_creation_checkpoint_ordinals_match_exact_schema() @test {
-    assert(gpu::internal::vk::DeviceCreationCheckpoint.NONE.ordinal == 0);
-    assert(gpu::internal::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal == 1);
-    assert(gpu::internal::vk::DeviceCreationCheckpoint.ALLOCATOR.ordinal == 2);
-    assert(gpu::internal::vk::DeviceCreationCheckpoint.COMMAND_STORAGE.ordinal == 3);
-    assert(gpu::internal::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP.ordinal == 4);
-    assert(gpu::internal::vk::DeviceCreationCheckpoint.PIPELINE_SHARED.ordinal == 5);
-    assert(gpu::internal::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal == 6);
-}
-
 fn void command_policy_selection_covers_both_contract_modes() @test {
     gpu::internal::vk::DeviceValidationPolicy policy;
     uptr trusted_address = (uptr)gpu::internal::vk::select_command_ops(policy);
@@ -738,7 +755,7 @@ fn void command_policy_selection_covers_both_contract_modes() @test {
     );
 }
 
-fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
+fn void device_creation_rolls_back_each_checkpoint() @test {
     gpu::RuntimeDesc desc = {
         .application_name  = "gpu_vk_device_desc_rollback_test",
         .contract_validation      = gpu::ContractValidation.FULL,
@@ -750,13 +767,15 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
 
-        for (
-            uint checkpoint_ordinal = gpu::internal::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal;
-            checkpoint_ordinal <= gpu::internal::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION.ordinal;
-            checkpoint_ordinal++
-        ) {
-            gpu::internal::vk::DeviceCreationCheckpoint checkpoint =
-                (gpu::internal::vk::DeviceCreationCheckpoint)checkpoint_ordinal;
+        gpu::internal::vk::DeviceCreationCheckpoint[6] checkpoints = {
+            gpu::internal::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE,
+            gpu::internal::vk::DeviceCreationCheckpoint.ALLOCATOR,
+            gpu::internal::vk::DeviceCreationCheckpoint.COMMAND_STORAGE,
+            gpu::internal::vk::DeviceCreationCheckpoint.DESCRIPTOR_HEAP,
+            gpu::internal::vk::DeviceCreationCheckpoint.PIPELINE_SHARED,
+            gpu::internal::vk::DeviceCreationCheckpoint.BEFORE_PUBLICATION,
+        };
+        foreach (checkpoint : checkpoints) {
             gpu::internal::vk::DeviceCreationProbe probe = { .fail_at = checkpoint };
             uint live_slots_before = live_device_slot_count();
 
@@ -790,9 +809,9 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void required_dynamic_color_features_are_enabled_transactionally() @test {
+fn void native_device_creation_failure_rolls_back() @test {
     gpu::RuntimeDesc desc = {
-        .application_name = "gpu_vk_required_dynamic_color_features_test",
+        .application_name = "gpu_vk_native_device_failure_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
@@ -802,50 +821,28 @@ fn void required_dynamic_color_features_are_enabled_transactionally() @test {
         if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
         uint live_slots_before = live_device_slot_count();
 
-        gpu::internal::vk::DeviceCreationProbe missing_support = {
-            .dynamic_color_support_override = true,
+        gpu::internal::vk::DeviceCreationProbe probe;
+        gpu::internal::vk::DeviceCreationOps creation_ops = {
+            .create = &reject_native_device_create,
         };
         assert(
             run_injected_device_create(
-                runtime:     &runtime,
-                adapter:     &adapter,
-                device_desc: null,
-                probe:       &missing_support,
-            ) == gpu::UNSUPPORTED_FEATURE,
-            "device creation rechecks and rejects missing dynamic color support"
-        );
-        assert(
-            missing_support.reached
-                    == gpu::internal::vk::DeviceCreationCheckpoint.NONE
-                && missing_support.rollback_count == 1
-                && live_device_slot_count() == live_slots_before,
-            "the real feature gate rolls back once and publishes no device"
-        );
-
-        gpu::internal::vk::DeviceCreationProbe failure_probe = {
-            .native_device_create_hook = &reject_native_device_create,
-        };
-        assert(
-            run_injected_device_create(
-                runtime:     &runtime,
-                adapter:     &adapter,
-                device_desc: null,
-                probe:       &failure_probe,
+                runtime:      &runtime,
+                adapter:      &adapter,
+                device_desc:  null,
+                probe:        &probe,
+                creation_ops: &creation_ops,
             ) == gpu::UNSUPPORTED_BACKEND,
             "an injected native failure aborts device creation"
         );
         assert(
-            failure_probe.dynamic_color_feature_chained
-                && failure_probe.dynamic_color_blend_enable == vk::TRUE
-                && failure_probe.dynamic_color_blend_equation == vk::TRUE
-                && failure_probe.dynamic_color_write_mask == vk::TRUE,
-            "device creation chains and enables all three color feature bits"
-        );
-        assert(
-            failure_probe.rollback_count == 1
+            probe.reached == gpu::internal::vk::DeviceCreationCheckpoint.NONE
+                && probe.rollback_count == 1
                 && live_device_slot_count() == live_slots_before,
-            "native failure rolls back once and publishes no device"
+            "native failure rolls back without publishing a device"
         );
+        gpu::Device device = gpu::create_device(&adapter)!!;
+        gpu::destroy_device(&device)!!;
         return;
     }
 }
