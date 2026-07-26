@@ -1118,14 +1118,6 @@ fn LoweredColorState? full_prepare_color_state(
     gpu::ColorState* color,
     ZString operation,
 ) @private {
-    if (color == null) {
-        return color_state_rejection(
-            state:     state,
-            operation: operation,
-            field:     "ColorState",
-            invariant: "color state must not be null",
-        )~;
-    }
     if (!record.logical_pipeline.handle.is_valid()) {
         return report_contract_failure(
             state:               state,
@@ -1151,7 +1143,7 @@ fn LoweredColorState? full_prepare_color_state(
         return color_state_rejection(
             state:     state,
             operation: operation,
-            field:     "ColorState.targets",
+            field:     "GraphicsState.color.targets",
             invariant: "target count must match the selected graphics pipeline",
         )~;
     }
@@ -1175,7 +1167,7 @@ fn LoweredColorState? full_prepare_color_state(
             return color_state_rejection(
                 state:     state,
                 operation: operation,
-                field:     "ColorState.targets.blend",
+                field:     "GraphicsState.color.targets.blend",
                 invariant: "enabled blend factors and operations must be defined",
             )~;
         }
@@ -1183,7 +1175,7 @@ fn LoweredColorState? full_prepare_color_state(
             return color_state_rejection(
                 state:     state,
                 operation: operation,
-                field:     "ColorState.targets.write_mask",
+                field:     "GraphicsState.color.targets.write_mask",
                 invariant: "write mask may contain only RGBA channel bits",
             )~;
         }
@@ -1194,7 +1186,7 @@ fn LoweredColorState? full_prepare_color_state(
             return color_state_rejection(
                 state:     state,
                 operation: operation,
-                field:     "ColorState.targets.blend.enable",
+                field:     "GraphicsState.color.targets.blend.enable",
                 invariant: "integer color targets do not support blending",
             )~;
         }
