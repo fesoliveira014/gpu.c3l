@@ -51,18 +51,6 @@ struct DeviceValidationPolicy {
     bool                    vulkan_layers;
 }
 
-struct VkDeviceConfig {
-    DeviceValidationPolicy    validation_policy;
-    bool                      enable_debug_names;
-    uint                      texture_heap_capacity;
-    uint                      sampler_heap_capacity;
-    uint                      texture_capacity;
-    uint                      pipeline_capacity;
-    char[]                    pipeline_cache_data;
-    gpu::DebugMessageCallback debug_callback;
-    void*                     debug_user_data;
-}
-
 struct DeviceCreationProbe {
     DeviceCreationCheckpoint fail_at;
     DeviceCreationCheckpoint reached;
@@ -426,20 +414,6 @@ fn CommandOps* select_command_ops(DeviceValidationPolicy policy) {
         : &TRUSTED_COMMAND_OPS;
 }
 
-fn VkDeviceConfig runtime_device_config(VkRuntimeState* state) {
-    return {
-        .validation_policy     = state.validation_policy,
-        .enable_debug_names    = state.debug_names,
-        .texture_heap_capacity = state.texture_heap_capacity,
-        .sampler_heap_capacity = state.sampler_heap_capacity,
-        .texture_capacity      = state.texture_capacity,
-        .pipeline_capacity     = state.pipeline_capacity,
-        .pipeline_cache_data   = state.pipeline_cache_data,
-        .debug_callback        = state.debug_callback,
-        .debug_user_data       = state.debug_user_data,
-    };
-}
-
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
     gpu::DeviceDesc* device_desc,
@@ -466,7 +440,6 @@ fn gpu::Device? create_vk_device_with_probe(
     VkRuntimeState* runtime_state = runtime_data.state;
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
 
-    VkDeviceConfig config = runtime_device_config(runtime_state);
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = normalized.surface;
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null;
@@ -483,7 +456,7 @@ fn gpu::Device? create_vk_device_with_probe(
         }
     }
     return create_vk_device_from_runtime(
-        desc:                       &config,
+        config:                     &runtime_state.config,
         instance:                   runtime_state.instance,
         physical_device:            adapter_state.physical_device,
         retained_runtime:           retained_runtime,
@@ -506,12 +479,12 @@ fn void? validate_device_baseline_support(
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
     if (adapter_index >= runtime_state.adapters.len) return gpu::INVALID_HANDLE~;
 
-    VkDeviceConfig desc = runtime_device_config(runtime_state);
-    VkShaderHeapState shader_heap = resolve_shader_heap_state(&desc)!;
+    VkShaderHeapState shader_heap =
+        resolve_shader_heap_state(&runtime_state.config)!;
     VkDeviceState diagnostic_state = {
-        .debug_callback    = runtime_state.debug_callback,
-        .debug_user_data   = runtime_state.debug_user_data,
-        .validation_policy = runtime_state.validation_policy,
+        .debug_callback    = runtime_state.config.debug_callback,
+        .debug_user_data   = runtime_state.config.debug_user_data,
+        .validation_policy = runtime_state.config.validation,
     };
     validate_shader_heap_support(
         &diagnostic_state,
@@ -521,7 +494,7 @@ fn void? validate_device_baseline_support(
 }
 
 fn gpu::Device? create_vk_device_from_runtime(
-    VkDeviceConfig* desc,
+    RuntimeConfig* config,
     vk::Instance instance,
     vk::PhysicalDevice physical_device,
     gpu::Runtime* retained_runtime = null,
@@ -543,17 +516,17 @@ fn gpu::Device? create_vk_device_from_runtime(
     $if env::TESTING:
         install_recording_host_allocator(state);
     $endif
-    state.debug_callback = desc.debug_callback;
-    state.debug_user_data = desc.debug_user_data;
-    state.debug_names = desc.enable_debug_names;
-    state.validation_policy = desc.validation_policy;
+    state.debug_callback = config.debug_callback;
+    state.debug_user_data = config.debug_user_data;
+    state.debug_names = config.debug_names;
+    state.validation_policy = config.validation;
     state.command_ops = select_command_ops(state.validation_policy);
     state.resource_mutex.init()!;
     state.pipeline_creation_mutex.init()!;
     state.texture_view_cache_mutex.init()!;
     state.command_mutex.init()!;
 
-    state.shader_heap = resolve_shader_heap_state(desc)!;
+    state.shader_heap = resolve_shader_heap_state(config)!;
 
     state.presentation.enabled = presentation_surface != null;
     if (state.presentation.enabled) state.presentation.queue_mutex.init()!;
@@ -806,14 +779,20 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.COMMAND_STORAGE)!;
     uint pipeline_capacity =
-        resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
+        resolve_descriptor_capacity(config.pipeline_capacity, gpu::MAX_PIPELINES)!;
     state.pipelines.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
     );
     state.pipelines.slots = mem::new_array(PipelineCell, pipeline_capacity);
     state.textures.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.TEXTURE);
-    state.textures.slots = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
+    state.textures.slots = mem::new_array(
+        TextureCell,
+        resolve_descriptor_capacity(
+            config.texture_capacity,
+            gpu::DEFAULT_TEXTURE_CAPACITY,
+        )!,
+    );
     state.attachment_views.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
         gpu::internal::ResourceOwnerKind.ATTACHMENT_VIEW,
@@ -829,7 +808,11 @@ fn gpu::Device? create_vk_device_from_runtime(
     create_sampler_table(state)!;
     create_descriptor_heap(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;
-    create_pipeline_shared(state, desc.pipeline_cache_data, pipeline_capacity)!;
+    create_pipeline_shared(
+        state,
+        config.pipeline_cache_data,
+        pipeline_capacity,
+    )!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PIPELINE_SHARED)!;
     CapsInputs caps_inputs = {
         .presentation_enabled = state.presentation.enabled,
@@ -1110,15 +1093,15 @@ fn bool heap_indexing_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDe
         && v12.descriptor_binding_update_unused_while_pending != 0;
 }
 
-fn VkShaderHeapState? resolve_shader_heap_state(VkDeviceConfig* desc) {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
+fn VkShaderHeapState? resolve_shader_heap_state(RuntimeConfig* config) {
+    if (config == null) return gpu::INVALID_ARGUMENT~;
     VkShaderHeapState state;
     state.texture_capacity = resolve_descriptor_capacity(
-        desc.texture_heap_capacity,
+        config.texture_heap_capacity,
         gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
     )!;
     state.sampler_capacity = resolve_descriptor_capacity(
-        desc.sampler_heap_capacity,
+        config.sampler_heap_capacity,
         gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     )!;
     return state;
@@ -1277,7 +1260,7 @@ fn IndexingHeapLimits query_indexing_heap_limits(vk::PhysicalDevice physical_dev
 
 fn bool candidate_satisfies(
     vk::PhysicalDevice candidate,
-    VkDeviceConfig* desc,
+    RuntimeConfig* config,
     ShaderHeapSupport* shader_heap,
 ) @private {
     vk::PhysicalDeviceProperties props;
@@ -1306,21 +1289,21 @@ fn bool candidate_satisfies(
     )) return false;
 
     uint? resolved_tex = resolve_descriptor_capacity(
-        desc.texture_heap_capacity,
+        config.texture_heap_capacity,
         gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
     );
     if (catch resolved_tex) return false;
     uint? resolved_smp = resolve_descriptor_capacity(
-        desc.sampler_heap_capacity,
+        config.sampler_heap_capacity,
         gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     );
     if (catch resolved_smp) return false;
     if (catch resolve_descriptor_capacity(
-        desc.texture_capacity,
+        config.texture_capacity,
         gpu::DEFAULT_TEXTURE_CAPACITY,
     )) return false;
     if (catch resolve_descriptor_capacity(
-        desc.pipeline_capacity,
+        config.pipeline_capacity,
         gpu::MAX_PIPELINES,
     )) return false;
 

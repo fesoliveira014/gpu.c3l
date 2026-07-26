@@ -6,21 +6,25 @@ import vk;
 import std::core::mem;
 import std::io;
 
+struct RuntimeConfig {
+    DeviceValidationPolicy    validation;
+    bool                      debug_names;
+    uint                      texture_heap_capacity;
+    uint                      sampler_heap_capacity;
+    uint                      texture_capacity;
+    uint                      pipeline_capacity;
+    char[]                    pipeline_cache_data;
+    gpu::DebugMessageCallback debug_callback;
+    void*                     debug_user_data;
+}
+
 struct VkRuntimeState @public {
-    vk::Instance               instance;
-    VkInstanceDispatch         dispatch;
-    VkInstanceCapabilities     instance_capabilities;
-    vk::DebugUtilsMessengerEXT messenger;
-    gpu::DebugMessageCallback  debug_callback;
-    void*                      debug_user_data;
-    VkAdapterState[]           adapters;
-    DeviceValidationPolicy     validation_policy;
-    bool                       debug_names;
-    uint                       texture_heap_capacity;
-    uint                       sampler_heap_capacity;
-    uint                       texture_capacity;
-    uint                       pipeline_capacity;
-    char[]                     pipeline_cache_data;
+    vk::Instance                instance;
+    VkInstanceDispatch          dispatch;
+    VkInstanceCapabilities      instance_capabilities;
+    vk::DebugUtilsMessengerEXT  messenger;
+    VkAdapterState[]            adapters;
+    RuntimeConfig               config;
 }
 
 fn uint route_runtime_debug_message(
@@ -30,7 +34,7 @@ fn uint route_runtime_debug_message(
     vk::DebugUtilsMessengerCallbackDataEXT* data,
 ) {
     ZString text = data != null ? (ZString)data.p_message : null;
-    if (state == null || state.debug_callback == null) {
+    if (state == null || state.config.debug_callback == null) {
         io::eprintfn("vk: %s", text == null ? (ZString)"<no message>" : text);
         return vk::FALSE;
     }
@@ -42,7 +46,11 @@ fn uint route_runtime_debug_message(
         .validation_id_name   = data != null ? (ZString)data.p_message_id_name : null,
         .validation_id_number = data != null ? data.message_id_number : 0,
     };
-    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    gpu::internal::dispatch_debug_message(
+        state.config.debug_callback,
+        state.config.debug_user_data,
+        &message,
+    );
     return vk::FALSE;
 }
 
@@ -101,7 +109,7 @@ fn void destroy_runtime_debug_messenger(VkRuntimeState* state) {
 }
 
 fn void report_runtime_debug_messenger_failure(VkRuntimeState* state) {
-    if (state.debug_callback == null) {
+    if (state.config.debug_callback == null) {
         io::eprintfn("vk: debug-utils messenger unavailable; relying on layer stderr");
         return;
     }
@@ -111,7 +119,11 @@ fn void report_runtime_debug_messenger_failure(VkRuntimeState* state) {
         .operation    = "create_runtime",
         .backend_text = "debug-utils messenger unavailable",
     };
-    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    gpu::internal::dispatch_debug_message(
+        state.config.debug_callback,
+        state.config.debug_user_data,
+        &message,
+    );
 }
 
 fn void destroy_vk_runtime_state(VkRuntimeState* state) {
@@ -125,25 +137,26 @@ fn void destroy_vk_runtime_state(VkRuntimeState* state) {
         mem::free(state.adapters.ptr);
         state.adapters = {};
     }
-    if (state.pipeline_cache_data.ptr != null) {
-        mem::free(state.pipeline_cache_data.ptr);
-        state.pipeline_cache_data = {};
+    if (state.config.pipeline_cache_data.ptr != null) {
+        mem::free(state.config.pipeline_cache_data.ptr);
+        state.config.pipeline_cache_data = {};
     }
     mem::free(state);
 }
 
 fn VkInstanceDesc runtime_instance_desc(
-    gpu::RuntimeDesc* desc,
+    RuntimeConfig* config,
+    ZString application_name,
     vk::DebugUtilsMessengerCreateInfoEXT* messenger_info,
 ) {
     return {
-        .enable_validation         = desc.enable_vulkan_validation,
-        .enable_debug_utils        = desc.enable_vulkan_validation
-            || desc.enable_debug_names
-            || desc.debug_callback != null,
+        .enable_validation         = config.validation.vulkan_layers,
+        .enable_debug_utils        = config.validation.vulkan_layers
+            || config.debug_names
+            || config.debug_callback != null,
         .enable_available_surfaces = true,
-        .application_name          = desc.application_name,
-        .debug_messenger_info      = desc.enable_vulkan_validation
+        .application_name          = application_name,
+        .debug_messenger_info      = config.validation.vulkan_layers
             ? messenger_info
             : null,
     };
@@ -155,32 +168,36 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
         destroy_vk_runtime_state(state);
     }
 
-    state.debug_callback = desc.debug_callback;
-    state.debug_user_data = desc.debug_user_data;
-    state.validation_policy = {
+    state.config.validation = {
         .contract      = desc.contract_validation,
         .vulkan_layers = desc.enable_vulkan_validation,
     };
-    state.debug_names = desc.enable_debug_names;
-    state.texture_heap_capacity = desc.texture_heap_capacity;
-    state.sampler_heap_capacity = desc.sampler_heap_capacity;
-    state.texture_capacity = desc.texture_capacity;
-    state.pipeline_capacity = desc.pipeline_capacity;
+    state.config.debug_names = desc.enable_debug_names;
+    state.config.texture_heap_capacity = desc.texture_heap_capacity;
+    state.config.sampler_heap_capacity = desc.sampler_heap_capacity;
+    state.config.texture_capacity = desc.texture_capacity;
+    state.config.pipeline_capacity = desc.pipeline_capacity;
+    state.config.debug_callback = desc.debug_callback;
+    state.config.debug_user_data = desc.debug_user_data;
     if (desc.pipeline_cache_data.len > 0) {
         if (desc.pipeline_cache_data.ptr == null) return gpu::INVALID_ARGUMENT~;
-        state.pipeline_cache_data = mem::new_array(
+        state.config.pipeline_cache_data = mem::new_array(
             char,
             desc.pipeline_cache_data.len,
         );
         mem::copy(
-            state.pipeline_cache_data.ptr,
+            state.config.pipeline_cache_data.ptr,
             desc.pipeline_cache_data.ptr,
             desc.pipeline_cache_data.len,
         );
     }
     vk::DebugUtilsMessengerCreateInfoEXT messenger_info =
         runtime_debug_messenger_create_info(state);
-    VkInstanceDesc instance_desc = runtime_instance_desc(desc, &messenger_info);
+    VkInstanceDesc instance_desc = runtime_instance_desc(
+        config:           &state.config,
+        application_name: desc.application_name,
+        messenger_info:   &messenger_info,
+    );
     VkInstanceCreateResult instance_result =
         create_vk_instance(&instance_desc)!;
     state.instance = instance_result.instance;

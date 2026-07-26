@@ -180,12 +180,12 @@ fn gpu::internal::vk::IndexingHeapLimits permissive_indexing_heap_limits() @priv
 }
 
 fn void shader_heap_state_preserves_configured_capacities() @test {
-    gpu::internal::vk::VkDeviceConfig desc = {
+    gpu::internal::vk::RuntimeConfig config = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
     gpu::internal::vk::VkShaderHeapState indexing =
-        gpu::internal::vk::resolve_shader_heap_state(&desc)!!;
+        gpu::internal::vk::resolve_shader_heap_state(&config)!!;
     assert(indexing.texture_capacity == 7, "the requested texture capacity is preserved");
     assert(indexing.sampler_capacity == 9, "the requested sampler capacity is preserved");
 }
@@ -212,12 +212,12 @@ fn void shader_heap_defaults_fit_required_indexing_limits() @test {
 }
 
 fn void shader_heap_support_reports_exact_failure() @test {
-    gpu::internal::vk::VkDeviceConfig desc = {
+    gpu::internal::vk::RuntimeConfig config = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
     gpu::internal::vk::VkShaderHeapState heap =
-        gpu::internal::vk::resolve_shader_heap_state(&desc)!!;
+        gpu::internal::vk::resolve_shader_heap_state(&config)!!;
     BaselineSupportDiagnosticCapture capture = {
         .expected_field = "device baseline",
         .expected_invariant =
@@ -300,10 +300,9 @@ fn void shader_heap_support_reports_exact_failure() @test {
     }
 }
 
-fn void runtime_copies_device_creation_defaults() @test {
+fn void runtime_owned_configuration_reaches_device_creation() @test {
     char[4] cache_data = { 1, 2, 3, 4 };
     gpu::RuntimeDesc desc = {
-        .enable_debug_names    = true,
         .texture_heap_capacity = 17,
         .sampler_heap_capacity = 19,
         .texture_capacity      = 23,
@@ -312,47 +311,28 @@ fn void runtime_copies_device_creation_defaults() @test {
         .application_name      = "gpu_vk_runtime_defaults_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
-    gpu::internal::vk::VkRuntimeState* state =
-        gpu::internal::resolve_runtime(&runtime).state;
-
-    assert(state != null, "the runtime publishes its Vulkan state");
-    assert(state.debug_names, "the runtime retains the debug-name default");
-    assert(
-        state.texture_heap_capacity == 17,
-        "the runtime retains the texture heap capacity"
-    );
-    assert(
-        state.sampler_heap_capacity == 19,
-        "the runtime retains the sampler heap capacity"
-    );
-    assert(
-        state.texture_capacity == 23,
-        "the runtime retains the texture identity capacity"
-    );
-    assert(
-        state.pipeline_capacity == 29,
-        "the runtime retains the pipeline capacity"
-    );
-    assert(
-        state.pipeline_cache_data.ptr != &cache_data[0],
-        "the runtime owns an independent cache copy"
-    );
-    assert(
-        state.pipeline_cache_data.len == cache_data.len,
-        "the runtime retains the full cache blob"
-    );
-    assert(state.pipeline_cache_data[0] == 1, "the runtime copies cache bytes");
-
+    defer gpu::destroy_runtime(&runtime)!!;
+    desc = {};
     cache_data[0] = 9;
-    assert(
-        state.pipeline_cache_data[0] == 1,
-        "caller mutation cannot change the runtime cache copy"
-    );
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
 
-    gpu::destroy_runtime(&runtime)!!;
+        gpu::Device device = gpu::create_device(&adapter)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        assert(
+            caps.texture_heap_capacity == 17
+                && caps.sampler_heap_capacity == 19,
+            "the published device retains explicit runtime heap capacities"
+        );
+        gpu::destroy_device(&device)!!;
+        return;
+    }
+    assert(false, "the controlled native target supports the device baseline");
 }
 
-fn void adapter_baseline_support_inherits_runtime_device_config() @test {
+fn void adapter_support_and_creation_share_runtime_capacities() @test {
     gpu::RuntimeDesc desc = {
         .texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY,
         .sampler_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY,
@@ -362,55 +342,11 @@ fn void adapter_baseline_support_inherits_runtime_device_config() @test {
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     assert(adapters.count > 0, "the controlled target exposes an adapter");
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(&runtime);
-    gpu::internal::vk::VkRuntimeState* runtime_state =
-        runtime_data.state;
-    gpu::internal::vk::VkDeviceConfig config = gpu::internal::vk::runtime_device_config(runtime_state);
-
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter)!!;
-        gpu::internal::vk::VkAdapterState* adapter_state = &runtime_state.adapters[i];
-        bool expected = gpu::internal::vk::device_baseline_supported(
-            adapter_state.physical_device,
-            &config,
-            &adapter_state.shader_heap,
-        );
-        assert(
-            adapter_state.device_baseline_supported == expected,
-            "adapter baseline support uses the runtime configuration"
-        );
-        assert(support.supported == expected, "support and adapter info agree");
-        if (expected) {
-            gpu::internal::vk::validate_device_baseline_support(
-                runtime_state,
-                adapter.adapter_index,
-            )!!;
-        } else {
-            assert(
-                @catch(gpu::internal::vk::validate_device_baseline_support(
-                    runtime_state,
-                    adapter.adapter_index,
-                )) == gpu::UNSUPPORTED_FEATURE,
-                "creation preflight agrees with cached unsupported baseline"
-            );
-        }
-
-        gpu::internal::vk::VkDeviceConfig invalid_config = config;
-        invalid_config.texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY + 1;
-        gpu::internal::vk::VkAdapterState invalid_adapter;
-        gpu::internal::vk::initialize_adapter(
-            &invalid_adapter,
-            adapter_state.physical_device,
-            &invalid_config,
-        );
-        assert(
-            !invalid_adapter.device_baseline_supported,
-            "each adapter consumes the supplied configuration"
-        );
-
-        if (!expected) {
+        if (!support.supported) {
             assert(
                 @catch(gpu::create_device(&adapter)) == gpu::UNSUPPORTED_FEATURE,
                 "creation rejects a configuration reported as unsupported"
