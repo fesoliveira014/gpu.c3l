@@ -1917,6 +1917,44 @@ fn void graphics_native_creation_failure_releases_prepared_identities() @test {
         "failed native dynamic creation releases prepared shader identities");
 }
 
+fn void out_of_range_polygon_mode_rejects_before_backend_work() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, pipeline_colors[..]);
+    int out_of_range = 99;
+    mem::copy(&desc.polygon_mode, &out_of_range, int::size);
+
+    fault rejected = @catch(gpu::create_graphics_pipeline(&device, &desc));
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "an out-of-range polygon mode faults INVALID_ARGUMENT: %s",
+        rejected);
+    assert(cache_entry_count(&device) == 0,
+        "immutable state rejection publishes no cache entry");
+}
+
+fn void depth_format_in_color_formats_rejects_before_backend_work() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+
+    gpu::Format[1] depth_colors = {
+        gpu::Format.D32_FLOAT,
+    };
+    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, depth_colors[..]);
+
+    fault rejected = @catch(gpu::create_graphics_pipeline(&device, &desc));
+    assert(rejected == gpu::INVALID_ARGUMENT,
+        "a depth format in color_formats faults INVALID_ARGUMENT: %s",
+        rejected);
+    assert(cache_entry_count(&device) == 0,
+        "color format rejection publishes no cache entry");
+}
+
 fn void graphics_color_formats_require_host_safe_storage() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
