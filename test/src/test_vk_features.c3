@@ -108,7 +108,7 @@ fn void required_features_reject_only_missing_dynamic_color() @test {
         dynamic_color:      &dynamic_color,
         dynamic_properties: &dynamic_properties,
     )) == gpu::UNSUPPORTED_FEATURE,
-        "the strict gate rejects an otherwise complete device without dynamic color");
+        "the required-feature gate rejects an otherwise complete device without dynamic color");
 }
 
 fn bool? dynamic_state3_extension_absent(

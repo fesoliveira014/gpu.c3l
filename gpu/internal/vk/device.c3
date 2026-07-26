@@ -146,7 +146,6 @@ struct VkDeviceState @public {
     VkPresentationState        presentation;
     VkShaderHeapState          shader_heap;
     HostAllocator              host_allocator;
-    // Advisory, best-effort across queue mutexes — mirrors get_memory_stats.
 }
 
 struct GeneratedWorkSupport {

@@ -133,9 +133,9 @@ Capability-specific tests query support in C3 and handle an unavailable
 feature explicitly. CI does not parse `EXERCISED` text or require a particular
 message format.
 
-Some tests use narrow private helpers or counters to observe otherwise hidden
-transactional behavior. Those are test implementation details, not public
-interfaces or output schemas.
+Some tests use narrow private helpers or operation-local seams to observe
+otherwise hidden transactional behavior. Those are test implementation
+details, not public interfaces or output schemas.
 
 ## Manual benchmarks
 

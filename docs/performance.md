@@ -3,7 +3,7 @@
 The repository provides manual benchmarks for investigating broad performance
 questions. Their timings, labels, line ordering, and ratios are advisory. CI
 builds the executables but does not run them, parse their output, enforce
-thresholds, or compare private implementation counters.
+thresholds, or treat private implementation details as a stable schema.
 
 Compare results only when the compiler, optimization level, adapter, driver,
 validation configuration, and queue topology are comparable. Prefer a profiler
