@@ -7,7 +7,7 @@
 The API uses root pointers, bindless heap indices, explicit barriers, and
 backend-neutral GPU allocation. Its design follows Sebastian Aaltonen's
 [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api);
-the [strict GPU architecture](strict_gpu_profile.md) records the broader design.
+the [device baseline architecture](device_baseline.md) records the broader design.
 
 The API centers on:
 
@@ -174,7 +174,12 @@ behavior. The all-zero descriptor is therefore TRUSTED with layers disabled.
 
 `AdapterList` is an allocation-free view. Its adapters and the read-only strings in adapter query results are borrowed until their runtime is destroyed. Destroying a runtime consumes its token, invalidates its adapter views and handles, and returns `RESOURCE_IN_USE` while a dependent surface or device is live.
 
-Canonical `create_device(Adapter*, DeviceRequest*)` uses the exact borrowed adapter, retains its runtime, and reuses the runtime-owned backend instance. `supports_device_request` is read-only and enables no state. Backend-neutral device defaults are copied by `create_runtime` and inherited by devices created from that runtime.
+Canonical `create_device(Adapter*, DeviceDesc* = null)` uses the exact borrowed
+adapter, retains its runtime, and reuses the runtime-owned backend instance.
+An omitted, null, or zero-initialized descriptor selects the same default
+non-presenting device. `supports_device_desc` is an optional, read-only adapter
+selection query and enables no state. Backend-neutral device defaults are
+copied by `create_runtime` and inherited by devices created from that runtime.
 
 ### Surfaces
 
@@ -188,19 +193,23 @@ gpu::surface::x11::create_surface(Runtime*, DisplayHandle, WindowHandle)
 
 supports_presentation(Adapter*, Surface*) -> bool?
 destroy_surface(Surface*)                 -> void?
-request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
 ```
 
-Query presentation support before device creation, then add the surface to the
-immutable request. The device is bound to that exact surface and selects a
-presentation-capable private queue, which may differ from its graphics queue.
-Presentation requests require at least one public graphics queue.
+Store a surface directly in `DeviceDesc` to request presentation. The support
+query may preflight it during adapter selection, but callers may instead create
+the device directly and handle `UNSUPPORTED_FEATURE`. A presentation device is
+bound to that exact surface and selects a presentation-capable private queue,
+which may differ from its graphics queue. Presentation requires at least one
+public graphics queue.
 A platform surface implementation resolves its runtime token to the typed
 private Vulkan runtime state and calls the corresponding WSI operation
 directly. There is no runtime forwarding table between the public surface
 module and the Vulkan implementation.
-A surface must outlive its swapchains; destroying a live dependency returns
-`RESOURCE_IN_USE`.
+A device records but does not retain its descriptor's surface token. A surface
+must outlive its swapchains; destroying a live swapchain dependency returns
+`RESOURCE_IN_USE`. Destroying a requested surface with no live swapchain
+succeeds, and later swapchain creation through the device rejects the stale
+token with `INVALID_HANDLE`.
 
 ### Device
 
@@ -227,10 +236,10 @@ Device                         (slot | generation | reserved)
 get_device_caps(Device*)       -> DeviceCaps?
 ```
 
-Device requests compose strict semantics with independent queue and
-presentation contributions. Texture states use one mandatory explicit native
-layout mapping on every device. Command-time color state is part of every
-strict device's mandatory graphics-state model.
+`DeviceDesc` contains the presentation surface and semantic queue requirements.
+The library's device baseline is implicit rather than requested. Texture states
+use one mandatory explicit native layout mapping on every device. Command-time
+color state is part of every device's mandatory graphics-state model.
 
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
@@ -274,12 +283,15 @@ QueueKind.TRANSFER
 Queue { device, id, roles }
 ```
 
-`DeviceRequest` carries semantic queue counts and optional distinct-role
-requirements. The strict request defaults to one queue under each role, and
-`request_queues` adds one immutable explicit group. The backend chooses native
-families and indices privately. The core stores every selected identity and its
-canonical role mask; unsupported counts or alias constraints make the request
-unsupported.
+`DeviceDesc.queues` carries semantic queue counts and optional distinct-role
+requirements. An all-zero `QueueRequirements` selects one queue under each
+role, with cross-role aliasing allowed. Any other value is an explicit queue
+topology. The backend chooses native families and indices privately. The core
+stores every selected identity and its canonical role mask; unsupported counts
+or alias constraints make the descriptor unsupported.
+
+The descriptor currently uses `QueueRequirements`; queue multiplicity and
+role-local indexing remain part of the queue model described below.
 
 `get_queue_counts` reports selected counts by role. `get_queue` returns a
 device-owned identity for a role/index pair, and aliased roles return the same
@@ -673,11 +685,11 @@ observations are the authority for warm behavior; there is no source-policy
 scanner. Timing is blocking only for an explicitly pinned runner, driver, and
 comparison profile.
 
-The strict descriptor heap is device-global and bound lazily on the first
-strict pipeline selection in a command record. Its descriptor-indexing set 0
+The shader-visible descriptor heap is device-global and bound lazily on the
+first pipeline selection in a command record. Its descriptor-indexing set 0
 binds once per used graphics or compute bind point. The two bind-point cache
 bits remain independent when commands alternate between compute and graphics.
-Ordinary strict pipeline changes, descriptor publication, draws, dispatches,
+Ordinary pipeline changes, descriptor publication, draws, dispatches,
 and global barriers do not replay that setup. Fresh command records start with
 empty binding state after native command-buffer reset.
 
@@ -813,12 +825,11 @@ create_texture_views(device, descs, out_views) -> void?
 intern_sampler(device, desc) -> SamplerIndex?
 ```
 
-The strict request initializes one inline, device-owned heap group. Callers
-request texture and sampler capacities; descriptor objects, native features,
-dispatch, and pipeline state remain private. An unrequested group owns none of
-that state; current public request validation requires strict semantics.
+Every device initializes one inline, device-owned heap group. Runtime
+configuration selects texture and sampler capacities; descriptor objects,
+native features, dispatch, and pipeline state remain private.
 
-The backend keeps one append-only sampler table per strict-enabled device.
+The backend keeps one append-only sampler table per device.
 The public frontend validates sampler semantics before calling the Vulkan
 implementation. Enabled
 anisotropy is accepted only in the inclusive range `[1,

@@ -85,8 +85,7 @@ struct VkPresentationState {
     SwapchainTable swapchains;
 }
 
-struct VkStrictHeapState {
-    bool                enabled;
+struct VkShaderHeapState {
     uint                texture_capacity;
     uint                sampler_capacity;
     DescriptorHeapState descriptors;
@@ -156,7 +155,7 @@ struct VkDeviceState @public {
     PipelineCacheTable         pipeline_cache;
     vk::PipelineLayout         graphics_layout;
     vk::PipelineLayout         compute_layout;
-    vk::DescriptorSetLayout    strict_pipeline_set_layout;
+    vk::DescriptorSetLayout    shader_pipeline_set_layout;
     vk::IndirectCommandsLayoutEXT generated_draw_layout;
     vk::IndirectCommandsLayoutEXT generated_indexed_draw_layout;
     vk::IndirectCommandsLayoutEXT generated_dispatch_layout;
@@ -165,7 +164,7 @@ struct VkDeviceState @public {
     AttachmentViewTable        attachment_views;
     SamplerTable               samplers;
     VkPresentationState        presentation;
-    VkStrictHeapState          strict_heap;
+    VkShaderHeapState          shader_heap;
     Atomic{ulong}              generated_preprocess_allocations;
     Atomic{ulong}              generated_preprocess_reuses;
     Atomic{ulong}              generated_recording_allocations;
@@ -259,7 +258,6 @@ struct GeneratedWorkSupport {
 }
 
 struct CapsInputs {
-    bool                 strict_enabled;
     bool                 presentation_enabled;
     bool                 async_compute;
     bool                 line_polygon_mode;
@@ -450,12 +448,12 @@ fn VkDeviceConfig runtime_device_config(VkRuntimeState* state) {
 
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
-    gpu::DeviceRequest* request,
+    gpu::DeviceDesc* device_desc,
     gpu::Runtime* retained_runtime,
 ) {
     return create_vk_device_with_probe(
         adapter:          adapter,
-        request:          request,
+        device_desc:      device_desc,
         retained_runtime: retained_runtime,
         probe:            null,
     );
@@ -463,33 +461,37 @@ fn gpu::Device? create_vk_device(
 
 fn gpu::Device? create_vk_device_with_probe(
     gpu::Adapter* adapter,
-    gpu::DeviceRequest* request,
+    gpu::DeviceDesc* device_desc,
     gpu::Runtime* retained_runtime,
     DeviceCreationProbe* probe,
 ) {
-    gpu::internal::validate_device_request(request)!;
+    gpu::DeviceDesc normalized =
+        gpu::internal::normalize_device_desc(device_desc)!;
     gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(adapter);
     if (runtime_data == null) return gpu::INVALID_HANDLE~;
     VkRuntimeState* runtime_state = runtime_data.state;
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
 
-    VkDeviceConfig desc = runtime_device_config(runtime_state);
+    VkDeviceConfig config = runtime_device_config(runtime_state);
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
-    gpu::Surface requested_surface = gpu::internal::requested_surface(*request);
-    if (requested_surface.is_valid()
-        && !runtime_state.instance_capabilities.surface_maintenance) {
-        return gpu::UNSUPPORTED_FEATURE~;
+    gpu::Surface requested_surface = normalized.surface;
+    vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null;
+    if (requested_surface.is_valid()) {
+        gpu::internal::SurfaceData* surface_data =
+            gpu::internal::resolve_surface(&requested_surface);
+        if (surface_data == null) return gpu::INVALID_HANDLE~;
+        gpu::internal::RuntimeData* surface_runtime =
+            gpu::internal::resolve_runtime(&surface_data.runtime);
+        if (surface_runtime != runtime_data) return gpu::INVALID_HANDLE~;
+        presentation_surface = (vk::SurfaceKHR)surface_data.backend_surface;
+        if (!runtime_state.instance_capabilities.surface_maintenance) {
+            return gpu::UNSUPPORTED_FEATURE~;
+        }
     }
-    gpu::QueueRequirements queue_requirements =
-        gpu::internal::requested_queue_requirements(*request);
-    vk::SurfaceKHR presentation_surface = requested_surface.is_valid()
-        ? (vk::SurfaceKHR)gpu::internal::surface_backend_handle(&requested_surface)!
-        : (vk::SurfaceKHR)null;
     return create_vk_device_from_runtime(
-        desc:                       &desc,
+        desc:                       &config,
         instance:                   runtime_state.instance,
         physical_device:            adapter_state.physical_device,
-        strict_requested:           gpu::internal::requests_strict(*request),
         retained_runtime:           retained_runtime,
         adapter:                    adapter,
         runtime_state:              runtime_state,
@@ -497,33 +499,30 @@ fn gpu::Device? create_vk_device_with_probe(
         presentation_surface_owner: requested_surface.is_valid()
             ? &requested_surface
             : null,
-        queue_requirements:         &queue_requirements,
-        strict_heap_support:        &adapter_state.strict_heap,
+        queue_requirements:         &normalized.queues,
+        shader_heap_support:        &adapter_state.shader_heap,
         probe:                      probe,
     );
 }
 
-fn void? validate_strict_device_request_support(
+fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
-    gpu::DeviceRequest* request,
 ) {
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
-    if (request == null) return gpu::INVALID_ARGUMENT~;
     if (adapter_index >= runtime_state.adapters.len) return gpu::INVALID_HANDLE~;
-    if (!gpu::internal::requests_strict(*request)) return;
 
     VkDeviceConfig desc = runtime_device_config(runtime_state);
-    VkStrictHeapState strict_heap = resolve_strict_heap_state(true, &desc)!;
+    VkShaderHeapState shader_heap = resolve_shader_heap_state(&desc)!;
     VkDeviceState diagnostic_state = {
         .debug_callback    = runtime_state.debug_callback,
         .debug_user_data   = runtime_state.debug_user_data,
         .validation_policy = runtime_state.validation_policy,
     };
-    validate_strict_heap_support(
+    validate_shader_heap_support(
         &diagnostic_state,
-        &strict_heap,
-        &runtime_state.adapters[adapter_index].strict_heap,
+        &shader_heap,
+        &runtime_state.adapters[adapter_index].shader_heap,
     )!;
 }
 
@@ -531,14 +530,13 @@ fn gpu::Device? create_vk_device_from_runtime(
     VkDeviceConfig* desc,
     vk::Instance instance,
     vk::PhysicalDevice physical_device,
-    bool strict_requested,
     gpu::Runtime* retained_runtime = null,
     gpu::Adapter* adapter = null,
     VkRuntimeState* runtime_state = null,
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null,
     gpu::Surface* presentation_surface_owner = null,
     gpu::QueueRequirements* queue_requirements = null,
-    StrictHeapSupport* strict_heap_support = null,
+    ShaderHeapSupport* shader_heap_support = null,
     DeviceCreationProbe* probe = null,
 ) @private {
     VkDeviceState* state = mem::new(VkDeviceState);
@@ -563,7 +561,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.texture_view_cache_mutex.init()!;
     state.command_mutex.init()!;
 
-    state.strict_heap = resolve_strict_heap_state(strict_requested, desc)!;
+    state.shader_heap = resolve_shader_heap_state(desc)!;
 
     state.presentation.enabled = presentation_surface != null;
     if (state.presentation.enabled) state.presentation.queue_mutex.init()!;
@@ -595,11 +593,10 @@ fn gpu::Device? create_vk_device_from_runtime(
             state.physical_device,
             SWAPCHAIN_MAINTENANCE_EXTENSION,
         );
-    bool generated_work_extension = state.strict_heap.enabled
-        && device_supports_extension(
-            state.physical_device,
-            GENERATED_WORK_EXTENSION,
-        );
+    bool generated_work_extension = device_supports_extension(
+        state.physical_device,
+        GENERATED_WORK_EXTENSION,
+    );
     bool generated_work_usage_extension = generated_work_extension
         && device_supports_extension(
             state.physical_device,
@@ -680,24 +677,22 @@ fn gpu::Device? create_vk_device_from_runtime(
         vk::get_physical_device_properties(state.physical_device, &anisotropy_props);
         state.max_sampler_anisotropy = anisotropy_props.limits.max_sampler_anisotropy;
     }
-    if (state.strict_heap.enabled) {
-        StrictHeapSupport queried_support;
-        if (strict_heap_support == null) {
-            queried_support = {
-                .indexing = heap_indexing_supported(
-                    &features2.features,
-                    &features12,
-                ),
-                .limits = query_indexing_heap_limits(state.physical_device),
-            };
-            strict_heap_support = &queried_support;
-        }
-        validate_strict_heap_support(
-            state,
-            &state.strict_heap,
-            strict_heap_support,
-        )!;
+    ShaderHeapSupport queried_support;
+    if (shader_heap_support == null) {
+        queried_support = {
+            .indexing = heap_indexing_supported(
+                &features2.features,
+                &features12,
+            ),
+            .limits = query_indexing_heap_limits(state.physical_device),
+        };
+        shader_heap_support = &queried_support;
     }
+    validate_shader_heap_support(
+        state,
+        &state.shader_heap,
+        shader_heap_support,
+    )!;
 
     state.selected_queue_roles = families.selected;
     if (families.selected.graphics) {
@@ -818,12 +813,13 @@ fn gpu::Device? create_vk_device_from_runtime(
     );
     state.commands.slots = mem::new_array(CommandCell, MAX_COMMAND_LISTS);
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.COMMAND_STORAGE)!;
-    uint pipeline_capacity;
-    if (state.strict_heap.enabled) {
-        pipeline_capacity = resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
-        state.pipelines.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.PIPELINE);
-        state.pipelines.slots = mem::new_array(PipelineCell, pipeline_capacity);
-    }
+    uint pipeline_capacity =
+        resolve_descriptor_capacity(desc.pipeline_capacity, gpu::MAX_PIPELINES)!;
+    state.pipelines.owner = gpu::internal::resource_owner_tag(
+        state.resource_owner,
+        gpu::internal::ResourceOwnerKind.PIPELINE,
+    );
+    state.pipelines.slots = mem::new_array(PipelineCell, pipeline_capacity);
     state.textures.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.TEXTURE);
     state.textures.slots = mem::new_array(TextureCell, resolve_descriptor_capacity(desc.texture_capacity, gpu::DEFAULT_TEXTURE_CAPACITY)!);
     state.attachment_views.owner = gpu::internal::resource_owner_tag(
@@ -838,20 +834,17 @@ fn gpu::Device? create_vk_device_from_runtime(
         state.presentation.swapchains.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.SWAPCHAIN);
         state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     }
-    if (state.strict_heap.enabled) {
-        create_sampler_table(state)!;
-        create_descriptor_heap(state)!;
-        reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;
-        create_pipeline_shared(state, desc.pipeline_cache_data, pipeline_capacity)!;
-        reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PIPELINE_SHARED)!;
-    }
+    create_sampler_table(state)!;
+    create_descriptor_heap(state)!;
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;
+    create_pipeline_shared(state, desc.pipeline_cache_data, pipeline_capacity)!;
+    reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PIPELINE_SHARED)!;
     CapsInputs caps_inputs = {
-        .strict_enabled       = state.strict_heap.enabled,
         .presentation_enabled = state.presentation.enabled,
         .async_compute        = state.compute_queue_distinct,
         .line_polygon_mode    = line_polygon_mode,
-        .texture_capacity     = state.strict_heap.texture_capacity,
-        .sampler_capacity     = state.strict_heap.sampler_capacity,
+        .texture_capacity     = state.shader_heap.texture_capacity,
+        .sampler_capacity     = state.shader_heap.sampler_capacity,
         .generated_work       = state.generated_work,
     };
     state.caps = build_caps(
@@ -1116,11 +1109,9 @@ fn bool heap_indexing_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDe
         && v12.descriptor_binding_update_unused_while_pending != 0;
 }
 
-fn VkStrictHeapState? resolve_strict_heap_state(bool requested, VkDeviceConfig* desc) {
+fn VkShaderHeapState? resolve_shader_heap_state(VkDeviceConfig* desc) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
-    VkStrictHeapState state;
-    if (!requested) return state;
-    state.enabled = true;
+    VkShaderHeapState state;
     state.texture_capacity = resolve_descriptor_capacity(
         desc.texture_heap_capacity,
         gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
@@ -1132,15 +1123,14 @@ fn VkStrictHeapState? resolve_strict_heap_state(bool requested, VkDeviceConfig* 
     return state;
 }
 
-fn void? validate_strict_heap_support(
+fn void? validate_shader_heap_support(
     VkDeviceState* device,
-    VkStrictHeapState* state,
-    StrictHeapSupport* support,
+    VkShaderHeapState* state,
+    ShaderHeapSupport* support,
 ) {
     if (device == null || state == null || support == null) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (!state.enabled) return;
     if (!support.indexing) {
         return report_contract_failure(
             state:               device,
@@ -1151,8 +1141,8 @@ fn void? validate_strict_heap_support(
             index:               0,
             generation:          0,
             debug_name:          null,
-            rejected_field:      "DeviceRequest.features.strict",
-            invariant:           "strict mode requires descriptor indexing with update-after-bind support",
+            rejected_field:      "device baseline",
+            invariant:           "the device baseline requires descriptor indexing with update-after-bind support",
             backend_text:        null,
         )~;
     }
@@ -1287,7 +1277,7 @@ fn IndexingHeapLimits query_indexing_heap_limits(vk::PhysicalDevice physical_dev
 fn bool candidate_satisfies(
     vk::PhysicalDevice candidate,
     VkDeviceConfig* desc,
-    StrictHeapSupport* strict_heap,
+    ShaderHeapSupport* shader_heap,
 ) @private {
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(candidate, &props);
@@ -1333,12 +1323,12 @@ fn bool candidate_satisfies(
         gpu::MAX_PIPELINES,
     )) return false;
 
-    return strict_heap != null
-        && strict_heap.indexing
+    return shader_heap != null
+        && shader_heap.indexing
         && indexing_heap_fits_limits(
             resolved_tex,
             resolved_smp,
-            strict_heap.limits,
+            shader_heap.limits,
         );
 }
 
@@ -1441,19 +1431,14 @@ fn void? create_logical_device_with_queue_infos(
         .set_buffer_device_address(vk::TRUE)
         .set_timeline_semaphore(vk::TRUE)
         .set_next(&features13);
-    if (state.strict_heap.enabled) {
-        features12 = features12
-            .set_runtime_descriptor_array(vk::TRUE)
-            .set_shader_sampled_image_array_non_uniform_indexing(vk::TRUE)
-            .set_shader_storage_image_array_non_uniform_indexing(vk::TRUE);
-    }
-    if (state.strict_heap.enabled) {
-        features12 = features12
-            .set_descriptor_binding_partially_bound(vk::TRUE)
-            .set_descriptor_binding_sampled_image_update_after_bind(vk::TRUE)
-            .set_descriptor_binding_storage_image_update_after_bind(vk::TRUE)
-            .set_descriptor_binding_update_unused_while_pending(vk::TRUE);
-    }
+    features12 = features12
+        .set_runtime_descriptor_array(vk::TRUE)
+        .set_shader_sampled_image_array_non_uniform_indexing(vk::TRUE)
+        .set_shader_storage_image_array_non_uniform_indexing(vk::TRUE)
+        .set_descriptor_binding_partially_bound(vk::TRUE)
+        .set_descriptor_binding_sampled_image_update_after_bind(vk::TRUE)
+        .set_descriptor_binding_storage_image_update_after_bind(vk::TRUE)
+        .set_descriptor_binding_update_unused_while_pending(vk::TRUE);
     if (state.draw_indirect_count) {
         features12 = features12.set_draw_indirect_count(vk::TRUE);
     }
@@ -1467,10 +1452,8 @@ fn void? create_logical_device_with_queue_infos(
     if (line_polygon_mode) features2.features.fill_mode_non_solid = vk::TRUE;
     if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;
-    if (state.strict_heap.enabled) {
-        features2.features.shader_storage_image_read_without_format  = vk::TRUE;
-        features2.features.shader_storage_image_write_without_format = vk::TRUE;
-    }
+    features2.features.shader_storage_image_read_without_format  = vk::TRUE;
+    features2.features.shader_storage_image_write_without_format = vk::TRUE;
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
     ZString[7] extensions;
@@ -1569,7 +1552,7 @@ fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString na
     return false;
 }
 
-<* Report enabled capability state and configured strict heap capacities. *>
+<* Report enabled capability state and configured shader heap capacities. *>
 fn gpu::DeviceCaps build_caps(
     vk::PhysicalDeviceFeatures* base,
     vk::PhysicalDeviceVulkan12Features* v12,
@@ -1596,7 +1579,6 @@ fn gpu::DeviceCaps build_caps(
         timeline_props.max_timeline_semaphore_value_difference;
     *non_coherent_atom_size = (usz)props.limits.non_coherent_atom_size;
     return (gpu::DeviceCaps){
-        .strict_enabled             = inputs.strict_enabled,
         .presentation_enabled       = inputs.presentation_enabled,
         .buffer_device_address      = v12.buffer_device_address != 0,
         .synchronization2           = v13.synchronization2 != 0,

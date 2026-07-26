@@ -609,11 +609,10 @@ fn void partial_creation_rolls_back_across_both_contract_modes() @test {
         );
         gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
         gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-        gpu::DeviceRequest request = gpu::strict_device_request();
         bool exercised;
         for (uint i = 0; i < adapters.count; i++) {
             gpu::Adapter adapter = adapters.get(i)!!;
-            if (!gpu::supports_device_request(&adapter, &request)!!
+            if (!gpu::supports_device_desc(&adapter)!!
                 .supported) continue;
             exercised = true;
             gpu::Runtime retained_runtime = runtime;
@@ -624,7 +623,7 @@ fn void partial_creation_rolls_back_across_both_contract_modes() @test {
             uint live_before = policy_live_device_count();
             assert(@catch(vk::create_vk_device_with_probe(
                 adapter:          &adapter,
-                request:          &request,
+                device_desc:      null,
                 retained_runtime: &retained_runtime,
                 probe:            &probe,
             )) == gpu::BACKEND_ERROR,
@@ -639,7 +638,7 @@ fn void partial_creation_rolls_back_across_both_contract_modes() @test {
             break;
         }
         assert(exercised,
-            "the pinned Vulkan adapter supports strict device creation");
+            "the pinned Vulkan adapter supports the device baseline");
         gpu::destroy_runtime(&runtime)!!;
     }
 }

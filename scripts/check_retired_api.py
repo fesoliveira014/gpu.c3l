@@ -19,7 +19,14 @@ FIXTURES = {
     "texture_desc_dimension": "dimension",
     "texture_desc_depth": "depth",
     "texture_view_desc_format": "format",
-    "device_desc": "DeviceDesc",
+    "device_request": "DeviceRequest",
+    "device_request_support": "DeviceRequestSupport",
+    "strict_device_request": "strict_device_request",
+    "request_presentation": "request_presentation",
+    "request_queues": "request_queues",
+    "supports_device_request": "supports_device_request",
+    "strict_enabled_caps": "strict_enabled",
+    "strict_supported_adapter_info": "strict_supported",
     "backend_kind": "BackendKind",
     "runtime_backend": "backend",
     "get_device_backend": "get_device_backend",
@@ -181,6 +188,8 @@ FIELD_OR_METHODS = {
     "resource_agnostic_texture_sync_caps": (
         "DeviceCaps.resource_agnostic_texture_sync"
     ),
+    "strict_enabled_caps": "DeviceCaps.strict_enabled",
+    "strict_supported_adapter_info": "AdapterInfo.strict_supported",
     "command_list_device": "CommandList.device",
     "command_list_handle_member": "CommandList.handle",
     "executable_command_list_device": "ExecutableCommandList.device",
@@ -219,9 +228,27 @@ LIVE_SCAN_ROOTS = (
     ROOT / "README.md",
 )
 LIVE_SCAN_SUFFIXES = {".c3", ".json", ".md", ".txt"}
+RETIRED_DEVICE_REQUEST_MARKERS = {
+    "DeviceRequest",
+    "DeviceRequestSupport",
+    "strict_device_request",
+    "request_presentation",
+    "request_queues",
+    "supports_device_request",
+    "DeviceCaps.strict_enabled",
+    "AdapterInfo.strict_supported",
+}
 LIVE_RETIRED_PATTERNS = {
     "BackendKind": re.compile(r"\bBackendKind\b"),
     "get_device_backend": re.compile(r"\bget_device_backend\b"),
+    "DeviceRequest": re.compile(r"\bDeviceRequest\b"),
+    "DeviceRequestSupport": re.compile(r"\bDeviceRequestSupport\b"),
+    "strict_device_request": re.compile(r"\bstrict_device_request\b"),
+    "request_presentation": re.compile(r"\brequest_presentation\b"),
+    "request_queues": re.compile(r"\brequest_queues\b"),
+    "supports_device_request": re.compile(r"\bsupports_device_request\b"),
+    "DeviceCaps.strict_enabled": re.compile(r"\bstrict_enabled\b"),
+    "AdapterInfo.strict_supported": re.compile(r"\bstrict_supported\b"),
     "TextureDimension": re.compile(r"\bTextureDimension\b"),
     "D24_UNORM_S8_UINT": re.compile(r"\bD24_UNORM_S8_UINT\b"),
     "ClearDepthStencil": re.compile(r"\bClearDepthStencil\b"),
@@ -388,6 +415,20 @@ def live_scan_files(roots: tuple[Path, ...] = LIVE_SCAN_ROOTS):
             yield path
 
 
+def is_retired_migration_reference(
+    relative_path: str,
+    source: str,
+    position: int,
+) -> bool:
+    if relative_path != "docs/api.md":
+        return False
+    section_start = source.find("### Breaking migration")
+    if section_start < 0 or position < section_start:
+        return False
+    section_end = source.find("\n## ", section_start)
+    return section_end < 0 or position < section_end
+
+
 def find_live_retired_usages(
     roots: tuple[Path, ...] = LIVE_SCAN_ROOTS,
 ) -> list[str]:
@@ -397,6 +438,15 @@ def find_live_retired_usages(
         relative_path = path.relative_to(ROOT).as_posix()
         for marker, pattern in LIVE_RETIRED_PATTERNS.items():
             for match in pattern.finditer(source):
+                if (
+                    marker in RETIRED_DEVICE_REQUEST_MARKERS
+                    and is_retired_migration_reference(
+                        relative_path,
+                        source,
+                        match.start(),
+                    )
+                ):
+                    continue
                 line = source.count("\n", 0, match.start()) + 1
                 failures.append(f"{relative_path}:{line}: {marker}")
         if path.name == "README.md":

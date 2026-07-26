@@ -134,7 +134,7 @@ GeneratedDispatchRecord
 These structs are generated as C3 and GLSL twins. A GPU producer can compact
 or reorder the complete work record without maintaining a parallel root table.
 `DeviceCaps.generated_work` is true only when all three layouts are supported;
-the shared-root indirect convention remains portable on every strict device.
+the shared-root indirect convention remains portable on every device.
 
 ## 5. Buffer layout
 

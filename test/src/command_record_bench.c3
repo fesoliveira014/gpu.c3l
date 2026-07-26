@@ -85,7 +85,7 @@ fn void accumulate_resolution_stats(
     total.recording_commands += sample.recording_commands;
     total.native_commands += sample.native_commands;
     total.pipeline_bind_commands += sample.pipeline_bind_commands;
-    total.strict_heap_set_bind_commands += sample.strict_heap_set_bind_commands;
+    total.descriptor_heap_set_bind_commands += sample.descriptor_heap_set_bind_commands;
 }
 
 fn double record_barriers(
@@ -450,7 +450,7 @@ fn int main() {
     assert(resolution.pipeline_cache_lookups == 0,
         "warm recording does not resolve the pipeline cache after bind");
     assert(resolution.pipeline_bind_commands == 0
-        && resolution.strict_heap_set_bind_commands == 0,
+        && resolution.descriptor_heap_set_bind_commands == 0,
         "post-bind recording emits no pipeline or descriptor heap binds");
     assert(resolution.encoder_cell_computations == 0,
         "warm recording performs no frontend encoder-cell computation");
@@ -509,7 +509,7 @@ fn int main() {
         resolution.recording_commands,
         resolution.native_commands,
         resolution.pipeline_bind_commands,
-        resolution.strict_heap_set_bind_commands,
+        resolution.descriptor_heap_set_bind_commands,
         resolution.device_registry_resolutions,
         resolution.retained_pin_operations,
         resolution.command_table_lookups,

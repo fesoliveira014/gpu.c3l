@@ -9,8 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CPU_PROJECT = ROOT / "test" / "cpu"
-CANONICAL_STRICT_SURFACE = CPU_PROJECT / "canonical_strict_surface.c3"
-CANONICAL_STRICT_MANIFEST = CPU_PROJECT / "canonical_strict_surface.txt"
+CANONICAL_GPU_SURFACE = CPU_PROJECT / "canonical_gpu_surface.c3"
+CANONICAL_GPU_MANIFEST = CPU_PROJECT / "canonical_gpu_surface.txt"
 ROOT_FUNCTION_REFERENCE = re.compile(r"\bgpu::([a-z_][a-z0-9_]*)\s*\(")
 MODULE_DECLARATION = re.compile(
     r"(?m)^\s*module\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*"
@@ -46,7 +46,13 @@ SHARED_PRIVATE_BACKEND_TYPES = {
 }
 
 FORBIDDEN_TEXT = {
-    "devicedesc": "retired transitional DeviceDesc",
+    "devicerequest": "retired packed DeviceRequest",
+    '"name":"strict_device_request"': "retired strict request builder",
+    '"name":"request_presentation"': "retired presentation request builder",
+    '"name":"request_queues"': "retired queue request builder",
+    '"name":"supports_device_request"': "retired device request support query",
+    '"name":"strict_enabled"': "retired strict device capability",
+    '"name":"strict_supported"': "retired strict adapter capability",
     "backendkind": "retired BackendKind",
     "commandlisthandle": "retired CommandListHandle",
     '"name":"command_list_handle_invalid"': (
@@ -227,10 +233,16 @@ DEBUG_RESOURCE_KINDS = (
 )
 
 RETIRED_SOURCE_SYMBOLS = (
+    "DeviceRequest",
+    "strict_device_request(",
+    "request_presentation(",
+    "request_queues(",
+    "supports_device_request(",
+    "strict_enabled",
+    "strict_supported",
     "full_render_graphics_state(",
     "BackendKind",
     "get_device_backend(",
-    "DeviceDesc",
     "create_device_from_desc(",
     "PlatformKind",
     "PresentDesc",
@@ -327,6 +339,18 @@ RETIRED_SOURCE_SYMBOLS = (
     "strict_heap_offset_commands",
     "note_command_strict_heap_buffer_bind",
     "note_command_strict_heap_offset",
+    "DEVICE_REQUEST_",
+    "DeviceCapability",
+    "compose_device_request(",
+    "empty_device_request(",
+    "validate_device_request(",
+    "device_request_is_well_formed(",
+    "requests_strict(",
+    "requested_surface(",
+    "requested_queue_requirements(",
+    "encode_queue_requirements(",
+    "decode_queue_requirements(",
+    "strict_heap",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -366,6 +390,20 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "requests_dynamic_color_state",
     "vk_supports_dynamic_color_state",
     "query_dynamic_color_state_support",
+    "DeviceRequest",
+    "StrictHeapSupport",
+    "VkStrictHeapState",
+    "StrictHeapCommandBinding",
+    "strict_heap",
+    "strict_requested",
+    "strict_adapter_supported",
+    "strict_enabled",
+    "strict_supported",
+    "strict_pipeline_set_layout",
+    "validate_strict_device_request_support",
+    "validate_device_request",
+    "requested_queue_requirements",
+    "requests_strict",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
@@ -525,7 +563,7 @@ def validate_canonical_function_fixture(
         for match in ROOT_FUNCTION_REFERENCE.finditer(source)
     }
     return [
-        f"canonical strict fixture missing gpu::{name}"
+        f"canonical GPU fixture missing gpu::{name}"
         for name in sorted(public_functions - referenced_functions)
     ]
 
@@ -1033,6 +1071,20 @@ def validate_document(document: dict) -> list[str]:
     if member_schema(types.get("RuntimeDesc")) != runtime_desc_schema:
         failures.append("RuntimeDesc must match the strict schema")
 
+    device_desc_schema = (
+        ("surface", "Surface"),
+        ("queues", "QueueRequirements"),
+    )
+    if member_schema(types.get("DeviceDesc")) != device_desc_schema:
+        failures.append("DeviceDesc must match the exact semantic schema")
+
+    device_support_schema = (
+        ("supported", "bool"),
+        ("unmet_requirement", "String"),
+    )
+    if member_schema(types.get("DeviceSupport")) != device_support_schema:
+        failures.append("DeviceSupport must match the exact semantic schema")
+
     device_caps_fields = dict(member_schema(types.get("DeviceCaps")))
     for field in (
         "texture_heap_capacity",
@@ -1190,6 +1242,14 @@ def validate_document(document: dict) -> list[str]:
             failures.append("submit must take Queue and SubmitDesc*")
 
     required_functions = {
+        "supports_device_desc": (
+            ("Adapter*", "DeviceDesc*"),
+            "DeviceSupport?",
+        ),
+        "create_device": (
+            ("Adapter*", "DeviceDesc*"),
+            "Device?",
+        ),
         "create_command_allocator": (
             ("Device*", "Queue", "CommandAllocatorDesc*"),
             "CommandAllocator?",
@@ -1408,6 +1468,8 @@ def validate_document(document: dict) -> list[str]:
         ),
     }
     required_parameter_names = {
+        "supports_device_desc": ("adapter", "desc"),
+        "create_device": ("adapter", "desc"),
         "intern_sampler": ("device", "desc"),
         "create_texture_view": ("device", "texture", "desc"),
         "destroy_texture_view": ("device", "view"),
@@ -2531,13 +2593,13 @@ def main() -> int:
     failures.extend(
         validate_canonical_function_fixture(
             document,
-            CANONICAL_STRICT_SURFACE.read_text(encoding="utf-8"),
+            CANONICAL_GPU_SURFACE.read_text(encoding="utf-8"),
         )
     )
     failures.extend(
         validate_canonical_surface_manifest(
             document,
-            CANONICAL_STRICT_MANIFEST.read_text(encoding="utf-8"),
+            CANONICAL_GPU_MANIFEST.read_text(encoding="utf-8"),
         )
     )
     failures.extend(scan_retired_source_symbols())
@@ -2552,7 +2614,7 @@ def main() -> int:
             print(f"- {failure}", file=sys.stderr)
         return 1
 
-    print("public GPU API matches the strict contract")
+    print("public GPU API matches the exact contract")
     return 0
 
 

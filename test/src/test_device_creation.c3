@@ -14,21 +14,55 @@ fn Adapter device_creation_adapter(Runtime* runtime, uint index = 0) {
     return gpu::enumerate_adapters(runtime)!!.get(index)!!;
 }
 
+fn void public_device_desc_defaults_are_equivalent_and_reusable() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc runtime_desc = device_creation_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    Adapter adapter = device_creation_adapter(&runtime);
+    DeviceDesc zero_desc;
+    DeviceDesc original = zero_desc;
+
+    assert(gpu::supports_device_desc(&adapter)!!.supported);
+    assert(gpu::supports_device_desc(&adapter, null)!!.supported);
+    assert(gpu::supports_device_desc(&adapter, &zero_desc)!!.supported);
+    assert(device_desc_equal(zero_desc, original));
+
+    Device omitted = gpu::create_device(&adapter)!!;
+    Device explicit_null = gpu::create_device(&adapter, null)!!;
+    Device first_zero = gpu::create_device(&adapter, &zero_desc)!!;
+    Device second_zero = gpu::create_device(&adapter, &zero_desc)!!;
+    assert(device_desc_equal(zero_desc, original));
+
+    Device[4] devices = {
+        omitted,
+        explicit_null,
+        first_zero,
+        second_zero,
+    };
+    foreach (device : devices) {
+        QueueCounts queues = gpu::get_queue_counts(&device)!!;
+        assert(queues.graphics == 1);
+        assert(queues.compute == 1);
+        assert(queues.transfer == 1);
+        gpu::destroy_device(&device)!!;
+    }
+    gpu::destroy_runtime(&runtime)!!;
+}
+
 fn void adapter_device_preserves_identity_and_runtime_lifetime() @test {
     gpu::internal::vk::stub_set_adapter_count(2);
-    gpu::internal::vk::stub_set_strict_support(true);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
     gpu::internal::vk::stub_reset_device_counts();
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = device_creation_adapter(&runtime, 1);
-    DeviceRequest request = gpu::strict_device_request();
-
-    Device device = gpu::create_device(&adapter, &request)!!;
+    Device device = gpu::create_device(&adapter)!!;
     assert(
         (ulong)gpu::internal::vk::stub_last_device_adapter() == (ulong)adapter,
         "creation routes the exact borrowed adapter"
     );
-    assert(gpu::get_device_caps(&device)!!.strict_enabled, "strict state is enabled");
     assert(
         @catch(gpu::destroy_runtime(&runtime)) == gpu::RESOURCE_IN_USE,
         "a live adapter device retains its runtime"
@@ -45,16 +79,14 @@ fn void adapter_device_preserves_identity_and_runtime_lifetime() @test {
 
 fn void distinct_adapter_devices_preserve_exact_owners() @test {
     gpu::internal::vk::stub_set_adapter_count(2);
-    gpu::internal::vk::stub_set_strict_support(true);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
     gpu::internal::vk::stub_reset_device_counts();
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter first_adapter = device_creation_adapter(&runtime, 0);
     Adapter second_adapter = device_creation_adapter(&runtime, 1);
-    DeviceRequest request = gpu::strict_device_request();
-
-    Device first = gpu::create_device(&first_adapter, &request)!!;
-    Device second = gpu::create_device(&second_adapter, &request)!!;
+    Device first = gpu::create_device(&first_adapter)!!;
+    Device second = gpu::create_device(&second_adapter)!!;
 
     assert(
         (ulong)gpu::internal::vk::stub_device_adapter(&first)!! == (ulong)first_adapter,
@@ -93,9 +125,8 @@ fn void foreign_allocation_owner_rejects_before_backend_mutation() @test {
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = device_creation_adapter(&runtime, 0);
-    DeviceRequest request = gpu::strict_device_request();
-    Device first = gpu::create_device(&adapter, &request)!!;
-    Device second = gpu::create_device(&adapter, &request)!!;
+    Device first = gpu::create_device(&adapter)!!;
+    Device second = gpu::create_device(&adapter)!!;
     AllocationDesc allocation_desc = device_creation_allocation_desc();
     GpuAllocation first_allocation = gpu::allocate_memory(&first, &allocation_desc)!!;
     GpuAllocation second_allocation = gpu::allocate_memory(&second, &allocation_desc)!!;
@@ -124,10 +155,9 @@ fn void stale_child_allocation_rejects_after_device_slot_reuse() @test {
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = device_creation_adapter(&runtime, 0);
-    DeviceRequest request = gpu::strict_device_request();
     AllocationDesc allocation_desc = device_creation_allocation_desc();
 
-    Device old_device = gpu::create_device(&adapter, &request)!!;
+    Device old_device = gpu::create_device(&adapter)!!;
     GpuAllocation old_allocation = gpu::allocate_memory(&old_device, &allocation_desc)!!;
     GpuAllocation stale_allocation = old_allocation;
     uint old_index = old_device.index;
@@ -135,7 +165,7 @@ fn void stale_child_allocation_rejects_after_device_slot_reuse() @test {
     gpu::free_allocation(&old_device, &old_allocation)!!;
     gpu::destroy_device(&old_device)!!;
 
-    Device replacement = gpu::create_device(&adapter, &request)!!;
+    Device replacement = gpu::create_device(&adapter)!!;
     GpuAllocation replacement_allocation =
         gpu::allocate_memory(&replacement, &allocation_desc)!!;
     assert(replacement.index == old_index, "freed registry slot is reused");
@@ -166,8 +196,7 @@ fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = device_creation_adapter(&runtime, 0);
-    DeviceRequest request = gpu::strict_device_request();
-    Device device = gpu::create_device(&adapter, &request)!!;
+    Device device = gpu::create_device(&adapter)!!;
     AllocationDesc allocation_desc = device_creation_allocation_desc();
     TextureDesc texture_desc = {
         .access    = { .graphics, .compute, .transfer },
@@ -208,22 +237,20 @@ fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
 
 fn void unsupported_and_stale_adapter_creation_faults_before_allocation() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_strict_support(false);
+    gpu::internal::vk::stub_set_device_baseline_support(false);
     gpu::internal::vk::stub_reset_device_counts();
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = device_creation_adapter(&runtime);
-    DeviceRequest request = gpu::strict_device_request();
-
     assert(
-        @catch(gpu::create_device(&adapter, &request)) == gpu::UNSUPPORTED_FEATURE,
-        "unsupported strict creation faults without fallback"
+        @catch(gpu::create_device(&adapter)) == gpu::UNSUPPORTED_FEATURE,
+        "unsupported device baseline faults without fallback"
     );
     assert(gpu::internal::vk::stub_device_temporary_create_count() == 0, "unsupported requests allocate nothing");
 
     gpu::destroy_runtime(&runtime)!!;
     assert(
-        @catch(gpu::create_device(&adapter, &request)) == gpu::INVALID_HANDLE,
+        @catch(gpu::create_device(&adapter)) == gpu::INVALID_HANDLE,
         "a stale adapter faults before device work"
     );
     assert(gpu::internal::vk::stub_device_temporary_create_count() == 0, "stale adapters allocate nothing");
@@ -231,16 +258,14 @@ fn void unsupported_and_stale_adapter_creation_faults_before_allocation() @test 
 
 fn void device_creation_failure_rolls_back_runtime_and_backend_state() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_strict_support(true);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
     gpu::internal::vk::stub_reset_device_counts();
     gpu::internal::vk::stub_fail_device_after_temporary_allocation(true);
     RuntimeDesc desc = device_creation_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = device_creation_adapter(&runtime);
-    DeviceRequest request = gpu::strict_device_request();
-
     assert(
-        @catch(gpu::create_device(&adapter, &request)) == gpu::BACKEND_ERROR,
+        @catch(gpu::create_device(&adapter)) == gpu::BACKEND_ERROR,
         "failure after temporary allocation publishes no device"
     );
     assert(gpu::internal::device_slot_available(), "failed creation leaves the device slot available");

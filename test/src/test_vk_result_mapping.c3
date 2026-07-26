@@ -15,7 +15,7 @@ struct BackendResultCapture {
 fn gpu::Device device_loss_fixture(gpu::internal::vk::VkDeviceState* state) {
     return gpu::internal::register_device(
         state:  state,
-        caps:   { .strict_enabled = true },
+        caps:   {},
         owner:  &state.owner,
     )!!;
 }
@@ -76,8 +76,10 @@ fn void explicit_device_loss_invalidates_only_its_owner() @test {
         )) == gpu::BACKEND_ERROR,
         "an unknown native result remains a backend error"
     );
-    assert(gpu::get_device_caps(&first)!!.strict_enabled, "an unknown result leaves its owner usable");
-    assert(gpu::get_device_caps(&second)!!.strict_enabled, "an unknown result leaves a peer usable");
+    assert(!gpu::get_device_caps(&first)!!.presentation_enabled,
+        "an unknown result leaves its owner usable");
+    assert(!gpu::get_device_caps(&second)!!.presentation_enabled,
+        "an unknown result leaves a peer usable");
 
     assert(
         @catch(gpu::internal::vk::check_backend_result(
@@ -91,7 +93,8 @@ fn void explicit_device_loss_invalidates_only_its_owner() @test {
         @catch(gpu::get_device_caps(&first)) == gpu::DEVICE_LOST,
         "the reporting device becomes unusable"
     );
-    assert(gpu::get_device_caps(&second)!!.strict_enabled, "a peer device remains usable");
+    assert(!gpu::get_device_caps(&second)!!.presentation_enabled,
+        "a peer device remains usable");
 
     gpu::destroy_device(&first)!!;
     gpu::destroy_device(&second)!!;

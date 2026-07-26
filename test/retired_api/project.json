@@ -10,7 +10,7 @@
     "../../gpu/internal/runtime.c3",
     "../../gpu/internal/adapter.c3",
     "../../gpu/internal/device.c3",
-    "../../gpu/internal/device_request.c3",
+    "../../gpu/internal/device_desc.c3",
     "../../gpu/internal/surface.c3",
     "../../gpu/internal/debug.c3",
     "../../gpu/internal/shader_abi.c3",
@@ -63,10 +63,52 @@
       "type": "object-files",
       "sources": [ "texture_view_desc_format.c3" ]
     },
-    "device_desc": {
+    "device_request": {
       "type": "object-files",
       "sources": [
-        "device_desc.c3"
+        "device_request.c3"
+      ]
+    },
+    "device_request_support": {
+      "type": "object-files",
+      "sources": [
+        "device_request_support.c3"
+      ]
+    },
+    "strict_device_request": {
+      "type": "object-files",
+      "sources": [
+        "strict_device_request.c3"
+      ]
+    },
+    "request_presentation": {
+      "type": "object-files",
+      "sources": [
+        "request_presentation.c3"
+      ]
+    },
+    "request_queues": {
+      "type": "object-files",
+      "sources": [
+        "request_queues.c3"
+      ]
+    },
+    "supports_device_request": {
+      "type": "object-files",
+      "sources": [
+        "supports_device_request.c3"
+      ]
+    },
+    "strict_enabled_caps": {
+      "type": "object-files",
+      "sources": [
+        "strict_enabled_caps.c3"
+      ]
+    },
+    "strict_supported_adapter_info": {
+      "type": "object-files",
+      "sources": [
+        "strict_supported_adapter_info.c3"
       ]
     },
     "create_device_from_desc": {

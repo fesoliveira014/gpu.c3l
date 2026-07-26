@@ -162,82 +162,95 @@ fn void presentation_support_validates_runtime_ownership() @test {
     gpu::destroy_runtime(&first)!!;
 }
 
-fn void presentation_request_is_immutable_and_surface_bound() @test {
+fn void presentation_desc_is_immutable_and_surface_bound() @test {
     gpu::internal::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
     Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
-    DeviceRequest strict = gpu::strict_device_request();
-    DeviceRequest original = strict;
-    DeviceRequest presentation = gpu::request_presentation(strict, &surface)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    DeviceDesc original = device_desc;
 
-    assert(DeviceRequest::size == uint128::size, "request fits in two machine words");
-    assert((uint128)strict == (uint128)original, "composition preserves its input");
-    assert((uint128)presentation != (uint128)strict, "presentation returns a new value");
-    assert(
-        @catch(gpu::request_presentation(presentation, &surface)) == gpu::INVALID_ARGUMENT
-    );
-    assert(gpu::supports_device_request(&adapter, &presentation)!!.supported);
+    assert(gpu::supports_device_desc(&adapter, &device_desc)!!.supported);
+    assert(device_desc_equal(device_desc, original));
 
-    Device device = gpu::create_device(&adapter, &presentation)!!;
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
     QueueCounts counts = gpu::get_queue_counts(&device)!!;
     Queue graphics = gpu::get_queue(&device, QueueKind.GRAPHICS)!!;
-    assert(counts.graphics == 1, "a supported presentation request admits graphics");
+    assert(counts.graphics == 1, "a supported presentation descriptor admits graphics");
     assert(graphics.roles.graphics, "the admitted graphics queue supports graphics");
     gpu::destroy_device(&device)!!;
 
     gpu::internal::vk::stub_set_presentation_support(false);
-    DeviceRequestSupport unsupported = gpu::supports_device_request(&adapter, &presentation)!!;
+    DeviceSupport unsupported = gpu::supports_device_desc(&adapter, &device_desc)!!;
     assert(!unsupported.supported);
     assert(unsupported.unmet_requirement == "presentation");
 
     gpu::destroy_surface(&surface)!!;
-    assert(@catch(gpu::supports_device_request(&adapter, &presentation)) == gpu::INVALID_HANDLE);
+    assert(@catch(gpu::supports_device_desc(&adapter, &device_desc))
+        == gpu::INVALID_HANDLE);
+    assert(@catch(gpu::create_device(&adapter, &device_desc))
+        == gpu::INVALID_HANDLE);
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void presentation_requests_require_graphics_in_every_composition_order() @test {
+fn void descriptor_surface_identity_rejects_before_backend_work() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc desc = runtime_desc();
+    Runtime first = gpu::create_runtime(&desc)!!;
+    Runtime second = gpu::create_runtime(&desc)!!;
+    Surface first_surface = create_test_surface(&first);
+    Surface second_surface = create_test_surface(&second);
+    Surface malformed = first_surface;
+    malformed.reserved = 1;
+    Adapter adapter = gpu::enumerate_adapters(&first)!!.get(0)!!;
+    DeviceDesc foreign_desc = { .surface = second_surface };
+    DeviceDesc malformed_desc = { .surface = malformed };
+
+    assert(@catch(gpu::supports_device_desc(&adapter, &foreign_desc))
+        == gpu::INVALID_HANDLE);
+    assert(@catch(gpu::create_device(&adapter, &foreign_desc))
+        == gpu::INVALID_HANDLE);
+    assert(@catch(gpu::supports_device_desc(&adapter, &malformed_desc))
+        == gpu::INVALID_HANDLE);
+    assert(@catch(gpu::create_device(&adapter, &malformed_desc))
+        == gpu::INVALID_HANDLE);
+    assert(gpu::internal::vk::stub_device_support_query_count() == 0);
+    assert(gpu::internal::vk::stub_device_temporary_create_count() == 0);
+
+    gpu::destroy_surface(&second_surface)!!;
+    gpu::destroy_surface(&first_surface)!!;
+    gpu::destroy_runtime(&second)!!;
+    gpu::destroy_runtime(&first)!!;
+}
+
+fn void presentation_desc_requires_graphics() @test {
     gpu::internal::vk::stub_set_presentation_support(true);
     gpu::internal::vk::stub_reset_device_counts();
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
     Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
-    QueueRequirements compute_only = { .counts = { .compute = 1 } };
-    DeviceRequest strict = gpu::strict_device_request();
-    DeviceRequest queues_first = gpu::request_queues(strict, compute_only)!!;
-    DeviceRequest presentation_first = gpu::request_presentation(strict, &surface)!!;
+    DeviceDesc invalid = {
+        .surface = surface,
+        .queues  = { .counts = { .compute = 1 } },
+    };
 
     assert(
-        @catch(gpu::request_presentation(queues_first, &surface))
-            == gpu::INVALID_ARGUMENT,
-        "presentation cannot be added to a request without graphics"
+        @catch(gpu::supports_device_desc(&adapter, &invalid))
+            == gpu::INVALID_ARGUMENT
     );
     assert(
-        @catch(gpu::request_queues(presentation_first, compute_only))
-            == gpu::INVALID_ARGUMENT,
-        "graphics cannot be removed from a presentation request"
-    );
-
-    DeviceRequest forged = (DeviceRequest)((uint128)queues_first
-        | (uint128)presentation_first);
-    assert(
-        @catch(gpu::supports_device_request(&adapter, &forged))
-            == gpu::INVALID_ARGUMENT,
-        "support rejects forged presentation requests without graphics"
-    );
-    assert(
-        @catch(gpu::create_device(&adapter, &forged)) == gpu::INVALID_ARGUMENT,
-        "creation rejects forged presentation requests without graphics"
+        @catch(gpu::create_device(&adapter, &invalid)) == gpu::INVALID_ARGUMENT
     );
     assert(
         gpu::internal::vk::stub_device_support_query_count() == 0,
-        "invalid presentation requests bypass support queries"
+        "invalid presentation descriptors bypass support queries"
     );
     assert(
         gpu::internal::vk::stub_device_temporary_create_count() == 0,
-        "invalid presentation requests allocate no device state"
+        "invalid presentation descriptors allocate no device state"
     );
 
     gpu::destroy_surface(&surface)!!;
@@ -263,11 +276,8 @@ fn void swapchains_borrow_runtime_owned_surfaces() @test {
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
     Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
-    DeviceRequest request = gpu::request_presentation(
-        gpu::strict_device_request(),
-        &surface,
-    )!!;
-    Device device = gpu::create_device(&adapter, &request)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
     SwapchainDesc swapchain_desc = {
         .width  = 640,
         .height = 480,
@@ -293,11 +303,8 @@ fn void swapchain_creation_rejects_a_foreign_runtime_surface() @test {
     Surface first_surface = create_test_surface(&first);
     Surface second_surface = create_test_surface(&second);
     Adapter adapter = gpu::enumerate_adapters(&first)!!.get(0)!!;
-    DeviceRequest request = gpu::request_presentation(
-        gpu::strict_device_request(),
-        &first_surface,
-    )!!;
-    Device device = gpu::create_device(&adapter, &request)!!;
+    DeviceDesc device_desc = { .surface = first_surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
     SwapchainDesc swapchain_desc = {
         .width  = 640,
         .height = 480,
@@ -318,14 +325,13 @@ fn void swapchain_creation_rejects_a_foreign_runtime_surface() @test {
     gpu::destroy_runtime(&first)!!;
 }
 
-fn void strict_only_devices_reject_swapchains_before_backend_work() @test {
+fn void non_presenting_devices_reject_swapchains_before_backend_work() @test {
     gpu::internal::vk::stub_reset_surface_counts();
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
     Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
-    DeviceRequest request = gpu::strict_device_request();
-    Device device = gpu::create_device(&adapter, &request)!!;
+    Device device = gpu::create_device(&adapter)!!;
     SwapchainDesc swapchain_desc = {
         .width  = 640,
         .height = 480,
@@ -341,7 +347,7 @@ fn void strict_only_devices_reject_swapchains_before_backend_work() @test {
     );
     assert(
         gpu::internal::vk::stub_swapchain_create_attempt_count() == 0,
-        "strict-only rejection precedes backend mutation"
+        "non-presenting rejection precedes backend mutation"
     );
 
     gpu::destroy_device(&device)!!;
@@ -361,16 +367,10 @@ fn void presentation_devices_accept_only_the_requested_surface() @test {
     AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     Adapter first_adapter = adapters.get(0)!!;
     Adapter second_adapter = adapters.get(1)!!;
-    DeviceRequest first_request = gpu::request_presentation(
-        gpu::strict_device_request(),
-        &first_surface,
-    )!!;
-    DeviceRequest second_request = gpu::request_presentation(
-        gpu::strict_device_request(),
-        &second_surface,
-    )!!;
-    Device first = gpu::create_device(&first_adapter, &first_request)!!;
-    Device second = gpu::create_device(&second_adapter, &second_request)!!;
+    DeviceDesc first_desc = { .surface = first_surface };
+    DeviceDesc second_desc = { .surface = second_surface };
+    Device first = gpu::create_device(&first_adapter, &first_desc)!!;
+    Device second = gpu::create_device(&second_adapter, &second_desc)!!;
     SwapchainDesc swapchain_desc = {
         .width  = 640,
         .height = 480,

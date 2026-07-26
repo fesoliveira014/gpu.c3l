@@ -106,7 +106,6 @@ fn void runtimes_enumerate_independent_borrowed_adapters() @test {
     assert(info.device_class == AdapterClass.SOFTWARE, "semantic device class is available");
     assert(info.memory.device_local_bytes == 1024, "semantic device-local memory is available");
     assert(info.queues.compute_count == 1, "semantic queue counts are available");
-    assert(info.strict_supported, "strict support is reported semantically");
 
     AdapterDiagnostics diagnostics = gpu::get_adapter_diagnostics(&first_adapter)!!;
     assert(diagnostics.backend_name == "stub", "backend identity is diagnostic-only data");

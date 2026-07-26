@@ -150,7 +150,7 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     assert_warm_command_resolution(after_bind, 1, 1);
     assert(after_bind.pipeline_bind_commands == 1,
         "the first compute bind emits one native pipeline bind");
-    assert_strict_heap_bind_work(after_bind, 1);
+    assert_shader_heap_bind_work(after_bind, 1);
     gpu::PipelineHandle[PERFORMANCE_PIPELINE_CHURN_COUNT] churned_pipelines;
     for (uint i = 0; i < churned_pipelines.len; i++) {
         churned_pipelines[i] = gpu::create_compute_pipeline(

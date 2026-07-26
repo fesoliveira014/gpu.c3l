@@ -67,6 +67,18 @@ def valid_document() -> dict:
         "modules": {
             "gpu": {
                 "functions": [
+                    api_function(
+                        "supports_device_desc",
+                        "DeviceSupport?",
+                        ("adapter", "Adapter*"),
+                        ("desc", "DeviceDesc*"),
+                    ),
+                    api_function(
+                        "create_device",
+                        "Device?",
+                        ("adapter", "Adapter*"),
+                        ("desc", "DeviceDesc*"),
+                    ),
                     {
                         "name": "begin_commands",
                         "return_type": {"name": "CommandList?"},
@@ -1056,6 +1068,34 @@ def valid_document() -> dict:
                         ],
                     },
                     {
+                        "name": "DeviceDesc",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "surface",
+                                "type": {"name": "Surface"},
+                            },
+                            {
+                                "name": "queues",
+                                "type": {"name": "QueueRequirements"},
+                            },
+                        ],
+                    },
+                    {
+                        "name": "DeviceSupport",
+                        "kind": "struct",
+                        "members": [
+                            {
+                                "name": "supported",
+                                "type": {"name": "bool"},
+                            },
+                            {
+                                "name": "unmet_requirement",
+                                "type": {"name": "String"},
+                            },
+                        ],
+                    },
+                    {
                         "name": "DeviceCaps",
                         "kind": "struct",
                         "members": [
@@ -1582,7 +1622,7 @@ bool depth_state_set;
                 document,
                 source,
             ),
-            ["canonical strict fixture missing gpu::destroy_runtime"],
+            ["canonical GPU fixture missing gpu::destroy_runtime"],
         )
 
     def test_canonical_manifest_pins_every_public_entry_kind(self) -> None:

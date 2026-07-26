@@ -1143,7 +1143,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::CommandResolutionStats bind_stats = gpu::command_resolution_stats();
     assert(bind_stats.pipeline_bind_commands == 2,
         "repeated binds and aliases emit once per selected bind point");
-    assert_strict_heap_bind_work(bind_stats, 2);
+    assert_shader_heap_bind_work(bind_stats, 2);
 
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::SamplerDesc sampler_desc = {};
@@ -1153,7 +1153,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::CommandResolutionStats publication_stats =
         gpu::command_resolution_stats();
     assert(publication_stats.pipeline_bind_commands == 0
-        && publication_stats.strict_heap_set_bind_commands == 0,
+        && publication_stats.descriptor_heap_set_bind_commands == 0,
         "descriptor publication preserves cached heap binding");
 
     gpu::Barrier global_barrier = {
@@ -1166,7 +1166,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::CommandResolutionStats hazard_stats =
         gpu::command_resolution_stats();
     assert(hazard_stats.pipeline_bind_commands == 0
-        && hazard_stats.strict_heap_set_bind_commands == 0,
+        && hazard_stats.descriptor_heap_set_bind_commands == 0,
         "a global barrier does not invalidate heap binding");
 
     gpu::reset_command_resolution_stats();
@@ -1191,15 +1191,15 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     ValComputeCtx stale = make_val_compute_ctx(&device);
     gpu::PipelineHandle stale_handle = stale.pipeline;
     gpu::destroy_pipeline(&device, stale_handle)!!;
-    vk::StrictHeapCommandBinding heap_binding_before =
-        record.strict_heap_binding;
+    vk::DescriptorHeapCommandBinding heap_binding_before =
+        record.descriptor_heap_binding;
     fault stale_bind = @catch(gpu::cmd_bind_pipeline(&commands, stale_handle));
     assert(stale_bind == gpu::INVALID_HANDLE, "binding a stale pipeline faults INVALID_HANDLE");
-    assert(record.strict_heap_binding.graphics_set_bound
+    assert(record.descriptor_heap_binding.graphics_set_bound
             == heap_binding_before.graphics_set_bound
-        && record.strict_heap_binding.compute_set_bound
+        && record.descriptor_heap_binding.compute_set_bound
             == heap_binding_before.compute_set_bound,
-        "failed pipeline validation preserves strict heap state");
+        "failed pipeline validation preserves descriptor heap state");
     gpu::cmd_dispatch(
         commands: &commands,
         root:     root,

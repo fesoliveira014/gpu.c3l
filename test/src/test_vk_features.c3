@@ -46,7 +46,7 @@ fn void required_dynamic_color_features_require_the_complete_set() @test {
         dynamic_color_features_with_required();
     assert(
         gpu::internal::vk::required_dynamic_color_features_supported(&features),
-        "all three color features satisfy the strict baseline"
+        "all three color features satisfy the device baseline"
     );
 
     features.extended_dynamic_state3color_blend_enable = vk::FALSE;
@@ -1222,7 +1222,7 @@ fn void index_type_validation_rejects_unknown_values() @test {
     assert(unknown == gpu::INVALID_ARGUMENT, "unknown index format faults");
 }
 
-fn void strict_presentation_requires_completion_fences() @test {
+fn void presentation_requires_completion_fences() @test {
     assert(gpu::internal::vk::presentation_maintenance_supported(
         extension_supported: true,
         feature_enabled:     vk::TRUE,

@@ -202,18 +202,15 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
         },
         .distinct = { .graphics, .compute, .transfer },
     };
-    gpu::DeviceRequest request = gpu::request_queues(
-        gpu::strict_device_request(),
-        requirements,
-    )!!;
+    gpu::DeviceDesc device_desc = { .queues = requirements };
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
 
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue graphics = gpu::get_queue(
             &device,

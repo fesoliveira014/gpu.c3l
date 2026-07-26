@@ -24,13 +24,12 @@ fn gpu::Device? create_bench_device(
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;
-        gpu::DeviceRequestSupport support =
-            gpu::supports_device_request(&adapter, &request)!;
+        gpu::DeviceSupport support =
+            gpu::supports_device_desc(&adapter)!;
         if (!support.supported) continue;
-        gpu::Device? device = gpu::create_device(&adapter, &request);
+        gpu::Device? device = gpu::create_device(&adapter);
         if (catch err = device) {
             if (err == gpu::UNSUPPORTED_FEATURE) continue;
             return err~;

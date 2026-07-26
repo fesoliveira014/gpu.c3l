@@ -12,7 +12,7 @@ Start with:
 | Document | Scope |
 |---|---|
 | [Architecture](architecture.md) | Modules, objects, caller-owned lifetimes, commands, descriptors, and swapchains. |
-| [Strict GPU architecture](strict_gpu_profile.md) | Target runtime, device, memory, command, and compatibility extension model. |
+| [Device baseline architecture](device_baseline.md) | Mandatory runtime, device, memory, command, and compatibility extension model. |
 | [Public API](api.md) | Public types, functions, faults, and examples. |
 | [Memory](memory.md) | Owning allocations, non-owning spans, mapping/address queries, visibility, and transfers. |
 | [Shader ABI](shader_abi.md) | Root pointers, generated layouts, descriptor indices, and reflection. |
@@ -25,9 +25,9 @@ Start with:
 
 ## Planning
 
-- [Strict GPU architecture requirements](specs/strict-gpu-profile/requirements.md) for scope and acceptance criteria.
-- [Strict GPU architecture design](specs/strict-gpu-profile/design.md) for module boundaries and implementation order.
-- [Strict GPU architecture tasks](specs/strict-gpu-profile/tasks.md) for implementation status and verification commands.
+- [Baseline architecture requirements](specs/strict-gpu-profile/requirements.md) for scope and acceptance criteria.
+- [Baseline architecture design](specs/strict-gpu-profile/design.md) for module boundaries and implementation order.
+- [Baseline architecture tasks](specs/strict-gpu-profile/tasks.md) for implementation status and verification commands.
 
 ## Maintenance
 

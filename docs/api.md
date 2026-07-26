@@ -12,7 +12,7 @@ All public API lives in:
 module gpu;
 ```
 
-The source-of-truth split is strict: `gpu/gpu.c3i` contains all public
+The source-of-truth split is explicit: `gpu/gpu.c3i` contains all public
 non-callable declarations, while `gpu/gpu.c3` contains all public callable
 implementations with their doc contracts, attributes, and default arguments.
 Backend-independent implementation details live in private `gpu::internal`;
@@ -118,7 +118,6 @@ AdapterInfo
     AdapterClass device_class
     AdapterMemoryInfo memory
     AdapterQueueInfo queues
-    bool strict_supported
     AdapterLimits limits
 
 BackendVersion
@@ -224,28 +223,30 @@ destroy_surface(Surface*)                 -> void?
 ```
 
 The adapter and surface must belong to the same runtime. A presentation device
-accepts swapchains only for the exact surface named in its request and reports
-that capability through `DeviceCaps.presentation_enabled`. Presentation may
-use a private queue distinct from graphics. Destroying a surface with a live
-swapchain returns `RESOURCE_IN_USE`; destroy surfaces before their runtime.
-Destroying a requested surface with no live swapchain succeeds. Its presentation
-device remains bound to that stale token, so future `create_swapchain` calls
-return `INVALID_HANDLE`.
+accepts swapchains only for the exact surface named in its descriptor and
+reports that capability through `DeviceCaps.presentation_enabled`.
+Presentation may use a private queue distinct from graphics. Destroying a
+surface with a live swapchain returns `RESOURCE_IN_USE`; destroy surfaces
+before their runtime. Destroying a descriptor surface with no live swapchain
+succeeds. Its presentation device remains bound to that stale token, so future
+`create_swapchain` calls return `INVALID_HANDLE`.
 
-### Device requests and creation
+### Device descriptors and creation
 
-Presentation and queue requirements are explicit additions to the immutable
-strict request.
-
-Strict device creation takes one exact borrowed adapter plus an immutable
-semantic request. Support detection is read-only and enables nothing;
-successful creation records strict and presentation enablement separately in
-`DeviceCaps`. The unmet-requirement label is borrowed static text and names
-GPU semantics rather than backend features.
+Device creation takes one exact borrowed adapter and an optional plain
+descriptor. The descriptor contains only per-device semantic requirements:
+presentation and queue topology. The library's required device baseline is
+implicit. Support detection is optional application functionality for adapter
+selection; it is read-only, enables nothing, and does not mutate the descriptor.
+The unmet-requirement label is borrowed static text and names GPU semantics
+rather than backend features.
 
 ```text
-DeviceRequest                    (opaque immutable value)
-DeviceRequestSupport
+DeviceDesc
+    Surface surface
+    QueueRequirements queues
+
+DeviceSupport
     bool supported
     String unmet_requirement     (borrowed static semantic label)
 
@@ -253,30 +254,53 @@ QueueRequirements
     QueueCounts counts
     QueueRoles distinct
 
-strict_device_request()          -> DeviceRequest
-request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
-request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
-supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
-create_device(Adapter*, DeviceRequest*) -> Device?
+supports_device_desc(Adapter*, DeviceDesc* = null) -> DeviceSupport?
+create_device(Adapter*, DeviceDesc* = null)        -> Device?
 ```
 
-The strict request defaults to one graphics, compute, and transfer queue; one
-native queue may satisfy several roles. Presentation requires at least one
-graphics queue in both the default and an explicit queue group.
-`request_queues` replaces that implicit default with one explicit group. Each
-role count is 0..255 and requests distinct identities within that role. At
-least one count must be nonzero. A role marked
-`distinct` must have a nonzero count and may not alias another requested role.
-Invalid or duplicate queue groups return `INVALID_ARGUMENT`. Support queries
-report unavailable counts or topology without enabling device state.
+An omitted descriptor, null, and a zero-initialized `DeviceDesc` are
+equivalent. They select a non-presenting device with one graphics, compute, and
+transfer queue; one native queue may satisfy several roles. The omitted form is
+the canonical minimal call:
+
+```c3
+gpu::Device device = gpu::create_device(&adapter)!;
+```
+
+Store a live same-runtime surface directly to request presentation:
+
+```c3
+gpu::DeviceDesc device_desc = {
+    .surface = surface,
+};
+gpu::Device device = gpu::create_device(&adapter, &device_desc)!;
+```
+
+`DeviceDesc.queues = {}` selects the default topology. Any nonzero
+`QueueRequirements` is explicit: each role count is 0..255 and requests
+distinct identities within that role. At least one count must be nonzero. A
+role marked `distinct` must have a nonzero count and may not alias another
+requested role. Presentation requires at least one graphics queue. Unknown
+role bits, invalid count/distinct combinations, and a presentation descriptor
+without graphics fault `INVALID_ARGUMENT`.
+
+The current descriptor uses `QueueRequirements`, including queue counts and
+distinct-role constraints.
+
+Descriptor input is borrowed for the call and copied during normalization.
+Zero surface means no presentation. A nonzero surface must resolve live and
+belong to the adapter's runtime; stale, malformed, or foreign tokens fault
+`INVALID_HANDLE`. A valid surface or queue topology unavailable on the adapter
+is unsupported rather than malformed.
 
 A live adapter-created device retains its runtime and reuses the runtime-owned
 backend instance. Device defaults are copied by `create_runtime` and inherited
-by every device created from that runtime. Destroy each device before its runtime.
+by every device created from that runtime. A presentation device records but
+does not retain its surface token; only a live swapchain blocks surface
+destruction. Destroy each device before its runtime.
 
 ```text
 DeviceCaps
-    bool strict_enabled
     bool presentation_enabled
     bool buffer_device_address
     bool synchronization2
@@ -304,15 +328,16 @@ Device                           (slot | generation | reserved)
 get_device_caps(Device*)         -> DeviceCaps?
 ```
 
-`strict_enabled` reports whether strict semantics were requested and enabled.
-The minimum supported device profile is intentionally Vulkan 1.3 plus
+Every published device implements the same mandatory semantic baseline. The
+minimum supported device profile is intentionally Vulkan 1.3 plus
 `VK_EXT_extended_dynamic_state3` and
-`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. The strict profile also
+`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`. The baseline also
 requires the extension's color blend-enable, color blend-equation, and color
 write-mask features, together with independent per-target blending and
-depth-bias clamp. Query request support before creation; creation returns
-`UNSUPPORTED_FEATURE` when an adapter cannot provide every requirement.
-`generated_work` is true only when the created strict device enables
+depth-bias clamp. Creation returns `UNSUPPORTED_FEATURE` when an adapter cannot
+provide every requirement. `supports_device_desc` may be used before creation
+when an application wants to select among adapters. `generated_work` is true
+only when the created device enables
 GPU-written root and work records for graphics and compute. A supported device
 reports a nonzero `max_generated_work_count`; an unsupported device reports
 false and zero. Heap and generated-work implementation mechanisms remain
@@ -329,19 +354,17 @@ valid capacity unavailable on the selected adapter faults `UNSUPPORTED_FEATURE`.
 Creation:
 
 ```text
-strict_device_request() -> DeviceRequest
-supports_device_request(Adapter*, DeviceRequest*) -> DeviceRequestSupport?
-request_presentation(DeviceRequest, Surface*) -> DeviceRequest?
-request_queues(DeviceRequest, QueueRequirements) -> DeviceRequest?
-create_device(Adapter*, DeviceRequest*) -> Device?
+supports_device_desc(Adapter*, DeviceDesc* = null) -> DeviceSupport?
+create_device(Adapter*, DeviceDesc* = null)        -> Device?
 destroy_device(Device*) -> void?
 ```
 
-Malformed or empty requests fault before adapter/backend work. A valid
-unsupported request returns `supported = false` with the first unmet semantic
-label; passing it to `create_device` faults `UNSUPPORTED_FEATURE` without
-selecting another adapter. Duplicate capability contribution is rejected
-transactionally by private composition helpers.
+Malformed descriptors fault before backend mutation. A valid unsupported
+descriptor returns `supported = false` with the first unmet semantic label;
+passing it to `create_device` faults `UNSUPPORTED_FEATURE` without selecting
+another adapter. Support queries and creation share descriptor normalization
+and validation semantics. Failed creation publishes no device and changes no
+runtime or surface dependency count.
 
 Multiple live devices may coexist. `Device` is a compact slot and generation
 token. Most public operations take a short-lived atomic pin before reading
@@ -453,7 +476,7 @@ both always-checked and `FULL`-only causes.
 |---|---|---|---|
 | `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the Vulkan loader, driver, or required backend initialization path is unavailable |
 | `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
-| `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; `request_queues`; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
+| `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; device descriptor validation; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; `prepare_shader_code`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
 | `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource handle; or a zero, stale, consumed, or wrong-phase valid-origin direct command token; submit also rejects a token recorded for another device |
 | `INVALID_RESOURCE_STATE` | Always checked lifecycle/safe snapshot / Runtime failures | command execution; surface and swapchain creation/lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an authoritative lifecycle transition is invalid, trusted-table command execution has no usable bound-pipeline snapshot, a borrowed view was passed for destruction, a generated-scratch key is not reserved, or Vulkan reports that the native window is already in use |
 | `OUT_OF_HOST_MEMORY` | Runtime failures | creates; mapped visibility | driver or backend cache host-allocation failure |
@@ -545,7 +568,7 @@ normal device destruction.
 
 ### Host transfers
 
-The strict core exposes primitives, not transfer policy. For long-lived or
+The core exposes primitives, not transfer policy. For long-lived or
 one-shot CPU-written data, allocate `CPU_WRITE` memory, borrow its span,
 mapping, and address as needed, write, flush the span, record and submit the
 work, wait for or poll its covering completion point, then free the owning
@@ -729,10 +752,10 @@ owner- and generation-checked CPU lifetime token whose `index` field is the raw
 generation bits; destroying a view immediately makes its index reusable. First
 discard or complete every use and remove the index from GPU-visible data.
 Passing a stale or foreign view to `destroy_texture_view` faults before heap
-mutation. Texture-view publication requires strict capability and returns
-`UNSUPPORTED_FEATURE` before backend work otherwise. Distinct subresource views
-are governed by the device-wide heap capacity, with no smaller fixed per-texture
-publication limit. Sampler indices remain stable until device
+mutation. Texture-view publication uses every device's mandatory shader-visible
+heap. Distinct subresource views are governed by the device-wide heap capacity,
+with no smaller fixed per-texture publication limit. Sampler indices remain
+stable until device
 destruction.
 
 `create_texture_views` batch-publishes N views under one lock hold and ends in
@@ -793,10 +816,24 @@ support faults `UNSUPPORTED_FEATURE`. When anisotropy or comparison is disabled,
 its associated value is ignored and canonicalized to zero; signed zero also has
 one identity. Sampler indices and their native objects live until device
 destruction and have no individual destroy operation. Repeated interning is idempotent.
-`DESCRIPTOR_HEAP_FULL` consumes no table or heap entry; a device without strict
-capability returns `UNSUPPORTED_FEATURE` before backend mutation.
+`DESCRIPTOR_HEAP_FULL` consumes no table or heap entry.
 
 ### Breaking migration
+
+The packed device-request builder has been retired. Migrate its operations as
+follows:
+
+| Retired API | Replacement |
+| --- | --- |
+| `DeviceRequest` and `strict_device_request()` | `DeviceDesc`; omit it or pass null for the default headless description |
+| `request_presentation()` | Set `DeviceDesc.surface` |
+| `request_queues()` | Set `DeviceDesc.queues` |
+| `supports_device_request()` | `supports_device_desc()` |
+| `DeviceRequestSupport` | `DeviceSupport` |
+
+Pass the resulting description directly to `create_device`. The pointer-first
+baseline is mandatory and implicit, so no strict-capability bit or builder call
+is needed.
 
 Texture shape is implicitly 2D, view format is always the texture's format,
 and sampler interning now returns the shader index in one call:

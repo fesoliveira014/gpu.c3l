@@ -371,11 +371,9 @@ domain. Blend equations and write masks are supplied as command state after
 binding a compatible pipeline:
 
 ```c3
-gpu::DeviceRequest request = gpu::strict_device_request();
-gpu::DeviceRequestSupport support =
-    gpu::supports_device_request(&adapter, &request)!;
+gpu::DeviceSupport support = gpu::supports_device_desc(&adapter)!;
 if (!support.supported) { /* select another adapter */ }
-gpu::Device device = gpu::create_device(&adapter, &request)!;
+gpu::Device device = gpu::create_device(&adapter)!;
 
 gpu::Format[3] color_formats = {
     albedo_format,

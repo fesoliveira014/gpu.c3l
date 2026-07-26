@@ -242,7 +242,6 @@ enum QueueKind : int {
 <* Capabilities of the created device. Query with get_device_caps instead of
    hardcoding limits. *>
 struct DeviceCaps {
-    bool strict_enabled;
     bool presentation_enabled;
     bool buffer_device_address;
     bool synchronization2;
@@ -425,7 +424,6 @@ struct AdapterInfo {
     AdapterClass      device_class;
     AdapterMemoryInfo memory;
     AdapterQueueInfo  queues;
-    bool              strict_supported;
     AdapterLimits     limits;
 }
 
@@ -459,16 +457,6 @@ bitstruct Surface : ulong {
 
 const Surface SURFACE_INVALID = {};
 
-<* Immutable semantic requirements for device creation. *>
-typedef DeviceRequest = uint128;
-
-<* Result of a read-only semantic support query. unmet_requirement is a
-   borrowed static label when supported is false. *>
-struct DeviceRequestSupport {
-    bool   supported;
-    String unmet_requirement;
-}
-
 const ulong RESOURCE_OWNER_KIND_COUNT = 10;
 const ulong MAX_DEVICE_RESOURCE_OWNER =
     ulong::max / RESOURCE_OWNER_KIND_COUNT;
@@ -488,7 +476,7 @@ struct CommandResolutionStats @if(env::TESTING || $feature(COMMAND_RESOLUTION_ST
     ulong recording_commands;
     ulong native_commands;
     ulong pipeline_bind_commands;
-    ulong strict_heap_set_bind_commands;
+    ulong descriptor_heap_set_bind_commands;
 }
 
 // A shader-visible 64-bit GPU address. Distinct from a plain ulong so it can't
@@ -1242,6 +1230,20 @@ struct QueueCounts {
 struct QueueRequirements {
     QueueCounts counts;
     QueueRoles distinct;
+}
+
+<* Plain semantic requirements for device creation. A zero value selects the
+   documented default queues and no presentation surface. *>
+struct DeviceDesc {
+    Surface           surface;
+    QueueRequirements queues;
+}
+
+<* Result of a read-only semantic support query. unmet_requirement is a
+   borrowed static label when supported is false. *>
+struct DeviceSupport {
+    bool   supported;
+    String unmet_requirement;
 }
 
 <* Work submitted to an explicit queue. Every wait names its first destination

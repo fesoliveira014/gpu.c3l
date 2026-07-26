@@ -1,4 +1,4 @@
-module gpu_canonical_strict_surface;
+module gpu_canonical_gpu_surface;
 
 import gpu;
 
@@ -8,7 +8,6 @@ fn void pin_runtime_adapter_device() {
     gpu::Runtime runtime = {};
     gpu::AdapterList adapters = {};
     gpu::Adapter adapter = {};
-    gpu::DeviceRequest request = gpu::strict_device_request();
     gpu::QueueRequirements queues = {
         .counts = {
             .graphics = 1,
@@ -16,6 +15,7 @@ fn void pin_runtime_adapter_device() {
             .transfer = 1,
         },
     };
+    gpu::DeviceDesc device_desc = { .queues = queues };
     gpu::Device device = {};
 
     (void)gpu::full_validation_runtime_desc();
@@ -24,9 +24,9 @@ fn void pin_runtime_adapter_device() {
     (void)adapters.get(0);
     (void)gpu::get_adapter_info(&adapter);
     (void)gpu::get_adapter_diagnostics(&adapter);
-    (void)gpu::request_queues(request, queues);
-    (void)gpu::supports_device_request(&adapter, &request);
-    (void)gpu::create_device(&adapter, &request);
+    (void)gpu::supports_device_desc(&adapter, &device_desc);
+    (void)gpu::create_device(&adapter);
+    (void)gpu::create_device(&adapter, &device_desc);
     (void)gpu::get_device_caps(&device);
     (void)gpu::get_queue_counts(&device);
     (void)gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
@@ -366,8 +366,8 @@ fn void pin_commands_and_completion() {
 }
 
 fn void pin_presentation() {
-    gpu::DeviceRequest request = gpu::strict_device_request();
     gpu::Surface surface = {};
+    gpu::DeviceDesc device_desc = { .surface = surface };
     gpu::Adapter adapter = {};
     gpu::Device device = {};
     gpu::SwapchainDesc desc = {
@@ -379,7 +379,7 @@ fn void pin_presentation() {
     gpu::TextureState prior_state = image.prior_state;
     gpu::CompletionPoint completion = {};
 
-    (void)gpu::request_presentation(request, &surface);
+    (void)gpu::supports_device_desc(&adapter, &device_desc);
     (void)gpu::supports_presentation(&adapter, &surface);
     (void)gpu::create_swapchain(&device, &surface, &desc);
     (void)gpu::get_swapchain_info(&device, swapchain);

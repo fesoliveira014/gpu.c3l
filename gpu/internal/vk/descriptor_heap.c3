@@ -153,9 +153,9 @@ fn vk::Result create_descriptor_heap_layout(
 }
 
 fn void? create_descriptor_heap(VkDeviceState* state) {
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
-    uint tex_capacity = state.strict_heap.texture_capacity;
-    uint smp_capacity = state.strict_heap.sampler_capacity;
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
+    uint tex_capacity = state.shader_heap.texture_capacity;
+    uint smp_capacity = state.shader_heap.sampler_capacity;
 
     heap.texture_view_owner     = gpu::internal::resource_owner_tag(
         state.resource_owner,
@@ -211,7 +211,7 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
 
 <* Safe on a partial or zeroed heap. *>
 fn void destroy_descriptor_heap(VkDeviceState* state) {
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
     if (heap.descriptor_pool != null) {
         vk::destroy_descriptor_pool(state.device, heap.descriptor_pool, null);
         heap.descriptor_pool = (vk::DescriptorPool)null;
@@ -226,7 +226,7 @@ fn void destroy_descriptor_heap(VkDeviceState* state) {
 }
 
 fn void report_descriptor_leaks(VkDeviceState* state) {
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
     if (heap.texture_cells.ptr != null) {
         foreach (i, &cell : heap.texture_cells[:heap.texture_next_new]) {
             if (!cell.used) continue;
@@ -292,7 +292,7 @@ fn TextureDescriptorCell*? texture_cell_get(
     $if env::TESTING || $feature(TEXTURE_VIEW_ACCOUNTING_STATS):
         state.texture_view_cell_lookups++;
     $endif
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
     if (!view.index.is_valid()) return gpu::INVALID_HANDLE~;
     uint slot = texture_index_slot(view.index);
     if (slot >= heap.texture_cells.len || !heap.texture_cells[slot].used) {
@@ -335,7 +335,7 @@ fn void? validate_texture_view_increment(
     ZString operation,
 ) @private {
     if (!contract_uses_full_validation(state.validation_policy)) return;
-    uint capacity = (uint)state.strict_heap.descriptors.texture_cells.len;
+    uint capacity = (uint)state.shader_heap.descriptors.texture_cells.len;
     if (pending_count > capacity
         || owner.live_descriptor_views > capacity - pending_count) {
         return report_texture_view_accounting_failure(
@@ -376,7 +376,7 @@ fn void recycle_texture_descriptor_slot(
 <* Sampled and/or storage descriptor per the texture's usage, same slot in
    both bindings, so one TextureIndex serves both access kinds. *>
 fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* texture, vk::ImageView view) @private {
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
     vk::WriteDescriptorSet[2] writes;
     vk::DescriptorImageInfo[2] image_infos;
     uint write_count = 0;
@@ -418,7 +418,7 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
 }
 
 fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sampler) @private {
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
 
     vk::DescriptorImageInfo image_info = { .sampler = sampler };
     vk::WriteDescriptorSet write = vk::write_descriptor_set()
@@ -431,7 +431,7 @@ fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sa
 }
 
 fn void? validate_descriptor_heap_binding(VkDeviceState* state) {
-    if (!state.strict_heap.enabled) return gpu::UNSUPPORTED_FEATURE~;
+    if (state == null) return gpu::INVALID_ARGUMENT~;
 }
 
 fn void? bind_descriptor_heap(
@@ -441,7 +441,7 @@ fn void? bind_descriptor_heap(
     vk::PipelineBindPoint bind_point,
 ) {
     validate_descriptor_heap_binding(state)!;
-    StrictHeapCommandBinding* binding = &record.strict_heap_binding;
+    DescriptorHeapCommandBinding* binding = &record.descriptor_heap_binding;
     bool set_bound = bind_point == vk::PipelineBindPoint.COMPUTE
         ? binding.compute_set_bound
         : binding.graphics_set_bound;
@@ -452,11 +452,11 @@ fn void? bind_descriptor_heap(
         layout:                layout,
         first_set:             HEAP_SET,
         descriptor_set_count:  1,
-        p_descriptor_sets:     &state.strict_heap.descriptors.descriptor_set,
+        p_descriptor_sets:     &state.shader_heap.descriptors.descriptor_set,
         dynamic_offset_count:  0,
         p_dynamic_offsets:     null,
     );
-    gpu::internal::note_command_strict_heap_set_bind();
+    gpu::internal::note_command_descriptor_heap_set_bind();
     gpu::internal::note_command_native_call();
     if (bind_point == vk::PipelineBindPoint.COMPUTE) {
         binding.compute_set_bound = true;
@@ -552,7 +552,7 @@ fn gpu::TextureView? vk_create_texture_view(
     defer state.resource_mutex.unlock();
     state.texture_view_cache_mutex.lock()!!;
     defer state.texture_view_cache_mutex.unlock();
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
     TextureSlot* texture_slot = resolve_descriptor_texture(
         state:         state,
         texture:       texture,
@@ -746,7 +746,7 @@ fn void? vk_create_texture_views(
     defer state.resource_mutex.unlock();
     state.texture_view_cache_mutex.lock()!!;
     defer state.texture_view_cache_mutex.unlock();
-    DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
 
     uint headroom = heap.texture_free_count
         + (uint)heap.texture_cells.len - heap.texture_next_new;
@@ -857,7 +857,7 @@ fn void? vk_destroy_texture_view(
     cell.used = false;
     owner.live_descriptor_views--;
     recycle_texture_descriptor_slot(
-        &state.strict_heap.descriptors,
+        &state.shader_heap.descriptors,
         view,
         cell,
     );

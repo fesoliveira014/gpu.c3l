@@ -12,8 +12,7 @@ fn RuntimeDesc queue_runtime_desc() {
 
 fn Device create_queue_test_device(Runtime* runtime) {
     Adapter adapter = gpu::enumerate_adapters(runtime)!!.get(0)!!;
-    DeviceRequest request = gpu::strict_device_request();
-    return gpu::create_device(&adapter, &request)!!;
+    return gpu::create_device(&adapter)!!;
 }
 
 
@@ -253,11 +252,8 @@ fn void device_exposes_only_requested_queue_roles() @test {
     defer gpu::destroy_runtime(&runtime)!!;
     Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
     QueueRequirements requirements = { .counts = { .compute = 1 } };
-    DeviceRequest request = gpu::request_queues(
-        gpu::strict_device_request(),
-        requirements,
-    )!!;
-    Device device = gpu::create_device(&adapter, &request)!!;
+    DeviceDesc desc = { .queues = requirements };
+    Device device = gpu::create_device(&adapter, &desc)!!;
     defer gpu::destroy_device(&device)!!;
 
     QueueCounts counts = gpu::get_queue_counts(&device)!!;

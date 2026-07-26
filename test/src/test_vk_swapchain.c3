@@ -476,7 +476,8 @@ fn void swapchain_requires_a_presentation_request() @test {
         &surface,
         &sc_desc,
     ));
-    assert(gate_fault == gpu::UNSUPPORTED_FEATURE, "swapchain without a presentation request faults");
+    assert(gate_fault == gpu::UNSUPPORTED_FEATURE,
+        "swapchain without a presentation descriptor faults");
 }
 
 fn void swapchain_submit_guard_lifecycle() @test {
@@ -1148,7 +1149,7 @@ fn void swapchain_release_detects_shared_resource_references() @test {
 
     uint[3] high_water_marks = { 16, 4_096, 65_536 };
     foreach (high_water : high_water_marks) {
-        state.strict_heap.descriptors.texture_next_new = high_water;
+        state.shader_heap.descriptors.texture_next_new = high_water;
         gpu::internal::vk::reset_texture_view_accounting(&state);
         assert(!gpu::internal::vk::swapchain_images_referenced_locked(
             &state,

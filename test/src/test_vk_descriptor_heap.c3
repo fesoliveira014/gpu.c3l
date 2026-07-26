@@ -125,51 +125,6 @@ fn void texture_descriptors_use_classic_layouts() @test {
     );
 }
 
-fn void disabled_descriptor_heap_bind_returns_unsupported_feature() @test {
-    gpu::internal::vk::VkDeviceState state = {};
-    gpu::internal::vk::CommandRecord record = {};
-    fault bind_fault = @catch(gpu::internal::vk::bind_descriptor_heap(
-        state:      &state,
-        record:     &record,
-        layout:     (vk::PipelineLayout)null,
-        bind_point: vk::PipelineBindPoint.COMPUTE,
-    ));
-
-    assert(bind_fault == gpu::UNSUPPORTED_FEATURE, "disabled descriptor heaps cannot be bound");
-}
-
-fn void disabled_heap_rejects_pipeline_bind_preflight() @test {
-    gpu::internal::vk::VkDeviceState state = {};
-    gpu::PipelineHandle cached = { .index = 7, .generation = 3 };
-    gpu::PipelineHandle requested = { .index = 11, .generation = 5 };
-    gpu::internal::vk::CommandRecord record = {
-        .device_state = &state,
-        .state        = gpu::internal::CommandState.RECORDING,
-        .logical_pipeline = {
-            .handle      = cached,
-            .cache_entry = 19,
-        },
-        .strict_heap_binding = {
-            .compute_set_bound  = true,
-            .graphics_set_bound = true,
-        },
-    };
-
-    fault bind_fault = @catch(gpu::internal::vk::full_bind_pipeline(
-        &record,
-        requested,
-    ));
-    assert(bind_fault == gpu::UNSUPPORTED_FEATURE,
-        "pipeline binding preflight rejects a disabled descriptor heap");
-    assert(record.logical_pipeline.handle == cached,
-        "rejected binding preserves the active pipeline");
-    assert(record.logical_pipeline.cache_entry == 19,
-        "rejected binding preserves the active pipeline entry");
-    assert(record.strict_heap_binding.compute_set_bound
-        && record.strict_heap_binding.graphics_set_bound,
-        "rejected binding preserves strict heap state");
-}
-
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
@@ -205,17 +160,17 @@ fn gpu::TextureHandle make_heap_view_texture(gpu::Device* device) {
     return gpu::create_texture(device, &desc)!!;
 }
 
-fn void strict_pipeline_layouts_share_heap_set_zero() @test {
+fn void pipeline_layouts_share_heap_set_zero() @test {
     gpu::Device device = make_heap_test_device(1, 1);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
 
     assert(state.graphics_layout != null && state.compute_layout != null,
-        "strict devices create both shared pipeline layouts");
-    assert(state.strict_pipeline_set_layout
-            == state.strict_heap.descriptors.set_layout,
-        "strict graphics and compute layouts share the heap set-zero layout");
+        "devices create both shared pipeline layouts");
+    assert(state.shader_pipeline_set_layout
+            == state.shader_heap.descriptors.set_layout,
+        "graphics and compute layouts share the heap set-zero layout");
 }
 
 fn void sampler_lookup_scale_empty_bucket_miss_has_zero_work() @test {
@@ -445,8 +400,8 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
         gpu::internal::device_slots[first_device.index].data.state;
     vk::VkDeviceState* second_state =
         gpu::internal::device_slots[second_device.index].data.state;
-    uint first_free_before = first_state.strict_heap.descriptors.texture_free_count;
-    uint second_free_before = second_state.strict_heap.descriptors.texture_free_count;
+    uint first_free_before = first_state.shader_heap.descriptors.texture_free_count;
+    uint second_free_before = second_state.shader_heap.descriptors.texture_free_count;
     uint first_owner_before = live_descriptor_view_count(
         first_state,
         first_texture,
@@ -460,11 +415,11 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
     fault foreign = @catch(gpu::destroy_texture_view(&second_device, first_view));
     assert(foreign == gpu::INVALID_HANDLE,
         "a foreign texture view faults INVALID_HANDLE");
-    assert(first_state.strict_heap.descriptors.texture_free_count == first_free_before
-        && second_state.strict_heap.descriptors.texture_free_count == second_free_before,
+    assert(first_state.shader_heap.descriptors.texture_free_count == first_free_before
+        && second_state.shader_heap.descriptors.texture_free_count == second_free_before,
         "foreign release stops before either heap mutates");
-    assert(first_state.strict_heap.descriptors.texture_cells[first_view.index.value - 1].used
-        && second_state.strict_heap.descriptors.texture_cells[second_view.index.value - 1].used,
+    assert(first_state.shader_heap.descriptors.texture_cells[first_view.index.value - 1].used
+        && second_state.shader_heap.descriptors.texture_cells[second_view.index.value - 1].used,
         "both coincident live cells survive the rejected release");
     assert(live_descriptor_view_count(first_state, first_texture)
             == first_owner_before
@@ -558,7 +513,7 @@ fn void texture_view_generation_exhaustion_retires_slot() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::TextureDescriptorCell* cell =
-        &state.strict_heap.descriptors.texture_cells[view.index.value - 1];
+        &state.shader_heap.descriptors.texture_cells[view.index.value - 1];
     cell.generation = vk::HANDLE_GENERATION_MAX - 1;
     view.generation = cell.generation;
 
@@ -568,7 +523,7 @@ fn void texture_view_generation_exhaustion_retires_slot() @test {
         "an exhausted texture-view generation retires at the sentinel");
     assert(live_descriptor_view_count(state, texture) == 0,
         "terminal generation retirement decrements ownership exactly once");
-    assert(state.strict_heap.descriptors.texture_free_count == 0,
+    assert(state.shader_heap.descriptors.texture_free_count == 0,
         "an exhausted texture-view slot never returns to the free list");
     assert(@catch(gpu::create_texture_view(&device, texture, null))
         == gpu::DESCRIPTOR_HEAP_FULL,
@@ -584,7 +539,7 @@ fn void texture_view_zero_owner_count_faults_before_destruction_mutation() @test
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* owner = state.textures.get(texture)!!;
-    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    vk::DescriptorHeapState* heap = &state.shader_heap.descriptors;
     vk::TextureDescriptorCell* cell =
         &heap.texture_cells[view.index.value - 1];
     owner.live_descriptor_views = 0;
@@ -633,7 +588,7 @@ fn void texture_view_missing_owner_faults_before_destruction_mutation() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* owner = state.textures.get(texture)!!;
-    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    vk::DescriptorHeapState* heap = &state.shader_heap.descriptors;
     vk::TextureDescriptorCell* cell =
         &heap.texture_cells[view.index.value - 1];
     gpu::TextureHandle owner_before = cell.owner;
@@ -681,7 +636,7 @@ fn void texture_view_increment_invariant_faults_transactionally() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* owner = state.textures.get(texture)!!;
-    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    vk::DescriptorHeapState* heap = &state.shader_heap.descriptors;
     owner.live_descriptor_views = 8;
     DescriptorBackendCapture capture = {
         .expected_fault     = gpu::BACKEND_ERROR,
@@ -727,7 +682,7 @@ fn void texture_views_batch_increment_invariant_is_transactional() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* owner = state.textures.get(texture)!!;
-    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    vk::DescriptorHeapState* heap = &state.shader_heap.descriptors;
     owner.live_descriptor_views = 7;
     DescriptorBackendCapture capture = {
         .expected_fault     = gpu::BACKEND_ERROR,
@@ -804,7 +759,7 @@ fn void texture_views_late_increment_invariant_rolls_back_cached_view() @test {
     assert(live_descriptor_view_count(state, first) == 0
             && inconsistent_owner.live_descriptor_views == 8,
         "late increment validation preserves every owner count");
-    assert(state.strict_heap.descriptors.texture_next_new == 0,
+    assert(state.shader_heap.descriptors.texture_next_new == 0,
         "late increment validation publishes no descriptor cells");
 
     inconsistent_owner.live_descriptor_views = 0;
@@ -902,7 +857,7 @@ fn void texture_destroy_ownership_work_is_high_water_invariant() @test {
 
     foreach (high_water : high_water_marks) {
         gpu::TextureHandle texture = make_heap_texture(&device);
-        state.strict_heap.descriptors.texture_next_new = high_water;
+        state.shader_heap.descriptors.texture_next_new = high_water;
         vk::reset_texture_view_accounting(state);
 
         gpu::destroy_texture(&device, texture)!!;
@@ -1204,7 +1159,7 @@ fn void texture_views_mid_batch_fault_preserves_descriptor_state() @test {
     gpu::TextureHandle stale_texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, stale_texture)!!;
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    vk::DescriptorHeapState* heap = &state.strict_heap.descriptors;
+    vk::DescriptorHeapState* heap = &state.shader_heap.descriptors;
     uint owner_count_before = live_descriptor_view_count(state, texture);
 
     vk::TextureDescriptorCell[8] cells_before;
@@ -1328,7 +1283,7 @@ fn void sampler_interning_is_stable() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     assert(state.samplers.count == 2
-            && state.strict_heap.descriptors.sampler_next_new == 2,
+            && state.shader_heap.descriptors.sampler_next_new == 2,
         "failed interning preserves table and heap state");
     assert(vk::sampler_table_index_consistent(&state.samplers),
         "heap exhaustion preserves a consistent sampler index");
@@ -1351,7 +1306,7 @@ fn void sampler_interning_is_stable() @test {
     }
     assert(bucket_head_count_after == bucket_head_count
             && state.samplers.count == 2
-            && state.strict_heap.descriptors.sampler_next_new == 2
+            && state.shader_heap.descriptors.sampler_next_new == 2
             && vk::sampler_table_index_consistent(&state.samplers),
         "slot-table exhaustion preserves the complete published index");
 }
@@ -1399,7 +1354,7 @@ fn void sampler_hash_collisions_preserve_distinct_keys() @test {
     assert(first != second && first != third && second != third,
         "full key equality preserves every forced-hash collision identity");
     assert(state.samplers.count == 3
-            && state.strict_heap.descriptors.sampler_next_new == 3,
+            && state.shader_heap.descriptors.sampler_next_new == 3,
         "a collision publishes exactly three cells and descriptors");
     assert(state.samplers.slots[0].native != null
             && state.samplers.slots[1].native != null
@@ -1457,7 +1412,7 @@ fn void sampler_native_create_failure_is_transactional() @test {
     gpu::SamplerDesc existing_desc = {};
     gpu::SamplerIndex existing = gpu::intern_sampler(&device, &existing_desc)!!;
     uint table_count = state.samplers.count;
-    uint heap_count = state.strict_heap.descriptors.sampler_next_new;
+    uint heap_count = state.shader_heap.descriptors.sampler_next_new;
     gpu::SamplerDesc desc = { .mag_filter = gpu::Filter.LINEAR };
     vk::SamplerKey key = vk::canonical_sampler_key(
         &desc,
@@ -1474,7 +1429,7 @@ fn void sampler_native_create_failure_is_transactional() @test {
         == gpu::OUT_OF_HOST_MEMORY,
         "native sampler creation faults without publication");
     assert(state.samplers.count == table_count
-            && state.strict_heap.descriptors.sampler_next_new == heap_count,
+            && state.shader_heap.descriptors.sampler_next_new == heap_count,
         "native sampler creation failure preserves both counts");
     assert(state.samplers.bucket_heads[bucket] == bucket_head
             && vk::sampler_table_index_consistent(&state.samplers),
@@ -1531,7 +1486,7 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
             "native sampler creation receives the exact accepted anisotropy value");
 
         uint sampler_count = state.samplers.count;
-        uint sampler_heap_count = state.strict_heap.descriptors.sampler_next_new;
+        uint sampler_heap_count = state.shader_heap.descriptors.sampler_next_new;
         vk::reset_sampler_lookup_stats(state);
         ulong sampler_lookup_probes =
             vk::sampler_lookup_stats(state).lookup_probes;
@@ -1541,7 +1496,7 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
                 == gpu::INVALID_ARGUMENT,
             "over-limit anisotropy is rejected before Vulkan sampler interning");
         assert(state.samplers.count == sampler_count
-                && state.strict_heap.descriptors.sampler_next_new
+                && state.shader_heap.descriptors.sampler_next_new
                     == sampler_heap_count
                 && vk::sampler_lookup_stats(state).lookup_probes
                     == sampler_lookup_probes

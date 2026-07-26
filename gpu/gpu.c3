@@ -157,112 +157,20 @@ fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
     );
 }
 
-<* Create a strict semantic device request. *>
-fn DeviceRequest strict_device_request() {
-    return gpu::internal::compose_device_request(
-        gpu::internal::empty_device_request(),
-        gpu::internal::DeviceCapability.STRICT,
-    )!!;
-}
-
-<* Return a new request that requires presentation to the given surface. *>
-fn DeviceRequest? request_presentation(
-    DeviceRequest request,
-    Surface* surface,
-) {
-    return gpu::internal::compose_device_request(
-        request,
-        gpu::internal::DeviceCapability.PRESENTATION,
-        surface,
-    );
-}
-
-<* Return a new request with one explicit semantic queue group. *>
-fn DeviceRequest? request_queues(
-    DeviceRequest request,
-    QueueRequirements requirements,
-) {
-    if (!gpu::internal::device_request_is_well_formed(request)
-        || !gpu::internal::queue_requirements_are_valid(requirements)) {
-        return INVALID_ARGUMENT~;
-    }
-    if (((ulong)(uint128)request & gpu::internal::DEVICE_REQUEST_QUEUES_BIT) != 0) {
-        return INVALID_ARGUMENT~;
-    }
-    if (gpu::internal::requested_surface(request).is_valid()
-        && requirements.counts.graphics == 0) {
-        return INVALID_ARGUMENT~;
-    }
-    return (DeviceRequest)((uint128)request
-        | (uint128)(gpu::internal::DEVICE_REQUEST_QUEUES_BIT | gpu::internal::encode_queue_requirements(requirements)));
-}
-
-<* Query semantic request support without enabling device state.
+<* Query semantic descriptor support without enabling device state.
    unmet_requirement is a borrowed static label. *>
-fn DeviceRequestSupport? supports_device_request(
+fn DeviceSupport? supports_device_desc(
     Adapter* adapter,
-    DeviceRequest* request,
+    DeviceDesc* desc = null,
 ) {
-    gpu::internal::validate_device_request(request)!;
+    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
     gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
-
-    AdapterInfo info = gpu::internal::vk::vk_get_adapter_info(
-        data.state,
-        adapter.adapter_index,
-    )!;
-    if (!info.strict_supported) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "strict semantics",
-        };
-    }
-
-    QueueRequirements queues = gpu::internal::requested_queue_requirements(*request);
-    if (queues.counts.graphics > info.queues.graphics_count) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "graphics queues",
-        };
-    }
-    if (queues.counts.compute > info.queues.compute_count) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "compute queues",
-        };
-    }
-    if (queues.counts.transfer > info.queues.transfer_count) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "transfer queues",
-        };
-    }
-
-    Surface surface = gpu::internal::requested_surface(*request);
-    void* backend_surface = null;
-    if (surface.is_valid() && !supports_presentation(adapter, &surface)!) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "presentation",
-        };
-    }
-    if (surface.is_valid()) {
-        backend_surface = gpu::internal::surface_backend_handle(&surface)!;
-    }
-
-    if (!gpu::internal::vk::vk_supports_queue_requirements(
-        state:           data.state,
-        adapter_index:   adapter.adapter_index,
-        requirements:    &queues,
-        backend_surface: backend_surface,
-    )!) {
-        return {
-            .supported         = false,
-            .unmet_requirement = "queue topology",
-        };
-    }
-
-    return { .supported = true };
+    return gpu::internal::evaluate_device_desc_support(
+        data,
+        adapter,
+        normalized,
+    );
 }
 
 fn bool Surface.is_valid(self) => (ulong)self != 0;
@@ -320,7 +228,7 @@ fn void reset_command_resolution_stats() @if(env::TESTING || $feature(COMMAND_RE
     gpu::internal::command_recording_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_native_commands.store(0, AtomicOrdering.RELAXED);
     gpu::internal::command_pipeline_bind_commands.store(0, AtomicOrdering.RELAXED);
-    gpu::internal::command_strict_heap_set_bind_commands.store(0, AtomicOrdering.RELAXED);
+    gpu::internal::command_descriptor_heap_set_bind_commands.store(0, AtomicOrdering.RELAXED);
 }
 
 <* Snapshot process-wide command instrumentation with relaxed loads.
@@ -352,7 +260,7 @@ fn CommandResolutionStats command_resolution_stats() @if(env::TESTING || $featur
         .pipeline_bind_commands = gpu::internal::command_pipeline_bind_commands.load(
             AtomicOrdering.RELAXED,
         ),
-        .strict_heap_set_bind_commands = gpu::internal::command_strict_heap_set_bind_commands.load(
+        .descriptor_heap_set_bind_commands = gpu::internal::command_descriptor_heap_set_bind_commands.load(
             AtomicOrdering.RELAXED,
         ),
     };
@@ -365,21 +273,25 @@ fn DeviceCaps? get_device_caps(Device* device) {
     return operation.data.caps;
 }
 
-<* Create a strict device from one exact borrowed adapter.
+<* Create a device from one exact borrowed adapter.
    Ownership: the caller must release the returned device with destroy_device. *>
-fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
-    gpu::internal::validate_device_request(request)!;
+fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
+    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
     gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(adapter);
     if (runtime_data == null) return INVALID_HANDLE~;
-    if (!gpu::internal::device_slot_available()) return SLOT_TABLE_FULL~;
 
-    gpu::internal::vk::validate_strict_device_request_support(
+    DeviceSupport support = gpu::internal::evaluate_device_desc_support(
+        data:                 runtime_data,
+        adapter:              adapter,
+        normalized:           normalized,
+        creation_diagnostics: true,
+    )!;
+    if (!support.supported) return UNSUPPORTED_FEATURE~;
+    gpu::internal::vk::validate_device_baseline_support(
         runtime_data.state,
         adapter.adapter_index,
-        request,
     )!;
-    DeviceRequestSupport support = supports_device_request(adapter, request)!;
-    if (!support.supported) return UNSUPPORTED_FEATURE~;
+    if (!gpu::internal::device_slot_available()) return SLOT_TABLE_FULL~;
 
     Runtime runtime = {
         .index      = adapter.runtime_index,
@@ -398,7 +310,7 @@ fn Device? create_device(Adapter* adapter, DeviceRequest* request) {
         }
     }
 
-    device = gpu::internal::vk::create_vk_device(adapter, request, &runtime)!;
+    device = gpu::internal::vk::create_vk_device(adapter, &normalized, &runtime)!;
     retain_transferred = true;
     return device;
 }
@@ -765,13 +677,12 @@ fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     gpu::internal::validate_sampler_desc(&operation, desc)!;
     return gpu::internal::vk::vk_intern_sampler(operation.state, desc);
 }
 
-<* Publish one texture view in the strict shader-visible heap. Requires strict
-   capability, and the texture must carry sampled or storage usage. The returned
+<* Publish one texture view in the shader-visible heap. The texture must carry
+   sampled or storage usage. The returned
    owner-bearing view contains the raw generation-free index stored in shader data. *>
 fn TextureView? create_texture_view(
     Device* device,
@@ -781,7 +692,6 @@ fn TextureView? create_texture_view(
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
-    if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     TextureView view =
         gpu::internal::vk::vk_create_texture_view(operation.state, texture, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -800,7 +710,7 @@ fn void? destroy_texture_view(Device* device, TextureView view) {
     gpu::internal::release_device_children(&operation);
 }
 
-<* Batch-publish texture views. Requires strict capability.
+<* Batch-publish texture views.
    `out_views.len` must equal `descs.len`; an empty batch succeeds. A fault leaves
    heap allocation, generations, cached native views, and outputs unchanged. *>
 fn void? create_texture_views(
@@ -824,7 +734,6 @@ fn void? create_texture_views(
     foreach (&desc : descs) {
         gpu::internal::validate_resource_owner(&operation, desc.texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
     }
-    if (!operation.data.caps.strict_enabled) return UNSUPPORTED_FEATURE~;
     gpu::internal::vk::vk_create_texture_views(operation.state, descs, out_views)!;
     gpu::internal::retain_device_children(&operation, (ulong)descs.len);
 }

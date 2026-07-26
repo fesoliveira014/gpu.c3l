@@ -183,5 +183,5 @@ fn void render_sample_count_is_shared_by_textures_and_pipelines() @test {
     texture.mip_levels = 1;
     texture.usage = { .sampled };
     assert(!gpu::internal::texture_desc_valid(&texture),
-        "multisample textures stay attachment-only in strict core");
+        "multisample textures stay attachment-only in the device baseline");
 }

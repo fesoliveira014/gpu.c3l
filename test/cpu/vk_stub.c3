@@ -286,7 +286,7 @@ struct VkDeviceState @public {
 }
 
 uint configured_adapter_count @private = 1;
-bool configured_strict_support @private = true;
+bool configured_device_baseline_support @private = true;
 uint device_support_queries @private;
 uint device_temporary_creates @private;
 uint device_temporary_destroys @private;
@@ -725,8 +725,17 @@ fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
             .compute_count  = 1,
             .transfer_count = 1,
         },
-        .strict_supported = configured_strict_support,
     };
+}
+
+fn bool? vk_adapter_supports_device_baseline(
+    VkRuntimeState* state,
+    uint adapter_index,
+) {
+    if (state == null || adapter_index >= state.adapter_count) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return configured_device_baseline_support;
 }
 
 fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
@@ -847,10 +856,12 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
 
 fn void stub_set_adapter_count(uint count) {
     configured_adapter_count = count;
-    configured_strict_support = true;
+    configured_device_baseline_support = true;
 }
 
-fn void stub_set_strict_support(bool supported) => configured_strict_support = supported;
+fn void stub_set_device_baseline_support(bool supported) {
+    configured_device_baseline_support = supported;
+}
 
 fn void stub_reset_device_counts() {
     device_support_queries = 0;
@@ -1348,18 +1359,6 @@ fn gpu::PresentModeSupport? vk_get_present_mode_support(
     return { .fifo = true };
 }
 
-fn gpu::Device? stub_create_strict_disabled_device() {
-    VkDeviceState* state = mem::new(VkDeviceState);
-    defer catch mem::free(state);
-    state.free_on_destroy = true;
-    state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
-    return gpu::internal::register_device(
-        state:          state,
-        caps:           { .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT },
-        resource_owner: state.resource_owner,
-    );
-}
-
 fn gpu::Device? stub_create_anisotropy_disabled_device() {
     VkDeviceState* state = mem::new(VkDeviceState);
     defer catch mem::free(state);
@@ -1368,29 +1367,28 @@ fn gpu::Device? stub_create_anisotropy_disabled_device() {
     return gpu::internal::register_device(
         state: state,
         caps: {
-            .strict_enabled       = true,
             .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         },
         resource_owner: state.resource_owner,
     );
 }
 
-fn void? validate_strict_device_request_support(
+fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
-    gpu::DeviceRequest* request,
 ) {
     if (runtime_state == null) return gpu::INVALID_HANDLE~;
-    if (request == null) return gpu::INVALID_ARGUMENT~;
-    (void)adapter_index;
+    if (adapter_index >= runtime_state.adapter_count) return gpu::INVALID_HANDLE~;
+    if (!configured_device_baseline_support) return gpu::UNSUPPORTED_FEATURE~;
 }
 
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
-    gpu::DeviceRequest* request,
+    gpu::DeviceDesc* device_desc,
     gpu::Runtime* retained_runtime,
 ) {
-    gpu::internal::validate_device_request(request)!;
+    gpu::DeviceDesc normalized =
+        gpu::internal::normalize_device_desc(device_desc)!;
     VkDeviceState* state = mem::new(VkDeviceState);
     state.free_on_destroy = true;
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;
@@ -1403,17 +1401,14 @@ fn gpu::Device? create_vk_device(
 
     state.adapter = *adapter;
     last_device_adapter = *adapter;
-    gpu::Surface presentation_surface = gpu::internal::requested_surface(*request);
-    gpu::QueueRequirements requirements = gpu::internal::requested_queue_requirements(*request);
     gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_requirements(
-        requirements:               requirements,
+        requirements:               normalized.queues,
         compute_aliases_graphics:    true,
         transfer_aliases_graphics:   true,
         transfer_aliases_compute:    true,
     )!;
     gpu::DeviceCaps caps = {
-        .strict_enabled       = true,
-        .presentation_enabled = presentation_surface.is_valid(),
+        .presentation_enabled = normalized.surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
     };
@@ -1423,8 +1418,8 @@ fn gpu::Device? create_vk_device(
         resource_owner:       state.resource_owner,
         retained_runtime:     retained_runtime,
         adapter:              adapter,
-        presentation_surface: presentation_surface.is_valid()
-            ? &presentation_surface
+        presentation_surface: normalized.surface.is_valid()
+            ? &normalized.surface
             : null,
         queues: queues,
         owner:  &state.owner,

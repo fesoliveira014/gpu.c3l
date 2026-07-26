@@ -31,13 +31,12 @@ fn gpu::Device? create_test_device(
     gpu::Runtime runtime = gpu::create_runtime(desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;
-        gpu::DeviceRequestSupport support =
-            gpu::supports_device_request(&adapter, &request)!;
+        gpu::DeviceSupport support =
+            gpu::supports_device_desc(&adapter)!;
         if (!support.supported) continue;
-        gpu::Device? device = gpu::create_device(&adapter, &request);
+        gpu::Device? device = gpu::create_device(&adapter);
         if (catch err = device) {
             if (err == gpu::UNSUPPORTED_FEATURE) continue;
             return err~;
@@ -358,10 +357,10 @@ fn void assert_warm_command_resolution(
         "the command counter observes each warm recording call");
 }
 
-fn void assert_strict_heap_bind_work(
+fn void assert_shader_heap_bind_work(
     gpu::CommandResolutionStats stats,
     ulong expected_bind_points,
 ) @if(env::TESTING) {
-    assert(stats.strict_heap_set_bind_commands == expected_bind_points,
-        "the strict descriptor set binds once per used bind point");
+    assert(stats.descriptor_heap_set_bind_commands == expected_bind_points,
+        "the descriptor set binds once per used bind point");
 }

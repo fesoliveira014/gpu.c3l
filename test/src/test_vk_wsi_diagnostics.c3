@@ -43,7 +43,7 @@ fn void wsi_presentation_gate_diagnostic() @test {
     assert(capture.last.public_fault == gate_fault, "diagnostic preserves the returned fault");
     assert(capture.last.operation.str_view() == "create_swapchain", "diagnostic names create_swapchain");
     assert(
-        capture.last.rejected_field.str_view() == "DeviceRequest.presentation",
+        capture.last.rejected_field.str_view() == "DeviceDesc.surface",
         "diagnostic names the presentation gate"
     );
     assert(capture.last.resource.kind == gpu::DebugResourceKind.SWAPCHAIN, "diagnostic identifies a swapchain");

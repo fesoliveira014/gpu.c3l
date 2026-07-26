@@ -8,14 +8,14 @@ import std::atomic;
 import std::core::mem;
 import std::io;
 
-struct StrictSupportDiagnosticCapture {
+struct BaselineSupportDiagnosticCapture {
     uint calls;
     ZString expected_field;
     ZString expected_invariant;
     bool matched;
 }
 
-struct StrictSupportDiagnosticCase {
+struct BaselineSupportDiagnosticCase {
     gpu::internal::vk::IndexingHeapLimits limits;
     ZString                               expected_field;
     ZString                               expected_invariant;
@@ -31,12 +31,12 @@ struct IndexingFeatureChainCapture {
     bool all_required_bits_enabled;
 }
 
-fn void capture_strict_support_diagnostic(
+fn void capture_baseline_support_diagnostic(
     gpu::DebugMessage* message,
     void* user_data,
 ) {
-    StrictSupportDiagnosticCapture* capture =
-        (StrictSupportDiagnosticCapture*)user_data;
+    BaselineSupportDiagnosticCapture* capture =
+        (BaselineSupportDiagnosticCapture*)user_data;
     bool matched = message.severity == gpu::DebugMessageSeverity.ERROR
         && message.category.public_contract
         && message.has_fault
@@ -118,7 +118,7 @@ fn uint live_device_slot_count() @private {
 fn fault run_injected_device_create(
     gpu::Runtime* runtime,
     gpu::Adapter* adapter,
-    gpu::DeviceRequest* request,
+    gpu::DeviceDesc* device_desc,
     gpu::internal::vk::DeviceCreationProbe* probe,
 ) @private {
     gpu::Runtime retained_runtime = *runtime;
@@ -126,7 +126,7 @@ fn fault run_injected_device_create(
     gpu::Device? creation_result =
         gpu::internal::vk::create_vk_device_with_probe(
             adapter:          adapter,
-            request:          request,
+            device_desc:      device_desc,
             retained_runtime: &retained_runtime,
             probe:            probe,
         );
@@ -151,14 +151,6 @@ fn vk::Result reject_native_device_create(
     (void)requested_info;
     (void)device;
     return vk::Result.ERROR_INITIALIZATION_FAILED;
-}
-
-fn void strict_disabled_state_owns_no_sampler_table() @test {
-    gpu::internal::vk::VkDeviceState state;
-    gpu::internal::vk::create_sampler_table(&state)!!;
-
-    assert(state.samplers.slots.ptr == null,
-        "a strict-disabled state allocates no sampler table");
 }
 
 fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
@@ -187,26 +179,18 @@ fn gpu::internal::vk::IndexingHeapLimits permissive_indexing_heap_limits() @priv
     };
 }
 
-fn void strict_heap_state_preserves_requested_capacities() @test {
+fn void shader_heap_state_preserves_configured_capacities() @test {
     gpu::internal::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
-    gpu::internal::vk::VkStrictHeapState disabled =
-        gpu::internal::vk::resolve_strict_heap_state(false, &desc)!!;
-    assert(!disabled.enabled, "an unrequested strict heap remains disabled");
-    assert(disabled.texture_capacity == 0, "a disabled strict heap reserves no texture capacity");
-    assert(disabled.sampler_capacity == 0, "a disabled strict heap reserves no sampler capacity");
-    assert(disabled.descriptors.texture_cells.ptr == null, "a disabled strict heap owns no descriptor cells");
-
-    gpu::internal::vk::VkStrictHeapState indexing =
-        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    assert(indexing.enabled, "a requested strict heap is enabled");
+    gpu::internal::vk::VkShaderHeapState indexing =
+        gpu::internal::vk::resolve_shader_heap_state(&desc)!!;
     assert(indexing.texture_capacity == 7, "the requested texture capacity is preserved");
     assert(indexing.sampler_capacity == 9, "the requested sampler capacity is preserved");
 }
 
-fn void strict_heap_defaults_fit_required_indexing_limits() @test {
+fn void shader_heap_defaults_fit_required_indexing_limits() @test {
     gpu::internal::vk::IndexingHeapLimits required_limits = {
         .max_sampled_images           = 500_000,
         .max_storage_images           = 500_000,
@@ -227,34 +211,34 @@ fn void strict_heap_defaults_fit_required_indexing_limits() @test {
     );
 }
 
-fn void strict_heap_support_reports_exact_failure() @test {
+fn void shader_heap_support_reports_exact_failure() @test {
     gpu::internal::vk::VkDeviceConfig desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
     };
-    gpu::internal::vk::VkStrictHeapState heap =
-        gpu::internal::vk::resolve_strict_heap_state(true, &desc)!!;
-    StrictSupportDiagnosticCapture capture = {
-        .expected_field = "DeviceRequest.features.strict",
+    gpu::internal::vk::VkShaderHeapState heap =
+        gpu::internal::vk::resolve_shader_heap_state(&desc)!!;
+    BaselineSupportDiagnosticCapture capture = {
+        .expected_field = "device baseline",
         .expected_invariant =
-            "strict mode requires descriptor indexing with update-after-bind support",
+            "the device baseline requires descriptor indexing with update-after-bind support",
     };
     gpu::internal::vk::VkDeviceState device = {
-        .debug_callback  = &capture_strict_support_diagnostic,
+        .debug_callback  = &capture_baseline_support_diagnostic,
         .debug_user_data = &capture,
     };
-    gpu::internal::vk::StrictHeapSupport support = {
+    gpu::internal::vk::ShaderHeapSupport support = {
         .limits = permissive_indexing_heap_limits(),
     };
-    assert(@catch(gpu::internal::vk::validate_strict_heap_support(
+    assert(@catch(gpu::internal::vk::validate_shader_heap_support(
         &device,
         &heap,
         &support,
     )) == gpu::UNSUPPORTED_FEATURE);
     assert(capture.calls == 1 && capture.matched,
-        "missing indexing support reports the exact strict requirement");
+        "missing indexing support reports the exact baseline requirement");
 
-    StrictSupportDiagnosticCase[5] cases;
+    BaselineSupportDiagnosticCase[5] cases;
     gpu::internal::vk::IndexingHeapLimits limits =
         permissive_indexing_heap_limits();
     limits.max_sampled_images = 6;
@@ -306,13 +290,13 @@ fn void strict_heap_support_reports_exact_failure() @test {
             .expected_invariant = diagnostic_case.expected_invariant,
         };
         support.limits = diagnostic_case.limits;
-        assert(@catch(gpu::internal::vk::validate_strict_heap_support(
+        assert(@catch(gpu::internal::vk::validate_shader_heap_support(
             &device,
             &heap,
             &support,
         )) == gpu::UNSUPPORTED_FEATURE);
         assert(capture.calls == 1 && capture.matched,
-            "each strict capacity failure reports its exact diagnostic mapping");
+            "each baseline capacity failure reports its exact diagnostic mapping");
     }
 }
 
@@ -368,7 +352,7 @@ fn void runtime_copies_device_creation_defaults() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void adapter_support_inherits_runtime_device_config() @test {
+fn void adapter_baseline_support_inherits_runtime_device_config() @test {
     gpu::RuntimeDesc desc = {
         .texture_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY,
         .sampler_heap_capacity = gpu::MAX_SHADER_HEAP_CAPACITY,
@@ -378,7 +362,6 @@ fn void adapter_support_inherits_runtime_device_config() @test {
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     assert(adapters.count > 0, "the controlled target exposes an adapter");
-    gpu::DeviceRequest request = gpu::strict_device_request();
     gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state =
         runtime_data.state;
@@ -386,31 +369,31 @@ fn void adapter_support_inherits_runtime_device_config() @test {
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        gpu::AdapterInfo info = gpu::get_adapter_info(&adapter)!!;
-        gpu::DeviceRequestSupport support =
-            gpu::supports_device_request(&adapter, &request)!!;
+        gpu::DeviceSupport support =
+            gpu::supports_device_desc(&adapter)!!;
         gpu::internal::vk::VkAdapterState* adapter_state = &runtime_state.adapters[i];
-        bool expected = gpu::internal::vk::strict_adapter_supported(
+        bool expected = gpu::internal::vk::device_baseline_supported(
             adapter_state.physical_device,
             &config,
-            &adapter_state.strict_heap,
+            &adapter_state.shader_heap,
         );
-        assert(info.strict_supported == expected, "adapter info uses the runtime configuration");
+        assert(
+            adapter_state.device_baseline_supported == expected,
+            "adapter baseline support uses the runtime configuration"
+        );
         assert(support.supported == expected, "support and adapter info agree");
         if (expected) {
-            gpu::internal::vk::validate_strict_device_request_support(
+            gpu::internal::vk::validate_device_baseline_support(
                 runtime_state,
                 adapter.adapter_index,
-                &request,
             )!!;
         } else {
             assert(
-                @catch(gpu::internal::vk::validate_strict_device_request_support(
+                @catch(gpu::internal::vk::validate_device_baseline_support(
                     runtime_state,
                     adapter.adapter_index,
-                    &request,
                 )) == gpu::UNSUPPORTED_FEATURE,
-                "the creation preflight agrees with cached adapter support"
+                "creation preflight agrees with cached unsupported baseline"
             );
         }
 
@@ -422,16 +405,19 @@ fn void adapter_support_inherits_runtime_device_config() @test {
             adapter_state.physical_device,
             &invalid_config,
         );
-        assert(!invalid_adapter.info.strict_supported, "each adapter consumes the supplied configuration");
+        assert(
+            !invalid_adapter.device_baseline_supported,
+            "each adapter consumes the supplied configuration"
+        );
 
         if (!expected) {
             assert(
-                @catch(gpu::create_device(&adapter, &request)) == gpu::UNSUPPORTED_FEATURE,
+                @catch(gpu::create_device(&adapter)) == gpu::UNSUPPORTED_FEATURE,
                 "creation rejects a configuration reported as unsupported"
             );
             continue;
         }
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter)!!;
         gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
         assert(
             caps.texture_heap_capacity == gpu::MAX_SHADER_HEAP_CAPACITY,
@@ -445,8 +431,8 @@ fn void adapter_support_inherits_runtime_device_config() @test {
     }
 }
 
-fn void public_creation_reports_cached_strict_capacity_failure() @test {
-    StrictSupportDiagnosticCapture capture = {
+fn void public_creation_reports_cached_baseline_capacity_failure() @test {
+    BaselineSupportDiagnosticCapture capture = {
         .expected_field = "RuntimeDesc.texture_heap_capacity",
         .expected_invariant =
             "texture heap capacity must fit the sampled-image update-after-bind limit",
@@ -454,73 +440,71 @@ fn void public_creation_reports_cached_strict_capacity_failure() @test {
     gpu::RuntimeDesc desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
-        .debug_callback        = &capture_strict_support_diagnostic,
+        .debug_callback        = &capture_baseline_support_diagnostic,
         .debug_user_data       = &capture,
-        .application_name      = "gpu_vk_cached_strict_support_test",
+        .application_name      = "gpu_vk_cached_baseline_support_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+        if (!gpu::supports_device_desc(&adapter)!!.supported) {
             continue;
         }
         gpu::internal::vk::VkAdapterState* adapter_state =
             &runtime_state.adapters[adapter.adapter_index];
-        gpu::internal::vk::StrictHeapSupport saved_support =
-            adapter_state.strict_heap;
-        adapter_state.strict_heap = {
+        gpu::internal::vk::ShaderHeapSupport saved_support =
+            adapter_state.shader_heap;
+        adapter_state.shader_heap = {
             .indexing = true,
             .limits   = permissive_indexing_heap_limits(),
         };
-        adapter_state.strict_heap.limits.max_sampled_images = 6;
+        adapter_state.shader_heap.limits.max_sampled_images = 6;
 
-        fault rejected = @catch(gpu::create_device(&adapter, &request));
-        adapter_state.strict_heap = saved_support;
+        fault rejected = @catch(gpu::create_device(&adapter));
+        adapter_state.shader_heap = saved_support;
 
         assert(rejected == gpu::UNSUPPORTED_FEATURE,
-            "public creation rejects the cached strict capacity failure");
+            "public creation rejects the cached baseline capacity failure");
         assert(capture.calls == 1 && capture.matched,
             "public creation reports the exact cached capacity diagnostic");
         return;
     }
-    assert(false, "the pinned Vulkan adapter supports strict device creation");
+    assert(false, "the pinned Vulkan adapter supports the device baseline");
 }
 
-fn void cached_strict_failure_precedes_native_device_creation() @test {
+fn void cached_baseline_failure_precedes_native_device_creation() @test {
     gpu::RuntimeDesc desc = {
         .texture_heap_capacity = 7,
         .sampler_heap_capacity = 9,
-        .application_name      = "gpu_vk_cached_strict_native_gate_test",
+        .application_name      = "gpu_vk_cached_baseline_native_gate_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+        if (!gpu::supports_device_desc(&adapter)!!.supported) {
             continue;
         }
         gpu::internal::vk::VkAdapterState* adapter_state =
             &runtime_state.adapters[adapter.adapter_index];
-        gpu::internal::vk::StrictHeapSupport saved_support =
-            adapter_state.strict_heap;
-        adapter_state.strict_heap = {
+        gpu::internal::vk::ShaderHeapSupport saved_support =
+            adapter_state.shader_heap;
+        adapter_state.shader_heap = {
             .indexing = true,
             .limits   = permissive_indexing_heap_limits(),
         };
-        adapter_state.strict_heap.limits.max_sampled_images = 6;
+        adapter_state.shader_heap.limits.max_sampled_images = 6;
 
         NativeDeviceCreateCapture create_capture;
         gpu::internal::vk::DeviceCreationProbe probe = {
@@ -532,39 +516,38 @@ fn void cached_strict_failure_precedes_native_device_creation() @test {
         fault rejected =
             @catch(gpu::internal::vk::create_vk_device_with_probe(
                 adapter:          &adapter,
-                request:          &request,
+                device_desc:      null,
                 retained_runtime: &retained_runtime,
                 probe:            &probe,
             ));
         gpu::internal::runtime_release_device(&retained_runtime)!!;
-        adapter_state.strict_heap = saved_support;
+        adapter_state.shader_heap = saved_support;
 
         assert(rejected == gpu::UNSUPPORTED_FEATURE,
-            "cached strict capacity failure rejects backend creation");
+            "cached baseline capacity failure rejects backend creation");
         assert(create_capture.calls == 0,
-            "cached strict capacity failure never reaches vkCreateDevice");
+            "cached baseline capacity failure never reaches vkCreateDevice");
         assert(
             probe.reached == gpu::internal::vk::DeviceCreationCheckpoint.NONE
                 && probe.rollback_count == 1,
-            "cached strict rejection precedes the first creation checkpoint"
+            "cached baseline rejection precedes the first creation checkpoint"
         );
         return;
     }
-    assert(false, "the pinned Vulkan adapter supports strict device creation");
+    assert(false, "the pinned Vulkan adapter supports the device baseline");
 }
 
-fn void strict_creation_enables_all_required_indexing_features() @test {
+fn void device_creation_enables_all_required_indexing_features() @test {
     gpu::RuntimeDesc desc = {
         .application_name = "gpu_vk_required_indexing_features_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) {
+        if (!gpu::supports_device_desc(&adapter)!!.supported) {
             continue;
         }
         IndexingFeatureChainCapture capture;
@@ -577,7 +560,7 @@ fn void strict_creation_enables_all_required_indexing_features() @test {
         fault rejected =
             @catch(gpu::internal::vk::create_vk_device_with_probe(
                 adapter:          &adapter,
-                request:          &request,
+                device_desc:      null,
                 retained_runtime: &retained_runtime,
                 probe:            &probe,
             ));
@@ -586,21 +569,21 @@ fn void strict_creation_enables_all_required_indexing_features() @test {
         assert(rejected == gpu::UNSUPPORTED_BACKEND,
             "the native hook aborts creation after inspecting the feature chain");
         assert(capture.calls == 1 && capture.found_features12,
-            "strict creation chains Vulkan 1.2 features into vkCreateDevice");
+            "device creation chains Vulkan 1.2 features into vkCreateDevice");
         assert(capture.all_required_bits_enabled,
-            "strict creation enables all seven required indexing feature bits");
+            "device creation enables all seven required indexing feature bits");
         assert(probe.rollback_count == 1,
             "the injected native creation failure rolls back exactly once");
         return;
     }
-    assert(false, "the pinned Vulkan adapter supports strict device creation");
+    assert(false, "the pinned Vulkan adapter supports the device baseline");
 }
 
-fn void adapter_request_creation_reuses_runtime_discovery() @test {
+fn void adapter_desc_creation_reuses_runtime_discovery() @test {
     gpu::RuntimeDesc desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
-        .application_name  = "gpu_vk_device_request_test",
+        .application_name  = "gpu_vk_device_desc_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
@@ -609,17 +592,16 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
         return;
     }
 
-    gpu::DeviceRequest request = gpu::strict_device_request();
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        gpu::DeviceRequestSupport support =
-            gpu::supports_device_request(&adapter, &request)!!;
+        gpu::DeviceSupport support =
+            gpu::supports_device_desc(&adapter)!!;
         if (!support.supported) continue;
 
         gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
         gpu::internal::vk::VkRuntimeState* runtime_state =
             runtime_data.state;
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter)!!;
         gpu::internal::vk::VkDeviceState* device_state =
             gpu::internal::device_slots[device.index].data.state;
 
@@ -639,49 +621,47 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
             "the device inherits runtime Vulkan validation layers"
         );
         gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
-        assert(device_state.strict_heap.enabled, "the strict request owns heap state");
-        assert(caps.strict_enabled, "strict state is enabled");
         assert(
             gpu::internal::vk::device_dispatch_supports_dynamic_color(
                 &device_state.device_dispatch,
             ),
-            "every strict device loads the required color dispatch"
+            "every device loads the required color dispatch"
         );
         assert(
-            device_state.strict_heap.descriptors.texture_cells.ptr != null,
-            "strict state owns texture descriptor cells"
+            device_state.shader_heap.descriptors.texture_cells.ptr != null,
+            "the device owns texture descriptor cells"
         );
         assert(
             device_state.samplers.slots.ptr != null,
             "the device owns an independent sampler identity table"
         );
         assert(
-            device_state.strict_heap.descriptors.sampler_next_new == 0,
-            "the strict sampler heap begins unpublished"
+            device_state.shader_heap.descriptors.sampler_next_new == 0,
+            "the sampler heap begins unpublished"
         );
         assert(
-            device_state.strict_heap.descriptors.set_layout != null,
-            "strict state owns its descriptor layout"
+            device_state.shader_heap.descriptors.set_layout != null,
+            "the device owns its descriptor layout"
         );
         assert(
-            caps.texture_heap_capacity == device_state.strict_heap.texture_capacity,
-            "published texture capacity matches strict state"
+            caps.texture_heap_capacity == device_state.shader_heap.texture_capacity,
+            "published texture capacity matches shader heap state"
         );
         assert(
-            caps.sampler_heap_capacity == device_state.strict_heap.sampler_capacity,
-            "published sampler capacity matches strict state"
+            caps.sampler_heap_capacity == device_state.shader_heap.sampler_capacity,
+            "published sampler capacity matches shader heap state"
         );
-        assert(!device_state.presentation.enabled, "headless requests create no presentation state");
-        assert(device_state.presentation.queue == null, "headless requests retrieve no presentation queue");
-        assert(!device_state.presentation.queue_mutex.is_initialized(), "headless requests initialize no presentation mutex");
-        assert(device_state.presentation.swapchains.slots.ptr == null, "headless requests allocate no swapchain table");
+        assert(!device_state.presentation.enabled, "headless devices create no presentation state");
+        assert(device_state.presentation.queue == null, "headless devices retrieve no presentation queue");
+        assert(!device_state.presentation.queue_mutex.is_initialized(), "headless devices initialize no presentation mutex");
+        assert(device_state.presentation.swapchains.slots.ptr == null, "headless devices allocate no swapchain table");
         assert(
             !gpu::internal::vk::instance_dispatch_supports_presentation(&device_state.instance_dispatch),
-            "headless requests retain no surface procedures"
+            "headless devices retain no surface procedures"
         );
         assert(
             !gpu::internal::vk::device_dispatch_supports_presentation(&device_state.device_dispatch),
-            "headless requests load no presentation procedures"
+            "headless devices load no presentation procedures"
         );
         assert(
             @catch(gpu::destroy_runtime(&runtime)) == gpu::RESOURCE_IN_USE,
@@ -698,19 +678,19 @@ fn void adapter_request_creation_reuses_runtime_discovery() @test {
     }
 
     gpu::Adapter unsupported_adapter = adapters.get(0)!!;
-    gpu::DeviceRequestSupport unsupported =
-        gpu::supports_device_request(&unsupported_adapter, &request)!!;
-    assert(!unsupported.supported, "no adapter silently falls back from strict semantics");
+    gpu::DeviceSupport unsupported =
+        gpu::supports_device_desc(&unsupported_adapter)!!;
+    assert(!unsupported.supported, "no adapter bypasses the device baseline");
     assert(
-        @catch(gpu::create_device(&unsupported_adapter, &request)) == gpu::UNSUPPORTED_FEATURE,
+        @catch(gpu::create_device(&unsupported_adapter)) == gpu::UNSUPPORTED_FEATURE,
         "unsupported native creation publishes no device"
     );
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void malformed_native_request_preserves_runtime_state() @test {
+fn void malformed_native_desc_preserves_runtime_state() @test {
     gpu::RuntimeDesc desc = {
-        .application_name = "gpu_vk_device_request_failure_test",
+        .application_name = "gpu_vk_device_desc_failure_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
@@ -720,10 +700,15 @@ fn void malformed_native_request_preserves_runtime_state() @test {
     }
 
     gpu::Adapter adapter = adapters.get(0)!!;
-    gpu::DeviceRequest empty = gpu::internal::empty_device_request();
+    gpu::DeviceDesc invalid = {
+        .queues = {
+            .counts   = { .graphics = 1 },
+            .distinct = { .compute },
+        },
+    };
     assert(
-        @catch(gpu::create_device(&adapter, &empty)) == gpu::INVALID_ARGUMENT,
-        "an empty request is rejected before native creation"
+        @catch(gpu::create_device(&adapter, &invalid)) == gpu::INVALID_ARGUMENT,
+        "an invalid descriptor is rejected before native creation"
     );
     assert(
         gpu::get_adapter_info(&adapter)!!.name.len > 0,
@@ -748,16 +733,13 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
     defer gpu::destroy_surface(&surface)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::Adapter adapter = adapters.get(0)!!;
-    gpu::DeviceRequest request = gpu::request_presentation(
-        gpu::strict_device_request(),
-        &surface,
-    )!!;
+    gpu::DeviceDesc device_desc = { .surface = surface };
     gpu::internal::vk::DeviceCreationProbe probe;
 
     assert(
         @catch(gpu::internal::vk::create_vk_device_with_probe(
             adapter:          &adapter,
-            request:          &request,
+            device_desc:      &device_desc,
             retained_runtime: &runtime,
             probe:            &probe,
         )) == gpu::UNSUPPORTED_FEATURE,
@@ -822,17 +804,15 @@ fn void command_policy_selection_covers_both_contract_modes() @test {
 
 fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
     gpu::RuntimeDesc desc = {
-        .application_name  = "gpu_vk_device_request_rollback_test",
+        .application_name  = "gpu_vk_device_desc_rollback_test",
         .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
-
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
+        if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
 
         for (
             uint checkpoint_ordinal = gpu::internal::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE.ordinal;
@@ -846,10 +826,10 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
 
             assert(
                 run_injected_device_create(
-                    runtime: &runtime,
-                    adapter: &adapter,
-                    request: &request,
-                    probe:   &probe,
+                    runtime:     &runtime,
+                    adapter:     &adapter,
+                    device_desc: null,
+                    probe:       &probe,
                 ) == gpu::BACKEND_ERROR,
                 "a checkpoint failure returns the backend fault"
             );
@@ -865,7 +845,7 @@ fn void failed_native_device_creation_rolls_back_each_checkpoint() @test {
             );
         }
 
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter)!!;
         gpu::destroy_device(&device)!!;
         gpu::destroy_runtime(&runtime)!!;
         return;
@@ -881,11 +861,9 @@ fn void required_dynamic_color_features_are_enabled_transactionally() @test {
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
-
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
+        if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
         uint live_slots_before = live_device_slot_count();
 
         gpu::internal::vk::DeviceCreationProbe missing_support = {
@@ -893,12 +871,12 @@ fn void required_dynamic_color_features_are_enabled_transactionally() @test {
         };
         assert(
             run_injected_device_create(
-                runtime: &runtime,
-                adapter: &adapter,
-                request: &request,
-                probe:   &missing_support,
+                runtime:     &runtime,
+                adapter:     &adapter,
+                device_desc: null,
+                probe:       &missing_support,
             ) == gpu::UNSUPPORTED_FEATURE,
-            "strict creation rechecks and rejects missing dynamic color support"
+            "device creation rechecks and rejects missing dynamic color support"
         );
         assert(
             missing_support.reached
@@ -913,19 +891,19 @@ fn void required_dynamic_color_features_are_enabled_transactionally() @test {
         };
         assert(
             run_injected_device_create(
-                runtime: &runtime,
-                adapter: &adapter,
-                request: &request,
-                probe:   &failure_probe,
+                runtime:     &runtime,
+                adapter:     &adapter,
+                device_desc: null,
+                probe:       &failure_probe,
             ) == gpu::UNSUPPORTED_BACKEND,
-            "an injected native failure aborts strict creation"
+            "an injected native failure aborts device creation"
         );
         assert(
             failure_probe.dynamic_color_feature_chained
                 && failure_probe.dynamic_color_blend_enable == vk::TRUE
                 && failure_probe.dynamic_color_blend_equation == vk::TRUE
                 && failure_probe.dynamic_color_write_mask == vk::TRUE,
-            "strict creation chains and enables all three color feature bits"
+            "device creation chains and enables all three color feature bits"
         );
         assert(
             failure_probe.rollback_count == 1
@@ -936,26 +914,24 @@ fn void required_dynamic_color_features_are_enabled_transactionally() @test {
     }
 }
 
-fn void strict_device_loads_required_dynamic_color_dispatch() @test {
+fn void device_loads_required_dynamic_color_dispatch() @test {
     gpu::RuntimeDesc desc = {
         .application_name = "gpu_vk_required_dynamic_color_dispatch_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
-
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
+        gpu::Device device = gpu::create_device(&adapter)!!;
         gpu::internal::vk::VkDeviceState* state =
             gpu::internal::device_slots[device.index].data.state;
         assert(
             gpu::internal::vk::device_dispatch_supports_dynamic_color(
                 &state.device_dispatch,
             ),
-            "successful strict creation loads the complete color dispatch"
+            "successful device creation loads the complete color dispatch"
         );
         gpu::destroy_device(&device)!!;
         return;
@@ -973,12 +949,11 @@ fn void publication_failure_rolls_back_native_state() @test {
         if (runtime.is_valid()) (void)gpu::destroy_runtime(&runtime);
     }
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
     bool exercised;
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
+        if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
         exercised = true;
 
         gpu::Device[gpu::internal::MAX_DEVICES] blockers;
@@ -1004,7 +979,7 @@ fn void publication_failure_rolls_back_native_state() @test {
         assert(
             @catch(gpu::internal::vk::create_vk_device_with_probe(
                 adapter:          &adapter,
-                request:          &request,
+                device_desc:      null,
                 retained_runtime: &retained_runtime,
                 probe:            &probe,
             )) == gpu::SLOT_TABLE_FULL,
@@ -1022,12 +997,12 @@ fn void publication_failure_rolls_back_native_state() @test {
             "registry exhaustion publishes no additional device"
         );
         assert(
-            @catch(gpu::create_device(&adapter, &request)) == gpu::SLOT_TABLE_FULL,
+            @catch(gpu::create_device(&adapter)) == gpu::SLOT_TABLE_FULL,
             "public creation reports a full registry without retaining the runtime"
         );
 
         destroy_registry_blockers(blockers[..]);
-        gpu::Device device = gpu::create_device(&adapter, &request)!!;
+        gpu::Device device = gpu::create_device(&adapter)!!;
         gpu::destroy_device(&device)!!;
         assert(
             gpu::get_adapter_info(&adapter)!!.name.len > 0,
@@ -1037,7 +1012,7 @@ fn void publication_failure_rolls_back_native_state() @test {
         break;
     }
 
-    assert(exercised, "the controlled native target has a compatible strict adapter");
+    assert(exercised, "the controlled native target supports the device baseline");
 }
 
 fn void runtime_devices_destroy_independently() @test {
@@ -1048,32 +1023,31 @@ fn void runtime_devices_destroy_independently() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
-    gpu::DeviceRequest request = gpu::strict_device_request();
     bool exercised;
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
-        if (!gpu::supports_device_request(&adapter, &request)!!.supported) continue;
+        if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
 
         gpu::Adapter second_adapter = adapter;
         bool distinct_adapters;
         for (uint j = 0; j < adapters.count; j++) {
             if (j == i) continue;
             gpu::Adapter candidate = adapters.get(j)!!;
-            if (!gpu::supports_device_request(&candidate, &request)!!.supported) continue;
+            if (!gpu::supports_device_desc(&candidate)!!.supported) continue;
             second_adapter = candidate;
             distinct_adapters = true;
             break;
         }
         if (!distinct_adapters) {
-            io::eprintfn("runtime_devices: distinct-adapter=N/A (one strict-compatible adapter)");
+            io::eprintfn("runtime_devices: distinct-adapter=N/A (one baseline-compatible adapter)");
         }
 
         gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
         gpu::internal::vk::VkRuntimeState* runtime_state =
             runtime_data.state;
-        gpu::Device first = gpu::create_device(&adapter, &request)!!;
-        gpu::Device second = gpu::create_device(&second_adapter, &request)!!;
+        gpu::Device first = gpu::create_device(&adapter)!!;
+        gpu::Device second = gpu::create_device(&second_adapter)!!;
         uptr first_physical = device_physical_adapter(&first);
         uptr second_physical = device_physical_adapter(&second);
 
@@ -1107,7 +1081,10 @@ fn void runtime_devices_destroy_independently() @test {
         gpu::free_allocation(&second, &second_allocation)!!;
 
         gpu::destroy_device(&first)!!;
-        assert(gpu::get_device_caps(&second)!!.strict_enabled, "destroying one device preserves its peer");
+        assert(
+            gpu::get_device_caps(&second)!!.texture_heap_capacity > 0,
+            "destroying one device preserves its peer"
+        );
         assert(
             device_physical_adapter(&second) == second_physical,
             "destroying one device preserves its peer's physical adapter"
@@ -1121,5 +1098,5 @@ fn void runtime_devices_destroy_independently() @test {
     }
 
     gpu::destroy_runtime(&runtime)!!;
-    assert(exercised, "the controlled native target has a compatible strict adapter");
+    assert(exercised, "the controlled native target supports the device baseline");
 }

@@ -1,4 +1,4 @@
-# Canonical public gpu module entries. One kind and fully qualified UID per line.
+# Canonical GPU module entries. One kind and fully qualified UID per line.
 alias gpu::DebugMessageCallback
 alias gpu::Vec2f
 alias gpu::Vec4f
@@ -54,7 +54,6 @@ constant gpu::SWAPCHAIN_READINESS_INVALID
 constant gpu::TEXTURE_HANDLE_INVALID
 constant gpu::TEXTURE_INDEX_INVALID
 constant gpu::TEXTURE_VIEW_INVALID
-distinct type gpu::DeviceRequest
 distinct type gpu::GpuAddress
 distinct type gpu::TextureCompatibility
 enum gpu::AdapterClass
@@ -193,15 +192,12 @@ function gpu::prepare_shader_code
 function gpu::present
 function gpu::release_generated_scratch
 function gpu::render_geometry_state
-function gpu::request_presentation
-function gpu::request_queues
 function gpu::reserve_generated_scratch
 function gpu::resize_swapchain
 function gpu::sampled_at
 function gpu::storage_at
-function gpu::strict_device_request
 function gpu::submit
-function gpu::supports_device_request
+function gpu::supports_device_desc
 function gpu::supports_presentation
 function gpu::supports_texture_desc
 function gpu::texture_transition
@@ -275,7 +271,8 @@ struct gpu::DedicatedTexture
 struct gpu::DepthState
 struct gpu::DepthTargetDesc
 struct gpu::DeviceCaps
-struct gpu::DeviceRequestSupport
+struct gpu::DeviceDesc
+struct gpu::DeviceSupport
 struct gpu::DispatchIndirectCommand
 struct gpu::DrawIndexedIndirectCommand
 struct gpu::DrawIndirectCommand
