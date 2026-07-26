@@ -108,11 +108,10 @@ fn gpu::CommandList record_lifetime_copy(
 
 fn gpu::PipelineHandle make_lifetime_compute_pipeline(gpu::Device* device) {
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = LIFETIME_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
     return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
 }

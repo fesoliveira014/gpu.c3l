@@ -66,7 +66,8 @@ then free or reuse it.
 - Command-buffer graphics state: attachment-only render-pass begin plus
   explicit complete/partial state that can be reused across compatible pass
   boundaries
-- Pipeline dedup cache + driver-cache save/load; swapchain with present-mode
+- Direct call-scoped shader descriptors with private pipeline identity,
+  pipeline dedup cache + driver-cache save/load; swapchain with present-mode
   query; compare samplers, depth bias, MRT
 - Runs entirely on lavapipe (CPU Vulkan) — CI needs no GPU, and neither does
   your first program

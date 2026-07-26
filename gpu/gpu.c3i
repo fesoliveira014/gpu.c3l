@@ -712,13 +712,6 @@ struct TextureViewCreateDesc {
 const uint MAX_PIPELINES                  = 256;
 const uint MAX_COLOR_ATTACHMENTS          = 8;
 
-<* Shader stage associated with SPIR-V code. *>
-enum ShaderStage : int {
-    COMPUTE,
-    VERTEX,
-    FRAGMENT,
-}
-
 <* How draws assemble vertices into primitives. *>
 enum PrimitiveTopology : int {
     TRIANGLES,
@@ -800,23 +793,12 @@ const ColorWriteMask COLOR_WRITE_ALL = {
     .alpha = true,
 };
 
-<* Borrowed SPIR-V preparation input; the bytes must match `stage`. *>
+<* Borrowed SPIR-V input for one pipeline stage. A null entry point selects
+   `main`; the enclosing field determines the role. Storage is call-scoped. *>
 struct ShaderDesc {
-    ShaderStage stage;
-    char[]      spirv;
-    // Null selects "main".
-    ZString     entry_point;
-    ZString     debug_name;
-}
-
-<* Borrowed shader IR with library-computed process-local identity. Keep the
-   referenced bytes immutable and alive while using this value. *>
-struct ShaderCode {
-    ShaderStage stage;
-    char[]      spirv;
-    ZString     entry_point;
-    ZString     debug_name;
-    ulong       digest;
+    char[]  spirv;
+    ZString entry_point;
+    ZString debug_name;
 }
 
 <* Depth test/write state; the zero value means depth off. *>
@@ -862,15 +844,15 @@ struct DynamicRasterState {
 
 <* Inputs to create_compute_pipeline; the layout uses the fixed RootPush ABI. *>
 struct ComputePipelineDesc {
-    ShaderCode shader;
+    ShaderDesc shader;
     ZString    debug_name;
 }
 
 <* Inputs to create_graphics_pipeline, targeting dynamic rendering. The layout
    is fixed: the global heap set plus a 16-byte vertex/fragment root push range. *>
 struct GraphicsPipelineDesc {
-    ShaderCode   vertex_shader;
-    ShaderCode   fragment_shader;
+    ShaderDesc   vertex_shader;
+    ShaderDesc   fragment_shader;
     Format[]     color_formats;
     Format       depth_format;
     SampleCount  sample_count;

@@ -495,19 +495,22 @@ Destroying a texture with live views returns `RESOURCE_IN_USE`. Destroying a
 view immediately recycles its index, so every GPU reference must already be
 complete and stale shader data must be removed.
 
-### Shader code and pipelines
+### Shader input and pipelines
 
-`ShaderCode` is borrowed CPU-side SPIR-V prepared by the library. Its opaque,
-process-local identity is derived from the bytes; stage and entry point complete
-the identity, while debug names do not. Callers keep the borrowed inputs
-immutable and alive for each creation call. Each device interns exact identity
-into one owned SPIR-V clone and represents it internally with a compact ID. The
-same prepared code may be reused for multiple pipelines and devices; each device
-owns independently. Native shader modules are temporary pipeline-construction
-details, never public resources. Before native module creation, selected-entry
-reflection validates the descriptor convention and, when a push-constant block
-is declared, its complete generated root ABI. Batch preparation performs this
-once per deduplicated shader identity and publishes nothing on failure.
+Pipeline descriptors embed `ShaderDesc` directly. Its SPIR-V bytes, entry point,
+and debug name are borrowed only until the synchronous creation call returns;
+a null entry point selects `main`. The enclosing compute, vertex, or fragment
+field supplies the expected role. Each device interns the exact role, normalized
+entry point, length, and bytes into one owned private identity represented by a
+compact ID. Debug names do not participate in identity, and no surviving state
+retains caller pointers.
+
+Native shader modules are temporary pipeline-construction details, never public
+resources. Before native module creation, selected-entry reflection validates
+the field-derived role, descriptor convention, and, when a push-constant block
+is declared, its complete generated root ABI. Batch normalization covers every
+shader before store mutation, deduplicates private identities, and publishes
+nothing on failure.
 
 Pipelines are immutable shader execution objects. Creation is split by kind:
 

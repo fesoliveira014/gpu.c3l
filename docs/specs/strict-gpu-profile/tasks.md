@@ -31,7 +31,7 @@ This plan implements the approved [requirements](requirements.md) and [design](d
 | 2. Devices and queues | Multiple independent devices, semantic queues, ownership validation, and retryable teardown. | — |
 | 3. Commands and completion | Transient one-shot commands, compact completion points, explicit submission, and private native synchronization. | — |
 | 4. Memory and textures | Independent allocations, checked spans, placed textures, immediate lifetimes, and application-owned allocation policy. | — |
-| 5. Binding and pipelines | Strict heaps, automatic shader identity, explicit pipeline identity, and bind-before-execute commands. | — |
+| 5. Binding and pipelines | Strict heaps, private shader identity, explicit pipeline identity, and bind-before-execute commands. | — |
 | 6. Synchronization and rendering | Global hazards, semantic texture transitions, dynamic render passes, and strict presentation. | — |
 | 7. Strict release | Remove transitional API, migrate consumers, and collect correctness and performance evidence. | Gate B |
 | 8. Compatibility extension | Add descriptor-set semantics to the shared architecture after a separate design review. | Gates C and D |
@@ -241,13 +241,25 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
   - **Edges:** devices supporting several implementations, devices supporting none, differing capacities, and diagnostic reporting without behavior branching.
   - **Verify:** public API scan and native capability-selection tests using mocked feature matrices.
 
-### 5.4 Automatic shader-code identity
+### 5.4 Private shader identity from direct pipeline input
 
-- [x] Replace public shader-module handles with lightweight `ShaderCode` values and library-computed content identity in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/pipeline.c3`, `gpu/internal/shader_abi.c3`, `gpu/internal/vk/shader.c3`, and pipeline creation.
+- [x] Replace public shader-module and preparation objects with direct
+  call-scoped `ShaderDesc` pipeline fields and private library-owned identity in
+  `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/pipeline.c3`,
+  `gpu/internal/shader_abi.c3`, `gpu/internal/vk/shader.c3`, and pipeline
+  creation.
   - **Depends on:** 2.3.
-  - **Contract:** `prepare_shader_code` validates borrowed IR and computes an opaque process-local digest; the IR remains immutable and alive while used; collisions compare length and bytes; one-off creation may prepare raw IR internally; no public `ShaderHandle` exists.
-  - **Edges:** empty or invalid IR, identical bytes from different storage, caller mutation of borrowed bytes, hash collision handling, and cross-device prepared data.
-  - **Verify:** deterministic identity/deduplication tests, invalid-IR tests, and compile fixtures rejecting retired shader handles.
+  - **Contract:** pipeline creation borrows IR and strings only for the call;
+    field position determines role; null entry points select `main`; selected
+    entries are reflected before publication; surviving exact identity is
+    privately owned; no public shader preparation object or `ShaderHandle`
+    exists.
+  - **Edges:** empty or invalid IR, invalid or missing selected entries,
+    field-role mismatch, identical bytes from different storage, caller storage
+    release after creation, and private hash collision handling.
+  - **Verify:** deterministic identity/deduplication tests, invalid-IR and
+    selected-entry tests, caller-storage lifetime tests, and compile fixtures
+    rejecting retired shader handles and preparation symbols.
 
 ### 5.5 Explicit deterministic pipeline identity and batches
 

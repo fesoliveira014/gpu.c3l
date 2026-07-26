@@ -72,6 +72,7 @@ FIXTURES = {
     "shader_handle_invalid": "SHADER_HANDLE_INVALID",
     "max_shaders": "MAX_SHADERS",
     "create_shader": "create_shader",
+    "prepare_shader_code": "prepare_shader_code",
     "destroy_shader": "destroy_shader",
     "public_semaphore": "SemaphoreHandle",
     "queue_idle": "wait_queue_idle",
@@ -268,6 +269,9 @@ LIVE_RETIRED_PATTERNS = {
     "resource_agnostic_texture_sync": re.compile(
         r"\bresource_agnostic_texture_sync\b"
     ),
+    "ShaderCode": re.compile(r"\bShaderCode\b"),
+    "ShaderStage": re.compile(r"(?<!spvreflect::)\bShaderStage\b"),
+    "prepare_shader_code": re.compile(r"\bprepare_shader_code\b"),
 }
 README_RETIRED_PATTERNS = {
     "automatic per-worker command pools": re.compile(

@@ -56,11 +56,10 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     }
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = GENERATED_SCRATCH_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader = shader,
     };
@@ -197,11 +196,10 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     }
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = GENERATED_SCRATCH_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader = shader,
     };
@@ -403,11 +401,10 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
     if (!gpu::get_device_caps(&device)!!.generated_work) return;
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = GENERATED_SCRATCH_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(
         &device,

@@ -298,16 +298,16 @@ fn int main() {
     )!!;
     defer gpu::destroy_attachment_view(&device, rt_view)!!;
 
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = OVERLAP_COMP_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode comp_shader = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ShaderDesc comp_sd = { .spirv = OVERLAP_COMP_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc comp_shader = comp_sd;
     gpu::ComputePipelineDesc comp_pipe_desc = { .shader = comp_shader };
     gpu::PipelineHandle comp_pipeline = gpu::create_compute_pipeline(&device, &comp_pipe_desc)!!;
     defer gpu::destroy_pipeline(&device, comp_pipeline)!!;
 
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode vert_shader = gpu::prepare_shader_code(&vert_sd)!!;
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OVERLAP_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode frag_shader = gpu::prepare_shader_code(&frag_sd)!!;
+    gpu::ShaderDesc vert_sd = { .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert_shader = vert_sd;
+    gpu::ShaderDesc frag_sd = { .spirv = OVERLAP_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag_shader = frag_sd;
     gpu::Format[1] pipeline_color_formats = {
         gpu::Format.RGBA8_UNORM,
     };

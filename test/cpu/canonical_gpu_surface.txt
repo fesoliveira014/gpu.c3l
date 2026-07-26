@@ -77,7 +77,6 @@ enum gpu::PresentMode
 enum gpu::PrimitiveTopology
 enum gpu::QueueKind
 enum gpu::SampleCount
-enum gpu::ShaderStage
 enum gpu::StoreOp
 enum gpu::TextureLayout
 fault gpu::BACKEND_ERROR
@@ -186,7 +185,6 @@ function gpu::intern_sampler
 function gpu::invalidate_mapped_span
 function gpu::poll_completion
 function gpu::premultiplied_alpha_blend
-function gpu::prepare_shader_code
 function gpu::present
 function gpu::release_generated_scratch
 function gpu::render_geometry_state
@@ -223,8 +221,6 @@ method gpu::Queue.equals
 method gpu::Queue.is_valid
 method gpu::Runtime.is_valid
 method gpu::SamplerIndex.is_valid
-method gpu::ShaderCode.equals
-method gpu::ShaderCode.is_valid
 method gpu::Surface.is_valid
 method gpu::SwapchainHandle.equals
 method gpu::SwapchainHandle.is_valid
@@ -296,7 +292,6 @@ struct gpu::RootPush
 struct gpu::RuntimeDesc
 struct gpu::SamplerDesc
 struct gpu::ScissorRect
-struct gpu::ShaderCode
 struct gpu::ShaderDesc
 struct gpu::SubmitDesc
 struct gpu::SwapchainDesc

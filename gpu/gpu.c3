@@ -738,62 +738,6 @@ fn void? create_texture_views(
     gpu::internal::retain_device_children(&operation, (ulong)descs.len);
 }
 
-fn bool ShaderCode.is_valid(self) {
-    if (self.digest == 0
-        || !gpu::internal::shader_stage_valid(self.stage)
-        || self.spirv.ptr == null
-        || self.spirv.len < gpu::internal::SPIRV_HEADER_SIZE
-        || self.spirv.len % uint::size != 0
-        || self.entry_point == null) return false;
-
-    uint magic;
-    mem::copy(&magic, self.spirv.ptr, uint::size);
-    usz entry_point_len = self.entry_point.str_view().len;
-    return magic == gpu::internal::SPIRV_MAGIC
-        && entry_point_len > 0
-        && entry_point_len < gpu::internal::SHADER_ENTRY_POINT_CAP;
-}
-
-fn bool ShaderCode.equals(self, ShaderCode other) @operator(==) {
-    if (!self.is_valid() || !other.is_valid()) {
-        return !self.is_valid()
-            && !other.is_valid()
-            && self.spirv.ptr == other.spirv.ptr
-            && self.spirv.len == other.spirv.len;
-    }
-    return self.digest == other.digest
-        && self.stage == other.stage
-        && self.entry_point.str_view() == other.entry_point.str_view()
-        && self.spirv.len == other.spirv.len
-        && mem::equals(self.spirv, other.spirv);
-}
-
-<* Validate borrowed SPIR-V and compute its opaque process-local identity. *>
-fn ShaderCode? prepare_shader_code(ShaderDesc* desc) {
-    if (desc == null) return INVALID_ARGUMENT~;
-    if (!gpu::internal::shader_stage_valid(desc.stage)) return INVALID_ARGUMENT~;
-    if (desc.spirv.ptr == null
-        || desc.spirv.len < gpu::internal::SPIRV_HEADER_SIZE
-        || desc.spirv.len % uint::size != 0) return SHADER_INVALID~;
-
-    uint magic;
-    mem::copy(&magic, desc.spirv.ptr, uint::size);
-    if (magic != gpu::internal::SPIRV_MAGIC) return SHADER_INVALID~;
-
-    ZString entry_point = desc.entry_point == null ? "main" : desc.entry_point;
-    usz entry_point_len = entry_point.str_view().len;
-    if (entry_point_len == 0 || entry_point_len >= gpu::internal::SHADER_ENTRY_POINT_CAP) {
-        return INVALID_ARGUMENT~;
-    }
-    return {
-        .stage       = desc.stage,
-        .spirv       = desc.spirv,
-        .entry_point = entry_point,
-        .debug_name  = desc.debug_name,
-        .digest      = gpu::internal::shader_code_digest(desc.spirv),
-    };
-}
-
 <* Construct disabled blending with the selected write mask. *>
 fn ColorTargetState color_blend_disabled(
     ColorWriteMask write_mask = COLOR_WRITE_ALL,

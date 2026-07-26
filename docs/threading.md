@@ -42,8 +42,7 @@ concurrent aliases valid.
 | `create_attachment_view` / `destroy_attachment_view` | S | immutable render subresource; destroy happens-after every command reference |
 | `create_texture_view` / `create_texture_views` / `destroy_texture_view` | S | owner and generation are validated before heap mutation |
 | `intern_sampler` | S | equal descriptions converge on one stable index under the device resource lock |
-| `prepare_shader_code` | S | pure read of caller-owned immutable bytes and strings |
-| `create_compute_pipeline` / `create_graphics_pipeline` / `create_compute_pipelines` / `create_graphics_pipelines` / `destroy_pipeline` | S | single and batch creation serialize on a device-wide creation lock; a same-key request converges to one entry |
+| `create_compute_pipeline` / `create_graphics_pipeline` / `create_compute_pipelines` / `create_graphics_pipelines` / `destroy_pipeline` | S | creation borrows shader descriptors only for the call; single and batch creation serialize on a device-wide creation lock, and a same-key request converges to one owned private identity and cache entry |
 | `get_memory_stats` / `build_memory_report` | S | advisory: values may be inconsistent under concurrent mutation; quiesce externally for exact snapshots |
 | `CommandAllocatorHandle.is_valid` / `CommandAllocatorHandle.equals` | S | pure value operations |
 | `create_command_allocator` | S | internally synchronized; distinct allocators may be created concurrently, and each result is bound to the exact supplied queue |

@@ -60,13 +60,13 @@ fn void bindless_texture_write_then_sample() @test {
     defer free_owned_span(&device, &output)!!;
 
     gpu::ShaderDesc write_shader_desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main",
+        .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderCode write_shader = gpu::prepare_shader_code(&write_shader_desc)!!;
+    gpu::ShaderDesc write_shader = write_shader_desc;
     gpu::ShaderDesc sample_shader_desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
+        .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderCode sample_shader = gpu::prepare_shader_code(&sample_shader_desc)!!;
+    gpu::ShaderDesc sample_shader = sample_shader_desc;
 
     gpu::ComputePipelineDesc write_pipe_desc = { .shader = write_shader };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pipe_desc)!!;
@@ -280,28 +280,25 @@ fn void storage_write_then_fragment_sample() @test {
     gpu::SamplerIndex sampler_index = gpu::intern_sampler(&device, &sampler_desc)!!;
 
     gpu::ShaderDesc write_shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = HEAP_WRITE_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode write_shader = gpu::prepare_shader_code(&write_shader_desc)!!;
+    gpu::ShaderDesc write_shader = write_shader_desc;
     gpu::ComputePipelineDesc write_pipeline_desc = { .shader = write_shader };
     gpu::PipelineHandle write_pipeline =
         gpu::create_compute_pipeline(&device, &write_pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, write_pipeline)!!;
 
     gpu::ShaderDesc vertex_shader_desc = {
-        .stage       = gpu::ShaderStage.VERTEX,
         .spirv       = HEAP_OFFSCREEN_VERT_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode vertex_shader = gpu::prepare_shader_code(&vertex_shader_desc)!!;
+    gpu::ShaderDesc vertex_shader = vertex_shader_desc;
     gpu::ShaderDesc fragment_shader_desc = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = HEAP_OFFSCREEN_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode fragment_shader = gpu::prepare_shader_code(&fragment_shader_desc)!!;
+    gpu::ShaderDesc fragment_shader = fragment_shader_desc;
     gpu::Format[1] pipeline_color_formats = {
         gpu::Format.RGBA8_UNORM,
     };

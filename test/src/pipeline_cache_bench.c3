@@ -31,11 +31,10 @@ fn void probe_owned_shader_identity(
     foreach (&byte : spirv) *byte = 0;
     mem::copy(spirv.ptr, BENCH_VERT_SPIRV[..].ptr, 20);
     gpu::ShaderDesc desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = spirv,
         .entry_point = "main",
     };
-    gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
+    gpu::ShaderDesc code = desc;
     std::time::Clock start = std::time::clock::now();
     vk::PipelineIdentityProbeResult result =
         vk::probe_pipeline_identity_boundary(state, &code)!!;
@@ -163,17 +162,15 @@ fn int main() {
     defer gpu::destroy_command_allocator(&allocator)!!;
 
     gpu::ShaderDesc vert_sd = {
-        .stage       = gpu::ShaderStage.VERTEX,
         .spirv       = BENCH_VERT_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc frag_sd = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = BENCH_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
-    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
+    gpu::ShaderDesc vert = vert_sd;
+    gpu::ShaderDesc frag = frag_sd;
 
     gpu::Format[1] color_formats = {
         gpu::Format.RGBA8_UNORM,

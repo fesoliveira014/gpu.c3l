@@ -67,10 +67,10 @@ fn gpu::Device make_generated_work_device() {
    white pattern feeding the fragment heap path. *>
 fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
     IndDrawCtx ctx;
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = IND_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = IND_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
+    gpu::ShaderDesc vert_sd = { .spirv = IND_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert = vert_sd;
+    gpu::ShaderDesc frag_sd = { .spirv = IND_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag = frag_sd;
 
     gpu::Format[1] pipeline_color_formats = {
         gpu::Format.RGBA8_UNORM,
@@ -194,11 +194,10 @@ fn bool distinct_graphics_compute_families(gpu::Device* device, ZString test_nam
 
 fn gpu::PipelineHandle make_cross_family_compute_pipeline(gpu::Device* device) {
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = IND_DOUBLE_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader = shader,
     };
@@ -395,8 +394,8 @@ fn void compute_generated_indexed_indirect_draw() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &target_view)!!;
 
-    gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_sd)!!;
+    gpu::ShaderDesc build_sd = { .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc build_shader = build_sd;
     gpu::ComputePipelineDesc build_desc = { .shader = build_shader };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!!;
     defer gpu::destroy_pipeline(&device, build_pipeline)!!;
@@ -650,11 +649,10 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     defer destroy_test_attachment_view(&device, &null_view)!!;
 
     gpu::ShaderDesc build_shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = IND_GENERATED_WORK_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_shader_desc)!!;
+    gpu::ShaderDesc build_shader = build_shader_desc;
     gpu::ComputePipelineDesc build_pipeline_desc = {
         .shader = build_shader,
     };
@@ -1556,14 +1554,14 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc build_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode build_shader = gpu::prepare_shader_code(&build_sd)!!;
+    gpu::ShaderDesc build_sd = { .spirv = IND_BUILD_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc build_shader = build_sd;
     gpu::ComputePipelineDesc build_desc = { .shader = build_shader };
     gpu::PipelineHandle build_pipeline = gpu::create_compute_pipeline(&device, &build_desc)!!;
     defer gpu::destroy_pipeline(&device, build_pipeline)!!;
 
-    gpu::ShaderDesc double_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = IND_DOUBLE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode double_shader = gpu::prepare_shader_code(&double_sd)!!;
+    gpu::ShaderDesc double_sd = { .spirv = IND_DOUBLE_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc double_shader = double_sd;
     gpu::ComputePipelineDesc double_desc = { .shader = double_shader };
     gpu::PipelineHandle double_pipeline = gpu::create_compute_pipeline(&device, &double_desc)!!;
     defer gpu::destroy_pipeline(&device, double_pipeline)!!;

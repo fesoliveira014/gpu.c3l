@@ -131,9 +131,8 @@ fn gpu::PipelineHandle? create_reflection_compute_pipeline(
     gpu::Device* device,
     gpu::ShaderDesc* shader_desc,
 ) {
-    gpu::ShaderCode shader = gpu::prepare_shader_code(shader_desc)!;
     gpu::ComputePipelineDesc pipeline_desc = {
-        .shader = shader,
+        .shader = *shader_desc,
     };
     return gpu::create_compute_pipeline(device, &pipeline_desc);
 }
@@ -142,25 +141,31 @@ fn void assert_root_mismatch_reported(
     gpu::Device* device,
     ShaderDiagnosticCapture* capture,
     char[] spirv,
-    gpu::ShaderStage stage,
+    gpu::internal::ShaderRole role,
     ZString invariant,
 ) {
     gpu::ShaderDesc desc = {
-        .stage       = stage,
         .spirv       = spirv,
         .entry_point = "main",
         .debug_name  = "root_mismatch",
     };
-    gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
+    vk::ShaderIdentityInput input;
+    vk::normalize_shader_input(
+        state:          state,
+        desc:           &desc,
+        role:           role,
+        operation:      "test_root_mismatch",
+        rejected_field: "ShaderDesc",
+        out_input:      &input,
+    )!!;
     uint before = capture.calls;
     fault mismatch_fault = @catch(vk::create_pipeline_shader_module(
         state:          state,
-        code:           &code,
-        expected_stage: stage,
+        code:           &input,
         operation:      "test_root_mismatch",
-        rejected_field: "ShaderCode",
+        rejected_field: "ShaderDesc",
     ));
     assert(mismatch_fault == gpu::SHADER_INVALID,
         "root mismatch preserves SHADER_INVALID");
@@ -169,7 +174,7 @@ fn void assert_root_mismatch_reported(
         before:        before,
         returned:      mismatch_fault,
         operation:     "test_root_mismatch",
-        field:         "ShaderCode",
+        field:         "ShaderDesc",
         invariant:     invariant,
         resource_kind: gpu::DebugResourceKind.SHADER,
     );
@@ -186,7 +191,6 @@ fn void assert_shader_interface_rejected(
     ulong reflections_before = vk::shader_reflection_validation_count(state);
     ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
     gpu::ShaderDesc desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = spirv,
         .entry_point = entry_point,
     };
@@ -201,7 +205,7 @@ fn void assert_shader_interface_rejected(
 
 fn void? check_fixture_root_abi(
     char[] spirv,
-    gpu::ShaderStage stage,
+    gpu::internal::ShaderRole role,
     ZString entry_point,
 ) {
     ulong[spvreflect::SHADER_MODULE_SIZE / 8] module_storage;
@@ -215,7 +219,7 @@ fn void? check_fixture_root_abi(
         return gpu::SHADER_INVALID~;
     }
     defer reflect_module.destroy();
-    vk::check_root_push_abi(reflect_module, entry_point, stage)!;
+    vk::check_root_push_abi(reflect_module, entry_point, role)!;
 }
 
 fn void assert_fixture_root_flag(
@@ -289,26 +293,32 @@ fn void assert_fixture_root_block_shape(
 fn void assert_reflected_shader_rejected(
     gpu::Device* device,
     char[] spirv,
-    gpu::ShaderStage stage,
+    gpu::internal::ShaderRole role,
     ZString message,
 ) {
     gpu::ShaderDesc desc = {
-        .stage       = stage,
         .spirv       = spirv,
         .entry_point = "main",
     };
-    gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
+    vk::ShaderIdentityInput input;
+    vk::normalize_shader_input(
+        state:          state,
+        desc:           &desc,
+        role:           role,
+        operation:      "test_shader_reflection",
+        rejected_field: "ShaderDesc",
+        out_input:      &input,
+    )!!;
     ulong reflections_before = vk::shader_reflection_validation_count(state);
     ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
 
     fault shader_fault = @catch(vk::create_pipeline_shader_module(
         state:          state,
-        code:           &code,
-        expected_stage: stage,
+        code:           &input,
         operation:      "test_shader_reflection",
-        rejected_field: "ShaderCode",
+        rejected_field: "ShaderDesc",
     ));
 
     assert(shader_fault == gpu::SHADER_INVALID,
@@ -324,11 +334,22 @@ fn void heap_conforming_shader_accepted() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_HEAP_SPIRV[..], .entry_point = "main",
+        .spirv = REFLECT_HEAP_SPIRV[..], .entry_point = "main",
     };
     gpu::PipelineHandle pipeline = create_reflection_compute_pipeline(&device, &desc)!!;
     gpu::destroy_pipeline(&device, pipeline)!!;
     assert(pipeline.is_valid(), "heap-conforming shader is accepted");
+}
+
+fn void null_entry_point_defaults_to_main() @test {
+    gpu::Device device = make_reflection_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc desc = {
+        .spirv = REFLECT_BUFFERS_SPIRV[..],
+    };
+    gpu::PipelineHandle pipeline =
+        create_reflection_compute_pipeline(&device, &desc)!!;
+    gpu::destroy_pipeline(&device, pipeline)!!;
 }
 
 fn void buffers_only_shader_accepted() @test {
@@ -336,7 +357,7 @@ fn void buffers_only_shader_accepted() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "main",
+        .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "main",
     };
     gpu::PipelineHandle pipeline = create_reflection_compute_pipeline(&device, &desc)!!;
     gpu::destroy_pipeline(&device, pipeline)!!;
@@ -348,7 +369,7 @@ fn void shader_without_push_block_accepted() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_NO_PUSH_SPIRV[..], .entry_point = "main",
+        .spirv = REFLECT_NO_PUSH_SPIRV[..], .entry_point = "main",
     };
     gpu::PipelineHandle pipeline = create_reflection_compute_pipeline(&device, &desc)!!;
     gpu::destroy_pipeline(&device, pipeline)!!;
@@ -455,7 +476,6 @@ fn void selected_entry_interfaces_are_isolated() @test {
     ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
 
     gpu::ShaderDesc good_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = REFLECT_MULTI_ENTRY_SPIRV[..],
         .entry_point = "good",
     };
@@ -485,11 +505,10 @@ fn void invalid_deduplicated_shader_is_reflected_once_transactionally() @test {
     gpu::Device device = make_reflection_test_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = REFLECT_SIGNED_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc[2] descs = {
         { .shader = shader },
         { .shader = shader },
@@ -526,22 +545,22 @@ fn void invalid_deduplicated_shader_is_reflected_once_transactionally() @test {
 fn void exact_compute_vertex_and_fragment_roots_accepted() @test {
     check_fixture_root_abi(
         spirv:       REFLECT_BUFFERS_SPIRV[..],
-        stage:       gpu::ShaderStage.COMPUTE,
+        role:        gpu::internal::ShaderRole.COMPUTE,
         entry_point: "main",
     )!!;
     check_fixture_root_abi(
         spirv:       REFLECT_VERTEX_SPIRV[..],
-        stage:       gpu::ShaderStage.VERTEX,
+        role:        gpu::internal::ShaderRole.VERTEX,
         entry_point: "main",
     )!!;
     check_fixture_root_abi(
         spirv:       REFLECT_FRAGMENT_SPIRV[..],
-        stage:       gpu::ShaderStage.FRAGMENT,
+        role:        gpu::internal::ShaderRole.FRAGMENT,
         entry_point: "main",
     )!!;
     check_fixture_root_abi(
         spirv:       REFLECT_RENAMED_SPIRV[..],
-        stage:       gpu::ShaderStage.COMPUTE,
+        role:        gpu::internal::ShaderRole.COMPUTE,
         entry_point: "main",
     )!!;
 }
@@ -549,7 +568,7 @@ fn void exact_compute_vertex_and_fragment_roots_accepted() @test {
 fn void reversed_graphics_member_order_rejected() @test {
     fault order_fault = @catch(check_fixture_root_abi(
         spirv:       REFLECT_REVERSED_GRAPHICS_SPIRV[..],
-        stage:       gpu::ShaderStage.VERTEX,
+        role:        gpu::internal::ShaderRole.VERTEX,
         entry_point: "main",
     ));
     assert(order_fault == gpu::SHADER_INVALID,
@@ -563,7 +582,7 @@ fn void graphics_size_8_rejected_before_native_creation() @test {
     assert_reflected_shader_rejected(
         device:  &device,
         spirv:   REFLECT_GRAPHICS_SIZE_8_SPIRV[..],
-        stage:   gpu::ShaderStage.VERTEX,
+        role:    gpu::internal::ShaderRole.VERTEX,
         message: "an 8-byte graphics root faults SHADER_INVALID",
     );
 }
@@ -575,7 +594,7 @@ fn void graphics_second_member_offset_4_rejected_before_native_creation() @test 
     assert_reflected_shader_rejected(
         device:  &device,
         spirv:   REFLECT_GRAPHICS_SECOND_OFFSET_4_SPIRV[..],
-        stage:   gpu::ShaderStage.VERTEX,
+        role:    gpu::internal::ShaderRole.VERTEX,
         message: "a graphics second member at offset 4 faults SHADER_INVALID",
     );
 }
@@ -585,7 +604,7 @@ fn void foreign_set_rejected() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BAD_SET_SPIRV[..], .entry_point = "main",
+        .spirv = REFLECT_BAD_SET_SPIRV[..], .entry_point = "main",
     };
     fault set_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
     assert(set_fault == gpu::SHADER_INVALID, "a set-1 binding faults SHADER_INVALID");
@@ -596,7 +615,7 @@ fn void convention_violating_binding_rejected() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BAD_BINDING_SPIRV[..], .entry_point = "main",
+        .spirv = REFLECT_BAD_BINDING_SPIRV[..], .entry_point = "main",
     };
     fault binding_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
     assert(binding_fault == gpu::SHADER_INVALID, "a combined-image-sampler at set-0 binding 0 faults SHADER_INVALID");
@@ -607,22 +626,11 @@ fn void bogus_entry_point_rejected() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "not_main",
+        .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "not_main",
     };
     fault entry_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
     assert(entry_fault == gpu::SHADER_INVALID,
         "a requested entry point absent from the module faults SHADER_INVALID");
-}
-
-fn void wrong_stage_rejected() @test {
-    gpu::Device device = make_reflection_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.VERTEX, .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "main",
-    };
-    fault stage_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
-    assert(stage_fault == gpu::INVALID_ARGUMENT, "requesting VERTEX for a compute module faults INVALID_ARGUMENT");
 }
 
 fn void reflected_stage_mismatch_rejected_before_native_creation() @test {
@@ -633,7 +641,7 @@ fn void reflected_stage_mismatch_rejected_before_native_creation() @test {
     ulong native_attempts_before = vk::pipeline_shader_create_attempt_count(state);
 
     gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_VERTEX_SPIRV[..], .entry_point = "main",
+        .spirv = REFLECT_VERTEX_SPIRV[..], .entry_point = "main",
     };
     fault stage_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
     assert(stage_fault == gpu::SHADER_INVALID,
@@ -649,7 +657,7 @@ fn void vertex_module_reflected_as_fragment_rejected_before_native_creation() @t
     assert_reflected_shader_rejected(
         device:  &device,
         spirv:   REFLECT_VERTEX_SPIRV[..],
-        stage:   gpu::ShaderStage.FRAGMENT,
+        role:    gpu::internal::ShaderRole.FRAGMENT,
         message: "a vertex module declared as fragment faults SHADER_INVALID",
     );
 }
@@ -661,7 +669,7 @@ fn void fragment_module_reflected_as_vertex_rejected_before_native_creation() @t
     assert_reflected_shader_rejected(
         device:  &device,
         spirv:   REFLECT_FRAGMENT_SPIRV[..],
-        stage:   gpu::ShaderStage.VERTEX,
+        role:    gpu::internal::ShaderRole.VERTEX,
         message: "a fragment module declared as vertex faults SHADER_INVALID",
     );
 }
@@ -671,22 +679,43 @@ fn void oversized_push_constant_rejected() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_OVERSIZED_PUSH_SPIRV[..], .entry_point = "main",
+        .spirv = REFLECT_OVERSIZED_PUSH_SPIRV[..], .entry_point = "main",
     };
     fault push_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
     assert(push_fault == gpu::SHADER_INVALID,
         "a push-constant block past the root-push ABI faults SHADER_INVALID");
 }
 
-fn void entry_point_over_cap_rejected() @test {
+fn void invalid_entry_points_reject_before_store_mutation() @test {
     gpu::Device device = make_reflection_test_device();
     defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    ulong native_attempts_before =
+        vk::pipeline_shader_create_attempt_count(state);
 
-    gpu::ShaderDesc desc = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = ENTRY_POINT_OVER_CAP,
+    gpu::ShaderDesc empty = {
+        .spirv       = REFLECT_BUFFERS_SPIRV[..],
+        .entry_point = "",
     };
-    fault cap_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
-    assert(cap_fault == gpu::INVALID_ARGUMENT, "an entry point name past SHADER_ENTRY_POINT_CAP faults INVALID_ARGUMENT");
+    fault empty_fault =
+        @catch(create_reflection_compute_pipeline(&device, &empty));
+    assert(empty_fault == gpu::INVALID_ARGUMENT,
+        "an empty entry point faults INVALID_ARGUMENT");
+
+    gpu::ShaderDesc oversized = {
+        .spirv       = REFLECT_BUFFERS_SPIRV[..],
+        .entry_point = ENTRY_POINT_OVER_CAP,
+    };
+    fault cap_fault =
+        @catch(create_reflection_compute_pipeline(&device, &oversized));
+    assert(cap_fault == gpu::INVALID_ARGUMENT,
+        "an oversized entry point faults INVALID_ARGUMENT");
+    assert(vk::shader_store_live_count(state) == 0,
+        "entry-point validation retains no shader identity");
+    assert(vk::pipeline_shader_create_attempt_count(state)
+            == native_attempts_before,
+        "entry-point validation performs no native shader creation");
 }
 
 fn void shader_contract_rejections_report_exact_context() @test {
@@ -695,7 +724,7 @@ fn void shader_contract_rejections_report_exact_context() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc missing_entry = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BUFFERS_SPIRV[..],
+        .spirv = REFLECT_BUFFERS_SPIRV[..],
         .entry_point = "not_main", .debug_name = "missing_entry_shader",
     };
     uint before = capture.calls;
@@ -711,27 +740,27 @@ fn void shader_contract_rejections_report_exact_context() @test {
         resource_kind: gpu::DebugResourceKind.SHADER,
     );
     assert(((ZString)&capture.resource_name[0]).str_view() == "missing_entry_shader", "shader debug name is preserved");
-    assert(!capture.has_public_identity, "borrowed shader code has no public identity");
+    assert(!capture.has_public_identity, "borrowed shader input has no public identity");
 
-    gpu::ShaderDesc wrong_stage = {
-        .stage = gpu::ShaderStage.VERTEX, .spirv = REFLECT_BUFFERS_SPIRV[..],
-        .entry_point = "main", .debug_name = "wrong_stage_shader",
+    gpu::ShaderDesc wrong_role = {
+        .spirv = REFLECT_VERTEX_SPIRV[..],
+        .entry_point = "main", .debug_name = "wrong_role_shader",
     };
     before = capture.calls;
-    fault stage_fault = @catch(create_reflection_compute_pipeline(&device, &wrong_stage));
-    assert(stage_fault == gpu::INVALID_ARGUMENT, "wrong stage keeps INVALID_ARGUMENT");
+    fault role_fault = @catch(create_reflection_compute_pipeline(&device, &wrong_role));
+    assert(role_fault == gpu::SHADER_INVALID, "wrong role keeps SHADER_INVALID");
     assert_shader_rejection(
         capture:       &capture,
         before:        before,
-        returned:      stage_fault,
+        returned:      role_fault,
         operation:     "create_compute_pipeline",
         field:         "ComputePipelineDesc.shader",
-        invariant:     "shader stage must match its pipeline role",
+        invariant:     "reflected execution model must match the pipeline field",
         resource_kind: gpu::DebugResourceKind.SHADER,
     );
 
     gpu::ShaderDesc bad_abi = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_OVERSIZED_PUSH_SPIRV[..],
+        .spirv = REFLECT_OVERSIZED_PUSH_SPIRV[..],
         .entry_point = "main", .debug_name = "bad_abi_shader",
     };
     before = capture.calls;
@@ -757,76 +786,76 @@ fn void root_mismatch_diagnostics_identify_properties() @test {
         device:    &device,
         capture:   &capture,
         spirv:     REFLECT_MULTIPLE_BLOCKS_SPIRV[..],
-        stage:     gpu::ShaderStage.COMPUTE,
+        role:      gpu::internal::ShaderRole.COMPUTE,
         invariant: "selected-entry push block count must be zero or one",
     );
     assert_root_mismatch_reported(
         device:    &device,
         capture:   &capture,
         spirv:     REFLECT_WRONG_OFFSET_SPIRV[..],
-        stage:     gpu::ShaderStage.COMPUTE,
+        role:      gpu::internal::ShaderRole.COMPUTE,
         invariant: "selected-entry push block offset must be zero",
     );
     assert_root_mismatch_reported(
         device:    &device,
         capture:   &capture,
         spirv:     REFLECT_MEMBER_COUNT_SPIRV[..],
-        stage:     gpu::ShaderStage.COMPUTE,
+        role:      gpu::internal::ShaderRole.COMPUTE,
         invariant: "selected-entry push member count must match the root ABI",
     );
     assert_root_mismatch_reported(
         device:    &device,
         capture:   &capture,
         spirv:     REFLECT_REVERSED_GRAPHICS_SPIRV[..],
-        stage:     gpu::ShaderStage.VERTEX,
+        role:      gpu::internal::ShaderRole.VERTEX,
         invariant: "selected-entry push member offset must match the root ABI",
     );
     assert_root_mismatch_reported(
         device:    &device,
         capture:   &capture,
         spirv:     REFLECT_SIGNED_SPIRV[..],
-        stage:     gpu::ShaderStage.COMPUTE,
+        role:      gpu::internal::ShaderRole.COMPUTE,
         invariant: "selected-entry push member signedness must match the root ABI",
     );
     assert_root_mismatch_reported(
         device:    &device,
         capture:   &capture,
         spirv:     REFLECT_FLOAT64_SPIRV[..],
-        stage:     gpu::ShaderStage.COMPUTE,
+        role:      gpu::internal::ShaderRole.COMPUTE,
         invariant: "selected-entry push member scalar kind must match the root ABI",
     );
     assert_root_mismatch_reported(
         device:    &device,
         capture:   &capture,
         spirv:     REFLECT_REF_SPIRV[..],
-        stage:     gpu::ShaderStage.COMPUTE,
+        role:      gpu::internal::ShaderRole.COMPUTE,
         invariant: "selected-entry push member must be a flat scalar",
     );
 }
 
-fn void wrong_pipeline_shader_context_reports_borrowed_code_once() @test {
+fn void wrong_pipeline_shader_context_reports_borrowed_input_once() @test {
     ShaderDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_reflection_test_device(&capture);
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc vertex_desc = {
-        .stage = gpu::ShaderStage.VERTEX, .spirv = REFLECT_VERTEX_SPIRV[..],
+        .spirv = REFLECT_VERTEX_SPIRV[..],
         .entry_point = "main", .debug_name = "vertex_in_compute",
     };
-    gpu::ShaderCode vertex = gpu::prepare_shader_code(&vertex_desc)!!;
+    gpu::ShaderDesc vertex = vertex_desc;
     gpu::ComputePipelineDesc pipeline_desc = { .shader = vertex };
     uint before = capture.calls;
     fault pipeline_fault = @catch(gpu::create_compute_pipeline(&device, &pipeline_desc));
-    assert(pipeline_fault == gpu::INVALID_ARGUMENT, "wrong compute shader context keeps INVALID_ARGUMENT");
+    assert(pipeline_fault == gpu::SHADER_INVALID, "wrong compute shader context keeps SHADER_INVALID");
     assert_shader_rejection(
         capture:       &capture,
         before:        before,
         returned:      pipeline_fault,
         operation:     "create_compute_pipeline",
         field:         "ComputePipelineDesc.shader",
-        invariant:     "shader stage must match its pipeline role",
+        invariant:     "reflected execution model must match the pipeline field",
         resource_kind: gpu::DebugResourceKind.SHADER,
     );
-    assert(!capture.has_public_identity, "borrowed shader code has no public identity");
+    assert(!capture.has_public_identity, "borrowed shader input has no public identity");
     assert(capture.resource_index == 0 && capture.resource_generation == 0,
         "borrowed shader diagnostics invent no handle identity");
     assert(((ZString)&capture.resource_name[0]).str_view() == "vertex_in_compute",
@@ -837,7 +866,7 @@ fn void shader_diagnostic_callback_preserves_fault_parity() @test {
     ShaderDiagnosticCapture capture;
     gpu::Device callback_device = make_diagnostic_reflection_test_device(&capture);
     gpu::ShaderDesc rejected = {
-        .stage = gpu::ShaderStage.COMPUTE, .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "not_main",
+        .spirv = REFLECT_BUFFERS_SPIRV[..], .entry_point = "not_main",
     };
     uint before = capture.calls;
     fault callback_fault = @catch(create_reflection_compute_pipeline(&callback_device, &rejected));

@@ -278,10 +278,10 @@ fn void offscreen_textured_triangle() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
 
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OFFSCREEN_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
+    gpu::ShaderDesc vert_sd = { .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert = vert_sd;
+    gpu::ShaderDesc frag_sd = { .spirv = OFFSCREEN_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag = frag_sd;
 
     gpu::Format[1] pipeline_color_formats = {
         gpu::Format.RGBA8_UNORM,
@@ -461,13 +461,13 @@ fn void dynamic_viewport_scissor_pixels() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc vert_desc = {
-        .stage = gpu::ShaderStage.VERTEX, .spirv = DYNAMIC_RECT_VERT_SPIRV[..], .entry_point = "main",
+        .spirv = DYNAMIC_RECT_VERT_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_desc)!!;
+    gpu::ShaderDesc vert = vert_desc;
     gpu::ShaderDesc frag_desc = {
-        .stage = gpu::ShaderStage.FRAGMENT, .spirv = DYNAMIC_RECT_FRAG_SPIRV[..], .entry_point = "main",
+        .spirv = DYNAMIC_RECT_FRAG_SPIRV[..], .entry_point = "main",
     };
-    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_desc)!!;
+    gpu::ShaderDesc frag = frag_desc;
     gpu::Format[1] pipeline_color_formats = {
         gpu::Format.RGBA8_UNORM,
     };
@@ -689,17 +689,15 @@ fn void complete_and_individual_color_state_output_matches() @test {
     gpu::Device device = maybe_device;
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc vertex_desc = {
-        .stage       = gpu::ShaderStage.VERTEX,
         .spirv       = DYNAMIC_RECT_VERT_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc fragment_desc = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = DYNAMIC_RECT_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode vertex = gpu::prepare_shader_code(&vertex_desc)!!;
-    gpu::ShaderCode fragment = gpu::prepare_shader_code(&fragment_desc)!!;
+    gpu::ShaderDesc vertex = vertex_desc;
+    gpu::ShaderDesc fragment = fragment_desc;
     gpu::ColorWriteMask red_green = { .red, .green };
     gpu::ColorTargetState[5] packets = {
         gpu::color_blend_disabled(),
@@ -982,10 +980,10 @@ fn void graphics_pipeline_depth_format_validation() @test {
     gpu::Device device = make_offscreen_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode vert = gpu::prepare_shader_code(&vert_sd)!!;
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = OFFSCREEN_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode frag = gpu::prepare_shader_code(&frag_sd)!!;
+    gpu::ShaderDesc vert_sd = { .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert = vert_sd;
+    gpu::ShaderDesc frag_sd = { .spirv = OFFSCREEN_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag = frag_sd;
 
     gpu::Format[1] pipeline_color_formats = {
         gpu::Format.RGBA8_UNORM,

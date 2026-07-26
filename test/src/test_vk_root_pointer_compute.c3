@@ -80,11 +80,10 @@ fn void root_pointer_compute_readback() @test {
     gpu::flush_mapped_span(&device, input.span)!!;
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = ROOT_POINTER_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader = shader,
     };
@@ -198,11 +197,10 @@ fn void direct_reference_root_runtime_evidence() @test {
     gpu::flush_mapped_span(&device, root_owned.span)!!;
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = ROOT_REFERENCE_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
     gpu::PipelineHandle pipeline =
         gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
@@ -243,11 +241,10 @@ fn void signed_root_runtime_evidence() @test {
     defer free_owned_span(&device, &output)!!;
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = ROOT_SIGNED_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
     gpu::PipelineHandle pipeline =
         gpu::create_compute_pipeline(&device, &pipeline_desc)!!;

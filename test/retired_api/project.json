@@ -249,6 +249,12 @@
         "create_shader.c3"
       ]
     },
+    "prepare_shader_code": {
+      "type": "object-files",
+      "sources": [
+        "prepare_shader_code.c3"
+      ]
+    },
     "destroy_shader": {
       "type": "object-files",
       "sources": [

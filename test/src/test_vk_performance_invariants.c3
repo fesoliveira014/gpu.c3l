@@ -52,11 +52,10 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     gpu::Device device = make_performance_invariant_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = PERFORMANCE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(
         &device,
@@ -64,12 +63,10 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
     )!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     gpu::ShaderDesc alternate_vertex_desc = {
-        .stage       = gpu::ShaderStage.VERTEX,
         .spirv       = PERFORMANCE_VERT_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc alternate_fragment_desc = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = PERFORMANCE_FRAG_SPIRV[..],
         .entry_point = "main",
     };
@@ -77,10 +74,8 @@ fn void warm_bind_dispatch_complete_operation_has_zero_creation_work() @test {
         gpu::Format.RGBA8_UNORM,
     };
     gpu::GraphicsPipelineDesc alternate_desc = {
-        .vertex_shader = gpu::prepare_shader_code(&alternate_vertex_desc)!!,
-        .fragment_shader = gpu::prepare_shader_code(
-            &alternate_fragment_desc,
-        )!!,
+        .vertex_shader   = alternate_vertex_desc,
+        .fragment_shader = alternate_fragment_desc,
         .color_formats = alternate_color_formats[..],
     };
     gpu::PipelineHandle alternate_pipeline = gpu::create_graphics_pipeline(
@@ -252,12 +247,10 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
     gpu::Device device = make_performance_invariant_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc vertex_desc = {
-        .stage       = gpu::ShaderStage.VERTEX,
         .spirv       = PERFORMANCE_VERT_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc fragment_desc = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = PERFORMANCE_FRAG_SPIRV[..],
         .entry_point = "main",
     };
@@ -265,9 +258,9 @@ fn void warm_render_pass_complete_operation_has_zero_creation_work() @test {
         gpu::Format.RGBA8_UNORM,
     };
     gpu::GraphicsPipelineDesc pipeline_desc = {
-        .vertex_shader = gpu::prepare_shader_code(&vertex_desc)!!,
-        .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
-        .color_formats = pipeline_color_formats[..],
+        .vertex_shader   = vertex_desc,
+        .fragment_shader = fragment_desc,
+        .color_formats   = pipeline_color_formats[..],
     };
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(
         &device,

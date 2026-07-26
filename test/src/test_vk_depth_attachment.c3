@@ -21,8 +21,8 @@ const float NEAR_Z = 0.25f;
 const float FAR_Z = 0.75f;
 
 struct DepthCtx {
-    gpu::ShaderCode vert;
-    gpu::ShaderCode frag;
+    gpu::ShaderDesc vert;
+    gpu::ShaderDesc frag;
 }
 
 fn gpu::Device make_depth_device() {
@@ -35,11 +35,11 @@ fn gpu::Device make_depth_device() {
 }
 
 fn DepthCtx make_depth_ctx() {
-    gpu::ShaderDesc vert_sd = { .stage = gpu::ShaderStage.VERTEX, .spirv = DEPTH_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderDesc frag_sd = { .stage = gpu::ShaderStage.FRAGMENT, .spirv = DEPTH_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc vert_sd = { .spirv = DEPTH_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag_sd = { .spirv = DEPTH_FRAG_SPIRV[..], .entry_point = "main" };
     return {
-        .vert = gpu::prepare_shader_code(&vert_sd)!!,
-        .frag = gpu::prepare_shader_code(&frag_sd)!!,
+        .vert = vert_sd,
+        .frag = frag_sd,
     };
 }
 
@@ -607,8 +607,8 @@ fn void sampled_depth_matches_readback() @test {
         .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
     };
     gpu::SamplerIndex smp_index = gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::ShaderDesc comp_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = DEPTH_SAMPLE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ShaderDesc comp_sd = { .spirv = DEPTH_SAMPLE_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc comp = comp_sd;
     gpu::ComputePipelineDesc comp_desc = { .shader = comp };
     gpu::PipelineHandle sample_pipeline = gpu::create_compute_pipeline(&device, &comp_desc)!!;
     defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
@@ -1012,8 +1012,8 @@ fn void compare_sampler_exact_results() @test {
         .compare        = gpu::CompareOp.LESS,
     };
     gpu::SamplerIndex shadow_smp = gpu::intern_sampler(&device, &shadow_desc)!!;
-    gpu::ShaderDesc probe_sd = { .stage = gpu::ShaderStage.COMPUTE, .spirv = SHADOW_PROBE_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode probe = gpu::prepare_shader_code(&probe_sd)!!;
+    gpu::ShaderDesc probe_sd = { .spirv = SHADOW_PROBE_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc probe = probe_sd;
     gpu::ComputePipelineDesc probe_desc = { .shader = probe };
     gpu::PipelineHandle probe_pipeline = gpu::create_compute_pipeline(&device, &probe_desc)!!;
     defer gpu::destroy_pipeline(&device, probe_pipeline)!!;

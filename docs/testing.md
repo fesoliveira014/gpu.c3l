@@ -508,7 +508,8 @@ validation separately covers unsupported capability, count bounds, alignment,
 short spans, zero work, index formats, and generated-preprocess barrier masks.
 `vk_pipeline_cache` covers collision-safe device-owned shader interning,
 cache-hit reference stability, last-alias release, unique free-list churn,
-full-capacity preflight, and exact cleanup after partial shader preparation,
+full-capacity preflight, caller-storage independence after creation, and exact
+cleanup after partial private shader interning,
 reflection, native shader, native pipeline, cache insertion, and mid-batch
 faults. It uses exact interning and byte-comparison counters for collision and
 distinct-storage cases, while cache hits require compact-key probes without
@@ -705,13 +706,14 @@ preserving every other blocking assertion. A pinned lane sets
 `generated-work` and `generated-scratch-reservation`; Linux distro Mesa may
 report either as unavailable.
 
-`vk_shader_reflection` covers selected-entry isolation, absent blocks, exact
-compute and graphics roots, wrong stage and entry, and malformed block/member
-shapes. It also verifies property-specific block/member diagnostics while
-preserving `SHADER_INVALID`. Test-only counters prove a rejected deduplicated
-`ShaderId` is reflected once and reaches neither native shader creation nor
-cache/output publication; `vk_pipeline_cache` proves the same once-per-identity
-behavior for successful batches. `scripts/build_shaders.py` compiles sorted
+`vk_shader_reflection` covers null-entry `main` selection, selected-entry
+isolation, absent blocks, exact compute and graphics roots, field-derived role
+mismatches, missing entries, and malformed block/member shapes. It also verifies
+property-specific nested-field diagnostics while preserving `SHADER_INVALID`.
+Test-only counters prove a rejected deduplicated private shader identity is
+reflected once and reaches neither native shader creation nor cache/output
+publication; `vk_pipeline_cache` proves the same once-per-identity behavior for
+successful batches. `scripts/build_shaders.py` compiles sorted
 `.glsl` fixtures with
 `glslc` and assembles sorted `.spvasm` fixtures with `spirv-as`. The latter make
 multi-entry, offset, member-order, and multiple-block reflection shapes

@@ -68,8 +68,8 @@ fn vk::VkDeviceState* cache_test_state(gpu::Device* device) {
 }
 
 struct CacheShaders {
-    gpu::ShaderCode vert;
-    gpu::ShaderCode frag;
+    gpu::ShaderDesc vert;
+    gpu::ShaderDesc frag;
 }
 
 struct GeneratedLayoutGate {
@@ -89,6 +89,7 @@ struct PipelineShaderDiagnosticCapture {
     ZString expected_operation;
     ZString expected_debug_name;
     ZString expected_field;
+    ZString expected_invariant;
     bool    matched;
 }
 
@@ -103,7 +104,7 @@ fn void capture_pipeline_shader_diagnostic(
         && message.severity == gpu::DebugMessageSeverity.ERROR
         && message.category.public_contract
         && message.has_fault
-        && message.public_fault == gpu::INVALID_ARGUMENT
+        && message.public_fault == gpu::SHADER_INVALID
         && message.operation != null
         && message.operation.str_view()
             == capture.expected_operation.str_view()
@@ -116,7 +117,7 @@ fn void capture_pipeline_shader_diagnostic(
         && message.rejected_field.str_view() == capture.expected_field.str_view()
         && message.invariant != null
         && message.invariant.str_view()
-            == "shader code must come from prepare_shader_code";
+            == capture.expected_invariant.str_view();
 }
 
 fn void block_generated_layout_read(void* raw_gate) {
@@ -144,18 +145,16 @@ fn int record_generated_dispatch(void* raw_args) {
 
 fn CacheShaders make_cache_shaders() {
     gpu::ShaderDesc vert_sd = {
-        .stage       = gpu::ShaderStage.VERTEX,
         .spirv       = CACHE_VERT_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc frag_sd = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = CACHE_FRAG_SPIRV[..],
         .entry_point = "main",
     };
     return {
-        .vert = gpu::prepare_shader_code(&vert_sd)!!,
-        .frag = gpu::prepare_shader_code(&frag_sd)!!,
+        .vert = vert_sd,
+        .frag = frag_sd,
     };
 }
 
@@ -179,11 +178,10 @@ fn void assert_pipeline_identity_scale_work(
     foreach (&byte : spirv) *byte = 0;
     mem::copy(spirv.ptr, CACHE_COMP_SPIRV[..].ptr, 20);
     gpu::ShaderDesc desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = spirv,
         .entry_point = "main",
     };
-    gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
+    gpu::ShaderDesc code = desc;
     vk::PipelineIdentityProbeResult result =
         vk::probe_pipeline_identity_boundary(state, &code)!!;
 
@@ -231,11 +229,10 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
     gpu::ShaderDesc target_frag_desc = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = CACHE_TARGETS_FRAG_SPIRV[..],
         .entry_point = "main",
     };
-    shaders.frag = gpu::prepare_shader_code(&target_frag_desc)!!;
+    shaders.frag = target_frag_desc;
 
     gpu::Format[2] color_formats = {
         gpu::Format.RGBA8_UNORM,
@@ -483,11 +480,10 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::ShaderDesc comp_sd = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ShaderDesc comp = comp_sd;
 
     gpu::ComputePipelineDesc desc = { .shader = comp };
     gpu::PipelineHandle first = gpu::create_compute_pipeline(&device, &desc)!!;
@@ -498,11 +494,10 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
     assert(cache_entry_count(&device) == 1, "identical compute descriptors share one entry");
 
     gpu::ShaderDesc alt_sd = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_ALT_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode alt = gpu::prepare_shader_code(&alt_sd)!!;
+    gpu::ShaderDesc alt = alt_sd;
     gpu::ComputePipelineDesc distinct_desc = { .shader = alt };
     gpu::PipelineHandle third = gpu::create_compute_pipeline(
         &device,
@@ -522,46 +517,45 @@ fn void compute_pipelines_dedup_and_share_layouts() @test {
         "compute pipelines use the device singleton layout");
 }
 
-fn void identical_shader_bytes_from_distinct_storage_deduplicate() @test {
+fn void caller_shader_storage_is_call_scoped_and_deduplicates() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
 
     char[] source = CACHE_COMP_SPIRV[..];
     char[] first_storage = mem::new_array(char, source.len);
-    defer mem::free(first_storage.ptr);
-    char[] second_storage = mem::new_array(char, source.len);
-    defer mem::free(second_storage.ptr);
     mem::copy(first_storage.ptr, source.ptr, source.len);
-    mem::copy(second_storage.ptr, source.ptr, source.len);
-
     gpu::ShaderDesc first_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = first_storage,
         .entry_point = "main",
     };
-    gpu::ShaderDesc second_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
-        .spirv       = second_storage,
-        .entry_point = "main",
-    };
-    gpu::ShaderCode first_code = gpu::prepare_shader_code(&first_desc)!!;
-    gpu::ShaderCode second_code = gpu::prepare_shader_code(&second_desc)!!;
     gpu::ComputePipelineDesc first_pipeline_desc = {
-        .shader             = first_code,
-    };
-    gpu::ComputePipelineDesc second_pipeline_desc = {
-        .shader             = second_code,
+        .shader = first_desc,
     };
     vk::VkDeviceState* state = cache_test_state(&device);
 
     vk::reset_pipeline_identity_stats(state);
     gpu::PipelineHandle first =
         gpu::create_compute_pipeline(&device, &first_pipeline_desc)!!;
+    foreach (&byte : first_storage) *byte = 0;
+    mem::free(first_storage.ptr);
+
+    char[] second_storage = mem::new_array(char, source.len);
+    mem::copy(second_storage.ptr, source.ptr, source.len);
+    gpu::ShaderDesc second_desc = {
+        .spirv       = second_storage,
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc second_pipeline_desc = {
+        .shader = second_desc,
+    };
     gpu::PipelineHandle second =
         gpu::create_compute_pipeline(&device, &second_pipeline_desc)!!;
+    foreach (&byte : second_storage) *byte = 0;
+    mem::free(second_storage.ptr);
+
     vk::PipelineIdentityStats stats = vk::pipeline_identity_stats(state);
     assert(cache_entry_count(&device) == 1,
-        "identical IR bytes from distinct storage share one cache entry");
+        "released caller storage does not change exact cache identity");
     assert(stats.shader_intern_probes == 1
             && stats.shader_intern_bytes_compared == source.len,
         "distinct storage performs one exact identity comparison");
@@ -569,6 +563,15 @@ fn void identical_shader_bytes_from_distinct_storage_deduplicate() @test {
         "distinct storage owns one canonical SPIR-V clone");
     assert(stats.pipeline_key_probes == 1,
         "distinct storage reaches one compact pipeline-key cache hit");
+
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::cmd_bind_pipeline(&commands, first)!!;
+    gpu::cmd_bind_pipeline(&commands, second)!!;
+    gpu::discard_commands(&commands)!!;
 
     gpu::destroy_pipeline(&device, first)!!;
     gpu::destroy_pipeline(&device, second)!!;
@@ -591,11 +594,10 @@ fn void shader_store_cache_hit_reference_is_stable() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc desc = { .shader = shader };
     vk::VkDeviceState* state = cache_test_state(&device);
 
@@ -647,16 +649,44 @@ fn void shader_store_collision_verification_is_exact() @test {
     );
     distinct_storage[distinct_storage.len - 1] ^= 1;
     gpu::ShaderDesc first_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc distinct_desc = first_desc;
     distinct_desc.spirv = distinct_storage;
-    gpu::ShaderCode first = gpu::prepare_shader_code(&first_desc)!!;
-    gpu::ShaderCode distinct = gpu::prepare_shader_code(&distinct_desc)!!;
-    distinct.digest = first.digest;
     vk::VkDeviceState* state = cache_test_state(&device);
+    vk::ShaderIdentityInput first;
+    vk::ShaderIdentityInput distinct;
+    vk::ShaderIdentityInput alternate_entry;
+    vk::normalize_shader_input(
+        state:          state,
+        desc:           &first_desc,
+        role:           gpu::internal::ShaderRole.COMPUTE,
+        operation:      "test_shader_store_collision",
+        rejected_field: "ShaderDesc",
+        out_input:      &first,
+    )!!;
+    vk::normalize_shader_input(
+        state:          state,
+        desc:           &distinct_desc,
+        role:           gpu::internal::ShaderRole.COMPUTE,
+        operation:      "test_shader_store_collision",
+        rejected_field: "ShaderDesc",
+        out_input:      &distinct,
+    )!!;
+    distinct.hash = first.hash;
+    gpu::ShaderDesc alternate_entry_desc = first_desc;
+    alternate_entry_desc.entry_point = "alternate";
+    vk::normalize_shader_input(
+        state:          state,
+        desc:           &alternate_entry_desc,
+        role:           gpu::internal::ShaderRole.COMPUTE,
+        operation:      "test_shader_store_collision",
+        rejected_field: "ShaderDesc",
+        out_input:      &alternate_entry,
+    )!!;
+    vk::ShaderIdentityInput alternate_role = first;
+    alternate_role.role = gpu::internal::ShaderRole.VERTEX;
 
     vk::reset_pipeline_identity_stats(state);
     state.resource_mutex.lock()!!;
@@ -665,30 +695,41 @@ fn void shader_store_collision_verification_is_exact() @test {
         state,
         &distinct,
     )!!;
+    vk::ShaderId alternate_entry_id =
+        vk::retain_shader_identity_locked(state, &alternate_entry)!!;
+    vk::ShaderId alternate_role_id =
+        vk::retain_shader_identity_locked(state, &alternate_role)!!;
     state.resource_mutex.unlock();
     vk::PipelineIdentityStats collision_stats =
         vk::pipeline_identity_stats(state);
-    assert(first_id != distinct_id,
-        "equal digests with different bytes receive distinct shader IDs");
-    assert(collision_stats.shader_intern_probes == 1
+    assert(first_id != distinct_id
+            && first_id != alternate_entry_id
+            && first_id != alternate_role_id
+            && distinct_id != alternate_entry_id
+            && distinct_id != alternate_role_id
+            && alternate_entry_id != alternate_role_id,
+        "bytes, entry point, and role distinguish colliding shader identities");
+    assert(collision_stats.shader_intern_probes == 6
             && collision_stats.shader_intern_bytes_compared == first.spirv.len,
-        "a digest collision probes and compares the complete payload once");
-    assert(collision_stats.shader_owned_bytes_cloned == first.spirv.len * 2,
+        "colliding identities probe the chain and compare the payload once");
+    assert(collision_stats.shader_owned_bytes_cloned == first.spirv.len * 4,
         "collision-separated identities each own one complete clone");
-    assert(vk::shader_store_live_count(state) == 2,
-        "both collision-separated identities remain live");
+    assert(vk::shader_store_live_count(state) == 4,
+        "all collision-separated identities remain live");
     assert(vk::shader_store_index_consistent(state),
         "collision-separated entries remain bucket-indexed");
 
     state.resource_mutex.lock()!!;
     vk::release_shader_identity_locked(state, first_id)!!;
     vk::release_shader_identity_locked(state, distinct_id)!!;
+    vk::release_shader_identity_locked(state, alternate_entry_id)!!;
+    vk::release_shader_identity_locked(state, alternate_role_id)!!;
     state.resource_mutex.unlock();
     collision_stats = vk::pipeline_identity_stats(state);
     assert(vk::shader_store_live_count(state) == 0,
         "releasing both collision identities empties the store");
-    assert(collision_stats.shader_owned_bytes_freed == first.spirv.len * 2,
-        "releasing both collision identities frees both complete clones");
+    assert(collision_stats.shader_owned_bytes_freed == first.spirv.len * 4,
+        "releasing collision identities frees every complete clone");
 }
 
 fn void shader_store_reuses_entries_across_unique_churn() @test {
@@ -696,20 +737,29 @@ fn void shader_store_reuses_entries_across_unique_churn() @test {
     gpu::Device device = make_cache_test_device_with_capacity(1);
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc desc = { .shader = shader };
     vk::VkDeviceState* state = cache_test_state(&device);
 
     vk::reset_pipeline_identity_stats(state);
     for (uint i = 0; i < CHURN_COUNT; i++) {
-        desc.shader.digest = shader.digest + (ulong)i + 1;
-        gpu::PipelineHandle pipeline =
-            gpu::create_compute_pipeline(&device, &desc)!!;
-        gpu::destroy_pipeline(&device, pipeline)!!;
+        vk::ShaderIdentityInput input;
+        vk::normalize_shader_input(
+            state:          state,
+            desc:           &desc.shader,
+            role:           gpu::internal::ShaderRole.COMPUTE,
+            operation:      "test_shader_store_churn",
+            rejected_field: "ShaderDesc",
+            out_input:      &input,
+        )!!;
+        input.hash += (ulong)i + 1;
+        state.resource_mutex.lock()!!;
+        vk::ShaderId id = vk::retain_shader_identity_locked(state, &input)!!;
+        vk::release_shader_identity_locked(state, id)!!;
+        state.resource_mutex.unlock();
         assert(vk::shader_store_live_count(state) == 0,
             "each churn iteration releases its unique shader identity");
         assert(vk::shader_store_index_consistent(state),
@@ -740,12 +790,10 @@ fn void full_pipeline_capacity_faults_before_shader_store_mutation() @test {
         "one live graphics pipeline fills the two-identity store");
 
     gpu::ShaderDesc compute_shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode compute_shader =
-        gpu::prepare_shader_code(&compute_shader_desc)!!;
+    gpu::ShaderDesc compute_shader = compute_shader_desc;
     gpu::ComputePipelineDesc compute = { .shader = compute_shader };
     vk::reset_pipeline_identity_stats(state);
     fault capacity_fault =
@@ -774,11 +822,10 @@ fn void pipeline_creation_faults_release_owned_shader_identity() @test {
 
     char[] truncated_spirv = CACHE_COMP_SPIRV[0:20];
     gpu::ShaderDesc truncated_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = truncated_spirv,
         .entry_point = "main",
     };
-    gpu::ShaderCode truncated = gpu::prepare_shader_code(&truncated_desc)!!;
+    gpu::ShaderDesc truncated = truncated_desc;
     gpu::ComputePipelineDesc reflection_desc = { .shader = truncated };
     vk::reset_pipeline_identity_stats(state);
     assert(@catch(gpu::create_compute_pipeline(&device, &reflection_desc))
@@ -794,11 +841,10 @@ fn void pipeline_creation_faults_release_owned_shader_identity() @test {
         "reflection failure frees its owned shader bytes exactly once");
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc desc = { .shader = shader };
 
     vk::reset_pipeline_identity_stats(state);
@@ -855,50 +901,12 @@ fn void pipeline_creation_faults_release_owned_shader_identity() @test {
         "every injected fault preserves both indexes");
 }
 
-fn void shader_digest_collisions_compare_ir_bytes() @test {
-    gpu::Device device = make_cache_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::ShaderDesc first_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
-        .spirv       = CACHE_COMP_SPIRV[..],
-        .entry_point = "main",
-    };
-    gpu::ShaderDesc distinct_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
-        .spirv       = CACHE_ALT_COMP_SPIRV[..],
-        .entry_point = "main",
-    };
-    gpu::ShaderCode first_code = gpu::prepare_shader_code(&first_desc)!!;
-    gpu::ShaderCode distinct_code = gpu::prepare_shader_code(&distinct_desc)!!;
-    distinct_code.digest = first_code.digest;
-    assert(first_code != distinct_code,
-        "forced digest collisions remain distinct shader code");
-
-    gpu::ComputePipelineDesc first_pipeline_desc = {
-        .shader             = first_code,
-    };
-    gpu::ComputePipelineDesc distinct_pipeline_desc = {
-        .shader             = distinct_code,
-    };
-    gpu::PipelineHandle first =
-        gpu::create_compute_pipeline(&device, &first_pipeline_desc)!!;
-    gpu::PipelineHandle distinct =
-        gpu::create_compute_pipeline(&device, &distinct_pipeline_desc)!!;
-    assert(cache_entry_count(&device) == 2,
-        "equal digests with different IR bytes create distinct cache entries");
-
-    gpu::destroy_pipeline(&device, first)!!;
-    gpu::destroy_pipeline(&device, distinct)!!;
-}
-
-fn void prepared_shader_code_is_reusable_across_devices() @test {
+fn void shader_desc_is_reusable_across_devices() @test {
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
 
     gpu::Device first_device = make_cache_test_device();
     defer destroy_test_device(&first_device)!!;
@@ -918,7 +926,7 @@ fn void prepared_shader_code_is_reusable_across_devices() @test {
     assert(cache_entry_count(&first_device) == 1,
         "the first device owns one pipeline cache entry");
     assert(cache_entry_count(&second_device) == 1,
-        "the second device owns an independent entry for shared shader code");
+        "the second device owns an independent entry for shared shader input");
 }
 
 fn void dynamic_raster_state_renders_with_one_pipeline() @test {
@@ -1425,7 +1433,7 @@ fn void line_polygon_mode_respects_optional_feature() @test {
     };
     uint entries_before = cache_entry_count(&device);
     assert(@catch(gpu::create_graphics_pipeline(&device, &unavailable)) == gpu::UNSUPPORTED_FEATURE,
-        "unsupported LINE faults before invalid shader-code validation");
+        "unsupported LINE faults before invalid shader input validation");
     assert(cache_entry_count(&device) == entries_before, "unsupported LINE publishes no cache entry");
     state.caps.line_polygon_mode = supported;
 
@@ -1452,11 +1460,10 @@ fn void compute_layout_exists_before_pipeline_creation() @test {
         state.generated_dispatch_layout;
 
     gpu::ShaderDesc comp_sd = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode comp = gpu::prepare_shader_code(&comp_sd)!!;
+    gpu::ShaderDesc comp = comp_sd;
     gpu::ComputePipelineDesc desc = { .shader = comp };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &desc)!!;
     assert(state.pipelines.slots[pipeline.index].value.layout
@@ -1478,11 +1485,10 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
     if (!caps.generated_work) return;
 
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc pipeline_desc = {
         .shader             = shader,
     };
@@ -1559,12 +1565,10 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
     while (!gate.entered.load(AtomicOrdering.ACQUIRE)) thread::yield();
 
     gpu::ShaderDesc alternate_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_ALT_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode alternate_shader =
-        gpu::prepare_shader_code(&alternate_desc)!!;
+    gpu::ShaderDesc alternate_shader = alternate_desc;
     gpu::ComputePipelineDesc alternate_pipeline_desc = {
         .shader = alternate_shader,
     };
@@ -1598,11 +1602,10 @@ fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test 
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     char[] equivalent_storage = mem::new_array(char, CACHE_COMP_SPIRV.len);
     defer mem::free(equivalent_storage.ptr);
     mem::copy(
@@ -1612,14 +1615,12 @@ fn void compute_pipeline_batch_deduplicates_identity_and_shader_modules() @test 
     );
     gpu::ShaderDesc equivalent_desc = shader_desc;
     equivalent_desc.spirv = equivalent_storage;
-    gpu::ShaderCode equivalent_shader = gpu::prepare_shader_code(&equivalent_desc)!!;
+    gpu::ShaderDesc equivalent_shader = equivalent_desc;
     gpu::ShaderDesc distinct_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_ALT_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode distinct_shader =
-        gpu::prepare_shader_code(&distinct_desc)!!;
+    gpu::ShaderDesc distinct_shader = distinct_desc;
     gpu::ComputePipelineDesc[3] descs = {
         { .shader = shader },
         { .shader = equivalent_shader },
@@ -1709,13 +1710,13 @@ fn void graphics_pipeline_batch_revalidates_shared_shader_roles() @test {
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     ulong native_pipelines_before = vk::pipeline_native_create_count(state);
 
-    fault stage_fault = @catch(gpu::create_graphics_pipelines(
+    fault role_fault = @catch(gpu::create_graphics_pipelines(
         &device,
         descs[..],
         outputs[..],
     ));
 
-    assert(stage_fault == gpu::INVALID_ARGUMENT,
+    assert(role_fault == gpu::SHADER_INVALID,
         "batch shader reuse still validates each graphics shader role");
     assert(outputs[0] == before, "shader-role failure leaves caller outputs unchanged");
     assert(cache_entry_count(&device) == 0, "shader-role failure publishes no cache entry");
@@ -1727,11 +1728,10 @@ fn void pipeline_batch_shape_failure_preserves_outputs() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc[2] descs;
     foreach (&desc : descs) {
         *desc = { .shader = shader };
@@ -1752,11 +1752,10 @@ fn void pipeline_batch_capacity_failure_is_transactional() @test {
     gpu::Device device = make_cache_test_device_with_capacity(1);
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc[2] descs = {
         { .shader = shader },
         { .shader = shader },
@@ -1789,16 +1788,21 @@ fn void pipeline_batch_capacity_failure_is_transactional() @test {
         "batch handle preflight faults before shader interning");
 }
 
-fn void compute_pipeline_shader_validation_reports_contract_failure() @test {
+fn void malformed_compute_shader_rejected_before_store_mutation() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
-    gpu::ShaderCode invalid = { .debug_name = "invalid_compute_shader" };
+    uint[5] invalid_words = { 0, 0x00010000, 0, 1, 0 };
+    gpu::ShaderDesc invalid = {
+        .spirv = ((char*)&invalid_words[0])[:uint[5]::size],
+        .debug_name = "invalid_compute_shader",
+    };
     gpu::ComputePipelineDesc desc = { .shader = invalid };
     vk::VkDeviceState* state = cache_test_state(&device);
     PipelineShaderDiagnosticCapture capture = {
         .expected_operation  = "create_compute_pipeline",
         .expected_debug_name = "invalid_compute_shader",
         .expected_field      = "ComputePipelineDesc.shader",
+        .expected_invariant  = "SPIR-V magic must be valid",
         .matched             = true,
     };
     state.debug_callback = &capture_pipeline_shader_diagnostic;
@@ -1808,7 +1812,7 @@ fn void compute_pipeline_shader_validation_reports_contract_failure() @test {
 
     state.debug_callback = null;
     state.debug_user_data = null;
-    assert(shader_fault == gpu::INVALID_ARGUMENT,
+    assert(shader_fault == gpu::SHADER_INVALID,
         "invalid compute shader preserves its validation fault");
     assert(capture.calls == 1 && capture.matched,
         "invalid compute shader emits one exact contract diagnostic");
@@ -1818,15 +1822,14 @@ fn void compute_pipeline_shader_validation_reports_contract_failure() @test {
         "compute shader validation performs no interning");
 }
 
-fn void compute_pipeline_batch_shader_validation_ignores_unprepared_suffix() @test {
+fn void compute_pipeline_batch_normalization_rejects_invalid_suffix() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ComputePipelineDesc[2] descs = {
         { .shader = shader },
         { .shader = shader },
@@ -1852,6 +1855,7 @@ fn void compute_pipeline_batch_shader_validation_ignores_unprepared_suffix() @te
         .expected_operation  = "create_compute_pipelines",
         .expected_debug_name = "invalid_compute_batch_shader",
         .expected_field      = "ComputePipelineDesc.shader",
+        .expected_invariant  = "SPIR-V must contain a word-aligned header",
         .matched             = true,
     };
     state.debug_callback = &capture_pipeline_shader_diagnostic;
@@ -1869,7 +1873,7 @@ fn void compute_pipeline_batch_shader_validation_ignores_unprepared_suffix() @te
     state.debug_callback = null;
     state.debug_user_data = null;
 
-    assert(shader_fault == gpu::INVALID_ARGUMENT,
+    assert(shader_fault == gpu::SHADER_INVALID,
         "a later invalid compute shader preserves its validation fault");
     assert(capture.calls == 1 && capture.matched,
         "later invalid compute shader emits one exact contract diagnostic");
@@ -1885,7 +1889,7 @@ fn void compute_pipeline_batch_shader_validation_ignores_unprepared_suffix() @te
     assert(vk::shader_store_live_count(state) == 1,
         "compute shader validation preserves the sentinel identity");
     assert(state.shader_store.entries[(uint)sentinel_shader_id].refcount == 1,
-        "compute cleanup ignores the poisoned unprepared suffix");
+        "compute cleanup ignores the poisoned suffix identity");
     assert(vk::shader_store_index_consistent(state),
         "compute shader validation preserves the shader index and free list");
     assert(stats.shader_owned_bytes_cloned == 0
@@ -1896,7 +1900,7 @@ fn void compute_pipeline_batch_shader_validation_ignores_unprepared_suffix() @te
         "destroying the sentinel releases its cache-owned identity");
 }
 
-fn void graphics_pipeline_batch_shader_validation_ignores_unprepared_suffix() @test {
+fn void graphics_pipeline_batch_normalization_rejects_invalid_suffix() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     CacheShaders shaders = make_cache_shaders();
@@ -1929,6 +1933,7 @@ fn void graphics_pipeline_batch_shader_validation_ignores_unprepared_suffix() @t
         .expected_operation  = "create_graphics_pipelines",
         .expected_debug_name = "invalid_graphics_batch_fragment",
         .expected_field      = "GraphicsPipelineDesc.fragment_shader",
+        .expected_invariant  = "SPIR-V must contain a word-aligned header",
         .matched             = true,
     };
     state.debug_callback = &capture_pipeline_shader_diagnostic;
@@ -1946,7 +1951,7 @@ fn void graphics_pipeline_batch_shader_validation_ignores_unprepared_suffix() @t
     state.debug_callback = null;
     state.debug_user_data = null;
 
-    assert(shader_fault == gpu::INVALID_ARGUMENT,
+    assert(shader_fault == gpu::SHADER_INVALID,
         "a later invalid fragment shader preserves its validation fault");
     assert(capture.calls == 1 && capture.matched,
         "later invalid fragment emits one exact contract diagnostic");
@@ -1963,7 +1968,7 @@ fn void graphics_pipeline_batch_shader_validation_ignores_unprepared_suffix() @t
         "graphics shader validation preserves both sentinel identities");
     assert(state.shader_store.entries[(uint)sentinel_vertex_id].refcount == 1
             && state.shader_store.entries[(uint)sentinel_fragment_id].refcount == 1,
-        "graphics cleanup ignores the poisoned unprepared fragment suffix");
+        "graphics cleanup ignores the poisoned fragment identity");
     assert(vk::shader_store_index_consistent(state),
         "graphics shader validation preserves the shader index and free list");
     assert(stats.shader_owned_bytes_cloned == 0
@@ -1991,6 +1996,7 @@ fn void graphics_pipeline_shader_validation_reports_contract_failure() @test {
         .expected_operation  = "create_graphics_pipeline",
         .expected_debug_name = "invalid_graphics_fragment",
         .expected_field      = "GraphicsPipelineDesc.fragment_shader",
+        .expected_invariant  = "SPIR-V must contain a word-aligned header",
         .matched             = true,
     };
     state.debug_callback = &capture_pipeline_shader_diagnostic;
@@ -2004,7 +2010,7 @@ fn void graphics_pipeline_shader_validation_reports_contract_failure() @test {
     state.debug_callback = null;
     state.debug_user_data = null;
 
-    assert(shader_fault == gpu::INVALID_ARGUMENT,
+    assert(shader_fault == gpu::SHADER_INVALID,
         "an invalid fragment shader preserves its validation fault");
     assert(capture.calls == 1 && capture.matched,
         "invalid fragment emits one exact contract diagnostic");
@@ -2022,6 +2028,50 @@ fn void graphics_pipeline_shader_validation_reports_contract_failure() @test {
     assert(stats.shader_owned_bytes_cloned == 0
             && stats.shader_owned_bytes_freed == 0,
         "single graphics shader validation faults before interning");
+}
+
+fn void graphics_fragment_failure_releases_vertex_preparation() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::ShaderDesc valid_fragment = shaders.frag;
+    shaders.frag = {
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::Format[1] colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc desc =
+        base_graphics_desc(&shaders, colors[..]);
+    vk::VkDeviceState* state = cache_test_state(&device);
+    ulong modules_before =
+        vk::pipeline_shader_module_create_count(state);
+    ulong attempts_before =
+        vk::pipeline_shader_create_attempt_count(state);
+
+    fault fragment_fault =
+        @catch(gpu::create_graphics_pipeline(&device, &desc));
+
+    assert(fragment_fault == gpu::SHADER_INVALID,
+        "a compute fragment faults SHADER_INVALID");
+    assert(vk::pipeline_shader_module_create_count(state)
+            == modules_before + 1,
+        "the fragment fails after one temporary vertex module");
+    assert(vk::pipeline_shader_create_attempt_count(state)
+            == attempts_before + 1,
+        "the rejected fragment creates no native module");
+    assert(vk::shader_store_live_count(state) == 0,
+        "fragment failure releases both prepared shader identities");
+    assert(cache_entry_count(&device) == 0,
+        "fragment failure publishes no pipeline cache entry");
+
+    desc.fragment_shader = valid_fragment;
+    gpu::PipelineHandle pipeline =
+        gpu::create_graphics_pipeline(&device, &desc)!!;
+    gpu::destroy_pipeline(&device, pipeline)!!;
+    assert(vk::shader_store_live_count(state) == 0,
+        "the corrected retry releases both identities on destroy");
 }
 
 fn void pipeline_batch_invalid_state_prevalidates_transactionally() @test {
@@ -2069,18 +2119,15 @@ fn void pipeline_batch_partial_failure_rolls_back_publication() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode shader = gpu::prepare_shader_code(&shader_desc)!!;
+    gpu::ShaderDesc shader = shader_desc;
     gpu::ShaderDesc alternate_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = CACHE_ALT_COMP_SPIRV[..],
         .entry_point = "main",
     };
-    gpu::ShaderCode alternate_shader =
-        gpu::prepare_shader_code(&alternate_desc)!!;
+    gpu::ShaderDesc alternate_shader = alternate_desc;
     gpu::ComputePipelineDesc[2] descs = {
         { .shader = shader },
         { .shader = alternate_shader },

@@ -556,23 +556,28 @@ descriptor cell, owner count, generation, free list, or output token.
 
 ## 11. Shader and pipeline implementation
 
-### Shader preparation and modules
+### Shader input and modules
 
-`ShaderCode` is borrowed CPU-side IR with library-computed identity, not a
-backend object. Before cache lookup, each device interns digest, stage, entry
-point, length, and exact SPIR-V into owned storage. Digest selects a bucket;
-exact comparison resolves collisions. Debug names do not participate in
-identity. On a miss, the backend reflects the owned entry against the requested
-pipeline ABI before creating a temporary `vk::ShaderModule`, compiles the
-pipeline, and destroys the module before returning. Batch creation reflects
-and creates at most one temporary module per `ShaderId`, and rolls back every
-created handle, cache entry, and pending shader reference before returning a
-fault. No native shader-module handle crosses the public boundary.
+Pipeline creation receives borrowed `ShaderDesc` values directly. The enclosing
+compute, vertex, or fragment field supplies the expected role, and a null entry
+point normalizes to `main`. Before cache lookup, the backend validates every
+host-visible shader shape and copies each surviving role, normalized entry
+point, byte length, and exact SPIR-V into owned private storage. A private hash
+selects a bucket; exact comparison resolves collisions. Debug names do not
+participate in identity, and no post-call identity retains caller pointers.
+
+On a miss, the backend reflects the selected entry against the field-derived
+role and pipeline ABI before creating a temporary `vk::ShaderModule`, compiles
+the pipeline, and destroys the module before returning. Batch creation
+normalizes every shader before interning any, reflects and creates at most one
+temporary module per private shader identity, and rolls back every created
+handle, cache entry, and pending shader reference before returning a fault. No
+native shader-module handle crosses the public boundary.
 
 Reflection validation checks:
 
 ```text
-entry point exists and matches the declared stage
+entry point exists and matches the enclosing pipeline field's role
 descriptor and push-constant enumeration is scoped to the selected entry point
 unexpected descriptor sets are rejected and heap bindings match convention
 an absent push-constant block is accepted
@@ -583,9 +588,9 @@ a present block is unique, starts at offset zero, and exactly matches the
 The exact check compares block size, member count and order, byte offsets and
 sizes, scalar widths, signedness, and integer/float kind. It rejects vectors,
 matrices, arrays, nested structs, booleans, and references; reflected names are
-ignored. Reflection failures return `SHADER_INVALID` before native shader
-creation, pipeline-cache mutation, or output publication. Caller-side pipeline
-role errors remain `INVALID_ARGUMENT`.
+ignored. Reflection failures, including a selected-entry execution-model
+mismatch, return `SHADER_INVALID` before native shader creation, pipeline-cache
+mutation, or output publication.
 
 ### Compute pipeline
 
@@ -666,10 +671,11 @@ Multi-viewport arrays are outside the portable contract.
 
 Two layers. A descriptor-keyed dedup cache (`PipelineKey` over immutable state,
 with refcounted aliases) sits in front of a driver `vk::PipelineCache`. The key
-and cache entry contain compact shader IDs, never borrowed `ShaderCode` or
-SPIR-V clones. Collision verification and the one owned clone happen only at
-the device interning boundary; pipeline lookup compares IDs and immutable state
-in average constant time. Cache entries own retained IDs. Last-alias release
+and cache entry contain compact shader IDs, never borrowed `ShaderDesc` values
+or caller-owned SPIR-V. Collision verification and the one owned clone happen
+only at the device interning boundary; pipeline lookup compares IDs and
+immutable state in average constant time. Cache entries own retained IDs.
+Last-alias release
 unlinks zero-reference identities and returns their slots to a free list, so
 capacity follows live cache ownership rather than historical churn. The driver
 cache is created with `RuntimeDesc.pipeline_cache_data` as initial data and

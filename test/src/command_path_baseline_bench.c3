@@ -141,24 +141,21 @@ fn void? free_bench_span(gpu::Device* device, BenchSpan* owned) {
 
 fn gpu::PipelineHandle create_compute_pipeline(gpu::Device* device) {
     gpu::ShaderDesc shader_desc = {
-        .stage       = gpu::ShaderStage.COMPUTE,
         .spirv       = COMMAND_PATH_COMP_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ComputePipelineDesc pipeline_desc = {
-        .shader = gpu::prepare_shader_code(&shader_desc)!!,
+        .shader = shader_desc,
     };
     return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
 }
 
 fn gpu::PipelineHandle create_graphics_pipeline(gpu::Device* device) {
     gpu::ShaderDesc vertex_desc = {
-        .stage       = gpu::ShaderStage.VERTEX,
         .spirv       = COMMAND_PATH_VERT_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc fragment_desc = {
-        .stage       = gpu::ShaderStage.FRAGMENT,
         .spirv       = COMMAND_PATH_FRAG_SPIRV[..],
         .entry_point = "main",
     };
@@ -166,8 +163,8 @@ fn gpu::PipelineHandle create_graphics_pipeline(gpu::Device* device) {
         gpu::Format.RGBA8_UNORM,
     };
     gpu::GraphicsPipelineDesc pipeline_desc = {
-        .vertex_shader   = gpu::prepare_shader_code(&vertex_desc)!!,
-        .fragment_shader = gpu::prepare_shader_code(&fragment_desc)!!,
+        .vertex_shader   = vertex_desc,
+        .fragment_shader = fragment_desc,
         .color_formats   = color_formats[..],
     };
     return gpu::create_graphics_pipeline(device, &pipeline_desc)!!;

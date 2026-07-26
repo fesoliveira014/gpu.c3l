@@ -84,7 +84,6 @@
         "../src/test_internal_helpers.c3",
         "../src/test_vk_internal_helpers.c3",
         "../src/test_handles.c3",
-        "../src/test_shader_code.c3",
         "../src/test_sampler_identity.c3",
         "../src/test_runtime.c3",
         "../src/test_device_desc.c3",

@@ -200,6 +200,9 @@ FORBIDDEN_SYMBOLS = {
     "RenderPassHandle",
     "Framebuffer",
     "FramebufferHandle",
+    "ShaderCode",
+    "ShaderStage",
+    "prepare_shader_code",
     "create_render_pass",
     "destroy_render_pass",
     "create_framebuffer",
@@ -340,6 +343,9 @@ RETIRED_SOURCE_SYMBOLS = (
     "create_dynamic_graphics_pipeline(",
     "create_dynamic_graphics_pipelines(",
     "resource_agnostic_texture_sync",
+    "ShaderCode",
+    "ShaderStage",
+    "prepare_shader_code(",
     "RESOURCE_AGNOSTIC_TEXTURE_SYNC",
     "strict_heap_buffer_bind_commands",
     "strict_heap_offset_commands",
@@ -369,6 +375,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "selected_queue_count(",
     "queue_count_for_kind(",
     "add_queue_role_identities(",
+    "shader_code_digest",
+    "shader_stage_valid",
     "cmd_begin_render_pass_with_state(",
 )
 
@@ -819,6 +827,15 @@ def validate_document(document: dict) -> list[str]:
 
     pipeline_schemas = (
         (
+            "ShaderDesc",
+            "struct",
+            (
+                ("spirv", "char[]"),
+                ("entry_point", "ZString"),
+                ("debug_name", "ZString"),
+            ),
+        ),
+        (
             "BlendState",
             "struct",
             (
@@ -905,7 +922,7 @@ def validate_document(document: dict) -> list[str]:
             "ComputePipelineDesc",
             "struct",
             (
-                ("shader", "ShaderCode"),
+                ("shader", "ShaderDesc"),
                 ("debug_name", "ZString"),
             ),
         ),
@@ -913,8 +930,8 @@ def validate_document(document: dict) -> list[str]:
             "GraphicsPipelineDesc",
             "struct",
             (
-                ("vertex_shader", "ShaderCode"),
-                ("fragment_shader", "ShaderCode"),
+                ("vertex_shader", "ShaderDesc"),
+                ("fragment_shader", "ShaderDesc"),
                 ("color_formats", "Format[]"),
                 ("depth_format", "Format"),
                 ("sample_count", "SampleCount"),

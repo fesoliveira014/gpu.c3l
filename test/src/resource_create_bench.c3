@@ -8,10 +8,8 @@ import std::thread;
 import std::time;
 import std::core::mem::allocators;
 
-// Advisory allocation/texture create-destroy and shader-code preparation at
-// 1/2/4 workers, reporting ns/op and scaling against one worker.
-
-const char[*] BENCH_SHADER_SPIRV = $embed("shaders/root_pointer.comp.spv");
+// Advisory allocation/texture create-destroy at 1/2/4 workers, reporting
+// ns/op and scaling against one worker.
 
 const uint BENCH_ITERS_PER_WORKER = 300;
 const uint[3] BENCH_WORKER_COUNTS = { 1, 2, 4 };
@@ -19,7 +17,6 @@ const uint BENCH_MAX_WORKERS = 4;
 
 enum BenchPhase : int {
     TEXTURE,
-    SHADER_CODE,
     ALLOCATION,
     MIXED,
 }
@@ -33,9 +30,8 @@ struct BenchWorkerArgs {
 
 fn ZString phase_name(BenchPhase phase) {
     switch (phase) {
-        case BenchPhase.TEXTURE:     return "textures";
-        case BenchPhase.SHADER_CODE: return "shader_code";
-        case BenchPhase.ALLOCATION:  return "allocations";
+        case BenchPhase.TEXTURE:    return "textures";
+        case BenchPhase.ALLOCATION: return "allocations";
         default:                    return "mixed";
     }
 }
@@ -50,12 +46,6 @@ fn void run_texture_op(gpu::Device* device) {
     };
     gpu::TextureHandle handle = gpu::create_texture(device, &desc)!!;
     gpu::destroy_texture(device, handle)!!;
-}
-
-fn void run_shader_code_op() {
-    gpu::ShaderDesc desc = { .stage = gpu::ShaderStage.COMPUTE, .spirv = BENCH_SHADER_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderCode code = gpu::prepare_shader_code(&desc)!!;
-    (void)code;
 }
 
 fn void run_allocation_op(gpu::Device* device) {
@@ -73,15 +63,12 @@ fn void run_phase_op(gpu::Device* device, BenchPhase phase, uint mix_index) {
     switch (phase) {
         case BenchPhase.TEXTURE:
             run_texture_op(device);
-        case BenchPhase.SHADER_CODE:
-            run_shader_code_op();
         case BenchPhase.ALLOCATION:
             run_allocation_op(device);
         case BenchPhase.MIXED:
-            switch (mix_index % 3) {
+            switch (mix_index % 2) {
                 case 0:  run_allocation_op(device);
-                case 1:  run_texture_op(device);
-                default: run_shader_code_op();
+                default: run_texture_op(device);
             }
     }
 }
@@ -138,7 +125,6 @@ fn int main() {
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     run_phase(&device, state, BenchPhase.TEXTURE);
-    run_phase(&device, state, BenchPhase.SHADER_CODE);
     run_phase(&device, state, BenchPhase.ALLOCATION);
     run_phase(&device, state, BenchPhase.MIXED);
 
