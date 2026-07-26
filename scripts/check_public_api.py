@@ -472,6 +472,16 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "transfer_ids",
     "render_pass_with_state",
     "RenderPassWithState",
+    "vk_create_compute_pipelines",
+    "vk_create_graphics_pipelines",
+    "PipelineBatchShader",
+    "pipeline_batch_shader",
+    "compute_pipeline_is_cached",
+    "pipeline_key_is_cached",
+    "pipeline_creation_failure",
+    "pipeline_creation_should_fail",
+    "pipeline_prepare_poison",
+    "poison_unprepared_shader_identities",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
