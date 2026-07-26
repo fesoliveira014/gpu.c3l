@@ -825,7 +825,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.caps = build_caps(
         base:                    &features2.features,
         v12:                     &features12,
-        v13:                     &features13,
         physical_device:         state.physical_device,
         inputs:                  &caps_inputs,
         viewport_limits:         &state.viewport_limits,
@@ -1538,7 +1537,6 @@ fn bool device_supports_extension(vk::PhysicalDevice physical_device, ZString na
 fn gpu::DeviceCaps build_caps(
     vk::PhysicalDeviceFeatures* base,
     vk::PhysicalDeviceVulkan12Features* v12,
-    vk::PhysicalDeviceVulkan13Features* v13,
     vk::PhysicalDevice physical_device,
     CapsInputs* inputs,
     ViewportLimits* viewport_limits,
@@ -1562,10 +1560,6 @@ fn gpu::DeviceCaps build_caps(
     *non_coherent_atom_size = (usz)props.limits.non_coherent_atom_size;
     return (gpu::DeviceCaps){
         .presentation_enabled       = inputs.presentation_enabled,
-        .buffer_device_address      = v12.buffer_device_address != 0,
-        .synchronization2           = v13.synchronization2 != 0,
-        .dynamic_rendering          = v13.dynamic_rendering != 0,
-        .shader_int64               = base.shader_int64 != 0,
         .draw_indirect_count        = v12.draw_indirect_count != 0,
         .generated_work             = inputs.generated_work.enabled,
         .async_compute              = inputs.async_compute,

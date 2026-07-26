@@ -17,6 +17,26 @@ fn void pin_runtime_adapter_device() {
     };
     gpu::DeviceDesc device_desc = { .queues = queues };
     gpu::Device device = {};
+    gpu::DeviceCaps caps = {
+        .presentation_enabled         = true,
+        .draw_indirect_count          = true,
+        .generated_work               = true,
+        .async_compute                = true,
+        .queues                       = { .graphics, .compute, .transfer },
+        .line_polygon_mode            = true,
+        .texture_heap_capacity        = 1,
+        .sampler_heap_capacity        = 1,
+        .max_color_attachments        = 1,
+        .max_push_constant_size       = 1,
+        .max_compute_work_group_count = { .x = 1, .y = 1, .z = 1 },
+        .max_draw_indirect_count      = 1,
+        .max_generated_work_count     = 1,
+        .min_uniform_alignment        = 1,
+        .min_storage_alignment        = 1,
+        .min_texel_buffer_alignment   = 1,
+        .max_sampler_lod_bias         = 1.0f,
+        .max_sampler_anisotropy       = 1.0f,
+    };
 
     (void)gpu::full_validation_runtime_desc();
     (void)gpu::create_runtime(&runtime_desc);
@@ -34,6 +54,24 @@ fn void pin_runtime_adapter_device() {
     (void)gpu::build_memory_report(&device, false);
     (void)gpu::destroy_device(&device);
     (void)gpu::destroy_runtime(&runtime);
+    (void)caps.presentation_enabled;
+    (void)caps.draw_indirect_count;
+    (void)caps.generated_work;
+    (void)caps.async_compute;
+    (void)caps.queues;
+    (void)caps.line_polygon_mode;
+    (void)caps.texture_heap_capacity;
+    (void)caps.sampler_heap_capacity;
+    (void)caps.max_color_attachments;
+    (void)caps.max_push_constant_size;
+    (void)caps.max_compute_work_group_count;
+    (void)caps.max_draw_indirect_count;
+    (void)caps.max_generated_work_count;
+    (void)caps.min_uniform_alignment;
+    (void)caps.min_storage_alignment;
+    (void)caps.min_texel_buffer_alignment;
+    (void)caps.max_sampler_lod_bias;
+    (void)caps.max_sampler_anisotropy;
 }
 
 fn void pin_memory_and_resources() {

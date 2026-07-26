@@ -296,10 +296,6 @@ destruction. Destroy each device before its runtime.
 ```text
 DeviceCaps
     bool presentation_enabled
-    bool buffer_device_address
-    bool synchronization2
-    bool dynamic_rendering
-    bool shader_int64
     bool draw_indirect_count
     bool generated_work
     bool async_compute

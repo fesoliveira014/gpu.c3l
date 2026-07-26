@@ -243,10 +243,6 @@ enum QueueKind : int {
    hardcoding limits. *>
 struct DeviceCaps {
     bool presentation_enabled;
-    bool buffer_device_address;
-    bool synchronization2;
-    bool dynamic_rendering;
-    bool shader_int64;
     bool draw_indirect_count;
     // GPU-written root records and work arguments can execute without host
     // readback or CPU-loop emulation.
