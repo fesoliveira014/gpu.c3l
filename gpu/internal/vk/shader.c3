@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 import vk;
 import spvreflect;
+import std::core::env;
 import std::core::mem;
 import std::core::mem::alloc;
 
@@ -57,9 +58,9 @@ struct PipelineShaderModule {
 }
 
 struct ShaderModuleCreateOps @private {
-    void*                user_data;
-    ShaderModuleCreateFn create;
-    bool                  allow_alternate_root_abi;
+    void*                   user_data;
+    ShaderModuleCreateFn    create;
+    bool allow_alternate_root_abi @if(env::TESTING);
 }
 
 fn uint shader_store_bucket(ulong hash, uint bucket_count) {
@@ -769,11 +770,16 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
             invariant:      "selected-entry descriptor bindings must match the gpu heap convention",
         )~;
     }
+    bool allow_alternate_root_abi = false;
+    $if env::TESTING:
+        allow_alternate_root_abi =
+            create_ops.allow_alternate_root_abi;
+    $endif
     RootAbiMismatch root_mismatch = root_push_abi_mismatch(
         reflect_module:  reflect_module,
         entry_point:     selected_entry_point,
         role:            code.role,
-        allow_alternate: create_ops.allow_alternate_root_abi,
+        allow_alternate: allow_alternate_root_abi,
     );
     if (root_mismatch != RootAbiMismatch.NONE) {
         return report_shader_contract_failure(

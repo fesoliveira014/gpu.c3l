@@ -5,6 +5,7 @@ import gpu @public;
 import vk;
 import std::thread;
 import std::core::mem;
+import std::core::env;
 import std::atomic;
 import std::atomic::types;
 
@@ -15,7 +16,25 @@ alias QueueSubmit2Fn @private = fn vk::Result (
     vk::SubmitInfo2*,
     vk::Fence,
 );
+alias SubmissionCheckpointFn @private @if(env::TESTING) = fn void (
+    void*,
+    SubmissionCheckpoint,
+);
+
 const uint MAX_QUEUE_FAMILIES = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES + 4;
+
+enum SubmissionCheckpoint : uint @if(env::TESTING) {
+    NATIVE_ACCEPTED,
+    BATCHES_PUBLISHED,
+    TOKEN_PUBLISHED,
+}
+
+struct QueueSubmitOps @private {
+    QueueSubmit2Fn              submit;
+    SemaphoreCounterQueryFn     counter_query;
+    void*                       checkpoint_user_data @if(env::TESTING);
+    SubmissionCheckpointFn      checkpoint @if(env::TESTING);
+}
 
 struct QueueFamilies {
     gpu::QueueRoles selected;
@@ -1295,14 +1314,21 @@ fn usz append_completion_wait_infos(
     return next_wait;
 }
 
+fn void reach_submission_checkpoint(
+    QueueSubmitOps* ops,
+    SubmissionCheckpoint checkpoint,
+) @if(env::TESTING) {
+    if (ops.checkpoint == null) return;
+    ops.checkpoint(ops.checkpoint_user_data, checkpoint);
+}
+
 <* Submit executable command lists and signal the queue-owned completion
    timeline. Preparation and native failure leave every token retryable. *>
-fn gpu::CompletionPoint? vk_submit_with_queries(
+fn gpu::CompletionPoint? vk_submit_with_ops(
     VkDeviceState* state,
     gpu::Queue queue,
     gpu::SubmitDesc* desc,
-    QueueSubmit2Fn submit_fn,
-    SemaphoreCounterQueryFn counter_query_fn,
+    QueueSubmitOps* ops,
 ) @private {
     gpu::CompletionPoint submitted;
     vk::SemaphoreSubmitInfo[2] signal_infos;
@@ -1392,12 +1418,12 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     drain_queue_if_needed_with_query(
         state,
         completion,
-        counter_query_fn,
+        ops.counter_query,
     )!;
     require_queue_completion_headroom_with_query(
         state:      state,
         completion: completion,
-        query_fn:   counter_query_fn,
+        query_fn:   ops.counter_query,
     )!;
     gpu::CompletionPoint point = reserve_queue_completion_locked(
         state,
@@ -1405,7 +1431,7 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
     )!;
     completion_signal.value = gpu::internal::completion_point_sequence(point);
 
-    vk::Result result = submit_fn(
+    vk::Result result = ops.submit(
         completion.queue,
         1,
         &submit,
@@ -1420,6 +1446,13 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         )!;
     }
 
+    $if env::TESTING:
+        reach_submission_checkpoint(
+            ops,
+            SubmissionCheckpoint.NATIVE_ACCEPTED,
+        );
+    $endif
+
     completion.retirement_mutex.lock()!!;
     publish_pending_commands_locked(
         state,
@@ -1428,6 +1461,12 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         point,
     );
     completion.retirement_mutex.unlock();
+    $if env::TESTING:
+        reach_submission_checkpoint(
+            ops,
+            SubmissionCheckpoint.BATCHES_PUBLISHED,
+        );
+    $endif
     if (swapchain != null) {
         commit_swapchain_submit(swapchain, point);
     }
@@ -1435,9 +1474,56 @@ fn gpu::CompletionPoint? vk_submit_with_queries(
         record.state = gpu::internal::CommandState.SUBMITTED;
     }
     publish_queue_completion_locked(state, point)!!;
+    $if env::TESTING:
+        reach_submission_checkpoint(
+            ops,
+            SubmissionCheckpoint.TOKEN_PUBLISHED,
+        );
+    $endif
     submitted = point;
     claimed = false;
     return submitted;
+}
+
+fn gpu::CompletionPoint? vk_submit_with_queries(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    gpu::SubmitDesc* desc,
+    QueueSubmit2Fn submit_fn,
+    SemaphoreCounterQueryFn counter_query_fn,
+) @private {
+    QueueSubmitOps ops = {
+        .submit        = submit_fn,
+        .counter_query = counter_query_fn,
+    };
+    return vk_submit_with_ops(
+        state: state,
+        queue: queue,
+        desc:  desc,
+        ops:   &ops,
+    );
+}
+
+fn gpu::CompletionPoint? vk_submit_with_checkpoint(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    gpu::SubmitDesc* desc,
+    QueueSubmit2Fn submit_fn,
+    SubmissionCheckpointFn checkpoint,
+    void* user_data,
+) @if(env::TESTING) {
+    QueueSubmitOps ops = {
+        .submit               = submit_fn,
+        .counter_query        = &real_semaphore_counter_query,
+        .checkpoint_user_data = user_data,
+        .checkpoint           = checkpoint,
+    };
+    return vk_submit_with_ops(
+        state: state,
+        queue: queue,
+        desc:  desc,
+        ops:   &ops,
+    );
 }
 
 fn gpu::CompletionPoint? vk_submit_with(

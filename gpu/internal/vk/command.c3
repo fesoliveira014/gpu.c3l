@@ -625,7 +625,7 @@ fn vk::MemoryRequirements? generated_scratch_requirements(
         default:
             return gpu::INVALID_ARGUMENT~;
     }
-    layout = required_generated_work_layout(layout);
+    layout = required_generated_work_layout(layout)!;
 
     vk::GeneratedCommandsPipelineInfoEXT pipeline_info =
         vk::generated_commands_pipeline_info_ext()
@@ -2400,14 +2400,14 @@ fn void? execute_generated_work(
     );
 }
 
-fn vk::IndirectCommandsLayoutEXT required_generated_work_layout(
+fn vk::IndirectCommandsLayoutEXT? required_generated_work_layout(
     vk::IndirectCommandsLayoutEXT layout,
 ) {
-    if (layout == null) unreachable();
+    if (layout == null) return gpu::BACKEND_ERROR~;
     return layout;
 }
 
-fn vk::IndirectCommandsLayoutEXT snapshot_generated_dispatch_layout(
+fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
     BoundPipeline* pipeline,
 ) {
     return required_generated_work_layout(pipeline.generated_dispatch_layout);
@@ -2461,7 +2461,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
         max_dispatch_count: max_dispatch_count,
     )!;
     if (dispatch.max_count == 0) return dispatch;
-    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline);
+    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
     return dispatch;
 }
 
@@ -2483,7 +2483,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_with_layout_read_ops(
         layout_read.user_data,
         &dispatch.pipeline,
     );
-    dispatch.layout = required_generated_work_layout(dispatch.layout);
+    dispatch.layout = required_generated_work_layout(dispatch.layout)!;
     return dispatch;
 }
 
@@ -2530,7 +2530,7 @@ fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
         operation:      "cmd_dispatch_generated",
         rejected_field: "count_span",
     )!;
-    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline);
+    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
     return dispatch;
 }
 

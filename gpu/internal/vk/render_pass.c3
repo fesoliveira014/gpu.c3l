@@ -2179,7 +2179,7 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (max_draw_count == 0) return draw;
-    draw.layout = required_generated_work_layout(draw.layout);
+    draw.layout = required_generated_work_layout(draw.layout)!;
     draw.records = lower_generated_work_records(
         state:       state,
         records:     &records,
@@ -2220,7 +2220,7 @@ fn PreparedGeneratedDraw? full_prepare_generated_draw(
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (max_draw_count == 0) return draw;
-    draw.layout = required_generated_work_layout(draw.layout);
+    draw.layout = required_generated_work_layout(draw.layout)!;
     draw.records = validate_and_lower_generated_work_records(
         state:       state,
         record:      record,
@@ -2344,7 +2344,7 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (max_draw_count == 0) return draw;
-    draw.layout = required_generated_work_layout(draw.layout);
+    draw.layout = required_generated_work_layout(draw.layout)!;
     draw.records = lower_generated_work_records(
         state:       state,
         records:     &records,
@@ -2396,7 +2396,7 @@ fn PreparedGeneratedIndexedDraw? full_prepare_generated_indexed_draw(
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (max_draw_count == 0) return draw;
-    draw.layout = required_generated_work_layout(draw.layout);
+    draw.layout = required_generated_work_layout(draw.layout)!;
     draw.records = validate_and_lower_generated_work_records(
         state:       state,
         record:      record,

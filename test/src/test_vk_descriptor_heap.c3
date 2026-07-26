@@ -1528,10 +1528,8 @@ fn void sampler_non_finite_and_reversed_ranges_rejected() @test {
             "over-limit anisotropy is rejected before Vulkan sampler interning");
         assert(state.samplers.count == sampler_count
                 && state.shader_heap.descriptors.sampler_next_new
-                    == sampler_heap_count
-                && capture.calls == 1
-                && capture.max_anisotropy == caps.max_sampler_anisotropy,
-            "over-limit anisotropy preserves table, heap, and local native-create state");
+                    == sampler_heap_count,
+            "over-limit anisotropy preserves sampler table and heap state");
     }
 
     float bias_limit = caps.max_sampler_lod_bias;

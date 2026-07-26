@@ -152,6 +152,62 @@ fn gpu::PipelineHandle create_policy_matrix_graphics_pipeline(
     return gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
 }
 
+fn void trusted_generated_dispatch_with_graphics_pipeline_faults_defined() @test {
+    PolicyDiagnosticCapture capture;
+    gpu::RuntimeDesc desc = policy_runtime_desc(
+        contract:      gpu::ContractValidation.TRUSTED,
+        vulkan_layers: false,
+        callback:      false,
+        debug_names:   false,
+        capture:       &capture,
+    );
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::PipelineHandle pipeline =
+        create_policy_matrix_graphics_pipeline(&device);
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    OwnedSpan indirect = policy_span(
+        &device,
+        { .graphics },
+        "trusted_generated_wrong_pipeline",
+    );
+    defer free_owned_span(&device, &indirect)!!;
+
+    vk::VkDeviceState* state = policy_device_state(&device);
+    bool generated_work_enabled = state.generated_work.enabled;
+    uint generated_work_limit = state.caps.max_generated_work_count;
+    state.generated_work.enabled = true;
+    state.caps.max_generated_work_count = 1;
+    defer {
+        state.generated_work.enabled = generated_work_enabled;
+        state.caps.max_generated_work_count = generated_work_limit;
+    }
+
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer gpu::discard_commands(&commands)!!;
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+
+    fault wrong_pipeline = @catch(gpu::cmd_dispatch_generated(
+        commands:           &commands,
+        records:            indirect.span,
+        count_span:         indirect.span,
+        max_dispatch_count: 1,
+    ));
+    assert(wrong_pipeline == gpu::BACKEND_ERROR,
+        "TRUSTED generated dispatch keeps null native lowering defined");
+    assert(commands.is_valid(),
+        "rejected generated dispatch preserves the recording token");
+}
+
 fn gpu::TextureHandle create_policy_matrix_transfer_texture(
     gpu::Device* device,
 ) {
