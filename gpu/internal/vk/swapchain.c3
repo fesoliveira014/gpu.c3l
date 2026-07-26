@@ -842,7 +842,7 @@ fn bool? swapchain_images_referenced_locked(
     for (uint i = 0; i < slot.image_count; i++) {
         gpu::TextureHandle handle = slot.textures[i];
         TextureSlot* texture = state.textures.get(handle)!;
-        if (texture_has_live_descriptor_views(state, texture)) return true;
+        if (texture_has_live_descriptor_views(texture)) return true;
         if (texture.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
             return true;
         }

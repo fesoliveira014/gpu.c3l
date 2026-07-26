@@ -310,25 +310,15 @@ fn void texture_view_round_trip() @test {
         "created view and its raw shader index are valid");
     assert(live_descriptor_view_count(state, texture) == 1,
         "descriptor publication increments its owning texture once");
-    vk::reset_texture_view_accounting(state);
     gpu::destroy_texture_view(&device, view)!!;
-    vk::TextureViewAccountingCounters destroyed =
-        vk::texture_view_accounting(state);
-    assert(destroyed.cell_lookups == 1,
-        "successful texture-view destruction performs one cell lookup");
     assert(live_descriptor_view_count(state, texture) == 0,
         "successful texture-view destruction decrements its owner once");
 
-    vk::reset_texture_view_accounting(state);
     fault stale_fault = @catch(gpu::destroy_texture_view(&device, view));
     assert(stale_fault == gpu::INVALID_HANDLE,
         "destroying a stale view faults INVALID_HANDLE");
-    vk::TextureViewAccountingCounters stale =
-        vk::texture_view_accounting(state);
-    assert(stale.cell_lookups == 1,
-        "stale destruction performs one rejected cell lookup");
     assert(live_descriptor_view_count(state, texture) == 0,
-        "stale destruction leaves owner accounting unchanged");
+        "stale destruction leaves the owner count unchanged");
 }
 
 fn void texture_view_multi_layer_ranges_select_array_views() @test {
@@ -410,8 +400,6 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
         second_state,
         second_texture,
     );
-    vk::reset_texture_view_accounting(second_state);
-
     fault foreign = @catch(gpu::destroy_texture_view(&second_device, first_view));
     assert(foreign == gpu::INVALID_HANDLE,
         "a foreign texture view faults INVALID_HANDLE");
@@ -426,11 +414,6 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
         && live_descriptor_view_count(second_state, second_texture)
             == second_owner_before,
         "foreign release preserves both texture owner counts");
-    vk::TextureViewAccountingCounters rejected =
-        vk::texture_view_accounting(second_state);
-    assert(rejected.cell_lookups == 0,
-        "foreign device ownership rejects before backend cell lookup");
-
     gpu::destroy_texture_view(&first_device, first_view)!!;
     gpu::destroy_texture_view(&second_device, second_view)!!;
     gpu::destroy_texture(&first_device, first_texture)!!;
@@ -554,13 +537,11 @@ fn void texture_view_zero_owner_count_faults_before_destruction_mutation() @test
     };
     state.debug_callback = &capture_descriptor_backend_diagnostic;
     state.debug_user_data = &capture;
-    vk::reset_texture_view_accounting(state);
+    fault invariant = @catch(gpu::destroy_texture_view(&device, view));
 
-    fault accounting = @catch(gpu::destroy_texture_view(&device, view));
-
-    assert(accounting == gpu::BACKEND_ERROR
+    assert(invariant == gpu::BACKEND_ERROR
             && capture.calls == 1 && capture.matched,
-        "zero owner accounting emits one exact backend invariant fault");
+        "zero owner state emits one exact backend invariant fault");
     assert(cell.used == cell_before.used
             && cell.owner == cell_before.owner
             && cell.generation == cell_before.generation,
@@ -569,11 +550,6 @@ fn void texture_view_zero_owner_count_faults_before_destruction_mutation() @test
         "decrement invariant failure preserves the free list");
     assert(owner.live_descriptor_views == 0,
         "decrement invariant failure does not underflow the owner count");
-    vk::TextureViewAccountingCounters counters =
-        vk::texture_view_accounting(state);
-    assert(counters.cell_lookups == 1,
-        "decrement validation reuses the single resolved cell");
-
     state.debug_callback = null;
     owner.live_descriptor_views = 1;
     gpu::destroy_texture_view(&device, view)!!;
@@ -603,11 +579,9 @@ fn void texture_view_missing_owner_faults_before_destruction_mutation() @test {
     };
     state.debug_callback = &capture_descriptor_backend_diagnostic;
     state.debug_user_data = &capture;
-    vk::reset_texture_view_accounting(state);
+    fault invariant = @catch(gpu::destroy_texture_view(&device, view));
 
-    fault accounting = @catch(gpu::destroy_texture_view(&device, view));
-
-    assert(accounting == gpu::BACKEND_ERROR
+    assert(invariant == gpu::BACKEND_ERROR
             && capture.calls == 1 && capture.matched,
         "a missing live descriptor owner emits one exact backend fault");
     assert(cell.used == cell_before.used
@@ -618,11 +592,6 @@ fn void texture_view_missing_owner_faults_before_destruction_mutation() @test {
         "missing owner failure preserves the free list");
     assert(owner.live_descriptor_views == 1,
         "missing owner failure preserves the real owner count");
-    vk::TextureViewAccountingCounters counters =
-        vk::texture_view_accounting(state);
-    assert(counters.cell_lookups == 1,
-        "missing owner failure reuses the single resolved descriptor cell");
-
     state.debug_callback = null;
     cell.owner = owner_before;
     gpu::destroy_texture_view(&device, view)!!;
@@ -654,13 +623,13 @@ fn void texture_view_increment_invariant_faults_transactionally() @test {
         .layer_count = 1,
     };
 
-    fault accounting = @catch(gpu::create_texture_view(
+    fault invariant = @catch(gpu::create_texture_view(
         &device,
         texture,
         &desc,
     ));
 
-    assert(accounting == gpu::BACKEND_ERROR
+    assert(invariant == gpu::BACKEND_ERROR
             && capture.calls == 1 && capture.matched,
         "single increment overflow emits one exact backend invariant fault");
     assert(owner.live_descriptor_views == 8,
@@ -703,13 +672,13 @@ fn void texture_views_batch_increment_invariant_is_transactional() @test {
     };
     gpu::TextureView[2] views_before = views;
 
-    fault accounting = @catch(gpu::create_texture_views(
+    fault invariant = @catch(gpu::create_texture_views(
         &device,
         descs[..],
         views[..],
     ));
 
-    assert(accounting == gpu::BACKEND_ERROR
+    assert(invariant == gpu::BACKEND_ERROR
             && capture.calls == 1 && capture.matched,
         "repeated-owner batch overflow emits one exact invariant fault");
     assert(owner.live_descriptor_views == 7,
@@ -746,13 +715,13 @@ fn void texture_views_late_increment_invariant_rolls_back_cached_view() @test {
     };
     gpu::TextureView[2] views;
 
-    fault accounting = @catch(gpu::create_texture_views(
+    fault invariant = @catch(gpu::create_texture_views(
         &device,
         descs[..],
         views[..],
     ));
 
-    assert(accounting == gpu::BACKEND_ERROR,
+    assert(invariant == gpu::BACKEND_ERROR,
         "a later inconsistent owner rejects the complete batch");
     assert(cached_texture_view_count(state, first) == 0,
         "late increment validation rolls back an earlier cached native view");
@@ -848,7 +817,7 @@ fn void destroy_texture_unaffected_by_unrelated_descriptor() @test {
     gpu::destroy_texture(&device, texture_b)!!;
 }
 
-fn void texture_destroy_ownership_work_is_high_water_invariant() @test {
+fn void texture_destroy_ignores_descriptor_high_water() @test {
     gpu::Device device = make_heap_test_device(65_536, 1);
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
@@ -858,16 +827,11 @@ fn void texture_destroy_ownership_work_is_high_water_invariant() @test {
     foreach (high_water : high_water_marks) {
         gpu::TextureHandle texture = make_heap_texture(&device);
         state.shader_heap.descriptors.texture_next_new = high_water;
-        vk::reset_texture_view_accounting(state);
 
         gpu::destroy_texture(&device, texture)!!;
 
-        vk::TextureViewAccountingCounters counters =
-            vk::texture_view_accounting(state);
-        assert(counters.cell_lookups == 0,
-            "texture destruction does not inspect descriptor cells");
-        assert(counters.ownership_work_units == 1,
-            "texture destruction charges one ownership decision at every high-water mark");
+        assert(@catch(state.textures.get(texture)) == gpu::INVALID_HANDLE,
+            "texture destruction succeeds at every descriptor high-water mark");
     }
 }
 
@@ -1585,7 +1549,7 @@ fn void live_descriptors_block_device_destruction() @test {
     destroy_test_device(&device)!!;
 }
 
-fn void device_loss_teardown_accepts_live_texture_view_accounting() @test {
+fn void device_loss_teardown_accepts_live_texture_views() @test {
     gpu::Device device = make_heap_test_device(8, 1);
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     gpu::TextureViewDesc desc = {
@@ -1607,7 +1571,7 @@ fn void device_loss_teardown_accepts_live_texture_view_accounting() @test {
         "device-loss fixture owns one descriptor and one cached native view");
     assert(@catch(vk::check_backend_result(
         state:     state,
-        operation: "descriptor accounting teardown",
+        operation: "descriptor teardown",
         result:    vk::Result.ERROR_DEVICE_LOST,
     )) == gpu::DEVICE_LOST,
         "the fixture enters forced device-loss teardown");

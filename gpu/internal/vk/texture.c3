@@ -1341,7 +1341,7 @@ fn void? vk_destroy_texture(
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle)!;
     if (slot.swapchain_owned) return gpu::INVALID_ARGUMENT~;
-    if (texture_has_live_descriptor_views(state, slot)) {
+    if (texture_has_live_descriptor_views(slot)) {
         return gpu::RESOURCE_IN_USE~;
     }
     vk::Image image = slot.image;

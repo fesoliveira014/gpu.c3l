@@ -167,8 +167,6 @@ struct VkDeviceState @public {
     vk::Rect2D                 last_scissor @if(env::TESTING);
     gpu::DynamicRasterState    last_raster_state @if(env::TESTING);
     gpu::DepthState            last_depth_state @if(env::TESTING);
-    ulong                      texture_view_cell_lookups @if(env::TESTING);
-    ulong                      texture_view_ownership_work_units @if(env::TESTING);
     CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
     void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;
