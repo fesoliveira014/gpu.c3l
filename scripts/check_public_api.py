@@ -388,6 +388,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "shader_code_digest",
     "shader_stage_valid",
     "cmd_begin_render_pass_with_state(",
+    "completion_wait_scope_valid(",
+    "COMPLETION_CONSUMER_BITS",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -482,6 +484,9 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "pipeline_creation_should_fail",
     "pipeline_prepare_poison",
     "poison_unprepared_shader_identities",
+    "submit_wait_scope_to_vk",
+    "barrier_hazards_known",
+    "BARRIER_HAZARD_BITS",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (

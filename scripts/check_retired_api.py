@@ -284,6 +284,27 @@ LIVE_RETIRED_PATTERNS = {
     "create_graphics_pipelines": re.compile(
         r"(?<!vk::)\bcreate_graphics_pipelines\b"
     ),
+    "CompletionConsumerFlags": re.compile(
+        r"\bCompletionConsumerFlags\b"
+    ),
+    "HazardFlags": re.compile(
+        r"\bHazardFlags\b"
+    ),
+    "COMPLETION_CONSUMER_BITS": re.compile(
+        r"\bCOMPLETION_CONSUMER_BITS\b"
+    ),
+    "completion_wait_scope_valid": re.compile(
+        r"\bcompletion_wait_scope_valid\b"
+    ),
+    "BARRIER_HAZARD_BITS": re.compile(
+        r"\bBARRIER_HAZARD_BITS\b"
+    ),
+    "barrier_hazards_known": re.compile(
+        r"\bbarrier_hazards_known\b"
+    ),
+    "submit_wait_scope_to_vk": re.compile(
+        r"\bsubmit_wait_scope_to_vk\b"
+    ),
 }
 README_RETIRED_PATTERNS = {
     "automatic per-worker command pools": re.compile(
