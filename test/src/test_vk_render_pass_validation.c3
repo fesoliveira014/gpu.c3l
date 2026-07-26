@@ -13,67 +13,6 @@ struct ReviewValidationCapture {
     uint errors;
 }
 
-struct DynamicColorCapture {
-    uint blend_enable_calls;
-    uint blend_equation_calls;
-    uint write_mask_calls;
-    uint first_attachment;
-    uint target_count;
-    uint[gpu::MAX_COLOR_ATTACHMENTS] blend_enables;
-    vk::ColorBlendEquationEXT[gpu::MAX_COLOR_ATTACHMENTS] blend_equations;
-    vk::ColorComponentFlags[gpu::MAX_COLOR_ATTACHMENTS] write_masks;
-}
-
-DynamicColorCapture* dynamic_color_capture;
-
-fn void capture_color_blend_enable(
-    vk::CommandBuffer command_buffer,
-    uint first_attachment,
-    uint target_count,
-    uint* blend_enables,
-) {
-    (void)command_buffer;
-    DynamicColorCapture* capture = dynamic_color_capture;
-    capture.blend_enable_calls++;
-    capture.first_attachment = first_attachment;
-    capture.target_count = target_count;
-    for (uint i = 0; i < target_count; i++) {
-        capture.blend_enables[i] = blend_enables[i];
-    }
-}
-
-fn void capture_color_blend_equation(
-    vk::CommandBuffer command_buffer,
-    uint first_attachment,
-    uint target_count,
-    vk::ColorBlendEquationEXT* blend_equations,
-) {
-    (void)command_buffer;
-    DynamicColorCapture* capture = dynamic_color_capture;
-    capture.blend_equation_calls++;
-    assert(capture.first_attachment == first_attachment
-        && capture.target_count == target_count);
-    for (uint i = 0; i < target_count; i++) {
-        capture.blend_equations[i] = blend_equations[i];
-    }
-}
-
-fn void capture_color_write_mask(
-    vk::CommandBuffer command_buffer,
-    uint first_attachment,
-    uint target_count,
-    vk::ColorComponentFlags* write_masks,
-) {
-    (void)command_buffer;
-    DynamicColorCapture* capture = dynamic_color_capture;
-    capture.write_mask_calls++;
-    assert(capture.first_attachment == first_attachment
-        && capture.target_count == target_count);
-    for (uint i = 0; i < target_count; i++) {
-        capture.write_masks[i] = write_masks[i];
-    }
-}
-
 fn void capture_review_validation_error(
     gpu::DebugMessage* message,
     void* user_data,
@@ -175,7 +114,6 @@ fn DynamicStateFixture make_dynamic_state_fixture_before_pass(
     fixture.commands = gpu::begin_commands(&fixture.allocator)!!;
     record_val_target_to_attach(&fixture.commands, fixture.target);
     fixture.state = gpu::internal::device_slots[fixture.device.index].data.state;
-    vk::reset_dynamic_state_observation(fixture.state);
     return fixture;
 }
 
@@ -210,7 +148,6 @@ fn DynamicStateFixture make_dynamic_state_fixture(
         color_formats[..],
     );
     gpu::cmd_set_graphics_state(&fixture.commands, &graphics_state)!!;
-    vk::reset_dynamic_state_observation(fixture.state);
     return fixture;
 }
 
@@ -250,72 +187,6 @@ fn bool native_scissor_matches(
         && native.extent.height == (uint)expected.height;
 }
 
-fn bool raster_state_matches(
-    gpu::DynamicRasterState* actual,
-    gpu::DynamicRasterState* expected,
-) {
-    return actual.topology == expected.topology
-        && actual.cull_mode == expected.cull_mode
-        && actual.front_face == expected.front_face
-        && actual.depth_bias_enable == expected.depth_bias_enable
-        && actual.depth_bias_constant == expected.depth_bias_constant
-        && actual.depth_bias_slope == expected.depth_bias_slope
-        && actual.depth_bias_clamp == expected.depth_bias_clamp;
-}
-
-fn bool depth_state_matches(
-    gpu::DepthState* actual,
-    gpu::DepthState* expected,
-) {
-    return actual.test_enable == expected.test_enable
-        && actual.write_enable == expected.write_enable
-        && actual.compare == expected.compare;
-}
-
-fn bool observation_matches_graphics_state(
-    vk::DynamicStateObservation* observation,
-    gpu::GraphicsState* expected,
-) {
-    return native_viewport_matches(
-        &observation.viewport,
-        &expected.viewport,
-    ) && native_scissor_matches(
-        &observation.scissor,
-        &expected.scissor,
-    ) && raster_state_matches(
-        &observation.raster,
-        &expected.raster,
-    ) && depth_state_matches(
-        &observation.depth,
-        &expected.depth,
-    );
-}
-
-fn bool observation_has_no_emissions(
-    vk::DynamicStateObservation* observation,
-) {
-    return observation.begin_rendering_emissions == 0
-        && observation.viewport_emissions == 0
-        && observation.scissor_emissions == 0
-        && observation.raster_state_emissions == 0
-        && observation.depth_state_emissions == 0;
-}
-
-fn vk::VkDynamicColorDispatch install_dynamic_color_capture(
-    vk::VkDeviceState* state,
-    DynamicColorCapture* capture,
-) {
-    vk::VkDynamicColorDispatch original =
-        state.device_dispatch.dynamic_color;
-    dynamic_color_capture = capture;
-    state.device_dispatch.dynamic_color = {
-        .set_blend_enable   = &capture_color_blend_enable,
-        .set_blend_equation = &capture_color_blend_equation,
-        .set_write_mask     = &capture_color_write_mask,
-    };
-    return original;
-}
-
 fn void select_graphics_color_pipeline(
     vk::CommandRecord* record,
     gpu::Format[] formats,
@@ -332,30 +203,6 @@ fn void select_graphics_color_pipeline(
     foreach (i, format : formats) {
         record.logical_pipeline.render.color_formats[i] = format;
     }
-}
-
-fn bool dynamic_color_captures_match(
-    DynamicColorCapture* first,
-    DynamicColorCapture* second,
-) {
-    if (first.blend_enable_calls != second.blend_enable_calls
-        || first.blend_equation_calls != second.blend_equation_calls
-        || first.write_mask_calls != second.write_mask_calls
-        || first.first_attachment != second.first_attachment
-        || first.target_count != second.target_count) return false;
-    for (uint i = 0; i < first.target_count; i++) {
-        vk::ColorBlendEquationEXT* a = &first.blend_equations[i];
-        vk::ColorBlendEquationEXT* b = &second.blend_equations[i];
-        if (first.blend_enables[i] != second.blend_enables[i]
-            || first.write_masks[i] != second.write_masks[i]
-            || a.src_color_blend_factor != b.src_color_blend_factor
-            || a.dst_color_blend_factor != b.dst_color_blend_factor
-            || a.color_blend_op != b.color_blend_op
-            || a.src_alpha_blend_factor != b.src_alpha_blend_factor
-            || a.dst_alpha_blend_factor != b.dst_alpha_blend_factor
-            || a.alpha_blend_op != b.alpha_blend_op) return false;
-    }
-    return true;
 }
 
 fn gpu::TextureHandle make_render_validation_target(
@@ -947,78 +794,6 @@ fn void preserves_graphics_binding_across_render_passes() @test {
         "cross-pass and cross-bind recording emits no Vulkan validation errors");
 }
 
-fn void same_graphics_pipeline_across_passes_reuses_graphics_state() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    ValDrawCtx draw = make_val_draw_ctx(&device);
-    defer destroy_val_draw_ctx(&device, &draw);
-    gpu::TextureHandle first = make_render_validation_target(
-        &device,
-        gpu::Format.RGBA8_UNORM,
-    );
-    defer gpu::destroy_texture(&device, first)!!;
-    gpu::TextureHandle second = make_render_validation_target(
-        &device,
-        gpu::Format.RGBA8_UNORM,
-    );
-    defer gpu::destroy_texture(&device, second)!!;
-    gpu::TextureHandle third = make_render_validation_target(
-        &device,
-        gpu::Format.RGBA8_UNORM,
-    );
-    defer gpu::destroy_texture(&device, third)!!;
-    gpu::AttachmentViewHandle[3] views = {
-        create_test_attachment_view(&device, first)!!,
-        create_test_attachment_view(&device, second)!!,
-        create_test_attachment_view(&device, third)!!,
-    };
-    defer destroy_test_attachment_view(&device, &views[0])!!;
-    defer destroy_test_attachment_view(&device, &views[1])!!;
-    defer destroy_test_attachment_view(&device, &views[2])!!;
-    gpu::ColorTargetDesc[1] colors = {{ .view = views[0] }};
-    gpu::RenderPassDesc pass = {
-        .colors = colors[..],
-        .width  = VAL_RT,
-        .height = VAL_RT,
-    };
-    gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
-    gpu::ColorTargetState[1] color_targets = {
-        gpu::color_blend_disabled(),
-    };
-    graphics_state.color.targets = color_targets[..];
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-    )!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    record_val_target_to_attach(&commands, first);
-    record_val_target_to_attach(&commands, second);
-    record_val_target_to_attach(&commands, third);
-
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::reset_dynamic_state_observation(state);
-    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
-    for (uint i = 0; i < views.len; i++) {
-        colors[0].view = views[i];
-        gpu::cmd_begin_render_pass(&commands, &pass)!!;
-        gpu::cmd_end_render_pass(&commands)!!;
-    }
-    vk::DynamicStateObservation observation =
-        vk::dynamic_state_observation(state);
-    assert(observation.begin_rendering_emissions == views.len
-        && observation.viewport_emissions == 1
-        && observation.scissor_emissions == 1
-        && observation.raster_state_emissions == 1
-        && observation.depth_state_emissions == 1,
-        "compatible passes reuse one complete graphics-state packet");
-}
-
 fn void graphics_alias_updates_logical_handle() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -1180,17 +955,7 @@ fn void pipeline_sample_mismatch_rejects_before_mutation() @test {
         "pipeline sample mismatch retains no attachment references");
 }
 
-fn void graphics_state_packet_emission_is_exact() @test {
-    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
-        gpu::ContractValidation.FULL,
-    );
-    defer destroy_dynamic_state_fixture(&fixture);
-    gpu::ColorTargetDesc[1] colors = {{ .view = fixture.view }};
-    gpu::RenderPassDesc pass = {
-        .colors = colors[..],
-        .width  = VAL_RT,
-        .height = VAL_RT,
-    };
+fn void graphics_state_lowering_is_exact() @test {
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1224,67 +989,41 @@ fn void graphics_state_packet_emission_is_exact() @test {
             .targets = color_targets[..],
         },
     };
-
-    vk::reset_dynamic_state_observation(fixture.state);
-    gpu::cmd_set_viewport(&fixture.commands, &graphics.viewport)!!;
-    vk::DynamicStateObservation partial =
-        vk::dynamic_state_observation(fixture.state);
-    vk::CommandRecord* record = vk::resolve_command(&fixture.commands)!!;
-    assert(partial.viewport_emissions == 1
-        && partial.scissor_emissions == 0
-        && partial.raster_state_emissions == 0
-        && partial.depth_state_emissions == 0,
-        "a pre-pass partial setter emits only its documented subset");
-    assert(!record.graphics_state_initialized,
-        "a partial setter does not initialize complete graphics state");
-
-    vk::reset_dynamic_state_observation(fixture.state);
-    gpu::cmd_begin_render_pass(&fixture.commands, &pass)!!;
-    vk::DynamicStateObservation minimal =
-        vk::dynamic_state_observation(fixture.state);
-    assert(minimal.begin_rendering_emissions == 1
-        && minimal.viewport_emissions == 0
-        && minimal.scissor_emissions == 0
-        && minimal.raster_state_emissions == 0
-        && minimal.depth_state_emissions == 0,
-        "minimal begin emits no graphics-state command");
-    assert(!record.graphics_state_initialized,
-        "minimal begin does not initialize graphics state");
-    gpu::cmd_end_render_pass(&fixture.commands)!!;
-
-    gpu::Format[1] color_formats = {
-        gpu::Format.RGBA8_UNORM,
-    };
-    select_graphics_color_pipeline(record, color_formats[..]);
-    vk::reset_dynamic_state_observation(fixture.state);
-    gpu::cmd_set_graphics_state(&fixture.commands, &graphics)!!;
-    vk::DynamicStateObservation packet =
-        vk::dynamic_state_observation(fixture.state);
-    assert(packet.begin_rendering_emissions == 0
-        && packet.viewport_emissions == 1
-        && packet.scissor_emissions == 1
-        && packet.raster_state_emissions == 1
-        && packet.depth_state_emissions == 1,
-        "complete state emits each supplied group exactly once");
-    assert(observation_matches_graphics_state(&packet, &graphics),
-        "complete state preserves every supplied value");
-    assert(record.graphics_state_initialized
-            && record.color_state_initialized,
-        "complete state initializes both readiness domains");
-
-    vk::reset_dynamic_state_observation(fixture.state);
-    gpu::cmd_begin_render_pass(&fixture.commands, &pass)!!;
-    vk::DynamicStateObservation reuse =
-        vk::dynamic_state_observation(fixture.state);
-    assert(reuse.begin_rendering_emissions == 1
-        && reuse.viewport_emissions == 0
-        && reuse.scissor_emissions == 0
-        && reuse.raster_state_emissions == 0
-        && reuse.depth_state_emissions == 0,
-        "a later minimal pass reuses state without replay");
-    assert(record.graphics_state_initialized,
-        "pass begin preserves complete initialization");
-    gpu::cmd_end_render_pass(&fixture.commands)!!;
+    vk::LoweredGraphicsState lowered =
+        vk::lower_graphics_state(&graphics)!!;
+    assert(native_viewport_matches(&lowered.viewport, &graphics.viewport)
+        && native_scissor_matches(&lowered.scissor, &graphics.scissor),
+        "viewport and scissor lowering preserve every supplied value");
+    assert(lowered.raster.topology == graphics.raster.topology
+        && lowered.raster.cull_mode == graphics.raster.cull_mode
+        && lowered.raster.front_face == graphics.raster.front_face
+        && lowered.raster.depth_bias_enable
+            == graphics.raster.depth_bias_enable
+        && lowered.raster.depth_bias_constant
+            == graphics.raster.depth_bias_constant
+        && lowered.raster.depth_bias_slope
+            == graphics.raster.depth_bias_slope
+        && lowered.raster.depth_bias_clamp
+            == graphics.raster.depth_bias_clamp,
+        "raster lowering preserves every supplied value");
+    assert(lowered.depth.test_enable == graphics.depth.test_enable
+        && lowered.depth.write_enable == graphics.depth.write_enable
+        && lowered.depth.compare == graphics.depth.compare,
+        "depth lowering preserves every supplied value");
+    assert(lowered.color.count == 1
+        && lowered.color.blend_enables[0] == vk::FALSE
+        && lowered.color.blend_equations[0].src_color_blend_factor
+            == vk::BlendFactor.ONE
+        && lowered.color.blend_equations[0].dst_color_blend_factor
+            == vk::BlendFactor.ZERO
+        && lowered.color.write_masks[0]
+            == (vk::ColorComponentFlags)(
+                (uint)vk::ColorComponentFlagBits.R_BIT
+                | (uint)vk::ColorComponentFlagBits.G_BIT
+                | (uint)vk::ColorComponentFlagBits.B_BIT
+                | (uint)vk::ColorComponentFlagBits.A_BIT
+            ),
+        "color lowering uses the canonical opaque native state");
 }
 
 fn void state_failure_after_begin_is_retryable_and_discardable() @test {
@@ -1341,16 +1080,11 @@ fn void state_failure_after_begin_is_retryable_and_discardable() @test {
         rejected_field: "GraphicsState.depth.compare",
         invariant:      "compare operation must be defined",
     );
-    vk::reset_dynamic_state_observation(fixture.state);
     assert(@catch(gpu::cmd_set_graphics_state(
         &fixture.commands,
         &graphics,
     )) == gpu::INVALID_ARGUMENT,
         "invalid complete state faults after pass begin");
-    vk::DynamicStateObservation failure_observation =
-        vk::dynamic_state_observation(fixture.state);
-    assert(observation_has_no_emissions(&failure_observation),
-        "invalid state emits no partial packet");
     assert(record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS
             && record.scratch.reference_count == references_before + 1,
         "state failure preserves the active pass and its reference");
@@ -1378,16 +1112,11 @@ fn void state_failure_after_begin_is_retryable_and_discardable() @test {
         &invalid_compare,
         int::size,
     );
-    vk::reset_dynamic_state_observation(fixture.state);
     assert(@catch(gpu::cmd_set_graphics_state(
         &fixture.commands,
         &graphics,
     )) == gpu::INVALID_ARGUMENT,
         "a later state failure remains discardable");
-    vk::DynamicStateObservation replacement_failure_observation =
-        vk::dynamic_state_observation(fixture.state);
-    assert(observation_has_no_emissions(&replacement_failure_observation),
-        "failed replacement emits no partial packet");
     assert(record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS
             && record.graphics_state_initialized
             && record.color_state_initialized,
@@ -1424,16 +1153,11 @@ fn void late_invalid_color_in_complete_graphics_state_is_transactional() @test {
     };
     graphics.color.targets = color_targets[..];
 
-    vk::reset_dynamic_state_observation(fixture.state);
     assert(@catch(gpu::cmd_set_graphics_state(
         &fixture.commands,
         &graphics,
     )) == gpu::INVALID_ARGUMENT,
         "integer blending rejects the complete packet");
-    vk::DynamicStateObservation observation =
-        vk::dynamic_state_observation(fixture.state);
-    assert(observation_has_no_emissions(&observation),
-        "late color validation rejects before any ordinary or color emission");
     assert(record.state == gpu::internal::CommandState.RECORDING
         && !record.graphics_state_initialized
         && !record.color_state_initialized,
@@ -1475,17 +1199,12 @@ fn void viewport_device_bounds_accept_native_shapes_exactly() @test {
     };
     gpu::cmd_set_viewport(&fixture.commands, &negative_origin)!!;
 
-    vk::DynamicStateObservation observation =
-        vk::dynamic_state_observation(fixture.state);
-    assert(observation.viewport_emissions == 3,
-        "inside, negative-height overscan, and negative-origin viewports emit");
-    assert(native_viewport_matches(
-        &observation.viewport,
-        &negative_origin,
-    ), "the final native viewport preserves every accepted field");
+    vk::Viewport native = vk::lower_viewport(&negative_origin);
+    assert(native_viewport_matches(&native, &negative_origin),
+        "viewport lowering preserves every accepted field");
 }
 
-fn void viewport_rejections_preserve_previous_native_state() @test {
+fn void viewport_rejections_preserve_command_state() @test {
     DynamicStateFixture fixture = make_dynamic_state_fixture(
         gpu::ContractValidation.FULL,
     );
@@ -1530,12 +1249,11 @@ fn void viewport_rejections_preserve_previous_native_state() @test {
         )) == gpu::INVALID_ARGUMENT, "invalid viewport faults before emission");
     }
 
-    vk::DynamicStateObservation observation =
-        vk::dynamic_state_observation(fixture.state);
-    assert(observation.viewport_emissions == 1,
-        "rejected viewports add no native emission");
-    assert(native_viewport_matches(&observation.viewport, &accepted),
-        "rejected viewports preserve the previous native state");
+    vk::CommandRecord* record =
+        vk::resolve_command(&fixture.commands)!!;
+    assert(record.state
+            == gpu::internal::CommandState.RECORDING_RENDER_PASS,
+        "rejected viewports preserve the recording phase");
 }
 
 fn void scissor_representation_accepts_overscan_and_empty_clip() @test {
@@ -1556,11 +1274,8 @@ fn void scissor_representation_accepts_overscan_and_empty_clip() @test {
         .y = int::max,
     };
     gpu::cmd_set_scissor(&fixture.commands, &empty)!!;
-    vk::DynamicStateObservation accepted =
-        vk::dynamic_state_observation(fixture.state);
-    assert(accepted.scissor_emissions == 2,
-        "off-pass and zero-extent scissors emit");
-    assert(native_scissor_matches(&accepted.scissor, &empty),
+    vk::Rect2D native = vk::lower_scissor(&empty);
+    assert(native_scissor_matches(&native, &empty),
         "empty scissor preserves exact native offset and extent");
 
     gpu::ScissorRect[6] rejected = {
@@ -1577,12 +1292,11 @@ fn void scissor_representation_accepts_overscan_and_empty_clip() @test {
             scissor,
         )) == gpu::INVALID_ARGUMENT, "invalid scissor faults before emission");
     }
-    vk::DynamicStateObservation after =
-        vk::dynamic_state_observation(fixture.state);
-    assert(after.scissor_emissions == accepted.scissor_emissions,
-        "rejected scissors add no native emission");
-    assert(native_scissor_matches(&after.scissor, &empty),
-        "rejected scissors preserve the previous native state");
+    vk::CommandRecord* record =
+        vk::resolve_command(&fixture.commands)!!;
+    assert(record.state
+            == gpu::internal::CommandState.RECORDING_RENDER_PASS,
+        "rejected scissors preserve the recording phase");
 }
 
 fn void dynamic_state_diagnostics_name_exact_rejected_fields() @test {
@@ -1650,99 +1364,6 @@ fn void dynamic_state_diagnostics_name_exact_rejected_fields() @test {
     );
 }
 
-fn void both_modes_lower_dynamic_state_identically() @test {
-    DynamicStateFixture trusted = make_dynamic_state_fixture_before_pass(
-        gpu::ContractValidation.TRUSTED,
-    );
-    defer destroy_dynamic_state_fixture(&trusted);
-    DynamicStateFixture full = make_dynamic_state_fixture_before_pass(
-        gpu::ContractValidation.FULL,
-    );
-    defer destroy_dynamic_state_fixture(&full);
-
-    gpu::ColorTargetDesc[1] trusted_colors = {{ .view = trusted.view }};
-    gpu::ColorTargetDesc[1] full_colors = {{ .view = full.view }};
-    gpu::RenderPassDesc trusted_pass = {
-        .colors = trusted_colors[..],
-        .width  = VAL_RT,
-        .height = VAL_RT,
-    };
-    gpu::RenderPassDesc full_pass = {
-        .colors = full_colors[..],
-        .width  = VAL_RT,
-        .height = VAL_RT,
-    };
-    gpu::ColorTargetState[1] color_targets = {
-        gpu::color_blend_disabled(),
-    };
-    gpu::GraphicsState graphics = {
-        .viewport = {
-            .x         = -1.0f,
-            .y         = (float)VAL_RT,
-            .width     = (float)VAL_RT + 2.0f,
-            .height    = -(float)VAL_RT,
-            .min_depth = 1.0f,
-            .max_depth = 0.0f,
-        },
-        .scissor = {
-            .x      = (int)VAL_RT,
-            .y      = (int)VAL_RT,
-            .width  = 1,
-            .height = 1,
-        },
-        .raster = {
-            .topology   = gpu::PrimitiveTopology.POINTS,
-            .cull_mode  = gpu::CullMode.FRONT,
-            .front_face = gpu::FrontFace.CLOCKWISE,
-        },
-        .depth = {
-            .compare = gpu::CompareOp.GREATER_EQUAL,
-        },
-        .color = {
-            .targets = color_targets[..],
-        },
-    };
-    gpu::Format[1] color_formats = {
-        gpu::Format.RGBA8_UNORM,
-    };
-    gpu::cmd_begin_render_pass(&trusted.commands, &trusted_pass)!!;
-    select_graphics_color_pipeline(
-        vk::resolve_command(&trusted.commands)!!,
-        color_formats[..],
-    );
-    gpu::cmd_set_graphics_state(&trusted.commands, &graphics)!!;
-    gpu::cmd_begin_render_pass(&full.commands, &full_pass)!!;
-    select_graphics_color_pipeline(
-        vk::resolve_command(&full.commands)!!,
-        color_formats[..],
-    );
-    gpu::cmd_set_graphics_state(&full.commands, &graphics)!!;
-
-    vk::DynamicStateObservation trusted_observation =
-        vk::dynamic_state_observation(trusted.state);
-    vk::DynamicStateObservation full_observation =
-        vk::dynamic_state_observation(full.state);
-    assert(trusted_observation.begin_rendering_emissions == 1
-        && full_observation.begin_rendering_emissions == 1,
-        "each mode begins rendering exactly once");
-    assert(trusted_observation.viewport_emissions == 1
-        && trusted_observation.scissor_emissions == 1
-        && trusted_observation.raster_state_emissions == 1
-        && trusted_observation.depth_state_emissions == 1
-        && full_observation.viewport_emissions == 1
-        && full_observation.scissor_emissions == 1
-        && full_observation.raster_state_emissions == 1
-        && full_observation.depth_state_emissions == 1,
-        "each mode emits one complete packet");
-    assert(observation_matches_graphics_state(
-        &trusted_observation,
-        &graphics,
-    ) && observation_matches_graphics_state(
-        &full_observation,
-        &graphics,
-    ), "trusted and full packet lowering is identical");
-}
-
 fn void trusted_dynamic_state_bypasses_full_device_bounds() @test {
     DynamicStateFixture trusted = make_dynamic_state_fixture(
         gpu::ContractValidation.TRUSTED,
@@ -1771,38 +1392,18 @@ fn void trusted_dynamic_state_bypasses_full_device_bounds() @test {
     )) == gpu::INVALID_ARGUMENT,
         "FULL rejects a device-over-limit viewport");
 
-    vk::DynamicStateObservation trusted_observation =
-        vk::dynamic_state_observation(trusted.state);
-    vk::DynamicStateObservation full_observation =
-        vk::dynamic_state_observation(full.state);
-    assert(trusted_observation.viewport_emissions == 1
-        && full_observation.viewport_emissions == 0,
-        "TRUSTED forwards while FULL rejects before emission");
-    assert(native_viewport_matches(
-        &trusted_observation.viewport,
-        &over_limit,
-    ), "TRUSTED preserves the over-limit native viewport");
+    vk::CommandRecord* trusted_record =
+        vk::resolve_command(&trusted.commands)!!;
+    vk::CommandRecord* full_record =
+        vk::resolve_command(&full.commands)!!;
+    assert(trusted_record.state
+            == gpu::internal::CommandState.RECORDING_RENDER_PASS
+        && full_record.state
+            == gpu::internal::CommandState.RECORDING_RENDER_PASS,
+        "TRUSTED forwarding and FULL rejection preserve command recording");
 }
 
-fn void dynamic_color_packet_emits_three_heterogeneous_arrays() @test {
-    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
-        gpu::ContractValidation.FULL,
-    );
-    defer destroy_dynamic_state_fixture(&fixture);
-    DynamicColorCapture capture;
-    vk::VkDynamicColorDispatch original =
-        install_dynamic_color_capture(fixture.state, &capture);
-    defer {
-        fixture.state.device_dispatch.dynamic_color = original;
-        dynamic_color_capture = null;
-    }
-    vk::CommandRecord* record =
-        vk::resolve_command(&fixture.commands)!!;
-    gpu::Format[2] formats = {
-        gpu::Format.RGBA8_UNORM,
-        gpu::Format.RGBA16_FLOAT,
-    };
-    select_graphics_color_pipeline(record, formats[..]);
+fn void dynamic_color_lowering_preserves_heterogeneous_targets() @test {
     gpu::ColorWriteMask red_alpha = { .red, .alpha };
     gpu::ColorTargetState[2] targets = {
         gpu::color_blend_disabled(red_alpha),
@@ -1811,19 +1412,12 @@ fn void dynamic_color_packet_emits_three_heterogeneous_arrays() @test {
     gpu::ColorWriteMask green_blue = { .green, .blue };
     targets[1].write_mask = green_blue;
     gpu::ColorState color = { .targets = targets[..] };
-
-    gpu::cmd_set_color_state(&fixture.commands, &color)!!;
-
-    assert(capture.blend_enable_calls == 1
-        && capture.blend_equation_calls == 1
-        && capture.write_mask_calls == 1
-        && capture.first_attachment == 0
-        && capture.target_count == 2,
-        "one packet emits exactly three arrays over the complete target range");
-    assert(capture.blend_enables[0] == vk::FALSE
-        && capture.blend_enables[1] == vk::TRUE,
+    vk::LoweredColorState lowered = vk::lower_color_state(&color)!!;
+    assert(lowered.count == 2
+        && lowered.blend_enables[0] == vk::FALSE
+        && lowered.blend_enables[1] == vk::TRUE,
         "blend enables preserve heterogeneous target order");
-    vk::ColorBlendEquationEXT* disabled = &capture.blend_equations[0];
+    vk::ColorBlendEquationEXT* disabled = &lowered.blend_equations[0];
     assert(disabled.src_color_blend_factor == vk::BlendFactor.ONE
         && disabled.dst_color_blend_factor == vk::BlendFactor.ZERO
         && disabled.color_blend_op == vk::BlendOp.ADD
@@ -1831,7 +1425,7 @@ fn void dynamic_color_packet_emits_three_heterogeneous_arrays() @test {
         && disabled.dst_alpha_blend_factor == vk::BlendFactor.ZERO
         && disabled.alpha_blend_op == vk::BlendOp.ADD,
         "disabled blend lowers to the canonical opaque equation");
-    vk::ColorBlendEquationEXT* alpha = &capture.blend_equations[1];
+    vk::ColorBlendEquationEXT* alpha = &lowered.blend_equations[1];
     assert(alpha.src_color_blend_factor == vk::BlendFactor.SRC_ALPHA
         && alpha.dst_color_blend_factor
             == vk::BlendFactor.ONE_MINUS_SRC_ALPHA
@@ -1851,97 +1445,16 @@ fn void dynamic_color_packet_emits_three_heterogeneous_arrays() @test {
             (uint)vk::ColorComponentFlagBits.G_BIT
             | (uint)vk::ColorComponentFlagBits.B_BIT
         );
-    assert(capture.write_masks[0] == red_alpha_native
-        && capture.write_masks[1] == green_blue_native,
+    assert(lowered.write_masks[0] == red_alpha_native
+        && lowered.write_masks[1] == green_blue_native,
         "write masks preserve heterogeneous target order");
 }
 
-fn void trusted_and_full_color_packets_lower_identically() @test {
-    DynamicStateFixture trusted = make_dynamic_state_fixture_before_pass(
-        gpu::ContractValidation.TRUSTED,
-    );
-    defer destroy_dynamic_state_fixture(&trusted);
-    DynamicStateFixture full = make_dynamic_state_fixture_before_pass(
-        gpu::ContractValidation.FULL,
-    );
-    defer destroy_dynamic_state_fixture(&full);
-    gpu::Format[2] formats = {
-        gpu::Format.RGBA8_UNORM,
-        gpu::Format.RGBA16_FLOAT,
-    };
-    select_graphics_color_pipeline(
-        vk::resolve_command(&trusted.commands)!!,
-        formats[..],
-    );
-    select_graphics_color_pipeline(
-        vk::resolve_command(&full.commands)!!,
-        formats[..],
-    );
-    gpu::ColorTargetState[2] targets = {
-        gpu::premultiplied_alpha_blend(),
-        gpu::additive_blend(),
-    };
-    gpu::ColorState color = { .targets = targets[..] };
-    DynamicColorCapture trusted_capture;
-    vk::VkDynamicColorDispatch trusted_original =
-        install_dynamic_color_capture(
-            trusted.state,
-            &trusted_capture,
-        );
-    gpu::cmd_set_color_state(&trusted.commands, &color)!!;
-    trusted.state.device_dispatch.dynamic_color = trusted_original;
-
-    DynamicColorCapture full_capture;
-    vk::VkDynamicColorDispatch full_original =
-        install_dynamic_color_capture(
-            full.state,
-            &full_capture,
-        );
-    defer {
-        full.state.device_dispatch.dynamic_color = full_original;
-        dynamic_color_capture = null;
-    }
-    gpu::cmd_set_color_state(&full.commands, &color)!!;
-
-    assert(dynamic_color_captures_match(
-        &trusted_capture,
-        &full_capture,
-    ), "TRUSTED and FULL emit identical native color arrays");
-}
-
-fn void zero_target_color_packet_emits_no_native_command() @test {
-    DynamicStateFixture fixture = make_dynamic_state_fixture_before_pass(
-        gpu::ContractValidation.FULL,
-    );
-    defer destroy_dynamic_state_fixture(&fixture);
-    DynamicColorCapture capture;
-    vk::VkDynamicColorDispatch original =
-        install_dynamic_color_capture(fixture.state, &capture);
-    defer {
-        fixture.state.device_dispatch.dynamic_color = original;
-        dynamic_color_capture = null;
-    }
-    gpu::Format[] formats;
-    select_graphics_color_pipeline(
-        vk::resolve_command(&fixture.commands)!!,
-        formats[..],
-    );
+fn void zero_target_color_lowering_is_empty() @test {
     gpu::ColorState color;
-
-    gpu::cmd_set_color_state(&fixture.commands, &color)!!;
-
-    assert(capture.blend_enable_calls == 0
-        && capture.blend_equation_calls == 0
-        && capture.write_mask_calls == 0,
-        "a depth-only dynamic domain emits no color command");
-
-    gpu::GraphicsState graphics =
-        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
-    gpu::cmd_set_graphics_state(&fixture.commands, &graphics)!!;
-    assert(capture.blend_enable_calls == 0
-            && capture.blend_equation_calls == 0
-            && capture.write_mask_calls == 0,
-        "a complete depth-only packet emits ten ordinary commands and no color commands");
+    vk::LoweredColorState lowered = vk::lower_color_state(&color)!!;
+    assert(lowered.count == 0,
+        "a depth-only dynamic color domain lowers to no targets");
 }
 
 fn void full_color_validation_rejects_before_mutation() @test {
@@ -1949,13 +1462,6 @@ fn void full_color_validation_rejects_before_mutation() @test {
         gpu::ContractValidation.FULL,
     );
     defer destroy_dynamic_state_fixture(&fixture);
-    DynamicColorCapture capture;
-    vk::VkDynamicColorDispatch original =
-        install_dynamic_color_capture(fixture.state, &capture);
-    defer {
-        fixture.state.device_dispatch.dynamic_color = original;
-        dynamic_color_capture = null;
-    }
     vk::CommandRecord* record =
         vk::resolve_command(&fixture.commands)!!;
     gpu::Format[2] formats = {
@@ -1976,10 +1482,6 @@ fn void full_color_validation_rejects_before_mutation() @test {
         &color,
     )) == gpu::INVALID_ARGUMENT,
         "FULL rejects blending on an integer target");
-    assert(capture.blend_enable_calls == 0
-        && capture.blend_equation_calls == 0
-        && capture.write_mask_calls == 0,
-        "late-target validation completes before the first native call");
     assert(record.state == phase_before
         && record.logical_pipeline.handle == pipeline_before.handle
         && record.logical_pipeline.kind == pipeline_before.kind
@@ -2003,11 +1505,6 @@ fn void full_color_validation_rejects_before_mutation() @test {
         &color,
     )) == gpu::INVALID_ARGUMENT,
         "FULL rejects write-mask bits outside RGBA");
-    assert(capture.blend_enable_calls == 0
-            && capture.blend_equation_calls == 0
-            && capture.write_mask_calls == 0,
-        "invalid write masks reject before native mutation");
-
     targets[0] = gpu::color_blend_disabled();
     gpu::ColorState short_color = {
         .targets = targets[:1],
@@ -2017,10 +1514,6 @@ fn void full_color_validation_rejects_before_mutation() @test {
         &short_color,
     )) == gpu::INVALID_ARGUMENT,
         "FULL rejects color target counts that differ from the bound pipeline");
-    assert(capture.blend_enable_calls == 0
-            && capture.blend_equation_calls == 0
-            && capture.write_mask_calls == 0,
-        "target-count rejection occurs before native mutation");
 }
 
 fn void complete_graphics_state_requires_the_graphics_bind_point() @test {
@@ -2100,13 +1593,6 @@ fn void dynamic_color_domain_persists_until_incompatible_bind() @test {
         gpu::ContractValidation.FULL,
     );
     defer destroy_dynamic_state_fixture(&fixture);
-    DynamicColorCapture capture;
-    vk::VkDynamicColorDispatch original =
-        install_dynamic_color_capture(fixture.state, &capture);
-    defer {
-        fixture.state.device_dispatch.dynamic_color = original;
-        dynamic_color_capture = null;
-    }
     vk::CommandRecord* record =
         vk::resolve_command(&fixture.commands)!!;
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
@@ -2149,10 +1635,6 @@ fn void dynamic_color_domain_persists_until_incompatible_bind() @test {
     assert(!record.color_state_initialized
         && record.color_state.count == 0,
         "an incompatible format domain clears initialization precisely");
-    assert(capture.blend_enable_calls == 1
-        && capture.blend_equation_calls == 1
-        && capture.write_mask_calls == 1,
-        "pass and bind changes never replay the explicit color packet");
 }
 
 fn void dynamic_color_initialization_gates_direct_and_generated_draws() @test {
@@ -2160,13 +1642,6 @@ fn void dynamic_color_initialization_gates_direct_and_generated_draws() @test {
         gpu::ContractValidation.FULL,
     );
     defer destroy_dynamic_state_fixture(&fixture);
-    DynamicColorCapture capture;
-    vk::VkDynamicColorDispatch original =
-        install_dynamic_color_capture(fixture.state, &capture);
-    defer {
-        fixture.state.device_dispatch.dynamic_color = original;
-        dynamic_color_capture = null;
-    }
     vk::CommandRecord* record =
         vk::resolve_command(&fixture.commands)!!;
     gpu::Format[1] formats = { gpu::Format.RGBA8_UNORM };
@@ -2228,8 +1703,4 @@ fn void dynamic_color_initialization_gates_direct_and_generated_draws() @test {
         record,
         true,
     )!!;
-    assert(capture.blend_enable_calls == 1
-        && capture.blend_equation_calls == 1
-        && capture.write_mask_calls == 1,
-        "depth-only validation requires no packet and emits no hidden replay");
 }

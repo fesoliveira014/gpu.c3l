@@ -146,16 +146,6 @@ struct VkDeviceState @public {
     SamplerTable               samplers;
     VkPresentationState        presentation;
     VkShaderHeapState          shader_heap;
-    bool                       dynamic_state_observation_enabled @if(env::TESTING);
-    ulong                      begin_rendering_emissions @if(env::TESTING);
-    ulong                      viewport_emissions @if(env::TESTING);
-    ulong                      scissor_emissions @if(env::TESTING);
-    ulong                      raster_state_emissions @if(env::TESTING);
-    ulong                      depth_state_emissions @if(env::TESTING);
-    vk::Viewport               last_viewport @if(env::TESTING);
-    vk::Rect2D                 last_scissor @if(env::TESTING);
-    gpu::DynamicRasterState    last_raster_state @if(env::TESTING);
-    gpu::DepthState            last_depth_state @if(env::TESTING);
     CompletionRetirementLockHook completion_retirement_lock_hook @if(env::TESTING);
     void*                      completion_retirement_lock_user_data @if(env::TESTING);
     ulong                      pipeline_shader_modules_created;

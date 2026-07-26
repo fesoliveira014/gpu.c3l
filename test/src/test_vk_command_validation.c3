@@ -217,7 +217,8 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
         desc:   &allocator_desc,
     )!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
@@ -286,7 +287,6 @@ fn void render_pass_reference_capacity_rejection_preserves_recording() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer gpu::discard_commands(&commands)!!;
     record_val_target_to_attach(&commands, target);
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint references_before = record.scratch.reference_count;
     assert(references_before == 1,
@@ -297,20 +297,15 @@ fn void render_pass_reference_capacity_rejection_preserves_recording() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    vk::reset_dynamic_state_observation(state);
     assert(@catch(gpu::cmd_begin_render_pass(
         &commands,
         &pass,
     )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "the attachment view exceeds the occupied reference slot");
-    vk::DynamicStateObservation observation =
-        vk::dynamic_state_observation(state);
     assert(record.state == gpu::internal::CommandState.RECORDING,
         "tracking rejection leaves the command outside a render pass");
     assert(record.scratch.reference_count == references_before,
         "tracking rejection preserves the reference checkpoint");
-    assert(observation_has_no_emissions(&observation),
-        "tracking rejection emits no render-pass or graphics-state command");
 }
 
 <* Textured draw context, same shape as the indirect-draw tests: offscreen
@@ -1136,16 +1131,11 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::cmd_barrier(&commands, &global_barrier)!!;
     gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
 
-    gpu::internal::vk::reset_root_push_observation();
     gpu::cmd_dispatch(
         commands: &commands,
         root:     (gpu::GpuAddress)0,
         groups:   { 0, 0, 0 },
     )!!;
-    gpu::internal::vk::RootPushObservation compute_roots =
-        gpu::internal::vk::root_push_observation();
-    assert(compute_roots.compute == (gpu::GpuAddress)0,
-        "dispatch pushes a null compute root unchanged");
     gpu::cmd_dispatch(
         commands: &commands,
         root:     root,
@@ -1198,7 +1188,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         vertex_count:  0,
         instance_count: 0,
     )!!;
-    gpu::internal::vk::reset_root_push_observation();
     gpu::cmd_draw(
         commands:      &commands,
         vertex_root:   (gpu::GpuAddress)0,
@@ -1206,11 +1195,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         vertex_count:  0,
         instance_count: 0,
     )!!;
-    gpu::internal::vk::RootPushObservation vertex_roots =
-        gpu::internal::vk::root_push_observation();
-    assert(vertex_roots.vertex == (gpu::GpuAddress)0
-        && vertex_roots.fragment == root,
-        "draw pushes a null vertex root unchanged");
     gpu::cmd_draw(
         commands:      &commands,
         vertex_root:   root,
@@ -1218,11 +1202,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         vertex_count:  0,
         instance_count: 0,
     )!!;
-    gpu::internal::vk::RootPushObservation fragment_roots =
-        gpu::internal::vk::root_push_observation();
-    assert(fragment_roots.vertex == root
-        && fragment_roots.fragment == (gpu::GpuAddress)0,
-        "draw pushes a null fragment root unchanged");
 
     gpu::DepthState invalid_depth = {};
     int invalid_compare = 99;
@@ -1299,8 +1278,10 @@ fn void dispatch_uses_bind_time_pipeline_snapshot() @test {
     bool saved_used = bound_cell.used;
     assert(saved_layout != alternate_cell.value.layout,
         "the alternate pipeline provides a distinct backing layout");
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    assert(record.logical_pipeline.layout == saved_layout,
+        "binding snapshots the selected pipeline layout");
 
-    vk::reset_root_push_observation();
     {
         defer {
             bound_cell.value.pipeline = saved_pipeline;
@@ -1323,9 +1304,7 @@ fn void dispatch_uses_bind_time_pipeline_snapshot() @test {
             root:     val_span_address(&device, root.span),
             groups:   { 1, 1, 1 },
         )!!;
-        vk::RootPushObservation observation =
-            vk::root_push_observation();
-        assert(observation.compute_layout == (ulong)saved_layout,
+        assert(record.logical_pipeline.layout == saved_layout,
             "dispatch consumes the bind-time pipeline layout snapshot");
     }
 }

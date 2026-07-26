@@ -87,18 +87,6 @@ struct PreparedGeneratedDispatch {
     uint                           max_count;
 }
 
-struct RootPushObservation @if(env::TESTING) {
-    gpu::GpuAddress compute;
-    ulong           compute_layout;
-    gpu::GpuAddress vertex;
-    gpu::GpuAddress fragment;
-}
-
-Atomic{ulong} last_compute_root @if(env::TESTING);
-Atomic{ulong} last_compute_layout @if(env::TESTING);
-Atomic{ulong} last_vertex_root @if(env::TESTING);
-Atomic{ulong} last_fragment_root @if(env::TESTING);
-
 struct CommandPoolOps @private {
     void*                    user_data;
     CreateCommandPoolFn      create;
@@ -219,28 +207,6 @@ fn void? CommandAllocatorTable.free(
     cell.generation = next_handle_generation(cell.generation)!;
     cell.next_free = self.free_head;
     self.free_head = handle.index + 1;
-}
-
-fn void reset_root_push_observation() @if(env::TESTING) {
-    last_compute_root.store(0, AtomicOrdering.RELAXED);
-    last_compute_layout.store(0, AtomicOrdering.RELAXED);
-    last_vertex_root.store(0, AtomicOrdering.RELAXED);
-    last_fragment_root.store(0, AtomicOrdering.RELAXED);
-}
-
-fn RootPushObservation root_push_observation() @if(env::TESTING) {
-    return {
-        .compute = (gpu::GpuAddress)last_compute_root.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .compute_layout = last_compute_layout.load(AtomicOrdering.RELAXED),
-        .vertex = (gpu::GpuAddress)last_vertex_root.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .fragment = (gpu::GpuAddress)last_fragment_root.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
 }
 
 fn vk::CommandPoolCreateFlags command_allocator_pool_create_flags() {
@@ -2058,10 +2024,6 @@ fn void push_compute_root(
     gpu::GpuAddress root,
 ) @private {
     gpu::RootPush push = { .root_gpu = root };
-    $if env::TESTING:
-        last_compute_root.store((ulong)push.root_gpu, AtomicOrdering.RELAXED);
-        last_compute_layout.store((ulong)pipeline.layout, AtomicOrdering.RELAXED);
-    $endif
     vk::cmd_push_constants(
         command_buffer: record.command_buffer,
         layout:         pipeline.layout,
