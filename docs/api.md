@@ -1441,6 +1441,12 @@ Keep a fully initialized `GraphicsState` as caller-owned cached state. To
 change raster, depth, or color behavior, mutate that packet, bind the graphics
 pipeline whose color domain it targets, and record the complete replacement:
 
+One complete raster/depth/color packet keeps the caller's source of truth and
+`FULL` validation atomic instead of maintaining parallel partial setters.
+Viewport and scissor remain narrow overrides because callers commonly replace
+them independently on hot paths; timing remains advisory rather than an API
+gate.
+
 ```c3
 state.raster = next_raster;
 state.depth = next_depth;

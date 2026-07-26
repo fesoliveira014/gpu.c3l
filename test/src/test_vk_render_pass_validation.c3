@@ -1263,6 +1263,33 @@ fn void state_failure_after_begin_is_retryable_and_discardable() @test {
     );
 
     graphics.depth.compare = gpu::CompareOp.LESS;
+    uint invalid_write_mask = 1u << 8;
+    mem::copy(
+        &color_targets[0].write_mask,
+        &invalid_write_mask,
+        uint::size,
+    );
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_set_graphics_state",
+        debug_name:     null,
+        rejected_field: "GraphicsState.color.targets.write_mask",
+        invariant:      "write mask may contain only RGBA channel bits",
+    );
+    assert(@catch(gpu::cmd_set_graphics_state(
+        &fixture.commands,
+        &graphics,
+    )) == gpu::INVALID_ARGUMENT,
+        "complete color diagnostics use the graphics-state namespace");
+    assert_sync_contract_diagnostic(
+        capture:             &capture,
+        expected_fault:      gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.NONE,
+        has_public_identity: false,
+        index:               0,
+        generation:          0,
+    );
+    color_targets[0] = gpu::color_blend_disabled();
     gpu::cmd_set_graphics_state(&fixture.commands, &graphics)!!;
     assert(record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS
             && record.graphics_state_initialized

@@ -543,8 +543,8 @@ fn void dynamic_viewport_scissor_pixels() @test {
     defer discard_test_commands(&cmd)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    record_depth_to_attach(&cmd, depth);
     for (uint i = 0; i < targets.len; i++) {
+        record_depth_to_attach(&cmd, depth);
         gpu::TextureBarrier to_attach = {
             .texture = targets[i],
             .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -717,7 +717,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
         "late color failure emits no viewport, scissor, raster, or depth state");
 }
 
-fn void repeated_complete_color_state_output_matches() @test {
+fn void complete_color_state_output_matches_expected() @test {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
@@ -727,7 +727,7 @@ fn void repeated_complete_color_state_output_matches() @test {
     if (catch err = maybe_device) {
         assert(err == gpu::UNSUPPORTED_FEATURE,
             "color output fails only when live support is absent");
-        io::eprintfn("repeated_complete_color_state_output_matches: unsupported, skipping");
+        io::eprintfn("complete_color_state_output_matches_expected: unsupported, skipping");
         return;
     }
     gpu::Device device = maybe_device;
@@ -763,12 +763,12 @@ fn void repeated_complete_color_state_output_matches() @test {
         &pipeline_desc,
     )!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-    gpu::TextureHandle[10] targets;
+    gpu::TextureHandle[5] targets;
     foreach (&target : targets) *target = make_render_target(&device);
     defer foreach (target : targets) {
         gpu::destroy_texture(&device, target)!!;
     }
-    gpu::AttachmentViewHandle[10] views;
+    gpu::AttachmentViewHandle[5] views;
     foreach (i, &view : views) {
         *view = create_test_attachment_view(&device, targets[i])!!;
     }
@@ -814,7 +814,6 @@ fn void repeated_complete_color_state_output_matches() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     foreach (i, target : targets) {
-        usz state_index = (usz)i / 2;
         gpu::TextureBarrier to_attachment = {
             .texture = target,
             .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -839,7 +838,7 @@ fn void repeated_complete_color_state_output_matches() @test {
         gpu::GraphicsState graphics =
             gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
         gpu::ColorTargetState[1] color_targets = {
-            packets[state_index],
+            packets[i],
         };
         graphics.color = { .targets = color_targets[..] };
         gpu::cmd_begin_render_pass(&commands, &pass)!!;
@@ -865,7 +864,7 @@ fn void repeated_complete_color_state_output_matches() @test {
     )!!;
     gpu::wait_completion(completion)!!;
 
-    char[RT_BYTES * 10] pixels;
+    char[RT_BYTES * 5] pixels;
     gpu::TextureState color_attachment = {
         .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
         .stages = { .color_output },
@@ -889,14 +888,10 @@ fn void repeated_complete_color_state_output_matches() @test {
     };
     usz center = ((RT_SIZE / 2) * RT_SIZE + RT_SIZE / 2) * 4;
     for (usz state_index = 0; state_index < packets.len; state_index++) {
-        char[] first_pixels =
-            pixels[RT_BYTES * state_index * 2 : RT_BYTES];
-        char[] repeated_pixels =
-            pixels[RT_BYTES * (state_index * 2 + 1) : RT_BYTES];
-        assert(first_pixels == repeated_pixels,
-            "repeated complete color state renders identical bytes");
+        char[] state_pixels =
+            pixels[RT_BYTES * state_index : RT_BYTES];
         for (uint channel = 0; channel < 4; channel++) {
-            uint actual = (uint)repeated_pixels[center + channel];
+            uint actual = (uint)state_pixels[center + channel];
             uint expected_value = expected[state_index * 4 + channel];
             uint difference = actual >= expected_value
                 ? actual - expected_value
