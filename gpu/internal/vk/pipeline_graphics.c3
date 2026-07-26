@@ -239,17 +239,6 @@ fn void? validate_graphics_pipeline_desc(
     check_polygon_mode_support(desc.polygon_mode, state.caps.line_polygon_mode)!;
 }
 
-fn bool pipeline_key_is_cached(
-    VkDeviceState* state,
-    PipelineKey* key,
-) {
-    ulong hash = hash_key(key);
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    return find_entry(state, hash, key)
-        != PIPELINE_ENTRY_NONE;
-}
-
 fn vk::Result create_graphics_pipeline_native(
     VkDeviceState* state,
     vk::GraphicsPipelineCreateInfo* info,
@@ -324,8 +313,6 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
     ZString debug_name,
     PreparedShaderIdentity* prepared_vertex_shader,
     PreparedShaderIdentity* prepared_fragment_shader,
-    PipelineShaderModule* batch_vertex_shader,
-    PipelineShaderModule* batch_fragment_shader,
 ) {
     PipelineKey key = *requested_key;
     ulong hash = hash_key(&key);
@@ -358,44 +345,34 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         }
     }
 
-    PipelineShaderModule owned_vertex_shader;
-    defer destroy_pipeline_shader_module(state, &owned_vertex_shader);
-    PipelineShaderModule* vertex_shader = batch_vertex_shader;
-    if (vertex_shader == null) {
-        ShaderIdentityInput code;
-        shader_store_input_for_retained_id(
-            state:      state,
-            id:         prepared_vertex_shader.id,
-            debug_name: vertex_desc.debug_name,
-            out_input:  &code,
-        );
-        owned_vertex_shader = create_pipeline_shader_module(
-            state:          state,
-            code:           &code,
-            operation:      operation,
-            rejected_field: vertex_field,
-        )!;
-        vertex_shader = &owned_vertex_shader;
-    }
-    PipelineShaderModule owned_fragment_shader;
-    defer destroy_pipeline_shader_module(state, &owned_fragment_shader);
-    PipelineShaderModule* fragment_shader = batch_fragment_shader;
-    if (fragment_shader == null) {
-        ShaderIdentityInput code;
-        shader_store_input_for_retained_id(
-            state:      state,
-            id:         prepared_fragment_shader.id,
-            debug_name: fragment_desc.debug_name,
-            out_input:  &code,
-        );
-        owned_fragment_shader = create_pipeline_shader_module(
-            state:          state,
-            code:           &code,
-            operation:      operation,
-            rejected_field: fragment_field,
-        )!;
-        fragment_shader = &owned_fragment_shader;
-    }
+    ShaderIdentityInput vertex_code;
+    shader_store_input_for_retained_id(
+        state:      state,
+        id:         prepared_vertex_shader.id,
+        debug_name: vertex_desc.debug_name,
+        out_input:  &vertex_code,
+    );
+    PipelineShaderModule vertex_shader = create_pipeline_shader_module(
+        state:          state,
+        code:           &vertex_code,
+        operation:      operation,
+        rejected_field: vertex_field,
+    )!;
+    defer destroy_pipeline_shader_module(state, &vertex_shader);
+    ShaderIdentityInput fragment_code;
+    shader_store_input_for_retained_id(
+        state:      state,
+        id:         prepared_fragment_shader.id,
+        debug_name: fragment_desc.debug_name,
+        out_input:  &fragment_code,
+    );
+    PipelineShaderModule fragment_shader = create_pipeline_shader_module(
+        state:          state,
+        code:           &fragment_code,
+        operation:      operation,
+        rejected_field: fragment_field,
+    )!;
+    defer destroy_pipeline_shader_module(state, &fragment_shader);
     @pool() {
         vk::Format[] color_formats = {};
         if (key.color_target_count > 0) {
@@ -633,165 +610,5 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
         debug_name:               desc.debug_name,
         prepared_vertex_shader:   &prepared[0],
         prepared_fragment_shader: &prepared[1],
-        batch_vertex_shader:      null,
-        batch_fragment_shader:    null,
     );
-}
-
-fn void? vk_create_graphics_pipelines(
-    VkDeviceState* state,
-    gpu::GraphicsPipelineDesc[] descs,
-    gpu::PipelineHandle[] out_pipelines,
-) {
-    if (out_pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
-    if (descs.len == 0) return;
-    state.pipeline_creation_mutex.lock()!!;
-    defer state.pipeline_creation_mutex.unlock();
-
-    foreach (&desc : descs) {
-        validate_graphics_pipeline_desc(state, desc)!;
-    }
-    if (!pipeline_handle_capacity_available(state, descs.len)) {
-        return gpu::SLOT_TABLE_FULL~;
-    }
-
-    @pool() {
-        ShaderIdentityInput[] vertex_inputs =
-            mem::talloc_array(ShaderIdentityInput, descs.len);
-        ShaderIdentityInput[] fragment_inputs =
-            mem::talloc_array(ShaderIdentityInput, descs.len);
-        foreach (i, &desc : descs) {
-            normalize_shader_input(
-                state:          state,
-                desc:           &desc.vertex_shader,
-                role:           gpu::internal::ShaderRole.VERTEX,
-                operation:      "create_graphics_pipelines",
-                rejected_field: "GraphicsPipelineDesc.vertex_shader",
-                out_input:      &vertex_inputs[i],
-            )!;
-            normalize_shader_input(
-                state:          state,
-                desc:           &desc.fragment_shader,
-                role:           gpu::internal::ShaderRole.FRAGMENT,
-                operation:      "create_graphics_pipelines",
-                rejected_field: "GraphicsPipelineDesc.fragment_shader",
-                out_input:      &fragment_inputs[i],
-            )!;
-        }
-
-        PreparedShaderIdentity[] prepared_vertex =
-            mem::talloc_array(PreparedShaderIdentity, descs.len);
-        PreparedShaderIdentity[] prepared_fragment =
-            mem::talloc_array(PreparedShaderIdentity, descs.len);
-        $if env::TESTING:
-            poison_unprepared_shader_identities(state, prepared_vertex);
-            poison_unprepared_shader_identities(state, prepared_fragment);
-        $endif
-        usz prepared_vertex_count = 0;
-        usz prepared_fragment_count = 0;
-        defer release_prepared_shaders(
-            state,
-            prepared_fragment[:prepared_fragment_count],
-        );
-        defer release_prepared_shaders(
-            state,
-            prepared_vertex[:prepared_vertex_count],
-        );
-        foreach (i, &vertex_input : vertex_inputs) {
-            {
-                state.resource_mutex.lock()!!;
-                defer state.resource_mutex.unlock();
-                prepared_vertex[i] = prepare_shader_identity_locked(
-                    state,
-                    vertex_input,
-                )!;
-            }
-            prepared_vertex_count++;
-            {
-                state.resource_mutex.lock()!!;
-                defer state.resource_mutex.unlock();
-                prepared_fragment[i] = prepare_shader_identity_locked(
-                    state,
-                    &fragment_inputs[i],
-                )!;
-            }
-            prepared_fragment_count++;
-        }
-
-        PipelineBatchShader[] shaders =
-            mem::talloc_array(PipelineBatchShader, descs.len * 2);
-        PipelineShaderModule*[] vertex_shaders =
-            mem::talloc_array(PipelineShaderModule*, descs.len);
-        PipelineShaderModule*[] fragment_shaders =
-            mem::talloc_array(PipelineShaderModule*, descs.len);
-        uint shader_count = 0;
-        defer destroy_pipeline_batch_shaders(state, shaders, shader_count);
-        foreach (i, &desc : descs) {
-            vertex_shaders[i] = null;
-            fragment_shaders[i] = null;
-            PipelineKey key = build_graphics_key(
-                desc,
-                prepared_vertex[i].id,
-                prepared_fragment[i].id,
-            );
-            if (pipeline_key_is_cached(state, &key)) continue;
-            vertex_shaders[i] = get_pipeline_batch_shader(
-                state:          state,
-                id:             prepared_vertex[i].id,
-                debug_name:     desc.vertex_shader.debug_name,
-                operation:      "create_graphics_pipelines",
-                rejected_field: "GraphicsPipelineDesc.vertex_shader",
-                shaders:        shaders,
-                shader_count:   &shader_count,
-            )!;
-            fragment_shaders[i] = get_pipeline_batch_shader(
-                state:          state,
-                id:             prepared_fragment[i].id,
-                debug_name:     desc.fragment_shader.debug_name,
-                operation:      "create_graphics_pipelines",
-                rejected_field: "GraphicsPipelineDesc.fragment_shader",
-                shaders:        shaders,
-                shader_count:   &shader_count,
-            )!;
-        }
-
-        gpu::PipelineHandle[] created = mem::talloc_array(gpu::PipelineHandle, descs.len);
-        usz created_count = 0;
-        foreach (i, &desc : descs) {
-            if (pipeline_creation_should_fail(state, (usz)i)) {
-                for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(state, created[rollback])!!;
-                }
-                return gpu::PIPELINE_CREATE_FAILED~;
-            }
-            PipelineKey key = build_graphics_key(
-                desc,
-                prepared_vertex[i].id,
-                prepared_fragment[i].id,
-            );
-            gpu::PipelineHandle? created_optional = create_graphics_pipeline_from_modules(
-                state:                    state,
-                requested_key:            &key,
-                vertex_desc:              &desc.vertex_shader,
-                fragment_desc:            &desc.fragment_shader,
-                operation:                "create_graphics_pipelines",
-                vertex_field:             "GraphicsPipelineDesc.vertex_shader",
-                fragment_field:           "GraphicsPipelineDesc.fragment_shader",
-                debug_name:               desc.debug_name,
-                prepared_vertex_shader:   &prepared_vertex[i],
-                prepared_fragment_shader: &prepared_fragment[i],
-                batch_vertex_shader:      vertex_shaders[i],
-                batch_fragment_shader:    fragment_shaders[i],
-            );
-            if (catch create_fault = created_optional) {
-                for (usz rollback = 0; rollback < created_count; rollback++) {
-                    vk_destroy_pipeline(state, created[rollback])!!;
-                }
-                return create_fault~;
-            }
-            created[i] = created_optional;
-            created_count++;
-        }
-        foreach (i, pipeline : created) out_pipelines[i] = pipeline;
-    };
 }

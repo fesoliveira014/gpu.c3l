@@ -8,16 +8,14 @@ import std::time;
 import std::core::mem;
 
 // Advisory, not gating: request one alias for each command-time raster-state
-// permutation, then measure duplicate single and batch cache lookup. The raster
-// matrix must remain one format-only graphics pipeline identity.
+// permutation, then measure duplicate singular cache lookup. The raster matrix
+// must remain one format-only graphics pipeline identity.
 
 const char[*] BENCH_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
 const char[*] BENCH_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 
 const uint BENCH_RASTER_PERMUTATION_COUNT = 200;
 const uint BENCH_DUPLICATE_COUNT          = 200_000;
-const uint BENCH_BATCH_SIZE               = 64;
-const uint BENCH_BATCH_ROUNDS             = 2_000;
 const usz BENCH_SHADER_SMALL_BYTES        = 1_024;
 const usz BENCH_SHADER_MEDIUM_BYTES       = 64 * 1_024;
 const usz BENCH_SHADER_LARGE_BYTES        = 1_024 * 1_024;
@@ -139,14 +137,12 @@ fn double record_raster_matrix(
 
 fn int main() {
     io::printfn(
-        "iterations=raster=%d;duplicate=%d;batch=%dx%d units=ns/create,ns/state",
+        "iterations=raster=%d;duplicate=%d units=ns/create,ns/state",
         BENCH_RASTER_PERMUTATION_COUNT,
         BENCH_DUPLICATE_COUNT,
-        BENCH_BATCH_SIZE,
-        BENCH_BATCH_ROUNDS,
     );
     gpu::RuntimeDesc desc = {
-        .pipeline_capacity = BENCH_RASTER_PERMUTATION_COUNT + BENCH_BATCH_SIZE,
+        .pipeline_capacity = BENCH_RASTER_PERMUTATION_COUNT + 1,
         .application_name  = "gpu_pipeline_cache_bench",
     };
     gpu::Device device = create_bench_device(&desc)!!;
@@ -238,31 +234,6 @@ fn int main() {
         "phase 2 (duplicate, %d at full alias set): %.1f ns/create",
         BENCH_DUPLICATE_COUNT,
         dup_ns_per_create,
-    );
-
-    gpu::GraphicsPipelineDesc[BENCH_BATCH_SIZE] batch_descs;
-    foreach (&batch_desc : batch_descs) *batch_desc = format_only;
-    gpu::PipelineHandle[BENCH_BATCH_SIZE] batch_pipelines;
-    long batch_elapsed_ns = 0;
-    for (uint round = 0; round < BENCH_BATCH_ROUNDS; round++) {
-        std::time::Clock mark = std::time::clock::now();
-        gpu::create_graphics_pipelines(
-            device:        &device,
-            descs:         batch_descs[..],
-            out_pipelines: batch_pipelines[..],
-        )!!;
-        batch_elapsed_ns += (long)mark.to_now();
-        foreach (pipeline : batch_pipelines) {
-            gpu::destroy_pipeline(&device, pipeline)!!;
-        }
-    }
-    double batch_ns_per_create = (double)batch_elapsed_ns
-        / (double)(BENCH_BATCH_SIZE * BENCH_BATCH_ROUNDS);
-    io::printfn(
-        "phase 3 (cached batch, %dx%d): %.1f ns/create",
-        BENCH_BATCH_SIZE,
-        BENCH_BATCH_ROUNDS,
-        batch_ns_per_create,
     );
 
     probe_owned_shader_identity(state, BENCH_SHADER_SMALL_BYTES);

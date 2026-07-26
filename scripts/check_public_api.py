@@ -88,6 +88,12 @@ FORBIDDEN_TEXT = {
     '"name":"create_dynamic_graphics_pipelines"': (
         "retired dynamic graphics pipeline batch creation"
     ),
+    '"name":"create_compute_pipelines"': (
+        "retired compute pipeline batch creation"
+    ),
+    '"name":"create_graphics_pipelines"': (
+        "retired graphics pipeline batch creation"
+    ),
     '"name":"dynamic_color_state"': (
         "retired optional dynamic color capability"
     ),
@@ -203,6 +209,8 @@ FORBIDDEN_SYMBOLS = {
     "ShaderCode",
     "ShaderStage",
     "prepare_shader_code",
+    "create_compute_pipelines",
+    "create_graphics_pipelines",
     "create_render_pass",
     "destroy_render_pass",
     "create_framebuffer",
@@ -346,6 +354,8 @@ RETIRED_SOURCE_SYMBOLS = (
     "ShaderCode",
     "ShaderStage",
     "prepare_shader_code(",
+    "create_compute_pipelines(",
+    "create_graphics_pipelines(",
     "RESOURCE_AGNOSTIC_TEXTURE_SYNC",
     "strict_heap_buffer_bind_commands",
     "strict_heap_offset_commands",
@@ -462,6 +472,16 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "transfer_ids",
     "render_pass_with_state",
     "RenderPassWithState",
+    "vk_create_compute_pipelines",
+    "vk_create_graphics_pipelines",
+    "PipelineBatchShader",
+    "pipeline_batch_shader",
+    "compute_pipeline_is_cached",
+    "pipeline_key_is_cached",
+    "pipeline_creation_failure",
+    "pipeline_creation_should_fail",
+    "pipeline_prepare_poison",
+    "poison_unprepared_shader_identities",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (

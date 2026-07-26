@@ -331,7 +331,7 @@ Pipeline creation is explicit and is the only operation that may compile native 
   command state.
 - Every compute pipeline shares the fixed `RootPush` device layout.
 
-Batch pipeline creation deduplicates identical shader modules within the batch and uses the device pipeline cache. It publishes either the documented successful handles or a transactional failure result.
+Repeated singular pipeline creation deduplicates identical shader identities through the device pipeline cache. Each call publishes one handle or rolls back its own mutation before returning a fault.
 
 Strict pipeline handles belong to `gpu`. Compatibility pipeline handles belong to `gpu::compat`; their distinct types prevent accidental binding-model crossover.
 
@@ -469,7 +469,7 @@ Diagnostic backend information may report backend name, API version, driver name
 
 - Invalid pointers, handles, ownership, ranges, alignment, state, and request composition fault before backend mutation.
 - Unsupported semantic requirements fail request validation or device creation with the unmet requirement identified.
-- Device creation, dedicated texture creation, descriptor writes, and batch pipeline creation are transactional.
+- Device creation, dedicated texture creation, descriptor writes, and singular pipeline creation are transactional.
 - Invalid placed texture creation faults before backend mutation.
 - Device destruction returns `RESOURCE_IN_USE` for live children and retryable `DEVICE_BUSY` for incomplete work or active operations.
 - Non-WSI GPU-visible resource destruction has a caller-completion precondition and never waits or defers; strict presentation uses the same rule for WSI destruction and resize.
@@ -489,7 +489,7 @@ Diagnostic backend information may report backend name, API version, driver name
 - Non-WSI resource and device destruction perform no hidden wait or deferred-release work; strict presentation extends that rule to swapchain destruction and resize.
 - GPU allocations are explicit so applications can batch and suballocate.
 - Exact shader identity is interned privately during pipeline creation.
-- Pipeline creation can be batched and deduplicate shared IR.
+- Repeated pipeline creation deduplicates shared IR.
 - Strict descriptor indices are direct shader values; CPU generation metadata is separate.
 - Compatibility descriptor arenas amortize native pool management.
 - Debug tracking and detailed validation can add cost only when enabled.

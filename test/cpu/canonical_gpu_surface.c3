@@ -118,7 +118,6 @@ fn void pin_shaders_and_pipelines() {
         .shader     = shader_desc,
         .debug_name = "compute",
     };
-    gpu::ComputePipelineDesc[1] compute_descs = { compute_desc };
     gpu::GraphicsPipelineDesc graphics_desc = {
         .vertex_shader   = shader_desc,
         .fragment_shader = shader_desc,
@@ -128,28 +127,16 @@ fn void pin_shaders_and_pipelines() {
         .polygon_mode    = gpu::PolygonMode.FILL,
         .debug_name      = "graphics",
     };
-    gpu::GraphicsPipelineDesc[1] graphics_descs = { graphics_desc };
     gpu::ColorTargetState[1] color_targets;
     gpu::ColorTargetState color_target =
         gpu::color_blend_disabled();
     gpu::ColorState color_state =
         gpu::uniform_color_state(color_targets[..], color_target);
     gpu::PipelineHandle pipeline = {};
-    gpu::PipelineHandle[1] pipelines;
     char[1] pipeline_cache;
 
     (void)gpu::create_compute_pipeline(&device, &compute_desc);
-    (void)gpu::create_compute_pipelines(
-        &device,
-        compute_descs[..],
-        pipelines[..],
-    );
     (void)gpu::create_graphics_pipeline(&device, &graphics_desc);
-    (void)gpu::create_graphics_pipelines(
-        &device,
-        graphics_descs[..],
-        pipelines[..],
-    );
     color_target = gpu::alpha_blend();
     color_target = gpu::premultiplied_alpha_blend();
     color_target = gpu::additive_blend();

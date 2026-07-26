@@ -568,11 +568,9 @@ participate in identity, and no post-call identity retains caller pointers.
 
 On a miss, the backend reflects the selected entry against the field-derived
 role and pipeline ABI before creating a temporary `vk::ShaderModule`, compiles
-the pipeline, and destroys the module before returning. Batch creation
-normalizes every shader before interning any, reflects and creates at most one
-temporary module per private shader identity, and rolls back every created
-handle, cache entry, and pending shader reference before returning a fault. No
-native shader-module handle crosses the public boundary.
+the pipeline, and destroys the module before returning. A fault rolls back the
+singular creation's handle, cache entry, and pending shader reference before
+returning. No native shader-module handle crosses the public boundary.
 
 Reflection validation checks:
 

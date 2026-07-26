@@ -255,6 +255,18 @@
         "prepare_shader_code.c3"
       ]
     },
+    "create_compute_pipelines": {
+      "type": "object-files",
+      "sources": [
+        "create_compute_pipelines.c3"
+      ]
+    },
+    "create_graphics_pipelines": {
+      "type": "object-files",
+      "sources": [
+        "create_graphics_pipelines.c3"
+      ]
+    },
     "destroy_shader": {
       "type": "object-files",
       "sources": [

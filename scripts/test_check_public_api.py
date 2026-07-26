@@ -1841,6 +1841,17 @@ method gpu::Runtime.is_valid
             with self.subTest(symbol=symbol):
                 self.assertIn(symbol, failures)
 
+    def test_rejects_retired_pipeline_batch_surface(self) -> None:
+        document = valid_document()
+        gpu_module = document["modules"]["gpu"]
+        gpu_module["functions"].extend([
+            {"name": "create_compute_pipelines"},
+            {"name": "create_graphics_pipelines"},
+        ])
+        failures = check_public_api.validate_document(document)
+        self.assertIn("retired compute pipeline batch creation", failures)
+        self.assertIn("retired graphics pipeline batch creation", failures)
+
     def test_rejects_untyped_root_surface_constructors(self) -> None:
         document = valid_document()
         document["modules"]["gpu"]["functions"].append(

@@ -410,7 +410,7 @@ Test names describe behavior, not roadmap or ticket labels.
 | Texture heap | owner-bearing view publication/release, raw-index reuse, stale/foreign rejection, and sampling by TextureIndex. |
 | Graphics | offscreen clear/draw/readback for opaque, alpha, premultiplied, additive, and masked writes; explicit attachment-view lifecycle and in-flight retention; one-command minimal begin; begin rejection before mutation; state failure after begin with retry, discard, attachment release, and allocator reuse; exact ten-command viewport/raster/depth prefix and three-command color packets; state reuse across compatible pipeline switches and pass boundaries and reset on command-buffer reuse; optional partial updates; FULL regular/generated missing-initialization rejection; exact zero/nonzero stage roots; per-target blend/write masks; dynamic raster validation; selected-device viewport bounds; exact negative-height, negative-coordinate, reversed-depth, off-pass scissor, and empty-scissor lowering; validation-layer-clean accepted cases; clipping; packet replacement; incompatible color-domain invalidation; and pipeline-alias persistence. |
 | Swapchain | Runtime-info selection, dormant sentinel, acquired prior state; pure WSI result mapping; SDL windowed present, resize, and surface-loss recovery. |
-| Pipeline cache | cache create/reuse, blob save/load, warm start, raster- and color-state aliasing across five command color packets, ordered color-format separation, transactional batches, and singleton compute/generated-dispatch layouts. |
+| Pipeline cache | cache create/reuse, blob save/load, warm start, raster- and color-state aliasing across five command color packets, ordered color-format separation, repeated singular creation, and singleton compute/generated-dispatch layouts. |
 | Threading | one explicit allocator per concurrent worker, same-allocator bounded-full rejection, synchronized allocator migration and executable handoff, one-thread-at-a-time alias confinement, no device-wide recording lock, no temp-pool setup, historical worker churn, private command-buffer/generated-scratch reuse, parallel record, same-queue submit/present serialization, distinct-queue submission concurrency, and prior-point retirement across a later publication gap. |
 | Upload benchmark observations | stable device-type and lavapipe classification; scaling against one worker. |
 | Debug report | callback dispatch/translation, unchanged faults, leak report contents, debug names, command labels. |
@@ -510,8 +510,8 @@ short spans, zero work, index formats, and generated-preprocess barrier masks.
 cache-hit reference stability, last-alias release, unique free-list churn,
 full-capacity preflight, caller-storage independence after creation, and exact
 cleanup after partial private shader interning,
-reflection, native shader, native pipeline, cache insertion, and mid-batch
-faults. It uses exact interning and byte-comparison counters for collision and
+reflection, native shader, native pipeline, and cache-insertion faults. It uses
+exact interning and byte-comparison counters for collision and
 distinct-storage cases, while cache hits require compact-key probes without
 shader-byte comparison. Live tests exercise 1 KiB, 64 KiB, and 1 MiB synthetic
 identities and require zero shader probes, byte comparisons, and clones after

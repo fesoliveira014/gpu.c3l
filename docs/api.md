@@ -898,11 +898,6 @@ ComputePipelineDesc
     ZString debug_name
 
 create_compute_pipeline(Device* device, ComputePipelineDesc* desc) -> PipelineHandle?
-create_compute_pipelines(
-    Device* device,
-    ComputePipelineDesc[] descs,
-    PipelineHandle[] out_pipelines,
-) -> void?
 ```
 
 Every compute pipeline uses the device's singleton layout with the fixed 8-byte
@@ -962,11 +957,6 @@ GraphicsPipelineDesc
     ZString debug_name
 
 create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) -> PipelineHandle?
-create_graphics_pipelines(
-    Device* device,
-    GraphicsPipelineDesc[] descs,
-    PipelineHandle[] out_pipelines,
-) -> void?
 destroy_pipeline(Device* device, PipelineHandle pipeline) -> void?
 ```
 `PolygonMode.LINE` is optional. Query `DeviceCaps.line_polygon_mode` before
@@ -996,11 +986,36 @@ SPIR-V bytes. Topology,
 cull/front-face, depth bias, depth test/write/compare, viewport, scissor,
 blend equations, and write masks are separate command state.
 
-Batch output length must equal descriptor count; an empty batch succeeds.
-Shared shader input creates one temporary native module per exact role, entry
-point, length, and byte sequence in the batch. Duplicate pipeline identities
-compile once. A fault leaves all output handles unchanged and publishes no
-pipeline from the batch.
+There is no public batch helper. Callers that need a collection create each
+pipeline in a loop. If the collection must be transactional, the caller destroys
+the handles created earlier in the loop when a later creation faults. Repeated
+identical descriptors still converge on the same backend pipeline through the
+device cache.
+
+```c3
+fn void? create_graphics_set(
+    gpu::Device* device,
+    gpu::GraphicsPipelineDesc[] descs,
+    gpu::PipelineHandle[] pipelines,
+) {
+    if (pipelines.len != descs.len) return gpu::INVALID_ARGUMENT~;
+    usz created;
+    foreach (i, &desc : descs) {
+        gpu::PipelineHandle? result =
+            gpu::create_graphics_pipeline(device, desc);
+        if (catch create_fault = result) {
+            while (created > 0) {
+                created--;
+                (void)gpu::destroy_pipeline(device, pipelines[created]);
+                pipelines[created] = gpu::PIPELINE_HANDLE_INVALID;
+            }
+            return create_fault~;
+        }
+        pipelines[i] = result;
+        created++;
+    }
+}
+```
 
 Each successful create must be balanced by exactly one `destroy_pipeline`; the
 backend pipeline is destroyed when its last alias is released. Destroying a

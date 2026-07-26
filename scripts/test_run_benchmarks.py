@@ -32,7 +32,7 @@ LIFECYCLE_OUTPUT = "\n".join(
 )
 COMMAND_OUTPUT = "\n".join(
     (
-        "expectation_version=4",
+        "expectation_version=5",
         (
             "command_tokens: representation=direct "
             "recording_token_bytes=16 executable_token_bytes=16 "
@@ -85,7 +85,7 @@ COMMAND_POLICY_OUTPUTS = (
 )
 PIPELINE_OUTPUT = "\n".join(
     (
-        "iterations=raster=200;duplicate=200000;batch=64x2000 "
+        "iterations=raster=200;duplicate=200000 "
         "units=ns/create,ns/state",
         (
             "phase 1 (raster matrix, requested=200 native=1 "
@@ -93,7 +93,6 @@ PIPELINE_OUTPUT = "\n".join(
         ),
         "raster recording (requested=200 native=1): 99.0 ns/state",
         "phase 2 (duplicate, 200000 at full alias set): 1388.1 ns/create",
-        "phase 3 (cached batch, 64x2000): 2454.9 ns/create",
         (
             "identity size_bytes=1024 intern_probes=0 "
             "intern_bytes_compared=0 owned_bytes_cloned=1024 "
@@ -363,7 +362,7 @@ class BenchmarkRunnerTests(unittest.TestCase):
         self.assertEqual(
             runner.BENCHMARK_METHODS["pipeline_cache_bench"],
             (
-                "raster=200; duplicate=200000; batch=64x2000; identity=1024,65536,1048576",
+                "raster=200; duplicate=200000; identity=1024,65536,1048576",
                 "ns/create, ns/state; exact identity work",
             ),
         )
@@ -983,13 +982,13 @@ class BenchmarkRunnerTests(unittest.TestCase):
         )
         mutations = (
             (
-                COMMAND_OUTPUT.replace("expectation_version=4\n", ""),
+                COMMAND_OUTPUT.replace("expectation_version=5\n", ""),
                 "expectation version",
             ),
             (
                 COMMAND_OUTPUT.replace(
+                    "expectation_version=5",
                     "expectation_version=4",
-                    "expectation_version=3",
                 ),
                 "expectation version",
             ),

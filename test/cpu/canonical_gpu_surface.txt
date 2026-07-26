@@ -138,11 +138,9 @@ function gpu::color_blend_disabled
 function gpu::create_attachment_view
 function gpu::create_command_allocator
 function gpu::create_compute_pipeline
-function gpu::create_compute_pipelines
 function gpu::create_dedicated_texture
 function gpu::create_device
 function gpu::create_graphics_pipeline
-function gpu::create_graphics_pipelines
 function gpu::create_placed_texture
 function gpu::create_runtime
 function gpu::create_swapchain

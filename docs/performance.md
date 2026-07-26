@@ -15,7 +15,7 @@ python -B scripts/run_benchmarks.py
 
 The runner builds every target once with C3 `-O1`, uses trusted/no-layer
 defaults for release evidence, validates output schemas and zero-work
-fields, records hand-maintained `expectation_version=4`, and writes
+fields, records hand-maintained `expectation_version=5`, and writes
 `test/build/benchmark-report.md`. The direct-token `command_record_bench` executable
 and fixed workload run in this required order:
 
@@ -147,7 +147,7 @@ The suite covers:
 | `command_record_bench` | Direct-token barrier, semantic-hazard barrier, indirect dispatch, and generated dispatch recording under TRUSTED and FULL; 1/16/256/4,096 command lists; exact native output and zero forbidden warm work |
 | `lifecycle_bench` | Submission, cached completed-point polling, and immediate texture destruction |
 | `submit_batch_bench` | Real submit batches of 1/8/32/128/1,024 lists with exact direct-token visits, duplicate detection, claim, queue serialization, native submit, and forbidden-work evidence |
-| `pipeline_cache_bench` | Dynamic raster and five command color-state matrix aliasing, state recording, ordered color-format separation, cached duplicate lookup/batches, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
+| `pipeline_cache_bench` | Dynamic raster and five command color-state matrix aliasing, state recording, ordered color-format separation, cached duplicate lookup, and exact 1 KiB/64 KiB/1 MiB shader-identity work |
 | `resource_create_bench` | Texture, shader-code, allocation, and mixed creation across 1/2/4 workers |
 | `descriptor_churn_bench` | Texture-view publication and sampler hits across 1/2/4 workers; zero-through-eight sampler probes at occupancy 8/64/1,024/65,536; upper-bounded texture/swapchain ownership work at descriptor high-water 16/4,096/65,536 |
 | `upload_throughput_bench` | Explicit uploads at 4 KiB, 256 KiB, and 4 MiB across 1/2/4 workers |
@@ -338,7 +338,7 @@ advisories:
 | Completed-point poll | 1,000 ns/poll |
 | Texture destruction | 10,000 ns/destroy |
 | Raster-matrix pipeline alias creation | 500,000 ns/create |
-| Cached duplicate / batch | 20,000 ns/create |
+| Cached duplicate | 20,000 ns/create |
 
 These thresholds flag observations for investigation; they are not
 cross-machine acceptance criteria. To make them blocking, identify all three
@@ -395,7 +395,6 @@ An advisory llvmpipe run on 2026-07-21 (Mesa 25.0.7, LLVM 15.0.7) requested
 | Matrix create time | 5,351.7 ns/create |
 | Dynamic raster recording | 99.7 ns/state |
 | Duplicate lookup | 3,438.5 ns/create |
-| Cached batch | 6,838.8 ns/create |
 
 The timings are observations, not acceptance thresholds. The stable contract
 is the one-native-pipeline accounting, which the benchmark asserts and the
@@ -428,7 +427,6 @@ The table reports the median of the three target medians and their full range.
 | Lifecycle | Texture destruction | 300 × 5 | 241.7 ns/destroy | 240.3–247.0 |
 | Pipeline | Cold creation | 200 | 49,669.0 ns/create | 49,105.5–51,123.0 |
 | Pipeline | Cached duplicate | 200,000 | 1,062.8 ns/create | 1,056.5–1,063.3 |
-| Pipeline | Cached batch | 64 × 2,000 | 2,051.9 ns/create | 2,044.4–2,065.9 |
 
 Every run reported:
 

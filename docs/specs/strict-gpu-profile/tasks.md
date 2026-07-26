@@ -261,13 +261,13 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
     selected-entry tests, caller-storage lifetime tests, and compile fixtures
     rejecting retired shader handles and preparation symbols.
 
-### 5.5 Explicit deterministic pipeline identity and batches
+### 5.5 Explicit deterministic pipeline identity
 
-- [x] Redesign graphics and compute pipeline creation in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/pipeline.c3`, `gpu/internal/vk/pipeline_compute.c3`, `gpu/internal/vk/pipeline_graphics.c3`, and `gpu/internal/vk/pipeline_cache.c3` around explicit immutable state and batch deduplication.
+- [x] Redesign graphics and compute pipeline creation in `gpu/gpu.c3i`, `gpu/gpu.c3`, `gpu/internal/pipeline.c3`, `gpu/internal/vk/pipeline_compute.c3`, `gpu/internal/vk/pipeline_graphics.c3`, and `gpu/internal/vk/pipeline_cache.c3` around explicit immutable state and cache deduplication.
   - **Depends on:** 5.4 and 5.3.
-  - **Contract:** native compilation occurs during creation; shared shader IR deduplicates within a batch; depth/stencil and raster controls are dynamic; per-target format/blend/write-mask state and polygon mode remain graphics identity; compute uses one fixed `RootPush` layout.
-  - **Edges:** partial batch failure, cache failure, duplicate pipeline descriptions, shared shader stages, unsupported state, and transactional publication.
-  - **Verify:** identity tests, shared-IR native creation counters, failure rollback tests, and pipeline-cache benchmarks.
+  - **Contract:** native compilation occurs during creation; repeated shared shader IR deduplicates through private identity; depth/stencil and raster controls are dynamic; per-target format/blend/write-mask state and polygon mode remain graphics identity; compute uses one fixed `RootPush` layout.
+  - **Edges:** cache failure, duplicate pipeline descriptions, shared shader stages, unsupported state, and transactional singular publication.
+  - **Verify:** identity tests, shared-IR native creation counters, singular failure rollback tests, and pipeline-cache benchmarks.
 
 ### 5.6 Bind pipelines separately from execution
 
