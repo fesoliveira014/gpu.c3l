@@ -385,6 +385,9 @@ RETIRED_SOURCE_SYMBOLS = (
     "selected_queue_count(",
     "queue_count_for_kind(",
     "add_queue_role_identities(",
+    "shader_code_digest",
+    "shader_stage_valid",
+    "cmd_begin_render_pass_with_state(",
 )
 
 RETIRED_BACKEND_SOURCE_SYMBOLS = (
@@ -467,6 +470,18 @@ RETIRED_BACKEND_SOURCE_SYMBOLS = (
     "graphics_ids",
     "compute_ids",
     "transfer_ids",
+    "render_pass_with_state",
+    "RenderPassWithState",
+    "vk_create_compute_pipelines",
+    "vk_create_graphics_pipelines",
+    "PipelineBatchShader",
+    "pipeline_batch_shader",
+    "compute_pipeline_is_cached",
+    "pipeline_key_is_cached",
+    "pipeline_creation_failure",
+    "pipeline_creation_should_fail",
+    "pipeline_prepare_poison",
+    "poison_unprepared_shader_identities",
 )
 
 RETIRED_COMMAND_RENDER_STATE_SYMBOLS = (
