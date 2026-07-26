@@ -463,7 +463,7 @@ fn void public_creation_reports_cached_baseline_capacity_failure() @test {
 
         assert(rejected == gpu::UNSUPPORTED_FEATURE,
             "public creation rejects the cached baseline capacity failure");
-        assert(capture.matched,
+        assert(capture.calls == 1 && capture.matched,
             "public creation reports the exact cached capacity diagnostic");
         return;
     }
