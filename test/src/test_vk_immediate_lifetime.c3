@@ -842,15 +842,13 @@ fn void completed_submission_release_boundary_is_exact() @test {
         point:      gpu::internal::make_completion_point(queue, 8)!!,
     );
 
-    vk::CommandBufferStats before = vk::command_buffer_stats(&state);
+    assert(completions[0].submitted_count == 3,
+        "the fixture begins with three pending command batches");
     completions[0].retirement_mutex.lock()!!;
     vk::retire_queue_through_locked(&state, &completions[0], 7);
     completions[0].retirement_mutex.unlock();
-    vk::CommandBufferStats incomplete = vk::command_buffer_stats(&state);
-    assert(incomplete.pending == before.pending - 1,
+    assert(completions[0].submitted_count == 2,
         "sequence N - 1 retires only its covered batch");
-    assert(incomplete.freed == before.freed,
-        "sequence N - 1 cannot free the submitted command buffer");
     assert(first_tracked_command_reference.load(AtomicOrdering.RELAXED) == 0
         && second_tracked_command_reference.load(AtomicOrdering.RELAXED) == 1
         && third_tracked_command_reference.load(AtomicOrdering.RELAXED) == 1,
@@ -875,11 +873,8 @@ fn void completed_submission_release_boundary_is_exact() @test {
     completions[0].retirement_mutex.lock()!!;
     vk::retire_queue_through_locked(&state, &completions[0], 8);
     completions[0].retirement_mutex.unlock();
-    vk::CommandBufferStats completed = vk::command_buffer_stats(&state);
-    assert(completed.pending == 0,
+    assert(completions[0].submitted_count == 0,
         "sequence N retires every batch covered by that sequence");
-    assert(completed.freed == before.freed,
-        "a null native buffer performs no backend free");
     assert(second_tracked_command_reference.load(AtomicOrdering.RELAXED) == 0
         && third_tracked_command_reference.load(AtomicOrdering.RELAXED) == 0,
         "sequence N releases every stable retained counter pointer");

@@ -17,12 +17,6 @@ struct CommandResourceReference {
     Atomic{uint}* retained_counter;
 }
 
-struct CommandBufferStats {
-    ulong allocated;
-    ulong freed;
-    uint  pending;
-}
-
 fn bool same_resource_reference(
     CommandResourceReference* left,
     CommandResourceReference* right,
@@ -470,22 +464,4 @@ fn void destroy_submitted_commands(VkDeviceState* state) {
         completion.submitted_count = 0;
         if (locked) completion.retirement_mutex.unlock();
     }
-}
-
-fn CommandBufferStats command_buffer_stats(VkDeviceState* state) {
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    uint pending;
-    foreach (&completion : state.queue_completions) {
-        completion.retirement_mutex.lock()!!;
-        pending += completion.submitted_count;
-        completion.retirement_mutex.unlock();
-    }
-    state.command_mutex.lock()!!;
-    defer state.command_mutex.unlock();
-    return {
-        .allocated = state.command_buffers_allocated,
-        .freed     = state.command_buffers_freed,
-        .pending   = pending,
-    };
 }

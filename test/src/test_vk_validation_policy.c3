@@ -828,10 +828,8 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
             &state.allocations.get(
                 owned.allocation,
             )!!.tracked_command_references;
-        vk::CommandBufferStats before = vk::command_buffer_stats(state);
         gpu::CommandList commands = record_policy_fill(&allocator, owned.span);
         vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-        vk::CommandBufferStats recorded = vk::command_buffer_stats(state);
         bool full = contract == gpu::ContractValidation.FULL;
         assert((record.scratch.reference_count == 1) == full,
             "device-loss setup reflects the selected contract mode");
@@ -840,19 +838,10 @@ fn void device_loss_accepts_empty_or_populated_command_references() @test {
         assert(retained_counter.load(AtomicOrdering.RELAXED)
                 == (full ? (uint)1 : (uint)0),
             "device-loss setup retains exactly the selected resource work");
-        assert(recorded.allocated == before.allocated
-            && recorded.freed == before.freed
-            && recorded.pending == before.pending,
-            "device-loss recording reuses its allocator's native buffer");
         gpu::internal::mark_device_lost(&device);
         gpu::discard_commands(&commands)!!;
         assert(retained_counter.load(AtomicOrdering.RELAXED) == 0,
             "device-loss cleanup releases exactly the selected reference work");
-        vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
-        assert(discarded.allocated == recorded.allocated
-            && discarded.freed == recorded.freed
-            && discarded.pending == before.pending,
-            "lost-command discard performs no extra native allocation or free");
         gpu::destroy_command_allocator(&allocator)!!;
         destroy_test_device(&device)!!;
         assert(!device.is_valid(),

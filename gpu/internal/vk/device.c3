@@ -151,22 +151,6 @@ struct VkDeviceState @public {
     SamplerTable               samplers;
     VkPresentationState        presentation;
     VkShaderHeapState          shader_heap;
-    Atomic{ulong}              generated_preprocess_allocations;
-    Atomic{ulong}              generated_preprocess_reuses;
-    Atomic{ulong}              generated_recording_allocations;
-    ulong                      command_buffers_allocated;
-    ulong                      command_buffers_freed;
-    RecordingHostAllocator     recording_host_allocator @if(env::TESTING);
-    Atomic{ulong}              recording_command_pool_creations @if(env::TESTING);
-    Atomic{ulong}              recording_command_buffer_allocations @if(env::TESTING);
-    Atomic{ulong}              recording_command_buffer_frees @if(env::TESTING);
-    Atomic{ulong}              command_buffer_resets @if(env::TESTING);
-    Atomic{ulong}              recording_image_view_creations @if(env::TESTING);
-    Atomic{ulong}              recording_vma_allocations @if(env::TESTING);
-    Atomic{ulong}              generated_scratch_misses @if(env::TESTING);
-    Atomic{ulong}              generated_dispatch_emissions @if(env::TESTING);
-    Atomic{ulong}              generated_draw_emissions @if(env::TESTING);
-    Atomic{ulong}              generated_indexed_draw_emissions @if(env::TESTING);
     Atomic{ulong}              texture_barrier_helper_calls @if(env::TESTING);
     Atomic{ulong}              texture_barrier_access_validations @if(env::TESTING);
     Atomic{ulong}              texture_barrier_range_resolutions @if(env::TESTING);
@@ -515,9 +499,6 @@ fn gpu::Device? create_vk_device_from_runtime(
         if (probe != null) probe.rollback_count++;
     }
     state.host_allocator = &allocators::LIBC_ALLOCATOR;
-    $if env::TESTING:
-        install_recording_host_allocator(state);
-    $endif
     state.debug_callback = config.debug_callback;
     state.debug_user_data = config.debug_user_data;
     state.debug_names = config.debug_names;

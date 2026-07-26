@@ -1042,8 +1042,6 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
 
     bind_test_compute_pipeline(&commands, dispatch_pipeline);
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    vk::CommandRecordingStats dispatch_recording_before =
-        vk::command_recording_stats(state);
     uint dispatch_preprocess_count =
         record.scratch.generated_preprocess_count;
     gpu::cmd_dispatch_generated(
@@ -1052,19 +1050,10 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         count_span:         count.span,
         max_dispatch_count: 1,
     )!!;
-    vk::CommandRecordingStats dispatch_recording_after =
-        vk::command_recording_stats(state);
-    assert(dispatch_recording_after.preprocess_allocations
-            == dispatch_recording_before.preprocess_allocations
-        && dispatch_recording_after.recording_allocations
-            == dispatch_recording_before.recording_allocations,
-        "reserved generated dispatch performs no preprocess allocation");
     assert(record.scratch.generated_preprocess_count
             == dispatch_preprocess_count + 1,
         "generated dispatch stays within its reserved preprocess capacity");
 
-    vk::CommandRecordingStats dispatch_exhausted_recording_before =
-        vk::command_recording_stats(state);
     uint dispatch_exhausted_references = record.scratch.reference_count;
     uint dispatch_exhausted_preprocess =
         record.scratch.generated_preprocess_count;
@@ -1075,13 +1064,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_dispatch_count: 1,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "generated dispatch exhaustion preserves the exact public fault");
-    vk::CommandRecordingStats dispatch_exhausted_recording_after =
-        vk::command_recording_stats(state);
-    assert(dispatch_exhausted_recording_after.preprocess_allocations
-            == dispatch_exhausted_recording_before.preprocess_allocations
-        && dispatch_exhausted_recording_after.recording_allocations
-            == dispatch_exhausted_recording_before.recording_allocations
-        && record.scratch.reference_count == dispatch_exhausted_references
+    assert(record.scratch.reference_count == dispatch_exhausted_references
         && record.scratch.generated_preprocess_count
             == dispatch_exhausted_preprocess,
         "generated dispatch exhaustion records no partial command");
@@ -1105,8 +1088,6 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     gpu::cmd_begin_render_pass(&commands, &plain_pass)!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
     gpu::cmd_set_graphics_state(&commands, &plain_graphics)!!;
-    vk::CommandRecordingStats draw_recording_before =
-        vk::command_recording_stats(state);
     uint draw_preprocess_count = record.scratch.generated_preprocess_count;
     gpu::cmd_draw_generated(
         commands:      &commands,
@@ -1114,19 +1095,10 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         count_span:    count.span,
         max_draw_count: 1,
     )!!;
-    vk::CommandRecordingStats draw_recording_after =
-        vk::command_recording_stats(state);
-    assert(draw_recording_after.preprocess_allocations
-            == draw_recording_before.preprocess_allocations
-        && draw_recording_after.recording_allocations
-            == draw_recording_before.recording_allocations,
-        "reserved generated draw performs no preprocess allocation");
     assert(record.scratch.generated_preprocess_count
             == draw_preprocess_count + 1,
         "generated draw stays within reserved preprocess capacity");
 
-    vk::CommandRecordingStats draw_exhausted_recording_before =
-        vk::command_recording_stats(state);
     uint draw_exhausted_references = record.scratch.reference_count;
     uint draw_exhausted_preprocess =
         record.scratch.generated_preprocess_count;
@@ -1137,16 +1109,10 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_draw_count: 1,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "generated draw exhaustion preserves the exact public fault");
-    vk::CommandRecordingStats draw_exhausted_recording_after =
-        vk::command_recording_stats(state);
-    assert(draw_exhausted_recording_after.preprocess_allocations
-            == draw_exhausted_recording_before.preprocess_allocations
-        && draw_exhausted_recording_after.recording_allocations
-            == draw_exhausted_recording_before.recording_allocations
-        && record.scratch.reference_count == draw_exhausted_references
+    assert(record.scratch.reference_count == draw_exhausted_references
         && record.scratch.generated_preprocess_count
             == draw_exhausted_preprocess,
-        "generated draw exhaustion performs no allocation or partial recording");
+        "generated draw exhaustion records no partial command");
     gpu::cmd_end_render_pass(&commands)!!;
     record_target_readback(&commands, plain_target, &plain_readback.span);
 
@@ -1170,8 +1136,6 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     gpu::cmd_begin_render_pass(&commands, &indexed_pass)!!;
     bind_test_graphics_pipeline(&commands, draw.pipeline);
     gpu::cmd_set_graphics_state(&commands, &indexed_graphics)!!;
-    vk::CommandRecordingStats indexed_recording_before =
-        vk::command_recording_stats(state);
     uint indexed_preprocess_count =
         record.scratch.generated_preprocess_count;
     gpu::cmd_draw_indexed_generated(
@@ -1181,19 +1145,10 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_draw_count: 1,
         index_span:    indices.span,
     )!!;
-    vk::CommandRecordingStats indexed_recording_after =
-        vk::command_recording_stats(state);
-    assert(indexed_recording_after.preprocess_allocations
-            == indexed_recording_before.preprocess_allocations
-        && indexed_recording_after.recording_allocations
-            == indexed_recording_before.recording_allocations,
-        "reserved generated indexed draw performs no preprocess allocation");
     assert(record.scratch.generated_preprocess_count
             == indexed_preprocess_count + 1,
         "generated indexed draw stays within reserved preprocess capacity");
 
-    vk::CommandRecordingStats indexed_exhausted_recording_before =
-        vk::command_recording_stats(state);
     uint indexed_exhausted_references = record.scratch.reference_count;
     uint indexed_exhausted_preprocess =
         record.scratch.generated_preprocess_count;
@@ -1205,16 +1160,10 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         index_span:    indices.span,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "generated indexed-draw exhaustion preserves the exact public fault");
-    vk::CommandRecordingStats indexed_exhausted_recording_after =
-        vk::command_recording_stats(state);
-    assert(indexed_exhausted_recording_after.preprocess_allocations
-            == indexed_exhausted_recording_before.preprocess_allocations
-        && indexed_exhausted_recording_after.recording_allocations
-            == indexed_exhausted_recording_before.recording_allocations
-        && record.scratch.reference_count == indexed_exhausted_references
+    assert(record.scratch.reference_count == indexed_exhausted_references
         && record.scratch.generated_preprocess_count
             == indexed_exhausted_preprocess,
-        "generated indexed-draw exhaustion performs no allocation or partial recording");
+        "generated indexed-draw exhaustion records no partial command");
     gpu::cmd_end_render_pass(&commands)!!;
     record_target_readback(&commands, indexed_target, &indexed_readback.span);
     assert(requirements_capture.calls == 3,

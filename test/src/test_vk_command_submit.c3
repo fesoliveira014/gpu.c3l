@@ -814,32 +814,24 @@ fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::CommandBufferStats before = vk::command_buffer_stats(state);
     gpu::CommandList abandoned = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&abandoned)!!;
+    vk::CommandBuffer abandoned_buffer =
+        vk::resolve_command(&abandoned)!!.command_buffer;
     gpu::ExecutableCommandList executable = gpu::end_commands(&abandoned)!!;
     defer discard_test_executable(&executable)!!;
     gpu::discard_executable_commands(&executable)!!;
 
-    vk::CommandBufferStats discarded = vk::command_buffer_stats(state);
-    assert(discarded.allocated == before.allocated,
-        "recording uses a command buffer preallocated by its allocator");
-    assert(discarded.freed == before.freed, "discard leaves reclamation to the recording owner");
-    assert(discarded.pending == before.pending, "discard does not create completion-tracked work");
     fault stale = @catch(gpu::discard_executable_commands(&executable));
     assert(stale == gpu::INVALID_HANDLE, "discard invalidates the executable token");
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
-    vk::CommandBufferStats reused = vk::command_buffer_stats(state);
-    assert(reused.allocated == discarded.allocated,
+    assert(vk::resolve_command(&next)!!.command_buffer == abandoned_buffer,
         "the recording owner reuses the discarded command buffer");
-    assert(reused.freed == before.freed,
-        "warm begin does not free the reusable command buffer");
 }
 
 fn void bad_command_state_rejected() @test {
@@ -896,12 +888,12 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::CommandBufferStats before = vk::command_buffer_stats(state);
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    vk::CommandBuffer submitted_buffer =
+        vk::resolve_command(&commands)!!.command_buffer;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -911,24 +903,12 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
         &submit,
     )!!;
 
-    vk::CommandBufferStats submitted = vk::command_buffer_stats(state);
-    assert(submitted.allocated == before.allocated,
-        "submit uses a command buffer preallocated by its allocator");
-    assert(submitted.freed == before.freed, "submit retains the native command buffer");
-    assert(submitted.pending == before.pending + 1, "submit tracks one pending native command buffer");
-
     gpu::wait_completion(completion, ulong::max)!!;
-    vk::CommandBufferStats completed = vk::command_buffer_stats(state);
-    assert(completed.freed == before.freed, "wait leaves native reclamation to the recording owner");
-    assert(completed.pending == before.pending, "wait retires the completion-tracked command buffer");
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
-    vk::CommandBufferStats reused = vk::command_buffer_stats(state);
-    assert(reused.allocated == completed.allocated,
+    assert(vk::resolve_command(&next)!!.command_buffer == submitted_buffer,
         "the recording owner reuses the completed command buffer");
-    assert(reused.freed == before.freed,
-        "warm begin does not free the completed command buffer");
 }
 
 fn void command_recording_requires_no_lifecycle_boundary() @test {

@@ -5,7 +5,6 @@ import gpu @public;
 import vk;
 import vma;
 import std::thread;
-import std::core::mem;
 import std::core::env;
 import std::atomic;
 import std::atomic::types;
@@ -48,25 +47,6 @@ struct GeneratedPreprocessBuffer {
     uint                   reservation_index;
     bool                   reservation_owned;
     bool                   reservation_in_use;
-}
-
-struct CommandRecordingStats {
-    ulong preprocess_allocations;
-    ulong preprocess_reuses;
-    ulong recording_allocations;
-}
-
-struct RecordingHostAllocatorSnapshot @if(env::TESTING) {
-    ulong allocations;
-    ulong resizes;
-    ulong releases;
-}
-
-struct RecordingHostAllocator (std::core::mem::alloc::Allocator) @if(env::TESTING) {
-    HostAllocator inner;
-    Atomic{ulong} allocations;
-    Atomic{ulong} resizes;
-    Atomic{ulong} releases;
 }
 
 struct PreparedBufferCopy {
@@ -178,37 +158,6 @@ struct CommandAllocatorTable {
     uint                   next_new;
 }
 
-fn void*? RecordingHostAllocator.acquire(
-    &self,
-    sz size,
-    AllocInitType init_type,
-    sz alignment,
-) @dynamic @if(env::TESTING) {
-    void* pointer = self.inner.acquire(size, init_type, alignment)!;
-    (void)self.allocations.add(1, AtomicOrdering.RELAXED);
-    return pointer;
-}
-
-fn void*? RecordingHostAllocator.resize(
-    &self,
-    void* old_pointer,
-    sz size,
-    sz alignment,
-) @dynamic @if(env::TESTING) {
-    void* pointer = self.inner.resize(old_pointer, size, alignment)!;
-    (void)self.resizes.add(1, AtomicOrdering.RELAXED);
-    return pointer;
-}
-
-fn void RecordingHostAllocator.release(
-    &self,
-    void* old_pointer,
-    bool aligned,
-) @dynamic @if(env::TESTING) {
-    self.inner.release(old_pointer, aligned);
-    (void)self.releases.add(1, AtomicOrdering.RELAXED);
-}
-
 fn gpu::CommandAllocatorHandle? CommandAllocatorTable.alloc(
     &self,
     CommandAllocatorSlot value,
@@ -272,32 +221,6 @@ fn void? CommandAllocatorTable.free(
     self.free_head = handle.index + 1;
 }
 
-fn void install_recording_host_allocator(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    state.recording_host_allocator = {
-        .inner = state.host_allocator,
-    };
-    // VkDeviceState stays address-stable while this interior pointer is installed.
-    state.host_allocator = &state.recording_host_allocator;
-}
-
-fn RecordingHostAllocatorSnapshot recording_host_allocator_snapshot(
-    VkDeviceState* state,
-) @if(env::TESTING) {
-    return {
-        .allocations = state.recording_host_allocator.allocations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .resizes = state.recording_host_allocator.resizes.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .releases = state.recording_host_allocator.releases.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
-}
-
 fn void reset_root_push_observation() @if(env::TESTING) {
     last_compute_root.store(0, AtomicOrdering.RELAXED);
     last_compute_layout.store(0, AtomicOrdering.RELAXED);
@@ -320,79 +243,6 @@ fn RootPushObservation root_push_observation() @if(env::TESTING) {
     };
 }
 
-fn void note_command_buffer_reset(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.command_buffer_resets.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_command_buffer_allocation(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.recording_command_buffer_allocations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_pool_creation(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.recording_command_pool_creations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_command_buffer_free(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.recording_command_buffer_frees.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_recording_vma_allocation(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.recording_vma_allocations.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
-    $endif
-}
-
-fn void note_generated_scratch_miss(VkDeviceState* state) {
-    $if env::TESTING:
-        (void)state.generated_scratch_misses.add(1, AtomicOrdering.RELAXED);
-    $endif
-}
-
-fn void note_generated_native_emission(
-    VkDeviceState* state,
-    gpu::GeneratedWorkKind kind,
-) {
-    $if env::TESTING:
-        switch (kind) {
-            case gpu::GeneratedWorkKind.DISPATCH:
-                (void)state.generated_dispatch_emissions.add(
-                    1,
-                    AtomicOrdering.RELAXED,
-                );
-            case gpu::GeneratedWorkKind.DRAW:
-                (void)state.generated_draw_emissions.add(
-                    1,
-                    AtomicOrdering.RELAXED,
-                );
-            case gpu::GeneratedWorkKind.DRAW_INDEXED:
-                (void)state.generated_indexed_draw_emissions.add(
-                    1,
-                    AtomicOrdering.RELAXED,
-                );
-        }
-    $endif
-}
-
 fn vk::CommandPoolCreateFlags command_allocator_pool_create_flags() {
     return (vk::CommandPoolCreateFlags)(
         (uint)vk::CommandPoolCreateFlagBits.TRANSIENT_BIT
@@ -412,7 +262,6 @@ fn vk::CommandPool? create_command_pool_real(void* user_data, vk::Device device,
         p_allocator:   null,
         p_command_pool: &pool,
     ))!;
-    note_command_pool_creation(state);
     return pool;
 }
 
@@ -447,12 +296,6 @@ fn void destroy_command_allocator_slot_with_ops(
         state,
         slot.reservations,
     );
-    if (slot.pool != null
-        && slot.command_buffers.len > 0
-        && slot.command_buffers[0] != null) {
-        state.command_buffers_freed += slot.command_buffers.len;
-        note_command_buffer_free(state);
-    }
     if (slot.pool != null) ops.destroy(ops.user_data, state.device, slot.pool);
     if (slot.command_buffers.ptr != null) {
         alloc::free(state.host_allocator, slot.command_buffers.ptr);
@@ -593,8 +436,6 @@ fn void? initialize_command_allocator_slot_with_ops(
         &allocate_info,
         slot.command_buffers.ptr,
     ))!;
-    state.command_buffers_allocated += capacity;
-    note_command_buffer_allocation(state);
 }
 
 fn void? initialize_command_allocator_slot(
@@ -1148,7 +989,6 @@ fn void? vk_begin_commands_with_ops(
         command_buffer,
         {},
     ))!;
-    note_command_buffer_reset(state);
     vk::CommandBufferBeginInfo begin = vk::command_buffer_begin_info()
         .set_flags(vk::CommandBufferUsageFlagBits.ONE_TIME_SUBMIT_BIT);
     check_device_result(state, ops.begin(
@@ -2538,7 +2378,6 @@ fn void? execute_generated_work(
         vk::FALSE,
         &info,
     );
-    note_generated_native_emission(state, kind);
 }
 
 fn vk::IndirectCommandsLayoutEXT? snapshot_generated_dispatch_layout(
@@ -2750,20 +2589,6 @@ fn void recycle_generated_preprocess_indices_locked(
     }
 }
 
-fn CommandRecordingStats command_recording_stats(VkDeviceState* state) {
-    return {
-        .preprocess_allocations = state.generated_preprocess_allocations.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .preprocess_reuses = state.generated_preprocess_reuses.load(
-            AtomicOrdering.RELAXED,
-        ),
-        .recording_allocations = state.generated_recording_allocations.load(
-            AtomicOrdering.RELAXED,
-        ),
-    };
-}
-
 fn void free_generated_preprocess_buffers(
     VkDeviceState* state,
     GeneratedPreprocessBuffer[] buffers,
@@ -2829,8 +2654,6 @@ fn GeneratedPreprocessBuffer? allocate_generated_preprocess_buffer(
     buffer.size = size;
     if (buffer.address == 0) return gpu::BACKEND_ERROR~;
     owns_pair = false;
-    (void)state.generated_preprocess_allocations.add(1, AtomicOrdering.RELAXED);
-    note_recording_vma_allocation(state);
     return buffer;
 }
 
@@ -2848,7 +2671,6 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
     defer slot.mutex.unlock();
     if (record.scratch.generated_preprocess_count
             >= record.scratch.generated_preprocess_indices.len) {
-        note_generated_scratch_miss(state);
         return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
     }
     foreach (index, &reserved : slot.reservations) {
@@ -2860,13 +2682,8 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
         record.scratch.generated_preprocess_indices[
             record.scratch.generated_preprocess_count++
         ] = (uint)index;
-        (void)state.generated_preprocess_reuses.add(
-            1,
-            AtomicOrdering.RELAXED,
-        );
         return reserved;
     }
-    note_generated_scratch_miss(state);
     return gpu::GENERATED_SCRATCH_EXHAUSTED~;
 }
 

@@ -143,12 +143,6 @@ fn gpu::AttachmentViewHandle? vk_create_attachment_view(
                 p_view:        &native,
             ),
         )!;
-        $if env::TESTING:
-            (void)state.recording_image_view_creations.add(
-                1,
-                AtomicOrdering.RELAXED,
-            );
-        $endif
     }
     defer catch {
         if (owns_native) vk::destroy_image_view(state.device, native, null);
