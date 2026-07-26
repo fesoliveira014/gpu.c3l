@@ -221,11 +221,6 @@ jobs:
           SPIRV_AS="$(cygpath -w "$(command -v spirv-as)")" \
           python scripts/build_shaders.py
 
-      - name: Run getting-started consumer
-        run: |
-          c3c build hello_gpu --path examples/getting_started
-          ./examples/getting_started/build/hello_gpu.exe
-
       - name: Build benchmark targets
         run: |
           for target in resource_create_bench upload_throughput_bench command_path_baseline_bench lifecycle_bench pipeline_cache_bench async_overlap_bench; do
@@ -274,6 +269,11 @@ jobs:
           head -30 /tmp/vulkaninfo.txt
           grep -F "VK_LAYER_KHRONOS_validation" /tmp/vulkaninfo.txt
           grep -Eim1 "lavapipe|llvmpipe" /tmp/vulkaninfo.txt
+
+      - name: Run getting-started consumer
+        run: |
+          c3c build hello_gpu --path examples/getting_started
+          ./examples/getting_started/build/hello_gpu.exe
 
       - name: Vulkan sweep (lavapipe)
         run: |

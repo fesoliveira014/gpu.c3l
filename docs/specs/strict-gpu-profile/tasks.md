@@ -364,7 +364,10 @@ These changes remain useful inputs. They do not authorize the superseded wholesa
   - **Depends on:** 7.1–7.3.
   - **Contract:** hot command recording has no registry lock, hidden per-command allocation, or draw-time compilation; completion points have no per-point allocation; destruction has no wait or deferred work.
   - **Edges:** separate debug validation cost, cold/warm pipeline cache, CPU-only evidence, driver variability, and hardware metadata.
-  - **Verify:** benchmark schema checks, repeated native runs with adapter/driver/API metadata, allocation/lock instrumentation, and regression thresholds. Complete Gate B review after this evidence is available.
+  - **Verify:** direct C3/Vulkan correctness tests plus repeated advisory native
+    runs with adapter, driver, and API context. Use output/readback assertions
+    and test-only allocation/lock observations without timing thresholds.
+    Complete Gate B review after this evidence is available.
 
 ## Milestone 8 — Compatibility extension
 

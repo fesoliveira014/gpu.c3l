@@ -468,7 +468,7 @@ struct CommandResolutionStats @if(env::TESTING) {
     ulong command_table_lookups;
     ulong pipeline_table_lookups;
     ulong pipeline_cache_lookups;
-    // Retired proof counters retained in benchmark schema; always zero.
+    // Counters for prohibited recording paths; always zero.
     ulong encoder_cell_computations;
     ulong encoder_lease_comparisons;
     ulong recording_commands;

@@ -175,12 +175,19 @@ c3c build canonical_gpu_surface --path test/cpu
 c3c build import_surface_win32 --path test/cpu
 c3c build import_surface_wayland --path test/cpu
 c3c build import_surface_x11 --path test/cpu
+c3c build span_data_operations --path test/cpu
+c3c build sampler_operations --path test/cpu
+c3c build texture_view_operations --path test/cpu
+c3c build command_wrapper_bench --path test/cpu -O1
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
 c3c test unit --path tools/gen_shader_abi
 python3 -B -m unittest scripts.test_gen_abi
 python3 scripts/gen_abi.py --check
 python3 scripts/build_shaders.py
+for target in resource_create_bench upload_throughput_bench command_path_baseline_bench lifecycle_bench pipeline_cache_bench async_overlap_bench; do
+    c3c build "$target" --path test -O1
+done
 c3c build smoke --path test
 ./test/build/smoke
 c3c test vk_core --path test --test-show-output
