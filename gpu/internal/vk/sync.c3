@@ -822,7 +822,6 @@ fn void emit_barrier(
         }
     $endif
     vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
-    gpu::internal::note_command_native_call();
 }
 
 fn void? full_barrier(
@@ -895,7 +894,6 @@ fn void emit_texture_barrier(
     $else
         vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
     $endif
-    gpu::internal::note_command_native_call();
 }
 
 fn void? trusted_texture_barrier(

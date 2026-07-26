@@ -66,7 +66,6 @@ fn gpu::internal::vk::CommandRecord*? direct_command_record(
 
 fn gpu::internal::vk::CommandRecord*? recording_command(
     CommandList* commands,
-    bool count_command = true,
 ) @private {
     if (commands == null) return gpu::INVALID_HANDLE~;
     gpu::internal::vk::CommandRecord* record = direct_command_record(
@@ -79,7 +78,6 @@ fn gpu::internal::vk::CommandRecord*? recording_command(
             != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    if (count_command) gpu::internal::note_command_recording_call();
     return record;
 }
 

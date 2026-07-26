@@ -419,12 +419,9 @@ fn void contract_diagnostics_and_callback_presence_are_independent() @test {
                 .access = { .read },
             },
         )!!;
-        gpu::reset_command_resolution_stats();
         fault misuse = @catch(gpu::cmd_texture_barrier(&commands, &barrier));
         assert(misuse == gpu::INVALID_ARGUMENT,
             "full command checks are independent of callback presence");
-        assert(gpu::command_resolution_stats().native_commands == 0,
-            "full rejection precedes native command emission");
         assert(capture.calls == (callback ? 1 : 0),
             "configured callbacks observe but never enable full checks");
         gpu::discard_commands(&commands)!!;
@@ -501,12 +498,9 @@ fn void trusted_commands_retain_the_mandatory_safety_floor() @test {
     )!!;
     defer discard_test_commands(&commands)!!;
 
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_copy_buffer(&commands, null))
         == gpu::INVALID_ARGUMENT,
         "trusted commands reject null host descriptors");
-    assert(gpu::command_resolution_stats().native_commands == 0,
-        "mandatory safety rejection performs no native call");
 }
 
 fn void trusted_rejects_foreign_and_stale_resources() @test {

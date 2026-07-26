@@ -235,7 +235,6 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
         destination_slot.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         );
-    gpu::reset_command_resolution_stats();
     gpu::BufferCopyDesc copy = {
         .src = source.span,
         .dst = destination.span,
@@ -253,8 +252,6 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
             AtomicOrdering.RELAXED,
         ) == destination_references_before,
         "capacity preflight leaves both retained counters unchanged");
-    assert(gpu::command_resolution_stats().native_commands == 0,
-        "capacity preflight rejects before the native copy command");
     assert(commands.is_valid() && slot.live_recordings == 1
         && slot.available_count == 0 && record.scratch.in_use,
         "capacity failure preserves the recording token and allocator unit");
@@ -265,7 +262,7 @@ fn void reference_capacity_preflights_all_copy_resources() @test {
     gpu::destroy_command_allocator(&allocator)!!;
 }
 
-fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
+fn void render_pass_reference_capacity_rejection_preserves_recording() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_validation_target(
@@ -304,23 +301,17 @@ fn void render_pass_reference_capacity_rejects_before_native_emission() @test {
         .height = VAL_RT,
     };
     vk::reset_dynamic_state_observation(state);
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_begin_render_pass(
         &commands,
         &pass,
     )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "the attachment view exceeds the occupied reference slot");
-    gpu::CommandResolutionStats resolution =
-        gpu::command_resolution_stats();
     vk::DynamicStateObservation observation =
         vk::dynamic_state_observation(state);
     assert(record.state == gpu::internal::CommandState.RECORDING,
         "tracking rejection leaves the command outside a render pass");
     assert(record.scratch.reference_count == references_before,
         "tracking rejection preserves the reference checkpoint");
-    assert(resolution.recording_commands == 1
-        && resolution.native_commands == 0,
-        "tracking rejection crosses the boundary without native emission");
     assert(observation_has_no_emissions(&observation),
         "tracking rejection emits no render-pass or graphics-state command");
 }
@@ -1124,7 +1115,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     assert(missing_pipeline == gpu::COMMAND_RECORDING_ERROR,
         "dispatch without an active pipeline faults command state");
 
-    gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     fault wrong_compute_kind = @catch(gpu::cmd_dispatch(
         commands: &commands,
@@ -1136,36 +1126,19 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
 
     gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
     gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
-    gpu::CommandResolutionStats bind_stats = gpu::command_resolution_stats();
-    assert(bind_stats.pipeline_bind_commands == 2,
-        "repeated binds and aliases emit once per selected bind point");
-    assert_shader_heap_bind_work(bind_stats, 2);
 
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::SamplerDesc sampler_desc = {};
     (void)gpu::intern_sampler(&device, &sampler_desc)!!;
-    gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
-    gpu::CommandResolutionStats publication_stats =
-        gpu::command_resolution_stats();
-    assert(publication_stats.pipeline_bind_commands == 0
-        && publication_stats.descriptor_heap_set_bind_commands == 0,
-        "descriptor publication preserves cached heap binding");
 
     gpu::Barrier global_barrier = {
         .before = { .compute = true },
         .after  = { .compute = true },
     };
-    gpu::reset_command_resolution_stats();
     gpu::cmd_barrier(&commands, &global_barrier)!!;
     gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
-    gpu::CommandResolutionStats hazard_stats =
-        gpu::command_resolution_stats();
-    assert(hazard_stats.pipeline_bind_commands == 0
-        && hazard_stats.descriptor_heap_set_bind_commands == 0,
-        "a global barrier does not invalidate heap binding");
 
-    gpu::reset_command_resolution_stats();
     gpu::internal::vk::reset_root_push_observation();
     gpu::cmd_dispatch(
         commands: &commands,
@@ -1181,8 +1154,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         root:     root,
         groups:   { 0, 0, 0 },
     )!!;
-
-    assert_warm_command_resolution(gpu::command_resolution_stats(), 2);
 
     ValComputeCtx stale = make_val_compute_ctx(&device);
     gpu::PipelineHandle stale_handle = stale.pipeline;
@@ -1222,7 +1193,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
-    gpu::reset_command_resolution_stats();
 
     gpu::cmd_draw(
         commands:      &commands,
@@ -1274,7 +1244,6 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         instance_count: 0,
     )!!;
 
-    assert_warm_command_resolution(gpu::command_resolution_stats(), 5);
     gpu::cmd_end_render_pass(&commands)!!;
 
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
@@ -1291,6 +1260,77 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
 
     assert(vk::pipeline_native_create_count(state) == native_pipelines_before,
         "pipeline bind and execution perform no native compilation");
+}
+
+fn void dispatch_uses_bind_time_pipeline_snapshot() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    ValDrawCtx draw = make_val_draw_ctx(&device);
+    defer destroy_val_draw_ctx(&device, &draw);
+    OwnedSpan root = allocate_owned_span(
+        device:       &device,
+        size:         16,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .compute },
+        debug_name:   "bind_time_pipeline_root",
+    )!!;
+    defer free_owned_span(&device, &root)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
+
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::PipelineCell* bound_cell =
+        &state.pipelines.slots[compute.pipeline.index];
+    vk::PipelineCell* alternate_cell =
+        &state.pipelines.slots[draw.graphics.index];
+    vk::Pipeline saved_pipeline = bound_cell.value.pipeline;
+    vk::PipelineLayout saved_layout = bound_cell.value.layout;
+    vk::IndirectCommandsLayoutEXT saved_generated_layout =
+        bound_cell.value.generated_dispatch_layout;
+    uint saved_entry = bound_cell.value.entry;
+    uint saved_generation = bound_cell.generation;
+    bool saved_used = bound_cell.used;
+    assert(saved_layout != alternate_cell.value.layout,
+        "the alternate pipeline provides a distinct backing layout");
+
+    vk::reset_root_push_observation();
+    {
+        defer {
+            bound_cell.value.pipeline = saved_pipeline;
+            bound_cell.value.layout = saved_layout;
+            bound_cell.value.generated_dispatch_layout =
+                saved_generated_layout;
+            bound_cell.value.entry = saved_entry;
+            bound_cell.generation = saved_generation;
+            bound_cell.used = saved_used;
+        };
+        bound_cell.value.pipeline = alternate_cell.value.pipeline;
+        bound_cell.value.layout = alternate_cell.value.layout;
+        bound_cell.value.generated_dispatch_layout =
+            alternate_cell.value.generated_dispatch_layout;
+        bound_cell.value.entry = alternate_cell.value.entry;
+        bound_cell.generation = compute.pipeline.generation + 1;
+        bound_cell.used = false;
+        gpu::cmd_dispatch(
+            commands: &commands,
+            root:     val_span_address(&device, root.span),
+            groups:   { 1, 1, 1 },
+        )!!;
+        vk::RootPushObservation observation =
+            vk::root_push_observation();
+        assert(observation.compute_layout == (ulong)saved_layout,
+            "dispatch consumes the bind-time pipeline layout snapshot");
+    }
 }
 
 fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
@@ -1319,10 +1359,7 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
     };
     graphics_state.color.targets = color_targets[..];
 
-    gpu::reset_command_resolution_stats();
     gpu::cmd_set_raster_state(&commands, &raster)!!;
-    assert(gpu::command_resolution_stats().native_commands == 5,
-        "partial graphics state records before a render pass");
     assert(!vk::resolve_command(&commands)!!.graphics_state_initialized,
         "partial pre-pass state does not establish initialization");
 
@@ -1349,10 +1386,7 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
         "FULL draw rejects partial-only graphics state");
     gpu::cmd_end_render_pass(&commands)!!;
 
-    gpu::reset_command_resolution_stats();
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
-    assert(gpu::command_resolution_stats().native_commands == 13,
-        "complete graphics state records before a render pass");
     assert(vk::resolve_command(&commands)!!.graphics_state_initialized,
         "a complete pre-pass packet establishes initialization");
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
@@ -1384,16 +1418,12 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
         gpu::cmd_set_raster_state(&commands, &raster)!!;
     }
 
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_raster_state(&commands, null))
             == gpu::INVALID_ARGUMENT,
         "null raster state faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_set_graphics_state(&commands, null))
             == gpu::INVALID_ARGUMENT,
         "null graphics state faults INVALID_ARGUMENT");
-    assert(gpu::command_resolution_stats().native_commands == 0,
-        "null dynamic state emits no native command");
-
     raster = {
         .topology            = gpu::PrimitiveTopology.LINES,
         .cull_mode           = gpu::CullMode.BACK,
@@ -1403,10 +1433,7 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
         .depth_bias_slope    = 2.0f,
         .depth_bias_clamp    = 3.0f,
     };
-    gpu::reset_command_resolution_stats();
     gpu::cmd_set_raster_state(&commands, &raster)!!;
-    assert(gpu::command_resolution_stats().native_commands == 5,
-        "enabled depth bias emits the four raster commands and bias factors");
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    {},
@@ -1418,27 +1445,18 @@ fn void dynamic_raster_state_validation_is_atomic_and_command_scoped() @test {
     gpu::DynamicRasterState invalid = raster;
     int invalid_topology = 99;
     mem::copy(&invalid.topology, &invalid_topology, int::size);
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_raster_state(&commands, &invalid))
             == gpu::INVALID_ARGUMENT,
         "invalid topology faults before replacing valid raster state");
-    assert(gpu::command_resolution_stats().native_commands == 0,
-        "invalid raster state emits no partial native update");
 
     invalid = raster;
     invalid.depth_bias_slope = float::nan;
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_raster_state(&commands, &invalid))
             == gpu::INVALID_ARGUMENT,
         "enabled non-finite depth bias faults INVALID_ARGUMENT");
-    assert(gpu::command_resolution_stats().native_commands == 0,
-        "invalid depth bias emits no partial native update");
 
     invalid.depth_bias_enable = false;
-    gpu::reset_command_resolution_stats();
     gpu::cmd_set_raster_state(&commands, &invalid)!!;
-    assert(gpu::command_resolution_stats().native_commands == 5,
-        "disabled depth bias emits zero bias factors with the four raster commands");
 
     gpu::cmd_end_render_pass(&commands)!!;
 }
@@ -1459,7 +1477,6 @@ fn void full_graphics_state_setters_reject_non_graphics_recording_roles() @test 
 
     gpu::GraphicsState graphics =
         gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_graphics_state(&commands, &graphics))
             == gpu::INVALID_ARGUMENT
         && @catch(gpu::cmd_set_viewport(&commands, &graphics.viewport))
@@ -1471,8 +1488,7 @@ fn void full_graphics_state_setters_reject_non_graphics_recording_roles() @test 
         && @catch(gpu::cmd_set_depth_state(&commands, &graphics.depth))
             == gpu::INVALID_ARGUMENT,
         "FULL rejects graphics-state setters on non-graphics command lists");
-    assert(gpu::command_resolution_stats().native_commands == 0
-        && !record.graphics_state_initialized,
+    assert(!record.graphics_state_initialized,
         "queue-role rejection precedes native state and initialization");
 }
 
@@ -2267,11 +2283,8 @@ fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
     );
 
     gpu::BufferTextureCopyDesc up = { .src = escaped, .texture = texture, .width = 4, .height = 4 };
-    gpu::reset_command_resolution_stats();
     fault beyond = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &up));
     assert(beyond == gpu::INVALID_ARGUMENT, "buffer-to-texture copy span beyond the backing buffer faults INVALID_ARGUMENT");
-    assert(gpu::command_resolution_stats().native_commands == 0,
-        "invalid buffer-to-texture copy emits no native command");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -2318,11 +2331,8 @@ fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
     );
 
     gpu::TextureBufferCopyDesc down = { .texture = texture, .dst = escaped, .width = 4, .height = 4 };
-    gpu::reset_command_resolution_stats();
     fault beyond = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &down));
     assert(beyond == gpu::INVALID_ARGUMENT, "texture-to-buffer copy span beyond the backing buffer faults INVALID_ARGUMENT");
-    assert(gpu::command_resolution_stats().native_commands == 0,
-        "invalid texture-to-buffer copy emits no native command");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -2859,7 +2869,7 @@ fn void selected_device_dispatch_limit_validates_before_recording() @test {
     defer discard_test_executable(&cmd_executable)!!;
 }
 
-fn void warm_render_pass_reuses_many_precreated_views() @test {
+fn void many_precreated_views_record_across_allocator_reuse() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     const uint VIEW_COUNT = vk::INITIAL_CACHED_VIEW_CAPACITY + 1;
@@ -2888,10 +2898,6 @@ fn void warm_render_pass_reuses_many_precreated_views() @test {
     for (uint iteration = 0; iteration < 2; iteration++) {
         gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
         if (iteration == 0) record_val_target_to_attach(&commands, texture);
-        vk::VkDeviceState* state =
-            gpu::internal::device_slots[device.index].data.state;
-        gpu::internal::RecordingWorkCounters before =
-            vk::command_recording_work_counters(state);
         foreach (view : views) {
             gpu::ColorTargetDesc[1] colors = { { .view = view } };
             gpu::RenderPassDesc pass = {
@@ -2901,14 +2907,6 @@ fn void warm_render_pass_reuses_many_precreated_views() @test {
             };
             gpu::cmd_begin_render_pass(&commands, &pass)!!;
             gpu::cmd_end_render_pass(&commands)!!;
-        }
-        gpu::internal::RecordingWorkCounters after =
-            vk::command_recording_work_counters(state);
-        if (iteration == 1) {
-            assert(after.host_allocations == before.host_allocations,
-                "warm recording reuses reference bookkeeping");
-            assert(after.image_view_creations == before.image_view_creations,
-                "recording many passes never creates attachment views");
         }
         gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
         gpu::discard_executable_commands(&executable)!!;

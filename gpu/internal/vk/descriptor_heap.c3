@@ -456,8 +456,6 @@ fn void? bind_descriptor_heap(
         dynamic_offset_count:  0,
         p_dynamic_offsets:     null,
     );
-    gpu::internal::note_command_descriptor_heap_set_bind();
-    gpu::internal::note_command_native_call();
     if (bind_point == vk::PipelineBindPoint.COMPUTE) {
         binding.compute_set_bound = true;
     } else {

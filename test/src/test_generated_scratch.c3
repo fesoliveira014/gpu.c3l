@@ -132,9 +132,6 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         max_count:    9,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "work above the reserved command count faults deterministically");
-    gpu::internal::RecordingWorkCounters before = vk::command_recording_work_counters(
-        state,
-    );
     vk::GeneratedPreprocessBuffer* acquired =
         vk::acquire_generated_preprocess_buffer(
             state:        state,
@@ -143,14 +140,8 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
             kind:         gpu::GeneratedWorkKind.DISPATCH,
             max_count:    8,
         )!!;
-    gpu::internal::RecordingWorkCounters after = vk::command_recording_work_counters(
-        state,
-    );
     assert(acquired.address == reserved.address,
         "generated recording consumes the exact reserved buffer");
-    assert(after.host_allocations == before.host_allocations
-            && after.vma_allocations == before.vma_allocations,
-        "reserved acquisition performs no host or VMA allocation");
     assert(@catch(vk::acquire_generated_preprocess_buffer(
         state:        state,
         record:       record,

@@ -59,7 +59,6 @@ fn gpu::PipelineHandle? PipelineTable.alloc(&self, PipelineSlot value) {
 }
 
 fn PipelineCell*? PipelineTable.get_cell(&self, gpu::PipelineHandle h) {
-    gpu::internal::note_command_pipeline_table_lookup();
     if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
     uint idx = h.index;
     if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;

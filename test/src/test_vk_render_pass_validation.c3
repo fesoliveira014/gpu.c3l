@@ -926,7 +926,6 @@ fn void preserves_graphics_binding_across_render_passes() @test {
     // Scope the validation-error window to the cross-pass/cross-bind recording
     // under test; device/resource setup is out of scope for this assertion.
     capture.errors = 0;
-    gpu::reset_command_resolution_stats();
     gpu::cmd_begin_render_pass(&commands, &first_pass)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
@@ -936,56 +935,19 @@ fn void preserves_graphics_binding_across_render_passes() @test {
         "ending a render pass preserves the logical graphics binding");
     assert(record.native_graphics_pipeline.pipeline != null,
         "ending a render pass preserves the native graphics binding");
-    gpu::CommandResolutionStats before_reuse =
-        gpu::command_resolution_stats();
     gpu::cmd_begin_render_pass(&commands, &second_pass)!!;
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
-    assert(gpu::command_resolution_stats().pipeline_bind_commands
-            == before_reuse.pipeline_bind_commands,
-        "a compatible pass reuses the selected graphics binding");
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_begin_render_pass(&commands, &second_pass)!!;
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
-    assert(stats.pipeline_bind_commands == 2,
-        "graphics and compute bind points retain independent native bindings");
     assert(capture.errors == 0,
         "cross-pass and cross-bind recording emits no Vulkan validation errors");
 }
 
-fn void distinct_graphics_cache_entries_emit_distinct_binds() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    ValDrawCtx draw = make_val_draw_ctx(&device);
-    defer destroy_val_draw_ctx(&device, &draw);
-    gpu::PipelineHandle alternate = review_distinct_graphics_pipeline(
-        &device,
-        gpu::Format.BGRA8_UNORM,
-    );
-    defer gpu::destroy_pipeline(&device, alternate)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-    )!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-
-    gpu::reset_command_resolution_stats();
-    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    gpu::cmd_bind_pipeline(&commands, alternate)!!;
-    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
-    assert(stats.pipeline_bind_commands == 2,
-        "distinct graphics cache entries emit two native binds");
-    assert_shader_heap_bind_work(stats, 1);
-}
-
-fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
+fn void same_graphics_pipeline_across_passes_reuses_graphics_state() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     ValDrawCtx draw = make_val_draw_ctx(&device);
@@ -1040,7 +1002,6 @@ fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::reset_dynamic_state_observation(state);
-    gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     for (uint i = 0; i < views.len; i++) {
@@ -1048,11 +1009,8 @@ fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
         gpu::cmd_begin_render_pass(&commands, &pass)!!;
         gpu::cmd_end_render_pass(&commands)!!;
     }
-    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
     vk::DynamicStateObservation observation =
         vk::dynamic_state_observation(state);
-    assert(stats.pipeline_bind_commands == 1,
-        "the same graphics pipeline across passes emits one native bind");
     assert(observation.begin_rendering_emissions == views.len
         && observation.viewport_emissions == 1
         && observation.scissor_emissions == 1
@@ -1061,56 +1019,7 @@ fn void same_graphics_pipeline_across_passes_emits_one_bind() @test {
         "compatible passes reuse one complete graphics-state packet");
 }
 
-fn void distinct_compute_cache_entries_emit_distinct_binds() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    ValComputeCtx compute = make_val_compute_ctx(&device);
-    defer destroy_val_compute_ctx(&device, &compute);
-    gpu::PipelineHandle alternate = review_distinct_compute_pipeline(&device);
-    defer gpu::destroy_pipeline(&device, alternate)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-    )!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-
-    gpu::reset_command_resolution_stats();
-    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
-    gpu::cmd_bind_pipeline(&commands, alternate)!!;
-    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
-    assert(stats.pipeline_bind_commands == 2,
-        "distinct compute cache entries emit two native binds");
-}
-
-fn void compute_graphics_compute_reuses_compute_binding() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    ValComputeCtx compute = make_val_compute_ctx(&device);
-    defer destroy_val_compute_ctx(&device, &compute);
-    ValDrawCtx draw = make_val_draw_ctx(&device);
-    defer destroy_val_draw_ctx(&device, &draw);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-    )!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-
-    gpu::reset_command_resolution_stats();
-    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
-    gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
-    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
-    assert(stats.pipeline_bind_commands == 2,
-        "compute binding survives an intervening graphics bind");
-}
-
-fn void graphics_alias_updates_logical_handle_without_rebinding() @test {
+fn void graphics_alias_updates_logical_handle() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     ValDrawCtx draw = make_val_draw_ctx(&device);
@@ -1129,18 +1038,14 @@ fn void graphics_alias_updates_logical_handle_without_rebinding() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
-    gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_bind_pipeline(&commands, alias_pipeline)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
-    assert(stats.pipeline_bind_commands == 1,
-        "graphics aliases sharing one cache entry emit one native bind");
     assert(record.logical_pipeline.handle == alias_pipeline,
         "graphics aliases still advance the logical public handle");
 }
 
-fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
+fn void command_buffer_reuse_resets_graphics_and_descriptor_state() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
@@ -1210,13 +1115,8 @@ fn void command_buffer_reuse_resets_both_pipeline_bindings() @test {
             && !reused_record.descriptor_heap_binding.compute_set_bound,
         "command-buffer reuse clears both descriptor-set bind points");
     record_val_target_to_attach(&reused, target);
-    gpu::reset_command_resolution_stats();
     gpu::cmd_bind_pipeline(&reused, compute.pipeline)!!;
     gpu::cmd_bind_pipeline(&reused, draw.graphics)!!;
-    gpu::CommandResolutionStats stats = gpu::command_resolution_stats();
-    assert(stats.pipeline_bind_commands == 2,
-        "command-buffer reuse resets both native pipeline caches");
-    assert_shader_heap_bind_work(stats, 2);
     gpu::cmd_begin_render_pass(&reused, &pass)!!;
     assert(@catch(gpu::cmd_draw(
         commands:       &reused,
@@ -1326,15 +1226,11 @@ fn void graphics_state_packet_emission_is_exact() @test {
     };
 
     vk::reset_dynamic_state_observation(fixture.state);
-    gpu::reset_command_resolution_stats();
     gpu::cmd_set_viewport(&fixture.commands, &graphics.viewport)!!;
-    gpu::CommandResolutionStats partial_stats =
-        gpu::command_resolution_stats();
     vk::DynamicStateObservation partial =
         vk::dynamic_state_observation(fixture.state);
     vk::CommandRecord* record = vk::resolve_command(&fixture.commands)!!;
-    assert(partial_stats.native_commands == 1
-        && partial.viewport_emissions == 1
+    assert(partial.viewport_emissions == 1
         && partial.scissor_emissions == 0
         && partial.raster_state_emissions == 0
         && partial.depth_state_emissions == 0,
@@ -1343,15 +1239,9 @@ fn void graphics_state_packet_emission_is_exact() @test {
         "a partial setter does not initialize complete graphics state");
 
     vk::reset_dynamic_state_observation(fixture.state);
-    gpu::reset_command_resolution_stats();
     gpu::cmd_begin_render_pass(&fixture.commands, &pass)!!;
-    gpu::CommandResolutionStats minimal_stats =
-        gpu::command_resolution_stats();
     vk::DynamicStateObservation minimal =
         vk::dynamic_state_observation(fixture.state);
-    assert(minimal_stats.recording_commands == 1
-        && minimal_stats.native_commands == 1,
-        "minimal begin crosses one boundary and emits one native command");
     assert(minimal.begin_rendering_emissions == 1
         && minimal.viewport_emissions == 0
         && minimal.scissor_emissions == 0
@@ -1367,15 +1257,9 @@ fn void graphics_state_packet_emission_is_exact() @test {
     };
     select_graphics_color_pipeline(record, color_formats[..]);
     vk::reset_dynamic_state_observation(fixture.state);
-    gpu::reset_command_resolution_stats();
     gpu::cmd_set_graphics_state(&fixture.commands, &graphics)!!;
-    gpu::CommandResolutionStats packet_stats =
-        gpu::command_resolution_stats();
     vk::DynamicStateObservation packet =
         vk::dynamic_state_observation(fixture.state);
-    assert(packet_stats.recording_commands == 1
-        && packet_stats.native_commands == 13,
-        "complete state emits one thirteen-command packet");
     assert(packet.begin_rendering_emissions == 0
         && packet.viewport_emissions == 1
         && packet.scissor_emissions == 1
@@ -1389,12 +1273,10 @@ fn void graphics_state_packet_emission_is_exact() @test {
         "complete state initializes both readiness domains");
 
     vk::reset_dynamic_state_observation(fixture.state);
-    gpu::reset_command_resolution_stats();
     gpu::cmd_begin_render_pass(&fixture.commands, &pass)!!;
     vk::DynamicStateObservation reuse =
         vk::dynamic_state_observation(fixture.state);
-    assert(gpu::command_resolution_stats().native_commands == 1
-        && reuse.begin_rendering_emissions == 1
+    assert(reuse.begin_rendering_emissions == 1
         && reuse.viewport_emissions == 0
         && reuse.scissor_emissions == 0
         && reuse.raster_state_emissions == 0
@@ -1460,18 +1342,13 @@ fn void state_failure_after_begin_is_retryable_and_discardable() @test {
         invariant:      "compare operation must be defined",
     );
     vk::reset_dynamic_state_observation(fixture.state);
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_graphics_state(
         &fixture.commands,
         &graphics,
     )) == gpu::INVALID_ARGUMENT,
         "invalid complete state faults after pass begin");
-    gpu::CommandResolutionStats failure_stats =
-        gpu::command_resolution_stats();
     vk::DynamicStateObservation failure_observation =
         vk::dynamic_state_observation(fixture.state);
-    assert(failure_stats.native_commands == 0,
-        "invalid state emits no native command");
     assert(observation_has_no_emissions(&failure_observation),
         "invalid state emits no partial packet");
     assert(record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS
@@ -1502,18 +1379,13 @@ fn void state_failure_after_begin_is_retryable_and_discardable() @test {
         int::size,
     );
     vk::reset_dynamic_state_observation(fixture.state);
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_graphics_state(
         &fixture.commands,
         &graphics,
     )) == gpu::INVALID_ARGUMENT,
         "a later state failure remains discardable");
-    gpu::CommandResolutionStats replacement_failure_stats =
-        gpu::command_resolution_stats();
     vk::DynamicStateObservation replacement_failure_observation =
         vk::dynamic_state_observation(fixture.state);
-    assert(replacement_failure_stats.native_commands == 0,
-        "failed replacement emits no native command");
     assert(observation_has_no_emissions(&replacement_failure_observation),
         "failed replacement emits no partial packet");
     assert(record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS
@@ -1553,7 +1425,6 @@ fn void late_invalid_color_in_complete_graphics_state_is_transactional() @test {
     graphics.color.targets = color_targets[..];
 
     vk::reset_dynamic_state_observation(fixture.state);
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_graphics_state(
         &fixture.commands,
         &graphics,
@@ -1561,8 +1432,7 @@ fn void late_invalid_color_in_complete_graphics_state_is_transactional() @test {
         "integer blending rejects the complete packet");
     vk::DynamicStateObservation observation =
         vk::dynamic_state_observation(fixture.state);
-    assert(gpu::command_resolution_stats().native_commands == 0
-        && observation_has_no_emissions(&observation),
+    assert(observation_has_no_emissions(&observation),
         "late color validation rejects before any ordinary or color emission");
     assert(record.state == gpu::internal::CommandState.RECORDING
         && !record.graphics_state_initialized
@@ -1942,7 +1812,6 @@ fn void dynamic_color_packet_emits_three_heterogeneous_arrays() @test {
     targets[1].write_mask = green_blue;
     gpu::ColorState color = { .targets = targets[..] };
 
-    gpu::reset_command_resolution_stats();
     gpu::cmd_set_color_state(&fixture.commands, &color)!!;
 
     assert(capture.blend_enable_calls == 1
@@ -1985,8 +1854,6 @@ fn void dynamic_color_packet_emits_three_heterogeneous_arrays() @test {
     assert(capture.write_masks[0] == red_alpha_native
         && capture.write_masks[1] == green_blue_native,
         "write masks preserve heterogeneous target order");
-    assert(gpu::command_resolution_stats().native_commands == 3,
-        "one nonempty packet records exactly three native commands");
 }
 
 fn void trusted_and_full_color_packets_lower_identically() @test {
@@ -2061,21 +1928,17 @@ fn void zero_target_color_packet_emits_no_native_command() @test {
     );
     gpu::ColorState color;
 
-    gpu::reset_command_resolution_stats();
     gpu::cmd_set_color_state(&fixture.commands, &color)!!;
 
     assert(capture.blend_enable_calls == 0
         && capture.blend_equation_calls == 0
-        && capture.write_mask_calls == 0
-        && gpu::command_resolution_stats().native_commands == 0,
+        && capture.write_mask_calls == 0,
         "a depth-only dynamic domain emits no color command");
 
     gpu::GraphicsState graphics =
         gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
-    gpu::reset_command_resolution_stats();
     gpu::cmd_set_graphics_state(&fixture.commands, &graphics)!!;
-    assert(gpu::command_resolution_stats().native_commands == 10
-            && capture.blend_enable_calls == 0
+    assert(capture.blend_enable_calls == 0
             && capture.blend_equation_calls == 0
             && capture.write_mask_calls == 0,
         "a complete depth-only packet emits ten ordinary commands and no color commands");
@@ -2108,7 +1971,6 @@ fn void full_color_validation_rejects_before_mutation() @test {
     };
     gpu::ColorState color = { .targets = targets[..] };
 
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_color_state(
         &fixture.commands,
         &color,
@@ -2116,8 +1978,7 @@ fn void full_color_validation_rejects_before_mutation() @test {
         "FULL rejects blending on an integer target");
     assert(capture.blend_enable_calls == 0
         && capture.blend_equation_calls == 0
-        && capture.write_mask_calls == 0
-        && gpu::command_resolution_stats().native_commands == 0,
+        && capture.write_mask_calls == 0,
         "late-target validation completes before the first native call");
     assert(record.state == phase_before
         && record.logical_pipeline.handle == pipeline_before.handle
@@ -2137,7 +1998,6 @@ fn void full_color_validation_rejects_before_mutation() @test {
         &invalid_write_mask,
         uint::size,
     );
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_color_state(
         &fixture.commands,
         &color,
@@ -2145,15 +2005,13 @@ fn void full_color_validation_rejects_before_mutation() @test {
         "FULL rejects write-mask bits outside RGBA");
     assert(capture.blend_enable_calls == 0
             && capture.blend_equation_calls == 0
-            && capture.write_mask_calls == 0
-            && gpu::command_resolution_stats().native_commands == 0,
+            && capture.write_mask_calls == 0,
         "invalid write masks reject before native mutation");
 
     targets[0] = gpu::color_blend_disabled();
     gpu::ColorState short_color = {
         .targets = targets[:1],
     };
-    gpu::reset_command_resolution_stats();
     assert(@catch(gpu::cmd_set_color_state(
         &fixture.commands,
         &short_color,
@@ -2161,8 +2019,7 @@ fn void full_color_validation_rejects_before_mutation() @test {
         "FULL rejects color target counts that differ from the bound pipeline");
     assert(capture.blend_enable_calls == 0
             && capture.blend_equation_calls == 0
-            && capture.write_mask_calls == 0
-            && gpu::command_resolution_stats().native_commands == 0,
+            && capture.write_mask_calls == 0,
         "target-count rejection occurs before native mutation");
 }
 

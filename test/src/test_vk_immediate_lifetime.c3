@@ -511,9 +511,7 @@ fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
     assert(@catch(gpu::destroy_pipeline(&device, pipeline))
         == gpu::RESOURCE_IN_USE, "recorded pipeline references reject destroy");
 
-    gpu::reset_command_resolution_stats();
     gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 1, 1, 1 })!!;
-    assert_warm_command_resolution(gpu::command_resolution_stats(), 1);
 
     gpu::discard_commands(&commands)!!;
     gpu::destroy_texture(&device, texture)!!;

@@ -1314,18 +1314,6 @@ happens at device or record setup; a warm `cmd_*` call never branches on policy
 or resolves another device operation. The direct representation retains
 `CommandOps` indirection and the fallible public signatures.
 
-Test builds expose `CommandResolutionStats`,
-`reset_command_resolution_stats`, and `command_resolution_stats`. The
-process-wide relaxed counters measure live command entry-point attempts, every
-emitted Vulkan command, and forbidden resolution paths. Exact
-native-operation fields distinguish pipeline and descriptor-set binds.
-Ordinary C3 tests use these observations to require zero retained
-device-operation resolution, retained-pin borrow, command-table lookup,
-encoder-cell computation, packed-lease comparison, frontend phase transition,
-and warm allocation. Reset and compare the counters only across an externally
-synchronized recording interval; they are absent from ordinary production
-builds.
-
 ### Render pass
 
 ```text
