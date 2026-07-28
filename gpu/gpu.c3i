@@ -694,6 +694,35 @@ struct SparseTextureRequirements {
     SparseTextureAspectRequirements[MAX_SPARSE_TEXTURE_ASPECTS] aspects;
 }
 
+<* One color image-tile bind. The exact invalid allocation unbinds the region
+   when allocation_offset is zero. *>
+struct SparseTextureTileBind {
+    SparseTextureAspect aspect;
+    uint                mip_level;
+    Vec3u               offset;
+    Vec3u               extent;
+    GpuAllocation       allocation;
+    usz                 allocation_offset;
+}
+
+<* One color or metadata mip-tail bind. The exact invalid allocation unbinds
+   the range when allocation_offset is zero. *>
+struct SparseTextureOpaqueBind {
+    SparseTextureAspect aspect;
+    usz                 resource_offset;
+    usz                 size;
+    GpuAllocation       allocation;
+    usz                 allocation_offset;
+}
+
+<* One transactional sparse mutation and its stage-free completion waits. *>
+struct SparseTextureBindDesc {
+    TextureHandle             texture;
+    SparseTextureTileBind[]   tiles;
+    SparseTextureOpaqueBind[] opaque;
+    CompletionPoint[]         waits;
+}
+
 <* Independently owned texture and allocation returned by dedicated creation. *>
 struct DedicatedTexture {
     TextureHandle texture;

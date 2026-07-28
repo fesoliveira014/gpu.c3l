@@ -51,7 +51,7 @@ gpu/internal/vk/adapter.c3              semantic adapter metadata and diagnostic
 gpu/internal/vk/instance.c3             shared instance construction
 gpu/internal/vk/device.c3               physical device selection, logical device, feature chain
 gpu/internal/vk/queue.c3                queue family selection, queue handles, submit
-gpu/internal/vk/sparse.c3               sparse feature plan, image creation, requirement capture
+gpu/internal/vk/sparse.c3               sparse feature plan, image creation, requirements, memory binding
 gpu/internal/vk/allocator.c3            vma::Allocator creation/destruction, stats
 gpu/internal/vk/allocation.c3           generic-buffer and raw texture-memory allocations
 gpu/internal/vk/buffer.c3               VkBuffer + VMA allocation path
@@ -532,6 +532,26 @@ value without another native query. Explicit destruction and defensive device
 teardown select sparse raw-image ownership before placed or VMA-owned paths;
 caller page allocations are untouched. Descriptor publication does not imply
 residency, and this creation path submits no queue work or hidden wait.
+
+Sparse binding lowers through the same private module. It preflights texture
+identity, tile/tail geometry, logical overlap, allocation compatibility,
+physical overlap, and wait publication before allocating exact call-scoped
+wait/bind/resolution arrays from `host_allocator`. It then reacquires
+`resource_mutex` and re-resolves every public allocation to
+`(VkDeviceMemory, absolute range)`. This detects overlap across distinct tokens
+sharing native memory and against known placed-texture intervals. The lock
+remains held through the native host call, so concurrent texture destruction or
+allocation free cannot invalidate the inputs.
+
+Under the resource lock, the target queue's `submission_mutex` revalidates
+published waits and the sparse-capable role, establishes timeline headroom,
+and reserves one candidate sequence. One `VkBindSparseInfo` chains one
+`VkTimelineSemaphoreSubmitInfo`, conditionally names one image-bind info and
+one opaque-image-bind info, carries every stage-free wait semaphore/value, and
+signals the target timeline once. Native failure cancels the candidate before
+common result mapping. Success release-publishes the point directly and adds no
+submitted-command record or residency history. Completion drains still query a
+queue whose published sparse-only prefix is ahead of its retired prefix.
 
 Texture transitions map caller-declared compositional states and a normalized
 subresource range directly to one native image barrier. The backend does not
@@ -1054,7 +1074,10 @@ mask. `indirect` lowers to `VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT`. When
 generated work is enabled, the same semantic also includes
 `VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_NV`
 because implicit preprocessing reads generated records before indirect execution.
-Waits owned by the target queue are validated and elided.
+Every explicit wait is emitted, including one owned by the target queue.
+Queue order still makes an omitted ordinary same-queue wait unnecessary, but
+preserving an explicit wait permits ordinary and sparse operations to compose
+without provenance tags or bridge submissions.
 The queue mutex covers sequence reservation and `vkQueueSubmit2`, satisfying
 Vulkan external synchronization. Near the timeline-value-difference limit, the
 backend queries completed progress and returns `DEVICE_BUSY` before reservation
@@ -1086,7 +1109,8 @@ to the acquire-loaded contiguous published prefix before retiring metadata.
 This cap keeps a submission that is natively accepted but not yet publicly
 published invisible. Wait calls `vkWaitSemaphores` once and, on success,
 retires exactly the requested sequence; timeout advances nothing. Timeline
-headroom and submitted-command drains publish through the same retired prefix.
+headroom and completion drains publish through the same retired prefix,
+including sparse-only sequences with no command record.
 Device-destruction counter queries remain non-retiring readiness checks because
 accepted teardown releases all remaining CPU metadata directly.
 

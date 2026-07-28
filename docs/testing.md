@@ -115,6 +115,7 @@ increments:
 
 ```sh
 c3c test vk_sparse_texture --path test --test-show-output
+c3c test vk_sparse_bind --path test --test-show-output
 c3c test vk_core --path test --test-show-output
 c3c test vk_wsi --path test --test-show-output
 c3c test vk_optional_generated_work --path test --test-show-output
@@ -123,6 +124,11 @@ c3c test vk_optional_generated_work --path test --test-show-output
 - `vk_sparse_texture` is the fast deterministic target for sparse descriptor
   validation, exact flags, requirement translation, transaction rollback,
   cached queries, and capability-gated real image lifecycle.
+- `vk_sparse_bind` covers tile/tail geometry, exact-invalid unbind, allocation
+  compatibility and physical overlap, call-scoped allocation failure rollback,
+  same/cross-queue timelines, native result mapping, sparse-only retirement,
+  resource/queue lock boundaries, and capability-gated bind/use/unbind on real
+  2D and 3D sparse images.
 - `vk_core` covers device selection and creation, allocations, spans,
   textures/views/samplers, reflection and root ABI, pipelines/cache, command
   recording and lifecycle, graphics/compute/transfer output, depth,
@@ -212,6 +218,7 @@ done
 c3c build smoke --path test
 ./test/build/smoke
 c3c test vk_sparse_texture --path test --test-show-output
+c3c test vk_sparse_bind --path test --test-show-output
 c3c test vk_core --path test --test-show-output
 c3c test vk_wsi --path test --test-show-output
 c3c test vk_optional_generated_work --path test --test-show-output

@@ -287,7 +287,10 @@ Sparse creation:
 create_sparse_texture on a sparse-enabled device
 query the immutable SparseTextureRequirements snapshot
 allocate compatible MemoryClass.TEXTURE page pools as needed
-bind residency explicitly when the binding API is available
+bind color tiles and required color/metadata tails
+order GPU use after the returned CompletionPoint
+order unbind or replacement after every prior user
+wait before reusing or freeing backing bytes
 ```
 
 Sparse creation owns only a raw unbound image and optional default view. It
@@ -298,6 +301,21 @@ compatibility retains the device owner and native memory-type mask, and
 `dedicated_only` is false. COLOR is always the first aspect and METADATA is
 optional. The snapshot is stored by value in the texture slot and later queries
 perform no native call.
+
+`bind_sparse_texture_memory` resolves each named allocation to its native
+device memory and absolute offset while holding the resource lock. A live
+backing must be non-dedicated `MemoryClass.TEXTURE` memory compatible with the
+page requirement, selected memory type, texture access roles, alignment, and
+requested range. The exact invalid allocation with zero offset is the unbind
+sentinel. Tile backing charges a complete page for every covered tile,
+including partial edge tiles; opaque tail sizes need not be page multiples.
+
+Backing ownership never transfers. The call retains no residency map,
+allocation reference, or deferred free after `vkQueueBindSparse` returns.
+Keep allocations live through the returned completion and keep resident bytes
+exclusive until an ordered unbind or replacement and all prior GPU use have
+completed. `free_allocation` does not implicitly unbind and cannot diagnose
+historical sparse binding with `RESOURCE_IN_USE`.
 
 Placed creation:
 
@@ -332,8 +350,9 @@ Destroying a sparse texture releases its raw image and cached/default views.
 It never frees, decrements, or otherwise mutates caller-owned page allocations.
 Descriptor publication does not establish residency, and sparse creation adds
 no implicit allocation, binding, completion wait, or resident-region tracking.
-Until a sparse binding API establishes residency, an unbound sparse texture
-must not be used by GPU commands.
+Use a region only after a successful ordered bind has established residency.
+Destroying the texture is safe only after all bind operations and GPU users
+complete; destruction still does not release its caller-owned backing pools.
 
 A live user-created attachment view retains its texture, so `destroy_texture`
 returns `RESOURCE_IN_USE` until every view is destroyed. A borrowed swapchain

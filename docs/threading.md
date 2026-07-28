@@ -31,7 +31,7 @@ concurrent aliases valid.
 | `supports_presentation` / `supports_device_desc` | E | process-wide surface registry access when presentation is requested; a descriptor does not retain its surface |
 | `create_device` | E | per runtime; device-registry mutation is synchronized; presentation also uses the surface scope |
 | `destroy_device` | S | per target device; success invalidates the caller's token; live children return `RESOURCE_IN_USE`, while active operations, incomplete queue work, or closing state return retryable `DEVICE_BUSY` |
-| `submit` / `present` | E | externally synchronize each acquired image; submit consumes readiness, present consumes the image |
+| `submit` / `bind_sparse_texture_memory` / `present` | E | externally synchronize operations targeting one native queue; submit consumes readiness, sparse bind preserves explicit points, and present consumes the image |
 | `poll_completion` / `wait_completion` | S | reusable value queries; host waits do not consume the point |
 | `create_swapchain` / `destroy_swapchain` | E | process-wide surface registry access; destruction rejects pending acquisition or use and never waits |
 | `resize_swapchain` / `get_swapchain_info` / `get_present_mode_support` / `acquire_next_image` | E | per swapchain; acquire waits only for its caller-selected timeout (zero by default), while resize never waits |
@@ -145,6 +145,18 @@ query and shares no mutable snapshot with the caller. Descriptor publication
 uses the ordinary resource-before-view-cache lock order. Creation and descriptor
 publication establish no residency, submit no work, and add no hidden waits.
 
+Sparse binding first preflights texture identity, geometry, allocations, and
+backing overlap under `resource_mutex`, then validates wait publication before
+allocating exact call-scoped lowering storage. It reacquires `resource_mutex`
+to resolve the native inputs that will be submitted and holds it continuously
+through return from `vkQueueBindSparse`. Texture destruction and allocation
+free therefore cannot invalidate native inputs during the host call. Under that
+lock it acquires only the target queue's `submission_mutex`, revalidates waits
+and capability, and reserves one timeline point. The resource lock is released
+immediately after host return; the queue lock remains through cancel or
+publication. The call then releases all storage and retains no texture,
+allocation, or residency reference.
+
 Submission validates and claims the complete direct-token batch once inside the
 private Vulkan implementation, using the exact queue stored by each
 authoritative record. It consumes executable command tokens only after native
@@ -176,6 +188,22 @@ allocators do not convoy. Cold resource operations may acquire `resource_mutex`
 before an allocator mutex when they must protect allocator-table, pipeline, or
 VMA lifetime together. When both resource and view-cache locks are needed,
 resource comes first.
+
+Sparse binding follows the complete forward order:
+
+```text
+device operation pin
+  resource_mutex
+    submission_mutex
+      retirement_mutex
+        allocator mutex
+          command_mutex
+```
+
+It never acquires `resource_mutex` while holding a queue, retirement,
+allocator, or command mutex. Aliased semantic roles and presentation on the
+same native queue share the submission boundary; distinct queue mutexes remain
+independent.
 
 Each selected queue owns two independent boundaries:
 
@@ -287,9 +315,11 @@ signals its next value and returns a `CompletionPoint` for that queue. Same-queu
 submissions are ordered by the queue. Cross-queue dependencies are explicit in
 `SubmitDesc.completion_waits`; each wait names its first destination stages,
 including `indirect` for argument consumption, and no application work boundary
-adds waits or signals.
-Same-queue waits are still scope-validated before the redundant native wait is
-elided.
+adds waits or signals. Every explicit completion wait is emitted, including a
+valid point from the target queue. Queue order means ordinary callers still
+need no wait between consecutive same-queue submits, but preserving an
+explicit wait also composes ordinary work with sparse binds. Sparse bind waits
+are stage-free and carry only the source timeline semaphore and value.
 
 Each queue owns an intrusive FIFO of its submitted authoritative records and
 release-publishes one retired prefix. Sequence N is retired only after native
@@ -298,9 +328,9 @@ released tracked references and generated scratch, returned its buffer/scratch
 index to its exact allocator, released retained device ownership,
 cleared its embedded pending link, and invalidated or generation-advanced its
 private command-record identity. A first successful observation queries every
-represented pending queue before publishing any retired prefix, then locks and
-drains those queues one at a time. It never holds two retirement mutexes
-simultaneously.
+queue with submitted records or an unretired completion-only published prefix
+before publishing any retired prefix, then locks and drains those queues one at
+a time. It never holds two retirement mutexes simultaneously.
 Submit threshold and headroom handling remain target-queue-only. An
 already-retired point can therefore use the zero-work cached path safely. Poll
 and wait acquire-load that prefix after point validation; an already-retired

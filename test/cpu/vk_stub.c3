@@ -1244,6 +1244,17 @@ fn gpu::SparseTextureRequirements? vk_get_sparse_texture_requirements(
     return gpu::INVALID_ARGUMENT~;
 }
 
+fn gpu::CompletionPoint? vk_bind_sparse_texture_memory(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    gpu::SparseTextureBindDesc* desc,
+) {
+    (void)state;
+    (void)queue;
+    (void)desc;
+    return gpu::INVALID_ARGUMENT~;
+}
+
 fn gpu::TextureHandle? vk_create_texture(
     VkDeviceState* state,
     gpu::TextureDesc* desc,

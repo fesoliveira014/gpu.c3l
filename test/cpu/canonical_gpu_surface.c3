@@ -200,6 +200,27 @@ fn void pin_memory_and_resources() {
     };
     sparse_requirements.aspects[0].aspect =
         gpu::SparseTextureAspect.COLOR;
+    gpu::SparseTextureTileBind[1] sparse_tiles = {
+        {
+            .aspect     = gpu::SparseTextureAspect.COLOR,
+            .mip_level = 0,
+            .extent    = { 1, 1, 1 },
+        },
+    };
+    gpu::SparseTextureOpaqueBind[1] sparse_opaque = {
+        {
+            .aspect = gpu::SparseTextureAspect.COLOR,
+            .size   = 1,
+        },
+    };
+    gpu::CompletionPoint[1] sparse_waits;
+    gpu::SparseTextureBindDesc sparse_bind_desc = {
+        .texture = texture,
+        .tiles   = sparse_tiles[..],
+        .opaque  = sparse_opaque[..],
+        .waits   = sparse_waits[..],
+    };
+    gpu::Queue sparse_queue = {};
     gpu::AttachmentViewHandle attachment_view = {};
     gpu::AttachmentViewDesc attachment_desc = { .texture = texture };
     gpu::TextureViewDesc view_desc = {};
@@ -225,6 +246,7 @@ fn void pin_memory_and_resources() {
     (void)gpu::get_sparse_texture_requirements(&device, texture);
     (void)gpu::MAX_SPARSE_TEXTURE_ASPECTS;
     (void)sparse_requirements;
+    (void)gpu::bind_sparse_texture_memory(sparse_queue, &sparse_bind_desc);
     (void)gpu::create_placed_texture(
         device:     &device,
         desc:       &texture_desc,

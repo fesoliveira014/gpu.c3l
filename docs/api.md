@@ -715,6 +715,27 @@ SparseTextureRequirements
     uint aspect_count
     SparseTextureAspectRequirements[2] aspects
 
+SparseTextureTileBind
+    SparseTextureAspect aspect
+    uint mip_level
+    Vec3u offset
+    Vec3u extent
+    GpuAllocation allocation
+    usz allocation_offset
+
+SparseTextureOpaqueBind
+    SparseTextureAspect aspect
+    usz resource_offset
+    usz size
+    GpuAllocation allocation
+    usz allocation_offset
+
+SparseTextureBindDesc
+    TextureHandle texture
+    SparseTextureTileBind[] tiles
+    SparseTextureOpaqueBind[] opaque
+    CompletionPoint[] waits
+
 DedicatedTexture
     TextureHandle texture
     GpuAllocation allocation
@@ -767,6 +788,7 @@ supports_texture_desc(Device* device, TextureDesc* desc) -> bool?
 get_texture_requirements(Device* device, TextureDesc* desc) -> TextureRequirements?
 create_sparse_texture(Device* device, TextureDesc* desc) -> TextureHandle?
 get_sparse_texture_requirements(Device* device, TextureHandle texture) -> SparseTextureRequirements?
+bind_sparse_texture_memory(Queue queue, SparseTextureBindDesc* desc) -> CompletionPoint?
 create_texture(Device* device, TextureDesc* desc) -> TextureHandle?
 create_placed_texture(Device* device, TextureDesc* desc, GpuAllocation allocation, usz offset) -> TextureHandle?
 create_dedicated_texture(Device* device, TextureDesc* desc, AllocationDesc* allocation_desc) -> DedicatedTexture?
@@ -828,14 +850,50 @@ metadata tile extent may be zero when the driver does not define standard image
 tiles for that aspect. Querying a live ordinary or swapchain texture returns
 `INVALID_ARGUMENT`; stale or foreign handles return `INVALID_HANDLE`.
 
-Sparse creation allocates no image memory and performs no binding. Existing
-texture-view publication can expose a sampled or storage sparse image before
-residency is established; publication and residency are independent. The
-library inserts no hidden wait and tracks no resident regions. Until sparse
-memory binding is added, the image remains unbound. FULL validation rejects
-buffer-to-texture and texture-to-buffer copies with `INVALID_ARGUMENT`;
-barriers remain legal. Destroying it releases its image and views but no caller
-allocation.
+Sparse creation allocates no image memory and performs no binding.
+`bind_sparse_texture_memory` mutates color tiles separately from color or
+metadata mip tails and returns an ordinary queue completion point. Tile offsets
+are aligned to the reported tile extent; partial edge extents are accepted only
+when they end at the selected mip edge and still consume complete sparse pages.
+Opaque ranges must lie inside the selected reported tail. Both resource and
+allocation offsets use the page alignment.
+
+`GPU_ALLOCATION_INVALID` with zero allocation offset unbinds a tile or tail.
+Any nonzero malformed allocation remains `INVALID_HANDLE`. Every named live
+allocation must be non-dedicated `MemoryClass.TEXTURE` storage compatible with
+the cached page requirement, selected memory type, texture access roles,
+alignment, and byte range. The backend rejects logical overlap within the call,
+physical overlap on the same native memory, and overlap with observable placed
+texture ranges.
+
+Sparse waits are stage-free `CompletionPoint` values. Every explicit wait is
+emitted, including one from the target queue, and the returned signal value is
+greater than every prior target-queue wait. A call must mutate at least one
+tile or opaque range and admits at most 1024 waits, 1024 tiles, and 1024 opaque
+ranges; these are private safety limits rather than public constants.
+
+The library inserts no hidden residency operation and retains no resident
+region or allocation reference after host return. Keep the texture and every
+referenced allocation live through bind completion. Keep bound bytes live and
+exclusive until an ordered unbind or replacement and every prior GPU user have
+completed. Freeing memory does not unbind it, destroying the texture does not
+free its page pools, and a completion point is synchronization rather than
+resource retention.
+
+Texture-view publication and residency are independent. The library tracks no
+resident regions, so FULL validation rejects buffer-to-texture and
+texture-to-buffer copies for sparse textures with `INVALID_ARGUMENT`; barriers
+remain legal and TRUSTED lowering is unchanged.
+
+The bind fault table is stable: invalid queue, texture, allocation, or wait
+identity and unpublished waits return `INVALID_HANDLE`; null or malformed
+descriptors, unsupported live queue roles, geometry, alignment, compatibility,
+bounds, or overlap return `INVALID_ARGUMENT`; host/device memory exhaustion
+returns `OUT_OF_HOST_MEMORY` / `OUT_OF_DEVICE_MEMORY`; sequence exhaustion and
+headroom return `SLOT_TABLE_FULL` / `DEVICE_BUSY`; native loss returns
+`DEVICE_LOST`; and an unclassified native failure returns `BACKEND_ERROR`.
+`UNSUPPORTED_FEATURE`, `INVALID_RESOURCE_STATE`, and `RESOURCE_IN_USE` are not
+ordinary outcomes for otherwise-live bind inputs.
 
 `create_placed_texture` requires `MemoryClass.TEXTURE`, compatible memory,
 an aligned, in-bounds, non-overlapping range, and allocation access covering

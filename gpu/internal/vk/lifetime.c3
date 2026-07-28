@@ -228,7 +228,13 @@ fn bool? query_pending_queue(
 ) @private {
     completion.retirement_mutex.lock()!!;
     defer completion.retirement_mutex.unlock();
-    if (completion.submitted_head == null) return false;
+    ulong published = completion.published_sequence.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    ulong retired = completion.retired_sequence.load(
+        AtomicOrdering.RELAXED,
+    );
+    if (completion.submitted_head == null && published <= retired) return false;
 
     check_device_result(
         state,

@@ -1314,10 +1314,8 @@ fn usz append_completion_wait_infos(
     vk::SemaphoreSubmitInfo[] waits,
     usz next_wait,
     ResolvedCompletionWait[] completion_waits,
-    QueueCompletionState* target,
 ) @private {
     foreach (&wait : completion_waits) {
-        if (wait.source == target) continue;
         waits[next_wait++] = vk::semaphore_submit_info()
             .set_semaphore(wait.source.timeline)
             .set_value(wait.sequence)
@@ -1390,7 +1388,6 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
             waits:            scratch.wait_infos[..],
             next_wait:        next_wait,
             completion_waits: inputs.completion_waits,
-            target:           completion,
         );
         if (swapchain != null) {
             scratch.wait_infos[next_wait++] = vk::semaphore_submit_info()
