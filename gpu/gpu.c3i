@@ -498,6 +498,15 @@ struct GpuSpan {
     usz   size;
 }
 
+<* Consistent non-owning CPU and GPU views of one mapped span.
+   `bytes.len` must equal `span.size`. All fields inherit the lifetime of the
+   span's owning allocation; copying this value retains nothing. *>
+struct MappedGpuSpan {
+    GpuSpan    span;
+    char[]     bytes;
+    GpuAddress address;
+}
+
 <* `size` must be nonzero; alignment zero selects 16 bytes. *>
 struct AllocationDesc {
     usz         size;

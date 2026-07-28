@@ -94,6 +94,7 @@
         "../src/test_resource_access.c3",
         "../src/test_surface.c3",
         "../src/test_ranges.c3",
+        "../src/test_mapped_gpu_span_values.c3",
         "../src/test_allocation_contract.c3",
         "../src/test_texture_transition.c3",
         "../src/test_render_pass.c3",

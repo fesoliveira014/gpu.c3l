@@ -860,6 +860,53 @@ fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
     return self.unchecked_subspan(offset, size);
 }
 
+<* Derive a non-empty exact-sized mapped range within this immediate parent.
+   The returned views inherit the owning allocation's lifetime and perform no
+   synchronization. The derived byte pointer has no alignment guarantee beyond
+   `char`.
+
+   @param offset : "Byte offset relative to this mapped span."
+   @param size : "Nonzero byte size of the derived mapped span."
+   @return "A consistent non-owning mapped subspan, or a recoverable invalid-argument range, representation, or address-overflow fault." *>
+fn MappedGpuSpan? MappedGpuSpan.checked_subspan(
+    self,
+    usz offset,
+    usz size,
+) {
+    if (self.bytes.len != self.span.size) return INVALID_ARGUMENT~;
+    GpuSpan child = self.span.checked_subspan(offset, size)!;
+    if ((ulong)offset > ulong::max - (ulong)self.address) {
+        return INVALID_ARGUMENT~;
+    }
+    return {
+        .span    = child,
+        .bytes   = self.bytes[offset : size],
+        .address = self.address + (GpuAddress)offset,
+    };
+}
+
+<* Borrow consistent CPU and GPU views of a live host-visible span.
+   The mapping and address are independent public queries; the caller must keep
+   the owning allocation live for the complete call and result lifetime. The
+   result performs no synchronization.
+
+   @param device : "Live device that owns the span."
+   @param span : "Non-owning host-visible allocation range."
+   @return "Consistent borrowed views, or a recoverable fault from the public mapping or address query." *>
+fn MappedGpuSpan? mapped_gpu_span(
+    Device* device,
+    GpuSpan span,
+) {
+    char[] bytes = get_span_mapping(device, span)!;
+    if (bytes.len != span.size) return BACKEND_ERROR~;
+    GpuAddress address = get_span_address(device, span)!;
+    return {
+        .span    = span,
+        .bytes   = bytes,
+        .address = address,
+    };
+}
+
 <* Test whether the compatibility value has a complete nonzero payload.
 
    @return "True for a structurally valid compatibility value." *>
