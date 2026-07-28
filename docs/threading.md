@@ -39,6 +39,8 @@ concurrent aliases valid.
 | `get_allocation_info` / `get_allocation_span` / `get_span_mapping` / `get_span_address` | S | lock-free slot resolution |
 | `flush_mapped_span` / `invalidate_mapped_span` | S | lock-free validation; coherent no-op; native calls are internally synchronized |
 | `create_texture` / `destroy_texture` | S | |
+| `create_timestamp_pool` / `destroy_timestamp_pool` | S | internally synchronized; destroy happens-after every command use and host read |
+| `read_timestamps` | S | distinct pools may be read concurrently; the caller orders each read after GPU execution and externally synchronizes same-pool mutation or destruction |
 | `create_attachment_view` / `destroy_attachment_view` | S | immutable render subresource; destroy happens-after every command reference |
 | `create_texture_view` / `create_texture_views` / `destroy_texture_view` | S | owner and generation are validated before heap mutation |
 | `intern_sampler` | S | equal descriptions converge on one stable index under the device resource lock |
@@ -124,6 +126,14 @@ allocator and its live recordings share one recording owner; different
 allocators may be recorded in parallel. Tier S allocation and
 span operations may overlap, but callers synchronize writes to mapped storage
 and keep every allocation live through its last submitted use.
+
+Timestamp pool operations use the same short-lived device pin and resource
+synchronization as other fixed-table resources. Distinct pools may be created,
+read, and destroyed concurrently. A host read serializes slot resolution
+against lifecycle mutation, but it does not synchronize with command submission
+or establish GPU completion. The caller orders the read after the relevant
+reset/write execution and does not concurrently mutate or destroy that pool.
+`DEVICE_BUSY` returns immediately and leaves the requested output unspecified.
 
 Submission validates and claims the complete direct-token batch once inside the
 private Vulkan implementation, using the exact queue stored by each
@@ -299,12 +309,15 @@ its use have completed.
 acquired image. Resource destruction is immediate and never waits. Discard
 recording or executable command tokens and wait for every returned
 `CompletionPoint` that may reference a resource before destroying it.
-Under `FULL`, explicit command resources are retained
+Under `FULL`, explicit command resources, including timestamp pools and a
+timestamp resolve's destination allocation, are retained
 through recording, executable, and incomplete-submission phases, so early
 destruction returns `RESOURCE_IN_USE`. Under `TRUSTED`, records allocate
 and update no reference storage and retirement performs no reference-release
 work; observing completion before destruction is solely the caller's contract.
 GPU addresses and shader-visible indices remain caller-managed in both modes.
+Neither policy tracks per-slot timestamp reset/write history; cross-submission
+ordering and same-native-queue comparison remain caller responsibilities.
 Allocator destruction follows the same non-waiting rule: it returns
 `RESOURCE_IN_USE` until every recording/executable token is consumed and every
 submitted unit has retired, then consumes the allocator without querying or

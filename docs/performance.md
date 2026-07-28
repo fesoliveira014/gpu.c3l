@@ -90,3 +90,18 @@ Those tests own behavior such as allocation and handle lifetimes, command
 recording and rollback, submission and completion, reflection and shader ABI,
 pipeline caching, synchronization, WSI, output/readback, and capability
 handling. The manual benchmarks do not define a second correctness protocol.
+
+Timestamp measurements are meaningful only when both writes execute on the
+same native queue. Logical graphics, compute, and transfer roles may alias that
+queue; values from distinct native queues are not calibrated and must not be
+compared. Use the selected role's valid-bit width and `period_ns` through
+`timestamp_delta_ns` rather than subtracting raw values directly.
+
+The caller resets each query before reuse, writes every query before resolving
+it, and orders host reads after the covering completion point. Command resolve
+uses a device-side availability wait and does not block the recording thread,
+but an unwritten query can stall the queue. Direct host reads neither wait nor
+allocate hidden staging; `DEVICE_BUSY` leaves the requested output unspecified.
+`FULL` retains referenced resources but adds no per-slot reset/write history
+tracker, so it does not turn timestamp history into a recording-time metric or
+diagnostic.
