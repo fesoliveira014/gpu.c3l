@@ -487,35 +487,28 @@ fn void? vk_destroy_command_allocator(
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         CommandAllocatorSlot* slot = state.command_allocators.get(handle)!;
+        // This claim never takes retirement_mutex, so a retirement waiter cannot form a lock cycle.
         uint claimed = mem::compare_exchange(
-            &slot.operation_pins.data,
-            (uint)0,
-            COMMAND_ALLOCATOR_DESTROY_CLAIM,
-            AtomicOrdering.ACQUIRE_RELEASE,
-            AtomicOrdering.ACQUIRE,
+            ptr:      &slot.operation_pins.data,
+            compare:  (uint)0,
+            value:    COMMAND_ALLOCATOR_DESTROY_CLAIM,
+            $success: AtomicOrdering.ACQUIRE_RELEASE,
+            $failure: AtomicOrdering.ACQUIRE,
         );
         if (claimed != 0) {
             return gpu::RESOURCE_IN_USE~;
         }
-        bool owns_claim = true;
-        defer catch {
-            if (owns_claim) {
-                slot.operation_pins.store(0, AtomicOrdering.RELEASE);
-            }
-        }
+        defer catch slot.operation_pins.store(0, AtomicOrdering.RELEASE);
         if (slot.live_recordings != 0
             || slot.live_executables != 0
             || slot.in_flight_buffers != 0
             || slot.generated_reservations_in_use != 0
             || slot.available_count != slot.command_buffers.len) {
-            slot.operation_pins.store(0, AtomicOrdering.RELEASE);
-            owns_claim = false;
             return gpu::RESOURCE_IN_USE~;
         }
         (void)slot.mutex.destroy();
         removed = *slot;
         state.command_allocators.free(handle)!;
-        owns_claim = false;
     }
     destroy_command_allocator_slot(state, &removed);
 }
@@ -546,16 +539,17 @@ fn void pin_command_allocator_slot(CommandAllocatorSlot* slot) {
     uint pins = slot.operation_pins.load(AtomicOrdering.ACQUIRE);
     while (true) {
         if (pins == COMMAND_ALLOCATOR_DESTROY_CLAIM) {
+            // Completion and retirement keep work live, so destroy releases the claim without freeing this slot.
             thread::yield();
             pins = slot.operation_pins.load(AtomicOrdering.ACQUIRE);
             continue;
         }
         uint seen = mem::compare_exchange(
-            &slot.operation_pins.data,
-            pins,
-            pins + 1,
-            AtomicOrdering.ACQUIRE_RELEASE,
-            AtomicOrdering.ACQUIRE,
+            ptr:      &slot.operation_pins.data,
+            compare:  pins,
+            value:    pins + 1,
+            $success: AtomicOrdering.ACQUIRE_RELEASE,
+            $failure: AtomicOrdering.ACQUIRE,
         );
         if (seen == pins) return;
         pins = seen;
@@ -576,7 +570,7 @@ fn CommandAllocatorSlot*? lock_command_allocator(
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         slot = resolve_command_allocator(state, allocator)!;
-        (void)slot.operation_pins.add(1, AtomicOrdering.RELEASE);
+        pin_command_allocator_slot(slot);
     }
     defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
     slot.mutex.lock()!;
@@ -592,7 +586,7 @@ fn CommandAllocatorSlot*? lock_command_allocator_handle(
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         slot = state.command_allocators.get(handle)!;
-        (void)slot.operation_pins.add(1, AtomicOrdering.RELEASE);
+        pin_command_allocator_slot(slot);
     }
     defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
     slot.mutex.lock()!;
@@ -610,7 +604,7 @@ fn CommandAllocatorSlot*? lock_command_allocator_for_pipeline(
         defer state.resource_mutex.unlock();
         slot = resolve_command_allocator(state, allocator)!;
         (void)state.pipelines.get(pipeline)!;
-        (void)slot.operation_pins.add(1, AtomicOrdering.RELEASE);
+        pin_command_allocator_slot(slot);
     }
     defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
     slot.mutex.lock()!;
@@ -719,6 +713,7 @@ fn bool generated_scratch_references_pipeline(
         :state.command_allocators.next_new
     ]) {
         if (!cell.used) continue;
+        // resource_mutex excludes a concurrent allocator destroy claim here.
         pin_command_allocator_slot(&cell.value);
         cell.value.mutex.lock()!!;
         bool found;

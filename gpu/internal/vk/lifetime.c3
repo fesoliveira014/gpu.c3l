@@ -139,6 +139,7 @@ fn void publish_pending_commands_locked(
         CommandAllocatorSlot* slot = state.command_allocators.get(
             record.allocator,
         )!!;
+        // The live executable forces destroy to release its claim before this retirement-held pin proceeds.
         pin_command_allocator_slot(slot);
         slot.mutex.lock()!!;
         slot.live_executables--;
@@ -184,6 +185,7 @@ fn CommandRecord* release_pending_command_locked(
     CommandAllocatorSlot* slot = state.command_allocators.get(
         record.allocator,
     )!!;
+    // The in-flight buffer forces destroy to release its claim before this retirement-held pin proceeds.
     pin_command_allocator_slot(slot);
     slot.mutex.lock()!!;
     record.state = gpu::internal::CommandState.INACTIVE;
