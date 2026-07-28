@@ -283,7 +283,6 @@ struct DeviceCaps {
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
     TimestampCaps timestamps;
-    SparseTextureCaps sparse_textures;
     // Configured semantic heap capacity, not the hardware maximum.
     uint texture_heap_capacity;
     // Configured semantic heap capacity, not the hardware maximum.
@@ -305,6 +304,7 @@ struct DeviceCaps {
     float max_sampler_lod_bias;
     // 0 means anisotropic filtering is unsupported.
     float max_sampler_anisotropy;
+    SparseTextureCaps sparse_textures;
 }
 
 alias DebugMessageCallback = fn void (DebugMessage*, void*);

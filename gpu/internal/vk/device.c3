@@ -1365,15 +1365,13 @@ fn void? create_logical_device_with_queue_infos(
     features2.features.shader_int64 = vk::TRUE;
     features2.features.independent_blend = vk::TRUE;
     features2.features.depth_bias_clamp = vk::TRUE;
-    if (sparse_texture_plan != null) {
-        features2.features.sparse_binding = sparse_texture_plan.enabled
-            ? vk::TRUE
-            : vk::FALSE;
-        features2.features.sparse_residency_image2d =
-            sparse_texture_plan.image_2d ? vk::TRUE : vk::FALSE;
-        features2.features.sparse_residency_image3d =
-            sparse_texture_plan.image_3d ? vk::TRUE : vk::FALSE;
-    }
+    features2.features.sparse_binding = sparse_texture_plan.enabled
+        ? vk::TRUE
+        : vk::FALSE;
+    features2.features.sparse_residency_image2d =
+        sparse_texture_plan.image_2d ? vk::TRUE : vk::FALSE;
+    features2.features.sparse_residency_image3d =
+        sparse_texture_plan.image_3d ? vk::TRUE : vk::FALSE;
     if (line_polygon_mode) features2.features.fill_mode_non_solid = vk::TRUE;
     if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;

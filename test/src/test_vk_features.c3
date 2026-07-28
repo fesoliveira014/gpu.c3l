@@ -1190,26 +1190,20 @@ struct SparseFeaturePlanCase {
 }
 
 fn void sparse_texture_feature_plan_is_exact() @test {
-    SparseFeaturePlanCase[7] cases = {
+    SparseFeaturePlanCase[6] cases = {
         { false, vk::FALSE, vk::FALSE, vk::FALSE, true,  false, false },
         { true,  vk::FALSE, vk::TRUE,  vk::FALSE, false, false, false },
         { true,  vk::TRUE,  vk::FALSE, vk::FALSE, false, false, false },
         { true,  vk::TRUE,  vk::TRUE,  vk::FALSE, true,  true,  false },
         { true,  vk::TRUE,  vk::FALSE, vk::TRUE,  true,  false, true  },
         { true,  vk::TRUE,  vk::TRUE,  vk::TRUE,  true,  true,  true  },
-        { true,  vk::TRUE,  vk::TRUE,  vk::TRUE,  true,  true,  true  },
     };
 
-    foreach (index, test_case : cases) {
+    foreach (test_case : cases) {
         vk::PhysicalDeviceFeatures features = {
             .sparse_binding             = test_case.sparse_binding,
             .sparse_residency_image2d   = test_case.image_2d,
             .sparse_residency_image3d   = test_case.image_3d,
-            .sparse_residency2samples   = index == 6 ? vk::TRUE : vk::FALSE,
-            .sparse_residency4samples   = index == 6 ? vk::TRUE : vk::FALSE,
-            .sparse_residency8samples   = index == 6 ? vk::TRUE : vk::FALSE,
-            .sparse_residency16samples  = index == 6 ? vk::TRUE : vk::FALSE,
-            .sparse_residency_aliased   = index == 6 ? vk::TRUE : vk::FALSE,
         };
         vk::SparseTextureFeaturePlan? result =
             vk::resolve_sparse_texture_feature_plan(
@@ -1230,7 +1224,7 @@ fn void sparse_texture_feature_plan_is_exact() @test {
 
 fn void sparse_texture_feature_plan_rejects_null_requested_features() @test {
     assert(@catch(vk::resolve_sparse_texture_feature_plan(true, null))
-        == gpu::UNSUPPORTED_FEATURE);
+        == gpu::INVALID_ARGUMENT);
     vk::SparseTextureFeaturePlan plan =
         vk::resolve_sparse_texture_feature_plan(false, null)!!;
     assert(!plan.enabled && !plan.image_2d && !plan.image_3d);

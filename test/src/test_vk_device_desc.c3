@@ -588,10 +588,15 @@ fn void requested_sparse_creation_enables_only_planned_features() @test {
     gpu::DeviceDesc device_desc = {
         .enable_sparse_textures = true,
     };
+    bool checked_unsupported;
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            assert(@catch(gpu::create_device(&adapter, &device_desc))
+                == gpu::UNSUPPORTED_FEATURE,
+                "unsupported sparse creation takes the verified negative path");
+            checked_unsupported = true;
             continue;
         }
         DeviceFeatureChainCapture capture;
@@ -618,6 +623,36 @@ fn void requested_sparse_creation_enables_only_planned_features() @test {
         assert(!capture.sparse_uncontracted_features);
         return;
     }
+    assert(checked_unsupported,
+        "the controlled native target exposes a sparse positive or negative path");
+}
+
+fn void default_device_caps_hide_sparse_support() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_default_sparse_caps_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceDesc device_desc;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            continue;
+        }
+        gpu::Device device =
+            gpu::create_device(&adapter, &device_desc)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        assert(!caps.sparse_textures.image_2d
+                && !caps.sparse_textures.image_3d
+                && !caps.sparse_textures.nonresident_strict
+                && (uint)caps.sparse_textures.binding_queues == 0,
+            "a zero DeviceDesc publishes entirely zero sparse capabilities");
+        gpu::destroy_device(&device)!!;
+        return;
+    }
+    assert(false, "the controlled native target supports the device baseline");
 }
 
 fn void sparse_support_and_created_caps_are_consistent() @test {

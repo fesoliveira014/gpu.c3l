@@ -288,6 +288,8 @@ struct VkDeviceState @public {
 
 uint configured_adapter_count @private = 1;
 bool configured_device_baseline_support @private = true;
+bool configured_sparse_texture_support @private;
+bool configured_sparse_queue_support @private;
 uint device_support_queries @private;
 uint device_temporary_creates @private;
 uint device_temporary_destroys @private;
@@ -724,9 +726,9 @@ fn bool? vk_adapter_supports_sparse_textures(
     uint adapter_index,
 ) {
     if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
+        return gpu::INVALID_HANDLE~;
     }
-    return false;
+    return configured_sparse_texture_support;
 }
 
 fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
@@ -801,9 +803,11 @@ fn bool? vk_supports_queue_request(
     bool require_sparse_binding = false,
 ) {
     (void)backend_surface;
-    (void)require_sparse_binding;
     if (state == null || request == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
+    }
+    if (require_sparse_binding && !configured_sparse_queue_support) {
+        return false;
     }
     gpu::internal::QueueSelection? selection = gpu::internal::queue_selection_for_request(
         request:                    *request,
@@ -850,10 +854,20 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
 fn void stub_set_adapter_count(uint count) {
     configured_adapter_count = count;
     configured_device_baseline_support = true;
+    configured_sparse_texture_support = false;
+    configured_sparse_queue_support = false;
 }
 
 fn void stub_set_device_baseline_support(bool supported) {
     configured_device_baseline_support = supported;
+}
+
+fn void stub_set_sparse_texture_support(bool supported) {
+    configured_sparse_texture_support = supported;
+}
+
+fn void stub_set_sparse_queue_support(bool supported) {
+    configured_sparse_queue_support = supported;
 }
 
 fn void stub_reset_device_counts() {

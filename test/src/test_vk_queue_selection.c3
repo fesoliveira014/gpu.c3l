@@ -30,7 +30,10 @@ fn void default_selection_prefers_dedicated_compute_and_transfer() @test {
         family(QF_T, 2),
     };
 
-    vk::QueueFamilies picked = vk::pick_queue_families(table[..])!!;
+    vk::QueueFamilies picked = vk::pick_queue_families_for_request(
+        table[..],
+        gpu::internal::default_queue_request(),
+    )!!;
 
     assert(picked.graphics == 0 && picked.graphics_index == 0,
         "graphics uses the first universal queue");
@@ -47,7 +50,10 @@ fn void no_graphics_family_faults_for_default_request() @test {
         family(QF_C | QF_T, 4),
     };
 
-    fault result = @catch(vk::pick_queue_families(table[..]));
+    fault result = @catch(vk::pick_queue_families_for_request(
+        table[..],
+        gpu::internal::default_queue_request(),
+    ));
 
     assert(result == gpu::UNSUPPORTED_FEATURE);
 }
@@ -259,11 +265,10 @@ fn void sparse_selection_rejects_unselected_sparse_only_family() @test {
     )) == gpu::UNSUPPORTED_FEATURE);
 }
 
-fn void sparse_selection_preserves_preferred_topology() @test {
-    vk::QueueFamilyProperties[3] table = {
+fn void sparse_selection_uses_best_eligible_topology() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 2),
         family(QF_G | QF_C | QF_T | QF_S, 2),
-        family(QF_C | QF_T | QF_S, 1),
-        family(QF_T | QF_S, 1),
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute, .transfer },
@@ -277,13 +282,14 @@ fn void sparse_selection_preserves_preferred_topology() @test {
         true,
     )!!;
 
-    assert(sparse.graphics == baseline.graphics
-            && sparse.graphics_index == baseline.graphics_index
-            && sparse.compute == baseline.compute
-            && sparse.compute_index == baseline.compute_index
-            && sparse.transfer == baseline.transfer
-            && sparse.transfer_index == baseline.transfer_index,
-        "sparse eligibility preserves the preferred family/index topology");
+    assert((uint)baseline.sparse_binding_queues == 0,
+        "the unconstrained preferred topology contains no sparse queue");
+    assert((uint)sparse.sparse_binding_queues != 0,
+        "the sparse filter rejects the unconstrained candidate");
+    assert(sparse.graphics != baseline.graphics
+            || sparse.compute != baseline.compute
+            || sparse.transfer != baseline.transfer,
+        "sparse eligibility changes only the topology needed to gain a sparse queue");
 }
 
 fn void sparse_selection_reports_capable_aliased_roles() @test {
@@ -350,9 +356,10 @@ fn void presentation_selects_a_surface_capable_graphics_queue() @test {
     };
     bool[3] presentation_support = { false, true, false };
 
-    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface_request(
         table[..],
         presentation_support[..],
+        gpu::internal::default_queue_request(),
     )!!;
 
     assert(picked.graphics == 1 && picked.graphics_index == 0);
@@ -370,9 +377,10 @@ fn void presentation_can_use_a_selected_non_graphics_queue() @test {
     };
     bool[2] presentation_support = { false, true };
 
-    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface_request(
         table[..],
         presentation_support[..],
+        gpu::internal::default_queue_request(),
     )!!;
 
     assert(picked.graphics == 0);
@@ -387,9 +395,10 @@ fn void presentation_can_use_a_private_queue_family() @test {
     };
     bool[2] presentation_support = { false, true };
 
-    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface_request(
         table[..],
         presentation_support[..],
+        gpu::internal::default_queue_request(),
     )!!;
 
     assert(picked.graphics == 0 && picked.compute == 0);
@@ -402,8 +411,11 @@ fn void presentation_support_must_cover_every_queue_family() @test {
         family(QF_G | QF_C | QF_T, 1),
     };
 
-    fault result =
-        @catch(vk::pick_queue_families_for_surface(table[..], {}));
+    fault result = @catch(vk::pick_queue_families_for_surface_request(
+        table[..],
+        {},
+        gpu::internal::default_queue_request(),
+    ));
 
     assert(result == gpu::INVALID_ARGUMENT);
 }
@@ -414,9 +426,10 @@ fn void presentation_requires_a_capable_queue_family() @test {
     };
     bool[1] presentation_support = { false };
 
-    fault result = @catch(vk::pick_queue_families_for_surface(
+    fault result = @catch(vk::pick_queue_families_for_surface_request(
         table[..],
         presentation_support[..],
+        gpu::internal::default_queue_request(),
     ));
 
     assert(result == gpu::UNSUPPORTED_FEATURE);

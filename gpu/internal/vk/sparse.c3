@@ -14,8 +14,8 @@ fn SparseTextureFeaturePlan? resolve_sparse_texture_feature_plan(
     vk::PhysicalDeviceFeatures* features,
 ) {
     if (!requested) return {};
-    if (features == null
-        || features.sparse_binding == 0
+    if (features == null) return gpu::INVALID_ARGUMENT~;
+    if (features.sparse_binding == 0
         || (features.sparse_residency_image2d == 0
             && features.sparse_residency_image3d == 0)) {
         return gpu::UNSUPPORTED_FEATURE~;

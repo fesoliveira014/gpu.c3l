@@ -607,24 +607,6 @@ fn QueueFamilies? pick_queue_families_for_surface_request(
     );
 }
 
-fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
-    return pick_queue_families_for_request(
-        families,
-        gpu::internal::default_queue_request(),
-    );
-}
-
-fn QueueFamilies? pick_queue_families_for_surface(
-    vk::QueueFamilyProperties[] families,
-    bool[] presentation_support,
-) {
-    return pick_queue_families_for_surface_request(
-        families,
-        presentation_support,
-        gpu::internal::default_queue_request(),
-    );
-}
-
 fn uint requested_queue_count(
     QueueFamilies* selection,
     uint family,
@@ -702,7 +684,7 @@ fn QueueFamilies? select_queue_families(
             ? gpu::internal::default_queue_request()
             : *request;
         return pick_queue_families_for_request(
-            families,
+            families[:count],
             resolved,
             require_sparse_binding,
         );
