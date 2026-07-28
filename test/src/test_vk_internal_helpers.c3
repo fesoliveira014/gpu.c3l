@@ -30,14 +30,14 @@ fn IndexingHeapLimits exact_indexing_heap_limits(
     uint sampler_capacity,
 ) {
     return {
-        .max_sampled_images           = texture_capacity,
-        .max_storage_images           = texture_capacity,
+        .max_sampled_images           = texture_capacity * 2,
+        .max_storage_images           = texture_capacity * 2,
         .max_samplers                 = sampler_capacity,
-        .max_per_stage_sampled_images = texture_capacity,
-        .max_per_stage_storage_images = texture_capacity,
+        .max_per_stage_sampled_images = texture_capacity * 2,
+        .max_per_stage_storage_images = texture_capacity * 2,
         .max_per_stage_samplers       = sampler_capacity,
-        .max_per_stage_resources      = texture_capacity * 2,
-        .max_all_pools_descriptors    = texture_capacity * 2
+        .max_per_stage_resources      = texture_capacity * 4,
+        .max_all_pools_descriptors    = texture_capacity * 4
             + sampler_capacity,
     };
 }
@@ -107,7 +107,7 @@ fn void indexing_heap_limit_arithmetic_widens() @test {
         .max_all_pools_descriptors    = uint::max,
     };
     assert(indexing_heap_limit_failure(
-        0x8000_0000,
+        0x4000_0000,
         0,
         limits,
     ) == IndexingHeapLimitFailure.PER_STAGE_RESOURCES);

@@ -23,4 +23,14 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer SampleRoot {
     uint height;
 };
 
+layout(buffer_reference, std430, buffer_reference_align = 8) buffer VolumeHeapRoot {
+    uint64_t output_gpu;
+    uint texture_2d_index;
+    uint texture_3d_index;
+    uint sampler_index;
+    uint width;
+    uint height;
+    uint depth;
+};
+
 #endif

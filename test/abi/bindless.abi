@@ -16,3 +16,13 @@ root SampleRoot {
     uint         width;
     uint         height;
 }
+
+root VolumeHeapRoot {
+    GpuAddress   output_gpu;
+    TextureIndex texture_2d_index;
+    TextureIndex texture_3d_index;
+    SamplerIndex sampler_index;
+    uint         width;
+    uint         height;
+    uint         depth;
+}

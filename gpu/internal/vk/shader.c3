@@ -343,11 +343,13 @@ fn void? check_heap_convention(
             if (binding.set_index() != HEAP_SET) return gpu::SHADER_INVALID~;
             int descriptor_type = (int)binding.descriptor_type();
             switch (binding.binding_index()) {
-                case HEAP_BINDING_SAMPLED:
+                case HEAP_BINDING_SAMPLED_2D:
+                case HEAP_BINDING_SAMPLED_3D:
                     if (descriptor_type != (int)vk::DescriptorType.SAMPLED_IMAGE) {
                         return gpu::SHADER_INVALID~;
                     }
-                case HEAP_BINDING_STORAGE:
+                case HEAP_BINDING_STORAGE_2D:
+                case HEAP_BINDING_STORAGE_3D:
                     if (descriptor_type != (int)vk::DescriptorType.STORAGE_IMAGE) {
                         return gpu::SHADER_INVALID~;
                     }

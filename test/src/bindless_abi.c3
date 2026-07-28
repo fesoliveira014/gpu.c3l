@@ -30,3 +30,21 @@ $assert $reflect(SampleRoot.texture_index).offset == 8;
 $assert $reflect(SampleRoot.sampler_index).offset == 12;
 $assert $reflect(SampleRoot.width).offset == 16;
 $assert $reflect(SampleRoot.height).offset == 20;
+
+struct VolumeHeapRoot {
+    GpuAddress   output_gpu;
+    TextureIndex texture_2d_index;
+    TextureIndex texture_3d_index;
+    SamplerIndex sampler_index;
+    uint         width;
+    uint         height;
+    uint         depth;
+}
+$assert VolumeHeapRoot::size == 32;
+$assert $reflect(VolumeHeapRoot.output_gpu).offset == 0;
+$assert $reflect(VolumeHeapRoot.texture_2d_index).offset == 8;
+$assert $reflect(VolumeHeapRoot.texture_3d_index).offset == 12;
+$assert $reflect(VolumeHeapRoot.sampler_index).offset == 16;
+$assert $reflect(VolumeHeapRoot.width).offset == 20;
+$assert $reflect(VolumeHeapRoot.height).offset == 24;
+$assert $reflect(VolumeHeapRoot.depth).offset == 28;

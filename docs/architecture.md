@@ -495,7 +495,8 @@ Placement validates memory class, compatibility, size, alignment, access, and
 overlap before native creation. Texture destruction never releases caller-owned storage.
 The same descriptor lowering drives exact support checks and owned, placed, and
 dedicated creation. Three-dimensional attachments and slice views are rejected;
-shader-visible 3D heap declarations and volume copies are separate contracts.
+shader-visible full-volume 3D views are supported. Volume copies remain a
+separate contract.
 
 ### Texture and sampler heap publication
 
@@ -516,6 +517,14 @@ SamplerIndex  -> generation-free, device-lifetime shader value
 Destroying a texture with live views returns `RESOURCE_IN_USE`. Destroying a
 view immediately recycles its index, so every GPU reference must already be
 complete and stale shader data must be removed.
+
+Two-dimensional and three-dimensional views share the same logical
+`TextureIndex` namespace, free list, and generation state. Publication selects
+the sampled and/or storage binding for the view's dimension and emits at most
+two native descriptor writes. The raw shader index is not dimension-tagged, so
+shader data must use a heap helper matching the published texture dimension.
+After cross-dimension slot reuse, the opposite-dimension binding may still
+reference the destroyed view; using a mismatched helper is invalid.
 
 ### Shader input and pipelines
 
