@@ -365,6 +365,94 @@ fn void dedicated_texture_transaction_publishes_separate_tokens() @test {
     );
 }
 
+fn void dedicated_transfer_only_texture_omits_default_view() @test {
+    DedicatedTextureFixture fixture;
+    init_dedicated_fixture(&fixture);
+    defer (void)fixture.state.resource_mutex.destroy();
+    gpu::TextureDesc texture_desc = dedicated_test_texture_desc();
+    texture_desc.usage = { .transfer_src, .transfer_dst };
+    gpu::TextureRequirements requirements =
+        dedicated_test_requirements(&fixture);
+    gpu::TextureRequirements[1] queried = { requirements };
+    gpu::AllocationDesc allocation_desc = {
+        .size                 = requirements.size,
+        .alignment            = requirements.alignment,
+        .memory_class         = gpu::MemoryClass.TEXTURE,
+        .access               = texture_desc.access,
+        .texture_requirements = queried[..],
+    };
+    vk::DedicatedTextureNativeOps ops =
+        dedicated_probe_ops(&fixture.probe);
+
+    gpu::DedicatedTexture created =
+        vk::create_dedicated_texture_for_state_with_ops(
+            state:           &fixture.state,
+            desc:            &texture_desc,
+            allocation_desc: &allocation_desc,
+            requirements:    requirements,
+            ops:             &ops,
+        )!!;
+    vk::TextureSlot* slot =
+        fixture.state.textures.get(created.texture)!!;
+    assert(fixture.probe.create_calls == 1
+        && fixture.probe.allocate_calls == 1
+        && fixture.probe.bind_calls == 1
+        && fixture.probe.view_calls == 0
+        && slot.default_view == null,
+        "dedicated transfer-only publication owns image memory without a view");
+
+    fixture.state.textures.free(created.texture)!!;
+    fixture.allocations[0].value.live_placements = 0;
+    fixture.state.allocations.free(created.allocation)!!;
+    ops.destroy_image(
+        ops.user_data,
+        fixture.state.device,
+        (vk::Image)(uptr)0x410,
+    );
+    ops.free_memory(
+        ops.user_data,
+        fixture.state.allocator,
+        (vma::Allocation)(void*)0x420,
+    );
+}
+
+fn void dedicated_transfer_only_publication_rolls_back_without_view() @test {
+    DedicatedTextureFixture fixture;
+    init_dedicated_fixture(&fixture);
+    defer (void)fixture.state.resource_mutex.destroy();
+    gpu::TextureDesc texture_desc = dedicated_test_texture_desc();
+    texture_desc.usage = { .transfer_dst };
+    gpu::TextureRequirements requirements =
+        dedicated_test_requirements(&fixture);
+    gpu::TextureRequirements[1] queried = { requirements };
+    gpu::AllocationDesc allocation_desc = {
+        .size                 = requirements.size,
+        .alignment            = requirements.alignment,
+        .memory_class         = gpu::MemoryClass.TEXTURE,
+        .access               = texture_desc.access,
+        .texture_requirements = queried[..],
+    };
+    vk::DedicatedTextureNativeOps ops =
+        dedicated_probe_ops(&fixture.probe);
+    fixture.state.textures.next_new = 1;
+
+    assert(@catch(vk::create_dedicated_texture_for_state_with_ops(
+        state:           &fixture.state,
+        desc:            &texture_desc,
+        allocation_desc: &allocation_desc,
+        requirements:    requirements,
+        ops:             &ops,
+    )) == gpu::SLOT_TABLE_FULL);
+    assert(fixture.probe.create_calls == 1
+        && fixture.probe.allocate_calls == 1
+        && fixture.probe.bind_calls == 1
+        && fixture.probe.view_calls == 0
+        && fixture.probe.destroy_view_calls == 0
+        && fixture.probe.destroy_image_calls == 1
+        && fixture.probe.free_calls == 1,
+        "dedicated transfer-only rollback releases image memory without a view");
+}
+
 fn void dedicated_texture_native_lifetime_is_independently_owned() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;

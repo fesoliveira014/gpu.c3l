@@ -621,6 +621,57 @@ fn void texture_create_destroy() @test {
     gpu::destroy_texture(&device, texture)!!;
 }
 
+fn void default_texture_views_follow_usage_eligibility() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureUsage[7] usages = {
+        { .transfer_src },
+        { .transfer_dst },
+        { .transfer_src, .transfer_dst },
+        { .sampled },
+        { .storage },
+        { .color_attach },
+        { .depth_attach },
+    };
+    gpu::Format[7] formats = {
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.RGBA8_UNORM,
+        gpu::Format.D32_FLOAT,
+    };
+    bool[7] expects_view = {
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true,
+    };
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+
+    foreach (i, usage : usages) {
+        gpu::TextureDesc desc = {
+            .access    = { .graphics, .compute, .transfer },
+            .width     = 4,
+            .height    = 4,
+            .format    = formats[i],
+            .usage     = usage,
+        };
+        gpu::TextureHandle texture =
+            gpu::create_texture(&device, &desc)!!;
+        vk::TextureSlot* slot = state.textures.get(texture)!!;
+        assert((slot.default_view != null) == expects_view[i],
+            "default view existence follows immutable texture usage");
+        gpu::destroy_texture(&device, texture)!!;
+    }
+}
+
 fn void texture_unsupported_desc_rejected() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
@@ -656,6 +707,15 @@ fn void texture_unsupported_desc_rejected() @test {
     fault view_fault = @catch(gpu::create_texture_view(&device, staging_target, null));
     assert(view_fault == gpu::INVALID_ARGUMENT,
         "a view on a non-shader-visible texture faults INVALID_ARGUMENT");
+    gpu::AttachmentViewDesc attachment_desc = {
+        .texture = staging_target,
+    };
+    fault attachment_fault = @catch(gpu::create_attachment_view(
+        &device,
+        &attachment_desc,
+    ));
+    assert(attachment_fault == gpu::INVALID_ARGUMENT,
+        "an attachment view on a transfer-only texture faults INVALID_ARGUMENT");
     gpu::destroy_texture(&device, staging_target)!!;
 }
 
@@ -2232,4 +2292,61 @@ fn void placed_texture_publication_rolls_back_native_failures() @test {
     ops.destroy_image(ops.user_data, fixture.state.device, slot.image);
     fixture.state.textures.free(texture)!!;
     fixture.allocations[0].value.live_placements--;
+}
+
+fn void placed_transfer_only_texture_omits_default_view() @test {
+    PlacementFixture fixture;
+    gpu::GpuAllocation allocation = init_placement_fixture(&fixture);
+    defer (void)fixture.state.resource_mutex.destroy();
+    vk::TexturePlacementNativeOps ops = placement_probe_ops(&fixture.probe);
+    gpu::TextureDesc desc = placement_test_desc();
+    desc.usage = { .transfer_src, .transfer_dst };
+    gpu::TextureRequirements requirements =
+        placement_test_requirements(&fixture);
+
+    gpu::TextureHandle texture = vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )!!;
+    vk::TextureSlot* slot = fixture.state.textures.get(texture)!!;
+    assert(fixture.probe.create_calls == 1
+        && fixture.probe.view_calls == 0
+        && slot.default_view == null
+        && fixture.allocations[0].value.live_placements == 1,
+        "placed transfer-only publication owns an image without a view");
+
+    ops.destroy_image(ops.user_data, fixture.state.device, slot.image);
+    fixture.state.textures.free(texture)!!;
+    fixture.allocations[0].value.live_placements--;
+}
+
+fn void placed_transfer_only_publication_rolls_back_without_view() @test {
+    PlacementFixture fixture;
+    gpu::GpuAllocation allocation = init_placement_fixture(&fixture);
+    defer (void)fixture.state.resource_mutex.destroy();
+    vk::TexturePlacementNativeOps ops = placement_probe_ops(&fixture.probe);
+    gpu::TextureDesc desc = placement_test_desc();
+    desc.usage = { .transfer_dst };
+    gpu::TextureRequirements requirements =
+        placement_test_requirements(&fixture);
+    fixture.state.textures.next_new = 1;
+
+    assert(@catch(vk::create_placed_texture_for_state_with_ops(
+        state:        &fixture.state,
+        desc:         &desc,
+        placement:    allocation,
+        offset:       0,
+        requirements: requirements,
+        ops:          &ops,
+    )) == gpu::SLOT_TABLE_FULL);
+    assert(fixture.probe.create_calls == 1
+        && fixture.probe.view_calls == 0
+        && fixture.probe.destroy_view_calls == 0
+        && fixture.probe.destroy_image_calls == 1
+        && fixture.allocations[0].value.live_placements == 0,
+        "placed transfer-only rollback releases only image ownership");
 }

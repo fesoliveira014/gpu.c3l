@@ -897,11 +897,13 @@ fn void destroy_state(VkDeviceState* state) @private {
             foreach (&cell : state.textures.slots[:state.textures.next_new]) {
                 if (cell.used) {
                     destroy_cached_views(state, &cell.value);
-                    vk::destroy_image_view(
-                        state.device,
-                        cell.value.default_view,
-                        null,
-                    );
+                    if (cell.value.default_view != null) {
+                        vk::destroy_image_view(
+                            state.device,
+                            cell.value.default_view,
+                            null,
+                        );
+                    }
                     if (cell.value.placed) {
                         vk::destroy_image(state.device, cell.value.image, null);
                     } else if (state.allocator != null) {

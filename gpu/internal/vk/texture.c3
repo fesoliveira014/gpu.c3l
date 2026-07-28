@@ -567,18 +567,6 @@ fn vk::ImageView? resolve_texture_view_tracked(
     return image_view;
 }
 
-fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view) {
-    CachedViewCreation creation;
-    return resolve_texture_view_tracked(
-        state:     state,
-        slot:      slot,
-        texture:   {},
-        view:      view,
-        operation: null,
-        creation:  &creation,
-    );
-}
-
 fn void commit_texture_view_creations(VkDeviceState* state, CachedViewCreation[] creations) @private {
     foreach (&creation : creations) {
         if (creation.replaced_cache && creation.previous_cache.ptr != null) {
@@ -659,6 +647,13 @@ fn vk::ImageViewCreateInfo default_texture_view_create_info(
             .base_array_layer = 0,
             .layer_count      = array_layers,
         });
+}
+
+fn bool texture_needs_default_view(gpu::TextureUsage usage) @private {
+    return usage.sampled
+        || usage.storage
+        || usage.color_attach
+        || usage.depth_attach;
 }
 
 fn gpu::TextureRequirements? texture_requirements_for_state(
@@ -796,20 +791,22 @@ fn gpu::TextureHandle? vk_create_texture(
         );
     }
 
-    vk::ImageViewCreateInfo view_info = default_texture_view_create_info(
-        desc:         desc,
-        image:        slot.image,
-        mip_levels:   mip_levels,
-        array_layers: array_layers,
-    );
-    if (catch err = check_device_result(state, vk::create_image_view(
-        device:        state.device,
-        p_create_info: &view_info,
-        p_allocator:   null,
-        p_view:        &slot.default_view,
-    ))) {
-        state.allocator.destroy_image(slot.image, slot.allocation);
-        return err~;
+    if (texture_needs_default_view(desc.usage)) {
+        vk::ImageViewCreateInfo view_info = default_texture_view_create_info(
+            desc:         desc,
+            image:        slot.image,
+            mip_levels:   mip_levels,
+            array_layers: array_layers,
+        );
+        if (catch err = check_device_result(state, vk::create_image_view(
+            device:        state.device,
+            p_create_info: &view_info,
+            p_allocator:   null,
+            p_view:        &slot.default_view,
+        ))) {
+            state.allocator.destroy_image(slot.image, slot.allocation);
+            return err~;
+        }
     }
 
     {
@@ -819,7 +816,9 @@ fn gpu::TextureHandle? vk_create_texture(
             return handle;
         }
     }
-    vk::destroy_image_view(state.device, slot.default_view, null);
+    if (slot.default_view != null) {
+        vk::destroy_image_view(state.device, slot.default_view, null);
+    }
     state.allocator.destroy_image(slot.image, slot.allocation);
     return gpu::SLOT_TABLE_FULL~;
 }
@@ -1071,19 +1070,21 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
         );
     }
 
-    vk::ImageViewCreateInfo view_info = default_texture_view_create_info(
-        desc:         desc,
-        image:        slot.image,
-        mip_levels:   mip_levels,
-        array_layers: array_layers,
-    );
-    check_device_result(state, ops.create_view(
-        ops.user_data,
-        state.device,
-        &view_info,
-        &slot.default_view,
-    ))!;
-    owns_view = true;
+    if (texture_needs_default_view(desc.usage)) {
+        vk::ImageViewCreateInfo view_info = default_texture_view_create_info(
+            desc:         desc,
+            image:        slot.image,
+            mip_levels:   mip_levels,
+            array_layers: array_layers,
+        );
+        check_device_result(state, ops.create_view(
+            ops.user_data,
+            state.device,
+            &view_info,
+            &slot.default_view,
+        ))!;
+        owns_view = true;
+    }
 
     gpu::TextureHandle handle = state.textures.alloc(slot)!;
     owns_image = false;
@@ -1226,19 +1227,21 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         texture_slot.image,
     ))!;
 
-    vk::ImageViewCreateInfo view_info = default_texture_view_create_info(
-        desc:         desc,
-        image:        texture_slot.image,
-        mip_levels:   mip_levels,
-        array_layers: array_layers,
-    );
-    check_device_result(state, ops.create_view(
-        ops.user_data,
-        state.device,
-        &view_info,
-        &texture_slot.default_view,
-    ))!;
-    owns_view = true;
+    if (texture_needs_default_view(desc.usage)) {
+        vk::ImageViewCreateInfo view_info = default_texture_view_create_info(
+            desc:         desc,
+            image:        texture_slot.image,
+            mip_levels:   mip_levels,
+            array_layers: array_layers,
+        );
+        check_device_result(state, ops.create_view(
+            ops.user_data,
+            state.device,
+            &view_info,
+            &texture_slot.default_view,
+        ))!;
+        owns_view = true;
+    }
 
     char[DEBUG_NAME_CAP] debug_name;
     copy_debug_name(&debug_name[0], allocation_desc.debug_name);
@@ -1353,7 +1356,9 @@ fn void? vk_destroy_texture(
     gpu::GpuAllocation placement = slot.placement;
     destroy_cached_views(state, slot);
     state.textures.free(handle)!;
-    vk::destroy_image_view(state.device, default_view, null);
+    if (default_view != null) {
+        vk::destroy_image_view(state.device, default_view, null);
+    }
     if (placed) {
         vk::destroy_image(state.device, image, null);
         state.allocations.get(placement)!!.live_placements--;

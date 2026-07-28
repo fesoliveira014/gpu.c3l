@@ -242,9 +242,13 @@ Owned creation:
 ```text
 validate descriptor and adapter support
 create image and allocation transactionally
-create the default view
+create the default view when usage is sampled, storage, or attachment-capable
 publish TextureHandle
 ```
+
+Transfer-only textures publish without a default image view. Their image,
+allocation, placement, transfer, barrier, and destruction behavior is otherwise
+unchanged.
 
 Placed creation:
 
