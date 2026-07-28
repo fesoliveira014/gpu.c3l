@@ -37,7 +37,7 @@ struct LoweredGraphicsState {
 }
 
 struct PreparedIndexedDraw {
-    BoundPipeline   pipeline;
+    BoundPipeline*  pipeline;
     ResolvedSpan    index;
     gpu::GpuSpan    index_span;
     gpu::GpuAddress vertex_root;
@@ -48,7 +48,7 @@ struct PreparedIndexedDraw {
 }
 
 struct PreparedIndirectDraw {
-    BoundPipeline   pipeline;
+    BoundPipeline*  pipeline;
     ResolvedSpan    args;
     gpu::GpuSpan    args_span;
     gpu::GpuAddress vertex_root;
@@ -57,7 +57,7 @@ struct PreparedIndirectDraw {
 }
 
 struct PreparedIndexedIndirectDraw {
-    BoundPipeline   pipeline;
+    BoundPipeline*  pipeline;
     ResolvedSpan    args;
     ResolvedSpan    index;
     gpu::GpuSpan    args_span;
@@ -69,7 +69,7 @@ struct PreparedIndexedIndirectDraw {
 }
 
 struct PreparedIndexedIndirectCountDraw {
-    BoundPipeline   pipeline;
+    BoundPipeline*  pipeline;
     ResolvedSpan    args;
     ResolvedSpan    count;
     ResolvedSpan    index;
@@ -83,7 +83,7 @@ struct PreparedIndexedIndirectCountDraw {
 }
 
 struct PreparedGeneratedDraw {
-    BoundPipeline                  pipeline;
+    BoundPipeline*                 pipeline;
     ResolvedSpan                   records;
     ResolvedSpan                   count;
     gpu::GpuSpan                   records_span;
@@ -93,7 +93,7 @@ struct PreparedGeneratedDraw {
 }
 
 struct PreparedGeneratedIndexedDraw {
-    BoundPipeline                  pipeline;
+    BoundPipeline*                 pipeline;
     ResolvedSpan                   records;
     ResolvedSpan                   count;
     ResolvedSpan                   index;
@@ -1324,10 +1324,6 @@ fn void push_graphics_roots(
     );
 }
 
-fn BoundPipeline? graphics_pipeline_snapshot(CommandRecord* record) {
-    return bound_pipeline_snapshot(record);
-}
-
 fn void record_draw(
     CommandRecord* commands,
     BoundPipeline* pipeline,
@@ -1358,10 +1354,10 @@ fn void? trusted_draw(
     if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    BoundPipeline pipeline = graphics_pipeline_snapshot(record)!;
+    BoundPipeline* pipeline = borrow_bound_pipeline(record)!;
     record_draw(
         commands:      commands,
-        pipeline:      &pipeline,
+        pipeline:      pipeline,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
         vertex_count:  vertex_count,
@@ -1382,7 +1378,7 @@ fn void? full_draw(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    BoundPipeline pipeline = *validate_graphics_execution_state(
+    BoundPipeline* pipeline = validate_graphics_execution_state(
         state:         state,
         record:        record,
         vertex_root:   vertex_root,
@@ -1391,7 +1387,7 @@ fn void? full_draw(
     )!;
     record_draw(
         commands:       commands,
-        pipeline:       &pipeline,
+        pipeline:       pipeline,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
         vertex_count:   vertex_count,
@@ -1419,7 +1415,7 @@ fn PreparedIndexedDraw? lower_indexed_draw(
         max_count:     uint::max,
     )!;
     return {
-        .pipeline      = graphics_pipeline_snapshot(record)!,
+        .pipeline      = borrow_bound_pipeline(record)!,
         .index         = lower_index_span(
             state:      state,
             span:       &index_span,
@@ -1452,7 +1448,7 @@ fn PreparedIndexedDraw? full_prepare_indexed_draw(
     VkDeviceState* state = commands.device_state;
     usz index_size = index_element_size(index_type)!;
     return {
-        .pipeline = *validate_graphics_execution_state(
+        .pipeline = validate_graphics_execution_state(
             state:         state,
             record:        record,
             vertex_root:   vertex_root,
@@ -1494,7 +1490,7 @@ fn void record_indexed_draw(
     CommandRecord* record = commands;
     push_graphics_roots(
         record,
-        &draw.pipeline,
+        draw.pipeline,
         draw.vertex_root,
         draw.fragment_root,
     );
@@ -1569,7 +1565,7 @@ fn PreparedIndirectDraw? lower_indirect_draw(
     }
     VkDeviceState* state = commands.device_state;
     return {
-        .pipeline = graphics_pipeline_snapshot(record)!,
+        .pipeline = borrow_bound_pipeline(record)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -1597,7 +1593,7 @@ fn PreparedIndirectDraw? full_prepare_indirect_draw(
     }
     VkDeviceState* state = commands.device_state;
     return {
-        .pipeline = *validate_graphics_execution_state(
+        .pipeline = validate_graphics_execution_state(
             state:         state,
             record:        record,
             vertex_root:   vertex_root,
@@ -1639,7 +1635,7 @@ fn void record_indirect_draw(
     CommandRecord* record = commands;
     push_graphics_roots(
         record,
-        &draw.pipeline,
+        draw.pipeline,
         draw.vertex_root,
         draw.fragment_root,
     );
@@ -1717,7 +1713,7 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
     }
     VkDeviceState* state = commands.device_state;
     return {
-        .pipeline = graphics_pipeline_snapshot(record)!,
+        .pipeline = borrow_bound_pipeline(record)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -1755,7 +1751,7 @@ fn PreparedIndexedIndirectDraw? full_prepare_indexed_indirect_draw(
     }
     VkDeviceState* state = commands.device_state;
     return {
-        .pipeline = *validate_graphics_execution_state(
+        .pipeline = validate_graphics_execution_state(
             state:         state,
             record:        record,
             vertex_root:   vertex_root,
@@ -1819,7 +1815,7 @@ fn void record_indexed_indirect_draw(
     CommandRecord* record = commands;
     push_graphics_roots(
         record,
-        &draw.pipeline,
+        draw.pipeline,
         draw.vertex_root,
         draw.fragment_root,
     );
@@ -1906,7 +1902,7 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
     VkDeviceState* state = commands.device_state;
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     return {
-        .pipeline = graphics_pipeline_snapshot(record)!,
+        .pipeline = borrow_bound_pipeline(record)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -1953,7 +1949,7 @@ fn PreparedIndexedIndirectCountDraw? full_prepare_indexed_indirect_count_draw(
     VkDeviceState* state = commands.device_state;
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     return {
-        .pipeline = *validate_graphics_execution_state(
+        .pipeline = validate_graphics_execution_state(
             state:         state,
             record:        record,
             vertex_root:   vertex_root,
@@ -2032,7 +2028,7 @@ fn void record_indexed_indirect_count_draw(
     CommandRecord* record = commands;
     push_graphics_roots(
         record,
-        &draw.pipeline,
+        draw.pipeline,
         draw.vertex_root,
         draw.fragment_root,
     );
@@ -2163,7 +2159,7 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     }
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDraw draw = {
-        .pipeline     = graphics_pipeline_snapshot(record)!,
+        .pipeline     = borrow_bound_pipeline(record)!,
         .records_span = records,
         .count_span   = count_span,
         .layout       = state.generated_draw_layout,
@@ -2200,7 +2196,7 @@ fn PreparedGeneratedDraw? full_prepare_generated_draw(
     }
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDraw draw = {
-        .pipeline = *validate_generated_graphics_execution_state(
+        .pipeline = validate_generated_graphics_execution_state(
             state,
             record,
             "cmd_draw_generated",
@@ -2264,7 +2260,7 @@ fn void? record_generated_draw(
     execute_generated_work(
         state:         commands.device_state,
         record:        commands,
-        pipeline:      &draw.pipeline,
+        pipeline:      draw.pipeline,
         kind:          gpu::GeneratedWorkKind.DRAW,
         layout:        draw.layout,
         shader_stages: generated_graphics_shader_stages(),
@@ -2326,7 +2322,7 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     }
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedIndexedDraw draw = {
-        .pipeline     = graphics_pipeline_snapshot(record)!,
+        .pipeline     = borrow_bound_pipeline(record)!,
         .records_span = records,
         .count_span   = count_span,
         .index_span   = index_span,
@@ -2374,7 +2370,7 @@ fn PreparedGeneratedIndexedDraw? full_prepare_generated_indexed_draw(
     VkDeviceState* state = commands.device_state;
     (void)index_element_size(index_type)!;
     PreparedGeneratedIndexedDraw draw = {
-        .pipeline = *validate_generated_graphics_execution_state(
+        .pipeline = validate_generated_graphics_execution_state(
             state,
             record,
             "cmd_draw_indexed_generated",
@@ -2455,7 +2451,7 @@ fn void? record_generated_indexed_draw(
     execute_generated_work(
         state:         commands.device_state,
         record:        record,
-        pipeline:      &draw.pipeline,
+        pipeline:      draw.pipeline,
         kind:          gpu::GeneratedWorkKind.DRAW_INDEXED,
         layout:        draw.layout,
         shader_stages: generated_graphics_shader_stages(),

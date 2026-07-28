@@ -985,6 +985,38 @@ fn void indexed_draw_misaligned_offset_faults() @test {
     defer discard_test_executable(&cmd_executable)!!;
 }
 
+fn void bound_pipeline_borrow_uses_command_snapshot_storage() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx compute = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &compute);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+
+    assert(@catch(vk::borrow_bound_pipeline(record))
+            == gpu::INVALID_RESOURCE_STATE,
+        "borrowing with no pipeline bound reports INVALID_RESOURCE_STATE");
+
+    gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
+    vk::BoundPipeline* borrowed = vk::borrow_bound_pipeline(record)!!;
+    assert(borrowed == &record.logical_pipeline,
+        "execution borrows the authoritative command snapshot");
+
+    vk::BoundPipeline* validated = vk::active_bound_pipeline(
+        state:         record.device_state,
+        record:        record,
+        expected_kind: vk::PipelineKind.COMPUTE,
+        operation:     "cmd_dispatch_indirect",
+    )!!;
+    assert(validated == &record.logical_pipeline,
+        "the validating borrow feeding prepared records aliases it too");
+}
+
 fn void dispatch_with_graphics_pipeline_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
