@@ -2,6 +2,7 @@ module gpu_bench;
 
 import gpu @public;
 import std::io;
+import std::thread;
 import std::time;
 
 const uint SUBMISSION_ITERATIONS = 256;
@@ -11,9 +12,19 @@ const uint LIFECYCLE_REPETITIONS = 5;
 const uint MAX_SUBMIT_BATCH_SIZE = 1_024;
 const uint SUBMIT_BATCH_ITERATIONS = 5;
 const uint[5] SUBMIT_BATCH_SIZES = { 1, 8, 32, 128, 1_024 };
+const uint ALLOCATOR_LIFECYCLE_ITERATIONS = 10_000;
+const uint[3] ALLOCATOR_LIFECYCLE_WORKER_COUNTS = { 1, 2, 4 };
+const uint ALLOCATOR_LIFECYCLE_MAX_WORKERS = 4;
 
 struct SubmissionFixture {
     gpu::ExecutableCommandList[1] commands;
+}
+
+struct AllocatorLifecycleWorkerArgs {
+    gpu::CommandAllocator* allocator;
+    uint                   iterations;
+    fault                  result;
+    bool                   failed;
 }
 
 fn double lifecycle_median(double[LIFECYCLE_REPETITIONS] values) {
@@ -28,6 +39,153 @@ fn double lifecycle_median(double[LIFECYCLE_REPETITIONS] values) {
         sorted[j + 1] = key;
     }
     return sorted[LIFECYCLE_REPETITIONS / 2];
+}
+
+fn void? run_allocator_lifecycles(AllocatorLifecycleWorkerArgs* args) {
+    for (uint i = 0; i < args.iterations; i++) {
+        gpu::CommandList commands = gpu::begin_commands(args.allocator)!;
+        gpu::ExecutableCommandList? executable_result =
+            gpu::end_commands(&commands);
+        if (catch end_fault = executable_result) {
+            (void)gpu::discard_commands(&commands);
+            return end_fault~;
+        }
+        gpu::ExecutableCommandList executable = executable_result;
+        if (catch discard_fault =
+            gpu::discard_executable_commands(&executable)
+        ) {
+            (void)discard_bench_executable(&executable);
+            return discard_fault~;
+        }
+    }
+}
+
+fn int allocator_lifecycle_worker(void* raw_args) {
+    AllocatorLifecycleWorkerArgs* args =
+        (AllocatorLifecycleWorkerArgs*)raw_args;
+    if (catch worker_fault = run_allocator_lifecycles(args)) {
+        args.result = worker_fault;
+        args.failed = true;
+        return 1;
+    }
+    return 0;
+}
+
+fn long? run_allocator_lifecycle_workers(
+    AllocatorLifecycleWorkerArgs[] args,
+    uint workers,
+) {
+    Thread[ALLOCATOR_LIFECYCLE_MAX_WORKERS] threads;
+    uint thread_count = 0;
+    std::time::Clock start = std::time::clock::now();
+    for (uint worker = 0; worker < workers; worker++) {
+        if (catch create_fault = threads[worker].create(
+            &allocator_lifecycle_worker,
+            &args[worker],
+        )) {
+            for (uint started = 0; started < thread_count; started++) {
+                (void)threads[started].join();
+            }
+            return create_fault~;
+        }
+        thread_count++;
+    }
+    for (uint worker = 0; worker < thread_count; worker++) {
+        (void)threads[worker].join()!;
+    }
+    long elapsed_ns = (long)start.to_now();
+    for (uint worker = 0; worker < workers; worker++) {
+        if (args[worker].failed) return args[worker].result~;
+    }
+    return elapsed_ns;
+}
+
+fn double? measure_allocator_lifecycle_worker_count(
+    gpu::Device* device,
+    gpu::Queue queue,
+    uint workers,
+) {
+    gpu::CommandAllocator[ALLOCATOR_LIFECYCLE_MAX_WORKERS] allocators;
+    AllocatorLifecycleWorkerArgs[ALLOCATOR_LIFECYCLE_MAX_WORKERS] args;
+    uint allocator_count = 0;
+    defer {
+        for (uint worker = 0; worker < allocator_count; worker++) {
+            (void)gpu::destroy_command_allocator(&allocators[worker]);
+        }
+    }
+
+    gpu::CommandAllocatorDesc allocator_desc = {
+        .command_buffer_capacity = 1,
+    };
+    for (uint worker = 0; worker < workers; worker++) {
+        allocators[worker] = gpu::create_command_allocator(
+            device,
+            queue,
+            &allocator_desc,
+        )!;
+        allocator_count++;
+    }
+    for (uint worker = 0; worker < workers; worker++) {
+        args[worker] = {
+            .allocator  = &allocators[worker],
+            .iterations = 1,
+        };
+    }
+
+    (void)run_allocator_lifecycle_workers(args[:workers], workers)!;
+    for (uint worker = 0; worker < workers; worker++) {
+        args[worker].iterations = ALLOCATOR_LIFECYCLE_ITERATIONS;
+    }
+
+    double[LIFECYCLE_REPETITIONS] elapsed_results;
+    for (uint repetition = 0;
+        repetition < LIFECYCLE_REPETITIONS;
+        repetition++
+    ) {
+        elapsed_results[repetition] =
+            (double)run_allocator_lifecycle_workers(
+                args[:workers],
+                workers,
+            )!;
+    }
+
+    for (uint worker = 0; worker < allocator_count; worker++) {
+        gpu::destroy_command_allocator(&allocators[worker])!;
+    }
+    allocator_count = 0;
+    return lifecycle_median(elapsed_results);
+}
+
+fn void? measure_allocator_lifecycle_scaling(
+    gpu::Device* device,
+    gpu::Queue queue,
+) {
+    foreach (workers : ALLOCATOR_LIFECYCLE_WORKER_COUNTS) {
+        double median_elapsed_ns =
+            measure_allocator_lifecycle_worker_count(
+                device,
+                queue,
+                workers,
+            )!;
+        assert(median_elapsed_ns > 0.0,
+            "allocator lifecycle timing is positive");
+        uint total_lifecycles =
+            workers * ALLOCATOR_LIFECYCLE_ITERATIONS;
+        double ns_per_lifecycle =
+            median_elapsed_ns / (double)total_lifecycles;
+        double lifecycles_per_second =
+            (double)total_lifecycles * 1.0e9 / median_elapsed_ns;
+        io::printfn(
+            "allocator lifecycle: workers=%d iterations/worker=%d total=%d repetitions=%d median_elapsed_ns=%.0f %.1f ns/lifecycle %.0f lifecycles/s",
+            workers,
+            ALLOCATOR_LIFECYCLE_ITERATIONS,
+            total_lifecycles,
+            LIFECYCLE_REPETITIONS,
+            median_elapsed_ns,
+            ns_per_lifecycle,
+            lifecycles_per_second,
+        );
+    }
 }
 
 fn gpu::ExecutableCommandList record_empty(gpu::CommandAllocator* allocator) {
@@ -196,5 +354,6 @@ fn int main() {
             ns_per_submit / (double)batch_size,
         );
     }
+    measure_allocator_lifecycle_scaling(&device, queue)!!;
     return 0;
 }

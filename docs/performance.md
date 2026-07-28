@@ -48,8 +48,8 @@ The Vulkan targets cover:
   worker counts;
 - `command_path_baseline_bench`: representative direct Vulkan and public
   command recording, including nonzero dispatch and copy output comparisons;
-- `lifecycle_bench`: submission, completed-point polling, destruction, and
-  submission batches;
+- `lifecycle_bench`: submission, completed-point polling, destruction,
+  submission batches, and independent command-allocator lifecycle scaling;
 - `pipeline_cache_bench`: pipeline alias creation, duplicate lookup, and
   complete `GraphicsState` packet recording across raster permutations;
 - `async_overlap_bench`: serialized and independent graphics/compute work,
@@ -69,6 +69,28 @@ c3c run command_wrapper_bench --path test/cpu -O1
 It compares representative public wrapper calls with an observable direct
 floor. The operation mix and printed output are deliberately not a stable
 schema.
+
+### Independent allocator lifecycle scaling
+
+The `lifecycle_bench` allocator phase runs 1, 2, and 4 workers.
+Each worker owns a distinct graphics-queue command allocator with one command
+buffer and repeatedly performs an empty `begin_commands`, `end_commands`, and
+`discard_executable_commands` lifecycle. It does not submit work or wait for
+GPU completion.
+
+Allocator creation and one warmup lifecycle per worker happen before timing.
+Each measured repetition includes worker-thread creation and join as well as
+the command lifecycles; this keeps the benchmark simple and makes thread
+startup an explicit part of the reported wall-clock cost. For each worker
+count, the benchmark reports iterations per worker, total lifecycles,
+repetitions, median wall-clock elapsed nanoseconds, nanoseconds per lifecycle,
+and aggregate lifecycles per second.
+
+The default run uses `ContractValidation.TRUSTED`. Set
+`GPU_C3L_BENCH_VALIDATION=1` only when deliberately investigating validation
+overhead; Vulkan validation can serialize native recording. Treat the scaling
+figures as advisory, and compare them only across similar hardware, drivers,
+compiler settings, queue topology, validation settings, and system load.
 
 ## Interpretation
 
