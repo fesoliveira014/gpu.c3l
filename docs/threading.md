@@ -55,20 +55,20 @@ concurrent aliases valid.
 | every `cmd_*` recording call | C | confined to the list's thread |
 | `cmd_begin_label` / `cmd_end_label` | C | no-ops without debug-utils |
 
-Most public device operations take a short-lived atomic pin. `begin_commands`
-transfers its pin to one stable device-table command record paired with the
-originating allocator unit and publishes `RECORDING` last. Other pinned
-operations receive the typed private Vulkan state and call its subsystem
-directly. Recording calls load their record from the direct token and compare
-its generation and authoritative phase; they do not borrow another registry
-pin, resolve a command table, or load device-loss state. End, submit, and other
-lifecycle boundaries report loss, while discard remains available. Successful
-end transfers the same record and retained ownership to the executable phase.
-Executable discard releases that ownership immediately. Successful submission
-consumes the public token but keeps the record and its ownership live through
-ordered completion retirement. Pin acquisition may return `DEVICE_BUSY`;
-failed destruction restores the live state and preserves the token and
-generation.
+Most public device operations take a short-lived atomic device pin.
+`begin_commands` transfers its device pin to one stable device-table command
+record paired with the originating allocator unit and publishes `RECORDING`
+last. Other operations holding device pins receive the typed private Vulkan
+state and call its subsystem directly. Recording calls load their record from
+the direct token and compare its generation and authoritative phase; they do
+not borrow another registry device pin, resolve a command table, or load
+device-loss state. End, submit, and other lifecycle boundaries report loss,
+while discard remains available. Successful end transfers the same record and
+retained ownership to the executable phase. Executable discard releases that
+ownership immediately. Successful submission consumes the public token but
+keeps the record and its ownership live through ordered completion retirement.
+Device-pin acquisition may return `DEVICE_BUSY`; failed destruction restores
+the live state and preserves the token and generation.
 
 `create_command_allocator` allocates one exact-queue command pool, every native
 command buffer, fixed per-list scratch, and recycling metadata before returning.
@@ -164,18 +164,20 @@ destroy every swapchain and child resource.
 Resource creation and destruction use `resource_mutex`; shader-visible
 texture-view cache publication uses `texture_view_cache_mutex`; command-record
 allocation, submit claims, rollback, and reclamation use `command_mutex`.
-Every allocator-mutex operation carries a stable slot pin. Public allocator
-resolution establishes the pin under `resource_mutex`, releases that mutex,
-and only then acquires the allocator mutex. The pin remains held through mutex
-ownership, so allocator destruction can reject active or waiting operations
-without probing or waiting on that mutex. Destruction atomically claims the
-zero-pin state before checking quiescence, excluding completion publication or
-retirement during the check. Begin, end, and discard therefore perform native
-and allocator-local work without a shared recording lock, so distinct
-allocators do not convoy. Cold resource operations may acquire `resource_mutex`
-before an allocator mutex when they must protect allocator-table, pipeline, or
-VMA lifetime together. When both resource and view-cache locks are needed,
-resource comes first.
+Every allocator-mutex operation carries a stable allocator slot pin. Public
+allocator resolution establishes the slot pin under `resource_mutex`, releases
+that mutex, and only then acquires the allocator mutex. The slot pin remains
+held through mutex ownership, so allocator destruction can reject active or
+waiting operations without probing or waiting on that mutex. Destruction
+atomically claims the zero-slot-pin state before checking quiescence, excluding
+completion publication or retirement during the check. Those paths may wait
+for the claim to clear; their live executable or in-flight buffer makes
+destruction release the claim without freeing the slot. Begin, end, and discard
+therefore perform native and allocator-local work without a shared recording
+lock, so distinct allocators do not convoy. Cold resource operations may
+acquire `resource_mutex` before an allocator mutex when they must protect
+allocator-table, pipeline, or VMA lifetime together. When both resource and
+view-cache locks are needed, resource comes first.
 
 Each selected queue owns two independent boundaries:
 
