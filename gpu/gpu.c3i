@@ -260,6 +260,16 @@ struct TimestampCaps {
     float      period_ns;
 }
 
+<* Sparse texture behavior enabled on the created device. A dimension is usable
+   only when its flag is set and `binding_queues` names a selected queue. With
+   `nonresident_strict`, nonresident reads return zero and writes are discarded. *>
+struct SparseTextureCaps {
+    bool       image_2d;
+    bool       image_3d;
+    bool       nonresident_strict;
+    QueueRoles binding_queues;
+}
+
 <* Capabilities of the created device. Query with get_device_caps instead of
    hardcoding limits. *>
 struct DeviceCaps {
@@ -294,6 +304,7 @@ struct DeviceCaps {
     float max_sampler_lod_bias;
     // 0 means anisotropic filtering is unsupported.
     float max_sampler_anisotropy;
+    SparseTextureCaps sparse_textures;
 }
 
 alias DebugMessageCallback = fn void (DebugMessage*, void*);
@@ -1207,10 +1218,13 @@ struct QueueRequest {
 }
 
 <* Plain semantic requirements for device creation. A zero value selects the
-   documented default queues and no presentation surface. *>
+   documented default queues, no presentation surface, and no sparse textures.
+   Sparse textures require core 2D or 3D residency and a selected semantic
+   queue capable of sparse binding. *>
 struct DeviceDesc {
     Surface      surface;
     QueueRequest queues;
+    bool         enable_sparse_textures;
 }
 
 <* Result of a read-only semantic support query. unmet_requirement is a

@@ -8,6 +8,7 @@ import vk;
 const uint QF_G = (uint)vk::QueueFlagBits.GRAPHICS_BIT;
 const uint QF_C = (uint)vk::QueueFlagBits.COMPUTE_BIT;
 const uint QF_T = (uint)vk::QueueFlagBits.TRANSFER_BIT;
+const uint QF_S = (uint)vk::QueueFlagBits.SPARSE_BINDING_BIT;
 
 fn vk::QueueFamilyProperties family(uint flags, uint count) {
     return { .queue_flags = (vk::QueueFlags)flags, .queue_count = count };
@@ -29,7 +30,10 @@ fn void default_selection_prefers_dedicated_compute_and_transfer() @test {
         family(QF_T, 2),
     };
 
-    vk::QueueFamilies picked = vk::pick_queue_families(table[..])!!;
+    vk::QueueFamilies picked = vk::pick_queue_families_for_request(
+        table[..],
+        gpu::internal::default_queue_request(),
+    )!!;
 
     assert(picked.graphics == 0 && picked.graphics_index == 0,
         "graphics uses the first universal queue");
@@ -46,7 +50,10 @@ fn void no_graphics_family_faults_for_default_request() @test {
         family(QF_C | QF_T, 4),
     };
 
-    fault result = @catch(vk::pick_queue_families(table[..]));
+    fault result = @catch(vk::pick_queue_families_for_request(
+        table[..],
+        gpu::internal::default_queue_request(),
+    ));
 
     assert(result == gpu::UNSUPPORTED_FEATURE);
 }
@@ -242,6 +249,90 @@ fn void unavailable_distinct_queue_faults() @test {
     assert(result == gpu::UNSUPPORTED_FEATURE);
 }
 
+fn void sparse_selection_rejects_unselected_sparse_only_family() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 2),
+        family(QF_S, 1),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+    };
+
+    assert(@catch(vk::pick_queue_families_for_request(
+        table[..],
+        request,
+        true,
+    )) == gpu::UNSUPPORTED_FEATURE);
+}
+
+fn void sparse_selection_uses_best_eligible_topology() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 2),
+        family(QF_G | QF_C | QF_T | QF_S, 2),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+    };
+
+    vk::QueueFamilies baseline =
+        vk::pick_queue_families_for_request(table[..], request)!!;
+    vk::QueueFamilies sparse = vk::pick_queue_families_for_request(
+        table[..],
+        request,
+        true,
+    )!!;
+
+    assert((uint)baseline.sparse_binding_queues == 0,
+        "the unconstrained preferred topology contains no sparse queue");
+    assert((uint)sparse.sparse_binding_queues != 0,
+        "the sparse filter rejects the unconstrained candidate");
+    assert(sparse.graphics != baseline.graphics
+            || sparse.compute != baseline.compute
+            || sparse.transfer != baseline.transfer,
+        "sparse eligibility changes only the topology needed to gain a sparse queue");
+}
+
+fn void sparse_selection_reports_capable_aliased_roles() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T | QF_S, 2),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+    };
+
+    vk::QueueFamilies picked = vk::pick_queue_families_for_request(
+        table[..],
+        request,
+        true,
+    )!!;
+
+    assert(picked.sparse_binding_queues.graphics);
+    assert(picked.sparse_binding_queues.compute);
+    assert(picked.sparse_binding_queues.transfer);
+}
+
+fn void sparse_selection_reports_only_capable_selected_roles() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G | QF_S, 1),
+        family(QF_C, 1),
+        family(QF_T, 1),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .distinct = { .graphics, .compute, .transfer },
+    };
+
+    vk::QueueFamilies picked = vk::pick_queue_families_for_request(
+        table[..],
+        request,
+        true,
+    )!!;
+
+    assert(picked.sparse_binding_queues.graphics);
+    assert(!picked.sparse_binding_queues.compute);
+    assert(!picked.sparse_binding_queues.transfer);
+}
+
 fn void distinct_roles_must_also_be_required() @test {
     vk::QueueFamilyProperties[1] table = {
         family(QF_G | QF_C | QF_T, 2),
@@ -265,9 +356,10 @@ fn void presentation_selects_a_surface_capable_graphics_queue() @test {
     };
     bool[3] presentation_support = { false, true, false };
 
-    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface_request(
         table[..],
         presentation_support[..],
+        gpu::internal::default_queue_request(),
     )!!;
 
     assert(picked.graphics == 1 && picked.graphics_index == 0);
@@ -285,9 +377,10 @@ fn void presentation_can_use_a_selected_non_graphics_queue() @test {
     };
     bool[2] presentation_support = { false, true };
 
-    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface_request(
         table[..],
         presentation_support[..],
+        gpu::internal::default_queue_request(),
     )!!;
 
     assert(picked.graphics == 0);
@@ -302,9 +395,10 @@ fn void presentation_can_use_a_private_queue_family() @test {
     };
     bool[2] presentation_support = { false, true };
 
-    vk::QueueFamilies picked = vk::pick_queue_families_for_surface(
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface_request(
         table[..],
         presentation_support[..],
+        gpu::internal::default_queue_request(),
     )!!;
 
     assert(picked.graphics == 0 && picked.compute == 0);
@@ -317,8 +411,11 @@ fn void presentation_support_must_cover_every_queue_family() @test {
         family(QF_G | QF_C | QF_T, 1),
     };
 
-    fault result =
-        @catch(vk::pick_queue_families_for_surface(table[..], {}));
+    fault result = @catch(vk::pick_queue_families_for_surface_request(
+        table[..],
+        {},
+        gpu::internal::default_queue_request(),
+    ));
 
     assert(result == gpu::INVALID_ARGUMENT);
 }
@@ -329,9 +426,10 @@ fn void presentation_requires_a_capable_queue_family() @test {
     };
     bool[1] presentation_support = { false };
 
-    fault result = @catch(vk::pick_queue_families_for_surface(
+    fault result = @catch(vk::pick_queue_families_for_surface_request(
         table[..],
         presentation_support[..],
+        gpu::internal::default_queue_request(),
     ));
 
     assert(result == gpu::UNSUPPORTED_FEATURE);

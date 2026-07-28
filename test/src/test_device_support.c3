@@ -95,3 +95,49 @@ fn void unavailable_queue_topology_is_reported_semantically() @test {
     assert(!support.supported);
     assert(support.unmet_requirement == "queue topology");
 }
+
+fn void unavailable_sparse_textures_are_reported_semantically() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc desc = {
+        .enable_sparse_textures = true,
+    };
+
+    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
+
+    assert(!support.supported);
+    assert(support.unmet_requirement == "sparse textures");
+    assert(@catch(gpu::create_device(&adapter, &desc))
+        == gpu::UNSUPPORTED_FEATURE);
+}
+
+fn void sparse_queue_requirement_reaches_backend_support_query() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_set_sparse_texture_support(true);
+    gpu::internal::vk::stub_set_sparse_queue_support(false);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc sparse = {
+        .enable_sparse_textures = true,
+    };
+
+    DeviceSupport sparse_support =
+        gpu::supports_device_desc(&adapter, &sparse)!!;
+    assert(!sparse_support.supported);
+    assert(sparse_support.unmet_requirement == "sparse queue topology");
+
+    DeviceDesc ordinary;
+    DeviceSupport ordinary_support =
+        gpu::supports_device_desc(&adapter, &ordinary)!!;
+    assert(ordinary_support.supported,
+        "ordinary support does not require a sparse-capable selected queue");
+}

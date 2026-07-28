@@ -27,6 +27,11 @@ struct NativeDeviceCreateCapture {
 
 struct DeviceFeatureChainCapture {
     uint calls;
+    bool found_base_features;
+    bool sparse_binding;
+    bool sparse_image_2d;
+    bool sparse_image_3d;
+    bool sparse_uncontracted_features;
     bool found_features12;
     bool indexing_features_enabled;
     bool found_dynamic_color;
@@ -81,7 +86,24 @@ fn vk::Result capture_device_feature_chain(
     vk::BaseInStructure* feature =
         (vk::BaseInStructure*)create_info.p_next;
     while (feature != null) {
-        if (feature.s_type
+        if (feature.s_type == vk::StructureType.PHYSICAL_DEVICE_FEATURES_2) {
+            vk::PhysicalDeviceFeatures2* features2 =
+                (vk::PhysicalDeviceFeatures2*)feature;
+            capture.found_base_features = true;
+            capture.sparse_binding =
+                features2.features.sparse_binding == vk::TRUE;
+            capture.sparse_image_2d =
+                features2.features.sparse_residency_image2d == vk::TRUE;
+            capture.sparse_image_3d =
+                features2.features.sparse_residency_image3d == vk::TRUE;
+            capture.sparse_uncontracted_features =
+                features2.features.sparse_residency_buffer != vk::FALSE
+                || features2.features.sparse_residency2samples != vk::FALSE
+                || features2.features.sparse_residency4samples != vk::FALSE
+                || features2.features.sparse_residency8samples != vk::FALSE
+                || features2.features.sparse_residency16samples != vk::FALSE
+                || features2.features.sparse_residency_aliased != vk::FALSE;
+        } else if (feature.s_type
             == vk::StructureType.PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) {
             vk::PhysicalDeviceVulkan12Features* features12 =
                 (vk::PhysicalDeviceVulkan12Features*)feature;
@@ -535,6 +557,13 @@ fn void device_creation_enables_required_native_features() @test {
             "device creation chains Vulkan 1.2 features into vkCreateDevice");
         assert(capture.indexing_features_enabled,
             "device creation enables all seven required indexing feature bits");
+        assert(capture.found_base_features,
+            "device creation chains core base features");
+        assert(!capture.sparse_binding
+                && !capture.sparse_image_2d
+                && !capture.sparse_image_3d
+                && !capture.sparse_uncontracted_features,
+            "default creation enables no sparse feature");
         assert(capture.found_dynamic_color
                 && capture.dynamic_color_features_enabled,
             "device creation chains and enables all required color features");
@@ -547,6 +576,136 @@ fn void device_creation_enables_required_native_features() @test {
         return;
     }
     assert(false, "the pinned Vulkan adapter supports the device baseline");
+}
+
+fn void requested_sparse_creation_enables_only_planned_features() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_sparse_feature_plan_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceDesc device_desc = {
+        .enable_sparse_textures = true,
+    };
+    bool checked_unsupported;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            assert(@catch(gpu::create_device(&adapter, &device_desc))
+                == gpu::UNSUPPORTED_FEATURE,
+                "unsupported sparse creation takes the verified negative path");
+            checked_unsupported = true;
+            continue;
+        }
+        DeviceFeatureChainCapture capture;
+        gpu::internal::vk::DeviceCreationProbe probe;
+        gpu::internal::vk::DeviceCreationOps creation_ops = {
+            .user_data = &capture,
+            .create    = &capture_device_feature_chain,
+        };
+        gpu::Runtime retained_runtime = runtime;
+        gpu::internal::runtime_retain_device(&retained_runtime)!!;
+        fault rejected =
+            @catch(gpu::internal::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                device_desc:      &device_desc,
+                retained_runtime: &retained_runtime,
+                probe:            &probe,
+                creation_ops:     &creation_ops,
+            ));
+        gpu::internal::runtime_release_device(&retained_runtime)!!;
+
+        assert(rejected == gpu::UNSUPPORTED_BACKEND);
+        assert(capture.found_base_features && capture.sparse_binding);
+        assert(capture.sparse_image_2d || capture.sparse_image_3d);
+        assert(!capture.sparse_uncontracted_features);
+        return;
+    }
+    assert(checked_unsupported,
+        "the controlled native target exposes a sparse positive or negative path");
+}
+
+fn void default_device_caps_hide_sparse_support() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_default_sparse_caps_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceDesc device_desc;
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            continue;
+        }
+        gpu::Device device =
+            gpu::create_device(&adapter, &device_desc)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        assert(!caps.sparse_textures.image_2d
+                && !caps.sparse_textures.image_3d
+                && !caps.sparse_textures.nonresident_strict
+                && (uint)caps.sparse_textures.binding_queues == 0,
+            "a zero DeviceDesc publishes entirely zero sparse capabilities");
+        gpu::destroy_device(&device)!!;
+        return;
+    }
+    assert(false, "the controlled native target supports the device baseline");
+}
+
+fn void sparse_support_and_created_caps_are_consistent() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_sparse_caps_test",
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceDesc device_desc = {
+        .enable_sparse_textures = true,
+    };
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::DeviceSupport support =
+            gpu::supports_device_desc(&adapter, &device_desc)!!;
+        if (!support.supported) {
+            assert(@catch(gpu::create_device(&adapter, &device_desc))
+                == gpu::UNSUPPORTED_FEATURE);
+            continue;
+        }
+
+        gpu::Device device =
+            gpu::create_device(&adapter, &device_desc)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::internal::vk::VkDeviceState* state =
+            gpu::internal::device_slots[device.index].data.state;
+        vk::PhysicalDeviceFeatures2 features2 =
+            vk::physical_device_features2();
+        vk::get_physical_device_features2(
+            state.physical_device,
+            &features2,
+        );
+        vk::PhysicalDeviceProperties properties;
+        vk::get_physical_device_properties(
+            state.physical_device,
+            &properties,
+        );
+
+        assert(caps.sparse_textures.image_2d
+            == (features2.features.sparse_residency_image2d != 0));
+        assert(caps.sparse_textures.image_3d
+            == (features2.features.sparse_residency_image3d != 0));
+        assert(caps.sparse_textures.nonresident_strict
+            == (properties.sparse_properties.residency_non_resident_strict
+                != 0));
+        assert((uint)caps.sparse_textures.binding_queues
+            == (uint)state.queues.sparse_binding_queues);
+        assert((uint)caps.sparse_textures.binding_queues != 0);
+
+        gpu::destroy_device(&device)!!;
+    }
 }
 
 fn void adapter_desc_creation_reuses_runtime_discovery() @test {

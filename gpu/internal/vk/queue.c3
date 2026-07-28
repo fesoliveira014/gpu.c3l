@@ -38,6 +38,7 @@ struct QueueSubmitOps @private {
 
 struct QueueFamilies {
     gpu::QueueRoles selected;
+    gpu::QueueRoles sparse_binding_queues;
     uint graphics;
     uint graphics_index;
     uint compute;
@@ -446,6 +447,7 @@ fn QueueFamilies? pick_queue_families_impl(
     vk::QueueFamilyProperties[] families,
     bool[] presentation_support,
     bool require_presentation,
+    bool require_sparse_binding,
     gpu::QueueRequest request,
 ) @private {
     if (!gpu::internal::queue_request_is_valid(request)) {
@@ -548,6 +550,15 @@ fn QueueFamilies? pick_queue_families_impl(
                                 )) {
                                 continue;
                             }
+                            candidate.sparse_binding_queues =
+                                sparse_binding_queue_roles(
+                                    &candidate,
+                                    families,
+                                );
+                            if (require_sparse_binding
+                                && (uint)candidate.sparse_binding_queues == 0) {
+                                continue;
+                            }
                             if (!found || selection_is_preferred(
                                 candidate: candidate,
                                 current:   best,
@@ -570,12 +581,14 @@ fn QueueFamilies? pick_queue_families_impl(
 fn QueueFamilies? pick_queue_families_for_request(
     vk::QueueFamilyProperties[] families,
     gpu::QueueRequest request,
+    bool require_sparse_binding = false,
 ) {
     return pick_queue_families_impl(
-        families:             families,
-        presentation_support: {},
-        require_presentation: false,
-        request:              request,
+        families:               families,
+        presentation_support:   {},
+        require_presentation:   false,
+        require_sparse_binding: require_sparse_binding,
+        request:                request,
     );
 }
 
@@ -583,30 +596,14 @@ fn QueueFamilies? pick_queue_families_for_surface_request(
     vk::QueueFamilyProperties[] families,
     bool[] presentation_support,
     gpu::QueueRequest request,
+    bool require_sparse_binding = false,
 ) {
     return pick_queue_families_impl(
-        families:             families,
-        presentation_support: presentation_support,
-        require_presentation: true,
-        request:              request,
-    );
-}
-
-fn QueueFamilies? pick_queue_families(vk::QueueFamilyProperties[] families) {
-    return pick_queue_families_for_request(
-        families,
-        gpu::internal::default_queue_request(),
-    );
-}
-
-fn QueueFamilies? pick_queue_families_for_surface(
-    vk::QueueFamilyProperties[] families,
-    bool[] presentation_support,
-) {
-    return pick_queue_families_for_surface_request(
-        families,
-        presentation_support,
-        gpu::internal::default_queue_request(),
+        families:               families,
+        presentation_support:   presentation_support,
+        require_presentation:   true,
+        require_sparse_binding: require_sparse_binding,
+        request:                request,
     );
 }
 
@@ -674,6 +671,7 @@ fn uint selected_device_queue_families(
 fn QueueFamilies? select_queue_families(
     vk::PhysicalDevice physical_device,
     gpu::QueueRequest* request = null,
+    bool require_sparse_binding = false,
 ) {
     uint count = 0;
     vk::get_physical_device_queue_family_properties(physical_device, &count, null);
@@ -682,9 +680,14 @@ fn QueueFamilies? select_queue_families(
     @pool() {
         vk::QueueFamilyProperties[] families = mem::talloc_array(vk::QueueFamilyProperties, (sz)count);
         vk::get_physical_device_queue_family_properties(physical_device, &count, families.ptr);
-        return request == null
-            ? pick_queue_families(families[:count])
-            : pick_queue_families_for_request(families[:count], *request);
+        gpu::QueueRequest resolved = request == null
+            ? gpu::internal::default_queue_request()
+            : *request;
+        return pick_queue_families_for_request(
+            families[:count],
+            resolved,
+            require_sparse_binding,
+        );
     };
 }
 
@@ -693,6 +696,7 @@ fn QueueFamilies? select_queue_families_for_surface(
     vk::PhysicalDevice physical_device,
     vk::SurfaceKHR surface,
     gpu::QueueRequest* request = null,
+    bool require_sparse_binding = false,
 ) {
     if (runtime == null || runtime.dispatch.surface.get_surface_support == null) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -720,13 +724,15 @@ fn QueueFamilies? select_queue_families_for_surface(
             ))!;
             presentation_support[index] = supported != 0;
         }
-        return request == null
-            ? pick_queue_families_for_surface(families[:count], presentation_support)
-            : pick_queue_families_for_surface_request(
-                families[:count],
-                presentation_support,
-                *request,
-            );
+        gpu::QueueRequest resolved = request == null
+            ? gpu::internal::default_queue_request()
+            : *request;
+        return pick_queue_families_for_surface_request(
+            families:               families[:count],
+            presentation_support:   presentation_support,
+            request:                resolved,
+            require_sparse_binding: require_sparse_binding,
+        );
     };
 }
 
@@ -735,6 +741,7 @@ fn bool? vk_supports_queue_request(
     uint adapter_index,
     gpu::QueueRequest* request,
     void* backend_surface,
+    bool require_sparse_binding = false,
 ) {
     if (state == null || request == null || adapter_index >= state.adapters.len) {
         return gpu::INVALID_HANDLE~;
@@ -742,12 +749,17 @@ fn bool? vk_supports_queue_request(
 
     vk::PhysicalDevice physical_device = state.adapters[adapter_index].physical_device;
     QueueFamilies? selection = backend_surface == null
-        ? select_queue_families(physical_device, request)
+        ? select_queue_families(
+            physical_device,
+            request,
+            require_sparse_binding,
+        )
         : select_queue_families_for_surface(
-            runtime:         state,
-            physical_device: physical_device,
-            surface:         (vk::SurfaceKHR)backend_surface,
-            request:         request,
+            runtime:                state,
+            physical_device:        physical_device,
+            surface:                (vk::SurfaceKHR)backend_surface,
+            request:                request,
+            require_sparse_binding: require_sparse_binding,
         );
     if (catch selection_fault = selection) {
         if (selection_fault == gpu::UNSUPPORTED_FEATURE) return false;

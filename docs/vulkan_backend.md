@@ -51,6 +51,7 @@ gpu/internal/vk/adapter.c3              semantic adapter metadata and diagnostic
 gpu/internal/vk/instance.c3             shared instance construction
 gpu/internal/vk/device.c3               physical device selection, logical device, feature chain
 gpu/internal/vk/queue.c3                queue family selection, queue handles, submit
+gpu/internal/vk/sparse.c3               sparse feature plan and selected-role capability
 gpu/internal/vk/allocator.c3            vma::Allocator creation/destruction, stats
 gpu/internal/vk/allocation.c3           generic-buffer and raw texture-memory allocations
 gpu/internal/vk/buffer.c3               VkBuffer + VMA allocation path
@@ -190,10 +191,11 @@ facts, and separate backend diagnostics. Public enumeration and queries
 allocate nothing. Cached strings remain valid until runtime destruction.
 
 Applications select an exact adapter from that cache.
-`supports_device_desc` evaluates the descriptor's queue and presentation
-semantics together with the mandatory baseline and runtime-configured heap
-capacities without enabling state. Device creation uses the same normalized
-descriptor and runtime configuration for the selected adapter.
+`supports_device_desc` evaluates the descriptor's queue, presentation, and
+sparse-texture semantics together with the mandatory baseline and
+runtime-configured heap capacities without enabling state. Device creation uses
+the same normalized descriptor and runtime configuration for the selected
+adapter.
 
 The mandatory baseline requires:
 
@@ -230,6 +232,14 @@ reports the complete surface and presentation capability.
 distinct-role constraints, presentation graphics requirement, and topology without
 enabling state. Surface formats and present modes remain swapchain-creation
 concerns.
+
+Sparse textures are a core-feature opt-in. The adapter must report
+`sparseBinding` and at least one of `sparseResidencyImage2D` or
+`sparseResidencyImage3D`. The existing exhaustive queue search filters to
+topologies where at least one selected public role's family has
+`VK_QUEUE_SPARSE_BINDING_BIT`, then applies its existing preference ordering.
+It does not admit a sparse-only private family. Support queries and creation use
+the same pure feature plan and queue constraint.
 
 Timestamp capabilities are derived after queue selection. The backend retains
 the selected families' `timestampValidBits` independently for graphics, compute,
@@ -303,6 +313,15 @@ layouts, token offset 16, record stride 40, and a nonzero work-count limit.
 `DeviceCaps.generated_work` and `max_generated_work_count` report the result
 semantically; unsupported devices report false and zero. These extensions are
 not physical-device selection requirements.
+
+When `DeviceDesc.enable_sparse_textures` is true, the backend enables
+`sparseBinding` and every advertised 2D/3D sparse-residency dimension. It leaves
+`sparseResidencyAliased` and all sparse-residency multisample bits disabled.
+`DeviceCaps.sparse_textures` publishes those enabled dimensions, the selected
+sparse-capable role mask, and `residencyNonResidentStrict`. When the opt-in is
+false the capability and all sparse feature bits remain zero, even on capable
+hardware. No extension or additional dispatch is required, and sparse image
+creation and binding remain out of scope.
 
 The backend owns one indirect-command layout for each draw shape and one
 generated-dispatch layout paired with the device's singleton compute pipeline
