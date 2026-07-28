@@ -713,6 +713,7 @@ fn bool generated_scratch_references_pipeline(
         :state.command_allocators.next_new
     ]) {
         if (!cell.used) continue;
+        // resource_mutex excludes a concurrent allocator destroy claim here.
         pin_command_allocator_slot(&cell.value);
         cell.value.mutex.lock()!!;
         bool found;
