@@ -957,6 +957,48 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
     return gpu::internal::vk::vk_get_texture_requirements(operation.state, desc);
 }
 
+<* Create an unbound single-layer, single-sample color sparse texture on a
+   device with the matching sparse dimension enabled. Usage is limited to
+   sampled, storage, and transfer. Creation allocates and binds no memory.
+   Ownership: release the image and its views with `destroy_texture`; sparse
+   page allocations remain caller-owned. *>
+fn TextureHandle? create_sparse_texture(
+    Device* device,
+    TextureDesc* desc,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    TextureHandle texture =
+        gpu::internal::vk::vk_create_sparse_texture(operation.state, desc)!;
+    gpu::internal::retain_device_children(&operation);
+    return texture;
+}
+
+<* Return the immutable tile, mip-tail, virtual-size, and page-allocation
+   requirements cached for a live sparse texture. A live non-sparse texture
+   faults `INVALID_ARGUMENT`; stale or foreign identity faults
+   `INVALID_HANDLE`. *>
+fn SparseTextureRequirements? get_sparse_texture_requirements(
+    Device* device,
+    TextureHandle texture,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
+        &operation,
+        texture.owner,
+        gpu::internal::ResourceOwnerKind.TEXTURE,
+    )!;
+    return gpu::internal::vk::vk_get_sparse_texture_requirements(
+        operation.state,
+        texture,
+    );
+}
+
 <* Create an independently allocated texture.
    The descriptor is borrowed only for the call. The returned handle owns the
    image; shader access goes through a `TextureIndex`. Release it with

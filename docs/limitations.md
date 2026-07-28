@@ -121,6 +121,16 @@ page doesn't explain it, that's a bug in this page — file an issue.
   z-slice view, or format reinterpretation switch. Multisample textures are
   2D color/depth attachments with one mip and cannot be sampled, stored, or
   transferred directly.
+- **Sparse texture creation is deliberately narrow and initially unbound.**
+  It supports single-layer, single-sample color 2D/3D images with sampled,
+  storage, and transfer usage. Attachment usage, depth/stencil aspects, and
+  native requirement shapes beyond COLOR plus optional METADATA are rejected.
+  Creation commits no memory. Descriptor publication is independent of
+  residency, and this surface currently has no sparse memory-binding call, so
+  an unbound sparse texture must not be used by GPU commands. The backend adds
+  no hidden allocation, wait, residency map, or backing-allocation lifetime
+  tracking. `SparseTextureCaps.nonresident_strict` describes device behavior;
+  it is not a substitute for establishing residency.
 - **Depth attachments are D32-only.** No public stencil attachment format or
   stencil clear state is exposed.
 - **Matrices are not a schema type.** The ABI DSL has no `mat4`; matrices
@@ -140,6 +150,7 @@ exists (else the limit is compile-time).
 | Interned samplers | selected-device `maxSamplerAllocationCount`, capped at 65 536 | — | `SLOT_TABLE_FULL` |
 | Sampler mip LOD bias | Absolute value up to selected-device `maxSamplerLodBias`, reported by `DeviceCaps.max_sampler_lod_bias` | — | `INVALID_ARGUMENT` |
 | Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/gpu.c3i`) | `texture_capacity` | `SLOT_TABLE_FULL` |
+| Sparse requirement aspects per texture | 2 (`MAX_SPARSE_TEXTURE_ASPECTS` in `gpu/gpu.c3i`): COLOR plus optional METADATA | — | `UNSUPPORTED_FEATURE` |
 | Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/internal/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
 | Live pipelines | 256 by default (`MAX_PIPELINES` in `gpu/gpu.c3i`) | `pipeline_capacity` | `SLOT_TABLE_FULL` |
 | Live timestamp pools | 256 (`MAX_TIMESTAMP_POOLS` in `gpu/internal/vk/timestamp.c3`) | destroy quiescent pools to recycle generational slots | `SLOT_TABLE_FULL` |

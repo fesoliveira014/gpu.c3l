@@ -584,13 +584,23 @@ fn void resource_texture_create_info_uses_exact_access_families() @test {
         vk::make_texture_create_info(&desc, aliased[..]);
     vk::ImageCreateInfo concurrent =
         vk::make_texture_create_info(&desc, split[..]);
+    vk::ImageCreateFlags sparse_flags =
+        (vk::ImageCreateFlags)vk::ImageCreateFlagBits.SPARSE_BINDING_BIT
+        | (vk::ImageCreateFlags)vk::ImageCreateFlagBits.SPARSE_RESIDENCY_BIT;
+    vk::ImageCreateInfo sparse = vk::make_texture_create_info(
+        &desc,
+        aliased[..],
+        sparse_flags,
+    );
 
+    assert(exclusive.flags == (vk::ImageCreateFlags)0);
     assert(exclusive.sharing_mode == vk::SharingMode.EXCLUSIVE);
     assert(exclusive.queue_family_index_count == 0);
     assert(concurrent.sharing_mode == vk::SharingMode.CONCURRENT);
     assert(concurrent.queue_family_index_count == 2);
     assert(concurrent.p_queue_family_indices[0] == 4);
     assert(concurrent.p_queue_family_indices[1] == 5);
+    assert(sparse.flags == sparse_flags);
 }
 
 fn void swapchain_sharing_aliases_the_graphics_family() @test {

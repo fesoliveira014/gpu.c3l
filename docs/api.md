@@ -379,8 +379,9 @@ successful sparse device, `image_2d` and `image_3d` name the enabled residency
 dimensions. When `nonresident_strict` is true, nonresident reads are guaranteed
 to return zero and writes are discarded; when false, that behavior is not
 guaranteed. `binding_queues` names every selected semantic role backed by a
-sparse-binding-capable family. Sparse resources and binding operations are not
-part of this capability-only surface.
+sparse-binding-capable family. Sparse image creation and immutable requirement
+queries use this enabled capability; sparse memory binding is separate and is
+not implicit in creation.
 
 Creation:
 
@@ -508,7 +509,7 @@ both always-checked and `FULL`-only causes.
 | Fault | Cause category | Fired by | Typical cause |
 |---|---|---|---|
 | `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the Vulkan loader, driver, or required backend initialization path is unavailable |
-| `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_timestamp_pool`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, timestamp recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; an enabled sparse request lacks a residency dimension or selected binding queue; no selected role supports the timestamp workflow; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_sparse_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_timestamp_pool`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, timestamp recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; an enabled sparse request lacks a residency dimension or selected binding queue; no selected role supports the timestamp workflow; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor; sparse native requirements cannot fit the public color-plus-metadata shape |
 | `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; device descriptor validation; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
 | `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource handle; or a zero, stale, consumed, or wrong-phase valid-origin direct command token; submit also rejects a token recorded for another device |
 | `INVALID_RESOURCE_STATE` | Always checked lifecycle/safe snapshot / Runtime failures | command execution; surface and swapchain creation/lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an authoritative lifecycle transition is invalid, trusted-table command execution has no usable bound-pipeline snapshot, a borrowed view was passed for destruction, a generated-scratch key is not reserved, or Vulkan reports that the native window is already in use |
@@ -686,6 +687,29 @@ TextureRequirements
     TextureCompatibility compatibility
     bool dedicated_only
 
+MAX_SPARSE_TEXTURE_ASPECTS = 2
+
+SparseTextureAspect
+    COLOR
+    METADATA
+
+SparseTextureAspectRequirements
+    SparseTextureAspect aspect
+    Vec3u tile_extent
+    uint mip_tail_first_lod
+    usz mip_tail_size
+    usz mip_tail_offset
+    usz mip_tail_stride
+    bool single_mip_tail
+    bool aligned_mip_size
+    bool nonstandard_block_size
+
+SparseTextureRequirements
+    usz virtual_size
+    TextureRequirements page_allocation
+    uint aspect_count
+    SparseTextureAspectRequirements[2] aspects
+
 DedicatedTexture
     TextureHandle texture
     GpuAllocation allocation
@@ -736,6 +760,8 @@ TextureViewCreateDesc
 get_texture_format_support(Device* device, Format format) -> TextureFormatSupport?
 supports_texture_desc(Device* device, TextureDesc* desc) -> bool?
 get_texture_requirements(Device* device, TextureDesc* desc) -> TextureRequirements?
+create_sparse_texture(Device* device, TextureDesc* desc) -> TextureHandle?
+get_sparse_texture_requirements(Device* device, TextureHandle texture) -> SparseTextureRequirements?
 create_texture(Device* device, TextureDesc* desc) -> TextureHandle?
 create_placed_texture(Device* device, TextureDesc* desc, GpuAllocation allocation, usz offset) -> TextureHandle?
 create_dedicated_texture(Device* device, TextureDesc* desc, AllocationDesc* allocation_desc) -> DedicatedTexture?
@@ -776,6 +802,33 @@ true capability result.
 compatibility value, and whether dedicated storage is required. Pass every
 requirement an allocation must support in
 `AllocationDesc.texture_requirements`; incompatible groups are rejected.
+
+`create_sparse_texture` creates one unbound sparse 2D or 3D image. The device
+must have been created with sparse textures enabled and must report the selected
+dimension in `DeviceCaps.sparse_textures`. The descriptor is deliberately
+narrow: one normalized array layer, `SampleCount.ONE`, a color format, no
+attachment usage, and a nonempty combination of sampled, storage, and transfer
+usage. Exact image-format support and a nonzero sparse-format property count
+are checked before native image creation. `TextureDesc.access` still describes
+image use and does not need to intersect `SparseTextureCaps.binding_queues`.
+
+`get_sparse_texture_requirements` returns the immutable snapshot captured
+during successful creation. `virtual_size` is the image's virtual byte span,
+not committed physical storage. `page_allocation` describes compatible
+caller-owned `MemoryClass.TEXTURE` backing; its size and alignment are one
+native sparse block and `dedicated_only` is false. The fixed aspect array
+contains COLOR first and optional METADATA second. Only the first
+`aspect_count` entries are meaningful. A single mip tail reports stride zero;
+metadata tile extent may be zero when the driver does not define standard image
+tiles for that aspect. Querying a live ordinary or swapchain texture returns
+`INVALID_ARGUMENT`; stale or foreign handles return `INVALID_HANDLE`.
+
+Sparse creation allocates no image memory and performs no binding. Existing
+texture-view publication can expose a sampled or storage sparse image before
+residency is established; publication and residency are independent. The
+library inserts no hidden wait and tracks no resident regions. Until sparse
+memory binding is added, the image remains unbound and must not be used by GPU
+commands. Destroying it releases its image and views but no caller allocation.
 
 `create_placed_texture` requires `MemoryClass.TEXTURE`, compatible memory,
 an aligned, in-bounds, non-overlapping range, and allocation access covering

@@ -181,6 +181,9 @@ fn void pin_memory_and_resources() {
         },
     };
     gpu::TextureHandle texture = {};
+    gpu::SparseTextureRequirements sparse_requirements = {};
+    sparse_requirements.aspects[0].aspect =
+        gpu::SparseTextureAspect.COLOR;
     gpu::AttachmentViewHandle attachment_view = {};
     gpu::AttachmentViewDesc attachment_desc = { .texture = texture };
     gpu::TextureViewDesc view_desc = {};
@@ -202,6 +205,8 @@ fn void pin_memory_and_resources() {
     (void)gpu::supports_texture_desc(&device, &texture_desc);
     (void)gpu::get_texture_requirements(&device, &texture_desc);
     (void)gpu::create_texture(&device, &texture_desc);
+    (void)gpu::create_sparse_texture(&device, &texture_desc);
+    (void)gpu::get_sparse_texture_requirements(&device, texture);
     (void)gpu::create_placed_texture(
         device:     &device,
         desc:       &texture_desc,

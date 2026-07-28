@@ -38,7 +38,8 @@ concurrent aliases valid.
 | `allocate_memory` / `free_allocation` | S | internally synchronized; free must happen-after the last use |
 | `get_allocation_info` / `get_allocation_span` / `get_span_mapping` / `get_span_address` | S | lock-free slot resolution |
 | `flush_mapped_span` / `invalidate_mapped_span` | S | lock-free validation; coherent no-op; native calls are internally synchronized |
-| `create_texture` / `destroy_texture` | S | |
+| `create_texture` / `create_sparse_texture` / `destroy_texture` | S | native creation and slot publication are internally synchronized |
+| `get_sparse_texture_requirements` | S | internally synchronized immutable snapshot copy; no native query |
 | `create_timestamp_pool` / `destroy_timestamp_pool` | S | internally synchronized; destroy happens-after every command use and host read |
 | `read_timestamps` | S | distinct pools may be read concurrently; the caller orders each read after GPU execution and externally synchronizes same-pool mutation or destruction |
 | `create_attachment_view` / `destroy_attachment_view` | S | immutable render subresource; destroy happens-after every command reference |
@@ -135,6 +136,15 @@ or establish GPU completion. The caller orders the read after the relevant
 reset/write execution and does not concurrently mutate or destroy that pool.
 `DEVICE_BUSY` returns immediately and leaves the requested output unspecified.
 
+Sparse texture creation performs descriptor and physical-device capability
+preflight before native mutation, then holds `resource_mutex` across raw image
+creation, requirement capture, optional default-view creation, and slot
+publication. `get_sparse_texture_requirements` briefly holds the same mutex for
+generation-checked lookup and returns the cached value. It performs no native
+query and shares no mutable snapshot with the caller. Descriptor publication
+uses the ordinary resource-before-view-cache lock order. Creation and descriptor
+publication establish no residency, submit no work, and add no hidden waits.
+
 Submission validates and claims the complete direct-token batch once inside the
 private Vulkan implementation, using the exact queue stored by each
 authoritative record. It consumes executable command tokens only after native
@@ -195,6 +205,9 @@ ownership transfers.
 - Resource slot reads (`get` paths), including allocation and span queries,
   are lock-free: tables never reallocate, and a token reaches another thread
   only through your synchronization. That hand-off is the happens-before edge.
+  Sparse requirement queries are the explicit exception: they serialize with
+  sparse creation and destruction under `resource_mutex` before copying the
+  immutable snapshot by value.
 - Command records live at stable addresses in the fixed device command table
   and are paired with fixed allocator-owned native buffer/scratch units.
   The token carries a library-owned typed record pointer, reuse generation, and

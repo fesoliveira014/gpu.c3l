@@ -33,6 +33,15 @@ alias TextureBindImageMemoryFn = fn vk::Result (
 alias TextureFreeMemoryFn = fn void (
     void*, vma::Allocator, vma::Allocation
 );
+alias TextureDestroyAllocatorImageFn = fn void (
+    void*, vma::Allocator, vk::Image, vma::Allocation
+);
+
+enum TextureImageOwnership : int {
+    ALLOCATOR,
+    SPARSE,
+    PLACED,
+}
 
 struct TexturePlacementNativeOps {
     void*                        user_data;
@@ -51,6 +60,12 @@ struct DedicatedTextureNativeOps {
     TextureDestroyImageFn        destroy_image;
     TextureDestroyViewFn         destroy_view;
     TextureFreeMemoryFn          free_memory;
+}
+
+struct TextureImageDestroyOps {
+    void*                          user_data;
+    TextureDestroyImageFn          destroy_image;
+    TextureDestroyAllocatorImageFn destroy_allocator_image;
 }
 
 // Concrete (non-generic) slot table for textures. Monomorphized twin of
@@ -93,12 +108,47 @@ struct TextureSlot {
     Atomic{bool}       presented;
     Atomic{uint}        tracked_command_references;
     bool               swapchain_owned;
+    bool               sparse;
+    gpu::SparseTextureRequirements sparse_requirements;
     bool               placed;
     gpu::GpuAllocation placement;
     usz                placement_offset;
     usz                allocation_size;
     char[DEBUG_NAME_CAP] debug_name;
     CachedView[]        views;
+}
+
+fn TextureImageOwnership texture_image_ownership(TextureSlot* slot) {
+    if (slot.sparse) return TextureImageOwnership.SPARSE;
+    if (slot.placed) return TextureImageOwnership.PLACED;
+    return TextureImageOwnership.ALLOCATOR;
+}
+
+fn void destroy_texture_image_with_ops(
+    VkDeviceState* state,
+    TextureImageOwnership ownership,
+    vk::Image image,
+    vma::Allocation allocation,
+    TextureImageDestroyOps* ops,
+) {
+    switch (ownership) {
+        case TextureImageOwnership.SPARSE:
+        case TextureImageOwnership.PLACED:
+            ops.destroy_image(
+                ops.user_data,
+                state.device,
+                image,
+            );
+        case TextureImageOwnership.ALLOCATOR:
+            if (state.allocator != null) {
+                ops.destroy_allocator_image(
+                    ops.user_data,
+                    state.allocator,
+                    image,
+                    allocation,
+                );
+            }
+    }
 }
 
 struct TextureCell {
@@ -335,7 +385,7 @@ fn gpu::TextureFormatSupport? vk_get_texture_format_support(
 fn bool? texture_desc_supported(
     VkDeviceState* state,
     gpu::TextureDesc* desc,
-    bool aliasing = false,
+    vk::ImageCreateFlags flags = (vk::ImageCreateFlags)0,
 ) @private {
     vk::ImageUsageFlags usage = texture_usage_to_vk(desc.usage);
     vk::ImageType image_type = gpu::internal::texture_desc_is_3d(desc)
@@ -348,9 +398,7 @@ fn bool? texture_desc_supported(
         image_type,
         vk::ImageTiling.OPTIMAL,
         usage,
-        aliasing
-            ? (vk::ImageCreateFlags)vk::ImageCreateFlagBits.ALIAS_BIT
-            : (vk::ImageCreateFlags)0,
+        flags,
         &properties,
     );
     switch (result) {
@@ -632,7 +680,7 @@ fn void destroy_cached_views(VkDeviceState* state, TextureSlot* slot) {
 fn vk::ImageCreateInfo make_texture_create_info(
     gpu::TextureDesc* desc,
     uint[] queue_families,
-    bool aliasing = false,
+    vk::ImageCreateFlags flags = (vk::ImageCreateFlags)0,
 ) @private {
     bool is_3d = gpu::internal::texture_desc_is_3d(desc);
     vk::ImageCreateInfo info = vk::image_create_info()
@@ -653,9 +701,7 @@ fn vk::ImageCreateInfo make_texture_create_info(
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
         .set_initial_layout(vk::ImageLayout.UNDEFINED);
-    if (aliasing) {
-        info.flags = (vk::ImageCreateFlags)vk::ImageCreateFlagBits.ALIAS_BIT;
-    }
+    info.flags = flags;
     if (queue_families.len >= 2) {
         info = info
             .set_sharing_mode(vk::SharingMode.CONCURRENT)
@@ -700,7 +746,9 @@ fn gpu::TextureRequirements? texture_requirements_for_state(
     gpu::TextureDesc* desc,
 ) {
     if (!gpu::internal::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
-    if (!texture_desc_supported(state, desc, true)!) {
+    vk::ImageCreateFlags alias_flag =
+        (vk::ImageCreateFlags)vk::ImageCreateFlagBits.ALIAS_BIT;
+    if (!texture_desc_supported(state, desc, alias_flag)!) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
 
@@ -713,7 +761,7 @@ fn gpu::TextureRequirements? texture_requirements_for_state(
     vk::ImageCreateInfo image_info = make_texture_create_info(
         desc,
         families[:family_count],
-        true,
+        alias_flag,
     );
     vk::DeviceImageMemoryRequirements query =
         vk::device_image_memory_requirements().set_create_info(&image_info);
@@ -910,6 +958,39 @@ fn void texture_destroy_view_real(
     vk::destroy_image_view(device, view, null);
 }
 
+fn void texture_destroy_allocator_image_real(
+    void* user_data,
+    vma::Allocator allocator,
+    vk::Image image,
+    vma::Allocation allocation,
+) {
+    (void)user_data;
+    allocator.destroy_image(image, allocation);
+}
+
+fn TextureImageDestroyOps texture_image_destroy_ops_real() {
+    return {
+        .destroy_image           = &texture_destroy_image_real,
+        .destroy_allocator_image = &texture_destroy_allocator_image_real,
+    };
+}
+
+fn void destroy_texture_image(
+    VkDeviceState* state,
+    TextureImageOwnership ownership,
+    vk::Image image,
+    vma::Allocation allocation,
+) {
+    TextureImageDestroyOps ops = texture_image_destroy_ops_real();
+    destroy_texture_image_with_ops(
+        state:      state,
+        ownership:  ownership,
+        image:      image,
+        allocation: allocation,
+        ops:        &ops,
+    );
+}
+
 fn TexturePlacementNativeOps texture_placement_native_ops_real() {
     return {
         .create_aliasing_image = &texture_create_aliasing_image_real,
@@ -1050,7 +1131,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     vk::ImageCreateInfo image_info = make_texture_create_info(
         desc,
         families[:family_count],
-        true,
+        (vk::ImageCreateFlags)vk::ImageCreateFlagBits.ALIAS_BIT,
     );
     uint mip_levels = gpu::internal::texture_mip_levels(desc);
     uint array_layers = gpu::internal::texture_array_layers(desc);
@@ -1182,7 +1263,7 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
     vk::ImageCreateInfo image_info = make_texture_create_info(
         desc,
         families[:family_count],
-        true,
+        (vk::ImageCreateFlags)vk::ImageCreateFlagBits.ALIAS_BIT,
     );
     vma::AllocationCreateInfo native_allocation_desc = {
         .flags            = { .dedicated_memory },
@@ -1387,26 +1468,29 @@ fn void? vk_destroy_texture(
     if (texture_has_live_descriptor_views(slot)) {
         return gpu::RESOURCE_IN_USE~;
     }
-    vk::Image image = slot.image;
     if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
         drain_completed_submitted_commands(state)!;
         if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
             return gpu::RESOURCE_IN_USE~;
         }
     }
+    vk::Image image = slot.image;
     vma::Allocation allocation = slot.allocation;
     vk::ImageView default_view = slot.default_view;
-    bool placed = slot.placed;
+    TextureImageOwnership ownership = texture_image_ownership(slot);
     gpu::GpuAllocation placement = slot.placement;
     destroy_cached_views(state, slot);
     state.textures.free(handle)!;
     if (default_view != null) {
         vk::destroy_image_view(state.device, default_view, null);
     }
-    if (placed) {
-        vk::destroy_image(state.device, image, null);
+    destroy_texture_image(
+        state:      state,
+        ownership:  ownership,
+        image:      image,
+        allocation: allocation,
+    );
+    if (ownership == TextureImageOwnership.PLACED) {
         state.allocations.get(placement)!!.live_placements--;
-    } else {
-        state.allocator.destroy_image(image, allocation);
     }
 }

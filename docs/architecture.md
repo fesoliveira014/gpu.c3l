@@ -484,6 +484,13 @@ one; positive depth selects 3D. Two-dimensional images may have array layers;
 `create_placed_texture` let the application group compatible textures into
 explicit allocations. Requirements are immutable device-owned values.
 
+`create_sparse_texture` instead publishes one unbound raw image on a device
+whose matching sparse dimension was enabled. Its immutable cached requirements
+describe virtual size, one compatible physical-page allocation shape, COLOR,
+and optional METADATA. The handle reuses ordinary views and command validation,
+but descriptor publication is independent of residency. Creation performs no
+memory binding, queue submission, hidden wait, or resident-region tracking.
+
 Placement validates memory class, compatibility, size, alignment, access, and
 overlap before native creation. Texture destruction never releases caller-owned storage.
 The same descriptor lowering drives exact support checks and owned, placed, and

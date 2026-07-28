@@ -90,6 +90,7 @@
         "src/test_vk_texture_transition.c3",
         "src/test_vk_texture.c3",
         "src/test_vk_dedicated_texture.c3",
+        "src/test_vk_sparse_texture.c3",
         "src/test_attachment_view_table.c3",
         "src/test_vk_descriptor_heap.c3",
         "src/test_vk_root_pointer_compute.c3",
@@ -118,6 +119,10 @@
         "src/test_vk_timestamp_commands.c3",
         "src/test_vk_timestamp_queries.c3"
       ]
+    },
+    "vk_sparse_texture": {
+      "type": "test",
+      "sources": [ "src/test_vk_sparse_texture.c3" ]
     },
     "vk_wsi": {
       "type": "test",
