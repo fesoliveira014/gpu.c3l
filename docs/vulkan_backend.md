@@ -444,10 +444,13 @@ public TextureDesc
     -> translate usage to vk::ImageUsageFlags
     -> derive the admitted native queue families
     -> allocator.try_create_image
-    -> create default image view
+    -> create a default image view for sampled, storage, or attachment usage
     -> store TextureSlot, including access roles
     -> return TextureHandle
 ```
+
+Transfer-only textures store a null default view. Copies, barriers, allocation,
+placement, and destruction operate on the image and do not require a view.
 
 Placed creation uses queried image requirements, raw alias-capable VMA memory,
 and `create_aliasing_image2`. Dedicated creation is one transaction:
@@ -456,11 +459,12 @@ and `create_aliasing_image2`. Dedicated creation is one transaction:
 create image
 allocate dedicated VMA memory for that image
 bind memory
-create default view
+create a default view when usage is view-capable
 publish TextureHandle and GpuAllocation under one lock
 ```
 
-Any fault before publication destroys the temporary view, image, and allocation.
+Any fault before publication destroys an existing temporary view, image, and
+allocation.
 
 Textures use the same one-family `EXCLUSIVE` or multi-family `CONCURRENT`
 rule as buffers, based only on `TextureDesc.access`.
