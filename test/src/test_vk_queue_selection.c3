@@ -892,3 +892,126 @@ fn void multi_role_access_stays_exclusive_on_single_family() @test {
         gpu::create_texture(&device, &texture_desc)!!;
     gpu::destroy_texture(&device, texture)!!;
 }
+
+fn vk::QueueFamilyProperties timestamp_family(
+    uint flags,
+    uint valid_bits,
+) {
+    return {
+        .queue_flags          = (vk::QueueFlags)flags,
+        .queue_count          = 1,
+        .timestamp_valid_bits = valid_bits,
+    };
+}
+
+fn void timestamp_caps_preserve_distinct_selected_widths() @test {
+    vk::QueueFamilyProperties[3] families = {
+        timestamp_family(QF_G, 36),
+        timestamp_family(QF_C, 48),
+        timestamp_family(QF_T, 64),
+    };
+    vk::QueueFamilies selection = {
+        .selected = { .graphics, .compute, .transfer },
+        .graphics = 0,
+        .compute  = 1,
+        .transfer = 2,
+    };
+
+    gpu::TimestampCaps caps =
+        vk::resolve_timestamp_caps(&selection, families[..], 1.25f);
+
+    assert(caps.queues.graphics && caps.queues.compute);
+    assert(!caps.queues.transfer);
+    assert(caps.graphics_valid_bits == 36);
+    assert(caps.compute_valid_bits == 48);
+    assert(caps.transfer_valid_bits == 0);
+    assert(caps.period_ns == 1.25f);
+}
+
+fn void timestamp_caps_copy_width_for_aliased_roles() @test {
+    vk::QueueFamilyProperties[1] families = {
+        timestamp_family(QF_G | QF_C | QF_T, 40),
+    };
+    vk::QueueFamilies selection = {
+        .selected = { .graphics, .compute, .transfer },
+        .graphics = 0,
+        .compute  = 0,
+        .transfer = 0,
+    };
+
+    gpu::TimestampCaps caps =
+        vk::resolve_timestamp_caps(&selection, families[..], 2.0f);
+
+    assert(caps.queues.graphics
+        && caps.queues.compute
+        && caps.queues.transfer);
+    assert(caps.graphics_valid_bits == 40);
+    assert(caps.compute_valid_bits == 40);
+    assert(caps.transfer_valid_bits == 40);
+    assert(caps.period_ns == 2.0f);
+}
+
+fn void timestamp_caps_ignore_unselected_roles() @test {
+    vk::QueueFamilyProperties[1] families = {
+        timestamp_family(QF_G | QF_C | QF_T, 32),
+    };
+    vk::QueueFamilies selection = {
+        .selected = { .graphics },
+        .graphics = 0,
+        .compute  = 0,
+        .transfer = 0,
+    };
+
+    gpu::TimestampCaps caps =
+        vk::resolve_timestamp_caps(&selection, families[..], 3.0f);
+
+    assert(caps.queues.graphics);
+    assert(!caps.queues.compute && !caps.queues.transfer);
+    assert(caps.graphics_valid_bits == 32);
+    assert(caps.compute_valid_bits == 0);
+    assert(caps.transfer_valid_bits == 0);
+    assert(caps.period_ns == 3.0f);
+}
+
+fn void timestamp_caps_require_nonzero_valid_bits() @test {
+    vk::QueueFamilyProperties[2] families = {
+        timestamp_family(QF_G, 0),
+        timestamp_family(QF_C, 52),
+    };
+    vk::QueueFamilies selection = {
+        .selected = { .graphics, .compute },
+        .graphics = 0,
+        .compute  = 1,
+    };
+
+    gpu::TimestampCaps caps =
+        vk::resolve_timestamp_caps(&selection, families[..], 0.5f);
+
+    assert(!caps.queues.graphics && caps.queues.compute);
+    assert(caps.graphics_valid_bits == 0);
+    assert(caps.compute_valid_bits == 52);
+    assert(caps.period_ns == 0.5f);
+}
+
+fn void timestamp_caps_clear_period_without_supported_roles() @test {
+    vk::QueueFamilyProperties[3] families = {
+        timestamp_family(QF_G, 0),
+        timestamp_family(QF_C, 0),
+        timestamp_family(QF_T, 64),
+    };
+    vk::QueueFamilies selection = {
+        .selected = { .graphics, .compute, .transfer },
+        .graphics = 0,
+        .compute  = 1,
+        .transfer = 2,
+    };
+
+    gpu::TimestampCaps caps =
+        vk::resolve_timestamp_caps(&selection, families[..], 4.0f);
+
+    assert((uint)caps.queues == 0);
+    assert(caps.graphics_valid_bits == 0);
+    assert(caps.compute_valid_bits == 0);
+    assert(caps.transfer_valid_bits == 0);
+    assert(caps.period_ns == 0.0f);
+}
