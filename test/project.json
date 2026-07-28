@@ -13,7 +13,8 @@
   // crashes in VMA's std::mutex when the runtimes drift apart.
   "wincrt": "dynamic",
   "sources": [
-    "../gpu/gpu.c3i", "../gpu/gpu.c3", "../gpu/surface/**",
+    "../gpu/gpu.c3i", "../gpu/gpu.c3", "../gpu/utils/**",
+    "../gpu/surface/**",
     "../gpu/internal/**",
     "src/test_lifetime_helpers.c3", "src/bench_lifetime.c3"
   ],
@@ -79,6 +80,7 @@
         "src/test_vk_command_allocator.c3",
         "src/test_vk_vma_allocator.c3",
         "src/test_vk_buffer.c3",
+        "src/test_vk_mapped_gpu_span.c3",
         "src/test_vk_buffer_table.c3",
         "src/test_vk_span_resolver.c3",
         "src/test_vk_allocation.c3",
