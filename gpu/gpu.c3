@@ -16,8 +16,6 @@ fn bool Device.is_valid(self)          => (ulong)self != 0;
    @return "True for a structurally valid token; this does not prove live provenance." *>
 fn bool GpuAllocation.is_valid(self) => self.owner != 0 && self.generation != 0;
 <* Compare complete allocation identities.
-
-   @param other : "The allocation token to compare."
    @return "True when owner, index, and generation are equal." *>
 fn bool GpuAllocation.equals(self, GpuAllocation other) @operator(==) {
     return self.owner == other.owner
@@ -29,8 +27,6 @@ fn bool GpuAllocation.equals(self, GpuAllocation other) @operator(==) {
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool TextureHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 <* Compare complete texture identities.
-
-   @param other : "The texture handle to compare."
    @return "True when owner, index, and generation are equal." *>
 fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
     return self.owner == other.owner
@@ -42,8 +38,6 @@ fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool AttachmentViewHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 <* Compare complete attachment-view identities.
-
-   @param other : "The attachment-view handle to compare."
    @return "True when owner, index, and generation are equal." *>
 fn bool AttachmentViewHandle.equals(self, AttachmentViewHandle other) @operator(==) {
     return self.owner == other.owner
@@ -57,8 +51,6 @@ fn bool TextureView.is_valid(self) {
     return self.owner != 0 && self.index.is_valid() && self.generation != 0;
 }
 <* Compare complete texture-view identities.
-
-   @param other : "The texture view to compare."
    @return "True when owner, index, and generation are equal." *>
 fn bool TextureView.equals(self, TextureView other) @operator(==) {
     return self.owner == other.owner
@@ -70,8 +62,6 @@ fn bool TextureView.equals(self, TextureView other) @operator(==) {
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool PipelineHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 <* Compare complete pipeline identities.
-
-   @param other : "The pipeline handle to compare."
    @return "True when owner, index, and generation are equal." *>
 fn bool PipelineHandle.equals(self, PipelineHandle other) @operator(==) {
     return self.owner == other.owner
@@ -83,8 +73,6 @@ fn bool PipelineHandle.equals(self, PipelineHandle other) @operator(==) {
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool SwapchainHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 <* Compare complete swapchain identities.
-
-   @param other : "The swapchain handle to compare."
    @return "True when owner, index, and generation are equal." *>
 fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
     return self.owner == other.owner
@@ -97,8 +85,6 @@ fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
 fn bool CommandAllocatorHandle.is_valid(self) =>
     self.owner != 0 && self.generation != 0;
 <* Compare complete command-allocator identities.
-
-   @param other : "The command-allocator handle to compare."
    @return "True when owner, index, and generation are equal." *>
 fn bool CommandAllocatorHandle.equals(
     self,
@@ -114,8 +100,6 @@ fn bool CommandAllocatorHandle.equals(
 fn bool TimestampPoolHandle.is_valid(self) =>
     self.owner != 0 && self.generation != 0;
 <* Compare complete timestamp-pool identities.
-
-   @param other : "The timestamp-pool handle to compare."
    @return "True when owner, index, and generation are equal." *>
 fn bool TimestampPoolHandle.equals(
     self,
@@ -157,10 +141,10 @@ fn bool SamplerIndex.is_valid(self) => (uint)self != 0;
    @return "True for a nonzero token; this does not prove live provenance." *>
 fn bool Runtime.is_valid(self) => (ulong)self != 0;
 
-<* Convert same-queue timestamp values with role-specific modular wrap.
+<* Convert same-native-queue timestamp values with role-specific modular wrap.
 
    @param caps : "Borrowed timestamp capabilities for the owning device."
-   @param queue : "Semantic queue role that produced both timestamp values."
+   @param queue : "Semantic role for the native queue that produced both values."
    @param begin : "Earlier raw timestamp value."
    @param end : "Later raw timestamp value."
    @return "Elapsed nanoseconds, or a recoverable fault for invalid capabilities or an unsupported role." *>
@@ -521,7 +505,7 @@ fn void? destroy_device(Device* device) {
    Values are advisory under concurrent mutation.
 
    @param device : "Live device to query."
-   @return "A memory statistics snapshot, or a recoverable device fault." *>
+   @return "A memory statistics snapshot, or a recoverable invalid-handle, busy, or device-loss fault." *>
 fn MemoryStats? get_memory_stats(Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -534,7 +518,7 @@ fn MemoryStats? get_memory_stats(Device* device) {
 
    @param device : "Live device to query."
    @param detailed : "Whether to include detailed allocation information."
-   @return "An owned report string, or a recoverable allocation or device fault." *>
+   @return "An owned report string, or a recoverable invalid-handle, allocation, busy, device-loss, or backend fault." *>
 fn String? build_memory_report(Device* device, bool detailed) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -586,7 +570,6 @@ fn void? destroy_timestamp_pool(
 }
 
 <* Reset a nonempty pool range outside a render pass.
-   The command token and all aliases are confined to one thread while recording.
 
    @param commands : "Live recording token."
    @param pool : "Pool whose slots will be reset."
@@ -605,7 +588,6 @@ fn void? cmd_reset_timestamps(
 }
 
 <* Write one timestamp at exactly one executable pipeline stage.
-   The command token and all aliases are confined to one thread while recording.
 
    @param commands : "Live recording token."
    @param pool : "Pool that receives the timestamp."
@@ -625,8 +607,7 @@ fn void? cmd_write_timestamp(
 
 <* Resolve packed `ulong` values with a device-side wait into aligned caller
    storage. Every slot must have been reset and written; an unwritten slot can
-   stall the queue indefinitely. This call never waits on the host. The command
-   token and all aliases are confined to one thread while recording.
+   stall the queue indefinitely. This call never waits on the host.
 
    @param commands : "Live recording token."
    @param pool : "Pool containing the timestamp values."
@@ -656,7 +637,7 @@ fn void? cmd_resolve_timestamps(
    @param first : "First slot to read."
    @param count : "Number of slots to read."
    @param out : "Caller-owned output slice with at least count elements."
-   @return "Success, or a recoverable ownership, range, busy, invalid-handle, or device fault." *>
+   @return "Success, or a recoverable invalid-argument, ownership, range, busy, invalid-handle, or device fault." *>
 fn void? read_timestamps(
     Device* device,
     TimestampPoolHandle pool,
@@ -687,7 +668,6 @@ fn void? read_timestamps(
 <* Open a debug-utils label region; a no-op without debug utils.
    Preconditions: calls are balanced while recording.
    Always checked: token identity, authoritative phase, and non-null label.
-   The command token and all aliases are confined to one thread while recording.
 
    @param commands : "Live recording token."
    @param label : "Borrowed non-null label text used only for the call."
@@ -702,7 +682,6 @@ fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = 
 <* Close a debug-utils label region.
    Preconditions: a matching label region is open.
    Always checked: token identity and authoritative recording phase.
-   The command token and all aliases are confined to one thread while recording.
 
    @param commands : "Live recording token."
    @return "Success, or a recoverable command-state fault." *>
@@ -717,7 +696,7 @@ fn void? cmd_end_label(CommandList* commands) {
 
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed size, memory-class, access, alignment, and debug-name description."
-   @return "An owning allocation token, or a recoverable validation, capacity, allocation, or device fault." *>
+   @return "An owning allocation token, or a recoverable invalid-argument, invalid-handle, unsupported-feature, capacity, allocation, busy, device-loss, or backend fault." *>
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -780,7 +759,7 @@ fn AllocationInfo? get_allocation_info(
 
    @param device : "Live device that owns the allocation."
    @param allocation : "Allocation whose complete range is borrowed."
-   @return "A non-owning span, or a recoverable ownership, invalid-handle, or device fault." *>
+   @return "A non-owning span, or a recoverable invalid-argument, ownership, invalid-handle, busy, or device-loss fault." *>
 fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1268,7 +1247,7 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
    with pipeline creation.
 
    @param device : "Live device whose cache is queried."
-   @return "The current cache byte size, or a recoverable device or backend fault." *>
+   @return "The current cache byte size, or a recoverable invalid-handle, busy, device-loss, or backend fault." *>
 fn usz? get_pipeline_cache_size(Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1283,7 +1262,7 @@ fn usz? get_pipeline_cache_size(Device* device) {
 
    @param device : "Live device whose cache is exported."
    @param out : "Caller-owned output storage sized from a fresh cache-size query."
-   @return "Bytes written, or a recoverable invalid-argument, device, or backend fault." *>
+   @return "Bytes written, or a recoverable invalid-argument, invalid-handle, busy, device-loss, or backend fault." *>
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1543,8 +1522,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
 <* Record a buffer-to-buffer copy; surrounding barriers are caller-owned.
    Preconditions: usage and queue access are valid.
    Always checked: token phase, required pointer, identity, bounds, and safe lowering.
-   FULL diagnostics: usage and queue-access misuse. The command token and all
-   aliases are confined to one thread while recording.
+   FULL diagnostics: usage and queue-access misuse.
 
    @param commands : "Live recording token."
    @param desc : "Borrowed exact source and destination ranges."
@@ -1558,8 +1536,7 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
 <* Record a 32-bit-pattern fill over dst.
    Preconditions: usage, queue access, and surrounding barriers are valid.
    Always checked: token phase, identity, bounds, alignment, and safe lowering.
-   FULL diagnostics: usage and queue-access misuse. The command token and all
-   aliases are confined to one thread while recording.
+   FULL diagnostics: usage and queue-access misuse.
 
    @param commands : "Live recording token."
    @param dst : "Destination GPU span."
@@ -1574,8 +1551,7 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
    subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
-   FULL diagnostics: usage and queue-access misuse. The command token and all
-   aliases are confined to one thread while recording.
+   FULL diagnostics: usage and queue-access misuse.
 
    @param commands : "Live recording token."
    @param desc : "Borrowed source-span and destination-texture region."
@@ -1590,8 +1566,7 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
    subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
-   FULL diagnostics: usage and queue-access misuse. The command token and all
-   aliases are confined to one thread while recording.
+   FULL diagnostics: usage and queue-access misuse.
 
    @param commands : "Live recording token."
    @param desc : "Borrowed source-texture and destination-span region."
@@ -1605,8 +1580,7 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
 <* Record a global semantic execution and memory barrier.
    Preconditions: stages are known, consistent, and queue-supported.
    Always checked: token identity, authoritative phase, and required pointer.
-   FULL diagnostics: stage and queue-support misuse. The command token and all
-   aliases are confined to one thread while recording.
+   FULL diagnostics: stage and queue-support misuse.
 
    @param commands : "Live recording token."
    @param barrier : "Borrowed source and destination execution scopes."
@@ -1620,8 +1594,7 @@ fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
 <* Record an explicit semantic texture transition.
    Preconditions: the texture, range, states, usage, and queue access are valid.
    Always checked: token phase, required pointer, texture identity, range, and safe lowering.
-   FULL diagnostics: state, usage, queue, format, and presentation misuse. The
-   command token and all aliases are confined to one thread while recording.
+   FULL diagnostics: state, usage, queue, format, and presentation misuse.
 
    @param commands : "Live recording token."
    @param barrier : "Borrowed texture, subresource range, and semantic states."
@@ -1637,8 +1610,7 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
    Always checked: token phase, pipeline identity, ownership, descriptor-heap
    binding prerequisites, and a safe native snapshot.
    FULL diagnostics: render-pass compatibility when binding during a pass;
-   failure preserves the prior logical bind. The command token and all aliases
-   are confined to one thread while recording.
+   failure preserves the prior logical bind.
 
    @param commands : "Live recording token."
    @param pipeline : "Compute or graphics pipeline to bind."
@@ -1654,8 +1626,7 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    dereferencing zero unless relying on defined robustness.
    Always checked: token identity, authoritative recording phase, and a
    usable bound-pipeline snapshot.
-   FULL diagnostics: active-kind and group-limit misuse. The command token and
-   all aliases are confined to one thread while recording.
+   FULL diagnostics: active-kind and group-limit misuse.
 
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
@@ -1669,8 +1640,7 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
 <* Set one dynamic viewport before or during a pass.
    Preconditions: values are finite, representable, within device bounds, and height is nonzero.
    Always checked: token phase and required pointer.
-   FULL diagnostics: queue and viewport-value misuse. The command token and all
-   aliases are confined to one thread while recording.
+   FULL diagnostics: queue and viewport-value misuse.
 
    @param commands : "Live recording token."
    @param viewport : "Borrowed complete viewport state copied into the command stream."
@@ -1684,8 +1654,7 @@ fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
 <* Set one dynamic scissor before or during a pass; overscan is valid.
    Preconditions: origin and extent are nonnegative and signed-representable.
    Always checked: token phase and required pointer.
-   FULL diagnostics: queue and scissor-value misuse. The command token and all
-   aliases are confined to one thread while recording.
+   FULL diagnostics: queue and scissor-value misuse.
 
    @param commands : "Live recording token."
    @param scissor : "Borrowed complete scissor state copied into the command stream."
@@ -1701,8 +1670,7 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    and queue-admitted root data; shaders make zero dereference safe.
    Always checked: token identity, authoritative render-pass phase, and a
    usable bound-pipeline snapshot.
-   FULL diagnostics: pipeline-kind and state misuse. The command token and all
-   aliases are confined to one thread while recording.
+   FULL diagnostics: pipeline-kind and state misuse.
 
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
@@ -1727,7 +1695,6 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    Always checked: token phase, identities, index bounds, a usable bound-pipeline
    snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, and index-type misuse.
-   The command token and all aliases are confined to one thread while recording.
 
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
@@ -1755,8 +1722,7 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    root data admits the queue and shaders make zero dereference safe.
    Always checked: token phase, identities, bounds, overflow, a usable
    bound-pipeline snapshot, and safe lowering.
-   FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse. The
-   command token and all aliases are confined to one thread while recording.
+   FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse.
 
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
@@ -1780,8 +1746,7 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    valid; shader zero paths and GPU-written index bounds are caller-owned.
    Always checked: token phase, identities, host-visible bounds, overflow, a
    usable bound-pipeline snapshot, and safe lowering.
-   FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type
-   misuse. The command token and all aliases are confined to one thread while recording.
+   FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
 
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
@@ -1811,7 +1776,6 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    usable bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
    Runtime failures: unsupported count execution faults UNSUPPORTED_FEATURE.
-   The command token and all aliases are confined to one thread while recording.
 
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
@@ -1841,8 +1805,7 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    group counts are valid; shaders make zero dereference safe.
    Always checked: token phase, identities, bounds, a usable bound-pipeline
    snapshot, and safe lowering.
-   FULL diagnostics: pipeline kind, usage, queue, and span misuse. The command
-   token and all aliases are confined to one thread while recording.
+   FULL diagnostics: pipeline kind, usage, queue, and span misuse.
 
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
@@ -1861,8 +1824,7 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
-   reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. The command token and
-   all aliases are confined to one thread while recording.
+   reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
 
    @param commands : "Live recording token inside a render pass."
    @param records : "Non-owning GPU-written generated-draw record range."
@@ -1887,8 +1849,7 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
-   reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. The command token and
-   all aliases are confined to one thread while recording.
+   reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
 
    @param commands : "Live recording token inside a render pass."
    @param records : "Non-owning GPU-written indexed generated-draw record range."
@@ -1917,8 +1878,7 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
    bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, usage, queue, and count misuse.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
-   reserved scratch faults GENERATED_SCRATCH_EXHAUSTED. The command token and
-   all aliases are confined to one thread while recording.
+   reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
 
    @param commands : "Live recording token."
    @param records : "Non-owning GPU-written generated-dispatch record range."
@@ -2015,7 +1975,6 @@ fn GraphicsState? render_geometry_state(uint width, uint height) {
    Preconditions: attachments, layouts, queue access, dimensions, and pass phase are valid.
    Always checked: token phase, host-safe descriptor shape, identities, and safe lowering.
    FULL diagnostics: attachment, usage, queue, compatibility, and render-area misuse.
-   The command token and all aliases are confined to one thread while recording.
 
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed attachment and render-area description copied into the command stream."
@@ -2031,7 +1990,6 @@ fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
    graphics-capable, and all state values are valid.
    Always checked: token phase, required host-safe input, and safe lowering.
    FULL diagnostics: pipeline, queue, enum, feature, and state-value misuse.
-   The command token and all aliases are confined to one thread while recording.
 
    @param commands : "Live recording token."
    @param state : "Borrowed complete graphics state copied into the command stream."
@@ -2047,8 +2005,7 @@ fn void? cmd_set_graphics_state(
 
 <* End the active render pass without adding synchronization.
    Preconditions: a render pass is active.
-   Always checked: token identity and authoritative render-pass phase. The
-   command token and all aliases are confined to one thread while recording.
+   Always checked: token identity and authoritative render-pass phase.
 
    @param commands : "Live recording token inside a render pass."
    @return "Success, or a recoverable command-state fault." *>
@@ -2063,8 +2020,6 @@ fn void? cmd_end_render_pass(CommandList* commands) {
 fn bool CompletionPoint.is_valid(self) => self.device.is_valid()
     && gpu::internal::completion_point_sequence(self) != 0;
 <* Compare complete completion-point identities.
-
-   @param other : "The completion point to compare."
    @return "True when device and packed queue sequence are equal." *>
 fn bool CompletionPoint.equals(self, CompletionPoint other) @operator(==) {
     return self.device == other.device && self.payload == other.payload;
@@ -2194,8 +2149,6 @@ fn void? wait_completion(
    @return "True for a structurally valid queue; this does not prove live provenance." *>
 fn bool Queue.is_valid(self) => self.device.is_valid();
 <* Compare complete selected-queue identities.
-
-   @param other : "The queue token to compare."
    @return "True when device, identity, and roles are equal." *>
 fn bool Queue.equals(self, Queue other) @operator(==) {
     return self.device == other.device
@@ -2247,7 +2200,7 @@ fn QueueInfo? get_queue_info(Device* device, Queue queue) {
    externally synchronizes the queue.
 
    @param queue : "Exact selected queue that executes the submission."
-   @param desc : "Borrowed waits and mutable executable-token batch; consumed members are cleared on success."
+   @param desc : "Borrowed waits and mutable executable-token batch; success clears command tokens and invalidates valid readiness."
    @return "A reusable completion point, or a recoverable validation, ownership, capacity, busy, device-loss, or backend fault." *>
 fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     Device device = queue.device;
@@ -2297,8 +2250,6 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
 fn bool SwapchainReadiness.is_valid(self) => self.device.is_valid()
     && self.payload != 0;
 <* Compare complete swapchain-readiness identities.
-
-   @param other : "The readiness value to compare."
    @return "True when device and one-shot payload are equal." *>
 fn bool SwapchainReadiness.equals(
     self,
@@ -2422,10 +2373,11 @@ fn AcquiredImage? acquire_next_image(
 <* Present an acquired image after its readiness-consuming submit.
    Preconditions: externally synchronize the image and pass that submit's point.
    Always checked: image/point identity, ownership, publication, and lifecycle.
-   Runtime failures: WAIT_TIMEOUT preserves the image; success consumes it.
+   Runtime failures: host/device out-of-memory and pre-submit WAIT_TIMEOUT
+   preserve the image. Success and every other submitted result consume it.
 
    @param device : "Live device that owns the acquired image."
-   @param image : "Externally synchronized acquired image; success replaces it with the zero value."
+   @param image : "Externally synchronized acquired image; consumed results replace it with the zero value."
    @param render_completion : "Completion point returned by the readiness-consuming render submission."
    @return "Success, or a recoverable timeout, ownership, lifecycle, surface, device-loss, or backend fault." *>
 fn void? present(

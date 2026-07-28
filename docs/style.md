@@ -169,8 +169,8 @@ Do not use Allman braces.
 
 ## 10. Comments and docstrings
 
-Every public callable in `gpu`, its platform surface modules, and `gpu::utils`
-uses a native C3 docstring. Order the content as:
+Every public callable in `gpu`, its platform surface modules, and any other
+shipped public module uses a native C3 docstring. Order the content as:
 
 ```text
 concise summary and recoverable-fault behavior
@@ -187,13 +187,16 @@ borrowing and lifetime, token consumption, blocking, and thread confinement
 when they affect correct use. Public descriptions stay backend-neutral; a
 platform surface may name its public native handle types.
 
+Avoid inline comments that restate the code. Comments should explain why, not
+what.
+
 C3 doc contracts are executable. Do not turn recoverable conditions such as
 invalid handles, unsupported capabilities, resource use, capacity exhaustion,
 timeouts, or device loss into `@require`. Describe those faults in prose and
 the `@return` text. Use `@require` only when the condition is a stable local
 programming contract and enforcing it preserves the intended API behavior.
-Future `gpu::utils` views must explicitly state that they are non-owning and
-inherit the lifetime of their public resources.
+Non-owning public utility views must explicitly state that they inherit the
+lifetime of their public resources.
 
 Example:
 
@@ -207,9 +210,8 @@ Example:
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc);
 ```
 
-Keep docstrings short and precise. Do not add a source parser, docstring linter,
-documentation manifest, generated-doc drift checker, or tests that count tags.
-Ordinary compilation and `c3c docgen` are the validation path.
+Keep docstrings short and precise. Ordinary compilation and `c3c docgen` are
+the validation path.
 
 API preconditions, side effects, and ownership rules belong in doc comments. If a field needs a comment to be understood, consider renaming it or restructuring the type.
 
