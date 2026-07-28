@@ -65,6 +65,8 @@ struct ShaderModuleCreateOps @private {
     bool allow_alternate_root_abi @if(env::TESTING);
 }
 
+<* Borrow the bytes of a live shader store entry.
+   @require entry != null && entry.used && entry.spirv_words.ptr != null : "Entry must own live word storage." *>
 fn char[] shader_entry_bytes(ShaderStoreEntry* entry) @private {
     return ((char*)entry.spirv_words.ptr)[:entry.spirv_byte_size];
 }
@@ -108,6 +110,7 @@ fn bool shader_store_entry_equals(
     return mem::equals(entry_spirv, input.spirv);
 }
 
+<* @require input == null || input.spirv.len % uint::size == 0 : "SPIR-V byte length must be word-aligned." *>
 fn ShaderId? retain_shader_identity_locked(
     VkDeviceState* state,
     ShaderIdentityInput* input,
@@ -801,7 +804,16 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
         )~;
     }
 
-    if (code.spirv_words == null) return gpu::INVALID_ARGUMENT~;
+    if (code.spirv_words == null) {
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   gpu::SHADER_INVALID,
+            debug_name:     code.debug_name,
+            rejected_field: rejected_field,
+            invariant:      "SPIR-V storage must be retained and word-aligned",
+        )~;
+    }
     vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
         .set_code_size(code.spirv.len)
         .set_code(code.spirv_words);

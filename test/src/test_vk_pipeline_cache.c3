@@ -148,7 +148,6 @@ fn vk::Result capture_shader_module_code(
     capture.matched = create_info != null
         && create_info.p_code == capture.expected_words
         && (usz)create_info.code_size == capture.expected_byte_size
-        && mem::ptr_is_aligned(create_info.p_code, uint::alignment)
         && mem::equals(
             ((char*)create_info.p_code)[:(usz)create_info.code_size],
             capture.expected_bytes,
@@ -613,6 +612,8 @@ fn void caller_shader_storage_is_call_scoped_and_deduplicates() @test {
         "the cache entry owns one live shader identity");
     assert((char*)owned.spirv_words.ptr != first_caller_ptr
             && owned.spirv_byte_size == source.len
+            && owned.spirv_words.len * uint::size
+                == owned.spirv_byte_size
             && mem::ptr_is_aligned(
                 owned.spirv_words.ptr,
                 uint::alignment,
@@ -710,7 +711,7 @@ fn void native_shader_module_borrows_aligned_store_words() @test {
     ShaderModuleCodeCapture capture = {
         .expected_words     = entry.spirv_words.ptr,
         .expected_byte_size = entry.spirv_byte_size,
-        .expected_bytes     = vk::shader_entry_bytes(entry),
+        .expected_bytes     = CACHE_COMP_SPIRV[..],
     };
     vk::ShaderModuleCreateOps create_ops = {
         .user_data = &capture,

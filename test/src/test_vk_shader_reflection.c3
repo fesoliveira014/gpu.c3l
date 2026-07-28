@@ -703,6 +703,48 @@ fn void shader_contract_rejections_report_exact_context() @test {
     );
 }
 
+fn void missing_aligned_shader_storage_reports_exact_context() @test {
+    ShaderDiagnosticCapture capture;
+    gpu::Device device = make_diagnostic_reflection_test_device(&capture);
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc desc = {
+        .spirv       = REFLECT_HEAP_SPIRV[..],
+        .entry_point = "main",
+        .debug_name  = "missing_aligned_storage",
+    };
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::ShaderIdentityInput input;
+    vk::normalize_shader_input(
+        state:          state,
+        desc:           &desc,
+        role:           gpu::internal::ShaderRole.COMPUTE,
+        operation:      "test_missing_aligned_storage",
+        rejected_field: "ComputePipelineDesc.shader",
+        out_input:      &input,
+    )!!;
+
+    uint before = capture.calls;
+    fault storage_fault = @catch(vk::create_pipeline_shader_module(
+        state:          state,
+        code:           &input,
+        operation:      "test_missing_aligned_storage",
+        rejected_field: "ComputePipelineDesc.shader",
+    ));
+
+    assert(storage_fault == gpu::SHADER_INVALID,
+        "missing aligned storage faults SHADER_INVALID");
+    assert_shader_rejection(
+        capture:       &capture,
+        before:        before,
+        returned:      storage_fault,
+        operation:     "test_missing_aligned_storage",
+        field:         "ComputePipelineDesc.shader",
+        invariant:     "SPIR-V storage must be retained and word-aligned",
+        resource_kind: gpu::DebugResourceKind.SHADER,
+    );
+}
+
 fn void root_mismatch_diagnostics_identify_properties() @test {
     ShaderDiagnosticCapture capture;
     gpu::Device device = make_diagnostic_reflection_test_device(&capture);
