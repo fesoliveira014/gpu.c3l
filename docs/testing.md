@@ -126,9 +126,11 @@ c3c test vk_optional_generated_work --path test --test-show-output
   cached queries, and capability-gated real image lifecycle.
 - `vk_sparse_bind` covers tile/tail geometry, exact-invalid unbind, allocation
   compatibility and physical overlap, call-scoped allocation failure rollback,
-  same/cross-queue timelines, native result mapping, sparse-only retirement,
-  resource/queue lock boundaries, and capability-gated bind/use/unbind on real
-  2D and 3D sparse images.
+  ordinary/sparse timeline chaining, native result mapping, sparse-texture
+  retention, sparse-only retirement, portable cross-thread lock boundaries,
+  and capability-gated bind/use/unbind. The real 2D path uploads and reads back
+  known bytes; the 3D path covers binding lifecycle where the stacked public
+  copy surface remains 2D-only.
 - `vk_core` covers device selection and creation, allocations, spans,
   textures/views/samplers, reflection and root ABI, pipelines/cache, command
   recording and lifecycle, graphics/compute/transfer output, depth,

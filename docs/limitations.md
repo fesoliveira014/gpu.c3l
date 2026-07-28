@@ -130,7 +130,8 @@ page doesn't explain it, that's a bug in this page — file an issue.
   depth/stencil, multiplanar images, aliasing residency, eviction, or automatic
   streaming. The backend adds no hidden allocation, residency map, or backing
   lifetime tracking. Callers keep bound bytes live and exclusive until an
-  ordered unbind/replacement and all prior users complete.
+  ordered unbind/replacement and all prior users complete. The image itself is
+  retained through each bind completion.
   Descriptor publication is independent of residency. Because FULL validation
   cannot prove regional residency without a map, it rejects sparse texture
   transfer copies while barriers remain legal; TRUSTED lowering is unchanged.

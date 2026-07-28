@@ -534,9 +534,9 @@ caller page allocations are untouched. Descriptor publication does not imply
 residency, and this creation path submits no queue work or hidden wait.
 
 Sparse binding lowers through the same private module. It preflights texture
-identity, tile/tail geometry, logical overlap, allocation compatibility,
-physical overlap, and wait publication before allocating exact call-scoped
-wait/bind/resolution arrays from `host_allocator`. It then reacquires
+identity, tile/tail geometry, allocation compatibility, and wait publication
+before allocating exact wait/bind/interval arrays plus one retained-texture
+record from `host_allocator`. It then reacquires
 `resource_mutex` and re-resolves every public allocation to
 `(VkDeviceMemory, absolute range)`. This detects overlap across distinct tokens
 sharing native memory and against known placed-texture intervals. The lock
@@ -545,13 +545,17 @@ allocation free cannot invalidate the inputs.
 
 Under the resource lock, the target queue's `submission_mutex` revalidates
 published waits and the sparse-capable role, establishes timeline headroom,
-and reserves one candidate sequence. One `VkBindSparseInfo` chains one
+adds a target-timeline wait when prior queue work exists, and reserves one
+candidate sequence. One `VkBindSparseInfo` chains one
 `VkTimelineSemaphoreSubmitInfo`, conditionally names one image-bind info and
 one opaque-image-bind info, carries every stage-free wait semaphore/value, and
 signals the target timeline once. Native failure cancels the candidate before
-common result mapping. Success release-publishes the point directly and adds no
-submitted-command record or residency history. Completion drains still query a
-queue whose published sparse-only prefix is ahead of its retired prefix.
+common result mapping and releases the candidate texture retain. Success moves
+that retain to queue retirement, release-publishes the point directly, and adds
+no submitted-command record or residency history. The next ordinary submit
+adds an all-commands wait on the latest sparse signal before it may signal the
+shared timeline. Completion drains still query a queue whose published
+sparse-only prefix is ahead of its retired prefix.
 
 Texture transitions map caller-declared compositional states and a normalized
 subresource range directly to one native image barrier. The backend does not
@@ -1076,8 +1080,8 @@ generated work is enabled, the same semantic also includes
 because implicit preprocessing reads generated records before indirect execution.
 Every explicit wait is emitted, including one owned by the target queue.
 Queue order still makes an omitted ordinary same-queue wait unnecessary, but
-preserving an explicit wait permits ordinary and sparse operations to compose
-without provenance tags or bridge submissions.
+the backend adds timeline waits across ordinary/sparse boundaries because
+Vulkan provides no implicit ordering between those operation kinds.
 The queue mutex covers sequence reservation and `vkQueueSubmit2`, satisfying
 Vulkan external synchronization. Near the timeline-value-difference limit, the
 backend queries completed progress and returns `DEVICE_BUSY` before reservation

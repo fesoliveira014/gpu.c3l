@@ -202,15 +202,21 @@ fn void pin_memory_and_resources() {
         gpu::SparseTextureAspect.COLOR;
     gpu::SparseTextureTileBind[1] sparse_tiles = {
         {
-            .aspect     = gpu::SparseTextureAspect.COLOR,
-            .mip_level = 0,
-            .extent    = { 1, 1, 1 },
+            .aspect            = gpu::SparseTextureAspect.COLOR,
+            .mip_level         = 0,
+            .offset            = { 1, 1, 1 },
+            .extent            = { 1, 1, 1 },
+            .allocation        = allocation,
+            .allocation_offset = 1,
         },
     };
     gpu::SparseTextureOpaqueBind[1] sparse_opaque = {
         {
-            .aspect = gpu::SparseTextureAspect.COLOR,
-            .size   = 1,
+            .aspect            = gpu::SparseTextureAspect.COLOR,
+            .resource_offset   = 1,
+            .size              = 1,
+            .allocation        = allocation,
+            .allocation_offset = 1,
         },
     };
     gpu::CompletionPoint[1] sparse_waits;

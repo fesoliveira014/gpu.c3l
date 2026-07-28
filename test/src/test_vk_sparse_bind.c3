@@ -48,10 +48,25 @@ struct SparseBindWorkerArgs {
     gpu::CompletionPoint        point;
 }
 
+struct MutexProbeArgs {
+    Mutex*        mutex;
+    Atomic{bool}* attempted;
+    Atomic{bool}* acquired;
+}
+
+struct SparseSubmitCapture {
+    uint                    calls;
+    uint                    wait_count;
+    vk::SemaphoreSubmitInfo wait;
+}
+
 SparseBindCapture sparse_bind_capture;
+SparseSubmitCapture sparse_submit_capture;
 vk::Result sparse_bind_result;
+vk::Result sparse_submit_result;
 Atomic{bool} sparse_bind_native_entered;
 Atomic{bool} sparse_bind_native_release;
+ulong sparse_completed_value;
 
 fn void*? SparseFailOnNAllocator.acquire(
     &self,
@@ -157,6 +172,36 @@ fn vk::Result sparse_counter_value(
     return vk::Result.SUCCESS;
 }
 
+fn vk::Result completed_sparse_counter_value(
+    vk::Device device,
+    vk::Semaphore semaphore,
+    ulong* value,
+) {
+    (void)device;
+    (void)semaphore;
+    *value = sparse_completed_value;
+    return vk::Result.SUCCESS;
+}
+
+fn vk::Result capture_sparse_followup_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)fence;
+    assert(submit_count == 1);
+    sparse_submit_capture.calls++;
+    sparse_submit_capture.wait_count =
+        submits[0].wait_semaphore_info_count;
+    if (sparse_submit_capture.wait_count > 0) {
+        sparse_submit_capture.wait =
+            submits[0].p_wait_semaphore_infos[0];
+    }
+    return sparse_submit_result;
+}
+
 fn vk::SparseBindNativeOps sparse_bind_ops() {
     return {
         .queue_bind_sparse            = &capture_sparse_bind,
@@ -179,6 +224,15 @@ fn int sparse_bind_worker(void* raw_args) {
         );
     if (catch point) return 1;
     args.point = point;
+    return 0;
+}
+
+fn int mutex_probe_worker(void* raw_args) {
+    MutexProbeArgs* args = (MutexProbeArgs*)raw_args;
+    args.attempted.store(true, AtomicOrdering.RELEASE);
+    args.mutex.lock()!!;
+    args.acquired.store(true, AtomicOrdering.RELEASE);
+    args.mutex.unlock();
     return 0;
 }
 
@@ -310,7 +364,12 @@ fn void init_sparse_bind_fixture(SparseBindFixture* fixture) {
 }
 
 fn void destroy_sparse_bind_fixture(SparseBindFixture* fixture) {
+    vk::destroy_submitted_commands(&fixture.state);
     foreach (&completion : fixture.completions) {
+        if (completion.submit_scratch != null) {
+            mem::free(completion.submit_scratch);
+            completion.submit_scratch = null;
+        }
         completion.retirement_mutex.destroy();
         completion.submission_mutex.destroy();
     }
@@ -642,11 +701,13 @@ fn void sparse_bind_lowers_one_transaction_and_publishes_completion() @test {
         1,
         AtomicOrdering.RELAXED,
     );
+    fixture.texture_cells[0].value.width = 512;
+    fixture.texture_cells[0].value.height = 256;
     gpu::SparseTextureTileBind[1] tiles = {{
         .aspect     = gpu::SparseTextureAspect.COLOR,
-        .mip_level  = 0,
-        .offset     = { 0, 0, 0 },
-        .extent     = { 64, 64, 1 },
+        .mip_level  = 1,
+        .offset     = { 64, 64, 0 },
+        .extent     = { 128, 64, 1 },
         .allocation = fixture.allocation,
     }};
     gpu::SparseTextureOpaqueBind[1] opaque = {{
@@ -699,15 +760,35 @@ fn void sparse_bind_lowers_one_transaction_and_publishes_completion() @test {
         && sparse_bind_capture.signal_value == 2);
     assert(sparse_bind_capture.image_bind_count == 1
             && sparse_bind_capture.opaque_bind_count == 1);
-    assert(sparse_bind_capture.image_bind.memory_offset == 4096
-            && sparse_bind_capture.image_bind.extent.width == 64);
-    assert(sparse_bind_capture.opaque_bind.memory_offset == 12288
+    assert(sparse_bind_capture.image_bind.subresource.aspect_mask
+            == vk::ImageAspectFlagBits.COLOR_BIT
+        && sparse_bind_capture.image_bind.subresource.mip_level == 1
+        && sparse_bind_capture.image_bind.subresource.array_layer == 0
+        && sparse_bind_capture.image_bind.offset.x == 64
+        && sparse_bind_capture.image_bind.offset.y == 64
+        && sparse_bind_capture.image_bind.offset.z == 0
+        && sparse_bind_capture.image_bind.extent.width == 128
+        && sparse_bind_capture.image_bind.extent.height == 64
+        && sparse_bind_capture.image_bind.extent.depth == 1
+        && sparse_bind_capture.image_bind.memory
+            == fixture.allocation_cells[0].value.raw_info.device_memory
+        && sparse_bind_capture.image_bind.memory_offset == 4096
+        && (uint)sparse_bind_capture.image_bind.flags == 0);
+    assert(sparse_bind_capture.opaque_bind.resource_offset == 49152
+        && sparse_bind_capture.opaque_bind.size == 4096
+        && sparse_bind_capture.opaque_bind.memory
+            == fixture.allocation_cells[0].value.raw_info.device_memory
+        && sparse_bind_capture.opaque_bind.memory_offset == 12288
         && sparse_bind_capture.opaque_bind.flags
             == vk::SparseMemoryBindFlagBits.METADATA_BIT);
     assert(gpu::internal::completion_point_sequence(point) == 2
         && fixture.completions[0].published_sequence.load(
             AtomicOrdering.ACQUIRE,
         ) == 2);
+    assert(fixture.texture_cells[0].value.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == 1,
+        "a successful sparse bind retains its image through completion");
 }
 
 fn void sparse_bind_native_failure_cancels_without_publication() @test {
@@ -740,6 +821,123 @@ fn void sparse_bind_native_failure_cancels_without_publication() @test {
         && fixture.completions[0].published_sequence.load(
             AtomicOrdering.ACQUIRE,
         ) == 0);
+    assert(fixture.texture_cells[0].value.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == 0,
+        "native failure rolls back sparse image retention");
+}
+
+fn void sparse_bind_orders_after_the_prior_target_signal() @test {
+    SparseBindFixture fixture;
+    init_sparse_bind_fixture(&fixture);
+    defer destroy_sparse_bind_fixture(&fixture);
+    fixture.completions[0].next_sequence = 1;
+    fixture.completions[0].published_sequence.store(
+        1,
+        AtomicOrdering.RELAXED,
+    );
+    gpu::SparseTextureTileBind[1] tiles = {{
+        .aspect     = gpu::SparseTextureAspect.COLOR,
+        .mip_level  = 0,
+        .extent     = { 64, 64, 1 },
+        .allocation = fixture.allocation,
+    }};
+    gpu::SparseTextureBindDesc desc = {
+        .texture = fixture.texture,
+        .tiles   = tiles[..],
+    };
+    vk::SparseBindNativeOps ops = sparse_bind_ops();
+    sparse_bind_capture = {};
+    sparse_bind_result = vk::Result.SUCCESS;
+
+    vk::vk_bind_sparse_texture_memory_with_ops(
+        state: &fixture.state,
+        queue: fixture.queue,
+        desc:  &desc,
+        ops:   &ops,
+    )!!;
+
+    assert(sparse_bind_capture.wait_count == 1
+        && sparse_bind_capture.wait_semaphores[0]
+            == fixture.completions[0].timeline
+        && sparse_bind_capture.wait_values[0] == 1,
+        "sparse binding waits on prior target work before signalling");
+}
+
+fn void sparse_bind_orders_the_next_submit_and_retains_texture() @test {
+    SparseBindFixture fixture;
+    init_sparse_bind_fixture(&fixture);
+    defer destroy_sparse_bind_fixture(&fixture);
+    gpu::SparseTextureTileBind[1] tiles = {{
+        .aspect     = gpu::SparseTextureAspect.COLOR,
+        .mip_level  = 0,
+        .extent     = { 64, 64, 1 },
+        .allocation = fixture.allocation,
+    }};
+    gpu::SparseTextureBindDesc bind_desc = {
+        .texture = fixture.texture,
+        .tiles   = tiles[..],
+    };
+    vk::SparseBindNativeOps bind_ops = sparse_bind_ops();
+    sparse_bind_result = vk::Result.SUCCESS;
+    gpu::CompletionPoint bound =
+        vk::vk_bind_sparse_texture_memory_with_ops(
+            state: &fixture.state,
+            queue: fixture.queue,
+            desc:  &bind_desc,
+            ops:   &bind_ops,
+        )!!;
+
+    fixture.completions[0].submit_scratch =
+        mem::new(vk::QueueSubmitScratch);
+    gpu::SubmitDesc submit_desc = {};
+    sparse_submit_capture = {};
+    sparse_submit_result = vk::Result.ERROR_UNKNOWN;
+    assert(@catch(vk::vk_submit_with_queries(
+        state:            &fixture.state,
+        queue:            fixture.queue,
+        desc:             &submit_desc,
+        submit_fn:        &capture_sparse_followup_submit,
+        counter_query_fn: &sparse_counter_value,
+    )) == gpu::BACKEND_ERROR);
+    assert(sparse_submit_capture.wait_count == 1
+        && sparse_submit_capture.wait.semaphore
+            == fixture.completions[0].timeline
+        && sparse_submit_capture.wait.value
+            == gpu::internal::completion_point_sequence(bound)
+        && sparse_submit_capture.wait.stage_mask
+            == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        "ordinary submission waits for the preceding sparse bind");
+
+    sparse_submit_capture = {};
+    sparse_submit_result = vk::Result.SUCCESS;
+    vk::vk_submit_with_queries(
+        state:            &fixture.state,
+        queue:            fixture.queue,
+        desc:             &submit_desc,
+        submit_fn:        &capture_sparse_followup_submit,
+        counter_query_fn: &sparse_counter_value,
+    )!!;
+    assert(sparse_submit_capture.wait_count == 1
+        && sparse_submit_capture.wait.value
+            == gpu::internal::completion_point_sequence(bound),
+        "a failed ordinary submit preserves the sparse ordering edge");
+    assert(fixture.texture_cells[0].value.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == 1);
+
+    sparse_completed_value =
+        fixture.completions[0].published_sequence.load(
+            AtomicOrdering.ACQUIRE,
+        );
+    vk::drain_completed_submitted_commands_with_query(
+        &fixture.state,
+        &completed_sparse_counter_value,
+    )!!;
+    assert(fixture.texture_cells[0].value.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == 0,
+        "queue retirement releases the retained sparse image");
 }
 
 fn void sparse_bind_exact_invalid_allocation_lowers_an_unbind() @test {
@@ -770,6 +968,37 @@ fn void sparse_bind_exact_invalid_allocation_lowers_an_unbind() @test {
     assert(sparse_bind_capture.image_bind.memory == null
             && sparse_bind_capture.image_bind.memory_offset == 0,
         "the exact invalid allocation lowers to null-memory unbind");
+}
+
+fn void sparse_bind_lowers_color_opaque_ranges_without_flags() @test {
+    SparseBindFixture fixture;
+    init_sparse_bind_fixture(&fixture);
+    defer destroy_sparse_bind_fixture(&fixture);
+    gpu::SparseTextureOpaqueBind[1] opaque = {{
+        .aspect          = gpu::SparseTextureAspect.COLOR,
+        .resource_offset = 32768,
+        .size            = 4096,
+        .allocation      = fixture.allocation,
+    }};
+    gpu::SparseTextureBindDesc desc = {
+        .texture = fixture.texture,
+        .opaque  = opaque[..],
+    };
+    vk::SparseBindNativeOps ops = sparse_bind_ops();
+    sparse_bind_capture = {};
+    sparse_bind_result = vk::Result.SUCCESS;
+
+    vk::vk_bind_sparse_texture_memory_with_ops(
+        state: &fixture.state,
+        queue: fixture.queue,
+        desc:  &desc,
+        ops:   &ops,
+    )!!;
+
+    assert(sparse_bind_capture.opaque_bind.resource_offset == 32768
+        && sparse_bind_capture.opaque_bind.size == 4096
+        && (uint)sparse_bind_capture.opaque_bind.flags == 0,
+        "color mip-tail binds lower without metadata flags");
 }
 
 fn void sparse_bind_preserves_a_same_queue_wait() @test {
@@ -1459,22 +1688,48 @@ fn void sparse_bind_holds_resource_and_target_queue_locks_only_through_native_ca
         thread::yield();
     }
 
-    assert(!fixture.state.resource_mutex.try_lock(),
-        "texture destruction and allocation free cannot acquire the resource lock during the native call");
-    assert(!fixture.completions[0].submission_mutex.try_lock(),
-        "same-queue submit, sparse bind, and aliased presentation serialize");
-    assert(fixture.completions[1].submission_mutex.try_lock(),
-        "a distinct native queue remains independently serializable");
-    fixture.completions[1].submission_mutex.unlock();
+    Atomic{bool}[3] attempted;
+    Atomic{bool}[3] acquired;
+    MutexProbeArgs[3] probes = {
+        {
+            .mutex     = &fixture.state.resource_mutex,
+            .attempted = &attempted[0],
+            .acquired  = &acquired[0],
+        },
+        {
+            .mutex     = &fixture.completions[0].submission_mutex,
+            .attempted = &attempted[1],
+            .acquired  = &acquired[1],
+        },
+        {
+            .mutex     = &fixture.completions[1].submission_mutex,
+            .attempted = &attempted[2],
+            .acquired  = &acquired[2],
+        },
+    };
+    Thread[3] lock_workers;
+    foreach (i, &lock_worker : lock_workers) {
+        attempted[i].store(false, AtomicOrdering.RELAXED);
+        acquired[i].store(false, AtomicOrdering.RELAXED);
+        lock_worker.create(&mutex_probe_worker, &probes[i])!!;
+    }
+    foreach (&started : attempted) {
+        while (!started.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    }
+    while (!acquired[2].load(AtomicOrdering.ACQUIRE)) thread::yield();
+    assert(!acquired[0].load(AtomicOrdering.ACQUIRE),
+        "resource users remain blocked during the native call");
+    assert(!acquired[1].load(AtomicOrdering.ACQUIRE),
+        "target-queue operations remain blocked during the native call");
 
     sparse_bind_native_release.store(true, AtomicOrdering.RELEASE);
     assert(worker.join()!! == 0 && args.point.is_valid());
-    assert(fixture.state.resource_mutex.try_lock(),
-        "the resource lock is released immediately after host return");
-    fixture.state.resource_mutex.unlock();
-    assert(fixture.completions[0].submission_mutex.try_lock(),
-        "the target queue lock is released immediately after host return");
-    fixture.completions[0].submission_mutex.unlock();
+    foreach (&lock_worker : lock_workers) {
+        assert(lock_worker.join()!! == 0);
+    }
+    assert(acquired[0].load(AtomicOrdering.ACQUIRE)
+        && acquired[1].load(AtomicOrdering.ACQUIRE),
+        "resource and target-queue locks release after host return");
 }
 
 fn bool run_real_sparse_bind_dimension(
@@ -1513,7 +1768,7 @@ fn bool run_real_sparse_bind_dimension(
         .depth      = image_3d ? 64 : 0,
         .mip_levels = 9,
         .format     = gpu::Format.RGBA8_UNORM,
-        .usage      = { .transfer_dst },
+        .usage      = { .transfer_src, .transfer_dst },
         .access     = access,
     };
     gpu::TextureHandle texture;
@@ -1612,8 +1867,11 @@ fn bool run_real_sparse_bind_dimension(
     gpu::wait_completion(bound, ulong::max)!!;
 
     OwnedSpan upload;
+    OwnedSpan readback;
     bool owns_upload;
+    bool owns_readback;
     defer if (owns_upload) free_owned_span(device, &upload)!!;
+    defer if (owns_readback) free_owned_span(device, &readback)!!;
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -1640,6 +1898,20 @@ fn bool run_real_sparse_bind_dimension(
             debug_name:   "sparse_bind_real_upload",
         )!!;
         owns_upload = true;
+        char[] upload_bytes =
+            gpu::get_span_mapping(device, upload.span)!!;
+        foreach (i, &byte : upload_bytes) {
+            *byte = (char)(((usz)i * 17 + 3) & 0x7f);
+        }
+        gpu::flush_mapped_span(device, upload.span)!!;
+        readback = allocate_owned_span(
+            device:       device,
+            size:         upload_size,
+            memory_class: gpu::MemoryClass.CPU_READ,
+            access:       access,
+            debug_name:   "sparse_bind_real_readback",
+        )!!;
+        owns_readback = true;
         gpu::BufferTextureCopyDesc copy = {
             .src     = upload.span,
             .texture = texture,
@@ -1647,6 +1919,32 @@ fn bool run_real_sparse_bind_dimension(
             .height  = tiles[0].extent.y,
         };
         gpu::cmd_copy_buffer_to_texture(&commands, &copy)!!;
+        gpu::TextureBarrier to_source = {
+            .texture = texture,
+            .before  = {
+                .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+                .stages = { .transfer },
+                .access = { .write },
+            },
+            .after = {
+                .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+                .stages = { .transfer },
+                .access = { .read },
+            },
+        };
+        gpu::cmd_texture_barrier(&commands, &to_source)!!;
+        gpu::TextureBufferCopyDesc copy_back = {
+            .texture = texture,
+            .dst     = readback.span,
+            .width   = tiles[0].extent.x,
+            .height  = tiles[0].extent.y,
+        };
+        gpu::cmd_copy_texture_to_buffer(&commands, &copy_back)!!;
+        gpu::Barrier host_read = {
+            .before = { .transfer },
+            .after  = { .host },
+        };
+        gpu::cmd_barrier(&commands, &host_read)!!;
     }
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
@@ -1660,6 +1958,20 @@ fn bool run_real_sparse_bind_dimension(
     };
     gpu::CompletionPoint used = gpu::submit(queue, &submit_desc)!!;
     gpu::wait_completion(used, ulong::max)!!;
+    if (!image_3d) {
+        gpu::invalidate_mapped_span(device, readback.span)!!;
+        char[] readback_bytes =
+            gpu::get_span_mapping(device, readback.span)!!;
+        foreach (i, byte : readback_bytes) {
+            assert(byte == (char)(((usz)i * 17 + 3) & 0x7f),
+                "bound sparse tile preserves uploaded bytes through readback");
+        }
+    } else {
+        io::eprintfn(
+            "run_real_sparse_bind_dimension: 3D residency readback "
+            "not available on the stacked base, lifecycle only",
+        );
+    }
 
     tiles[0].allocation = {};
     foreach (&bind : opaque[:opaque_count]) {
@@ -1676,7 +1988,7 @@ fn bool run_real_sparse_bind_dimension(
 
 fn void real_sparse_bind_use_and_unbind_when_supported() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation = gpu::ContractValidation.FULL,
+        .contract_validation = gpu::ContractValidation.TRUSTED,
         .application_name    = "gpu_sparse_bind_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;

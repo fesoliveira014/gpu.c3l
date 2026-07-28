@@ -310,12 +310,13 @@ requested range. The exact invalid allocation with zero offset is the unbind
 sentinel. Tile backing charges a complete page for every covered tile,
 including partial edge tiles; opaque tail sizes need not be page multiples.
 
-Backing ownership never transfers. The call retains no residency map,
-allocation reference, or deferred free after `vkQueueBindSparse` returns.
-Keep allocations live through the returned completion and keep resident bytes
-exclusive until an ordered unbind or replacement and all prior GPU use have
-completed. `free_allocation` does not implicitly unbind and cannot diagnose
-historical sparse binding with `RESOURCE_IN_USE`.
+Backing ownership never transfers. The call retains the sparse texture through
+the returned completion but keeps no residency map, allocation reference, or
+deferred backing free after `vkQueueBindSparse` returns. Keep allocations live
+through the returned completion and keep resident bytes exclusive until an
+ordered unbind or replacement and all prior GPU use have completed.
+`free_allocation` does not implicitly unbind and cannot diagnose historical
+sparse binding with `RESOURCE_IN_USE`.
 
 Placed creation:
 
@@ -351,8 +352,9 @@ It never frees, decrements, or otherwise mutates caller-owned page allocations.
 Descriptor publication does not establish residency, and sparse creation adds
 no implicit allocation, binding, completion wait, or resident-region tracking.
 Use a region only after a successful ordered bind has established residency.
-Destroying the texture is safe only after all bind operations and GPU users
-complete; destruction still does not release its caller-owned backing pools.
+An incomplete bind retains the image and makes destruction return
+`RESOURCE_IN_USE`. Destruction is safe only after all bind operations and GPU
+users complete and still does not release caller-owned backing pools.
 
 A live user-created attachment view retains its texture, so `destroy_texture`
 returns `RESOURCE_IN_USE` until every view is destroyed. A borrowed swapchain

@@ -1003,9 +1003,11 @@ fn SparseTextureRequirements? get_sparse_texture_requirements(
 
 <* Bind or unbind caller-owned memory for sparse color tiles and color or
    metadata mip tails. Every explicit point is preserved, including same-queue
-   waits. The caller keeps the texture and allocations live through completion
-   and keeps resident bytes exclusive until an ordered unbind or replacement
-   and every prior GPU user complete. The library retains no residency map. *>
+   waits. The library orders the bind with adjacent work on the target queue
+   and retains the texture through completion. The caller keeps allocations
+   live through completion and keeps resident bytes exclusive until an ordered
+   unbind or replacement and every prior GPU user complete. The library retains
+   no residency map. *>
 fn CompletionPoint? bind_sparse_texture_memory(
     Queue queue,
     SparseTextureBindDesc* desc,

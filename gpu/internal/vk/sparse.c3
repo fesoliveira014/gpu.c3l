@@ -34,6 +34,9 @@ const uint KNOWN_SPARSE_FORMAT_FLAGS =
     (uint)vk::SparseImageFormatFlagBits.SINGLE_MIPTAIL_BIT
     | (uint)vk::SparseImageFormatFlagBits.ALIGNED_MIP_SIZE_BIT
     | (uint)vk::SparseImageFormatFlagBits.NONSTANDARD_BLOCK_SIZE_BIT;
+const usz MAX_SPARSE_BIND_WAITS   = 1024;
+const usz MAX_SPARSE_TILE_BINDS   = 1024;
+const usz MAX_SPARSE_OPAQUE_BINDS = 1024;
 
 struct SparseTextureNativeOps {
     void*                                  user_data;
@@ -69,10 +72,6 @@ struct SparseBackingInterval {
     usz              offset;
     usz              size;
 }
-
-const usz MAX_SPARSE_BIND_WAITS   = 1024;
-const usz MAX_SPARSE_TILE_BINDS   = 1024;
-const usz MAX_SPARSE_OPAQUE_BINDS = 1024;
 
 fn bool sparse_allocation_is_exact_invalid(
     gpu::GpuAllocation allocation,
@@ -439,26 +438,6 @@ fn void? validate_sparse_backings_locked(
         };
         if (sparse_backing_overlaps_placed_locked(state, interval)) {
             return gpu::INVALID_ARGUMENT~;
-        }
-        for (usz prior_index = 0;
-            prior_index < index;
-            prior_index++) {
-            ResolvedSparseBacking prior =
-                resolve_sparse_bind_backing_locked(
-                    state:   state,
-                    texture: texture,
-                    desc:    desc,
-                    index:   prior_index,
-                )!;
-            if (prior.memory == interval.memory
-                && intervals_overlap(
-                    prior.absolute_offset,
-                    prior.size,
-                    interval.offset,
-                    interval.size,
-                )) {
-                return gpu::INVALID_ARGUMENT~;
-            }
         }
     }
 }
@@ -986,7 +965,6 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     ulong[] wait_values;
     vk::SparseImageMemoryBind[] tile_binds;
     vk::SparseMemoryBind[] opaque_binds;
-    ResolvedSparseBacking[] resolved_backings;
     SparseBackingInterval[] backing_intervals;
     usz backing_capacity = tile_count + opaque_count;
     defer if (wait_semaphores.ptr != null) {
@@ -1001,32 +979,27 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     defer if (opaque_binds.ptr != null) {
         alloc::free(state.host_allocator, opaque_binds.ptr);
     }
-    defer if (resolved_backings.ptr != null) {
-        alloc::free(state.host_allocator, resolved_backings.ptr);
-    }
     defer if (backing_intervals.ptr != null) {
         alloc::free(state.host_allocator, backing_intervals.ptr);
     }
 
-    if (wait_count > 0) {
-        vk::Semaphore[]? allocated_wait_semaphores = alloc::new_array_try(
-            state.host_allocator,
-            vk::Semaphore,
-            (sz)wait_count,
-        );
-        if (catch allocated_wait_semaphores) {
-            return gpu::OUT_OF_HOST_MEMORY~;
-        }
-        wait_semaphores = allocated_wait_semaphores;
-
-        ulong[]? allocated_wait_values = alloc::new_array_try(
-            state.host_allocator,
-            ulong,
-            (sz)wait_count,
-        );
-        if (catch allocated_wait_values) return gpu::OUT_OF_HOST_MEMORY~;
-        wait_values = allocated_wait_values;
+    vk::Semaphore[]? allocated_wait_semaphores = alloc::new_array_try(
+        state.host_allocator,
+        vk::Semaphore,
+        (sz)(wait_count + 1),
+    );
+    if (catch allocated_wait_semaphores) {
+        return gpu::OUT_OF_HOST_MEMORY~;
     }
+    wait_semaphores = allocated_wait_semaphores;
+
+    ulong[]? allocated_wait_values = alloc::new_array_try(
+        state.host_allocator,
+        ulong,
+        (sz)(wait_count + 1),
+    );
+    if (catch allocated_wait_values) return gpu::OUT_OF_HOST_MEMORY~;
+    wait_values = allocated_wait_values;
     if (tile_count > 0) {
         vk::SparseImageMemoryBind[]? allocated_tile_binds =
             alloc::new_array_try(
@@ -1047,13 +1020,17 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
         if (catch allocated_opaque_binds) return gpu::OUT_OF_HOST_MEMORY~;
         opaque_binds = allocated_opaque_binds;
     }
-    ResolvedSparseBacking[]? allocated_backings = alloc::new_array_try(
+    SparseBindReference[]? allocated_reference = alloc::new_array_try(
         state.host_allocator,
-        ResolvedSparseBacking,
-        (sz)backing_capacity,
+        SparseBindReference,
+        1,
     );
-    if (catch allocated_backings) return gpu::OUT_OF_HOST_MEMORY~;
-    resolved_backings = allocated_backings;
+    if (catch allocated_reference) return gpu::OUT_OF_HOST_MEMORY~;
+    SparseBindReference* retained_texture = allocated_reference.ptr;
+    bool retained_texture_published;
+    defer if (!retained_texture_published) {
+        alloc::free(state.host_allocator, retained_texture);
+    }
 
     SparseBackingInterval[]? allocated_intervals = alloc::new_array_try(
         state.host_allocator,
@@ -1074,18 +1051,17 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
 
     usz backing_count;
     foreach (i, &bind : desc.tiles) {
-        resolved_backings[i] = resolve_sparse_bind_backing_locked(
+        ResolvedSparseBacking resolved = resolve_sparse_bind_backing_locked(
             state:   state,
             texture: texture,
             desc:    desc,
             index:   (usz)i,
         )!;
-        ResolvedSparseBacking* resolved = &resolved_backings[i];
         add_sparse_backing_interval_locked(
             state:     state,
             intervals: backing_intervals,
             count:     backing_count,
-            resolved:  *resolved,
+            resolved:  resolved,
         )!;
         if (resolved.memory != null) backing_count++;
         tile_binds[i] = {
@@ -1112,20 +1088,18 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     }
     foreach (i, &bind : desc.opaque) {
         usz resolved_index = tile_count + (usz)i;
-        resolved_backings[resolved_index] =
+        ResolvedSparseBacking resolved =
             resolve_sparse_bind_backing_locked(
                 state:   state,
                 texture: texture,
                 desc:    desc,
                 index:   resolved_index,
             )!;
-        ResolvedSparseBacking* resolved =
-            &resolved_backings[resolved_index];
         add_sparse_backing_interval_locked(
             state:     state,
             intervals: backing_intervals,
             count:     backing_count,
-            resolved:  *resolved,
+            resolved:  resolved,
         )!;
         if (resolved.memory != null) backing_count++;
         opaque_binds[i] = {
@@ -1147,6 +1121,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
         return gpu::INVALID_ARGUMENT~;
     }
 
+    usz native_wait_count = wait_count;
     ulong maximum_same_queue_wait;
     foreach (i, point : desc.waits) {
         if (point.device != state.owner || !point.is_valid()) {
@@ -1164,7 +1139,30 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
             maximum_same_queue_wait = sequence;
         }
     }
+    ulong prior_target_sequence = target.published_sequence.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    if (prior_target_sequence > maximum_same_queue_wait) {
+        wait_semaphores[native_wait_count] = target.timeline;
+        wait_values[native_wait_count] = prior_target_sequence;
+        native_wait_count++;
+    }
 
+    retained_texture.retained_counter =
+        &texture.tracked_command_references;
+    retained_texture.retained_counter.add(1, AtomicOrdering.RELAXED);
+    bool texture_retained = true;
+    defer if (texture_retained) {
+        retained_texture.retained_counter.sub(
+            1,
+            AtomicOrdering.RELAXED,
+        );
+    }
+    drain_queue_if_needed_with_query(
+        state,
+        target,
+        ops.get_semaphore_counter_value,
+    )!;
     require_queue_completion_headroom_with_query(
         state,
         target,
@@ -1175,16 +1173,12 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
         queue,
     )!;
     ulong signal_value = gpu::internal::completion_point_sequence(point);
-    if (signal_value <= maximum_same_queue_wait) {
-        cancel_queue_completion_locked(state, point)!!;
-        return gpu::INVALID_HANDLE~;
-    }
     vk::Semaphore signal_semaphore = target.timeline;
 
     vk::TimelineSemaphoreSubmitInfo timeline_info =
         vk::timeline_semaphore_submit_info();
-    timeline_info.wait_semaphore_value_count = (uint)wait_count;
-    timeline_info.p_wait_semaphore_values = wait_count > 0
+    timeline_info.wait_semaphore_value_count = (uint)native_wait_count;
+    timeline_info.p_wait_semaphore_values = native_wait_count > 0
         ? wait_values.ptr
         : null;
     timeline_info.signal_semaphore_value_count = 1;
@@ -1202,8 +1196,8 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     };
     vk::BindSparseInfo bind_info = vk::bind_sparse_info();
     bind_info.p_next = &timeline_info;
-    bind_info.wait_semaphore_count = (uint)wait_count;
-    bind_info.p_wait_semaphores = wait_count > 0
+    bind_info.wait_semaphore_count = (uint)native_wait_count;
+    bind_info.p_wait_semaphores = native_wait_count > 0
         ? wait_semaphores.ptr
         : null;
     bind_info.image_bind_count = tile_count > 0 ? 1 : 0;
@@ -1221,8 +1215,6 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
         p_bind_info:     &bind_info,
         fence:           (vk::Fence)null,
     );
-    state.resource_mutex.unlock();
-    resource_locked = false;
     if (result != vk::Result.SUCCESS) {
         cancel_queue_completion_locked(state, point)!!;
         check_backend_result(
@@ -1231,6 +1223,18 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
             result:    result,
         )!;
     }
+    target.retirement_mutex.lock()!!;
+    publish_sparse_bind_reference_locked(
+        target,
+        retained_texture,
+        point,
+    );
+    target.retirement_mutex.unlock();
+    retained_texture_published = true;
+    texture_retained = false;
+    target.pending_sparse_sequence = signal_value;
+    state.resource_mutex.unlock();
+    resource_locked = false;
     publish_queue_completion_locked(state, point)!!;
     return point;
 }

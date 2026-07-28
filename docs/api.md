@@ -867,23 +867,26 @@ physical overlap on the same native memory, and overlap with observable placed
 texture ranges.
 
 Sparse waits are stage-free `CompletionPoint` values. Every explicit wait is
-emitted, including one from the target queue, and the returned signal value is
-greater than every prior target-queue wait. A call must mutate at least one
-tile or opaque range and admits at most 1024 waits, 1024 tiles, and 1024 opaque
-ranges; these are private safety limits rather than public constants.
+emitted, including one from the target queue. A bind also waits on the latest
+target-queue signal, and the next ordinary submit waits on the bind, so the
+shared timeline remains strictly ordered across both operation kinds. A call
+must mutate at least one tile or opaque range and admits at most 1024 waits,
+1024 tiles, and 1024 opaque ranges; these are private safety limits rather than
+public constants.
 
 The library inserts no hidden residency operation and retains no resident
-region or allocation reference after host return. Keep the texture and every
-referenced allocation live through bind completion. Keep bound bytes live and
-exclusive until an ordered unbind or replacement and every prior GPU user have
-completed. Freeing memory does not unbind it, destroying the texture does not
-free its page pools, and a completion point is synchronization rather than
-resource retention.
+region or allocation reference after host return. It retains the sparse texture
+until bind completion, so early destruction returns `RESOURCE_IN_USE`. Keep
+every referenced allocation live through bind completion and keep bound bytes
+live and exclusive until an ordered unbind or replacement and every prior GPU
+user have completed. Freeing memory does not unbind it, and destroying the
+texture does not free its page pools.
 
 Texture-view publication and residency are independent. The library tracks no
 resident regions, so FULL validation rejects buffer-to-texture and
 texture-to-buffer copies for sparse textures with `INVALID_ARGUMENT`; barriers
-remain legal and TRUSTED lowering is unchanged.
+remain legal. After an ordered bind, TRUSTED is the caller-contract path for
+sparse transfer copies.
 
 The bind fault table is stable: invalid queue, texture, allocation, or wait
 identity and unpublished waits return `INVALID_HANDLE`; null or malformed
