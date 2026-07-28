@@ -66,16 +66,30 @@ fn DeviceSupport? evaluate_device_desc_support(
         }
     }
 
+    if (normalized.enable_sparse_textures
+        && !gpu::internal::vk::vk_adapter_supports_sparse_textures(
+            data.state,
+            adapter.adapter_index,
+        )!) {
+        return {
+            .supported         = false,
+            .unmet_requirement = "sparse textures",
+        };
+    }
+
     QueueRequest queues = normalized.queues;
     if (!gpu::internal::vk::vk_supports_queue_request(
-        state:           data.state,
-        adapter_index:   adapter.adapter_index,
-        request:         &queues,
-        backend_surface: backend_surface,
+        state:                  data.state,
+        adapter_index:          adapter.adapter_index,
+        request:                &queues,
+        backend_surface:        backend_surface,
+        require_sparse_binding: normalized.enable_sparse_textures,
     )!) {
         return {
             .supported         = false,
-            .unmet_requirement = "queue topology",
+            .unmet_requirement = normalized.enable_sparse_textures
+                ? "sparse queue topology"
+                : "queue topology",
         };
     }
     if (!gpu::internal::vk::vk_adapter_supports_device_baseline(

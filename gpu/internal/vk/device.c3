@@ -155,12 +155,14 @@ struct GeneratedWorkSupport {
 }
 
 struct CapsInputs {
-    bool                 presentation_enabled;
-    bool                 async_compute;
-    bool                 line_polygon_mode;
-    uint                 texture_capacity;
-    uint                 sampler_capacity;
-    GeneratedWorkSupport generated_work;
+    bool                     presentation_enabled;
+    bool                     async_compute;
+    bool                     line_polygon_mode;
+    uint                     texture_capacity;
+    uint                     sampler_capacity;
+    GeneratedWorkSupport     generated_work;
+    SparseTextureFeaturePlan sparse_textures;
+    gpu::QueueRoles           sparse_binding_queues;
 }
 
 fn bool presentation_maintenance_supported(
@@ -381,10 +383,11 @@ fn gpu::Device? create_vk_device_with_probe(
         presentation_surface_owner: requested_surface.is_valid()
             ? &requested_surface
             : null,
-        queue_request:              &normalized.queues,
-        shader_heap_support:        &adapter_state.shader_heap,
-        probe:                      probe,
-        creation_ops:               creation_ops,
+        queue_request:               &normalized.queues,
+        enable_sparse_textures:      normalized.enable_sparse_textures,
+        shader_heap_support:         &adapter_state.shader_heap,
+        probe:                       probe,
+        creation_ops:                creation_ops,
     );
 }
 
@@ -419,6 +422,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null,
     gpu::Surface* presentation_surface_owner = null,
     gpu::QueueRequest* queue_request = null,
+    bool enable_sparse_textures = false,
     ShaderHeapSupport* shader_heap_support = null,
     DeviceCreationProbe* probe = null,
     DeviceCreationOps* creation_ops = null,
@@ -459,12 +463,14 @@ fn gpu::Device? create_vk_device_from_runtime(
         ? select_queue_families(
             physical_device: state.physical_device,
             request:         queue_request,
+            require_sparse_binding: enable_sparse_textures,
         )!
         : select_queue_families_for_surface(
-            runtime:         runtime_state,
-            physical_device: state.physical_device,
-            surface:         presentation_surface,
-            request:         queue_request,
+            runtime:                runtime_state,
+            physical_device:        state.physical_device,
+            surface:                presentation_surface,
+            request:                queue_request,
+            require_sparse_binding: enable_sparse_textures,
         )!;
 
     bool swapchain_maintenance_extension = state.presentation.enabled
@@ -510,6 +516,11 @@ fn gpu::Device? create_vk_device_from_runtime(
     vk::PhysicalDeviceFeatures2 features2 =
         vk::physical_device_features2().set_next(&features11);
     vk::get_physical_device_features2(state.physical_device, &features2);
+    SparseTextureFeaturePlan sparse_texture_plan =
+        resolve_sparse_texture_feature_plan(
+            enable_sparse_textures,
+            &features2.features,
+        )!;
     check_required_dynamic_state3_extension(
         state.physical_device,
         state,
@@ -583,10 +594,11 @@ fn gpu::Device? create_vk_device_from_runtime(
     }
 
     create_logical_device(
-        state:             state,
-        families:          &families,
-        line_polygon_mode: line_polygon_mode,
-        creation_ops:      creation_ops,
+        state:               state,
+        families:            &families,
+        line_polygon_mode:   line_polygon_mode,
+        sparse_texture_plan: &sparse_texture_plan,
+        creation_ops:        creation_ops,
     )!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.LOGICAL_DEVICE)!;
     VkDeviceDispatchPlan dispatch_plan = {
@@ -727,12 +739,14 @@ fn gpu::Device? create_vk_device_from_runtime(
     )!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.PIPELINE_SHARED)!;
     CapsInputs caps_inputs = {
-        .presentation_enabled = state.presentation.enabled,
-        .async_compute        = state.compute_queue_distinct,
-        .line_polygon_mode    = line_polygon_mode,
-        .texture_capacity     = state.shader_heap.texture_capacity,
-        .sampler_capacity     = state.shader_heap.sampler_capacity,
-        .generated_work       = state.generated_work,
+        .presentation_enabled  = state.presentation.enabled,
+        .async_compute         = state.compute_queue_distinct,
+        .line_polygon_mode     = line_polygon_mode,
+        .texture_capacity      = state.shader_heap.texture_capacity,
+        .sampler_capacity      = state.shader_heap.sampler_capacity,
+        .generated_work        = state.generated_work,
+        .sparse_textures       = sparse_texture_plan,
+        .sparse_binding_queues = families.sparse_binding_queues,
     };
     state.caps = build_caps(
         base:                    &features2.features,
@@ -1238,6 +1252,7 @@ fn void? create_logical_device(
     VkDeviceState* state,
     QueueFamilies* families,
     bool line_polygon_mode,
+    SparseTextureFeaturePlan* sparse_texture_plan,
     DeviceCreationOps* creation_ops = null,
 ) @private {
     @pool() {
@@ -1280,10 +1295,11 @@ fn void? create_logical_device(
                 .set_queue_priorities(priorities[:queue_count]);
         }
         return create_logical_device_with_queue_infos(
-            state:             state,
-            queue_infos:       queue_infos,
-            line_polygon_mode: line_polygon_mode,
-            creation_ops:      creation_ops,
+            state:               state,
+            queue_infos:         queue_infos,
+            line_polygon_mode:   line_polygon_mode,
+            sparse_texture_plan: sparse_texture_plan,
+            creation_ops:        creation_ops,
         );
     };
 }
@@ -1292,6 +1308,7 @@ fn void? create_logical_device_with_queue_infos(
     VkDeviceState* state,
     vk::DeviceQueueCreateInfo[] queue_infos,
     bool line_polygon_mode,
+    SparseTextureFeaturePlan* sparse_texture_plan,
     DeviceCreationOps* creation_ops,
 ) @private {
 
@@ -1348,6 +1365,15 @@ fn void? create_logical_device_with_queue_infos(
     features2.features.shader_int64 = vk::TRUE;
     features2.features.independent_blend = vk::TRUE;
     features2.features.depth_bias_clamp = vk::TRUE;
+    if (sparse_texture_plan != null) {
+        features2.features.sparse_binding = sparse_texture_plan.enabled
+            ? vk::TRUE
+            : vk::FALSE;
+        features2.features.sparse_residency_image2d =
+            sparse_texture_plan.image_2d ? vk::TRUE : vk::FALSE;
+        features2.features.sparse_residency_image3d =
+            sparse_texture_plan.image_3d ? vk::TRUE : vk::FALSE;
+    }
     if (line_polygon_mode) features2.features.fill_mode_non_solid = vk::TRUE;
     if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;
@@ -1463,6 +1489,15 @@ fn gpu::DeviceCaps build_caps(
         .generated_work             = inputs.generated_work.enabled,
         .async_compute              = inputs.async_compute,
         .line_polygon_mode          = inputs.line_polygon_mode,
+        .sparse_textures            = inputs.sparse_textures.enabled
+            ? (gpu::SparseTextureCaps){
+                .image_2d           = inputs.sparse_textures.image_2d,
+                .image_3d           = inputs.sparse_textures.image_3d,
+                .nonresident_strict =
+                    props.sparse_properties.residency_non_resident_strict != 0,
+                .binding_queues     = inputs.sparse_binding_queues,
+            }
+            : {},
         .texture_heap_capacity      = inputs.texture_capacity,
         .sampler_heap_capacity      = inputs.sampler_capacity,
         .max_color_attachments      = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS

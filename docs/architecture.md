@@ -223,6 +223,7 @@ queue ownership
 resource slot tables, including independent allocations
 caller-owned command allocators and fixed recording storage
 timestamp-query pool storage and selected-role timestamp capabilities
+sparse feature negotiation and selected-role binding capabilities
 VMA allocator through typed Vulkan state
 descriptor heaps
 caller-owned allocation and completion lifetimes
@@ -237,10 +238,11 @@ Device                         (slot | generation | reserved)
 get_device_caps(Device*)       -> DeviceCaps?
 ```
 
-`DeviceDesc` contains the presentation surface and semantic queue requirements.
-The library's device baseline is implicit rather than requested. Texture states
-use one mandatory explicit native layout mapping on every device. Command-time
-color state is part of every device's mandatory graphics-state model.
+`DeviceDesc` contains the presentation surface, semantic queue requirements,
+and a zero-default sparse-texture opt-in. The library's device baseline is
+implicit rather than requested. Texture states use one mandatory explicit
+native layout mapping on every device. Command-time color state is part of every
+device's mandatory graphics-state model.
 
 Multiple live `Device` values may coexist. Each is a compact slot and
 generation token resolved through the synchronized process-wide registry.
@@ -290,6 +292,13 @@ with cross-role aliasing allowed. Any other value is an explicit semantic
 topology. A distinct role must also be required and cannot alias another
 required role. The backend chooses native families and indices privately;
 unavailable roles or distinctness constraints make the descriptor unsupported.
+
+Sparse-texture negotiation constrains this same selection rather than adding a
+fourth public role. When enabled, at least one selected graphics, compute, or
+transfer role must use a family with native sparse-binding support. The
+capability reports every selected capable role, including aliases; a
+sparse-only unselected family is intentionally unusable until a future public
+resource/binding workflow can name it.
 
 `get_queue` returns the single device-owned identity selected for a role, and
 aliased roles return the same identity with a shared role mask. Each selected

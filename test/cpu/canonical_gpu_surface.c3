@@ -15,7 +15,10 @@ fn void pin_runtime_adapter_device() {
             .transfer,
         },
     };
-    gpu::DeviceDesc device_desc = { .queues = queues };
+    gpu::DeviceDesc device_desc = {
+        .queues                 = queues,
+        .enable_sparse_textures = true,
+    };
     gpu::Device device = {};
     gpu::DeviceCaps caps = {
         .presentation_enabled         = true,
@@ -30,6 +33,12 @@ fn void pin_runtime_adapter_device() {
             .compute_valid_bits  = 64,
             .transfer_valid_bits = 64,
             .period_ns           = 1.0f,
+        },
+        .sparse_textures              = {
+            .image_2d           = true,
+            .image_3d           = true,
+            .nonresident_strict = true,
+            .binding_queues     = { .graphics, .compute },
         },
         .texture_heap_capacity        = 1,
         .sampler_heap_capacity        = 1,
@@ -68,6 +77,11 @@ fn void pin_runtime_adapter_device() {
     (void)caps.queues;
     (void)caps.line_polygon_mode;
     (void)caps.timestamps;
+    (void)caps.sparse_textures;
+    (void)caps.sparse_textures.image_2d;
+    (void)caps.sparse_textures.image_3d;
+    (void)caps.sparse_textures.nonresident_strict;
+    (void)caps.sparse_textures.binding_queues;
     (void)caps.texture_heap_capacity;
     (void)caps.sampler_heap_capacity;
     (void)caps.max_color_attachments;

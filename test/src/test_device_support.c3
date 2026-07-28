@@ -95,3 +95,23 @@ fn void unavailable_queue_topology_is_reported_semantically() @test {
     assert(!support.supported);
     assert(support.unmet_requirement == "queue topology");
 }
+
+fn void unavailable_sparse_textures_are_reported_semantically() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc desc = {
+        .enable_sparse_textures = true,
+    };
+
+    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
+
+    assert(!support.supported);
+    assert(support.unmet_requirement == "sparse textures");
+    assert(@catch(gpu::create_device(&adapter, &desc))
+        == gpu::UNSUPPORTED_FEATURE);
+}
