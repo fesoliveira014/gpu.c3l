@@ -26,6 +26,8 @@ struct IndexingHeapLimits {
 }
 
 struct HeapDescriptorTotals {
+    ulong sampled_images;
+    ulong storage_images;
     ulong per_stage_resources;
     ulong all_pools_descriptors;
 }
@@ -95,8 +97,12 @@ fn HeapDescriptorTotals descriptor_heap_totals(uint tex_capacity, uint smp_capac
     // Heap-local checks cannot reserve device-wide capacity used by other
     // update-after-bind pools or pipeline layouts.
     return {
-        .per_stage_resources   = (ulong)tex_capacity * 2,
-        .all_pools_descriptors = (ulong)tex_capacity * 2 + (ulong)smp_capacity,
+        .sampled_images        = (ulong)tex_capacity * 2,
+        .storage_images        = (ulong)tex_capacity * 2,
+        .per_stage_resources   = (ulong)tex_capacity * 4
+            + (ulong)smp_capacity,
+        .all_pools_descriptors = (ulong)tex_capacity * 4
+            + (ulong)smp_capacity,
     };
 }
 
@@ -118,12 +124,14 @@ fn IndexingHeapLimitFailure indexing_heap_limit_failure(
     IndexingHeapLimits limits,
 ) {
     HeapDescriptorTotals totals = descriptor_heap_totals(tex_capacity, smp_capacity);
-    if (tex_capacity > limits.max_sampled_images
-        || tex_capacity > limits.max_per_stage_sampled_images) {
+    if (totals.sampled_images > (ulong)limits.max_sampled_images
+        || totals.sampled_images
+            > (ulong)limits.max_per_stage_sampled_images) {
         return IndexingHeapLimitFailure.SAMPLED_IMAGES;
     }
-    if (tex_capacity > limits.max_storage_images
-        || tex_capacity > limits.max_per_stage_storage_images) {
+    if (totals.storage_images > (ulong)limits.max_storage_images
+        || totals.storage_images
+            > (ulong)limits.max_per_stage_storage_images) {
         return IndexingHeapLimitFailure.STORAGE_IMAGES;
     }
     if (smp_capacity > limits.max_samplers

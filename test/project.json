@@ -92,6 +92,7 @@
         "src/test_vk_dedicated_texture.c3",
         "src/test_attachment_view_table.c3",
         "src/test_vk_descriptor_heap.c3",
+        "src/test_vk_descriptor_heap_plan.c3",
         "src/test_vk_root_pointer_compute.c3",
         "src/root_pointer_abi.c3",
         "src/test_vk_texture_heap.c3",

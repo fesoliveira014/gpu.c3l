@@ -258,6 +258,11 @@ the zero-based heap slot plus one. CPU generation and device-owner metadata live
 only in the `TextureView` ownership token. Published sampler indices remain
 valid until device destruction. Shader helpers perform the minus-one decode;
 do not index a native descriptor array directly with the encoded value.
+Two-dimensional and three-dimensional views share one logical `TextureIndex`
+namespace. A value names the same logical slot regardless of dimension, but
+only the native binding selected by the published view's dimension and usage is
+populated. The index carries no dimension tag; shader data must use a helper
+matching the texture dimension.
 
 Material example:
 
@@ -292,22 +297,29 @@ That file should define:
 ```text
 sample_texture_2d(TextureIndex, SamplerIndex, Vec2f) -> Vec4f          (explicit LOD 0; compute-safe)
 sample_texture_2d_implicit(TextureIndex, SamplerIndex, Vec2f) -> Vec4f (derivative LOD; fragment stage)
+sample_texture_3d(TextureIndex, SamplerIndex, Vec3f) -> Vec4f          (explicit LOD 0; compute-safe)
+sample_texture_3d_implicit(TextureIndex, SamplerIndex, Vec3f) -> Vec4f (derivative LOD; fragment stage)
 sample_shadow_2d(TextureIndex, SamplerIndex, Vec3f) -> float           (depth compare; needs a compare-enabled sampler)
 load_storage_texture(TextureIndex, Vec2i) -> Vec4f
 store_storage_texture(TextureIndex, Vec2i, Vec4f)
+load_storage_texture_3d(TextureIndex, Vec3i) -> Vec4f
+store_storage_texture_3d(TextureIndex, Vec3i, Vec4f)
 ```
 
 The descriptor-indexing ABI is fixed:
 
 ```text
-set 0, binding 0: sampled image array
-set 0, binding 1: storage image array
+set 0, binding 0: sampled 2D image array
+set 0, binding 1: storage 2D image array
 set 0, binding 2: sampler array
+set 0, binding 3: sampled 3D image array
+set 0, binding 4: storage 3D image array
 ```
 
 The same binding 2 is declared as a sampler-shadow view for depth comparison.
-Backend descriptor objects and binding commands remain hidden behind the
-helpers.
+For configured texture capacity `T`, each image binding has `T` native entries
+while the public capacity remains one shared logical namespace of `T` values.
+Backend descriptor objects and binding commands remain hidden behind the helpers.
 
 ## 10. Push constant contract
 

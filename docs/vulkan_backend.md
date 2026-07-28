@@ -523,12 +523,12 @@ update-after-bind
 update-unused-while-pending
 ```
 
-The indexing layout contains `T` sampled images, `T` storage images, and `S`
-samplers, all visible to every stage. Before object creation the backend checks
-the exact resource total `2T` against
-`maxPerStageUpdateAfterBindResources`; plain `SAMPLER` descriptors do not count
-toward that limit. Its single update-after-bind pool contains `2T + S`
-descriptors and is checked against `maxUpdateAfterBindDescriptorsInAllPools`.
+The indexing layout contains `T` sampled 2D images, `T` storage 2D images, `S`
+samplers, `T` sampled 3D images, and `T` storage 3D images, all visible to every
+stage. Before object creation the backend checks `2T` sampled images, `2T`
+storage images, and the exact per-stage resource total `4T + S`. Its single
+update-after-bind pool contains `4T + S` descriptors and is checked against
+`maxUpdateAfterBindDescriptorsInAllPools`.
 Configured capacities that exceed either aggregate or any per-type limit fail with
 `UNSUPPORTED_FEATURE` with the first exact capacity or aggregate diagnostic;
 capacities are never clamped. Values above the library hard ceiling remain
@@ -543,13 +543,23 @@ internal heap remain scoped to their owning `Device`.
 Public indices map to descriptor entries in one update-after-bind set:
 
 ```text
-set 0, binding 0: SAMPLED_IMAGE[texture_capacity]
-set 0, binding 1: STORAGE_IMAGE[texture_capacity]
+set 0, binding 0: SAMPLED_IMAGE_2D[texture_capacity]
+set 0, binding 1: STORAGE_IMAGE_2D[texture_capacity]
 set 0, binding 2: SAMPLER[sampler_capacity]
+set 0, binding 3: SAMPLED_IMAGE_3D[texture_capacity]
+set 0, binding 4: STORAGE_IMAGE_3D[texture_capacity]
 ```
 
 This does not expose descriptor sets in the public API or change shader
 material records.
+
+All four image arrays share one logical `TextureIndex` namespace, free list,
+and generation state. Publishing a view selects the sampled and/or storage
+binding for its native dimension while preserving the same logical slot number;
+the other dimension's bindings are not populated for that view. A texture view
+therefore emits at most two descriptor writes. Reflection accepts sampled
+images only at bindings 0 and 3, storage images only at bindings 1 and 4, and
+samplers only at binding 2.
 
 Descriptor-heap binding is command-record state rather than pipeline state. The
 backend emits one set-0 bind for each used graphics or compute bind point.

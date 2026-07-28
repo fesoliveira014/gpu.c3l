@@ -12,6 +12,14 @@ const char[*] REFLECT_HEAP_SPIRV        = $embed("shaders/heap_write.comp.spv");
 const char[*] REFLECT_BUFFERS_SPIRV     = $embed("shaders/root_pointer.comp.spv");
 const char[*] REFLECT_BAD_SET_SPIRV     = $embed("shaders/bad_set.comp.spv");
 const char[*] REFLECT_BAD_BINDING_SPIRV = $embed("shaders/bad_binding.comp.spv");
+const char[*] REFLECT_HEAP_DIMENSIONS_SPIRV =
+    $embed("shaders/heap_dimensions.comp.spv");
+const char[*] REFLECT_BAD_SAMPLED_3D_SPIRV =
+    $embed("shaders/bad_sampled_3d_binding.comp.spv");
+const char[*] REFLECT_BAD_STORAGE_3D_SPIRV =
+    $embed("shaders/bad_storage_3d_binding.comp.spv");
+const char[*] REFLECT_BAD_UNKNOWN_HEAP_SPIRV =
+    $embed("shaders/bad_unknown_heap_binding.comp.spv");
 const char[*] REFLECT_OVERSIZED_PUSH_SPIRV = $embed("shaders/oversized_push.comp.spv");
 const char[*] REFLECT_VERTEX_SPIRV      = $embed("shaders/offscreen.vert.spv");
 const char[*] REFLECT_FRAGMENT_SPIRV    = $embed("shaders/offscreen.frag.spv");
@@ -324,6 +332,38 @@ fn void heap_conforming_shader_accepted() @test {
     gpu::PipelineHandle pipeline = create_reflection_compute_pipeline(&device, &desc)!!;
     gpu::destroy_pipeline(&device, pipeline)!!;
     assert(pipeline.is_valid(), "heap-conforming shader is accepted");
+}
+
+fn void dimensional_heap_bindings_are_validated() @test {
+    gpu::Device device = make_reflection_test_device();
+    defer destroy_test_device(&device)!!;
+
+    gpu::ShaderDesc valid = {
+        .spirv       = REFLECT_HEAP_DIMENSIONS_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::PipelineHandle pipeline =
+        create_reflection_compute_pipeline(&device, &valid)!!;
+    gpu::destroy_pipeline(&device, pipeline)!!;
+
+    assert_shader_interface_rejected(
+        device:      &device,
+        spirv:       REFLECT_BAD_SAMPLED_3D_SPIRV[..],
+        entry_point: "main",
+        message:     "binding 3 rejects a storage image",
+    );
+    assert_shader_interface_rejected(
+        device:      &device,
+        spirv:       REFLECT_BAD_STORAGE_3D_SPIRV[..],
+        entry_point: "main",
+        message:     "binding 4 rejects a sampled image",
+    );
+    assert_shader_interface_rejected(
+        device:      &device,
+        spirv:       REFLECT_BAD_UNKNOWN_HEAP_SPIRV[..],
+        entry_point: "main",
+        message:     "an unknown set-0 heap binding is rejected",
+    );
 }
 
 fn void null_entry_point_defaults_to_main() @test {

@@ -9,6 +9,10 @@ import gpu @public;
 
 const char[*] HEAP_WRITE_SPIRV  = $embed("shaders/heap_write.comp.spv");
 const char[*] HEAP_SAMPLE_SPIRV = $embed("shaders/heap_sample.comp.spv");
+const char[*] HEAP_VOLUME_WRITE_SPIRV =
+    $embed("shaders/heap_volume_write.comp.spv");
+const char[*] HEAP_VOLUME_SAMPLE_SPIRV =
+    $embed("shaders/heap_volume_sample.comp.spv");
 const char[*] HEAP_OFFSCREEN_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
 const char[*] HEAP_OFFSCREEN_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 
@@ -18,6 +22,13 @@ const uint STORAGE_SAMPLE_Y = 3;
 const uint STORAGE_GRAPHICS_TARGET_SIZE = 32;
 const usz STORAGE_GRAPHICS_TARGET_BYTES =
     STORAGE_GRAPHICS_TARGET_SIZE * STORAGE_GRAPHICS_TARGET_SIZE * 4;
+const uint HEAP_VOLUME_WIDTH = 4;
+const uint HEAP_VOLUME_HEIGHT = 4;
+const uint HEAP_VOLUME_DEPTH = 4;
+const uint HEAP_VOLUME_AREA = HEAP_VOLUME_WIDTH * HEAP_VOLUME_HEIGHT;
+const uint HEAP_VOLUME_TEXELS = HEAP_VOLUME_AREA * HEAP_VOLUME_DEPTH;
+const uint HEAP_VOLUME_OUTPUT_TEXELS =
+    HEAP_VOLUME_TEXELS + HEAP_VOLUME_AREA + 2;
 
 fn void bindless_texture_write_then_sample() @test {
     gpu::RuntimeDesc device_desc = {
@@ -233,6 +244,205 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::wait_completion(reused_completion)!!;
     assert_heap_pattern(&device, output.span, REUSED_TEX_SIZE);
     gpu::destroy_texture_view(&device, reused_view)!!;
+}
+
+fn void bindless_volume_write_load_and_sample() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_volume_heap_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureDesc image_desc = {
+        .access     = { .compute },
+        .width      = HEAP_VOLUME_WIDTH,
+        .height     = HEAP_VOLUME_HEIGHT,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .storage },
+        .debug_name = "heap_image_2d",
+    };
+    gpu::TextureDesc volume_desc = image_desc;
+    volume_desc.depth = HEAP_VOLUME_DEPTH;
+    volume_desc.debug_name = "heap_volume_3d";
+    if (!gpu::supports_texture_desc(&device, &volume_desc)!!) return;
+
+    gpu::TextureHandle image =
+        gpu::create_texture(&device, &image_desc)!!;
+    defer gpu::destroy_texture(&device, image)!!;
+    gpu::TextureView image_view =
+        gpu::create_texture_view(&device, image, null)!!;
+
+    gpu::TextureHandle volume =
+        gpu::create_texture(&device, &volume_desc)!!;
+    defer gpu::destroy_texture(&device, volume)!!;
+    gpu::TextureView volume_view =
+        gpu::create_texture_view(&device, volume, null)!!;
+    defer gpu::destroy_texture_view(&device, volume_view)!!;
+
+    gpu::SamplerDesc sampler_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .mip_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    gpu::SamplerIndex sampler =
+        gpu::intern_sampler(&device, &sampler_desc)!!;
+
+    OwnedSpan output = allocate_owned_span(
+        device:       &device,
+        size:         HEAP_VOLUME_OUTPUT_TEXELS * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .compute },
+        debug_name:   "heap_volume_output",
+    )!!;
+    defer free_owned_span(&device, &output)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         VolumeHeapRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "heap_volume_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    gpu::GpuSpan root_span = root_owned.span;
+    VolumeHeapRoot* root =
+        (VolumeHeapRoot*)test_span_mapping(&device, root_span).ptr;
+    root.output_gpu = test_span_address(&device, output.span);
+    root.texture_2d_index = image_view.index;
+    root.texture_3d_index = volume_view.index;
+    root.sampler_index = sampler;
+    root.width = HEAP_VOLUME_WIDTH;
+    root.height = HEAP_VOLUME_HEIGHT;
+    root.depth = HEAP_VOLUME_DEPTH;
+    gpu::flush_mapped_span(&device, root_span)!!;
+
+    gpu::ShaderDesc write_shader = {
+        .spirv       = HEAP_VOLUME_WRITE_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc write_desc = { .shader = write_shader };
+    gpu::PipelineHandle write_pipeline =
+        gpu::create_compute_pipeline(&device, &write_desc)!!;
+    defer gpu::destroy_pipeline(&device, write_pipeline)!!;
+    gpu::ShaderDesc sample_shader = {
+        .spirv       = HEAP_VOLUME_SAMPLE_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc sample_desc = { .shader = sample_shader };
+    gpu::PipelineHandle sample_pipeline =
+        gpu::create_compute_pipeline(&device, &sample_desc)!!;
+    defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
+
+    gpu::Queue queue =
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::TextureState storage_read_write =
+        gpu::storage_at({ .compute }, { .read, .write });
+    gpu::TextureBarrier image_to_storage = gpu::texture_transition(
+        texture: image,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   storage_read_write,
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &image_to_storage)!!;
+    gpu::TextureBarrier volume_to_storage = gpu::texture_transition(
+        texture: volume,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   storage_read_write,
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &volume_to_storage)!!;
+
+    bind_test_compute_pipeline(&commands, write_pipeline);
+    gpu::cmd_dispatch(
+        commands: &commands,
+        root:     test_span_address(&device, root_span),
+        groups:   { 1, 1, HEAP_VOLUME_DEPTH },
+    )!!;
+
+    gpu::TextureBarrier image_to_sample = gpu::texture_transition(
+        texture: image,
+        before:  storage_read_write,
+        after:   gpu::sampled_at({ .compute }),
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &image_to_sample)!!;
+    gpu::TextureBarrier volume_to_sample = gpu::texture_transition(
+        texture: volume,
+        before:  storage_read_write,
+        after:   gpu::sampled_at({ .compute }),
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &volume_to_sample)!!;
+
+    bind_test_compute_pipeline(&commands, sample_pipeline);
+    gpu::cmd_dispatch(
+        commands: &commands,
+        root:     test_span_address(&device, root_span),
+        groups:   { 1, 1, 1 },
+    )!!;
+    gpu::Barrier output_to_host = {
+        .before = { .compute },
+        .after  = { .host },
+    };
+    gpu::cmd_barrier(&commands, &output_to_host)!!;
+
+    gpu::ExecutableCommandList executable =
+        gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+    gpu::invalidate_mapped_span(&device, output.span)!!;
+
+    float* texels = (float*)test_span_mapping(&device, output.span).ptr;
+    uint volume_index =
+        3 * HEAP_VOLUME_AREA + 2 * HEAP_VOLUME_WIDTH + 1;
+    float* loaded_volume = &texels[volume_index * 4];
+    assert(quantize_unorm8(loaded_volume[0]) == 1
+            && quantize_unorm8(loaded_volume[1]) == 2
+            && quantize_unorm8(loaded_volume[2]) == 3
+            && quantize_unorm8(loaded_volume[3]) == 255,
+        "formatted 3D storage load sees the known stored volume texel");
+    uint image_index = 2 * HEAP_VOLUME_WIDTH + 1;
+    float* loaded_image =
+        &texels[(HEAP_VOLUME_TEXELS + image_index) * 4];
+    assert(quantize_unorm8(loaded_image[0]) == 1
+            && quantize_unorm8(loaded_image[1]) == 2
+            && quantize_unorm8(loaded_image[2]) == 17
+            && quantize_unorm8(loaded_image[3]) == 255,
+        "the same dispatch exercises the 2D storage declaration");
+    float* sampled_volume =
+        &texels[(HEAP_VOLUME_TEXELS + HEAP_VOLUME_AREA) * 4];
+    assert(quantize_unorm8(sampled_volume[0]) == 1
+            && quantize_unorm8(sampled_volume[1]) == 2
+            && quantize_unorm8(sampled_volume[2]) == 3
+            && quantize_unorm8(sampled_volume[3]) == 255,
+        "explicit-LOD 3D sampling sees the known volume texel");
+    float* sampled_image = sampled_volume + 4;
+    assert(quantize_unorm8(sampled_image[0]) == 1
+            && quantize_unorm8(sampled_image[1]) == 2
+            && quantize_unorm8(sampled_image[2]) == 17
+            && quantize_unorm8(sampled_image[3]) == 255,
+        "the sample dispatch exercises the 2D sampled declaration");
+
+    gpu::destroy_texture_view(&device, image_view)!!;
+    gpu::TextureView recycled =
+        gpu::create_texture_view(&device, volume, null)!!;
+    assert(recycled.index == image_view.index
+            && recycled.generation != image_view.generation,
+        "2D and 3D views recycle one shared logical texture slot namespace");
+    gpu::destroy_texture_view(&device, recycled)!!;
 }
 
 fn void storage_write_then_fragment_sample() @test {

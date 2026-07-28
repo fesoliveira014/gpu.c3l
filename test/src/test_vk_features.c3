@@ -723,6 +723,59 @@ fn void combined_texture_batch_keeps_binding_layouts_distinct() @test {
         "batched storage descriptors use the general layout");
 }
 
+fn void texture_descriptor_writes_route_by_dimension() @test {
+    gpu::internal::vk::DescriptorHeapState heap;
+    gpu::internal::vk::TextureSlot two_dimensional = {
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled, .storage },
+    };
+    gpu::internal::vk::TextureSlot three_dimensional = {
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled, .storage },
+        .depth  = 4,
+    };
+    vk::DescriptorImageInfo[4] image_infos;
+    vk::WriteDescriptorSet[4] writes;
+
+    uint write_count = gpu::internal::vk::accumulate_texture_descriptor_write(
+        heap:         &heap,
+        slot:         3,
+        texture_slot: &two_dimensional,
+        view:         {},
+        image_infos:  image_infos[..],
+        writes:       writes[..],
+        write_count:  0,
+    );
+    assert(write_count == 2,
+        "one 2D view emits at most sampled and storage writes");
+    assert(writes[0].dst_binding == gpu::internal::vk::HEAP_BINDING_SAMPLED_2D
+            && writes[1].dst_binding
+                == gpu::internal::vk::HEAP_BINDING_STORAGE_2D,
+        "2D writes target the 2D bindings");
+    assert(writes[0].dst_array_element == 3
+            && writes[1].dst_array_element == 3,
+        "2D sampled and storage writes share one logical slot");
+
+    write_count = gpu::internal::vk::accumulate_texture_descriptor_write(
+        heap:         &heap,
+        slot:         7,
+        texture_slot: &three_dimensional,
+        view:         {},
+        image_infos:  image_infos[..],
+        writes:       writes[..],
+        write_count:  write_count,
+    );
+    assert(write_count == 4,
+        "a mixed-dimensional batch emits at most two writes per view");
+    assert(writes[2].dst_binding == gpu::internal::vk::HEAP_BINDING_SAMPLED_3D
+            && writes[3].dst_binding
+                == gpu::internal::vk::HEAP_BINDING_STORAGE_3D,
+        "3D writes target the 3D bindings");
+    assert(writes[2].dst_array_element == 7
+            && writes[3].dst_array_element == 7,
+        "3D sampled and storage writes share one logical slot");
+}
+
 fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {
     gpu::internal::vk::TextureSlot color_slot = {
         .format       = gpu::Format.RGBA8_UNORM,

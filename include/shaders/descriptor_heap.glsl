@@ -1,9 +1,11 @@
 // gpu.c3l descriptor heap shader ABI.
 //
 // Set/binding convention (must match gpu/internal/vk/descriptor_heap.c3):
-//   set 0, binding 0  sampled images
-//   set 0, binding 1  storage images
+//   set 0, binding 0  sampled 2D images
+//   set 0, binding 1  storage 2D images
 //   set 0, binding 2  samplers
+//   set 0, binding 3  sampled 3D images
+//   set 0, binding 4  storage 3D images
 //
 // TextureIndex/SamplerIndex values are generation-free uints. Zero is invalid;
 // live values encode the zero-based heap slot plus one.
@@ -21,6 +23,8 @@
 layout(set = 0, binding = 0) uniform texture2D gpu_texture_heap[];
 layout(set = 0, binding = 1) uniform image2D gpu_storage_heap[];
 layout(set = 0, binding = 2) uniform sampler gpu_sampler_heap[];
+layout(set = 0, binding = 3) uniform texture3D gpu_texture_3d_heap[];
+layout(set = 0, binding = 4) uniform image3D gpu_storage_3d_heap[];
 // Aliased view of the sampler binding for depth-compare (shadow) access;
 // SPIR-V samplers are untyped, so both views share binding 2.
 layout(set = 0, binding = 2) uniform samplerShadow gpu_shadow_sampler_heap[];
@@ -46,6 +50,29 @@ vec4 sample_texture_2d_implicit(uint tex_index, uint smp_index, vec2 uv) {
         uv);
 }
 
+// Explicit-LOD sampling: usable from compute, where derivatives don't exist.
+vec4 sample_texture_3d(uint tex_index, uint smp_index, vec3 uvw) {
+    return textureLod(
+        sampler3D(
+            gpu_texture_3d_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
+            gpu_sampler_heap[nonuniformEXT(GPU_HEAP_SLOT(smp_index))]),
+        uvw,
+        0.0);
+}
+
+// Implicit-LOD sampling: fragment-stage use (derivatives drive mip selection).
+vec4 sample_texture_3d_implicit(
+    uint tex_index,
+    uint smp_index,
+    vec3 uvw
+) {
+    return texture(
+        sampler3D(
+            gpu_texture_3d_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
+            gpu_sampler_heap[nonuniformEXT(GPU_HEAP_SLOT(smp_index))]),
+        uvw);
+}
+
 // Depth-compare fetch: coord.xy samples, coord.z is the reference depth.
 // Explicit LOD — safe in any stage. The sampler must be compare-enabled.
 float sample_shadow_2d(uint tex_index, uint smp_index, vec3 coord) {
@@ -63,6 +90,19 @@ vec4 load_storage_texture(uint tex_index, ivec2 coord) {
 
 void store_storage_texture(uint tex_index, ivec2 coord, vec4 value) {
     imageStore(gpu_storage_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))], coord, value);
+}
+
+vec4 load_storage_texture_3d(uint tex_index, ivec3 coord) {
+    return imageLoad(
+        gpu_storage_3d_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
+        coord);
+}
+
+void store_storage_texture_3d(uint tex_index, ivec3 coord, vec4 value) {
+    imageStore(
+        gpu_storage_3d_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
+        coord,
+        value);
 }
 
 #endif

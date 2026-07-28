@@ -1647,14 +1647,14 @@ fn void device_loss_teardown_accepts_live_texture_views() @test {
 
 fn void heap_fits_limits_indexing_at_limit_fits() @test {
     gpu::internal::vk::IndexingHeapLimits limits = {
-        .max_sampled_images           = 100,
-        .max_storage_images           = 100,
+        .max_sampled_images           = 200,
+        .max_storage_images           = 200,
         .max_samplers                 = 50,
-        .max_per_stage_sampled_images = 100,
-        .max_per_stage_storage_images = 100,
+        .max_per_stage_sampled_images = 200,
+        .max_per_stage_storage_images = 200,
         .max_per_stage_samplers       = 50,
-        .max_per_stage_resources      = 200,
-        .max_all_pools_descriptors    = 250,
+        .max_per_stage_resources      = 450,
+        .max_all_pools_descriptors    = 450,
     };
     bool fits = gpu::internal::vk::indexing_heap_fits_limits(
         tex_capacity:   100,
@@ -1666,14 +1666,14 @@ fn void heap_fits_limits_indexing_at_limit_fits() @test {
 
 fn void heap_fits_limits_indexing_exceeds_per_stage_aggregate() @test {
     gpu::internal::vk::IndexingHeapLimits limits = {
-        .max_sampled_images           = 100,
-        .max_storage_images           = 100,
+        .max_sampled_images           = 200,
+        .max_storage_images           = 200,
         .max_samplers                 = 50,
-        .max_per_stage_sampled_images = 100,
-        .max_per_stage_storage_images = 100,
+        .max_per_stage_sampled_images = 200,
+        .max_per_stage_storage_images = 200,
         .max_per_stage_samplers       = 50,
-        .max_per_stage_resources      = 199,
-        .max_all_pools_descriptors    = 250,
+        .max_per_stage_resources      = 449,
+        .max_all_pools_descriptors    = 450,
     };
     bool fits = gpu::internal::vk::indexing_heap_fits_limits(
         tex_capacity:   100,
@@ -1683,36 +1683,17 @@ fn void heap_fits_limits_indexing_exceeds_per_stage_aggregate() @test {
     assert(!fits, "aggregate per-stage limit binds when all per-type limits fit");
 }
 
-fn void heap_fits_limits_indexing_excludes_samplers_from_per_stage_aggregate() @test {
-    gpu::internal::vk::IndexingHeapLimits limits = {
-        .max_sampled_images           = 100,
-        .max_storage_images           = 100,
-        .max_samplers                 = 50,
-        .max_per_stage_sampled_images = 100,
-        .max_per_stage_storage_images = 100,
-        .max_per_stage_samplers       = 50,
-        .max_per_stage_resources      = 200,
-        .max_all_pools_descriptors    = 250,
-    };
-    bool fits = gpu::internal::vk::indexing_heap_fits_limits(
-        tex_capacity:   100,
-        smp_capacity:   50,
-        limits:         limits,
-    );
-    assert(fits, "plain samplers do not count against the per-stage resource aggregate");
-}
-
 fn void heap_fits_limits_indexing_exceeds_all_pools_aggregate() @test {
     gpu::internal::vk::IndexingHeapLimits limits = {
 
-        .max_sampled_images           = 100,
-        .max_storage_images           = 100,
+        .max_sampled_images           = 200,
+        .max_storage_images           = 200,
         .max_samplers                 = 50,
-        .max_per_stage_sampled_images = 100,
-        .max_per_stage_storage_images = 100,
+        .max_per_stage_sampled_images = 200,
+        .max_per_stage_storage_images = 200,
         .max_per_stage_samplers       = 50,
-        .max_per_stage_resources      = 200,
-        .max_all_pools_descriptors    = 249,
+        .max_per_stage_resources      = 450,
+        .max_all_pools_descriptors    = 449,
     };
     bool fits = gpu::internal::vk::indexing_heap_fits_limits(
         tex_capacity:   100,
@@ -1735,7 +1716,7 @@ fn void heap_fits_limits_indexing_widens_aggregate_arithmetic() @test {
         .max_all_pools_descriptors    = uint::max,
     };
     bool fits = gpu::internal::vk::indexing_heap_fits_limits(
-        tex_capacity:   0x8000_0000,
+        tex_capacity:   0x4000_0000,
         smp_capacity:   0,
         limits:         limits,
     );
@@ -1744,14 +1725,14 @@ fn void heap_fits_limits_indexing_widens_aggregate_arithmetic() @test {
 
 fn void heap_fits_limits_indexing_exceeds_sampled_images() @test {
     gpu::internal::vk::IndexingHeapLimits limits = {
-        .max_sampled_images = 99,
-        .max_storage_images = 100,
+        .max_sampled_images = 199,
+        .max_storage_images = 200,
         .max_samplers       = 50,
-        .max_per_stage_sampled_images = 100,
-        .max_per_stage_storage_images = 100,
+        .max_per_stage_sampled_images = 200,
+        .max_per_stage_storage_images = 200,
         .max_per_stage_samplers       = 50,
-        .max_per_stage_resources      = 250,
-        .max_all_pools_descriptors    = 250,
+        .max_per_stage_resources      = 450,
+        .max_all_pools_descriptors    = 450,
     };
     assert(!gpu::internal::vk::indexing_heap_fits_limits(
         tex_capacity:   100,
@@ -1763,14 +1744,14 @@ fn void heap_fits_limits_indexing_exceeds_sampled_images() @test {
 
 fn void heap_fits_limits_indexing_exceeds_storage_images() @test {
     gpu::internal::vk::IndexingHeapLimits limits = {
-        .max_sampled_images = 100,
-        .max_storage_images = 99,
+        .max_sampled_images = 200,
+        .max_storage_images = 199,
         .max_samplers       = 50,
-        .max_per_stage_sampled_images = 100,
-        .max_per_stage_storage_images = 100,
+        .max_per_stage_sampled_images = 200,
+        .max_per_stage_storage_images = 200,
         .max_per_stage_samplers       = 50,
-        .max_per_stage_resources      = 250,
-        .max_all_pools_descriptors    = 250,
+        .max_per_stage_resources      = 450,
+        .max_all_pools_descriptors    = 450,
     };
     assert(!gpu::internal::vk::indexing_heap_fits_limits(
         tex_capacity:   100,
@@ -1782,14 +1763,14 @@ fn void heap_fits_limits_indexing_exceeds_storage_images() @test {
 
 fn void heap_fits_limits_indexing_exceeds_samplers() @test {
     gpu::internal::vk::IndexingHeapLimits limits = {
-        .max_sampled_images = 100,
-        .max_storage_images = 100,
+        .max_sampled_images = 200,
+        .max_storage_images = 200,
         .max_samplers       = 49,
-        .max_per_stage_sampled_images = 100,
-        .max_per_stage_storage_images = 100,
+        .max_per_stage_sampled_images = 200,
+        .max_per_stage_storage_images = 200,
         .max_per_stage_samplers       = 49,
-        .max_per_stage_resources      = 250,
-        .max_all_pools_descriptors    = 250,
+        .max_per_stage_resources      = 450,
+        .max_all_pools_descriptors    = 450,
     };
     assert(!gpu::internal::vk::indexing_heap_fits_limits(
         tex_capacity:   100,
@@ -1801,14 +1782,14 @@ fn void heap_fits_limits_indexing_exceeds_samplers() @test {
 
 fn void heap_fits_limits_indexing_exceeds_per_stage() @test {
     gpu::internal::vk::IndexingHeapLimits limits = {
-        .max_sampled_images           = 100,
-        .max_storage_images           = 100,
+        .max_sampled_images           = 200,
+        .max_storage_images           = 200,
         .max_samplers                 = 50,
-        .max_per_stage_sampled_images = 99,
-        .max_per_stage_storage_images = 100,
+        .max_per_stage_sampled_images = 199,
+        .max_per_stage_storage_images = 200,
         .max_per_stage_samplers       = 50,
-        .max_per_stage_resources      = 250,
-        .max_all_pools_descriptors    = 250,
+        .max_per_stage_resources      = 450,
+        .max_all_pools_descriptors    = 450,
     };
     bool fits = gpu::internal::vk::indexing_heap_fits_limits(
         tex_capacity:   100,

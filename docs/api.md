@@ -364,6 +364,11 @@ cannot satisfy them. On success,
 report the exact capacities of the created shader-visible heaps. A runtime capacity
 above the library hard ceiling is malformed and faults `INVALID_ARGUMENT`; a
 valid capacity unavailable on the selected adapter faults `UNSUPPORTED_FEATURE`.
+The texture capacity is one logical `TextureIndex` namespace shared by 2D and
+3D views. The backend reserves that capacity in each of four native image
+arrays, so an adapter must support `2T` sampled images, `2T` storage images, and
+the aggregate `4T + S` update-after-bind descriptors for configured capacities
+`T` and `S`.
 
 `DeviceCaps.timestamps` reports only selected logical roles that can execute the
 complete reset/write/resolve workflow. Each role has its own valid-bit width;
@@ -803,6 +808,10 @@ destruction.
 For 3D textures, a view uses native `TYPE_3D`, requires `base_layer == 0` and
 `layer_count` zero or one, and covers the complete depth of every selected mip.
 Arbitrary z-slice views and 3D attachment views are not exposed.
+Two-dimensional and three-dimensional views share one `TextureIndex` namespace
+and capacity. The backend publishes a view to the sampled and/or storage array
+for its dimension and usage. Shader data must select a heap helper matching the
+published texture dimension; `TextureIndex` itself carries no dimension tag.
 
 `create_texture_views` batch-publishes N views under one lock hold and ends in
 one accumulated update to the device-global descriptor set.

@@ -8,9 +8,13 @@ import std::core::mem;
 
 // Heap binding convention (set 0), mirrored by include/shaders/descriptor_heap.glsl.
 const uint HEAP_SET = 0;
-const uint HEAP_BINDING_SAMPLED = 0;
-const uint HEAP_BINDING_STORAGE = 1;
+const uint HEAP_BINDING_SAMPLED_2D = 0;
+const uint HEAP_BINDING_STORAGE_2D = 1;
 const uint HEAP_BINDING_SAMPLERS = 2;
+const uint HEAP_BINDING_SAMPLED_3D = 3;
+const uint HEAP_BINDING_STORAGE_3D = 4;
+const uint HEAP_BINDING_COUNT = 5;
+const uint HEAP_POOL_SIZE_COUNT = 3;
 const uint TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP = 64;
 
 enum TextureDescriptorKind : char {
@@ -41,6 +45,90 @@ struct DescriptorHeapState {
 struct PendingTextureWrite {
     TextureSlot*  texture_slot;
     vk::ImageView view;
+}
+
+struct DescriptorHeapLayoutPlan {
+    vk::DescriptorSetLayoutBinding[HEAP_BINDING_COUNT] bindings;
+    vk::DescriptorBindingFlags[HEAP_BINDING_COUNT]     binding_flags;
+}
+
+struct DescriptorHeapPoolPlan {
+    vk::DescriptorPoolSize[HEAP_POOL_SIZE_COUNT] sizes;
+}
+
+fn DescriptorHeapLayoutPlan descriptor_heap_layout_plan(
+    uint tex_capacity,
+    uint smp_capacity,
+) @private {
+    uint binding_flag_bits =
+        (uint)vk::DescriptorBindingFlagBits.UPDATE_AFTER_BIND_BIT
+        | (uint)vk::DescriptorBindingFlagBits.UPDATE_UNUSED_WHILE_PENDING_BIT
+        | (uint)vk::DescriptorBindingFlagBits.PARTIALLY_BOUND_BIT;
+    vk::DescriptorBindingFlags binding_flags =
+        (vk::DescriptorBindingFlags)binding_flag_bits;
+    return {
+        .bindings = {
+            {
+                .binding          = HEAP_BINDING_SAMPLED_2D,
+                .descriptor_type  = vk::DescriptorType.SAMPLED_IMAGE,
+                .descriptor_count = tex_capacity,
+                .stage_flags      = vk::ShaderStageFlagBits.ALL,
+            },
+            {
+                .binding          = HEAP_BINDING_STORAGE_2D,
+                .descriptor_type  = vk::DescriptorType.STORAGE_IMAGE,
+                .descriptor_count = tex_capacity,
+                .stage_flags      = vk::ShaderStageFlagBits.ALL,
+            },
+            {
+                .binding          = HEAP_BINDING_SAMPLERS,
+                .descriptor_type  = vk::DescriptorType.SAMPLER,
+                .descriptor_count = smp_capacity,
+                .stage_flags      = vk::ShaderStageFlagBits.ALL,
+            },
+            {
+                .binding          = HEAP_BINDING_SAMPLED_3D,
+                .descriptor_type  = vk::DescriptorType.SAMPLED_IMAGE,
+                .descriptor_count = tex_capacity,
+                .stage_flags      = vk::ShaderStageFlagBits.ALL,
+            },
+            {
+                .binding          = HEAP_BINDING_STORAGE_3D,
+                .descriptor_type  = vk::DescriptorType.STORAGE_IMAGE,
+                .descriptor_count = tex_capacity,
+                .stage_flags      = vk::ShaderStageFlagBits.ALL,
+            },
+        },
+        .binding_flags = {
+            binding_flags,
+            binding_flags,
+            binding_flags,
+            binding_flags,
+            binding_flags,
+        },
+    };
+}
+
+fn DescriptorHeapPoolPlan descriptor_heap_pool_plan(
+    uint tex_capacity,
+    uint smp_capacity,
+) @private {
+    return {
+        .sizes = {
+            {
+                .type             = vk::DescriptorType.SAMPLED_IMAGE,
+                .descriptor_count = tex_capacity * 2,
+            },
+            {
+                .type             = vk::DescriptorType.STORAGE_IMAGE,
+                .descriptor_count = tex_capacity * 2,
+            },
+            {
+                .type             = vk::DescriptorType.SAMPLER,
+                .descriptor_count = smp_capacity,
+            },
+        },
+    };
 }
 
 fn void? report_descriptor_backend_failure(
@@ -106,44 +194,19 @@ fn vk::Result create_descriptor_heap_layout(
     uint smp_capacity,
     vk::DescriptorSetLayout* out_layout,
 ) @private {
-    vk::DescriptorSetLayoutBinding[3] bindings = {
-        {
-            .binding          = HEAP_BINDING_SAMPLED,
-            .descriptor_type  = vk::DescriptorType.SAMPLED_IMAGE,
-            .descriptor_count = tex_capacity,
-            .stage_flags      = vk::ShaderStageFlagBits.ALL,
-        },
-        {
-            .binding          = HEAP_BINDING_STORAGE,
-            .descriptor_type  = vk::DescriptorType.STORAGE_IMAGE,
-            .descriptor_count = tex_capacity,
-            .stage_flags      = vk::ShaderStageFlagBits.ALL,
-        },
-        {
-            .binding          = HEAP_BINDING_SAMPLERS,
-            .descriptor_type  = vk::DescriptorType.SAMPLER,
-            .descriptor_count = smp_capacity,
-            .stage_flags      = vk::ShaderStageFlagBits.ALL,
-        },
-    };
-
-    uint binding_flag_bits = (uint)vk::DescriptorBindingFlagBits.UPDATE_AFTER_BIND_BIT
-        | (uint)vk::DescriptorBindingFlagBits.UPDATE_UNUSED_WHILE_PENDING_BIT
-        | (uint)vk::DescriptorBindingFlagBits.PARTIALLY_BOUND_BIT;
-    vk::DescriptorBindingFlags[3] binding_flags = {
-        (vk::DescriptorBindingFlags)binding_flag_bits,
-        (vk::DescriptorBindingFlags)binding_flag_bits,
-        (vk::DescriptorBindingFlags)binding_flag_bits,
-    };
+    DescriptorHeapLayoutPlan plan = descriptor_heap_layout_plan(
+        tex_capacity,
+        smp_capacity,
+    );
     vk::DescriptorSetLayoutBindingFlagsCreateInfo flags_info =
         vk::descriptor_set_layout_binding_flags_create_info()
-            .set_binding_flags(binding_flags[..]);
+            .set_binding_flags(plan.binding_flags[..]);
 
     vk::DescriptorSetLayoutCreateInfo layout_info =
         vk::descriptor_set_layout_create_info()
             .set_next(&flags_info)
             .set_flags(vk::DescriptorSetLayoutCreateFlagBits.UPDATE_AFTER_BIND_POOL_BIT)
-            .set_bindings(bindings[..]);
+            .set_bindings(plan.bindings[..]);
     return vk::create_descriptor_set_layout(device, &layout_info, null, out_layout);
 }
 
@@ -170,15 +233,14 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
         ),
     )!;
 
-    vk::DescriptorPoolSize[3] pool_sizes = {
-        { .type = vk::DescriptorType.SAMPLED_IMAGE, .descriptor_count = tex_capacity },
-        { .type = vk::DescriptorType.STORAGE_IMAGE, .descriptor_count = tex_capacity },
-        { .type = vk::DescriptorType.SAMPLER,       .descriptor_count = smp_capacity },
-    };
+    DescriptorHeapPoolPlan pool = descriptor_heap_pool_plan(
+        tex_capacity,
+        smp_capacity,
+    );
     vk::DescriptorPoolCreateInfo pool_info = vk::descriptor_pool_create_info()
         .set_flags(vk::DescriptorPoolCreateFlagBits.UPDATE_AFTER_BIND_BIT)
         .set_max_sets(1)
-        .set_pool_sizes(pool_sizes[..]);
+        .set_pool_sizes(pool.sizes[..]);
     check_descriptor_pool_backend_result(
         state:     state,
         operation: "create_device",
@@ -258,6 +320,18 @@ fn vk::ImageLayout texture_descriptor_layout(
             : gpu::TextureLayout.SAMPLED,
         texture.format,
     );
+}
+
+fn uint sampled_texture_binding(TextureSlot* texture) @private {
+    return texture_slot_is_3d(texture)
+        ? HEAP_BINDING_SAMPLED_3D
+        : HEAP_BINDING_SAMPLED_2D;
+}
+
+fn uint storage_texture_binding(TextureSlot* texture) @private {
+    return texture_slot_is_3d(texture)
+        ? HEAP_BINDING_STORAGE_3D
+        : HEAP_BINDING_STORAGE_2D;
 }
 
 fn TextureDescriptorCell*? texture_cell_get(
@@ -358,7 +432,7 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
         };
         writes[write_count] = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
-            .set_dst_binding(HEAP_BINDING_SAMPLED)
+            .set_dst_binding(sampled_texture_binding(texture))
             .set_dst_array_element(slot)
             .set_descriptor_type(vk::DescriptorType.SAMPLED_IMAGE)
             .set_image_info((&image_infos[write_count])[:1]);
@@ -374,7 +448,7 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
         };
         writes[write_count] = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
-            .set_dst_binding(HEAP_BINDING_STORAGE)
+            .set_dst_binding(storage_texture_binding(texture))
             .set_dst_array_element(slot)
             .set_descriptor_type(vk::DescriptorType.STORAGE_IMAGE)
             .set_image_info((&image_infos[write_count])[:1]);
@@ -660,7 +734,7 @@ fn uint accumulate_texture_descriptor_write(
         };
         writes[write_count] = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
-            .set_dst_binding(HEAP_BINDING_SAMPLED)
+            .set_dst_binding(sampled_texture_binding(texture_slot))
             .set_dst_array_element(slot)
             .set_descriptor_type(vk::DescriptorType.SAMPLED_IMAGE)
             .set_image_info((&image_infos[write_count])[:1]);
@@ -676,7 +750,7 @@ fn uint accumulate_texture_descriptor_write(
         };
         writes[write_count] = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
-            .set_dst_binding(HEAP_BINDING_STORAGE)
+            .set_dst_binding(storage_texture_binding(texture_slot))
             .set_dst_array_element(slot)
             .set_descriptor_type(vk::DescriptorType.STORAGE_IMAGE)
             .set_image_info((&image_infos[write_count])[:1]);
