@@ -69,6 +69,8 @@ gpu/internal/vk/swapchain.c3            swapchain lifecycle and presentation
 gpu/internal/vk/lifetime.c3             FULL command resource lifetime tracking
 gpu/internal/vk/debug.c3                debug names, leak reports
 gpu/internal/vk/helpers.c3              enum and flag translation helpers
+gpu/internal/vk/timestamp_caps.c3       selected-role timestamp capabilities
+gpu/internal/vk/timestamp.c3            query-pool storage, commands, and reads
 gpu/internal/vk/validate.c3             descriptor and command validation helpers
 ```
 
@@ -229,6 +231,14 @@ distinct-role constraints, presentation graphics requirement, and topology witho
 enabling state. Surface formats and present modes remain swapchain-creation
 concerns.
 
+Timestamp capabilities are derived after queue selection. The backend retains
+the selected families' `timestampValidBits` independently for graphics, compute,
+and transfer and publishes a role only when its native queue also supports
+graphics or compute commands. Aliased roles reuse their shared family width. A
+dedicated transfer-only family is excluded even when it reports nonzero
+timestamp bits, because reset and query-result copy cannot execute the complete
+public workflow there.
+
 ## 6. Logical device creation
 
 Logical device creation builds a Vulkan feature chain.
@@ -331,6 +341,12 @@ when present. It appends only the first occurrence of each family. Vulkan
 receives one `DeviceQueueCreateInfo` per resulting family. Its `queueCount` is
 the highest selected or presentation queue index in that family plus one, with
 one priority value per allocated index.
+
+`DeviceCaps.timestamps.period_ns` comes from
+`VkPhysicalDeviceLimits.timestampPeriod`; the valid-bit fields come from the
+selected queue-family properties. If no selected role supports the complete
+workflow, the role mask and widths remain empty and the period is published as
+zero without failing device creation.
 
 ## 7. VMA allocator integration
 
@@ -703,6 +719,13 @@ resolves. Expected WSI recovery outcomes are silent even with a callback:
 acquire `TIMEOUT`/`NOT_READY` and a busy present fence return `WAIT_TIMEOUT`, and
 dormant acquire returns `SWAPCHAIN_OUT_OF_DATE`, without diagnostic delivery.
 
+Timestamp host reads have their own expected result mapping.
+`vkGetQueryPoolResults` uses 64-bit results without `WAIT_BIT`;
+`VK_NOT_READY` maps to `DEVICE_BUSY` without retrying or waiting. The native
+call may have modified output before returning not-ready, so the public output
+range remains unspecified on that fault. Other native results use the ordinary
+state-aware mapping.
+
 A rejected warm pipeline-cache blob may be retried with an empty cache. Host or
 device allocation failure and explicit device loss propagate without retry.
 
@@ -807,6 +830,22 @@ Core create/begin/record/end/discard/submit/retire and generated-reservation
 paths use explicit allocator-owned or bounded stack storage. They do not access
 an ambient per-thread recording cache or require a C3 temporary pool. Creation
 and generated reservation remain the intentional cold allocation points.
+
+Timestamp commands occupy dedicated entries in both immutable operation tables.
+Reset lowers to `vkCmdResetQueryPool`; write lowers one public stage to
+`vkCmdWriteTimestamp2`; resolve lowers to `vkCmdCopyQueryPoolResults` with
+`VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT`, `ulong::size` stride, and
+an aligned caller-owned destination. The wait occurs during device execution at
+the resolve point and never blocks command recording. Reset and resolve require
+recording outside a render pass; write preserves an active render pass.
+
+`FULL` validates the selected timestamp-capable role, exact write-stage shape,
+destination usage/access, and command-resource lifetime. It retains the pool,
+plus the destination allocation for resolve, transactionally. `TRUSTED`
+performs safe table/range/lowering checks but no command-reference work. Neither
+table tracks per-slot reset or write history. The caller resets before reuse,
+writes before resolve/read, orders host reads after execution, and compares only
+values written on the same native queue.
 
 ## 13. Synchronization
 
@@ -1080,8 +1119,8 @@ wait and owns no deferred-release queue. Swapchain destruction and resize use
 private presentation fences to prove WSI retirement without hidden waits.
 
 Under `FULL`, command references cover explicitly
-named spans, textures, attachment views, allocations, and pipelines across
-recording, executable, and incomplete submitted work. Destruction drains only
+named spans, textures, attachment views, allocations, pipelines, and timestamp
+pools across recording, executable, and incomplete submitted work. Destruction drains only
 already-completed reference records with non-blocking timeline queries; a
 remaining reference returns `RESOURCE_IN_USE`. Under `TRUSTED`, recording allocates
 no reference storage and discard, retirement, device loss, and teardown perform
@@ -1089,6 +1128,12 @@ no reference-release work. The backend adds no implicit wait: callers retain
 owners until the covering completion is observed. GPU addresses and shader
 indices remain caller-managed because they cannot be enumerated from a command
 stream.
+
+Timestamp pool creation allocates one native `VkQueryPool` and publishes it in a
+fixed generational table with copied debug name, capacity, and retained-reference
+counter. Recording and host reads allocate no staging or scratch storage.
+Device teardown reports live timestamp pools before defensively destroying
+their native objects.
 
 Placed and dedicated textures retain their allocation until texture destruction.
 Releasing an allocation with a live placement returns `RESOURCE_IN_USE`.

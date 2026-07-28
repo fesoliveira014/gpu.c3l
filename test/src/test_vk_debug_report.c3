@@ -77,6 +77,7 @@ struct LeakCapture {
     uint pipelines;
     uint shaders;
     uint command_allocators;
+    uint timestamp_pools;
 
     uint texture_descriptors;
     uint samplers;
@@ -142,6 +143,11 @@ fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
             capture.named_resources_valid = capture.named_resources_valid
                 && message.resource.debug_name != null
                 && message.resource.debug_name.str_view() == "leaky_command_allocator";
+        case gpu::DebugResourceKind.TIMESTAMP_POOL:
+            capture.timestamp_pools++;
+            capture.named_resources_valid = capture.named_resources_valid
+                && message.resource.debug_name != null
+                && message.resource.debug_name.str_view() == "leaky_timestamp_pool";
 
         case gpu::DebugResourceKind.TEXTURE_DESCRIPTOR: capture.texture_descriptors++;
         case gpu::DebugResourceKind.SAMPLER:            capture.samplers++;
@@ -574,6 +580,12 @@ fn void leak_reporters_count_leaks() @test {
         queue:  queue,
         desc:   &allocator_desc,
     )!!;
+    gpu::TimestampPoolDesc timestamp_desc = {
+        .capacity   = 2,
+        .debug_name = "leaky_timestamp_pool",
+    };
+    gpu::TimestampPoolHandle timestamp_pool =
+        gpu::create_timestamp_pool(&device, &timestamp_desc)!!;
 
     gpu::TextureView texture_index_view = gpu::create_texture_view(&device, texture, null)!!;
     gpu::TextureIndex texture_index = texture_index_view.index;
@@ -604,21 +616,24 @@ fn void leak_reporters_count_leaks() @test {
     assert(vk::report_pipeline_leaks(state) == 1, "one leaked cache entry counted");
     assert(vk::report_command_allocator_leaks(state) == 1,
         "one leaked command allocator counted");
+    assert(vk::report_timestamp_pool_leaks(state) == 1,
+        "one leaked timestamp pool counted");
 
     vk::report_descriptor_leaks(state);
 
-    assert(capture.total == 6, "each leaked resource or owned descriptor emits one warning");
+    assert(capture.total == 7, "each leaked resource or owned descriptor emits one warning");
     assert(capture.allocations == 1 && capture.gpu_spans == 1
         && capture.textures == 1 && capture.pipelines == 1
-        && capture.command_allocators == 1,
-        "allocation, GPU span, texture, pipeline, and command allocator leak kinds are exact");
+        && capture.command_allocators == 1
+        && capture.timestamp_pools == 1,
+        "allocation, GPU span, texture, pipeline, command allocator, and timestamp leak kinds are exact");
     assert(capture.shaders == 0,
         "borrowed shader input is not a live resource");
     assert(capture.texture_descriptors == 1 && capture.samplers == 0,
         "device-owned samplers are not descriptor leaks");
     assert(state.textures.get(texture)!!.live_descriptor_views == 1,
         "leak reporting does not decrement owner counts during table sweeps");
-    assert(capture.public_identities == 5,
+    assert(capture.public_identities == 6,
         "only exact public resources carry slot identities");
     assert(capture.private_span_identity_hidden,
         "private backing storage exposes no private handle identity");
@@ -633,6 +648,7 @@ fn void leak_reporters_count_leaks() @test {
     assert(tex_slot.allocation_size > 0, "texture leak line carries the allocation size");
 
     gpu::destroy_texture_view(&device, texture_index_view)!!;
+    gpu::destroy_timestamp_pool(&device, timestamp_pool)!!;
     gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::destroy_pipeline(&device, first_alias)!!;
     gpu::destroy_pipeline(&device, second_alias)!!;
@@ -641,7 +657,7 @@ fn void leak_reporters_count_leaks() @test {
     gpu::free_allocation(&device, &allocation)!!;
 
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
-    assert(capture.total == 6, "clean leak report emits nothing");
+    assert(capture.total == 7, "clean leak report emits nothing");
     destroy_test_device(&device)!!;
 }
 

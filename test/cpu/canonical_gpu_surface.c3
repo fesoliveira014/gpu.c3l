@@ -24,6 +24,13 @@ fn void pin_runtime_adapter_device() {
         .async_compute                = true,
         .queues                       = { .graphics, .compute, .transfer },
         .line_polygon_mode            = true,
+        .timestamps                   = {
+            .queues              = { .graphics, .compute, .transfer },
+            .graphics_valid_bits = 64,
+            .compute_valid_bits  = 64,
+            .transfer_valid_bits = 64,
+            .period_ns           = 1.0f,
+        },
         .texture_heap_capacity        = 1,
         .sampler_heap_capacity        = 1,
         .max_color_attachments        = 1,
@@ -60,6 +67,7 @@ fn void pin_runtime_adapter_device() {
     (void)caps.async_compute;
     (void)caps.queues;
     (void)caps.line_polygon_mode;
+    (void)caps.timestamps;
     (void)caps.texture_heap_capacity;
     (void)caps.sampler_heap_capacity;
     (void)caps.max_color_attachments;
@@ -72,6 +80,66 @@ fn void pin_runtime_adapter_device() {
     (void)caps.min_texel_buffer_alignment;
     (void)caps.max_sampler_lod_bias;
     (void)caps.max_sampler_anisotropy;
+}
+
+fn void pin_timestamps() {
+    gpu::Device device = {};
+    gpu::CommandList commands = {};
+    gpu::TimestampPoolDesc desc = {
+        .capacity   = 2,
+        .debug_name = "canonical_timestamp_pool",
+    };
+    gpu::TimestampPoolHandle pool = gpu::TIMESTAMP_POOL_HANDLE_INVALID;
+    gpu::TimestampCaps caps = {
+        .queues              = { .compute = true },
+        .compute_valid_bits  = 64,
+        .period_ns           = 1.0f,
+    };
+    gpu::GpuSpan dst = {};
+    ulong[2] values;
+
+    (void)pool.is_valid();
+    (void)(pool == gpu::TIMESTAMP_POOL_HANDLE_INVALID);
+    (void)gpu::DebugResourceKind.TIMESTAMP_POOL;
+    (void)caps.queues;
+    (void)caps.graphics_valid_bits;
+    (void)caps.compute_valid_bits;
+    (void)caps.transfer_valid_bits;
+    (void)caps.period_ns;
+    (void)gpu::create_timestamp_pool(&device, &desc);
+    (void)gpu::destroy_timestamp_pool(&device, pool);
+    (void)gpu::cmd_reset_timestamps(
+        commands: &commands,
+        pool:     pool,
+        first:    0,
+        count:    2,
+    );
+    (void)gpu::cmd_write_timestamp(
+        commands: &commands,
+        pool:     pool,
+        index:    0,
+        stage:    { .compute = true },
+    );
+    (void)gpu::cmd_resolve_timestamps(
+        commands: &commands,
+        pool:     pool,
+        first:    0,
+        count:    2,
+        dst:      dst,
+    );
+    (void)gpu::read_timestamps(
+        device: &device,
+        pool:   pool,
+        first:  0,
+        count:  2,
+        out:    values[..],
+    );
+    (void)gpu::timestamp_delta_ns(
+        caps:  &caps,
+        queue: gpu::QueueKind.COMPUTE,
+        begin: values[0],
+        end:   values[1],
+    );
 }
 
 fn void pin_memory_and_resources() {

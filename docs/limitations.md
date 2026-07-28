@@ -56,6 +56,13 @@ page doesn't explain it, that's a bug in this page — file an issue.
   stores no global or per-subresource layout history and inserts no repair
   transition. Applications must retain separate history for independently
   transitioned mip/layer ranges.
+- **Timestamp history and correlation are caller-owned.** The library inserts
+  no implicit query reset and does not track whether individual slots were reset
+  or written, including under `FULL`. Reset before reuse, write every query
+  before resolve or host read, and order reads after execution. Compare raw
+  values only when both writes used the same native queue; distinct native
+  queues are not calibrated. Resolve waits for availability on the device, so
+  resolving an unwritten query can stall that queue indefinitely.
 - **Texture layouts use one explicit profile.** Transfer, sampled, storage,
   attachment, initialization, and presentation states lower to their
   corresponding classic Vulkan layouts on every device. A global barrier has
@@ -134,6 +141,7 @@ exists (else the limit is compile-time).
 | Live textures | 1024 default, 65 536 max (`DEFAULT_TEXTURE_CAPACITY`, `MAX_SHADER_HEAP_CAPACITY` in `gpu/gpu.c3i`) | `texture_capacity` | `SLOT_TABLE_FULL` |
 | Live independent allocations | 4096 (`ALLOCATION_CAPACITY` in `gpu/internal/vk/allocation.c3`) | — | `SLOT_TABLE_FULL` |
 | Live pipelines | 256 by default (`MAX_PIPELINES` in `gpu/gpu.c3i`) | `pipeline_capacity` | `SLOT_TABLE_FULL` |
+| Live timestamp pools | 256 (`MAX_TIMESTAMP_POOLS` in `gpu/internal/vk/timestamp.c3`) | destroy quiescent pools to recycle generational slots | `SLOT_TABLE_FULL` |
 | Direct dispatch groups per axis | Selected-device `maxComputeWorkGroupCount`, reported by `DeviceCaps.max_compute_work_group_count` | — | `INVALID_ARGUMENT` |
 | Direct or count-buffer indirect draws per command | Selected-device `maxDrawIndirectCount`, reported by `DeviceCaps.max_draw_indirect_count` | — | `INVALID_ARGUMENT` |
 | Generated work items | Selected-device semantic limit reported by `DeviceCaps.max_generated_work_count`; zero when unsupported | — | — |
@@ -226,6 +234,14 @@ Anything the device can answer at runtime lives in `DeviceCaps` (filled at
 `max_generated_work_count`), and semantic feature booleans such as
 `draw_indirect_count` and `generated_work`. Native implementation choices are
 not reported.
+
+`DeviceCaps.timestamps` is queue-role-specific. Its graphics, compute, and
+transfer widths come from the selected native families rather than one
+device-wide counter width. A transfer role is reported only when its selected
+queue also supports graphics or compute; an aliased transfer role can therefore
+be available while a dedicated transfer-only role is not. The conversion period
+is device-wide, but that does not make values from distinct native queues
+comparable.
 
 Viewport dimensions and coordinate bounds are an intentional exception: the
 backend consumes them privately to validate `cmd_set_graphics_state` and

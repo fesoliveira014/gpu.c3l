@@ -4,6 +4,8 @@ The test strategy is compiler- and behavior-first:
 
 - compile real consumers of the public `gpu` bundle and surface modules;
 - run CPU C3 tests for public contracts and shader ABI layout;
+- cover timestamp conversion and selected-role capability resolution with
+  injected CPU/whitebox cases;
 - regenerate and check shipped shader ABI artifacts;
 - compile every GLSL and SPIR-V assembly fixture;
 - run consolidated C3 tests against Vulkan with validation enabled;
@@ -121,7 +123,10 @@ c3c test vk_optional_generated_work --path test --test-show-output
   textures/views/samplers, reflection and root ABI, pipelines/cache, command
   recording and lifecycle, graphics/compute/transfer output, depth,
   threading, queues, submission/completion, diagnostics, rollback, and
-  validation policy.
+  validation policy. Timestamp coverage includes pool lifecycle, role-specific
+  valid-bit selection, aliased and transfer-only queues, exact reset/write/resolve
+  lowering, caller-owned history, packed resolve output, direct host reads, and
+  `DEVICE_BUSY` without host waiting.
 - `vk_wsi` covers swapchain configuration, acquisition, present, resize,
   ownership, result mapping, and WSI diagnostics without requiring a native
   window.
@@ -136,6 +141,14 @@ message format.
 Some tests use narrow private helpers or operation-local seams to observe
 otherwise hidden transactional behavior. Those are test implementation
 details, not public interfaces or output schemas.
+
+Timestamp tests keep two distinct wait contracts observable: command resolve
+records a device-side availability wait, while `read_timestamps` requests no
+native wait and allocates no staging. The not-ready case must ignore output
+contents because the requested range is unspecified on `DEVICE_BUSY`.
+Validation tests cover deterministic bounds, phase, role, stage, usage, access,
+and lifetime behavior; they do not assert per-slot reset/write diagnostics,
+because neither `FULL` nor `TRUSTED` tracks that history.
 
 ## Manual benchmarks
 

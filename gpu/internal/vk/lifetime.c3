@@ -68,6 +68,15 @@ fn Atomic{uint}*? tracked_command_reference_counter(
         AttachmentViewSlot* slot = state.attachment_views.get(view)!;
         return &slot.tracked_command_references;
     }
+    if (reference.owner == state.timestamp_pools.owner) {
+        gpu::TimestampPoolHandle pool = {
+            .owner      = reference.owner,
+            .index      = reference.index,
+            .generation = reference.generation,
+        };
+        TimestampPoolSlot* slot = state.timestamp_pools.get(pool)!;
+        return &slot.tracked_command_references;
+    }
     if (reference.owner == state.pipelines.owner) {
         gpu::PipelineHandle pipeline = {
             .owner = reference.owner, .index = reference.index,

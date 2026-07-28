@@ -301,6 +301,7 @@ DeviceCaps
     bool async_compute
     QueueRoles queues
     bool line_polygon_mode
+    TimestampCaps timestamps
     uint texture_heap_capacity
     uint sampler_heap_capacity
     uint max_color_attachments
@@ -313,6 +314,13 @@ DeviceCaps
     usz min_texel_buffer_alignment
     float max_sampler_lod_bias
     float max_sampler_anisotropy
+
+TimestampCaps
+    QueueRoles queues
+    uint graphics_valid_bits
+    uint compute_valid_bits
+    uint transfer_valid_bits
+    float period_ns
 
 Device                           (slot | generation | reserved)
 get_device_caps(Device*)         -> DeviceCaps?
@@ -340,6 +348,14 @@ cannot satisfy them. On success,
 report the exact capacities of the created shader-visible heaps. A runtime capacity
 above the library hard ceiling is malformed and faults `INVALID_ARGUMENT`; a
 valid capacity unavailable on the selected adapter faults `UNSUPPORTED_FEATURE`.
+
+`DeviceCaps.timestamps` reports only selected logical roles that can execute the
+complete reset/write/resolve workflow. Each role has its own valid-bit width;
+unsupported roles have width zero. An aliased transfer role is available when
+its native queue supports graphics or compute and reports nonzero timestamp
+bits. A dedicated transfer-only queue is excluded even when it reports
+timestamp bits. `period_ns` is device-wide and is zero only when no selected
+role supports the workflow.
 
 Creation:
 
@@ -389,11 +405,13 @@ TextureView
 PipelineHandle
 SwapchainHandle
 CommandAllocatorHandle
+TimestampPoolHandle
 ```
 
 Owning tokens have zero-valued invalid constants such as
 `GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`, `TEXTURE_VIEW_INVALID`,
-`COMMAND_ALLOCATOR_HANDLE_INVALID`, and their peers.
+`COMMAND_ALLOCATOR_HANDLE_INVALID`, `TIMESTAMP_POOL_HANDLE_INVALID`, and their
+peers.
 `token.is_valid()` checks the owner and generation; operations also validate
 the local slot generation. Public code should not inspect or construct the
 representation.
@@ -465,14 +483,14 @@ both always-checked and `FULL`-only causes.
 | Fault | Cause category | Fired by | Typical cause |
 |---|---|---|---|
 | `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the Vulkan loader, driver, or required backend initialization path is unavailable |
-| `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_timestamp_pool`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, timestamp recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; no selected role supports the timestamp workflow; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; device descriptor validation; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
 | `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource handle; or a zero, stale, consumed, or wrong-phase valid-origin direct command token; submit also rejects a token recorded for another device |
 | `INVALID_RESOURCE_STATE` | Always checked lifecycle/safe snapshot / Runtime failures | command execution; surface and swapchain creation/lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an authoritative lifecycle transition is invalid, trusted-table command execution has no usable bound-pipeline snapshot, a borrowed view was passed for destruction, a generated-scratch key is not reserved, or Vulkan reports that the native window is already in use |
 | `OUT_OF_HOST_MEMORY` | Runtime failures | creates; mapped visibility | driver or backend cache host-allocation failure |
 | `OUT_OF_DEVICE_MEMORY` | Runtime failures | allocator, allocation, and texture creates; mapped visibility | backend device-memory exhaustion |
 | `DEVICE_LOST` | Runtime failures | any Vulkan-backed operation | Vulkan returned `VK_ERROR_DEVICE_LOST`; the affected device rejects later operations while peer devices remain usable |
-| `DEVICE_BUSY` | Runtime failures / Always checked lifecycle | public device operations; `begin_commands`; `submit`; `destroy_device` | closing state, bounded pin or allocator-unit contention, timeline headroom, active operations, or incomplete queue work; retry with the unchanged token |
+| `DEVICE_BUSY` | Runtime failures / Always checked lifecycle | public device operations; `read_timestamps`; `begin_commands`; `submit`; `destroy_device` | closing state, unavailable timestamp results, bounded pin or allocator-unit contention, timeline headroom, active operations, or incomplete queue work; retry, and ignore timestamp output after a not-ready read |
 | `RESOURCE_IN_USE` | Always checked lifecycle | resource or swapchain destruction/resize, `free_allocation`, allocator destruction, generated-scratch reservation/release, `destroy_device`, `destroy_runtime`, `destroy_surface` | a detected live owner, dependent, command reference, acquisition, presentation, child, or non-quiescent allocator prevents immediate mutation or destruction |
 | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` | Runtime failures | generated-scratch reservation; generated command recording; tracked command recording | fixed reference, generated-index, reservation-table, or preprocess-byte storage cannot represent valid requested work |
 | `SLOT_TABLE_FULL` | Runtime failures | runtime, device, allocator, allocation, and resource creates; `intern_sampler`; `acquire_next_image`; queue submission | a registry or handle table is at capacity, or a queue completion or swapchain acquisition sequence is exhausted |
@@ -1748,6 +1766,92 @@ get_span_mapping
 The caller owns the allocation, barriers, completion point, and mapped data.
 No application work boundary or readback-specific token is required.
 
+### Timestamp queries
+
+```text
+TimestampPoolHandle
+    ulong owner
+    uint index
+    uint generation
+
+TimestampPoolDesc
+    uint capacity
+    ZString debug_name
+
+create_timestamp_pool(
+    Device* device,
+    TimestampPoolDesc* desc,
+) -> TimestampPoolHandle?
+destroy_timestamp_pool(
+    Device* device,
+    TimestampPoolHandle pool,
+) -> void?
+cmd_reset_timestamps(
+    CommandList* commands,
+    TimestampPoolHandle pool,
+    uint first,
+    uint count,
+) -> void?
+cmd_write_timestamp(
+    CommandList* commands,
+    TimestampPoolHandle pool,
+    uint index,
+    StageMask stage,
+) -> void?
+cmd_resolve_timestamps(
+    CommandList* commands,
+    TimestampPoolHandle pool,
+    uint first,
+    uint count,
+    GpuSpan dst,
+) -> void?
+read_timestamps(
+    Device* device,
+    TimestampPoolHandle pool,
+    uint first,
+    uint count,
+    ulong[] out,
+) -> void?
+timestamp_delta_ns(
+    TimestampCaps* caps,
+    QueueKind queue,
+    ulong begin,
+    ulong end,
+) -> double?
+```
+
+Pool capacity must be positive, and the device must report at least one role in
+`DeviceCaps.timestamps.queues`. Reset and resolve use nonempty in-bounds ranges;
+write uses one in-bounds index. Reset and resolve record only outside a render
+pass. Write is valid inside or outside a render pass and, under `FULL`, requires
+exactly one executable stage supported by the recording queue.
+
+Resolve writes `count` tightly packed `ulong` values at the start of `dst`. The
+destination offset is aligned to `ulong::size`, the span covers the complete
+result, and under `FULL` it admits transfer-destination use by the recording
+queue. Resolve requests availability on the device, so command recording does
+not block the host. An ordered resolve of an unwritten query can leave the
+device waiting indefinitely.
+
+`read_timestamps` directly requests 64-bit results into `out[0..count]` and
+never waits, allocates staging, or establishes submission completion. If any
+requested result is unavailable, it returns `DEVICE_BUSY`; the requested output
+range is unspecified and must be ignored. Order the read after the relevant
+submission completion and retry explicitly.
+
+The caller owns query history in both validation modes: reset before reuse,
+write every query before resolve or host read, and keep the pool and destination
+alive through execution. `FULL` retains the pool for recorded commands and the
+resolve destination allocation, but does not track per-slot reset/write state.
+`TRUSTED` performs no command-reference work.
+
+`timestamp_delta_ns` masks and subtracts using the selected role's valid-bit
+width, handles one modular counter wrap, and scales by `period_ns`. Compare only
+timestamps written on the same native queue. Different logical roles are
+comparable only when they alias that queue; distinct native queues are not
+calibrated by this API. An unadvertised role returns `UNSUPPORTED_FEATURE`;
+invalid capabilities, role values, widths, or periods return `INVALID_ARGUMENT`.
+
 ### Barriers
 
 ```text
@@ -1946,6 +2050,9 @@ native result code.
 
 Stored public debug names remain available in every policy;
 `enable_debug_names` controls best-effort Vulkan object naming independently.
+Timestamp pool names are copied at creation, used for native object naming when
+enabled, and reported as `DebugResourceKind.TIMESTAMP_POOL` with public identity
+during eligible teardown leak scans.
 
 `TRUSTED` still reports backend/device failures, but does not promise detailed
 misuse diagnostics, retain command resources, or run teardown leak scans.

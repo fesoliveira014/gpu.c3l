@@ -40,9 +40,10 @@ enum ResourceOwnerKind @private {
     COMMAND_ALLOCATOR,
     COMMAND,
     COMPLETION_POINT,
+    TIMESTAMP_POOL,
 }
 
-$assert (ulong)ResourceOwnerKind.COMPLETION_POINT + 1
+$assert (ulong)ResourceOwnerKind.TIMESTAMP_POOL + 1
     == gpu::RESOURCE_OWNER_KIND_COUNT;
 
 bitstruct DeviceSlotControl : ulong @private {

@@ -127,6 +127,25 @@ alias CmdBeginLabelFn @private = fn void? (
     float[4],
 );
 alias CmdEndLabelFn @private = fn void? (CommandRecord*);
+alias CmdResetTimestampsFn @private = fn void? (
+    CommandRecord*,
+    gpu::TimestampPoolHandle,
+    uint,
+    uint,
+);
+alias CmdWriteTimestampFn @private = fn void? (
+    CommandRecord*,
+    gpu::TimestampPoolHandle,
+    uint,
+    gpu::StageMask,
+);
+alias CmdResolveTimestampsFn @private = fn void? (
+    CommandRecord*,
+    gpu::TimestampPoolHandle,
+    uint,
+    uint,
+    gpu::GpuSpan,
+);
 
 const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
@@ -167,6 +186,9 @@ struct CommandOps @public {
     CmdDispatchGeneratedFn        dispatch_generated;
     CmdBeginLabelFn               begin_label;
     CmdEndLabelFn                 end_label;
+    CmdResetTimestampsFn          reset_timestamps;
+    CmdWriteTimestampFn           write_timestamp;
+    CmdResolveTimestampsFn        resolve_timestamps;
 }
 
 struct VkRuntimeState @public {
@@ -958,6 +980,39 @@ fn String? vk_build_memory_report(VkDeviceState* state, bool detailed) {
     (void)state;
     (void)detailed;
     return {};
+}
+
+fn gpu::TimestampPoolHandle? vk_create_timestamp_pool(
+    VkDeviceState* state,
+    gpu::TimestampPoolDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::BACKEND_ERROR~;
+}
+
+fn void? vk_destroy_timestamp_pool(
+    VkDeviceState* state,
+    gpu::TimestampPoolHandle pool,
+) {
+    (void)state;
+    (void)pool;
+    return gpu::INVALID_HANDLE~;
+}
+
+fn void? vk_read_timestamps(
+    VkDeviceState* state,
+    gpu::TimestampPoolHandle pool,
+    uint first,
+    uint count,
+    ulong[] out,
+) {
+    (void)state;
+    (void)pool;
+    (void)first;
+    (void)count;
+    (void)out;
+    return gpu::DEVICE_BUSY~;
 }
 
 fn gpu::GpuAllocation? vk_allocate_memory(

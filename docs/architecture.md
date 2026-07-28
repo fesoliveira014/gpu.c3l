@@ -222,6 +222,7 @@ backend lifetime
 queue ownership
 resource slot tables, including independent allocations
 caller-owned command allocators and fixed recording storage
+timestamp-query pool storage and selected-role timestamp capabilities
 VMA allocator through typed Vulkan state
 descriptor heaps
 caller-owned allocation and completion lifetimes
@@ -546,6 +547,27 @@ backend-private.
 Texture layout transitions remain resource-specific because a global barrier
 carries neither texture identity nor subresource range.
 
+### Timestamp queries
+
+Timestamp pools are explicit generation-checked device children. A pool owns a
+fixed number of timestamp query slots; the caller records nonempty resets,
+writes one query at one executable stage, then resolves packed `ulong` values
+into caller-owned `GpuSpan` storage or reads available values directly on the
+host.
+
+`DeviceCaps.timestamps` describes the selected logical roles that can execute
+the complete reset/write/resolve workflow. It reports a separate valid-bit width
+for graphics, compute, and transfer plus the device-wide nanoseconds-per-tick
+period. A transfer role is included when it aliases a graphics- or
+compute-capable native queue with nonzero timestamp bits. A dedicated
+transfer-only queue is excluded even when its family reports timestamp bits,
+because it cannot execute the complete workflow.
+
+Timestamp values are comparable only when both writes execute on the same
+native queue. Logical roles that alias one queue may therefore be compared;
+timestamps from distinct native queues are not calibrated or correlated by the
+library.
+
 ### Swapchains
 
 Swapchains are optional. Headless compute and offscreen graphics must work without a swapchain.
@@ -609,7 +631,8 @@ image returns `INVALID_RESOURCE_STATE`; detected command/view or presentation
 use returns `RESOURCE_IN_USE`; faults preserve the owning token for retry.
 
 Under `FULL`, the backend retains explicitly named
-spans, textures, attachment views, allocations, and pipelines across recording,
+spans, textures, attachment views, allocations, pipelines, and timestamp pools
+across recording,
 executable, and incomplete-submission phases; destruction returns
 `RESOURCE_IN_USE` until discard or retirement releases the reference. Under
 `TRUSTED`, records contain no reference storage and destruction adds no
@@ -627,6 +650,11 @@ counter. Compound recording operations preflight their unique candidates
 against the remaining list capacity and roll back only entries appended after
 their checkpoint. Capacity failure therefore leaves prior references and
 native command state unchanged.
+
+Timestamp retention protects pool lifetime under `FULL`; resolve also retains
+its destination allocation. Neither policy records per-slot reset or write
+history. The caller executes a reset before reuse, writes every query before
+resolve or read, and establishes submission and host-read ordering explicitly.
 
 ## 7. Work and storage lifetime model
 
@@ -765,6 +793,36 @@ Transfers operate on caller-owned spans. Applications allocate and map
 `CPU_WRITE` or `CPU_READ` storage, record copies and barriers, and retain that
 storage until the returned `CompletionPoint` is reached. Transfer commands own no
 storage and perform no blocking work.
+
+### Timestamps
+
+```text
+create_timestamp_pool
+cmd_reset_timestamps
+cmd_write_timestamp
+cmd_resolve_timestamps
+read_timestamps
+timestamp_delta_ns
+destroy_timestamp_pool
+```
+
+Reset and resolve record only outside a render pass; write remains legal inside
+or outside one and names exactly one executable, queue-supported stage under
+`FULL`. Resolve writes tightly packed 64-bit values to an aligned caller-owned
+span. Its availability wait executes on the device at the resolve point; the
+recording host call does not wait.
+
+Direct host reads request packed values without a wait flag and allocate no
+hidden staging or scratch storage. If any result is unavailable,
+`read_timestamps` returns `DEVICE_BUSY` immediately and the requested output
+range is unspecified. The caller must ignore that range, establish completion
+ordering, and retry explicitly.
+
+The library inserts no implicit query reset and keeps no per-slot reset/write
+history, including under `FULL`. Resolving an unwritten query is outside the
+contract and can leave the device waiting. Timestamp conversion selects the
+requested role's valid-bit width, handles modular wrap, and is valid only for
+values written on the same native queue.
 
 ### Barriers
 
@@ -921,6 +979,7 @@ bindless texture compute
 offscreen graphics readback
 SDL3 windowed triangle sample
 GPU-driven indirect draw sample
+caller-managed GPU timestamp queries
 independent allocation ownership, mapping, and address queries
 VMA memory budget reporting
 debug resource leak reporting

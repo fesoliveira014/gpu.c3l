@@ -92,6 +92,25 @@ alias CmdBeginLabelFn @private = fn void? (
     float[4],
 );
 alias CmdEndLabelFn @private = fn void? (CommandRecord*);
+alias CmdResetTimestampsFn @private = fn void? (
+    CommandRecord*,
+    gpu::TimestampPoolHandle,
+    uint,
+    uint,
+);
+alias CmdWriteTimestampFn @private = fn void? (
+    CommandRecord*,
+    gpu::TimestampPoolHandle,
+    uint,
+    gpu::StageMask,
+);
+alias CmdResolveTimestampsFn @private = fn void? (
+    CommandRecord*,
+    gpu::TimestampPoolHandle,
+    uint,
+    uint,
+    gpu::GpuSpan,
+);
 
 const uint MAX_COMMAND_LISTS = gpu::internal::MAX_DEVICE_COMMANDS;
 const uint COMMAND_FREE_NONE = 0;
@@ -177,6 +196,9 @@ struct CommandOps @public {
     CmdDispatchGeneratedFn        dispatch_generated;
     CmdBeginLabelFn               begin_label;
     CmdEndLabelFn                 end_label;
+    CmdResetTimestampsFn          reset_timestamps;
+    CmdWriteTimestampFn           write_timestamp;
+    CmdResolveTimestampsFn        resolve_timestamps;
 }
 
 struct CommandCell {

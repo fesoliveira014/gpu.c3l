@@ -11,13 +11,13 @@ Start with:
 
 | Document | Scope |
 |---|---|
-| [Architecture](architecture.md) | Modules, objects, caller-owned lifetimes, commands, descriptors, and swapchains. |
+| [Architecture](architecture.md) | Modules, objects, caller-owned lifetimes, commands, timestamp pools, descriptors, and swapchains. |
 | [Device baseline architecture](device_baseline.md) | Mandatory runtime, device, memory, command, and compatibility extension model. |
-| [Public API](api.md) | Public types, functions, faults, and examples. |
+| [Public API](api.md) | Public types, functions, faults, timestamp queries, and examples. |
 | [Memory](memory.md) | Owning allocations, non-owning spans, mapping/address queries, visibility, and transfers. |
 | [Shader ABI](shader_abi.md) | Root pointers, generated layouts, descriptor indices, and reflection. |
 | [Threading](threading.md) | Entry-point tiers, lock order, command recording, and completion-driven reuse. |
-| [Vulkan backend](vulkan_backend.md) | Vulkan 1.3 requirements and backend implementation. |
+| [Vulkan backend](vulkan_backend.md) | Vulkan 1.3 requirements, timestamp lowering, and backend implementation. |
 | [Platforms and dependencies](platforms_and_dependencies.md) | Supported targets, native dependencies, and setup. |
 | [Performance](performance.md) | Manual benchmark targets and interpretation guidance. |
 | [Testing](testing.md) | Direct compiler, C3, Vulkan validation, and CI checks. |
