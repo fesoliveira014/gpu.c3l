@@ -31,8 +31,6 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer VolumeHeapRo
     uint width;
     uint height;
     uint depth;
-    uint _pad0;
-    uint _pad1;
 };
 
 #endif

@@ -99,8 +99,7 @@ fn HeapDescriptorTotals descriptor_heap_totals(uint tex_capacity, uint smp_capac
     return {
         .sampled_images        = (ulong)tex_capacity * 2,
         .storage_images        = (ulong)tex_capacity * 2,
-        .per_stage_resources   = (ulong)tex_capacity * 4
-            + (ulong)smp_capacity,
+        .per_stage_resources   = (ulong)tex_capacity * 4,
         .all_pools_descriptors = (ulong)tex_capacity * 4
             + (ulong)smp_capacity,
     };

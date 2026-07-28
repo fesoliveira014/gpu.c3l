@@ -713,7 +713,7 @@ fn void three_dimensional_texture_memory_models() @test {
         .access    = { .compute, .transfer },
         .width     = 4,
         .height    = 4,
-        .depth     = 4,
+        .depth     = 64,
         .format    = gpu::Format.RGBA8_UNORM,
         .usage     = { .storage, .transfer_dst },
         .debug_name = "three_dimensional_memory",

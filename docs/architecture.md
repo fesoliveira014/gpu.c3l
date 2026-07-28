@@ -516,6 +516,8 @@ Two-dimensional and three-dimensional views share the same logical
 the sampled and/or storage binding for the view's dimension and emits at most
 two native descriptor writes. The raw shader index is not dimension-tagged, so
 shader data must use a heap helper matching the published texture dimension.
+After cross-dimension slot reuse, the opposite-dimension binding may still
+reference the destroyed view; using a mismatched helper is invalid.
 
 ### Shader input and pipelines
 

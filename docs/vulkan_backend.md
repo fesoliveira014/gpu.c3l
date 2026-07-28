@@ -526,8 +526,9 @@ update-unused-while-pending
 The indexing layout contains `T` sampled 2D images, `T` storage 2D images, `S`
 samplers, `T` sampled 3D images, and `T` storage 3D images, all visible to every
 stage. Before object creation the backend checks `2T` sampled images, `2T`
-storage images, and the exact per-stage resource total `4T + S`. Its single
-update-after-bind pool contains `4T + S` descriptors and is checked against
+storage images, and the exact per-stage resource total `4T`; plain `SAMPLER`
+descriptors do not count toward that limit. Its single update-after-bind pool
+contains `4T + S` descriptors and is checked against
 `maxUpdateAfterBindDescriptorsInAllPools`.
 Configured capacities that exceed either aggregate or any per-type limit fail with
 `UNSUPPORTED_FEATURE` with the first exact capacity or aggregate diagnostic;

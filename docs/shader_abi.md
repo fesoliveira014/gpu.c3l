@@ -263,6 +263,8 @@ namespace. A value names the same logical slot regardless of dimension, but
 only the native binding selected by the published view's dimension and usage is
 populated. The index carries no dimension tag; shader data must use a helper
 matching the texture dimension.
+After cross-dimension slot reuse, the opposite-dimension binding may still
+reference the destroyed view; using a mismatched helper is invalid.
 
 Material example:
 

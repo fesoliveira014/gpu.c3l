@@ -69,8 +69,8 @@ fn void descriptor_heap_layout_and_pool_plans_are_exact() @test {
             && totals.storage_images == (ulong)texture_capacity * 2,
         "native image totals cover both dimensional bindings");
     assert(totals.per_stage_resources
-            == (ulong)texture_capacity * 4 + (ulong)sampler_capacity,
-        "per-stage total includes all image bindings and samplers");
+            == (ulong)texture_capacity * 4,
+        "per-stage total includes all image bindings");
     assert(totals.all_pools_descriptors
             == (ulong)texture_capacity * 4 + (ulong)sampler_capacity,
         "pool total includes all image bindings and samplers");

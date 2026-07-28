@@ -36,8 +36,7 @@ fn IndexingHeapLimits exact_indexing_heap_limits(
         .max_per_stage_sampled_images = texture_capacity * 2,
         .max_per_stage_storage_images = texture_capacity * 2,
         .max_per_stage_samplers       = sampler_capacity,
-        .max_per_stage_resources      = texture_capacity * 4
-            + sampler_capacity,
+        .max_per_stage_resources      = texture_capacity * 4,
         .max_all_pools_descriptors    = texture_capacity * 4
             + sampler_capacity,
     };
