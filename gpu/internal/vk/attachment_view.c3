@@ -107,7 +107,8 @@ fn gpu::AttachmentViewHandle? vk_create_attachment_view(
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureSlot* texture = state.textures.get(desc.texture)!;
-    if ((!texture.usage.color_attach && !texture.usage.depth_attach)
+    if (texture_slot_is_3d(texture)
+        || (!texture.usage.color_attach && !texture.usage.depth_attach)
         || desc.mip_level >= texture.mip_levels
         || desc.array_layer >= texture.array_layers) {
         return gpu::INVALID_ARGUMENT~;

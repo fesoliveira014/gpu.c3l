@@ -115,11 +115,12 @@ page doesn't explain it, that's a bug in this page — file an issue.
   `docs/getting_started.md`.
 - **C3 0.8.0 pinned.** The language is pre-1.0 and syntax moves between
   releases; the pin is deliberate and bumped explicitly.
-- **Textures are implicitly 2D and views preserve format.** Descriptors select
-  width, height, mip count, and array-layer count; they expose no shape or view
-  reinterpretation switch. Multisample textures are supported for color/depth
-  attachments when the adapter reports the requested count; they have one mip
-  and cannot be sampled, stored, or transferred directly.
+- **Texture dimensions are deliberately narrow and views preserve format.**
+  Zero `TextureDesc.depth` selects 2D; positive depth selects ordinary 3D.
+  There is no dimension enum, 1D/cube texture, 3D array, 3D attachment,
+  z-slice view, or format reinterpretation switch. Multisample textures are
+  2D color/depth attachments with one mip and cannot be sampled, stored, or
+  transferred directly.
 - **Depth attachments are D32-only.** No public stencil attachment format or
   stencil clear state is exposed.
 - **Matrices are not a schema type.** The ABI DSL has no `mat4`; matrices
@@ -267,10 +268,13 @@ backend profile and the physical adapter:
   and backend sample counts. Individual usage bits do not guarantee that a
   combination is supported.
 - `supports_texture_desc(device, desc)` checks an exact descriptor,
-  including combined usages and adapter extent/mip/layer limits, without
-  allocating. Use it to preflight optional formats and adapt asset choices.
+  including dimension, three-axis extent, combined usages, and adapter
+  mip/layer/sample limits, without allocating. Use it to preflight optional
+  formats and adapt asset choices.
 
-The required backend profile is implicit 2D with same-format views and D32
-depth. Per-format usages, sample counts, and filterability are optional adapter
-capabilities. Higher sample-count bits reflect exact color-attachment or
-depth-attachment descriptors supported end to end.
+The required backend profile supports ordinary 2D and 3D images with
+same-format views and D32 depth attachments for 2D. Per-format usages, sample
+counts, dimensions, and filterability remain optional adapter capabilities.
+`AdapterLimits.max_texture_dimension_3d` is only a quick ceiling;
+`supports_texture_desc` is the exact decision. Higher sample-count bits reflect
+2D color-attachment or depth-attachment descriptors supported end to end.

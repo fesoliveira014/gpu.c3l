@@ -426,6 +426,7 @@ struct AdapterQueueInfo {
 
 struct AdapterLimits {
     uint  max_texture_dimension_2d;
+    uint  max_texture_dimension_3d;
     uint  max_texture_array_layers;
     uint  max_color_attachments;
     uint  max_push_constant_size;
@@ -647,11 +648,13 @@ struct DedicatedTexture {
     GpuAllocation allocation;
 }
 
-<* Creation parameters for create_texture. `access` must be a non-empty subset
-   of the device's selected queue roles. *>
+<* Creation parameters for create_texture. Zero depth selects 2D; positive
+   depth selects 3D. `access` must name selected queue roles. *>
 struct TextureDesc {
     uint             width;
     uint             height;
+    // 0 creates a 2D texture; positive values create a 3D texture.
+    uint             depth;
     // 0 means 1.
     uint             mip_levels;
     // 0 means 1.

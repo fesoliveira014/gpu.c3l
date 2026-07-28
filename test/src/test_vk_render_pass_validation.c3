@@ -297,6 +297,53 @@ fn void texture_create_info_uses_requested_sample_count() @test {
         "texture creation uses the requested native sample count");
 }
 
+fn void texture_create_info_and_default_view_preserve_dimension() @test {
+    gpu::TextureDesc three_dimensional = {
+        .access       = { .compute },
+        .width        = 8,
+        .height       = 4,
+        .depth        = 1,
+        .mip_levels   = 3,
+        .array_layers = 1,
+        .format       = gpu::Format.RGBA8_UNORM,
+        .usage        = { .sampled, .storage },
+    };
+    uint[1] families;
+    vk::ImageCreateInfo image_info = vk::make_texture_create_info(
+        desc:           &three_dimensional,
+        queue_families: families[:0],
+    );
+    assert(image_info.image_type == vk::ImageType.TYPE_3D
+        && image_info.extent.width == three_dimensional.width
+        && image_info.extent.height == three_dimensional.height
+        && image_info.extent.depth == three_dimensional.depth
+        && image_info.array_layers == 1
+        && image_info.samples == vk::SampleCountFlagBits.COUNT_1_BIT,
+        "positive depth lowers to one exact three-dimensional image");
+
+    vk::ImageViewCreateInfo view_info =
+        vk::default_texture_view_create_info(
+            desc:         &three_dimensional,
+            image:        (vk::Image)(uptr)1,
+            mip_levels:   three_dimensional.mip_levels,
+            array_layers: 1,
+        );
+    assert(view_info.view_type == vk::ImageViewType.TYPE_3D
+        && view_info.subresource_range.base_array_layer == 0
+        && view_info.subresource_range.layer_count == 1,
+        "three-dimensional default views cover one native array layer");
+
+    gpu::TextureDesc two_dimensional = three_dimensional;
+    two_dimensional.depth = 0;
+    image_info = vk::make_texture_create_info(
+        desc:           &two_dimensional,
+        queue_families: families[:0],
+    );
+    assert(image_info.image_type == vk::ImageType.TYPE_2D
+        && image_info.extent.depth == 1,
+        "zero depth preserves two-dimensional native lowering");
+}
+
 fn void color_resolve_mode_matches_numeric_format() @test {
     assert(vk::color_resolve_mode(gpu::Format.RGBA8_UNORM)
         == vk::ResolveModeFlagBits.AVERAGE_BIT,

@@ -440,17 +440,28 @@ Creation flow:
 
 ```text
 public TextureDesc
-    -> validate shape, format, usage, and semantic access
+    -> normalize 2D/3D shape and validate format, usage, and semantic access
     -> translate usage to vk::ImageUsageFlags
     -> derive the admitted native queue families
+    -> lower TYPE_2D/depth 1 or TYPE_3D/requested depth
     -> allocator.try_create_image
-    -> create a default image view for sampled, storage, or attachment usage
-    -> store TextureSlot, including access roles
+    -> create a dimension-matched default view for view-capable usage
+    -> store TextureSlot, including depth sentinel and access roles
     -> return TextureHandle
 ```
 
 Transfer-only textures store a null default view. Copies, barriers, allocation,
 placement, and destruction operate on the image and do not require a view.
+For view-capable 3D textures, the default and cached mip views use `TYPE_3D`,
+base array layer zero, and layer count one, covering each selected mip's full
+depth. The backend never sets 2D-array-compatible or sliced-view flags.
+
+`vkGetPhysicalDeviceImageFormatProperties` receives the same image type, usage,
+tiling, flags, sample count, mip count, and normalized layer rules as creation.
+Three-dimensional descriptors compare all three requested axes against the
+returned extent. Adapter discovery publishes `maxImageDimension3D` as
+`AdapterLimits.max_texture_dimension_3d`; the exact descriptor query remains
+authoritative for format/usage combinations.
 
 Placed creation uses queried image requirements, raw alias-capable VMA memory,
 and `create_aliasing_image2`. Dedicated creation is one transaction:
@@ -473,6 +484,9 @@ Texture transitions map caller-declared compositional states and a normalized
 subresource range directly to one native image barrier. The backend does not
 infer or track general texture layouts. Swapchain slots retain only whether an
 image completed a presentation cycle so acquisition can report `prior_state`.
+Three-dimensional barriers name one array layer and cover the complete depth of
+every selected mip. Attachment-view creation rejects 3D slots; rendering to
+volume slices is outside the current contract.
 
 ## 10. Descriptor heap implementation
 

@@ -621,6 +621,198 @@ fn void texture_create_destroy() @test {
     gpu::destroy_texture(&device, texture)!!;
 }
 
+fn void three_dimensional_texture_lifecycle_and_views() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .access     = { .graphics, .compute, .transfer },
+        .width      = 8,
+        .height     = 4,
+        .depth      = 4,
+        .mip_levels = 3,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .storage, .transfer_dst },
+        .debug_name = "three_dimensional_texture",
+    };
+    if (!gpu::supports_texture_desc(&device, &desc)!!) return;
+
+    gpu::TextureDesc depth_one_desc = desc;
+    depth_one_desc.depth = 1;
+    gpu::TextureHandle depth_one =
+        gpu::create_texture(&device, &depth_one_desc)!!;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    assert(state.textures.get(depth_one)!!.depth == 1,
+        "depth one creates a genuine three-dimensional texture slot");
+    gpu::destroy_texture(&device, depth_one)!!;
+
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    vk::TextureSlot* slot = state.textures.get(texture)!!;
+    vk::MipExtent mip = vk::texture_mip_extent(slot, 2);
+    assert(slot.depth == desc.depth
+        && vk::texture_slot_is_3d(slot)
+        && vk::texture_slot_native_depth(slot) == desc.depth
+        && mip.width == 2 && mip.height == 1 && mip.depth == 1
+        && slot.default_view != null,
+        "three-dimensional slots retain shape, mips, and their default view");
+
+    gpu::TextureViewDesc mip_view = {
+        .base_mip  = 1,
+        .mip_count = 1,
+    };
+    gpu::TextureView view =
+        gpu::create_texture_view(&device, texture, &mip_view)!!;
+    bool found_three_dimensional_view;
+    foreach (&cached : slot.views) {
+        if (cached.used
+            && cached.base_mip == 1
+            && cached.mip_count == 1
+            && cached.view_type == vk::ImageViewType.TYPE_3D) {
+            found_three_dimensional_view = true;
+        }
+    }
+    assert(found_three_dimensional_view,
+        "three-dimensional mip views use the existing cache with TYPE_3D");
+
+    gpu::TextureViewDesc invalid_layer = {
+        .base_layer = 1,
+    };
+    assert(@catch(gpu::create_texture_view(
+        &device,
+        texture,
+        &invalid_layer,
+    )) == gpu::INVALID_ARGUMENT,
+        "three-dimensional views reject nonzero base layers");
+    invalid_layer = { .layer_count = 2 };
+    assert(@catch(gpu::create_texture_view(
+        &device,
+        texture,
+        &invalid_layer,
+    )) == gpu::INVALID_ARGUMENT,
+        "three-dimensional views reject multiple layers");
+
+    gpu::destroy_texture_view(&device, view)!!;
+    gpu::destroy_texture(&device, texture)!!;
+
+    gpu::TextureDesc transfer_only = desc;
+    transfer_only.usage = { .transfer_src, .transfer_dst };
+    gpu::TextureHandle transfer =
+        gpu::create_texture(&device, &transfer_only)!!;
+    assert(state.textures.get(transfer)!!.default_view == null,
+        "transfer-only three-dimensional textures omit default views");
+    gpu::destroy_texture(&device, transfer)!!;
+}
+
+fn void three_dimensional_texture_memory_models() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .access    = { .compute, .transfer },
+        .width     = 4,
+        .height    = 4,
+        .depth     = 4,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .storage, .transfer_dst },
+        .debug_name = "three_dimensional_memory",
+    };
+    if (!gpu::supports_texture_desc(&device, &desc)!!) return;
+
+    gpu::TextureRequirements requirements =
+        gpu::get_texture_requirements(&device, &desc)!!;
+    gpu::TextureRequirements[1] requirement_list = { requirements };
+    gpu::AllocationDesc placed_desc = {
+        .size                 = requirements.size,
+        .alignment            = requirements.alignment,
+        .memory_class         = gpu::MemoryClass.TEXTURE,
+        .access               = desc.access,
+        .texture_requirements = requirement_list[..],
+        .debug_name           = "three_dimensional_placed_memory",
+    };
+    gpu::GpuAllocation allocation =
+        gpu::allocate_memory(&device, &placed_desc)!!;
+    gpu::TextureHandle placed = gpu::create_placed_texture(
+        device:     &device,
+        desc:       &desc,
+        allocation: allocation,
+        offset:     0,
+    )!!;
+    gpu::destroy_texture(&device, placed)!!;
+    gpu::free_allocation(&device, &allocation)!!;
+
+    gpu::AllocationDesc dedicated_desc = placed_desc;
+    dedicated_desc.debug_name = "three_dimensional_dedicated_memory";
+    gpu::DedicatedTexture dedicated = gpu::create_dedicated_texture(
+        device:          &device,
+        desc:            &desc,
+        allocation_desc: &dedicated_desc,
+    )!!;
+    gpu::destroy_texture(&device, dedicated.texture)!!;
+    gpu::free_allocation(&device, &dedicated.allocation)!!;
+}
+
+fn void three_dimensional_texture_barriers_use_one_array_layer() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .access     = { .graphics },
+        .width      = 8,
+        .height     = 4,
+        .depth      = 4,
+        .mip_levels = 3,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .transfer_dst },
+    };
+    if (!gpu::supports_texture_desc(&device, &desc)!!) return;
+
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    TextureBarrierEmitCapture capture;
+    vk::BarrierEmitOps ops = {
+        .user_data = &capture,
+        .emit      = &capture_texture_barrier_emit,
+    };
+    gpu::TextureBarrier barrier = {
+        .texture = texture,
+        .view = {
+            .base_mip  = 1,
+            .mip_count = 1,
+        },
+        .before = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+    };
+    vk::texture_barrier_with_injected_ops(
+        vk::resolve_command(&commands)!!,
+        &barrier,
+        &ops,
+    )!!;
+    assert(capture.calls == 1
+        && capture.native.subresource_range.base_mip_level == 1
+        && capture.native.subresource_range.level_count == 1
+        && capture.native.subresource_range.base_array_layer == 0
+        && capture.native.subresource_range.layer_count == 1,
+        "three-dimensional barriers cover full mip depth through one array layer");
+
+    barrier.view = { .base_layer = 1 };
+    assert(@catch(vk::texture_barrier_with_injected_ops(
+        vk::resolve_command(&commands)!!,
+        &barrier,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT
+        && capture.calls == 1,
+        "three-dimensional barrier slice selection faults before emission");
+}
+
 fn void default_texture_views_follow_usage_eligibility() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;

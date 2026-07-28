@@ -86,6 +86,7 @@ struct TextureSlot {
     gpu::SampleCount   sample_count;
     uint               width;
     uint               height;
+    uint               depth;
     uint               mip_levels;
     uint               array_layers;
     uint               live_descriptor_views;
@@ -161,6 +162,14 @@ fn void? TextureTable.free(&self, gpu::TextureHandle h) {
     self.slots[idx].generation = next_handle_generation(self.slots[idx].generation)!;
     self.slots[idx].next_free = self.free_head;
     self.free_head = idx + 1;
+}
+
+fn bool texture_slot_is_3d(TextureSlot* slot) @private {
+    return slot.depth > 0;
+}
+
+fn uint texture_slot_native_depth(TextureSlot* slot) @private {
+    return texture_slot_is_3d(slot) ? slot.depth : 1;
 }
 
 fn gpu::TextureCompatibility texture_compatibility(ulong owner, uint value) {
@@ -325,11 +334,14 @@ fn gpu::TextureFormatSupport? vk_get_texture_format_support(
 
 fn bool? texture_desc_supported(VkDeviceState* state, gpu::TextureDesc* desc) @private {
     vk::ImageUsageFlags usage = texture_usage_to_vk(desc.usage);
+    vk::ImageType image_type = gpu::internal::texture_desc_is_3d(desc)
+        ? vk::ImageType.TYPE_3D
+        : vk::ImageType.TYPE_2D;
     vk::ImageFormatProperties properties;
     vk::Result result = vk::get_physical_device_image_format_properties(
         state.physical_device,
         format_to_vk(desc.format),
-        vk::ImageType.TYPE_2D,
+        image_type,
         vk::ImageTiling.OPTIMAL,
         usage,
         (vk::ImageCreateFlags)0,
@@ -350,6 +362,8 @@ fn bool? texture_desc_supported(VkDeviceState* state, gpu::TextureDesc* desc) @p
         & (uint)sample_count_to_vk(desc.sample_count)) != 0;
     return desc.width <= properties.max_extent.width
         && desc.height <= properties.max_extent.height
+        && gpu::internal::texture_desc_native_depth(desc)
+            <= properties.max_extent.depth
         && mip_levels <= properties.max_mip_levels
         && array_layers <= properties.max_array_layers
         && supports_sample_count;
@@ -404,14 +418,17 @@ fn usz format_texel_size(gpu::Format format) {
 struct MipExtent {
     uint width;
     uint height;
+    uint depth;
 }
 
 fn MipExtent texture_mip_extent(TextureSlot* slot, uint mip) {
     uint width  = slot.width >> mip;
     uint height = slot.height >> mip;
+    uint depth  = texture_slot_native_depth(slot) >> mip;
     return {
         .width  = width == 0 ? 1 : width,
         .height = height == 0 ? 1 : height,
+        .depth  = depth == 0 ? 1 : depth,
     };
 }
 
@@ -491,7 +508,11 @@ fn vk::ImageView? resolve_texture_view_tracked(
     if (mip_count > slot.mip_levels - view.base_mip)       return gpu::INVALID_ARGUMENT~;
     if (layer_count > slot.array_layers - view.base_layer) return gpu::INVALID_ARGUMENT~;
 
-    vk::ImageViewType view_type = layer_count > 1 ? vk::ImageViewType.TYPE_2D_ARRAY : vk::ImageViewType.TYPE_2D;
+    vk::ImageViewType view_type = texture_slot_is_3d(slot)
+        ? vk::ImageViewType.TYPE_3D
+        : layer_count > 1
+            ? vk::ImageViewType.TYPE_2D_ARRAY
+            : vk::ImageViewType.TYPE_2D;
     bool full_range = view.base_mip == 0 && mip_count == slot.mip_levels
         && view.base_layer == 0 && layer_count == slot.array_layers;
     if (full_range) return slot.default_view;
@@ -607,10 +628,17 @@ fn vk::ImageCreateInfo make_texture_create_info(
     uint[] queue_families,
     bool aliasing = false,
 ) @private {
+    bool is_3d = gpu::internal::texture_desc_is_3d(desc);
     vk::ImageCreateInfo info = vk::image_create_info()
-        .set_image_type(vk::ImageType.TYPE_2D)
+        .set_image_type(is_3d
+            ? vk::ImageType.TYPE_3D
+            : vk::ImageType.TYPE_2D)
         .set_format(format_to_vk(desc.format))
-        .set_extent({ .width = desc.width, .height = desc.height, .depth = 1 })
+        .set_extent({
+            .width  = desc.width,
+            .height = desc.height,
+            .depth  = gpu::internal::texture_desc_native_depth(desc),
+        })
         .set_mip_levels(gpu::internal::texture_mip_levels(desc))
         .set_array_layers(gpu::internal::texture_array_layers(desc))
         .set_samples(sample_count_to_vk(desc.sample_count))
@@ -634,11 +662,14 @@ fn vk::ImageViewCreateInfo default_texture_view_create_info(
     uint mip_levels,
     uint array_layers,
 ) {
+    bool is_3d = gpu::internal::texture_desc_is_3d(desc);
     return vk::image_view_create_info()
         .set_image(image)
-        .set_view_type(array_layers > 1
-            ? vk::ImageViewType.TYPE_2D_ARRAY
-            : vk::ImageViewType.TYPE_2D)
+        .set_view_type(is_3d
+            ? vk::ImageViewType.TYPE_3D
+            : array_layers > 1
+                ? vk::ImageViewType.TYPE_2D_ARRAY
+                : vk::ImageViewType.TYPE_2D)
         .set_format(format_to_vk(desc.format))
         .set_subresource_range({
             .aspect_mask      = format_aspect(desc.format),
@@ -763,6 +794,7 @@ fn gpu::TextureHandle? vk_create_texture(
         .sample_count          = desc.sample_count,
         .width                 = desc.width,
         .height                = desc.height,
+        .depth                 = desc.depth,
         .mip_levels            = mip_levels,
         .array_layers          = array_layers,
         .live_descriptor_views = 0,
@@ -1019,6 +1051,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
         .sample_count          = desc.sample_count,
         .width                 = desc.width,
         .height                = desc.height,
+        .depth                 = desc.depth,
         .mip_levels            = mip_levels,
         .array_layers          = array_layers,
         .live_descriptor_views = 0,
@@ -1155,6 +1188,7 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         .sample_count          = desc.sample_count,
         .width                 = desc.width,
         .height                = desc.height,
+        .depth                 = desc.depth,
         .mip_levels            = mip_levels,
         .array_layers          = array_layers,
         .live_descriptor_views = 0,

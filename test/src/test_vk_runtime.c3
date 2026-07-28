@@ -24,6 +24,8 @@ fn void runtimes_enumerate_vulkan_adapters_independently() @test {
     assert(first_info.name.len > 0, "adapter names are populated");
     assert(second_info.name == first_info.name, "both runtimes report the same adapter");
     assert(first_info.queues.available.graphics, "graphics queue availability is semantic");
+    assert(first_info.limits.max_texture_dimension_3d > 0,
+        "adapter limits publish the core three-dimensional image ceiling");
     assert(diagnostics.backend_name == "Vulkan", "backend identity stays in diagnostics");
     assert(diagnostics.backend_version.major >= 1, "the native API version is diagnostic data");
     assert(diagnostics.driver_name.len > 0, "driver identity is available for logging");
