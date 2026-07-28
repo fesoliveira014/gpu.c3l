@@ -57,15 +57,19 @@ struct QueueCompletionState {
     Mutex                         submission_mutex;
     Mutex                         retirement_mutex;
     QueueSubmitScratch*           submit_scratch;
-    CommandRecord* submitted_head;
-    CommandRecord* submitted_tail;
+    CommandRecord*                submitted_head;
+    CommandRecord*                submitted_tail;
+    SparseBindReference*          sparse_bind_head;
+    SparseBindReference*          sparse_bind_tail;
     uint                          submitted_count;
+    uint                          sparse_bind_count;
     gpu::QueueRoles               roles;
     QueueFamilyFlags              queue_flags;
     ulong                         native_id;
     ulong                         next_sequence;
     Atomic{ulong}                 published_sequence;
     Atomic{ulong}                 retired_sequence;
+    ulong                         pending_sparse_sequence;
     bool                          bound;
 }
 
@@ -82,7 +86,7 @@ struct QueueSubmitScratch {
         records;
     vk::CommandBufferSubmitInfo[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
         command_buffer_infos;
-    vk::SemaphoreSubmitInfo[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS + 1]
+    vk::SemaphoreSubmitInfo[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS + 2]
         wait_infos;
 }
 
@@ -1314,10 +1318,8 @@ fn usz append_completion_wait_infos(
     vk::SemaphoreSubmitInfo[] waits,
     usz next_wait,
     ResolvedCompletionWait[] completion_waits,
-    QueueCompletionState* target,
 ) @private {
     foreach (&wait : completion_waits) {
-        if (wait.source == target) continue;
         waits[next_wait++] = vk::semaphore_submit_info()
             .set_semaphore(wait.source.timeline)
             .set_value(wait.sequence)
@@ -1382,20 +1384,29 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     }
 
     SwapchainSlot* swapchain = inputs.swapchain;
+    bool waits_for_sparse_bind = completion.pending_sparse_sequence > 0;
     usz wait_count = desc.completion_waits.len
-        + (swapchain != null ? 1 : 0);
+        + (swapchain != null ? 1 : 0)
+        + (waits_for_sparse_bind ? 1 : 0);
     if (wait_count > 0) {
         usz next_wait;
         next_wait = append_completion_wait_infos(
             waits:            scratch.wait_infos[..],
             next_wait:        next_wait,
             completion_waits: inputs.completion_waits,
-            target:           completion,
         );
         if (swapchain != null) {
             scratch.wait_infos[next_wait++] = vk::semaphore_submit_info()
                 .set_semaphore(swapchain.pending_acquire_semaphore)
                 .set_stage_mask(inputs.readiness_stages);
+        }
+        if (waits_for_sparse_bind) {
+            scratch.wait_infos[next_wait++] = vk::semaphore_submit_info()
+                .set_semaphore(completion.timeline)
+                .set_value(completion.pending_sparse_sequence)
+                .set_stage_mask(
+                    vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+                );
         }
         if (next_wait > 0) {
             submit = submit.set_wait_semaphore_infos(
@@ -1457,6 +1468,7 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
             result:    result,
         )!;
     }
+    if (waits_for_sparse_bind) completion.pending_sparse_sequence = 0;
 
     $if env::TESTING:
         reach_submission_checkpoint(

@@ -593,6 +593,39 @@ fn void incomplete_reference_drain_is_deterministic() @test {
         "the reached counter releases the submitted reference batch");
 }
 
+fn void sparse_only_completion_drain_advances_the_retired_prefix() @test {
+    vk::VkDeviceState state;
+    vk::QueueCompletionState[1] completions = {{
+        .timeline = (vk::Semaphore)(uptr)1,
+        .bound    = true,
+    }};
+    state.queue_completions = completions[..];
+    completions[0].retirement_mutex.init()!!;
+    defer (void)completions[0].retirement_mutex.destroy();
+    completions[0].published_sequence.store(3, AtomicOrdering.RELEASE);
+    lifetime_counter_value = 3;
+    lifetime_counter_query_calls = 0;
+
+    vk::drain_completed_submitted_commands_with_query(
+        &state,
+        &lifetime_counter_query,
+    )!!;
+
+    assert(lifetime_counter_query_calls == 1,
+        "a sparse-only published prefix still queries its timeline");
+    assert(completions[0].retired_sequence.load(AtomicOrdering.ACQUIRE) == 3
+            && completions[0].submitted_head == null
+            && completions[0].submitted_count == 0,
+        "completion-only retirement requires no command record");
+
+    vk::drain_completed_submitted_commands_with_query(
+        &state,
+        &lifetime_counter_query,
+    )!!;
+    assert(lifetime_counter_query_calls == 1,
+        "a cached sparse-only prefix performs no repeated native query");
+}
+
 fn void successful_observation_drains_distinct_upstream_identity() @test {
     vk::VkDeviceState state = {
         .host_allocator = &allocators::LIBC_ALLOCATOR,

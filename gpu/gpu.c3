@@ -1001,6 +1001,30 @@ fn SparseTextureRequirements? get_sparse_texture_requirements(
     );
 }
 
+<* Bind or unbind caller-owned memory for sparse color tiles and color or
+   metadata mip tails. Every explicit point is preserved, including same-queue
+   waits. The library orders the bind with adjacent work on the target queue
+   and retains the texture through completion. The caller keeps allocations
+   live through completion and keeps resident bytes exclusive until an ordered
+   unbind or replacement and every prior GPU user complete. The library retains
+   no residency map. *>
+fn CompletionPoint? bind_sparse_texture_memory(
+    Queue queue,
+    SparseTextureBindDesc* desc,
+) {
+    Device device = queue.device;
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(&device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_queue(&operation, &device, queue)!;
+    if (desc == null) return INVALID_ARGUMENT~;
+    return gpu::internal::vk::vk_bind_sparse_texture_memory(
+        operation.state,
+        queue,
+        desc,
+    );
+}
+
 <* Create an independently allocated texture.
    The descriptor is borrowed only for the call. The returned handle owns the
    image; shader access goes through a `TextureIndex`. Release it with

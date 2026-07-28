@@ -18,7 +18,8 @@ uint accepted_swapchain_submit_calls;
 uint completion_counter_query_calls;
 ulong completion_counter_value;
 vk::Result completion_counter_result;
-uint same_queue_elision_submit_calls;
+uint same_queue_wait_submit_calls;
+vk::PipelineStageFlags2 expected_same_queue_wait_stages;
 uint draw_argument_wait_submit_calls;
 vk::PipelineStageFlags2 expected_draw_argument_wait_stages;
 Atomic{uint} distinct_native_entered;
@@ -505,6 +506,8 @@ fn vk::Result reject_user_submit(
     (void)fence;
     assert(submit_count == 1, "user submission emits one native submit");
     vk::SubmitInfo2* submit = &submits[0];
+    assert(submit.wait_semaphore_info_count == 0,
+        "zero explicit waits remain wait-free");
     rejected_user_signal_count = submit.signal_semaphore_info_count;
     assert(rejected_user_signal_count > 0,
         "user submission carries a private completion signal");
@@ -540,7 +543,7 @@ fn vk::Result reject_counted_user_submit(
     return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 }
 
-fn vk::Result observe_same_queue_elision(
+fn vk::Result observe_same_queue_wait(
     vk::Queue queue,
     uint submit_count,
     vk::SubmitInfo2* submits,
@@ -549,9 +552,19 @@ fn vk::Result observe_same_queue_elision(
     (void)queue;
     (void)fence;
     assert(submit_count == 1, "same-queue test emits one native submit");
-    assert(submits[0].wait_semaphore_info_count == 0,
-        "the full submit path elides a same-queue timeline wait");
-    same_queue_elision_submit_calls++;
+    assert(submits[0].wait_semaphore_info_count == 1,
+        "the full submit path preserves a same-queue timeline wait");
+    assert(submits[0].p_wait_semaphore_infos[0].semaphore
+            == submits[0].p_signal_semaphore_infos[
+                submits[0].signal_semaphore_info_count - 1
+            ].semaphore,
+        "same-queue wait and completion signal use the target timeline");
+    assert(submits[0].p_wait_semaphore_infos[0].value == 1,
+        "the full submit path preserves the same-queue sequence");
+    assert(submits[0].p_wait_semaphore_infos[0].stage_mask
+            == expected_same_queue_wait_stages,
+        "the full submit path preserves the exact lowered destination stage");
+    same_queue_wait_submit_calls++;
     return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 }
 
@@ -1358,7 +1371,7 @@ fn void native_device_loss_rolls_back_and_allows_discard() @test {
         "discard consumes the token after device loss");
 }
 
-fn void completion_wait_infos_map_cross_queue_and_elide_same_queue() @test {
+fn void completion_wait_infos_preserve_cross_and_same_queue_waits() @test {
     vk::QueueCompletionState source = {
         .timeline = (vk::Semaphore)(uptr)0x10,
     };
@@ -1387,13 +1400,12 @@ fn void completion_wait_infos_map_cross_queue_and_elide_same_queue() @test {
         waits:            waits[..],
         next_wait:        0,
         completion_waits: completion_waits[..],
-        target:           &target,
     );
     vk::SubmitInfo2 submit = vk::submit_info2()
         .set_wait_semaphore_infos(waits[:count]);
 
-    assert(submit.wait_semaphore_info_count == 1,
-        "same-queue completion waits emit no native dependency");
+    assert(submit.wait_semaphore_info_count == 2,
+        "every explicit completion wait emits one native dependency");
     assert(submit.p_wait_semaphore_infos[0].semaphore == source.timeline,
         "cross-queue waits map to the source timeline");
     assert(submit.p_wait_semaphore_infos[0].value == 7,
@@ -1403,14 +1415,19 @@ fn void completion_wait_infos_map_cross_queue_and_elide_same_queue() @test {
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     assert((ulong)submit.p_wait_semaphore_infos[0].stage_mask == expected,
         "cross-queue waits keep exact combined destination stages");
+    assert(submit.p_wait_semaphore_infos[1].semaphore == target.timeline,
+        "same-queue waits map to the target timeline");
+    assert(submit.p_wait_semaphore_infos[1].value == 3,
+        "same-queue waits keep the source sequence");
+    assert(submit.p_wait_semaphore_infos[1].stage_mask
+            == (vk::PipelineStageFlags2)
+                vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+        "same-queue waits keep the exact destination stage");
 }
 
 fn void completion_wait_infos_emit_every_exact_native_stage() @test {
     vk::QueueCompletionState source = {
         .timeline = (vk::Semaphore)(uptr)0x10,
-    };
-    vk::QueueCompletionState target = {
-        .timeline = (vk::Semaphore)(uptr)0x20,
     };
     vk::PipelineStageFlags2 depth = (vk::PipelineStageFlags2)(
         (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
@@ -1450,7 +1467,6 @@ fn void completion_wait_infos_emit_every_exact_native_stage() @test {
         waits:            native_waits[..],
         next_wait:        0,
         completion_waits: completion_waits[..],
-        target:           &target,
     );
 
     assert(count == expected.len,
@@ -1633,7 +1649,7 @@ fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
     gpu::wait_completion(completed, 1_000_000_000)!!;
 }
 
-fn void same_queue_wait_elides_through_full_submit_path() @test {
+fn void same_queue_wait_is_preserved_through_full_submit_path() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(
@@ -1660,23 +1676,74 @@ fn void same_queue_wait_elides_through_full_submit_path() @test {
     };
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    same_queue_elision_submit_calls = 0;
+    same_queue_wait_submit_calls = 0;
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    expected_same_queue_wait_stages = vk::submit_wait_stages_to_vk(
+        { .indirect },
+        completion.queue_flags,
+        state.generated_work.enabled,
+    )!!;
 
     assert(@catch(vk::vk_submit_with(
         state,
         queue,
         &desc,
-        &observe_same_queue_elision,
+        &observe_same_queue_wait,
     )) == gpu::OUT_OF_HOST_MEMORY,
-        "the injected native failure remains retryable after elision");
-    assert(same_queue_elision_submit_calls == 1,
-        "the full backend submit seam observed same-queue elision");
+        "the injected native failure remains retryable with the explicit wait");
+    assert(same_queue_wait_submit_calls == 1,
+        "the full backend submit seam observed the same-queue wait");
     assert(lists[0].is_valid(),
         "the injected failure preserves the executable token");
 
     desc.completion_waits = {};
     gpu::CompletionPoint completed = gpu::submit(queue, &desc)!!;
     gpu::wait_completion(completed, 1_000_000_000)!!;
+}
+
+fn void directly_published_sparse_origin_point_orders_normal_submit() @test {
+    gpu::Device device = make_submit_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(
+        &device,
+        gpu::QueueKind.GRAPHICS,
+    )!!;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::QueueCompletionState* completion =
+        vk::queue_completion_state(state, queue.id)!!;
+    gpu::CompletionPoint sparse_origin =
+        vk::reserve_queue_completion(state, queue)!!;
+    vk::publish_queue_completion(state, sparse_origin)!!;
+    gpu::CompletionWait[1] waits = {{
+        .point  = sparse_origin,
+        .before = { .indirect },
+    }};
+    gpu::SubmitDesc desc = {
+        .completion_waits = waits[..],
+    };
+    same_queue_wait_submit_calls = 0;
+    expected_same_queue_wait_stages = vk::submit_wait_stages_to_vk(
+        { .indirect },
+        completion.queue_flags,
+        state.generated_work.enabled,
+    )!!;
+
+    assert(@catch(vk::vk_submit_with(
+        state,
+        queue,
+        &desc,
+        &observe_same_queue_wait,
+    )) == gpu::OUT_OF_HOST_MEMORY,
+        "a sparse-origin point reaches ordinary native submission");
+    assert(same_queue_wait_submit_calls == 1,
+        "ordinary submission preserves the sparse-origin dependency");
+    assert(completion.next_sequence == 1
+            && completion.published_sequence.load(
+                AtomicOrdering.ACQUIRE,
+            ) == 1,
+        "native failure cancels only the ordinary candidate");
 }
 
 fn void invalid_readiness_handle_precedes_invalid_stage_mask() @test {

@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::core::env;
+import std::core::mem::alloc;
 import std::atomic::types;
 
 alias BeforeCompletionRetirementFn @if(env::TESTING) = fn void (void*);
@@ -15,6 +16,12 @@ struct CommandResourceReference {
     uint          index;
     uint          generation;
     Atomic{uint}* retained_counter;
+}
+
+struct SparseBindReference {
+    Atomic{uint}*       retained_counter;
+    ulong               sequence;
+    SparseBindReference* next;
 }
 
 struct CompletionRetirementOps {
@@ -140,6 +147,34 @@ fn void publish_pending_commands_locked(
     }
 }
 
+fn void publish_sparse_bind_reference_locked(
+    QueueCompletionState* completion,
+    SparseBindReference* reference,
+    gpu::CompletionPoint point,
+) {
+    reference.sequence = gpu::internal::completion_point_sequence(point);
+    reference.next = null;
+    if (completion.sparse_bind_tail == null) {
+        completion.sparse_bind_head = reference;
+    } else {
+        completion.sparse_bind_tail.next = reference;
+    }
+    completion.sparse_bind_tail = reference;
+    completion.sparse_bind_count++;
+}
+
+fn SparseBindReference* release_sparse_bind_reference_locked(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    SparseBindReference* reference,
+) {
+    SparseBindReference* next = reference.next;
+    reference.retained_counter.sub(1, AtomicOrdering.RELAXED);
+    alloc::free(state.host_allocator, reference);
+    completion.sparse_bind_count--;
+    return next;
+}
+
 fn CommandRecord* release_pending_command_locked(
     VkDeviceState* state,
     QueueCompletionState* completion,
@@ -207,6 +242,18 @@ fn void retire_queue_through_locked(
     if (completion.submitted_head == null) {
         completion.submitted_tail = null;
     }
+    while (completion.sparse_bind_head != null
+        && completion.sparse_bind_head.sequence <= target) {
+        completion.sparse_bind_head =
+            release_sparse_bind_reference_locked(
+                state,
+                completion,
+                completion.sparse_bind_head,
+            );
+    }
+    if (completion.sparse_bind_head == null) {
+        completion.sparse_bind_tail = null;
+    }
     completion.retired_sequence.store(target, AtomicOrdering.RELEASE);
 }
 
@@ -228,7 +275,13 @@ fn bool? query_pending_queue(
 ) @private {
     completion.retirement_mutex.lock()!!;
     defer completion.retirement_mutex.unlock();
-    if (completion.submitted_head == null) return false;
+    ulong published = completion.published_sequence.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    ulong retired = completion.retired_sequence.load(
+        AtomicOrdering.RELAXED,
+    );
+    if (completion.submitted_head == null && published <= retired) return false;
 
     check_device_result(
         state,
@@ -348,7 +401,8 @@ fn void? drain_queue_if_needed_with_query(
 ) {
     completion.retirement_mutex.lock()!!;
     defer completion.retirement_mutex.unlock();
-    if (completion.submitted_count < SUBMITTED_COMMAND_DRAIN_THRESHOLD) return;
+    if (completion.submitted_count + completion.sparse_bind_count
+        < SUBMITTED_COMMAND_DRAIN_THRESHOLD) return;
 
     ulong completed;
     check_device_result(
@@ -382,6 +436,16 @@ fn void destroy_submitted_commands(VkDeviceState* state) {
         }
         completion.submitted_tail = null;
         completion.submitted_count = 0;
+        while (completion.sparse_bind_head != null) {
+            completion.sparse_bind_head =
+                release_sparse_bind_reference_locked(
+                    state,
+                    completion,
+                    completion.sparse_bind_head,
+                );
+        }
+        completion.sparse_bind_tail = null;
+        completion.sparse_bind_count = 0;
         if (locked) completion.retirement_mutex.unlock();
     }
 }

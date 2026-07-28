@@ -121,17 +121,22 @@ page doesn't explain it, that's a bug in this page — file an issue.
   z-slice view, or format reinterpretation switch. Multisample textures are
   2D color/depth attachments with one mip and cannot be sampled, stored, or
   transferred directly.
-- **Sparse texture creation is deliberately narrow and initially unbound.**
+- **Sparse texture creation and binding are deliberately narrow.**
   It supports single-layer, single-sample color 2D/3D images with sampled,
   storage, and transfer usage. Attachment usage, depth/stencil aspects, and
   native requirement shapes beyond COLOR plus optional METADATA are rejected.
-  Creation commits no memory. Descriptor publication is independent of
-  residency, and this surface currently has no sparse memory-binding call, so
-  an unbound sparse texture must not be used by GPU commands. FULL validation
-  rejects texture transfer copies while barriers remain legal. The backend
-  adds no hidden allocation, wait, residency map, or backing-allocation
-  lifetime tracking. `SparseTextureCaps.nonresident_strict` describes device
-  behavior; it is not a substitute for establishing residency.
+  Creation commits no memory. Binding covers color tiles plus color/metadata
+  mip tails; it does not support sparse buffers, arrays, cubes, multisampling,
+  depth/stencil, multiplanar images, aliasing residency, eviction, or automatic
+  streaming. The backend adds no hidden allocation, residency map, or backing
+  lifetime tracking. Callers keep bound bytes live and exclusive until an
+  ordered unbind/replacement and all prior users complete. The image itself is
+  retained through each bind completion.
+  Descriptor publication is independent of residency. Because FULL validation
+  cannot prove regional residency without a map, it rejects sparse texture
+  transfer copies while barriers remain legal; TRUSTED lowering is unchanged.
+  `SparseTextureCaps.nonresident_strict` describes device behavior; it is not
+  a substitute for establishing residency.
 - **Depth attachments are D32-only.** No public stencil attachment format or
   stencil clear state is exposed.
 - **Matrices are not a schema type.** The ABI DSL has no `mat4`; matrices
