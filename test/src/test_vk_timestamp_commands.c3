@@ -435,6 +435,48 @@ fn void timestamp_transfer_stage_accepts_implicit_graphics_support() @test {
             vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT);
 }
 
+fn void timestamp_full_write_rejects_stage_absent_from_recording_queue() @test {
+    TimestampCommandFixture fixture =
+        create_timestamp_command_fixture(
+            gpu::ContractValidation.FULL,
+            1,
+        )!!;
+    defer destroy_timestamp_command_fixture(&fixture)!!;
+    TimestampCommandProbe probe;
+    TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
+    QueueCompletionState* completion = queue_completion_state(
+        fixture.state,
+        fixture.record.queue.id,
+    )!!;
+    completion.queue_flags = (vk::QueueFlags)
+        vk::QueueFlagBits.COMPUTE_BIT;
+
+    assert(@catch(full_write_timestamp_with(
+        record: fixture.record,
+        pool:   fixture.pool,
+        index:  0,
+        stage:  { .fragment_shader },
+        ops:    &ops,
+    )) == gpu::INVALID_ARGUMENT,
+        "a stage the recording queue family cannot execute is rejected");
+    assert(probe.write_calls == 0
+        && fixture.record.scratch.reference_count == 0,
+        "the rejected stage reaches no native write and tracks nothing");
+
+    full_write_timestamp_with(
+        record: fixture.record,
+        pool:   fixture.pool,
+        index:  0,
+        stage:  { .compute },
+        ops:    &ops,
+    )!!;
+
+    assert(probe.write_calls == 1
+        && probe.write_stage == (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+        "a stage the same queue family does execute still records");
+}
+
 fn void timestamp_full_write_rejects_invalid_masks_without_emission() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
