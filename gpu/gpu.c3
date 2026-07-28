@@ -957,6 +957,50 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
     return gpu::internal::vk::vk_get_texture_requirements(operation.state, desc);
 }
 
+<* Create an unbound single-layer, single-sample color sparse texture.
+   Creation binds no memory; sparse page allocations remain caller-owned.
+
+   @param device : "Live sparse-enabled device that will own the texture."
+   @param desc : "Borrowed sparse texture description."
+   @return "An owning texture handle, or a recoverable validation, support, capacity, allocation, or device fault." *>
+fn TextureHandle? create_sparse_texture(
+    Device* device,
+    TextureDesc* desc,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    TextureHandle texture =
+        gpu::internal::vk::vk_create_sparse_texture(operation.state, desc)!;
+    gpu::internal::retain_device_children(&operation);
+    return texture;
+}
+
+<* Return the immutable requirements cached for a live sparse texture.
+
+   @param device : "Live device that owns the texture."
+   @param texture : "Live sparse texture handle."
+   @return "The cached requirements, or a recoverable argument, handle, or device fault." *>
+fn SparseTextureRequirements? get_sparse_texture_requirements(
+    Device* device,
+    TextureHandle texture,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
+        &operation,
+        texture.owner,
+        gpu::internal::ResourceOwnerKind.TEXTURE,
+    )!;
+    return gpu::internal::vk::vk_get_sparse_texture_requirements(
+        operation.state,
+        texture,
+    );
+}
+
 <* Create an independently allocated texture.
    The descriptor is borrowed only for the call. The returned handle owns the
    image; shader access goes through a `TextureIndex`. Release it with

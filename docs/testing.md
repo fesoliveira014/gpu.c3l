@@ -114,11 +114,15 @@ The Vulkan suite is grouped by runtime needs rather than by historical feature
 increments:
 
 ```sh
+c3c test vk_sparse_texture --path test --test-show-output
 c3c test vk_core --path test --test-show-output
 c3c test vk_wsi --path test --test-show-output
 c3c test vk_optional_generated_work --path test --test-show-output
 ```
 
+- `vk_sparse_texture` is the fast deterministic target for sparse descriptor
+  validation, exact flags, requirement translation, transaction rollback,
+  cached queries, and capability-gated real image lifecycle.
 - `vk_core` covers device selection and creation, allocations, spans,
   textures/views/samplers, reflection and root ABI, pipelines/cache, command
   recording and lifecycle, graphics/compute/transfer output, depth,
@@ -207,6 +211,7 @@ for target in resource_create_bench upload_throughput_bench command_path_baselin
 done
 c3c build smoke --path test
 ./test/build/smoke
+c3c test vk_sparse_texture --path test --test-show-output
 c3c test vk_core --path test --test-show-output
 c3c test vk_wsi --path test --test-show-output
 c3c test vk_optional_generated_work --path test --test-show-output

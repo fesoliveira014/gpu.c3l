@@ -192,6 +192,7 @@ requires it.
 | GPU-private generic data | `MemoryClass.GPU_PRIVATE` | upload or write from GPU commands |
 | CPU-read generic data | `MemoryClass.CPU_READ` | wait, invalidate, then read |
 | Placed textures | `MemoryClass.TEXTURE` | query requirements, allocate, create placed textures |
+| Sparse texture pages | `MemoryClass.TEXTURE` | create sparse texture, query its page requirement, allocate compatible caller-owned pools |
 | Long-lived CPU-written tables | `MemoryClass.CPU_WRITE` | map, write, flush, submit, wait or poll, then free or reuse |
 
 Long-lived CPU-written storage follows the independent-allocation contract:
@@ -280,6 +281,24 @@ allocation, placement, transfer, barrier, and destruction behavior is otherwise
 unchanged for both dimensions. View-capable 3D textures create a full-volume
 `TYPE_3D` default view; selected mip views retain full depth and one array layer.
 
+Sparse creation:
+
+```text
+create_sparse_texture on a sparse-enabled device
+query the immutable SparseTextureRequirements snapshot
+allocate compatible MemoryClass.TEXTURE page pools as needed
+bind residency explicitly when the binding API is available
+```
+
+Sparse creation owns only a raw unbound image and optional default view. It
+does not ask VMA to allocate or bind image memory. `virtual_size` describes the
+image's virtual byte span and is not reported as physical allocation size.
+`page_allocation.size` and `.alignment` both name one native sparse block;
+compatibility retains the device owner and native memory-type mask, and
+`dedicated_only` is false. COLOR is always the first aspect and METADATA is
+optional. The snapshot is stored by value in the texture slot and later queries
+perform no native call.
+
 Placed creation:
 
 ```text
@@ -308,6 +327,13 @@ Destroying a placed texture releases the image but not its `GpuAllocation`.
 `free_allocation` returns `RESOURCE_IN_USE` while a placed image is live.
 Dedicated creation returns separate texture and allocation tokens; destroy the
 texture before releasing its allocation.
+
+Destroying a sparse texture releases its raw image and cached/default views.
+It never frees, decrements, or otherwise mutates caller-owned page allocations.
+Descriptor publication does not establish residency, and sparse creation adds
+no implicit allocation, binding, completion wait, or resident-region tracking.
+Until a sparse binding API establishes residency, an unbound sparse texture
+must not be used by GPU commands.
 
 A live user-created attachment view retains its texture, so `destroy_texture`
 returns `RESOURCE_IN_USE` until every view is destroyed. A borrowed swapchain

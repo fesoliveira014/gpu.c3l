@@ -1226,6 +1226,24 @@ fn gpu::TextureRequirements? vk_get_texture_requirements(
     };
 }
 
+fn gpu::TextureHandle? vk_create_sparse_texture(
+    VkDeviceState* state,
+    gpu::TextureDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::SparseTextureRequirements? vk_get_sparse_texture_requirements(
+    VkDeviceState* state,
+    gpu::TextureHandle texture,
+) {
+    (void)state;
+    (void)texture;
+    return gpu::INVALID_ARGUMENT~;
+}
+
 fn gpu::TextureHandle? vk_create_texture(
     VkDeviceState* state,
     gpu::TextureDesc* desc,

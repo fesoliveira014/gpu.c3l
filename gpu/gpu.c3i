@@ -662,6 +662,38 @@ struct TextureRequirements {
     bool                 dedicated_only;
 }
 
+const uint MAX_SPARSE_TEXTURE_ASPECTS = 2;
+
+enum SparseTextureAspect : int {
+    COLOR,
+    METADATA,
+}
+
+<* Sparse tile and mip-tail layout for one backend-neutral image aspect.
+   A single mip tail always reports stride zero. METADATA tile extent may be
+   zero. *>
+struct SparseTextureAspectRequirements {
+    SparseTextureAspect aspect;
+    Vec3u               tile_extent;
+    uint                mip_tail_first_lod;
+    usz                 mip_tail_size;
+    usz                 mip_tail_offset;
+    usz                 mip_tail_stride;
+    bool                single_mip_tail;
+    bool                aligned_mip_size;
+    bool                nonstandard_block_size;
+}
+
+<* Immutable requirements for one live sparse texture. `virtual_size` is not
+   committed storage. `page_allocation` describes compatible caller-owned
+   TEXTURE memory, and only `aspects[:aspect_count]` are meaningful. *>
+struct SparseTextureRequirements {
+    usz                                                       virtual_size;
+    TextureRequirements                                       page_allocation;
+    uint                                                      aspect_count;
+    SparseTextureAspectRequirements[MAX_SPARSE_TEXTURE_ASPECTS] aspects;
+}
+
 <* Independently owned texture and allocation returned by dedicated creation. *>
 struct DedicatedTexture {
     TextureHandle texture;

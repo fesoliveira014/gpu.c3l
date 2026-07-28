@@ -918,14 +918,12 @@ fn void destroy_state(VkDeviceState* state) @private {
                             null,
                         );
                     }
-                    if (cell.value.placed) {
-                        vk::destroy_image(state.device, cell.value.image, null);
-                    } else if (state.allocator != null) {
-                        state.allocator.destroy_image(
-                            cell.value.image,
-                            cell.value.allocation,
-                        );
-                    }
+                    destroy_texture_image(
+                        state:      state,
+                        ownership:  texture_image_ownership(&cell.value),
+                        image:      cell.value.image,
+                        allocation: cell.value.allocation,
+                    );
                 }
             }
             mem::free(state.textures.slots.ptr);

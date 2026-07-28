@@ -51,7 +51,7 @@ gpu/internal/vk/adapter.c3              semantic adapter metadata and diagnostic
 gpu/internal/vk/instance.c3             shared instance construction
 gpu/internal/vk/device.c3               physical device selection, logical device, feature chain
 gpu/internal/vk/queue.c3                queue family selection, queue handles, submit
-gpu/internal/vk/sparse.c3               sparse feature plan and selected-role capability
+gpu/internal/vk/sparse.c3               sparse feature plan, image creation, requirement capture
 gpu/internal/vk/allocator.c3            vma::Allocator creation/destruction, stats
 gpu/internal/vk/allocation.c3           generic-buffer and raw texture-memory allocations
 gpu/internal/vk/buffer.c3               VkBuffer + VMA allocation path
@@ -500,6 +500,38 @@ allocation.
 
 Textures use the same one-family `EXCLUSIVE` or multi-family `CONCURRENT`
 rule as buffers, based only on `TextureDesc.access`.
+
+Sparse creation is a separate raw-image transaction in
+`gpu/internal/vk/sparse.c3`:
+
+```text
+validate the single-layer, single-sample color subset
+require the enabled 2D/3D sparse capability
+query exact image support with SPARSE_BINDING_BIT | SPARSE_RESIDENCY_BIT
+query flag-free sparse-format property count
+create an unbound VkImage with the exact sparse flags
+query normal memory requirements
+query sparse image requirements with a fixed two-call sequence
+translate COLOR plus optional METADATA into a cached public snapshot
+create the ordinary default view only for sampled/storage usage
+publish the sparse TextureSlot last
+```
+
+The semantic exact-support callback delegates to the shared
+`texture_desc_supported`; sparse-format discovery remains a separate Vulkan
+query because that API has no image-create flags or extent. The translator
+maps normal requirement size to virtual size and alignment to one compatible
+physical page. It canonicalizes aspect order, permits zero metadata
+granularity, and rejects native shapes the fixed public representation cannot
+express. Any post-create fault destroys the raw image and any temporary view in
+reverse order. No VMA image allocation or binding occurs.
+
+Sparse slots reuse ordinary view, descriptor, barrier, copy, command-reference,
+and handle-generation machinery. Their immutable requirements are returned by
+value without another native query. Explicit destruction and defensive device
+teardown select sparse raw-image ownership before placed or VMA-owned paths;
+caller page allocations are untouched. Descriptor publication does not imply
+residency, and this creation path submits no queue work or hidden wait.
 
 Texture transitions map caller-declared compositional states and a normalized
 subresource range directly to one native image barrier. The backend does not
@@ -1209,7 +1241,7 @@ The Vulkan backend is acceptable when:
 
 ```text
 device creation is validation-clean
-all native buffer/image allocations are VMA-backed
+owned buffer/image allocations are VMA-backed; sparse images are raw and unbound
 independent allocation creation publishes only complete native state
 addressable spans produce valid GPU addresses
 root-pointer compute works
