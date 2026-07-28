@@ -162,24 +162,27 @@ Checked slicing preserves identity, changes only offset and size, and rejects
 zero size, parent escape, and offset overflow. `unchecked_subspan` performs no
 bounds or overflow checks.
 
-Applications that keep mapped spans and their GPU addresses together can opt
-into `gpu::utils`:
+Applications that keep mapped spans and their GPU addresses together can use
+the root-module `MappedGpuSpan` convenience value:
 
 ```c3
-import gpu::utils;
-
-MappedGpuSpan mapped = utils::mapped_gpu_span(device, packed)!;
-MappedGpuSpan vertices = mapped.checked_subspan(0, vertex_bytes)!;
+gpu::MappedGpuSpan mapped = gpu::mapped_gpu_span(device, packed)!;
+gpu::MappedGpuSpan vertices =
+    mapped.checked_subspan(0, vertex_bytes)!;
 vertices.bytes[..] = vertex_data[..];
 gpu::flush_mapped_span(device, vertices.span)!;
 ```
 
 `MappedGpuSpan` is a non-owning bundle of the span, its mapped byte slice, and
-its GPU address. Checked children keep those three views aligned without
-another device lookup. The bundle does not retain the allocation or perform
-synchronization: its fields expire when the allocation is freed, and callers
-still flush or invalidate mapped ranges and wait for GPU completion where the
-memory policy requires it.
+its GPU address. Its public invariant is `bytes.len == span.size`; checked
+children reject inconsistent aggregates and keep all three ranges consistent
+without another device lookup. Derived byte pointers carry no alignment
+guarantee beyond `char`. The factory performs independent public mapping and
+address queries, so the caller must keep the allocation live throughout the
+call. The bundle does not retain the allocation or perform synchronization:
+its fields expire when the allocation is freed, and callers still flush or
+invalidate mapped ranges and wait for GPU completion where the memory policy
+requires it.
 
 ## 6. Public memory policy
 

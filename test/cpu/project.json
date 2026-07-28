@@ -9,7 +9,6 @@
   "sources": [
     "../../gpu/gpu.c3i",
     "../../gpu/gpu.c3",
-    "../../gpu/utils/**",
     "../../gpu/surface/**",
     "../../gpu/internal/runtime.c3",
     "../../gpu/internal/adapter.c3",
@@ -35,12 +34,6 @@
       "type": "executable",
       "sources": [
         "import_gpu.c3"
-      ]
-    },
-    "import_gpu_utils": {
-      "type": "executable",
-      "sources": [
-        "import_gpu_utils.c3"
       ]
     },
     "import_surface_win32": {

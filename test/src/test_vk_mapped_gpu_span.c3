@@ -1,7 +1,6 @@
 module gpu_test;
 
 import gpu;
-import gpu::utils;
 
 fn void mapped_gpu_span_factory_uses_exact_public_views() @test {
     gpu::RuntimeDesc desc = {
@@ -22,7 +21,7 @@ fn void mapped_gpu_span_factory_uses_exact_public_views() @test {
     char[] expected_bytes = gpu::get_span_mapping(&device, owned.span)!!;
     gpu::GpuAddress expected_address =
         gpu::get_span_address(&device, owned.span)!!;
-    MappedGpuSpan mapped = utils::mapped_gpu_span(&device, owned.span)!!;
+    gpu::MappedGpuSpan mapped = gpu::mapped_gpu_span(&device, owned.span)!!;
 
     assert(mapped.span.owner == owned.span.owner
         && mapped.span.index == owned.span.index
@@ -37,8 +36,10 @@ fn void mapped_gpu_span_factory_uses_exact_public_views() @test {
         "factory preserves the exact public address");
 
     mapped.bytes[7] = 0x5A;
-    assert(expected_bytes[7] == 0x5A,
-        "writes through the utility update the underlying mapping");
+    gpu::flush_mapped_span(&device, mapped.span)!!;
+    char[] requeried = gpu::get_span_mapping(&device, owned.span)!!;
+    assert(requeried[7] == 0x5A,
+        "a flushed write is visible through a fresh public mapping query");
 }
 
 fn void mapped_gpu_span_factory_propagates_unmapped_fault() @test {
@@ -58,7 +59,9 @@ fn void mapped_gpu_span_factory_propagates_unmapped_fault() @test {
     defer free_owned_span(&device, &owned)!!;
 
     fault expected = @catch(gpu::get_span_mapping(&device, owned.span));
-    fault actual = @catch(utils::mapped_gpu_span(&device, owned.span));
+    assert(expected == gpu::INVALID_ARGUMENT,
+        "GPU-private spans use the exact public unmapped fault");
+    fault actual = @catch(gpu::mapped_gpu_span(&device, owned.span));
     assert(actual == expected,
         "factory propagates the public mapping query fault");
 }

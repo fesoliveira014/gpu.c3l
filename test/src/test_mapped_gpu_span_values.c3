@@ -1,9 +1,8 @@
 module gpu_test;
 
 import gpu;
-import gpu::utils;
 
-fn void mapped_gpu_span_checked_slicing_stays_aligned() @test {
+fn void mapped_gpu_span_checked_slicing_stays_consistent() @test {
     char[64] storage;
     MappedGpuSpan mapped = {
         .span = {
@@ -30,9 +29,9 @@ fn void mapped_gpu_span_checked_slicing_stays_aligned() @test {
     assert(nested.span.offset == 52 && nested.span.size == 8,
         "nested span advances from its immediate parent");
     assert(nested.bytes.ptr == &storage[20] && nested.bytes.len == 8,
-        "nested bytes remain aligned with the nested span");
+        "nested bytes remain consistent with the nested span");
     assert(nested.address == (gpu::GpuAddress)0x1014,
-        "nested address remains aligned with the nested span");
+        "nested address remains consistent with the nested span");
     assert(exact_end.bytes.ptr == &storage[32] && exact_end.bytes.len == 8,
         "an exact-end child is accepted");
 }
@@ -56,4 +55,14 @@ fn void mapped_gpu_span_checked_slicing_propagates_span_faults() @test {
         "child escaping its immediate parent propagates the span fault");
     assert(@catch(mapped.checked_subspan(1, 1)) == gpu::INVALID_ARGUMENT,
         "backing offset overflow propagates the span fault");
+
+    mapped.span.offset = 0;
+    mapped.bytes = storage[0:8];
+    assert(@catch(mapped.checked_subspan(0, 8)) == gpu::INVALID_ARGUMENT,
+        "mismatched byte and span ranges are rejected before slicing");
+
+    mapped.bytes = storage[..];
+    mapped.address = (gpu::GpuAddress)ulong::max;
+    assert(@catch(mapped.checked_subspan(1, 1)) == gpu::INVALID_ARGUMENT,
+        "GPU address overflow is rejected");
 }
