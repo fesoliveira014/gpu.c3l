@@ -6,6 +6,7 @@ import vk;
 import vma;
 import std::thread;
 import std::core::env;
+import std::core::mem;
 import std::atomic;
 import std::atomic::types;
 
@@ -45,6 +46,7 @@ alias PipelineBindFn @private = fn void (
 
 const uint MAX_COMMAND_ALLOCATORS = 256;
 const uint COMMAND_ALLOCATOR_FREE_NONE = 0;
+const uint COMMAND_ALLOCATOR_DESTROY_CLAIM = uint::max;
 
 struct PipelineBindOps {
     void*          user_data;
@@ -146,7 +148,7 @@ struct CommandAllocatorSlot {
     uint                         live_recordings;
     uint                         live_executables;
     uint                         in_flight_buffers;
-    Atomic{uint}                 resolution_pins;
+    Atomic{uint}                 operation_pins;
     RecordingThreadIdentity      recording_thread_identity;
     bool                         recording_thread_set;
     Mutex                        mutex;
@@ -485,22 +487,35 @@ fn void? vk_destroy_command_allocator(
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         CommandAllocatorSlot* slot = state.command_allocators.get(handle)!;
-        if (slot.resolution_pins.load(AtomicOrdering.ACQUIRE) != 0) {
+        uint claimed = mem::compare_exchange(
+            &slot.operation_pins.data,
+            (uint)0,
+            COMMAND_ALLOCATOR_DESTROY_CLAIM,
+            AtomicOrdering.ACQUIRE_RELEASE,
+            AtomicOrdering.ACQUIRE,
+        );
+        if (claimed != 0) {
             return gpu::RESOURCE_IN_USE~;
         }
-        if (!slot.mutex.try_lock()) return gpu::RESOURCE_IN_USE~;
+        bool owns_claim = true;
+        defer catch {
+            if (owns_claim) {
+                slot.operation_pins.store(0, AtomicOrdering.RELEASE);
+            }
+        }
         if (slot.live_recordings != 0
             || slot.live_executables != 0
             || slot.in_flight_buffers != 0
             || slot.generated_reservations_in_use != 0
             || slot.available_count != slot.command_buffers.len) {
-            slot.mutex.unlock();
+            slot.operation_pins.store(0, AtomicOrdering.RELEASE);
+            owns_claim = false;
             return gpu::RESOURCE_IN_USE~;
         }
-        slot.mutex.unlock();
         (void)slot.mutex.destroy();
         removed = *slot;
         state.command_allocators.free(handle)!;
+        owns_claim = false;
     }
     destroy_command_allocator_slot(state, &removed);
 }
@@ -527,6 +542,31 @@ fn CommandAllocatorSlot*? resolve_command_allocator(
     return slot;
 }
 
+fn void pin_command_allocator_slot(CommandAllocatorSlot* slot) {
+    uint pins = slot.operation_pins.load(AtomicOrdering.ACQUIRE);
+    while (true) {
+        if (pins == COMMAND_ALLOCATOR_DESTROY_CLAIM) {
+            thread::yield();
+            pins = slot.operation_pins.load(AtomicOrdering.ACQUIRE);
+            continue;
+        }
+        uint seen = mem::compare_exchange(
+            &slot.operation_pins.data,
+            pins,
+            pins + 1,
+            AtomicOrdering.ACQUIRE_RELEASE,
+            AtomicOrdering.ACQUIRE,
+        );
+        if (seen == pins) return;
+        pins = seen;
+    }
+}
+
+fn void unlock_command_allocator(CommandAllocatorSlot* slot) {
+    slot.mutex.unlock();
+    (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
+}
+
 fn CommandAllocatorSlot*? lock_command_allocator(
     VkDeviceState* state,
     gpu::CommandAllocator* allocator,
@@ -536,17 +576,10 @@ fn CommandAllocatorSlot*? lock_command_allocator(
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         slot = resolve_command_allocator(state, allocator)!;
-        (void)slot.resolution_pins.add(1, AtomicOrdering.RELEASE);
+        (void)slot.operation_pins.add(1, AtomicOrdering.RELEASE);
     }
-    bool pinned = true;
-    defer catch {
-        if (pinned) {
-            (void)slot.resolution_pins.sub(1, AtomicOrdering.RELEASE);
-        }
-    }
+    defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
     slot.mutex.lock()!;
-    (void)slot.resolution_pins.sub(1, AtomicOrdering.RELEASE);
-    pinned = false;
     return slot;
 }
 
@@ -559,17 +592,10 @@ fn CommandAllocatorSlot*? lock_command_allocator_handle(
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         slot = state.command_allocators.get(handle)!;
-        (void)slot.resolution_pins.add(1, AtomicOrdering.RELEASE);
+        (void)slot.operation_pins.add(1, AtomicOrdering.RELEASE);
     }
-    bool pinned = true;
-    defer catch {
-        if (pinned) {
-            (void)slot.resolution_pins.sub(1, AtomicOrdering.RELEASE);
-        }
-    }
+    defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
     slot.mutex.lock()!;
-    (void)slot.resolution_pins.sub(1, AtomicOrdering.RELEASE);
-    pinned = false;
     return slot;
 }
 
@@ -584,17 +610,10 @@ fn CommandAllocatorSlot*? lock_command_allocator_for_pipeline(
         defer state.resource_mutex.unlock();
         slot = resolve_command_allocator(state, allocator)!;
         (void)state.pipelines.get(pipeline)!;
-        (void)slot.resolution_pins.add(1, AtomicOrdering.RELEASE);
+        (void)slot.operation_pins.add(1, AtomicOrdering.RELEASE);
     }
-    bool pinned = true;
-    defer catch {
-        if (pinned) {
-            (void)slot.resolution_pins.sub(1, AtomicOrdering.RELEASE);
-        }
-    }
+    defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
     slot.mutex.lock()!;
-    (void)slot.resolution_pins.sub(1, AtomicOrdering.RELEASE);
-    pinned = false;
     return slot;
 }
 
@@ -700,6 +719,7 @@ fn bool generated_scratch_references_pipeline(
         :state.command_allocators.next_new
     ]) {
         if (!cell.used) continue;
+        pin_command_allocator_slot(&cell.value);
         cell.value.mutex.lock()!!;
         bool found;
         foreach (&buffer : cell.value.reservations) {
@@ -708,7 +728,7 @@ fn bool generated_scratch_references_pipeline(
                 break;
             }
         }
-        cell.value.mutex.unlock();
+        unlock_command_allocator(&cell.value);
         if (found) return true;
     }
     return false;
@@ -735,7 +755,7 @@ fn void? vk_reserve_generated_scratch(
             state,
             allocator,
         )!;
-        defer slot.mutex.unlock();
+        defer unlock_command_allocator(slot);
         if (!command_allocator_quiescent_locked(slot)) {
             return gpu::RESOURCE_IN_USE~;
         }
@@ -783,7 +803,7 @@ fn void? vk_reserve_generated_scratch(
             allocator,
             desc.pipeline,
         )!;
-        defer slot.mutex.unlock();
+        defer unlock_command_allocator(slot);
         if (!command_allocator_quiescent_locked(slot)) {
             return gpu::RESOURCE_IN_USE~;
         }
@@ -837,7 +857,7 @@ fn void? vk_release_generated_scratch(
         allocator,
         pipeline,
     )!;
-    defer slot.mutex.unlock();
+    defer unlock_command_allocator(slot);
     if (!command_allocator_quiescent_locked(slot)) {
         return gpu::RESOURCE_IN_USE~;
     }
@@ -909,7 +929,7 @@ fn void? vk_begin_commands_with_ops(
         state,
         allocator,
     )!;
-    defer slot.mutex.unlock();
+    defer unlock_command_allocator(slot);
 
     RecordingThreadIdentity current_identity =
         current_recording_thread_identity();
@@ -1014,7 +1034,7 @@ fn void? vk_end_commands_with_ops(
         state,
         record.allocator,
     )!;
-    defer slot.mutex.unlock();
+    defer unlock_command_allocator(slot);
     check_device_result(state, ops.end(
         ops.user_data,
         record.command_buffer,
@@ -1085,7 +1105,7 @@ fn void? vk_discard_commands(
         state,
         allocator_handle,
     )!;
-    defer slot.mutex.unlock();
+    defer unlock_command_allocator(slot);
     state.command_mutex.lock()!!;
     defer state.command_mutex.unlock();
     CommandRecord* record = state.commands.get(handle)!;
@@ -2770,7 +2790,7 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
         state,
         record.allocator,
     )!;
-    defer slot.mutex.unlock();
+    defer unlock_command_allocator(slot);
     if (record.scratch.generated_preprocess_count
             >= record.scratch.generated_preprocess_indices.len) {
         return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;

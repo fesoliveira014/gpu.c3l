@@ -154,13 +154,18 @@ destroy every swapchain and child resource.
 Resource creation and destruction use `resource_mutex`; shader-visible
 texture-view cache publication uses `texture_view_cache_mutex`; command-record
 allocation, submit claims, rollback, and reclamation use `command_mutex`.
-Allocator-table resolution pins a stable allocator slot under `resource_mutex`,
-releases that mutex, and only then acquires the allocator mutex. Begin, end, and
-discard therefore perform native and allocator-local work without a shared
-recording lock, so distinct allocators do not convoy. Cold resource operations
-may acquire `resource_mutex` before an allocator mutex when they must protect
-allocator-table, pipeline, or VMA lifetime together. When both resource and
-view-cache locks are needed, resource comes first.
+Every allocator-mutex operation carries a stable slot pin. Public allocator
+resolution establishes the pin under `resource_mutex`, releases that mutex,
+and only then acquires the allocator mutex. The pin remains held through mutex
+ownership, so allocator destruction can reject active or waiting operations
+without probing or waiting on that mutex. Destruction atomically claims the
+zero-pin state before checking quiescence, excluding completion publication or
+retirement during the check. Begin, end, and discard therefore perform native
+and allocator-local work without a shared recording lock, so distinct
+allocators do not convoy. Cold resource operations may acquire `resource_mutex`
+before an allocator mutex when they must protect allocator-table, pipeline, or
+VMA lifetime together. When both resource and view-cache locks are needed,
+resource comes first.
 
 Each selected queue owns two independent boundaries:
 

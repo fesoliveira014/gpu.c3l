@@ -4,6 +4,8 @@ import gpu::internal @public;
 import gpu;
 import gpu::internal::vk @public;
 import vk;
+import std::thread;
+import std::atomic;
 import std::core::mem;
 import std::core::mem::alloc;
 import std::core::mem::allocators;
@@ -26,6 +28,14 @@ struct CommandRecordingProbe {
     uint              reset_calls;
     uint              begin_calls;
     uint              end_calls;
+}
+
+struct CommandAllocatorOperationArgs {
+    gpu::internal::vk::VkDeviceState* state;
+    gpu::CommandAllocator*            allocator;
+    Atomic{bool}                      entered;
+    Atomic{bool}                      release;
+    Atomic{bool}                      completed;
 }
 
 struct FailOnNAllocator (Allocator) {
@@ -160,6 +170,21 @@ fn gpu::internal::vk::CommandRecordingOps command_recording_ops(
         .begin     = &probe_begin_command_buffer,
         .end       = &probe_end_command_buffer,
     };
+}
+
+fn int hold_command_allocator_operation(void* raw_args) {
+    CommandAllocatorOperationArgs* args =
+        (CommandAllocatorOperationArgs*)raw_args;
+    gpu::internal::vk::CommandAllocatorSlot* slot =
+        gpu::internal::vk::lock_command_allocator(
+            args.state,
+            args.allocator,
+        )!!;
+    args.entered.store(true, AtomicOrdering.RELEASE);
+    while (!args.release.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    gpu::internal::vk::unlock_command_allocator(slot);
+    args.completed.store(true, AtomicOrdering.RELEASE);
+    return 0;
 }
 
 fn gpu::internal::vk::CommandAllocatorSlot allocator_slot(uint queue_id) {
@@ -600,11 +625,31 @@ fn void command_allocator_destroy_never_waits_for_an_active_operation() @test {
         allocator.handle,
     )!!;
 
-    slot.mutex.lock()!!;
+    CommandAllocatorOperationArgs operation_args = {
+        .state     = state,
+        .allocator = &allocator,
+    };
+    Thread worker;
+    worker.create(
+        &hold_command_allocator_operation,
+        &operation_args,
+    )!!;
+    while (!operation_args.entered.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    uint pins_while_held = slot.operation_pins.load(
+        AtomicOrdering.ACQUIRE,
+    );
     fault destroy_fault = @catch(gpu::destroy_command_allocator(&allocator));
-    slot.mutex.unlock();
+    bool completed_before_release = operation_args.completed.load(
+        AtomicOrdering.ACQUIRE,
+    );
+    operation_args.release.store(true, AtomicOrdering.RELEASE);
+    assert(worker.join()!! == 0, "the allocator operation worker completes");
 
-    assert(destroy_fault == gpu::RESOURCE_IN_USE,
+    assert(pins_while_held == 1,
+        "the allocator operation stays pinned while owning its mutex");
+    assert(destroy_fault == gpu::RESOURCE_IN_USE && !completed_before_release,
         "destroy returns immediately while an allocator operation owns the slot");
     assert(allocator.device == original.device
         && allocator.queue == original.queue

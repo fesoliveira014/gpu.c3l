@@ -132,10 +132,11 @@ fn void publish_pending_commands_locked(
         CommandAllocatorSlot* slot = state.command_allocators.get(
             record.allocator,
         )!!;
+        pin_command_allocator_slot(slot);
         slot.mutex.lock()!!;
         slot.live_executables--;
         slot.in_flight_buffers++;
-        slot.mutex.unlock();
+        unlock_command_allocator(slot);
     }
 }
 
@@ -148,6 +149,7 @@ fn CommandRecord* release_pending_command_locked(
     CommandAllocatorSlot* slot = state.command_allocators.get(
         record.allocator,
     )!!;
+    pin_command_allocator_slot(slot);
     slot.mutex.lock()!!;
     record.state = gpu::internal::CommandState.INACTIVE;
     // Reference gates plus retirement/destroy serialization make resource_mutex unnecessary.
@@ -161,7 +163,7 @@ fn CommandRecord* release_pending_command_locked(
     );
     return_allocator_buffer_locked(slot, record.allocator_buffer);
     slot.in_flight_buffers--;
-    slot.mutex.unlock();
+    unlock_command_allocator(slot);
     gpu::internal::CommandListHandle identity = record.identity;
     gpu::Device owner = record.device;
     record.submitted_completion = {};
