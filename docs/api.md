@@ -233,9 +233,10 @@ succeeds. Its presentation device remains bound to that stale token, so future
 
 Device creation takes one exact borrowed adapter and an optional plain
 descriptor. The descriptor contains only per-device semantic requirements:
-presentation and queue topology. The library's required device baseline is
-implicit. Support detection is optional application functionality for adapter
-selection; it is read-only, enables nothing, and does not mutate the descriptor.
+presentation, queue topology, and the optional sparse-texture capability. The
+library's required device baseline is implicit. Support detection is optional
+application functionality for adapter selection; it is read-only, enables
+nothing, and does not mutate the descriptor.
 The unmet-requirement label is borrowed static text and names GPU semantics
 rather than backend features.
 
@@ -243,6 +244,7 @@ rather than backend features.
 DeviceDesc
     Surface surface
     QueueRequest queues
+    bool enable_sparse_textures
 
 DeviceSupport
     bool supported
@@ -258,8 +260,8 @@ create_device(Adapter*, DeviceDesc* = null)        -> Device?
 
 An omitted descriptor, null, and a zero-initialized `DeviceDesc` are
 equivalent. They select a non-presenting device with one graphics, compute, and
-transfer queue; one native queue may satisfy several roles. The omitted form is
-the canonical minimal call:
+transfer queue and sparse textures disabled; one native queue may satisfy
+several roles. The omitted form is the canonical minimal call:
 
 ```c3
 gpu::Device device = gpu::create_device(&adapter)!;
@@ -280,6 +282,12 @@ gpu::Device device = gpu::create_device(&adapter, &device_desc)!;
 Presentation requires graphics. Unknown role bits, invalid required/distinct
 combinations, and a presentation descriptor without graphics fault
 `INVALID_ARGUMENT`.
+
+Set `enable_sparse_textures` to require core sparse binding, at least one of 2D
+or 3D sparse residency, and at least one selected semantic role whose native
+family can submit sparse bindings. This opt-in does not add a sparse queue kind
+or select a hidden sparse-only family. An unavailable valid request is reported
+as unsupported.
 
 Descriptor input is borrowed for the call and copied during normalization.
 Zero surface means no presentation. A nonzero surface must resolve live and
@@ -302,6 +310,7 @@ DeviceCaps
     QueueRoles queues
     bool line_polygon_mode
     TimestampCaps timestamps
+    SparseTextureCaps sparse_textures
     uint texture_heap_capacity
     uint sampler_heap_capacity
     uint max_color_attachments
@@ -321,6 +330,12 @@ TimestampCaps
     uint compute_valid_bits
     uint transfer_valid_bits
     float period_ns
+
+SparseTextureCaps
+    bool image_2d
+    bool image_3d
+    bool nonresident_strict
+    QueueRoles binding_queues
 
 Device                           (slot | generation | reserved)
 get_device_caps(Device*)         -> DeviceCaps?
@@ -356,6 +371,15 @@ its native queue supports graphics or compute and reports nonzero timestamp
 bits. A dedicated transfer-only queue is excluded even when it reports
 timestamp bits. `period_ns` is device-wide and is zero only when no selected
 role supports the workflow.
+
+`DeviceCaps.sparse_textures` reports enabled behavior, not ambient hardware
+support. It is entirely zero unless sparse textures were requested. On a
+successful sparse device, `image_2d` and `image_3d` name the enabled residency
+dimensions. When `nonresident_strict` is true, nonresident reads are guaranteed
+to return zero and writes are discarded; when false, that behavior is not
+guaranteed. `binding_queues` names every selected semantic role backed by a
+sparse-binding-capable family. Sparse resources and binding operations are not
+part of this capability-only surface.
 
 Creation:
 
@@ -483,7 +507,7 @@ both always-checked and `FULL`-only causes.
 | Fault | Cause category | Fired by | Typical cause |
 |---|---|---|---|
 | `UNSUPPORTED_BACKEND` | Runtime failures | `create_runtime` | the Vulkan loader, driver, or required backend initialization path is unavailable |
-| `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_timestamp_pool`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, timestamp recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; no selected role supports the timestamp workflow; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
+| `UNSUPPORTED_FEATURE` | Runtime failures | device creation, `create_runtime`, `create_texture`, `create_dedicated_texture`, `create_texture_view`, `create_texture_views`, `create_timestamp_pool`, `create_swapchain`, `create_graphics_pipeline`, `intern_sampler`, generated draw/dispatch recording, timestamp recording, indexed-indirect-count execution | validation layers not installed; presentation was not requested or is unsupported for the adapter and surface; missing optional or required device feature; an enabled sparse request lacks a residency dimension or selected binding queue; no selected role supports the timestamp workflow; the selected adapter cannot provide the runtime's semantic heap capacities; unsupported image format or usage; adapter rejects a valid texture descriptor |
 | `INVALID_ARGUMENT` | Always checked / FULL diagnostics | runtime adapter indexing; device descriptor validation; any create/export, including `create_command_allocator`; `allocate_memory`; `GpuSpan.checked_subspan`; get/mapping/visibility operations; `get_queue`; `submit`; `present`; `cmd_*`; `render_geometry_state`; pipeline creates; transitions; descriptor publication; sampler interning; generated-scratch reservation | always checked for required pointer/slice safety, safe ranges and integer lowering, cold-path configuration, and fixed API limits; `FULL` additionally diagnoses command enum, usage, layout, queue, capability, render-compatibility, and dynamic-state misuse |
 | `INVALID_HANDLE` | Always checked | runtime and adapter queries; destruction; device/queue/completion queries; allocation info/span/mapping/address/visibility operations; any resource-handle-taking call; `cmd_*`; command lifecycle; `submit` | zero, destroyed, stale, consumed, malformed, or foreign runtime, adapter, device, queue, completion point, allocation, span, or resource handle; or a zero, stale, consumed, or wrong-phase valid-origin direct command token; submit also rejects a token recorded for another device |
 | `INVALID_RESOURCE_STATE` | Always checked lifecycle/safe snapshot / Runtime failures | command execution; surface and swapchain creation/lifecycle; `destroy_attachment_view`; `release_generated_scratch` | an authoritative lifecycle transition is invalid, trusted-table command execution has no usable bound-pipeline snapshot, a borrowed view was passed for destruction, a generated-scratch key is not reserved, or Vulkan reports that the native window is already in use |

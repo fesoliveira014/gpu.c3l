@@ -719,6 +719,16 @@ fn bool? vk_adapter_supports_device_baseline(
     return configured_device_baseline_support;
 }
 
+fn bool? vk_adapter_supports_sparse_textures(
+    VkRuntimeState* state,
+    uint adapter_index,
+) {
+    if (state == null || adapter_index >= state.adapter_count) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return false;
+}
+
 fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
     VkRuntimeState* state,
     uint index,
@@ -788,8 +798,10 @@ fn bool? vk_supports_queue_request(
     uint adapter_index,
     gpu::QueueRequest* request,
     void* backend_surface,
+    bool require_sparse_binding = false,
 ) {
     (void)backend_surface;
+    (void)require_sparse_binding;
     if (state == null || request == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
