@@ -567,18 +567,6 @@ fn vk::ImageView? resolve_texture_view_tracked(
     return image_view;
 }
 
-fn vk::ImageView? resolve_texture_view(VkDeviceState* state, TextureSlot* slot, gpu::TextureViewDesc* view) {
-    CachedViewCreation creation;
-    return resolve_texture_view_tracked(
-        state:     state,
-        slot:      slot,
-        texture:   {},
-        view:      view,
-        operation: null,
-        creation:  &creation,
-    );
-}
-
 fn void commit_texture_view_creations(VkDeviceState* state, CachedViewCreation[] creations) @private {
     foreach (&creation : creations) {
         if (creation.replaced_cache && creation.previous_cache.ptr != null) {
