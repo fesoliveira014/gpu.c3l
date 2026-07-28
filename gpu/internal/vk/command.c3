@@ -87,14 +87,14 @@ struct PreparedBufferTextureCopy {
 }
 
 struct PreparedDispatchIndirect {
-    BoundPipeline   pipeline;
+    BoundPipeline*  pipeline;
     ResolvedSpan    args;
     gpu::GpuSpan    args_span;
     gpu::GpuAddress root;
 }
 
 struct PreparedGeneratedDispatch {
-    BoundPipeline                  pipeline;
+    BoundPipeline*                 pipeline;
     ResolvedSpan                   records;
     ResolvedSpan                   count;
     gpu::GpuSpan                   records_span;
@@ -1825,8 +1825,8 @@ fn ResolvedSpan? validate_and_lower_indirect_span(
     return resolved;
 }
 
-fn BoundPipeline? bound_pipeline_snapshot(CommandRecord* record) {
-    BoundPipeline pipeline = record.logical_pipeline;
+fn BoundPipeline*? borrow_bound_pipeline(CommandRecord* record) @private {
+    BoundPipeline* pipeline = &record.logical_pipeline;
     if (!pipeline.handle.is_valid()) return gpu::INVALID_RESOURCE_STATE~;
     if (pipeline.pipeline == null || pipeline.layout == null) unreachable();
     return pipeline;
@@ -2150,8 +2150,8 @@ fn void? trusted_dispatch(
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    BoundPipeline pipeline = bound_pipeline_snapshot(record)!;
-    push_compute_root(record, &pipeline, root);
+    BoundPipeline* pipeline = borrow_bound_pipeline(record)!;
+    push_compute_root(record, pipeline, root);
     vk::cmd_dispatch(
         command_buffer: record.command_buffer,
         group_count_x:  groups.x,
@@ -2180,7 +2180,7 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
     }
     VkDeviceState* state = commands.device_state;
     return {
-        .pipeline  = bound_pipeline_snapshot(record)!,
+        .pipeline  = borrow_bound_pipeline(record)!,
         .args      = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -2203,14 +2203,13 @@ fn PreparedDispatchIndirect? full_prepare_dispatch_indirect(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    BoundPipeline pipeline = *active_bound_pipeline(
-        state:         state,
-        record:        record,
-        expected_kind: PipelineKind.COMPUTE,
-        operation:     "cmd_dispatch_indirect",
-    )!;
     return {
-        .pipeline  = pipeline,
+        .pipeline  = active_bound_pipeline(
+            state:         state,
+            record:        record,
+            expected_kind: PipelineKind.COMPUTE,
+            operation:     "cmd_dispatch_indirect",
+        )!,
         .args      = validate_and_lower_indirect_span(
             state:          state,
             record:         record,
@@ -2241,7 +2240,7 @@ fn void record_dispatch_indirect(
     PreparedDispatchIndirect* dispatch,
 ) {
     CommandRecord* record = commands;
-    push_compute_root(record, &dispatch.pipeline, dispatch.root);
+    push_compute_root(record, dispatch.pipeline, dispatch.root);
     vk::cmd_dispatch_indirect(
         record.command_buffer,
         dispatch.args.slot.buffer,
@@ -2425,7 +2424,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_inputs(
     }
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDispatch dispatch = {
-        .pipeline     = bound_pipeline_snapshot(record)!,
+        .pipeline     = borrow_bound_pipeline(record)!,
         .records_span = records,
         .count_span   = count_span,
         .max_count    = max_dispatch_count,
@@ -2461,7 +2460,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch(
         max_dispatch_count: max_dispatch_count,
     )!;
     if (dispatch.max_count == 0) return dispatch;
-    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
+    dispatch.layout = snapshot_generated_dispatch_layout(dispatch.pipeline)!;
     return dispatch;
 }
 
@@ -2481,7 +2480,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_with_layout_read_ops(
     if (dispatch.max_count == 0) return dispatch;
     dispatch.layout = layout_read.read(
         layout_read.user_data,
-        &dispatch.pipeline,
+        dispatch.pipeline,
     );
     dispatch.layout = required_generated_work_layout(dispatch.layout)!;
     return dispatch;
@@ -2500,7 +2499,7 @@ fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
     }
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDispatch dispatch = {
-        .pipeline = *active_bound_pipeline(
+        .pipeline = active_bound_pipeline(
             state:         state,
             record:        record,
             expected_kind: PipelineKind.COMPUTE,
@@ -2530,7 +2529,7 @@ fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
         operation:      "cmd_dispatch_generated",
         rejected_field: "count_span",
     )!;
-    dispatch.layout = snapshot_generated_dispatch_layout(&dispatch.pipeline)!;
+    dispatch.layout = snapshot_generated_dispatch_layout(dispatch.pipeline)!;
     return dispatch;
 }
 
@@ -2567,7 +2566,7 @@ fn void? record_generated_dispatch(
     execute_generated_work(
         state:         state,
         record:        record,
-        pipeline:      &dispatch.pipeline,
+        pipeline:      dispatch.pipeline,
         kind:          gpu::GeneratedWorkKind.DISPATCH,
         layout:        dispatch.layout,
         shader_stages: vk::ShaderStageFlagBits.COMPUTE_BIT,
