@@ -169,15 +169,47 @@ Do not use Allman braces.
 
 ## 10. Comments and docstrings
 
-Prefer doc comments for public API contracts:
+Every public callable in `gpu`, its platform surface modules, and `gpu::utils`
+uses a native C3 docstring. Order the content as:
+
+```text
+concise summary and recoverable-fault behavior
+
+@param entries in declaration order
+
+@return entry for a value or fault-returning operation
+
+@require entries for stable local caller contracts only
+```
+
+Omit a method's receiver when its meaning is self-evident. State ownership,
+borrowing and lifetime, token consumption, blocking, and thread confinement
+when they affect correct use. Public descriptions stay backend-neutral; a
+platform surface may name its public native handle types.
+
+C3 doc contracts are executable. Do not turn recoverable conditions such as
+invalid handles, unsupported capabilities, resource use, capacity exhaustion,
+timeouts, or device loss into `@require`. Describe those faults in prose and
+the `@return` text. Use `@require` only when the condition is a stable local
+programming contract and enforcing it preserves the intended API behavior.
+Future `gpu::utils` views must explicitly state that they are non-owning and
+inherit the lifetime of their public resources.
+
+Example:
 
 ```c3
-<* Allocate addressable generic GPU data.
-   Ownership: free with `free_allocation` after GPU use is quiescent. *>
+<* Allocate caller-managed GPU storage.
+   Free the returned allocation after GPU use is quiescent.
+
+   @param device : "Live device that will own the allocation."
+   @param desc : "Borrowed allocation description."
+   @return "An owning allocation token, or a recoverable validation, capacity, allocation, or device fault." *>
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc);
 ```
 
-Avoid inline comments that restate the code. Comments should explain why, not what.
+Keep docstrings short and precise. Do not add a source parser, docstring linter,
+documentation manifest, generated-doc drift checker, or tests that count tags.
+Ordinary compilation and `c3c docgen` are the validation path.
 
 API preconditions, side effects, and ownership rules belong in doc comments. If a field needs a comment to be understood, consider renaming it or restructuring the type.
 
