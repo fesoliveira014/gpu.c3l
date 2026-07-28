@@ -1568,6 +1568,7 @@ fn PreparedBufferTextureCopy? validate_and_lower_buffer_to_texture_copy(
     PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
+    if (copy.texture.sparse) return gpu::INVALID_ARGUMENT~;
     validate_span_recording_access_only(
         state:     state,
         record:    record,
@@ -1640,6 +1641,7 @@ fn PreparedBufferTextureCopy? validate_and_lower_texture_to_buffer_copy(
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
+    if (copy.texture.sparse) return gpu::INVALID_ARGUMENT~;
     validate_texture_recording_access_only(
         state:     state,
         record:    record,

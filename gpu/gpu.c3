@@ -957,11 +957,12 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
     return gpu::internal::vk::vk_get_texture_requirements(operation.state, desc);
 }
 
-<* Create an unbound single-layer, single-sample color sparse texture on a
-   device with the matching sparse dimension enabled. Usage is limited to
-   sampled, storage, and transfer. Creation allocates and binds no memory.
-   Ownership: release the image and its views with `destroy_texture`; sparse
-   page allocations remain caller-owned. *>
+<* Create an unbound single-layer, single-sample color sparse texture.
+   Creation binds no memory; sparse page allocations remain caller-owned.
+
+   @param device : "Live sparse-enabled device that will own the texture."
+   @param desc : "Borrowed sparse texture description."
+   @return "An owning texture handle, or a recoverable validation, support, capacity, allocation, or device fault." *>
 fn TextureHandle? create_sparse_texture(
     Device* device,
     TextureDesc* desc,
@@ -977,10 +978,11 @@ fn TextureHandle? create_sparse_texture(
     return texture;
 }
 
-<* Return the immutable tile, mip-tail, virtual-size, and page-allocation
-   requirements cached for a live sparse texture. A live non-sparse texture
-   faults `INVALID_ARGUMENT`; stale or foreign identity faults
-   `INVALID_HANDLE`. *>
+<* Return the immutable requirements cached for a live sparse texture.
+
+   @param device : "Live device that owns the texture."
+   @param texture : "Live sparse texture handle."
+   @return "The cached requirements, or a recoverable argument, handle, or device fault." *>
 fn SparseTextureRequirements? get_sparse_texture_requirements(
     Device* device,
     TextureHandle texture,

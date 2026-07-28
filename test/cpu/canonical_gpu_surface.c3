@@ -181,7 +181,23 @@ fn void pin_memory_and_resources() {
         },
     };
     gpu::TextureHandle texture = {};
-    gpu::SparseTextureRequirements sparse_requirements = {};
+    gpu::SparseTextureAspectRequirements sparse_aspect = {
+        .aspect                 = gpu::SparseTextureAspect.METADATA,
+        .tile_extent            = { 1, 1, 1 },
+        .mip_tail_first_lod     = 1,
+        .mip_tail_size          = 1,
+        .mip_tail_offset        = 1,
+        .mip_tail_stride        = 1,
+        .single_mip_tail        = true,
+        .aligned_mip_size       = true,
+        .nonstandard_block_size = true,
+    };
+    gpu::SparseTextureRequirements sparse_requirements = {
+        .virtual_size    = 1,
+        .page_allocation = {},
+        .aspect_count    = 1,
+        .aspects         = { sparse_aspect, {} },
+    };
     sparse_requirements.aspects[0].aspect =
         gpu::SparseTextureAspect.COLOR;
     gpu::AttachmentViewHandle attachment_view = {};
@@ -207,6 +223,8 @@ fn void pin_memory_and_resources() {
     (void)gpu::create_texture(&device, &texture_desc);
     (void)gpu::create_sparse_texture(&device, &texture_desc);
     (void)gpu::get_sparse_texture_requirements(&device, texture);
+    (void)gpu::MAX_SPARSE_TEXTURE_ASPECTS;
+    (void)sparse_requirements;
     (void)gpu::create_placed_texture(
         device:     &device,
         desc:       &texture_desc,

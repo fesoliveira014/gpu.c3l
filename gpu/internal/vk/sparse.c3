@@ -17,6 +17,11 @@ alias SparseTextureGetSparseRequirementsFn = fn void (
     void*, vk::Device, vk::Image, uint*, vk::SparseImageMemoryRequirements*
 );
 
+const uint KNOWN_SPARSE_FORMAT_FLAGS =
+    (uint)vk::SparseImageFormatFlagBits.SINGLE_MIPTAIL_BIT
+    | (uint)vk::SparseImageFormatFlagBits.ALIGNED_MIP_SIZE_BIT
+    | (uint)vk::SparseImageFormatFlagBits.NONSTANDARD_BLOCK_SIZE_BIT;
+
 struct SparseTextureNativeOps {
     void*                                  user_data;
     SparseTextureSupportsImageDescFn       supports_image_desc;
@@ -72,7 +77,9 @@ fn gpu::SparseTextureRequirements? sparse_texture_requirements_from_native(
     uint mip_levels,
 ) {
     if (memory == null || native.len == 0) return gpu::BACKEND_ERROR~;
-    if (native.len > 2) return gpu::UNSUPPORTED_FEATURE~;
+    if (native.len > gpu::MAX_SPARSE_TEXTURE_ASPECTS) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     usz virtual_size = (usz)memory.size;
     usz alignment = (usz)memory.alignment;
     if (memory.size == 0
@@ -97,11 +104,6 @@ fn gpu::SparseTextureRequirements? sparse_texture_requirements_from_native(
                 return gpu::UNSUPPORTED_FEATURE~;
         }
         uint flags = (uint)entry.format_properties.flags;
-        const uint KNOWN_SPARSE_FORMAT_FLAGS =
-            (uint)vk::SparseImageFormatFlagBits.SINGLE_MIPTAIL_BIT
-            | (uint)vk::SparseImageFormatFlagBits.ALIGNED_MIP_SIZE_BIT
-            | (uint)vk::SparseImageFormatFlagBits
-                .NONSTANDARD_BLOCK_SIZE_BIT;
         if ((flags & ~KNOWN_SPARSE_FORMAT_FLAGS) != 0) {
             return gpu::UNSUPPORTED_FEATURE~;
         }
@@ -165,14 +167,9 @@ fn bool sparse_texture_desc_valid(gpu::TextureDesc* desc) {
         return false;
     }
     return gpu::internal::texture_array_layers(desc) == 1
-        && desc.sample_count == gpu::SampleCount.ONE
-        && desc.format != gpu::Format.D32_FLOAT
+        && !texture_format_is_depth_stencil(desc.format)
         && !desc.usage.color_attach
-        && !desc.usage.depth_attach
-        && (desc.usage.sampled
-            || desc.usage.storage
-            || desc.usage.transfer_src
-            || desc.usage.transfer_dst);
+        && !desc.usage.depth_attach;
 }
 
 fn gpu::TextureHandle? create_sparse_texture_for_state_with_ops(

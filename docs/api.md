@@ -827,8 +827,10 @@ Sparse creation allocates no image memory and performs no binding. Existing
 texture-view publication can expose a sampled or storage sparse image before
 residency is established; publication and residency are independent. The
 library inserts no hidden wait and tracks no resident regions. Until sparse
-memory binding is added, the image remains unbound and must not be used by GPU
-commands. Destroying it releases its image and views but no caller allocation.
+memory binding is added, the image remains unbound. FULL validation rejects
+buffer-to-texture and texture-to-buffer copies with `INVALID_ARGUMENT`;
+barriers remain legal. Destroying it releases its image and views but no caller
+allocation.
 
 `create_placed_texture` requires `MemoryClass.TEXTURE`, compatible memory,
 an aligned, in-bounds, non-overlapping range, and allocation access covering

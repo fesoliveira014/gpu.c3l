@@ -4,6 +4,7 @@ import gpu @public;
 import gpu::internal::vk @public;
 import vk;
 import vma;
+import std::io;
 
 struct SparseTextureProbe {
     bool                              support_result;
@@ -223,16 +224,21 @@ fn gpu::TextureDesc sparse_test_texture_desc() {
 }
 
 fn void sparse_native_ops_exposes_creation_transaction_seam() @test {
-    vk::SparseTextureNativeOps ops;
+    vk::SparseTextureNativeOps ops =
+        vk::sparse_texture_native_ops_real();
 
-    assert(ops.supports_image_desc == null);
-    assert(ops.sparse_format_property_count == null);
-    assert(ops.create_image == null);
-    assert(ops.get_memory_requirements == null);
-    assert(ops.get_sparse_requirements == null);
-    assert(ops.create_view == null);
-    assert(ops.destroy_image == null);
-    assert(ops.destroy_view == null);
+    assert(ops.supports_image_desc
+        == &vk::sparse_texture_supports_image_desc_real);
+    assert(ops.sparse_format_property_count
+        == &vk::sparse_texture_format_property_count_real);
+    assert(ops.create_image == &vk::texture_create_image_real);
+    assert(ops.get_memory_requirements
+        == &vk::sparse_texture_get_memory_requirements_real);
+    assert(ops.get_sparse_requirements
+        == &vk::sparse_texture_get_sparse_requirements_real);
+    assert(ops.create_view == &vk::texture_create_view_real);
+    assert(ops.destroy_image == &vk::texture_destroy_image_real);
+    assert(ops.destroy_view == &vk::texture_destroy_view_real);
 }
 
 fn void sparse_texture_slot_stores_cached_requirements() @test {
@@ -881,12 +887,135 @@ fn void unsupported_sparse_aspect_shapes_fault_unsupported() @test {
     assert_sparse_shape_unsupported(&memory, (&invalid)[:1]);
 }
 
+fn void unbacked_sparse_texture_rejects_copies_in_full_validation() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .contract_validation = gpu::ContractValidation.FULL,
+        .application_name    = "gpu_sparse_copy_validation_test",
+    };
+    gpu::Device? maybe_device = create_test_device(&runtime_desc);
+    if (catch create_fault = maybe_device) {
+        assert(create_fault == gpu::UNSUPPORTED_BACKEND
+            || create_fault == gpu::UNSUPPORTED_FEATURE);
+        io::eprintfn(
+            "unbacked_sparse_texture_rejects_copies_in_full_validation: "
+            "no Vulkan device available, skipping",
+        );
+        return;
+    }
+    gpu::Device device = maybe_device;
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc texture_desc = {
+        .access = { .transfer },
+        .width  = 4,
+        .height = 4,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .transfer_src, .transfer_dst },
+    };
+    gpu::TextureHandle texture =
+        gpu::create_texture(&device, &texture_desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+    OwnedSpan buffer = allocate_owned_span(
+        device:       &device,
+        size:         64,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       { .transfer },
+        debug_name:   "sparse_copy_validation",
+    )!!;
+    defer free_owned_span(&device, &buffer)!!;
+    gpu::Queue queue =
+        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::TextureSlot* slot = state.textures.get(texture)!!;
+    slot.sparse = true;
+    defer slot.sparse = false;
+
+    gpu::TextureBarrier barrier = {
+        .texture = texture,
+        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+    };
+    gpu::cmd_texture_barrier(&commands, &barrier)!!;
+
+    gpu::BufferTextureCopyDesc upload = {
+        .src     = buffer.span,
+        .texture = texture,
+    };
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(
+        &commands,
+        &upload,
+    )) == gpu::INVALID_ARGUMENT);
+    gpu::TextureBufferCopyDesc readback = {
+        .texture = texture,
+        .dst     = buffer.span,
+    };
+    assert(@catch(gpu::cmd_copy_texture_to_buffer(
+        &commands,
+        &readback,
+    )) == gpu::INVALID_ARGUMENT);
+}
+
+fn bool exercise_real_sparse_three_dimensional_lifecycle(
+    gpu::Device* device,
+    gpu::QueueRoles access,
+    gpu::Format[] formats,
+) {
+    gpu::TextureDesc desc = {
+        .access = access,
+        .width  = 32,
+        .height = 16,
+        .depth  = 8,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled },
+    };
+    foreach (format : formats) {
+        desc.format = format;
+        gpu::TextureHandle? created =
+            gpu::create_sparse_texture(device, &desc);
+        if (catch create_fault = created) {
+            assert(create_fault == gpu::UNSUPPORTED_FEATURE);
+            continue;
+        }
+        gpu::TextureHandle texture = created;
+        gpu::SparseTextureRequirements requirements =
+            gpu::get_sparse_texture_requirements(device, texture)!!;
+        assert(requirements.virtual_size > 0);
+        assert(requirements.page_allocation.size > 0);
+        assert(requirements.aspect_count > 0);
+        gpu::TextureView view =
+            gpu::create_texture_view(device, texture, null)!!;
+        gpu::destroy_texture_view(device, view)!!;
+        gpu::destroy_texture(device, texture)!!;
+        return true;
+    }
+    return false;
+}
+
 fn void sparse_texture_real_lifecycle_when_supported() @test {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation = gpu::ContractValidation.FULL,
         .application_name    = "gpu_sparse_texture_test",
     };
-    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    gpu::Runtime? maybe_runtime = gpu::create_runtime(&runtime_desc);
+    if (catch create_fault = maybe_runtime) {
+        assert(create_fault == gpu::UNSUPPORTED_BACKEND);
+        io::eprintfn(
+            "sparse_texture_real_lifecycle_when_supported: "
+            "Vulkan unavailable, skipping",
+        );
+        return;
+    }
+    gpu::Runtime runtime = maybe_runtime;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::DeviceDesc device_desc = {
@@ -924,11 +1053,42 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
             queue_kind = gpu::QueueKind.TRANSFER;
             access = { .transfer };
         }
+
+        gpu::DeviceDesc disabled_desc;
+        gpu::Device disabled =
+            gpu::create_device(&adapter, &disabled_desc)!!;
+        gpu::TextureDesc disabled_texture_desc = {
+            .access = access,
+            .width  = 64,
+            .height = 64,
+            .format = gpu::Format.RGBA8_UNORM,
+            .usage  = { .sampled },
+        };
+        assert(@catch(gpu::create_sparse_texture(
+            &disabled,
+            &disabled_texture_desc,
+        )) == gpu::UNSUPPORTED_FEATURE);
+        gpu::destroy_device(&disabled)!!;
+
+        if (!caps.sparse_textures.image_3d
+            || !exercise_real_sparse_three_dimensional_lifecycle(
+                &device,
+                access,
+                formats[..],
+            )) {
+            io::eprintfn(
+                "sparse_texture_real_lifecycle_when_supported: "
+                "3D sparse residency unavailable, skipping 3D pass",
+            );
+        }
+        if (!caps.sparse_textures.image_2d) {
+            gpu::destroy_device(&device)!!;
+            continue;
+        }
         gpu::TextureDesc desc = {
             .access = access,
             .width  = 64,
             .height = 64,
-            .depth  = caps.sparse_textures.image_2d ? 0 : 8,
             .format = gpu::Format.RGBA8_UNORM,
             .usage  = { .sampled },
         };
@@ -1014,7 +1174,10 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
                     .src     = upload.span,
                     .texture = transfer,
                 };
-                gpu::cmd_copy_buffer_to_texture(&commands, &copy)!!;
+                assert(@catch(gpu::cmd_copy_buffer_to_texture(
+                    &commands,
+                    &copy,
+                )) == gpu::INVALID_ARGUMENT);
                 assert(@catch(gpu::destroy_texture(&device, transfer))
                     == gpu::RESOURCE_IN_USE);
                 gpu::discard_commands(&commands)!!;
@@ -1035,4 +1198,8 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
         }
         gpu::destroy_device(&device)!!;
     }
+    io::eprintfn(
+        "sparse_texture_real_lifecycle_when_supported: "
+        "2D sparse residency unavailable, skipping",
+    );
 }
