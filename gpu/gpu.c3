@@ -402,7 +402,8 @@ fn String? build_memory_report(Device* device, bool detailed) {
     return gpu::internal::vk::vk_build_memory_report(operation.state, detailed);
 }
 
-<* Create an explicitly reset, caller-owned timestamp query pool. *>
+<* Create a caller-owned timestamp pool. Slots are uninitialised and must be
+   reset with `cmd_reset_timestamps` before their first write. *>
 fn TimestampPoolHandle? create_timestamp_pool(
     Device* device,
     TimestampPoolDesc* desc,
@@ -462,7 +463,8 @@ fn void? cmd_write_timestamp(
 }
 
 <* Resolve packed `ulong` values with a device-side wait into aligned caller
-   storage. This call never waits on the host. *>
+   storage. Every slot must have been reset and written; an unwritten slot can
+   stall the queue indefinitely. This call never waits on the host. *>
 fn void? cmd_resolve_timestamps(
     CommandList* commands,
     TimestampPoolHandle pool,

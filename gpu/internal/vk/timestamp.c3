@@ -224,8 +224,11 @@ fn vk::PipelineStageFlags2 timestamp_stage_to_vk(
         return (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT;
     }
-    return (vk::PipelineStageFlags2)
-        vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+    if (stage.indirect) {
+        return (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+    }
+    unreachable();
 }
 
 fn bool timestamp_destination_valid(
