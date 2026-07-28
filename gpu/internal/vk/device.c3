@@ -122,6 +122,7 @@ struct VkDeviceState @public {
     float                      max_sampler_anisotropy;
     BufferTable                buffers;
     AllocationTable            allocations;
+    TimestampPoolTable         timestamp_pools;
     Mutex                      resource_mutex;
     Mutex                      pipeline_creation_mutex;
     Mutex                      texture_view_cache_mutex;
@@ -282,6 +283,9 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .dispatch_generated          = &trusted_dispatch_generated,
     .begin_label                 = &vk_cmd_begin_label,
     .end_label                   = &vk_cmd_end_label,
+    .reset_timestamps            = &trusted_reset_timestamps,
+    .write_timestamp             = &trusted_write_timestamp,
+    .resolve_timestamps          = &trusted_resolve_timestamps,
 };
 
 const CommandOps FULL_COMMAND_OPS @private = {
@@ -309,6 +313,9 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .dispatch_generated          = &full_dispatch_generated,
     .begin_label                 = &vk_cmd_begin_label,
     .end_label                   = &vk_cmd_end_label,
+    .reset_timestamps            = &full_reset_timestamps,
+    .write_timestamp             = &full_write_timestamp,
+    .resolve_timestamps          = &full_resolve_timestamps,
 };
 
 fn bool contract_uses_full_validation(DeviceValidationPolicy policy) =>
@@ -660,6 +667,14 @@ fn gpu::Device? create_vk_device_from_runtime(
         AllocationCell,
         ALLOCATION_CAPACITY,
     );
+    state.timestamp_pools.owner = gpu::internal::resource_owner_tag(
+        state.resource_owner,
+        gpu::internal::ResourceOwnerKind.TIMESTAMP_POOL,
+    );
+    state.timestamp_pools.slots = mem::new_array(
+        TimestampPoolCell,
+        MAX_TIMESTAMP_POOLS,
+    );
 
     state.command_allocators.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
@@ -727,6 +742,10 @@ fn gpu::Device? create_vk_device_from_runtime(
         viewport_limits:         &state.viewport_limits,
         max_timeline_difference: &state.max_timeline_semaphore_value_difference,
         non_coherent_atom_size:  &state.non_coherent_atom_size,
+    );
+    state.caps.timestamps = query_timestamp_caps(
+        state.physical_device,
+        &families,
     );
 
     gpu::QueueRequest request = queue_request == null
@@ -839,6 +858,7 @@ fn void destroy_state(VkDeviceState* state) @private {
         // Report before cleanup clears the diagnostic tables.
         if (report_teardown_leaks(state)) (void)report_resource_leaks(state);
         destroy_command_table(state);
+        destroy_timestamp_pool_table(state);
         if (state.command_allocators.slots.ptr != null) {
             foreach (&cell : state.command_allocators.slots[
                 :state.command_allocators.next_new

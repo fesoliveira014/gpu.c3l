@@ -57,6 +57,16 @@ fn bool CommandAllocatorHandle.equals(
         && self.index == other.index
         && self.generation == other.generation;
 }
+fn bool TimestampPoolHandle.is_valid(self) =>
+    self.owner != 0 && self.generation != 0;
+fn bool TimestampPoolHandle.equals(
+    self,
+    TimestampPoolHandle other,
+) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
 
 <* Tests only whether this value differs from the invalid token sentinel.
    This does not validate live provenance or recording phase. *>
@@ -78,6 +88,42 @@ fn bool SamplerIndex.is_valid(self) => (uint)self != 0;
 
 <* True when the token is not the invalid zero value. *>
 fn bool Runtime.is_valid(self) => (ulong)self != 0;
+
+<* Convert same-native-queue timestamp values with role-specific modular wrap. *>
+fn double? timestamp_delta_ns(
+    TimestampCaps* caps,
+    QueueKind queue,
+    ulong begin,
+    ulong end,
+) {
+    if (caps == null) return INVALID_ARGUMENT~;
+    uint valid_bits;
+    switch (queue) {
+        case GRAPHICS:
+            if (!caps.queues.graphics) return UNSUPPORTED_FEATURE~;
+            valid_bits = caps.graphics_valid_bits;
+        case COMPUTE:
+            if (!caps.queues.compute) return UNSUPPORTED_FEATURE~;
+            valid_bits = caps.compute_valid_bits;
+        case TRANSFER:
+            if (!caps.queues.transfer) return UNSUPPORTED_FEATURE~;
+            valid_bits = caps.transfer_valid_bits;
+        default:
+            return INVALID_ARGUMENT~;
+    }
+    if (valid_bits == 0 || valid_bits > 64 || caps.period_ns <= 0.0f) {
+        return INVALID_ARGUMENT~;
+    }
+    ulong mask = valid_bits == 64
+        ? ulong::max
+        : ((ulong)1 << valid_bits) - 1;
+    begin &= mask;
+    end &= mask;
+    ulong elapsed = end >= begin
+        ? end - begin
+        : (mask - begin) + end + 1;
+    return (double)elapsed * (double)caps.period_ns;
+}
 
 <* Return FULL contract diagnostics with Vulkan validation layers enabled. *>
 fn RuntimeDesc full_validation_runtime_desc() => {
@@ -354,6 +400,108 @@ fn String? build_memory_report(Device* device, bool detailed) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_build_memory_report(operation.state, detailed);
+}
+
+<* Create an explicitly reset, caller-owned timestamp query pool. *>
+fn TimestampPoolHandle? create_timestamp_pool(
+    Device* device,
+    TimestampPoolDesc* desc,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null || desc.capacity == 0) return INVALID_ARGUMENT~;
+    if ((uint)operation.data.caps.timestamps.queues == 0) {
+        return UNSUPPORTED_FEATURE~;
+    }
+    TimestampPoolHandle pool =
+        gpu::internal::vk::vk_create_timestamp_pool(operation.state, desc)!;
+    gpu::internal::retain_device_children(&operation);
+    return pool;
+}
+
+<* Destroy a pool after all recorded and submitted uses have retired. *>
+fn void? destroy_timestamp_pool(
+    Device* device,
+    TimestampPoolHandle pool,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
+        operation: &operation,
+        owner:     pool.owner,
+        kind:      gpu::internal::ResourceOwnerKind.TIMESTAMP_POOL,
+    )!;
+    gpu::internal::vk::vk_destroy_timestamp_pool(operation.state, pool)!;
+    gpu::internal::release_device_children(&operation);
+}
+
+<* Reset a nonempty pool range outside a render pass. *>
+fn void? cmd_reset_timestamps(
+    CommandList* commands,
+    TimestampPoolHandle pool,
+    uint first,
+    uint count,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    return record.ops.reset_timestamps(record, pool, first, count);
+}
+
+<* Write one timestamp at exactly one executable pipeline stage. *>
+fn void? cmd_write_timestamp(
+    CommandList* commands,
+    TimestampPoolHandle pool,
+    uint index,
+    StageMask stage,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    return record.ops.write_timestamp(record, pool, index, stage);
+}
+
+<* Resolve packed `ulong` values with a device-side wait into aligned caller
+   storage. This call never waits on the host. *>
+fn void? cmd_resolve_timestamps(
+    CommandList* commands,
+    TimestampPoolHandle pool,
+    uint first,
+    uint count,
+    GpuSpan dst,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    return record.ops.resolve_timestamps(record, pool, first, count, dst);
+}
+
+<* Read packed timestamp values without waiting.
+   `DEVICE_BUSY` leaves `out[0..count]` unspecified. *>
+fn void? read_timestamps(
+    Device* device,
+    TimestampPoolHandle pool,
+    uint first,
+    uint count,
+    ulong[] out,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
+        operation: &operation,
+        owner:     pool.owner,
+        kind:      gpu::internal::ResourceOwnerKind.TIMESTAMP_POOL,
+    )!;
+    if (count == 0 || out.len < count || out.ptr == null) {
+        return INVALID_ARGUMENT~;
+    }
+    return gpu::internal::vk::vk_read_timestamps(
+        state: operation.state,
+        pool:  pool,
+        first: first,
+        count: count,
+        out:   out,
+    );
 }
 
 <* Open a debug-utils label region; a no-op without debug utils.

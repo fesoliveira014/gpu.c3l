@@ -89,6 +89,13 @@ struct CommandAllocatorHandle {
 }
 $assert CommandAllocatorHandle::size <= ulong::size * 2;
 
+struct TimestampPoolHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
+}
+$assert TimestampPoolHandle::size <= ulong::size * 2;
+
 const Device                 DEVICE_INVALID                   = {};
 const GpuAllocation          GPU_ALLOCATION_INVALID           = {};
 const TextureHandle          TEXTURE_HANDLE_INVALID           = {};
@@ -97,6 +104,7 @@ const TextureView            TEXTURE_VIEW_INVALID             = {};
 const PipelineHandle         PIPELINE_HANDLE_INVALID          = {};
 const SwapchainHandle        SWAPCHAIN_HANDLE_INVALID         = {};
 const CommandAllocatorHandle COMMAND_ALLOCATOR_HANDLE_INVALID = {};
+const TimestampPoolHandle    TIMESTAMP_POOL_HANDLE_INVALID    = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
@@ -239,6 +247,19 @@ enum QueueKind : int {
     TRANSFER,
 }
 
+struct TimestampPoolDesc {
+    uint    capacity;
+    ZString debug_name;
+}
+
+struct TimestampCaps {
+    QueueRoles queues;
+    uint       graphics_valid_bits;
+    uint       compute_valid_bits;
+    uint       transfer_valid_bits;
+    float      period_ns;
+}
+
 <* Capabilities of the created device. Query with get_device_caps instead of
    hardcoding limits. *>
 struct DeviceCaps {
@@ -251,6 +272,7 @@ struct DeviceCaps {
     QueueRoles queues;
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
+    TimestampCaps timestamps;
     // Configured semantic heap capacity, not the hardware maximum.
     uint texture_heap_capacity;
     // Configured semantic heap capacity, not the hardware maximum.
@@ -297,6 +319,7 @@ enum DebugResourceKind : int {
     SAMPLER,
     ALLOCATION,
     ATTACHMENT_VIEW,
+    TIMESTAMP_POOL,
 }
 
 bitstruct DebugMessageCategory : uint {
@@ -451,7 +474,7 @@ bitstruct Surface : ulong {
 
 const Surface SURFACE_INVALID = {};
 
-const ulong RESOURCE_OWNER_KIND_COUNT = 10;
+const ulong RESOURCE_OWNER_KIND_COUNT = 11;
 const ulong MAX_DEVICE_RESOURCE_OWNER =
     ulong::max / RESOURCE_OWNER_KIND_COUNT;
 

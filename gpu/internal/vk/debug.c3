@@ -59,6 +59,7 @@ fn gpu::DebugResourceKind debug_resource_kind(vk::ObjectType object_type) {
         case vk::ObjectType.SHADER_MODULE:  return gpu::DebugResourceKind.SHADER;
         case vk::ObjectType.COMMAND_BUFFER: return gpu::DebugResourceKind.COMMAND_LIST;
         case vk::ObjectType.SAMPLER:        return gpu::DebugResourceKind.SAMPLER;
+        case vk::ObjectType.QUERY_POOL:     return gpu::DebugResourceKind.TIMESTAMP_POOL;
         default:                            return gpu::DebugResourceKind.NONE;
     }
 }
@@ -347,6 +348,35 @@ fn uint report_command_allocator_leaks(VkDeviceState* state) {
     return count;
 }
 
+fn uint report_timestamp_pool_leaks(VkDeviceState* state) {
+    uint count;
+    if (state.timestamp_pools.slots.ptr == null) return 0;
+    foreach (i, &cell : state.timestamp_pools.slots[
+        :state.timestamp_pools.next_new
+    ]) {
+        if (!cell.used) continue;
+        ZString name = slot_name(&cell.value.debug_name[0]);
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.TIMESTAMP_POOL,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          name,
+            backend_text:        "timestamp pool remains live",
+        )) {
+            io::eprintfn(
+                "gpu: leaked timestamp pool '%s' (index %d, generation %d)",
+                name,
+                i,
+                cell.generation,
+            );
+        }
+        count++;
+    }
+    return count;
+}
+
 fn uint report_resource_leaks(VkDeviceState* state) {
     uint count = report_allocation_leaks(state);
     count += report_buffer_leaks(state);
@@ -354,6 +384,7 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     count += report_attachment_view_leaks(state);
     count += report_pipeline_leaks(state);
     count += report_command_allocator_leaks(state);
+    count += report_timestamp_pool_leaks(state);
     return count;
 }
 
