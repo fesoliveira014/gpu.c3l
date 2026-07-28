@@ -824,6 +824,7 @@ fn void? trusted_write_timestamp_with(
     gpu::StageMask stage,
     TimestampCommandNativeOps* ops,
 ) {
+    if (!timestamp_stage_mask_valid(stage)) return gpu::INVALID_ARGUMENT~;
     TimestampPoolSlot* slot = lower_timestamp_pool_range(
         record,
         pool,

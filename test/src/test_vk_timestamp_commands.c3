@@ -465,6 +465,36 @@ fn void timestamp_full_write_rejects_invalid_masks_without_emission() @test {
     assert(fixture.record.scratch.reference_count == 0);
 }
 
+fn void timestamp_trusted_write_rejects_invalid_masks_without_emission() @test {
+    TimestampCommandFixture fixture =
+        create_timestamp_command_fixture(
+            gpu::ContractValidation.TRUSTED,
+            1,
+        )!!;
+    defer destroy_timestamp_command_fixture(&fixture)!!;
+    TimestampCommandProbe probe;
+    TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
+    gpu::StageMask[5] invalid = {
+        {},
+        { .host },
+        { .present },
+        { .compute, .transfer },
+        (gpu::StageMask)(1 << 10),
+    };
+
+    foreach (stage : invalid) {
+        assert(@catch(trusted_write_timestamp_with(
+            record: fixture.record,
+            pool:   fixture.pool,
+            index:  0,
+            stage:  stage,
+            ops:    &ops,
+        )) == gpu::INVALID_ARGUMENT);
+    }
+    assert(probe.write_calls == 0);
+    assert(fixture.record.scratch.reference_count == 0);
+}
+
 fn void timestamp_range_validation_prevents_native_emission() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
