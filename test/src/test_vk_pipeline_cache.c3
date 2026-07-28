@@ -91,6 +91,13 @@ struct PipelineShaderDiagnosticCapture {
     bool    matched;
 }
 
+struct ShaderModuleCodeCapture {
+    uint*  expected_words;
+    usz    expected_byte_size;
+    char[] expected_bytes;
+    bool   matched;
+}
+
 fn void capture_pipeline_shader_diagnostic(
     gpu::DebugMessage* message,
     void* user_data,
@@ -128,6 +135,30 @@ fn vk::Result return_shader_module_create_result(
     (void)create_info;
     (void)out_shader;
     return *(vk::Result*)user_data;
+}
+
+fn vk::Result capture_shader_module_code(
+    void* user_data,
+    vk::Device device,
+    vk::ShaderModuleCreateInfo* create_info,
+    vk::ShaderModule* out_shader,
+) {
+    ShaderModuleCodeCapture* capture =
+        (ShaderModuleCodeCapture*)user_data;
+    capture.matched = create_info != null
+        && create_info.p_code == capture.expected_words
+        && (usz)create_info.code_size == capture.expected_byte_size
+        && mem::ptr_is_aligned(create_info.p_code, uint::alignment)
+        && mem::equals(
+            ((char*)create_info.p_code)[:(usz)create_info.code_size],
+            capture.expected_bytes,
+        );
+    return vk::create_shader_module(
+        device:          device,
+        p_create_info:   create_info,
+        p_allocator:     null,
+        p_shader_module: out_shader,
+    );
 }
 
 fn vk::Result return_compute_pipeline_create_result(
@@ -577,11 +608,17 @@ fn void caller_shader_storage_is_call_scoped_and_deduplicates() @test {
     vk::ShaderId shader_id = cache_entry.key.vertex_shader;
     vk::ShaderStoreEntry* owned =
         &state.shader_store.entries[(uint)shader_id];
+    char[] owned_spirv = vk::shader_entry_bytes(owned);
     assert(owned.used && owned.refcount == 1,
         "the cache entry owns one live shader identity");
-    assert(owned.spirv.ptr != first_caller_ptr
-            && mem::equals(owned.spirv, source),
-        "the shader store owns an exact copy of caller-provided SPIR-V");
+    assert((char*)owned.spirv_words.ptr != first_caller_ptr
+            && owned.spirv_byte_size == source.len
+            && mem::ptr_is_aligned(
+                owned.spirv_words.ptr,
+                uint::alignment,
+            )
+            && mem::equals(owned_spirv, source),
+        "the shader store owns one exact aligned copy of caller-provided SPIR-V");
     foreach (&byte : first_storage) *byte = 0;
     mem::free(first_storage.ptr);
 
@@ -603,7 +640,7 @@ fn void caller_shader_storage_is_call_scoped_and_deduplicates() @test {
             .key.vertex_shader == shader_id,
         "equivalent caller storage preserves the canonical shader ID");
     assert(owned.used && owned.refcount == 1
-            && mem::equals(owned.spirv, source),
+            && mem::equals(vk::shader_entry_bytes(owned), source),
         "a cache hit keeps one cache-owned exact shader identity");
     foreach (&byte : second_storage) *byte = 0;
     mem::free(second_storage.ptr);
@@ -628,6 +665,76 @@ fn void caller_shader_storage_is_call_scoped_and_deduplicates() @test {
         "the final pipeline alias releases the canonical shader identity");
     assert(vk::shader_store_index_consistent(state),
         "caller-storage aliases leave the shader index consistent");
+}
+
+fn void native_shader_module_borrows_aligned_store_words() @test {
+    gpu::Device device = make_cache_test_device();
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = cache_test_state(&device);
+    gpu::ShaderDesc desc = {
+        .spirv       = CACHE_COMP_SPIRV[..],
+        .entry_point = "main",
+    };
+    vk::ShaderIdentityInput borrowed_input;
+    vk::normalize_shader_input(
+        state:          state,
+        desc:           &desc,
+        role:           gpu::internal::ShaderRole.COMPUTE,
+        operation:      "test_aligned_shader_store",
+        rejected_field: "ShaderDesc",
+        out_input:      &borrowed_input,
+    )!!;
+
+    state.resource_mutex.lock()!!;
+    vk::ShaderId shader_id =
+        vk::retain_shader_identity_locked(state, &borrowed_input)!!;
+    state.resource_mutex.unlock();
+    bool retained = true;
+    defer {
+        if (retained) {
+            state.resource_mutex.lock()!!;
+            vk::release_shader_identity_locked(state, shader_id)!!;
+            state.resource_mutex.unlock();
+        }
+    }
+
+    vk::ShaderStoreEntry* entry =
+        &state.shader_store.entries[(uint)shader_id];
+    vk::ShaderIdentityInput stored_input;
+    vk::shader_store_input_for_retained_id(
+        state:      state,
+        id:         shader_id,
+        debug_name: null,
+        out_input:  &stored_input,
+    );
+    ShaderModuleCodeCapture capture = {
+        .expected_words     = entry.spirv_words.ptr,
+        .expected_byte_size = entry.spirv_byte_size,
+        .expected_bytes     = vk::shader_entry_bytes(entry),
+    };
+    vk::ShaderModuleCreateOps create_ops = {
+        .user_data = &capture,
+        .create    = &capture_shader_module_code,
+    };
+    vk::PipelineShaderModule shader =
+        vk::create_pipeline_shader_module_with_ops(
+            state:          state,
+            code:           &stored_input,
+            operation:      "test_aligned_shader_store",
+            rejected_field: "ShaderDesc",
+            create_ops:      &create_ops,
+        )!!;
+    assert(capture.matched,
+        "native creation borrows the retained entry's exact aligned words");
+    vk::destroy_pipeline_shader_module(state, &shader);
+
+    state.resource_mutex.lock()!!;
+    vk::release_shader_identity_locked(state, shader_id)!!;
+    retained = false;
+    state.resource_mutex.unlock();
+    assert(vk::shader_store_live_count(state) == 0
+            && entry.spirv_words.ptr == null,
+        "final release frees aligned storage and recycles the entry");
 }
 
 fn void shader_store_cache_hit_reference_is_stable() @test {
@@ -778,12 +885,21 @@ fn void shader_store_collision_verification_is_exact() @test {
             && alternate_role_entry.hash == first.hash
             && different_length_entry.hash == first.hash,
         "the test exercises one shared hash bucket");
-    assert(mem::equals(first_entry.spirv, first.spirv)
-            && mem::equals(distinct_entry.spirv, distinct.spirv)
-            && mem::equals(alternate_entry_value.spirv, alternate_entry.spirv)
-            && mem::equals(alternate_role_entry.spirv, alternate_role.spirv)
+    assert(mem::equals(vk::shader_entry_bytes(first_entry), first.spirv)
             && mem::equals(
-                different_length_entry.spirv,
+                vk::shader_entry_bytes(distinct_entry),
+                distinct.spirv,
+            )
+            && mem::equals(
+                vk::shader_entry_bytes(alternate_entry_value),
+                alternate_entry.spirv,
+            )
+            && mem::equals(
+                vk::shader_entry_bytes(alternate_role_entry),
+                alternate_role.spirv,
+            )
+            && mem::equals(
+                vk::shader_entry_bytes(different_length_entry),
                 different_length.spirv,
             ),
         "each stored identity preserves its exact owned SPIR-V bytes");
@@ -931,7 +1047,7 @@ fn void pipeline_creation_faults_release_owned_shader_identity() @test {
     assert(state.shader_store.next_new == 1
             && state.shader_store.free_head == 1
             && !state.shader_store.entries[0].used
-            && state.shader_store.entries[0].spirv.ptr == null,
+            && state.shader_store.entries[0].spirv_words.ptr == null,
         "reflection failure returns its shader slot to the free list");
     assert(vk::shader_store_index_consistent(state)
             && cache_index_consistent(&device),
