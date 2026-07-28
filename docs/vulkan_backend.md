@@ -471,8 +471,8 @@ public TextureDesc
 
 Transfer-only textures store a null default view. Copies, barriers, allocation,
 placement, and destruction operate on the image and do not require a view.
-The current buffer/image copy descriptors are 2D-only and reject 3D texture
-slots before recording.
+Buffer/image copy descriptors select 2D mip/array-layer regions or 3D
+z/depth regions before recording.
 For view-capable 3D textures, the default and cached mip views use `TYPE_3D`,
 base array layer zero, and layer count one, covering each selected mip's full
 depth. The backend never sets 2D-array-compatible or sliced-view flags.
@@ -937,6 +937,20 @@ This is the only texture-layout mapping. Texture barriers, descriptor heaps,
 dynamic-rendering color/resolve/depth attachments, and both buffer-image copy
 directions use it directly. Device creation does not select an alternate
 policy.
+
+Both buffer-image copy directions use one dimension-aware region resolver.
+For 2D images it lowers z/depth to zero/one and preserves selected array
+layers. For 3D images it lowers z/depth to `imageOffset.z` and
+`imageExtent.depth` while fixing `baseArrayLayer = 0` and `layerCount = 1`.
+Zero width, height, and 3D depth select the remaining selected-mip extent from
+their offsets. Three-axis mip extents are authoritative for bounds.
+
+The resolver leaves `bufferImageHeight` zero. Required span bytes are the
+format texel size times normalized row texels, copied height, and either 2D
+array layers or 3D depth slices, with overflow checks before every
+multiplication. This preserves padded rows without adding a public slice
+pitch. The resolver runs in both validation policies; `FULL` retains the
+existing usage/access diagnostics and transactional span/texture references.
 
 The layout also enforces immutable texture usage, format class, WSI ownership,
 and a compatible recording queue. Under `FULL`, `host`, `present`, and

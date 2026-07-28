@@ -353,6 +353,243 @@ fn void texture_create_info_and_default_view_preserve_dimension() @test {
         "zero depth preserves two-dimensional native lowering");
 }
 
+fn void texture_copy_regions_preserve_dimension_and_safe_span_bounds() @test {
+    vk::ResolvedSpan span = {
+        .size = 4096,
+    };
+    vk::TextureSlot two_dimensional = {
+        .format       = gpu::Format.RGBA8_UNORM,
+        .width        = 8,
+        .height       = 6,
+        .mip_levels   = 2,
+        .array_layers = 4,
+    };
+    vk::BufferImageCopy two_d = vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &two_dimensional,
+        row_length_texels: 0,
+        mip:               0,
+        base_layer:        1,
+        layer_count:       2,
+        x:                 3,
+        y:                 1,
+        z:                 0,
+        width:             0,
+        height:            0,
+        depth:             0,
+    )!!;
+    assert(two_d.image_offset.x == 3
+        && two_d.image_offset.y == 1
+        && two_d.image_offset.z == 0
+        && two_d.image_extent.width == 5
+        && two_d.image_extent.height == 5
+        && two_d.image_extent.depth == 1
+        && two_d.image_subresource.base_array_layer == 1
+        && two_d.image_subresource.layer_count == 2,
+        "two-dimensional zero extents select the remaining x/y region");
+
+    two_d = vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &two_dimensional,
+        row_length_texels: 0,
+        mip:               0,
+        base_layer:        0,
+        layer_count:       0,
+        x:                 0,
+        y:                 0,
+        z:                 0,
+        width:             1,
+        height:            1,
+        depth:             1,
+    )!!;
+    assert(two_d.image_extent.depth == 1,
+        "explicit depth one preserves two-dimensional copies");
+
+    fault two_d_z = @catch(vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &two_dimensional,
+        row_length_texels: 0,
+        mip:               0,
+        base_layer:        0,
+        layer_count:       0,
+        x:                 0,
+        y:                 0,
+        z:                 1,
+        width:             1,
+        height:            1,
+        depth:             1,
+    ));
+    fault two_d_depth = @catch(vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &two_dimensional,
+        row_length_texels: 0,
+        mip:               0,
+        base_layer:        0,
+        layer_count:       0,
+        x:                 0,
+        y:                 0,
+        z:                 0,
+        width:             1,
+        height:            1,
+        depth:             2,
+    ));
+    assert(two_d_z == gpu::INVALID_ARGUMENT
+        && two_d_depth == gpu::INVALID_ARGUMENT,
+        "two-dimensional copies reject volume coordinates");
+
+    vk::TextureSlot three_dimensional = {
+        .format       = gpu::Format.RGBA8_UNORM,
+        .width        = 8,
+        .height       = 4,
+        .depth        = 8,
+        .mip_levels   = 4,
+        .array_layers = 1,
+    };
+    vk::BufferImageCopy three_d = vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &three_dimensional,
+        row_length_texels: 0,
+        mip:               1,
+        base_layer:        0,
+        layer_count:       0,
+        x:                 1,
+        y:                 0,
+        z:                 1,
+        width:             0,
+        height:            0,
+        depth:             0,
+    )!!;
+    assert(three_d.image_offset.x == 1
+        && three_d.image_offset.y == 0
+        && three_d.image_offset.z == 1
+        && three_d.image_extent.width == 3
+        && three_d.image_extent.height == 2
+        && three_d.image_extent.depth == 3
+        && three_d.image_subresource.base_array_layer == 0
+        && three_d.image_subresource.layer_count == 1,
+        "three-dimensional zero extents select the remaining mip volume");
+
+    fault three_d_layer = @catch(vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &three_dimensional,
+        row_length_texels: 0,
+        mip:               0,
+        base_layer:        1,
+        layer_count:       1,
+        x:                 0,
+        y:                 0,
+        z:                 0,
+        width:             1,
+        height:            1,
+        depth:             1,
+    ));
+    fault three_d_layers = @catch(vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &three_dimensional,
+        row_length_texels: 0,
+        mip:               0,
+        base_layer:        0,
+        layer_count:       2,
+        x:                 0,
+        y:                 0,
+        z:                 0,
+        width:             1,
+        height:            1,
+        depth:             1,
+    ));
+    fault three_d_z = @catch(vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &three_dimensional,
+        row_length_texels: 0,
+        mip:               1,
+        base_layer:        0,
+        layer_count:       1,
+        x:                 0,
+        y:                 0,
+        z:                 5,
+        width:             1,
+        height:            1,
+        depth:             1,
+    ));
+    fault three_d_depth = @catch(vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &three_dimensional,
+        row_length_texels: 0,
+        mip:               1,
+        base_layer:        0,
+        layer_count:       1,
+        x:                 0,
+        y:                 0,
+        z:                 1,
+        width:             1,
+        height:            1,
+        depth:             4,
+    ));
+    assert(three_d_layer == gpu::INVALID_ARGUMENT
+        && three_d_layers == gpu::INVALID_ARGUMENT
+        && three_d_z == gpu::INVALID_ARGUMENT
+        && three_d_depth == gpu::INVALID_ARGUMENT,
+        "three-dimensional copies reject array layers and out-of-range depth");
+
+    span.size = 95;
+    fault short_padded_span = @catch(vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &three_dimensional,
+        row_length_texels: 4,
+        mip:               1,
+        base_layer:        0,
+        layer_count:       1,
+        x:                 1,
+        y:                 0,
+        z:                 1,
+        width:             3,
+        height:            2,
+        depth:             3,
+    ));
+    span.size = 4096;
+    fault short_row = @catch(vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &three_dimensional,
+        row_length_texels: 2,
+        mip:               1,
+        base_layer:        0,
+        layer_count:       1,
+        x:                 1,
+        y:                 0,
+        z:                 1,
+        width:             3,
+        height:            2,
+        depth:             3,
+    ));
+    vk::TextureSlot overflow_texture = {
+        .format       = gpu::Format.RGBA8_UNORM,
+        .width        = uint::max,
+        .height       = uint::max,
+        .depth        = 1,
+        .mip_levels   = 1,
+        .array_layers = 1,
+    };
+    span.size = usz::max;
+    fault byte_overflow = @catch(vk::resolve_texture_copy_region(
+        resolved:          &span,
+        slot:              &overflow_texture,
+        row_length_texels: uint::max,
+        mip:               0,
+        base_layer:        0,
+        layer_count:       1,
+        x:                 0,
+        y:                 0,
+        z:                 0,
+        width:             1,
+        height:            uint::max,
+        depth:             1,
+    ));
+    assert(short_padded_span == gpu::INVALID_ARGUMENT
+        && short_row == gpu::INVALID_ARGUMENT
+        && byte_overflow == gpu::INVALID_ARGUMENT,
+        "multi-slice span sizing rejects padding, row, and arithmetic faults");
+}
+
 fn void color_resolve_mode_matches_numeric_format() @test {
     assert(vk::color_resolve_mode(gpu::Format.RGBA8_UNORM)
         == vk::ResolveModeFlagBits.AVERAGE_BIT,

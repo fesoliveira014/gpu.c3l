@@ -1594,10 +1594,11 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
     return record.ops.fill_buffer(record, dst, value);
 }
 
-<* Record a buffer-to-2D-texture copy; the effective layout is TRANSFER_DST.
+<* Record a dimension-aware buffer-to-texture copy; the effective layout is
+   TRANSFER_DST and surrounding barriers remain caller-owned.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
-   subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
+   dimension/subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse.
 
    @param commands : "Live recording token."
@@ -1609,10 +1610,11 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
     return record.ops.copy_buffer_to_texture(record, desc);
 }
 
-<* Record a 2D-texture-to-buffer copy; the effective layout is TRANSFER_SRC.
+<* Record a dimension-aware texture-to-buffer copy; the effective layout is
+   TRANSFER_SRC and surrounding barriers remain caller-owned.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
-   subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
+   dimension/subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse.
 
    @param commands : "Live recording token."

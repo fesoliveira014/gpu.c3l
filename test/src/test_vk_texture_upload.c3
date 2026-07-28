@@ -5,6 +5,19 @@ import gpu;
 const uint UP_SIZE = 8;
 const usz MIP0_BYTES = UP_SIZE * UP_SIZE * 4;
 const usz MIP1_BYTES = (UP_SIZE / 2) * (UP_SIZE / 2) * 4;
+const uint VOLUME_SIZE = 4;
+const uint VOLUME_MIP_SIZE = VOLUME_SIZE / 2;
+const uint VOLUME_TEXEL_BYTES = 4;
+const uint PARTIAL_ROW_TEXELS = 3;
+const uint PARTIAL_SIZE = 2;
+const usz VOLUME_BYTES =
+    VOLUME_SIZE * VOLUME_SIZE * VOLUME_SIZE * VOLUME_TEXEL_BYTES;
+const usz PARTIAL_BYTES =
+    PARTIAL_ROW_TEXELS * PARTIAL_SIZE * PARTIAL_SIZE * VOLUME_TEXEL_BYTES;
+const usz VOLUME_MIP_BYTES =
+    VOLUME_MIP_SIZE * VOLUME_MIP_SIZE * VOLUME_MIP_SIZE * VOLUME_TEXEL_BYTES;
+const usz VOLUME_MIP_SLICE_BYTES =
+    VOLUME_MIP_SIZE * VOLUME_MIP_SIZE * VOLUME_TEXEL_BYTES;
 
 fn gpu::Device make_upload_test_device() {
     gpu::RuntimeDesc desc = {
@@ -13,6 +26,250 @@ fn gpu::Device make_upload_test_device() {
         .application_name  = "gpu_texture_upload_test",
     };
     return create_test_device(&desc)!!;
+}
+
+fn void volume_texture_upload_and_readback_regions() @test {
+    gpu::Device device = make_upload_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc texture_desc = {
+        .access     = { .graphics },
+        .width      = VOLUME_SIZE,
+        .height     = VOLUME_SIZE,
+        .depth      = VOLUME_SIZE,
+        .mip_levels = 2,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .transfer_src, .transfer_dst },
+        .debug_name = "volume_copy_target",
+    };
+    if (!gpu::supports_texture_desc(&device, &texture_desc)!!) return;
+    gpu::TextureHandle texture =
+        gpu::create_texture(&device, &texture_desc)!!;
+    defer gpu::destroy_texture(&device, texture)!!;
+
+    OwnedSpan upload = allocate_owned_span(
+        device:       &device,
+        size:         VOLUME_BYTES + PARTIAL_BYTES + VOLUME_MIP_BYTES,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "volume_copy_upload",
+    )!!;
+    defer free_owned_span(&device, &upload)!!;
+    gpu::GpuSpan whole_upload =
+        upload.span.checked_subspan(0, VOLUME_BYTES)!!;
+    gpu::GpuSpan partial_upload =
+        upload.span.checked_subspan(VOLUME_BYTES, PARTIAL_BYTES)!!;
+    gpu::GpuSpan mip_upload = upload.span.checked_subspan(
+        VOLUME_BYTES + PARTIAL_BYTES,
+        VOLUME_MIP_BYTES,
+    )!!;
+    char* upload_bytes =
+        (char*)test_span_mapping(&device, upload.span).ptr;
+    for (uint z = 0; z < VOLUME_SIZE; z++) {
+        for (uint y = 0; y < VOLUME_SIZE; y++) {
+            for (uint x = 0; x < VOLUME_SIZE; x++) {
+                usz offset = (usz)(((z * VOLUME_SIZE + y) * VOLUME_SIZE + x)
+                    * VOLUME_TEXEL_BYTES);
+                upload_bytes[offset]     = (char)x;
+                upload_bytes[offset + 1] = (char)y;
+                upload_bytes[offset + 2] = (char)z;
+                upload_bytes[offset + 3] = (char)10;
+            }
+        }
+    }
+    char* partial_bytes = &upload_bytes[VOLUME_BYTES];
+    for (uint z = 0; z < PARTIAL_SIZE; z++) {
+        for (uint y = 0; y < PARTIAL_SIZE; y++) {
+            for (uint x = 0; x < PARTIAL_SIZE; x++) {
+                usz offset = (usz)(((z * PARTIAL_SIZE + y)
+                    * PARTIAL_ROW_TEXELS + x) * VOLUME_TEXEL_BYTES);
+                partial_bytes[offset]     = (char)(40 + x);
+                partial_bytes[offset + 1] = (char)(50 + y);
+                partial_bytes[offset + 2] = (char)(60 + z);
+                partial_bytes[offset + 3] = (char)70;
+            }
+        }
+    }
+    char* mip_bytes = &partial_bytes[PARTIAL_BYTES];
+    for (uint z = 0; z < VOLUME_MIP_SIZE; z++) {
+        for (uint y = 0; y < VOLUME_MIP_SIZE; y++) {
+            for (uint x = 0; x < VOLUME_MIP_SIZE; x++) {
+                usz offset = (usz)(((z * VOLUME_MIP_SIZE + y)
+                    * VOLUME_MIP_SIZE + x) * VOLUME_TEXEL_BYTES);
+                mip_bytes[offset]     = (char)(80 + x);
+                mip_bytes[offset + 1] = (char)(90 + y);
+                mip_bytes[offset + 2] = (char)(100 + z);
+                mip_bytes[offset + 3] = (char)110;
+            }
+        }
+    }
+    gpu::flush_mapped_span(&device, upload.span)!!;
+
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         VOLUME_BYTES + PARTIAL_BYTES + VOLUME_MIP_SLICE_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics },
+        debug_name:   "volume_copy_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
+    gpu::GpuSpan whole_readback =
+        readback.span.checked_subspan(0, VOLUME_BYTES)!!;
+    gpu::GpuSpan partial_readback =
+        readback.span.checked_subspan(VOLUME_BYTES, PARTIAL_BYTES)!!;
+    gpu::GpuSpan mip_readback = readback.span.checked_subspan(
+        VOLUME_BYTES + PARTIAL_BYTES,
+        VOLUME_MIP_SLICE_BYTES,
+    )!!;
+
+    gpu::Queue queue =
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::TextureState transfer_destination = {
+        .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+        .stages = { .transfer },
+        .access = { .write },
+    };
+    gpu::TextureBarrier to_destination = gpu::texture_transition(
+        texture: texture,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   transfer_destination,
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &to_destination)!!;
+
+    gpu::BufferTextureCopyDesc whole_upload_copy = {
+        .src     = whole_upload,
+        .texture = texture,
+    };
+    gpu::cmd_copy_buffer_to_texture(&commands, &whole_upload_copy)!!;
+    gpu::TextureBarrier order_partial = gpu::texture_transition(
+        texture: texture,
+        before:  transfer_destination,
+        after:   transfer_destination,
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &order_partial)!!;
+    gpu::BufferTextureCopyDesc partial_upload_copy = {
+        .src               = partial_upload,
+        .row_length_texels = PARTIAL_ROW_TEXELS,
+        .texture           = texture,
+        .x                 = 1,
+        .y                 = 1,
+        .z                 = 1,
+        .width             = PARTIAL_SIZE,
+        .height            = PARTIAL_SIZE,
+        .depth             = PARTIAL_SIZE,
+    };
+    gpu::cmd_copy_buffer_to_texture(&commands, &partial_upload_copy)!!;
+    gpu::BufferTextureCopyDesc mip_upload_copy = {
+        .src     = mip_upload,
+        .texture = texture,
+        .mip     = 1,
+    };
+    gpu::cmd_copy_buffer_to_texture(&commands, &mip_upload_copy)!!;
+
+    gpu::TextureState transfer_source = {
+        .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+        .stages = { .transfer },
+        .access = { .read },
+    };
+    gpu::TextureBarrier to_source = gpu::texture_transition(
+        texture: texture,
+        before:  transfer_destination,
+        after:   transfer_source,
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &to_source)!!;
+    gpu::TextureBufferCopyDesc whole_readback_copy = {
+        .texture = texture,
+        .dst     = whole_readback,
+    };
+    gpu::cmd_copy_texture_to_buffer(&commands, &whole_readback_copy)!!;
+    gpu::TextureBufferCopyDesc partial_readback_copy = {
+        .texture           = texture,
+        .dst               = partial_readback,
+        .row_length_texels = PARTIAL_ROW_TEXELS,
+        .x                 = 1,
+        .y                 = 1,
+        .z                 = 1,
+        .width             = PARTIAL_SIZE,
+        .height            = PARTIAL_SIZE,
+        .depth             = PARTIAL_SIZE,
+    };
+    gpu::cmd_copy_texture_to_buffer(&commands, &partial_readback_copy)!!;
+    gpu::TextureBufferCopyDesc mip_readback_copy = {
+        .texture = texture,
+        .dst     = mip_readback,
+        .mip     = 1,
+        .z       = 1,
+    };
+    gpu::cmd_copy_texture_to_buffer(&commands, &mip_readback_copy)!!;
+    gpu::Barrier host_read = {
+        .before = { .transfer },
+        .after  = { .host },
+    };
+    gpu::cmd_barrier(&commands, &host_read)!!;
+
+    gpu::ExecutableCommandList executable =
+        gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+    gpu::wait_completion(completion)!!;
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
+
+    char* readback_bytes =
+        (char*)test_span_mapping(&device, readback.span).ptr;
+    for (uint z = 0; z < VOLUME_SIZE; z++) {
+        for (uint y = 0; y < VOLUME_SIZE; y++) {
+            for (uint x = 0; x < VOLUME_SIZE; x++) {
+                usz offset = (usz)(((z * VOLUME_SIZE + y) * VOLUME_SIZE + x)
+                    * VOLUME_TEXEL_BYTES);
+                bool selected = x >= 1 && x < 3
+                    && y >= 1 && y < 3
+                    && z >= 1 && z < 3;
+                char expected_red = selected ? (char)(40 + x - 1) : (char)x;
+                char expected_green = selected ? (char)(50 + y - 1) : (char)y;
+                char expected_blue = selected ? (char)(60 + z - 1) : (char)z;
+                char expected_alpha = selected ? (char)70 : (char)10;
+                assert(readback_bytes[offset] == expected_red
+                    && readback_bytes[offset + 1] == expected_green
+                    && readback_bytes[offset + 2] == expected_blue
+                    && readback_bytes[offset + 3] == expected_alpha,
+                    "whole volume readback preserves selected and untouched texels");
+            }
+        }
+    }
+
+    char* partial_readback_bytes = &readback_bytes[VOLUME_BYTES];
+    for (uint z = 0; z < PARTIAL_SIZE; z++) {
+        for (uint y = 0; y < PARTIAL_SIZE; y++) {
+            for (uint x = 0; x < PARTIAL_SIZE; x++) {
+                usz offset = (usz)(((z * PARTIAL_SIZE + y)
+                    * PARTIAL_ROW_TEXELS + x) * VOLUME_TEXEL_BYTES);
+                assert(partial_readback_bytes[offset] == (char)(40 + x)
+                    && partial_readback_bytes[offset + 1] == (char)(50 + y)
+                    && partial_readback_bytes[offset + 2] == (char)(60 + z)
+                    && partial_readback_bytes[offset + 3] == (char)70,
+                    "padded partial readback preserves every selected slice");
+            }
+        }
+    }
+
+    char* mip_readback_bytes = &partial_readback_bytes[PARTIAL_BYTES];
+    for (uint y = 0; y < VOLUME_MIP_SIZE; y++) {
+        for (uint x = 0; x < VOLUME_MIP_SIZE; x++) {
+            usz offset =
+                (usz)((y * VOLUME_MIP_SIZE + x) * VOLUME_TEXEL_BYTES);
+            assert(mip_readback_bytes[offset] == (char)(80 + x)
+                && mip_readback_bytes[offset + 1] == (char)(90 + y)
+                && mip_readback_bytes[offset + 2] == (char)101
+                && mip_readback_bytes[offset + 3] == (char)110,
+                "zero depth selects the remaining reduced mip depth");
+        }
+    }
 }
 
 fn void sampled_texture_upload_and_mip_readback() @test {

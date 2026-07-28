@@ -59,6 +59,23 @@ gpu::TextureBarrier to_sample = gpu::texture_transition(
 gpu::cmd_texture_barrier(&cmd, &to_sample)!;
 ```
 
+For a 3D texture, use z/depth on the same copy descriptor. Zero depth copies
+the remaining selected-mip depth from `z`:
+
+```c3
+gpu::BufferTextureCopyDesc volume_upload = {
+    .src     = upload_span,
+    .texture = volume,
+    .z       = first_slice,
+    .depth   = slice_count,
+};
+gpu::cmd_copy_buffer_to_texture(&cmd, &volume_upload)!;
+```
+
+The volume must already be in `TRANSFER_DESTINATION`, and the source span must
+contain every copied row across all selected slices. The caller records the
+next transition exactly as in the 2D recipe.
+
 Running example: `textured_cube` (single texture), `pbr_materials`
 (several), `bindless_stress` (8192, batched).
 

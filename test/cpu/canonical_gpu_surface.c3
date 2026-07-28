@@ -307,10 +307,14 @@ fn void pin_commands_and_completion() {
     gpu::BufferTextureCopyDesc buffer_texture_copy = {
         .src     = span,
         .texture = texture,
+        .z       = 1,
+        .depth   = 2,
     };
     gpu::TextureBufferCopyDesc texture_buffer_copy = {
         .texture = texture,
         .dst     = span,
+        .z       = 1,
+        .depth   = 2,
     };
     gpu::PipelineHandle pipeline = {};
     gpu::AttachmentViewHandle attachment_view = {};

@@ -1022,9 +1022,9 @@ struct BufferCopyDesc {
     GpuSpan dst;
 }
 
-<* Buffer-to-texture copy region. Zero extent selects the full mip, zero
-   layer_count selects one layer, and zero row length is tightly packed.
-   Current copy commands reject 3D textures. *>
+<* Buffer-to-texture copy region. Zero width/height selects the remaining mip
+   extent from x/y; zero 3D depth selects the remainder from z. Zero layer
+   count is one, and zero row length means tightly packed rows. *>
 struct BufferTextureCopyDesc {
     GpuSpan       src;
     uint          row_length_texels;
@@ -1034,12 +1034,14 @@ struct BufferTextureCopyDesc {
     uint          layer_count;
     uint          x;
     uint          y;
+    uint          z;
     uint          width;
     uint          height;
+    uint          depth;
 }
 
-<* Texture-to-buffer readback region; same zero-value defaults and 2D-only
-   restriction as BufferTextureCopyDesc. *>
+<* Texture-to-buffer readback region with the same dimension-specific
+   zero-value defaults as BufferTextureCopyDesc. *>
 struct TextureBufferCopyDesc {
     TextureHandle texture;
     GpuSpan       dst;
@@ -1049,8 +1051,10 @@ struct TextureBufferCopyDesc {
     uint          layer_count;
     uint          x;
     uint          y;
+    uint          z;
     uint          width;
     uint          height;
+    uint          depth;
 }
 
 const uint DEFAULT_ATTACHMENT_VIEW_CAPACITY = 4096;
