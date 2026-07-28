@@ -4,6 +4,7 @@ import gpu @public;
 import std::io;
 import std::thread;
 import std::time;
+import std::core::mem::allocators;
 
 const uint SUBMISSION_ITERATIONS = 256;
 const uint COMPLETION_POLL_ITERATIONS = 100_000;
@@ -14,7 +15,10 @@ const uint SUBMIT_BATCH_ITERATIONS = 5;
 const uint[5] SUBMIT_BATCH_SIZES = { 1, 8, 32, 128, 1_024 };
 const uint ALLOCATOR_LIFECYCLE_ITERATIONS = 10_000;
 const uint[3] ALLOCATOR_LIFECYCLE_WORKER_COUNTS = { 1, 2, 4 };
-const uint ALLOCATOR_LIFECYCLE_MAX_WORKERS = 4;
+const uint ALLOCATOR_LIFECYCLE_MAX_WORKERS =
+    ALLOCATOR_LIFECYCLE_WORKER_COUNTS[
+        ALLOCATOR_LIFECYCLE_WORKER_COUNTS.len - 1
+    ];
 
 struct SubmissionFixture {
     gpu::ExecutableCommandList[1] commands;
@@ -54,7 +58,6 @@ fn void? run_allocator_lifecycles(AllocatorLifecycleWorkerArgs* args) {
         if (catch discard_fault =
             gpu::discard_executable_commands(&executable)
         ) {
-            (void)discard_bench_executable(&executable);
             return discard_fault~;
         }
     }
@@ -63,26 +66,22 @@ fn void? run_allocator_lifecycles(AllocatorLifecycleWorkerArgs* args) {
 fn int allocator_lifecycle_worker(void* raw_args) {
     AllocatorLifecycleWorkerArgs* args =
         (AllocatorLifecycleWorkerArgs*)raw_args;
-    if (catch worker_fault = run_allocator_lifecycles(args)) {
-        args.result = worker_fault;
-        args.failed = true;
-        return 1;
-    }
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        if (catch worker_fault = run_allocator_lifecycles(args)) {
+            args.result = worker_fault;
+            args.failed = true;
+            return 1;
+        }
+    };
     return 0;
 }
 
-fn long? run_allocator_lifecycle_workers(
-    AllocatorLifecycleWorkerArgs[] args,
-    uint workers,
-) {
+fn long? run_allocator_lifecycle_workers(AllocatorLifecycleWorkerArgs[] args) {
     Thread[ALLOCATOR_LIFECYCLE_MAX_WORKERS] threads;
     uint thread_count = 0;
     std::time::Clock start = std::time::clock::now();
-    for (uint worker = 0; worker < workers; worker++) {
-        if (catch create_fault = threads[worker].create(
-            &allocator_lifecycle_worker,
-            &args[worker],
-        )) {
+    for (uint worker = 0; worker < args.len; worker++) {
+        if (catch create_fault = threads[worker].create(&allocator_lifecycle_worker, &args[worker])) {
             for (uint started = 0; started < thread_count; started++) {
                 (void)threads[started].join();
             }
@@ -90,11 +89,19 @@ fn long? run_allocator_lifecycle_workers(
         }
         thread_count++;
     }
+    fault first_join_fault;
+    bool join_failed;
     for (uint worker = 0; worker < thread_count; worker++) {
-        (void)threads[worker].join()!;
+        if (catch join_fault = threads[worker].join()) {
+            if (!join_failed) {
+                first_join_fault = join_fault;
+                join_failed = true;
+            }
+        }
     }
     long elapsed_ns = (long)start.to_now();
-    for (uint worker = 0; worker < workers; worker++) {
+    if (join_failed) return first_join_fault~;
+    for (uint worker = 0; worker < args.len; worker++) {
         if (args[worker].failed) return args[worker].result~;
     }
     return elapsed_ns;
@@ -132,7 +139,7 @@ fn double? measure_allocator_lifecycle_worker_count(
         };
     }
 
-    (void)run_allocator_lifecycle_workers(args[:workers], workers)!;
+    (void)run_allocator_lifecycle_workers(args[:workers])!;
     for (uint worker = 0; worker < workers; worker++) {
         args[worker].iterations = ALLOCATOR_LIFECYCLE_ITERATIONS;
     }
@@ -143,16 +150,9 @@ fn double? measure_allocator_lifecycle_worker_count(
         repetition++
     ) {
         elapsed_results[repetition] =
-            (double)run_allocator_lifecycle_workers(
-                args[:workers],
-                workers,
-            )!;
+            (double)run_allocator_lifecycle_workers(args[:workers])!;
     }
 
-    for (uint worker = 0; worker < allocator_count; worker++) {
-        gpu::destroy_command_allocator(&allocators[worker])!;
-    }
-    allocator_count = 0;
     return lifecycle_median(elapsed_results);
 }
 
@@ -160,6 +160,7 @@ fn void? measure_allocator_lifecycle_scaling(
     gpu::Device* device,
     gpu::Queue queue,
 ) {
+    double baseline_lifecycles_per_second;
     foreach (workers : ALLOCATOR_LIFECYCLE_WORKER_COUNTS) {
         double median_elapsed_ns =
             measure_allocator_lifecycle_worker_count(
@@ -175,8 +176,13 @@ fn void? measure_allocator_lifecycle_scaling(
             median_elapsed_ns / (double)total_lifecycles;
         double lifecycles_per_second =
             (double)total_lifecycles * 1.0e9 / median_elapsed_ns;
+        if (workers == 1) {
+            baseline_lifecycles_per_second = lifecycles_per_second;
+        }
+        double scaling =
+            lifecycles_per_second / baseline_lifecycles_per_second;
         io::printfn(
-            "allocator lifecycle: workers=%d iterations/worker=%d total=%d repetitions=%d median_elapsed_ns=%.0f %.1f ns/lifecycle %.0f lifecycles/s",
+            "allocator lifecycle: workers=%d iterations/worker=%d total=%d repetitions=%d median_elapsed_ns=%.0f %.1f ns/lifecycle %.0f lifecycles/s %.2fx scaling vs 1 worker",
             workers,
             ALLOCATOR_LIFECYCLE_ITERATIONS,
             total_lifecycles,
@@ -184,6 +190,7 @@ fn void? measure_allocator_lifecycle_scaling(
             median_elapsed_ns,
             ns_per_lifecycle,
             lifecycles_per_second,
+            scaling,
         );
     }
 }

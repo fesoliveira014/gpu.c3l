@@ -81,10 +81,13 @@ GPU completion.
 Allocator creation and one warmup lifecycle per worker happen before timing.
 Each measured repetition includes worker-thread creation and join as well as
 the command lifecycles; this keeps the benchmark simple and makes thread
-startup an explicit part of the reported wall-clock cost. For each worker
-count, the benchmark reports iterations per worker, total lifecycles,
-repetitions, median wall-clock elapsed nanoseconds, nanoseconds per lifecycle,
-and aggregate lifecycles per second.
+startup an explicit part of the reported wall-clock cost. Startup cost grows
+with worker count, so this timing boundary can understate lifecycle scaling;
+use enough iterations to make that bias negligible when interpreting a result.
+For each worker count, the benchmark reports iterations per worker, total
+lifecycles, repetitions, median wall-clock elapsed nanoseconds, nanoseconds per
+lifecycle, aggregate lifecycles per second, and aggregate throughput scaling
+relative to one worker.
 
 The default run uses `ContractValidation.TRUSTED`. Set
 `GPU_C3L_BENCH_VALIDATION=1` only when deliberately investigating validation
