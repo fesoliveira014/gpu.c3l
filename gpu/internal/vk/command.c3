@@ -1443,6 +1443,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
     uint width,
     uint height,
 ) @private {
+    if (texture_slot_is_3d(slot)) return gpu::INVALID_ARGUMENT~;
     if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
     uint layers = layer_count == 0 ? 1 : layer_count;
     if ((ulong)base_layer + (ulong)layers > (ulong)slot.array_layers) {

@@ -332,7 +332,11 @@ fn gpu::TextureFormatSupport? vk_get_texture_format_support(
     return support;
 }
 
-fn bool? texture_desc_supported(VkDeviceState* state, gpu::TextureDesc* desc) @private {
+fn bool? texture_desc_supported(
+    VkDeviceState* state,
+    gpu::TextureDesc* desc,
+    bool aliasing = false,
+) @private {
     vk::ImageUsageFlags usage = texture_usage_to_vk(desc.usage);
     vk::ImageType image_type = gpu::internal::texture_desc_is_3d(desc)
         ? vk::ImageType.TYPE_3D
@@ -344,7 +348,9 @@ fn bool? texture_desc_supported(VkDeviceState* state, gpu::TextureDesc* desc) @p
         image_type,
         vk::ImageTiling.OPTIMAL,
         usage,
-        (vk::ImageCreateFlags)0,
+        aliasing
+            ? (vk::ImageCreateFlags)vk::ImageCreateFlagBits.ALIAS_BIT
+            : (vk::ImageCreateFlags)0,
         &properties,
     );
     switch (result) {
@@ -640,7 +646,9 @@ fn vk::ImageCreateInfo make_texture_create_info(
             .depth  = gpu::internal::texture_desc_native_depth(desc),
         })
         .set_mip_levels(gpu::internal::texture_mip_levels(desc))
-        .set_array_layers(gpu::internal::texture_array_layers(desc))
+        .set_array_layers(is_3d
+            ? 1
+            : gpu::internal::texture_array_layers(desc))
         .set_samples(sample_count_to_vk(desc.sample_count))
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
@@ -692,7 +700,9 @@ fn gpu::TextureRequirements? texture_requirements_for_state(
     gpu::TextureDesc* desc,
 ) {
     if (!gpu::internal::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
-    if (!texture_desc_supported(state, desc)!) return gpu::UNSUPPORTED_FEATURE~;
+    if (!texture_desc_supported(state, desc, true)!) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
 
     uint[MAX_QUEUE_FAMILIES] families;
     uint family_count = resource_queue_families(

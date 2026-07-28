@@ -729,12 +729,13 @@ rejected. Their mip count is bounded by width, height, and depth.
 `AdapterLimits.max_texture_dimension_3d` is a quick extent ceiling, while
 `supports_texture_desc` is the exact creatability query.
 
-`get_texture_format_support` reports library-creatable support, not every raw
-Vulkan capability. Its usage bits are dimension-neutral and independent; use
-`supports_texture_desc` for a complete 2D or 3D usage combination. Higher
-sample-count bits report exact 2D color-attachment or depth-attachment
-descriptors, as appropriate for the format. Per-format usages, sample counts,
-and linear filtering remain adapter-dependent. Depth support is D32-only.
+`get_texture_format_support` reports library-creatable 2D support, not every
+raw Vulkan capability. Its usage bits are independent; use
+`supports_texture_desc` for an exact 3D descriptor or any complete usage
+combination. Higher sample-count bits report exact 2D color-attachment or
+depth-attachment descriptors, as appropriate for the format. Per-format
+usages, sample counts, and linear filtering remain adapter-dependent. Depth
+support is D32-only.
 `supports_texture_desc` returns false for an empty, unknown, or unavailable
 access set.
 
@@ -1755,6 +1756,8 @@ cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) -> void?
 
 Valid copy spans are nonzero, equal in size, non-overlapping, and have the
 required usage and queue access.
+Buffer/texture copy commands currently reject 3D textures; their descriptors
+select only 2D mip and array-layer regions.
 `cmd_fill_buffer` fills the exact destination span; its byte offset and
 size are 4-byte aligned. There is no zero-size shorthand. Bounded identity,
 backing range, overflow, and alignment required for safe lowering are always

@@ -649,7 +649,8 @@ struct DedicatedTexture {
 }
 
 <* Creation parameters for create_texture. Zero depth selects 2D; positive
-   depth selects 3D. `access` must name selected queue roles. *>
+   depth selects 3D. `access` must be a non-empty subset of the device's
+   selected queue roles. *>
 struct TextureDesc {
     uint             width;
     uint             height;
@@ -1001,8 +1002,9 @@ struct BufferCopyDesc {
     GpuSpan dst;
 }
 
-// Zero-value defaults: extent 0 is the full mip level, layer_count 0 is one
-// layer, and row_length_texels 0 means tightly packed rows.
+<* Buffer-to-texture copy region. Zero extent selects the full mip, zero
+   layer_count selects one layer, and zero row length is tightly packed.
+   Current copy commands reject 3D textures. *>
 struct BufferTextureCopyDesc {
     GpuSpan       src;
     uint          row_length_texels;
@@ -1016,8 +1018,8 @@ struct BufferTextureCopyDesc {
     uint          height;
 }
 
-<* Texture-to-buffer readback region; same zero-value defaults as
-   BufferTextureCopyDesc. *>
+<* Texture-to-buffer readback region; same zero-value defaults and 2D-only
+   restriction as BufferTextureCopyDesc. *>
 struct TextureBufferCopyDesc {
     TextureHandle texture;
     GpuSpan       dst;

@@ -1200,7 +1200,7 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
     return record.ops.fill_buffer(record, dst, value);
 }
 
-<* Record a buffer-to-texture copy; the effective layout is TRANSFER_DST.
+<* Record a buffer-to-2D-texture copy; the effective layout is TRANSFER_DST.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
    subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
@@ -1211,7 +1211,7 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
     return record.ops.copy_buffer_to_texture(record, desc);
 }
 
-<* Record a texture-to-buffer copy; the effective layout is TRANSFER_SRC.
+<* Record a 2D-texture-to-buffer copy; the effective layout is TRANSFER_SRC.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
    subresource/extent bounds, byte-size overflow, alignment, and safe lowering.

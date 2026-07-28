@@ -452,6 +452,8 @@ public TextureDesc
 
 Transfer-only textures store a null default view. Copies, barriers, allocation,
 placement, and destruction operate on the image and do not require a view.
+The current buffer/image copy descriptors are 2D-only and reject 3D texture
+slots before recording.
 For view-capable 3D textures, the default and cached mip views use `TYPE_3D`,
 base array layer zero, and layer count one, covering each selected mip's full
 depth. The backend never sets 2D-array-compatible or sliced-view flags.

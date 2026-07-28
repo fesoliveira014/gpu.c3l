@@ -302,7 +302,7 @@ fn void texture_create_info_and_default_view_preserve_dimension() @test {
         .access       = { .compute },
         .width        = 8,
         .height       = 4,
-        .depth        = 1,
+        .depth        = 4,
         .mip_levels   = 3,
         .array_layers = 1,
         .format       = gpu::Format.RGBA8_UNORM,
@@ -320,6 +320,15 @@ fn void texture_create_info_and_default_view_preserve_dimension() @test {
         && image_info.array_layers == 1
         && image_info.samples == vk::SampleCountFlagBits.COUNT_1_BIT,
         "positive depth lowers to one exact three-dimensional image");
+
+    gpu::TextureDesc unvalidated_three_dimensional = three_dimensional;
+    unvalidated_three_dimensional.array_layers = 2;
+    image_info = vk::make_texture_create_info(
+        desc:           &unvalidated_three_dimensional,
+        queue_families: families[:0],
+    );
+    assert(image_info.array_layers == 1,
+        "private three-dimensional lowering clamps native array layers");
 
     vk::ImageViewCreateInfo view_info =
         vk::default_texture_view_create_info(

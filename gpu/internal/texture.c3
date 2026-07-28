@@ -97,7 +97,6 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
     if (!sample_count_valid(desc.sample_count)) return false;
     if (texture_desc_is_3d(desc)
         && (texture_array_layers(desc) != 1
-            || desc.sample_count != SampleCount.ONE
             || desc.usage.color_attach
             || desc.usage.depth_attach)) {
         return false;
