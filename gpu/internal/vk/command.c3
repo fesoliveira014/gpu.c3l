@@ -1825,6 +1825,10 @@ fn ResolvedSpan? validate_and_lower_indirect_span(
     return resolved;
 }
 
+<* Borrow the record's authoritative bind-time snapshot. The result aliases
+   CommandRecord.logical_pipeline and is valid only until the current cmd_*
+   call returns, because the next bind overwrites that storage in place. Never
+   store it in anything that outlives the call that borrowed it. *>
 fn BoundPipeline*? borrow_bound_pipeline(CommandRecord* record) @private {
     BoundPipeline* pipeline = &record.logical_pipeline;
     if (!pipeline.handle.is_valid()) return gpu::INVALID_RESOURCE_STATE~;
