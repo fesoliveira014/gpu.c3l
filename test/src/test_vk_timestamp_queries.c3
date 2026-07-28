@@ -59,6 +59,119 @@ fn void timestamp_pool_creation_rejects_unsupported_device() @test {
     );
 }
 
+fn gpu::Device? create_timestamp_read_device(ZString application_name) {
+    gpu::RuntimeDesc desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name         = application_name,
+    };
+    return create_test_device(&desc);
+}
+
+fn void host_timestamp_reads_reject_ranges_outside_the_pool() @test {
+    gpu::Device device =
+        create_timestamp_read_device("gpu_timestamp_read_range_test")!!;
+    defer destroy_test_device(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    if (!caps.timestamps.queues.compute) return;
+
+    gpu::TimestampPoolDesc pool_desc = {
+        .capacity   = TIMESTAMP_QUERY_COUNT,
+        .debug_name = "read_range_pool",
+    };
+    gpu::TimestampPoolHandle pool =
+        gpu::create_timestamp_pool(&device, &pool_desc)!!;
+    defer gpu::destroy_timestamp_pool(&device, pool)!!;
+
+    // Wider than the pool so the public wrapper's out.len check cannot fire
+    // first; each rejection below has to come from the backend range check.
+    ulong[TIMESTAMP_QUERY_COUNT + 1] out;
+    assert(
+        @catch(gpu::read_timestamps(
+            device: &device,
+            pool:   pool,
+            first:  0,
+            count:  TIMESTAMP_QUERY_COUNT + 1,
+            out:    out[..],
+        )) == gpu::INVALID_ARGUMENT,
+        "a count past the pool capacity is rejected"
+    );
+    assert(
+        @catch(gpu::read_timestamps(
+            device: &device,
+            pool:   pool,
+            first:  TIMESTAMP_QUERY_COUNT,
+            count:  1,
+            out:    out[..],
+        )) == gpu::INVALID_ARGUMENT,
+        "a first index at the pool capacity is rejected"
+    );
+    assert(
+        @catch(gpu::read_timestamps(
+            device: &device,
+            pool:   pool,
+            first:  0,
+            count:  TIMESTAMP_QUERY_COUNT,
+            out:    out[:1],
+        )) == gpu::INVALID_ARGUMENT,
+        "an output shorter than the requested count is rejected"
+    );
+}
+
+fn void host_timestamp_read_of_unwritten_slots_faults_device_busy() @test {
+    gpu::Device device =
+        create_timestamp_read_device("gpu_timestamp_read_busy_test")!!;
+    defer destroy_test_device(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    if (!caps.timestamps.queues.compute) return;
+
+    gpu::TimestampPoolDesc pool_desc = {
+        .capacity   = TIMESTAMP_QUERY_COUNT,
+        .debug_name = "read_busy_pool",
+    };
+    gpu::TimestampPoolHandle pool =
+        gpu::create_timestamp_pool(&device, &pool_desc)!!;
+    defer gpu::destroy_timestamp_pool(&device, pool)!!;
+
+    gpu::Queue queue =
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::cmd_reset_timestamps(
+        commands: &commands,
+        pool:     pool,
+        first:    0,
+        count:    TIMESTAMP_QUERY_COUNT,
+    )!!;
+
+    gpu::ExecutableCommandList executable =
+        gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion =
+        gpu::submit(queue, &submit)!!;
+    gpu::wait_completion(completion, ulong::max)!!;
+
+    // The slots are reset and never written, so they stay unavailable. A host
+    // read must report that rather than wait for a write that never comes.
+    ulong[TIMESTAMP_QUERY_COUNT] out;
+    assert(
+        @catch(gpu::read_timestamps(
+            device: &device,
+            pool:   pool,
+            first:  0,
+            count:  TIMESTAMP_QUERY_COUNT,
+            out:    out[..],
+        )) == gpu::DEVICE_BUSY,
+        "unavailable slots fault DEVICE_BUSY instead of blocking the host"
+    );
+}
+
 fn void run_timestamp_query_measurement(
     TimestampValidationCapture* validation_capture,
 ) {
@@ -73,6 +186,11 @@ fn void run_timestamp_query_measurement(
     defer destroy_test_device(&device)!!;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
     if (!caps.timestamps.queues.compute) return;
+
+    // The callback is installed at device creation, so it also sees bootstrap
+    // diagnostics a validation layer older than the driver raises against
+    // pNext structures it does not recognize. Measure the workflow only.
+    validation_capture.errors = 0;
 
     gpu::TimestampPoolDesc pool_desc = {
         .capacity   = TIMESTAMP_QUERY_COUNT,
