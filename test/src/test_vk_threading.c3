@@ -574,7 +574,7 @@ fn void contended_allocator_does_not_hold_the_device_resource_lock() @test {
     AllocatorBeginArgs blocked_args = { .allocator = &blocked };
     Thread blocked_worker;
     blocked_worker.create(&allocator_begin_worker, &blocked_args)!!;
-    while (blocked_slot.resolution_pins.load(AtomicOrdering.ACQUIRE) == 0) {
+    while (blocked_slot.operation_pins.load(AtomicOrdering.ACQUIRE) == 0) {
         thread::yield();
     }
 
