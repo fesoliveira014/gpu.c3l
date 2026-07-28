@@ -23,6 +23,7 @@ const uint SHADER_STORE_MAX_PIPELINE_CAPACITY = 0x20000000;
 
 struct ShaderIdentityInput {
     char[]                    spirv;
+    uint*                     spirv_words;
     char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
     ZString                   debug_name;
     ulong                     hash;
@@ -31,7 +32,8 @@ struct ShaderIdentityInput {
 
 struct ShaderStoreEntry {
     ulong                             hash;
-    char[]                            spirv;
+    uint[]                            spirv_words;
+    usz                               spirv_byte_size;
     char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
     gpu::internal::ShaderRole         role;
     uint                              refcount;
@@ -61,6 +63,12 @@ struct ShaderModuleCreateOps @private {
     void*                   user_data;
     ShaderModuleCreateFn    create;
     bool allow_alternate_root_abi @if(env::TESTING);
+}
+
+<* Borrow the bytes of a live shader store entry.
+   @require entry != null && entry.used && entry.spirv_words.ptr != null : "Entry must own live word storage." *>
+fn char[] shader_entry_bytes(ShaderStoreEntry* entry) @private {
+    return ((char*)entry.spirv_words.ptr)[:entry.spirv_byte_size];
 }
 
 fn uint shader_store_bucket(ulong hash, uint bucket_count) {
@@ -94,13 +102,15 @@ fn bool shader_store_entry_equals(
     ShaderStoreEntry* entry,
     ShaderIdentityInput* input,
 ) {
+    char[] entry_spirv = shader_entry_bytes(entry);
     if (entry.role != input.role
-        || entry.spirv.len != input.spirv.len
+        || entry_spirv.len != input.spirv.len
         || ((ZString)&entry.entry_point[0]).str_view()
             != ((ZString)&input.entry_point[0]).str_view()) return false;
-    return mem::equals(entry.spirv, input.spirv);
+    return mem::equals(entry_spirv, input.spirv);
 }
 
+<* @require input == null || input.spirv.len % uint::size == 0 : "SPIR-V byte length must be word-aligned." *>
 fn ShaderId? retain_shader_identity_locked(
     VkDeviceState* state,
     ShaderIdentityInput* input,
@@ -132,18 +142,19 @@ fn ShaderId? retain_shader_identity_locked(
         return gpu::SLOT_TABLE_FULL~;
     }
 
-    char[] spirv = alloc::new_array(
+    uint[] spirv_words = alloc::new_array(
         state.host_allocator,
-        char,
-        (sz)input.spirv.len,
+        uint,
+        (sz)(input.spirv.len / uint::size),
     );
-    mem::copy(spirv.ptr, input.spirv.ptr, input.spirv.len);
+    mem::copy(spirv_words.ptr, input.spirv.ptr, input.spirv.len);
     ShaderStoreEntry entry = {
-        .hash     = input.hash,
-        .spirv    = spirv,
-        .role     = input.role,
-        .refcount = 1,
-        .used     = true,
+        .hash            = input.hash,
+        .spirv_words     = spirv_words,
+        .spirv_byte_size = input.spirv.len,
+        .role            = input.role,
+        .refcount        = 1,
+        .used            = true,
     };
     String entry_point = ((ZString)&input.entry_point[0]).str_view();
     mem::copy(
@@ -171,7 +182,7 @@ fn void? release_shader_identity_locked(
         entry.refcount++;
         return gpu::INVALID_ARGUMENT~;
     }
-    alloc::free(state.host_allocator, entry.spirv.ptr);
+    alloc::free(state.host_allocator, entry.spirv_words.ptr);
     *entry = { .next_free = state.shader_store.free_head };
     state.shader_store.free_head = index + 1;
 }
@@ -216,10 +227,11 @@ fn void shader_store_input(
     ShaderIdentityInput* out_input,
 ) {
     *out_input = {
-        .spirv      = entry.spirv,
-        .debug_name = debug_name,
-        .hash       = entry.hash,
-        .role       = entry.role,
+        .spirv       = shader_entry_bytes(entry),
+        .spirv_words = entry.spirv_words.ptr,
+        .debug_name  = debug_name,
+        .hash        = entry.hash,
+        .role        = entry.role,
     };
     mem::copy(
         &out_input.entry_point[0],
@@ -285,8 +297,8 @@ fn void? create_shader_store(VkDeviceState* state, uint pipeline_capacity) {
 fn void destroy_shader_store(VkDeviceState* state) {
     if (state.shader_store.entries.ptr != null) {
         foreach (&entry : state.shader_store.entries[:state.shader_store.next_new]) {
-            if (entry.used && entry.spirv.ptr != null) {
-                alloc::free(state.host_allocator, entry.spirv.ptr);
+            if (entry.used && entry.spirv_words.ptr != null) {
+                alloc::free(state.host_allocator, entry.spirv_words.ptr);
             }
         }
         mem::free(state.shader_store.entries.ptr);
@@ -792,22 +804,28 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
         )~;
     }
 
-    @pool() {
-        uint[] aligned_code = mem::talloc_array(uint, code.spirv.len / uint::size);
-        mem::copy(aligned_code.ptr, code.spirv.ptr, code.spirv.len);
-        vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
-            .set_code_size(code.spirv.len)
-            .set_code(aligned_code.ptr);
-        check_shader_create_device_result(
-            state: state,
-            result: create_ops.create(
-                user_data:     create_ops.user_data,
-                device:        state.device,
-                create_info:   &info,
-                shader_module: &shader.shader_module,
-            ),
-        )!;
-    };
+    if (code.spirv_words == null) {
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   gpu::SHADER_INVALID,
+            debug_name:     code.debug_name,
+            rejected_field: rejected_field,
+            invariant:      "SPIR-V storage must be retained and word-aligned",
+        )~;
+    }
+    vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
+        .set_code_size(code.spirv.len)
+        .set_code(code.spirv_words);
+    check_shader_create_device_result(
+        state: state,
+        result: create_ops.create(
+            user_data:     create_ops.user_data,
+            device:        state.device,
+            create_info:   &info,
+            shader_module: &shader.shader_module,
+        ),
+    )!;
     set_object_name(
         state:         state,
         object_type:   vk::ObjectType.SHADER_MODULE,
