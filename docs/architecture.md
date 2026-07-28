@@ -467,14 +467,19 @@ The Vulkan backend may use private `BufferHandle`, `BufferDesc`, and
 
 ### Textures
 
-Textures represent implicit 2D images, including mip chains and array layers,
-and same-format views without exposing backend objects.
+Textures represent ordinary 2D and 3D images with same-format views without
+exposing backend objects. Zero `TextureDesc.depth` selects 2D with native depth
+one; positive depth selects 3D. Two-dimensional images may have array layers;
+3D images have one native array layer and full-volume views.
 `create_texture` owns its storage. `get_texture_requirements` and
 `create_placed_texture` let the application group compatible textures into
 explicit allocations. Requirements are immutable device-owned values.
 
 Placement validates memory class, compatibility, size, alignment, access, and
 overlap before native creation. Texture destruction never releases caller-owned storage.
+The same descriptor lowering drives exact support checks and owned, placed, and
+dedicated creation. Three-dimensional attachments and slice views are rejected;
+shader-visible 3D heap declarations and volume copies are separate contracts.
 
 ### Texture and sampler heap publication
 

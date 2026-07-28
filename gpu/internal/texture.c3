@@ -19,9 +19,22 @@ fn uint texture_array_layers(TextureDesc* desc) @private {
     return desc.array_layers == 0 ? 1 : desc.array_layers;
 }
 
-fn uint texture_full_mip_chain(uint width, uint height) @private {
+fn bool texture_desc_is_3d(TextureDesc* desc) @private {
+    return desc.depth > 0;
+}
+
+fn uint texture_desc_native_depth(TextureDesc* desc) @private {
+    return texture_desc_is_3d(desc) ? desc.depth : 1;
+}
+
+fn uint texture_full_mip_chain(
+    uint width,
+    uint height,
+    uint depth,
+) @private {
     uint levels = 1;
     uint size = width > height ? width : height;
+    if (depth > size) size = depth;
     while (size > 1) {
         size >>= 1;
         levels++;
@@ -70,7 +83,11 @@ fn bool sample_count_valid(SampleCount sample_count) @private {
 
 fn bool texture_desc_valid(TextureDesc* desc) @private {
     if (desc.width == 0 || desc.height == 0) return false;
-    if (texture_mip_levels(desc) > texture_full_mip_chain(desc.width, desc.height)) return false;
+    if (texture_mip_levels(desc) > texture_full_mip_chain(
+        desc.width,
+        desc.height,
+        texture_desc_native_depth(desc),
+    )) return false;
     if (!texture_format_in_backend_profile(desc.format)) return false;
 
     bool has_usage = desc.usage.sampled || desc.usage.storage || desc.usage.color_attach
@@ -78,6 +95,12 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
     if (!has_usage) return false;
 
     if (!sample_count_valid(desc.sample_count)) return false;
+    if (texture_desc_is_3d(desc)
+        && (texture_array_layers(desc) != 1
+            || desc.usage.color_attach
+            || desc.usage.depth_attach)) {
+        return false;
+    }
     if (desc.sample_count != SampleCount.ONE
         && (texture_mip_levels(desc) != 1
             || desc.usage.sampled

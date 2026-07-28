@@ -103,6 +103,7 @@ AdapterQueueInfo
 
 AdapterLimits
     uint max_texture_dimension_2d
+    uint max_texture_dimension_3d
     uint max_texture_array_layers
     uint max_color_attachments
     uint max_push_constant_size
@@ -677,6 +678,7 @@ SampleCount
 TextureDesc
     uint width
     uint height
+    uint depth
     uint mip_levels
     uint array_layers
     Format format
@@ -719,24 +721,32 @@ destroy_texture_view(Device* device, TextureView view) -> void?
 create_texture_views(Device* device, TextureViewCreateDesc[] descs, TextureView[] out_views) -> void?
 ```
 
-`get_texture_format_support` reports library-creatable support, not every raw
-Vulkan capability. Each usage bit comes from the same exact 2D optimal-tiling
-query used by creation, but the bits are independent; use
-`supports_texture_desc` for a usage combination. The backend profile masks every
-dimension except 2D. Higher sample-count bits report exact color-attachment or
-depth-attachment descriptors, as appropriate for the format. Per-format usages,
-sample counts, and linear filtering remain adapter-dependent. Depth support is
-D32-only.
+`TextureDesc.depth == 0` selects a 2D image with native depth one. A positive
+value selects a 3D image with that native depth, so `depth = 1` is a genuine 3D
+image. 3D textures require one normalized array layer, `SampleCount.ONE`, and
+sampled, storage, and/or transfer usage; color and depth attachments are
+rejected. Their mip count is bounded by width, height, and depth.
+`AdapterLimits.max_texture_dimension_3d` is a quick extent ceiling, while
+`supports_texture_desc` is the exact creatability query.
+
+`get_texture_format_support` reports library-creatable 2D support, not every
+raw Vulkan capability. Its usage bits are independent; use
+`supports_texture_desc` for an exact 3D descriptor or any complete usage
+combination. Higher sample-count bits report exact 2D color-attachment or
+depth-attachment descriptors, as appropriate for the format. Per-format
+usages, sample counts, and linear filtering remain adapter-dependent. Depth
+support is D32-only.
 `supports_texture_desc` returns false for an empty, unknown, or unavailable
 access set.
 
-`supports_texture_desc` checks the exact optimal-tiling format, combined usage,
-normalized extent, mip and layer counts, access roles, sample count, and image
-properties without allocating. Multisample textures require one mip and
-attachment-only usage. A false result caused by malformed input corresponds to
-`INVALID_ARGUMENT` at creation; a structurally valid descriptor rejected by the
-adapter corresponds to `UNSUPPORTED_FEATURE`. Memory exhaustion can still make
-creation fail after a true capability result.
+`supports_texture_desc` checks the exact optimal-tiling format, image type,
+three-axis extent, combined usage, normalized mip and layer counts, access
+roles, sample count, and image properties without allocating. Multisample
+textures are 2D, require one mip, and use attachment-only usage. A false result
+caused by malformed input corresponds to `INVALID_ARGUMENT` at creation; a
+structurally valid descriptor rejected by the adapter corresponds to
+`UNSUPPORTED_FEATURE`. Memory exhaustion can still make creation fail after a
+true capability result.
 
 `get_texture_requirements` returns size, alignment, a device-owned opaque
 compatibility value, and whether dedicated storage is required. Pass every
@@ -765,6 +775,10 @@ heap. Distinct subresource views are governed by the device-wide heap capacity,
 with no smaller fixed per-texture publication limit. Sampler indices remain
 stable until device
 destruction.
+
+For 3D textures, a view uses native `TYPE_3D`, requires `base_layer == 0` and
+`layer_count` zero or one, and covers the complete depth of every selected mip.
+Arbitrary z-slice views and 3D attachment views are not exposed.
 
 `create_texture_views` batch-publishes N views under one lock hold and ends in
 one accumulated update to the device-global descriptor set.
@@ -1742,6 +1756,8 @@ cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) -> void?
 
 Valid copy spans are nonzero, equal in size, non-overlapping, and have the
 required usage and queue access.
+Buffer/texture copy commands currently reject 3D textures; their descriptors
+select only 2D mip and array-layer regions.
 `cmd_fill_buffer` fills the exact destination span; its byte offset and
 size are 4-byte aligned. There is no zero-size shorthand. Bounded identity,
 backing range, overflow, and alignment required for safe lowering are always

@@ -164,6 +164,7 @@ fn void initialize_adapter(
         .queues           = query_adapter_queues(physical_device),
         .limits           = {
             .max_texture_dimension_2d  = limits.max_image_dimension2d,
+            .max_texture_dimension_3d  = limits.max_image_dimension3d,
             .max_texture_array_layers  = limits.max_image_array_layers,
             .max_color_attachments     = limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS
                 ? limits.max_color_attachments : gpu::MAX_COLOR_ATTACHMENTS,

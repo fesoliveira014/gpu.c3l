@@ -220,6 +220,7 @@ Public descriptor:
 TextureDesc
     uint width
     uint height
+    uint depth
     uint mip_levels
     uint array_layers
     Format format
@@ -228,6 +229,12 @@ TextureDesc
     SampleCount sample_count
     ZString debug_name
 ```
+
+Zero depth selects a 2D image with native depth one. Positive depth selects a
+3D image, including a genuine depth-one 3D image. Three-dimensional textures
+use one normalized array layer and one sample, may be sampled, stored, or
+transferred, and cannot be color or depth attachments. Their mip chain reduces
+width, height, and depth independently.
 
 Render attachments use a separate explicit child:
 
@@ -256,7 +263,7 @@ SampleCount               -> VkSampleCountFlagBits
 ```
 
 Multisample textures are attachment-only, have one mip, and require an
-adapter-supported sample count. Resolve destinations are separate
+adapter-supported sample count; they are therefore 2D. Resolve destinations are separate
 single-sample color-attachment textures.
 
 Owned creation:
@@ -270,7 +277,8 @@ publish TextureHandle
 
 Transfer-only textures publish without a default image view. Their image,
 allocation, placement, transfer, barrier, and destruction behavior is otherwise
-unchanged.
+unchanged for both dimensions. View-capable 3D textures create a full-volume
+`TYPE_3D` default view; selected mip views retain full depth and one array layer.
 
 Placed creation:
 
@@ -290,6 +298,8 @@ create_dedicated_texture with an exact-size compatible AllocationDesc
 Requirements are device-owned and opaque. Incompatible groups,
 dedicated-only requirements, insufficient size or access, stale allocations,
 and overlapping live placements fail before image creation.
+Owned, placed, and dedicated 3D textures use these same compatibility,
+alignment, overlap, and allocation-ownership rules.
 
 ## 9. Texture lifetime
 
