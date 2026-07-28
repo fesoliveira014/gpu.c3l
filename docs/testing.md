@@ -128,9 +128,9 @@ c3c test vk_optional_generated_work --path test --test-show-output
   compatibility and physical overlap, call-scoped allocation failure rollback,
   ordinary/sparse timeline chaining, native result mapping, sparse-texture
   retention, sparse-only retirement, portable cross-thread lock boundaries,
-  and capability-gated bind/use/unbind. The real 2D path uploads and reads back
-  known bytes; the 3D path covers binding lifecycle where the stacked public
-  copy surface remains 2D-only.
+  and capability-gated bind/use/unbind. The real 2D and 3D paths upload and
+  read back known bytes after an ordered bind; an unavailable dimension is
+  reported as a capability-gated skip.
 - `vk_core` covers device selection and creation, allocations, spans,
   textures/views/samplers, reflection and root ABI, pipelines/cache, command
   recording and lifecycle, graphics/compute/transfer output, depth,

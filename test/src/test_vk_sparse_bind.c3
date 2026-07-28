@@ -1886,66 +1886,68 @@ fn bool run_real_sparse_bind_dimension(
         },
     };
     gpu::cmd_texture_barrier(&commands, &barrier)!!;
-    if (!image_3d) {
-        usz upload_size = (usz)tiles[0].extent.x
-            * (usz)tiles[0].extent.y
-            * vk::format_texel_size(texture_desc.format);
-        upload = allocate_owned_span(
-            device:       device,
-            size:         upload_size,
-            memory_class: gpu::MemoryClass.CPU_WRITE,
-            access:       access,
-            debug_name:   "sparse_bind_real_upload",
-        )!!;
-        owns_upload = true;
-        char[] upload_bytes =
-            gpu::get_span_mapping(device, upload.span)!!;
-        foreach (i, &byte : upload_bytes) {
-            *byte = (char)(((usz)i * 17 + 3) & 0x7f);
-        }
-        gpu::flush_mapped_span(device, upload.span)!!;
-        readback = allocate_owned_span(
-            device:       device,
-            size:         upload_size,
-            memory_class: gpu::MemoryClass.CPU_READ,
-            access:       access,
-            debug_name:   "sparse_bind_real_readback",
-        )!!;
-        owns_readback = true;
-        gpu::BufferTextureCopyDesc copy = {
-            .src     = upload.span,
-            .texture = texture,
-            .width   = tiles[0].extent.x,
-            .height  = tiles[0].extent.y,
-        };
-        gpu::cmd_copy_buffer_to_texture(&commands, &copy)!!;
-        gpu::TextureBarrier to_source = {
-            .texture = texture,
-            .before  = {
-                .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-                .stages = { .transfer },
-                .access = { .write },
-            },
-            .after = {
-                .layout = gpu::TextureLayout.TRANSFER_SOURCE,
-                .stages = { .transfer },
-                .access = { .read },
-            },
-        };
-        gpu::cmd_texture_barrier(&commands, &to_source)!!;
-        gpu::TextureBufferCopyDesc copy_back = {
-            .texture = texture,
-            .dst     = readback.span,
-            .width   = tiles[0].extent.x,
-            .height  = tiles[0].extent.y,
-        };
-        gpu::cmd_copy_texture_to_buffer(&commands, &copy_back)!!;
-        gpu::Barrier host_read = {
-            .before = { .transfer },
-            .after  = { .host },
-        };
-        gpu::cmd_barrier(&commands, &host_read)!!;
+    uint copy_depth = image_3d ? tiles[0].extent.z : 1;
+    usz upload_size = (usz)tiles[0].extent.x
+        * (usz)tiles[0].extent.y
+        * (usz)copy_depth
+        * vk::format_texel_size(texture_desc.format);
+    upload = allocate_owned_span(
+        device:       device,
+        size:         upload_size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       access,
+        debug_name:   "sparse_bind_real_upload",
+    )!!;
+    owns_upload = true;
+    char[] upload_bytes =
+        gpu::get_span_mapping(device, upload.span)!!;
+    foreach (i, &byte : upload_bytes) {
+        *byte = (char)(((usz)i * 17 + 3) & 0x7f);
     }
+    gpu::flush_mapped_span(device, upload.span)!!;
+    readback = allocate_owned_span(
+        device:       device,
+        size:         upload_size,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       access,
+        debug_name:   "sparse_bind_real_readback",
+    )!!;
+    owns_readback = true;
+    gpu::BufferTextureCopyDesc copy = {
+        .src     = upload.span,
+        .texture = texture,
+        .width   = tiles[0].extent.x,
+        .height  = tiles[0].extent.y,
+        .depth   = image_3d ? copy_depth : 0,
+    };
+    gpu::cmd_copy_buffer_to_texture(&commands, &copy)!!;
+    gpu::TextureBarrier to_source = {
+        .texture = texture,
+        .before  = {
+            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+            .stages = { .transfer },
+            .access = { .write },
+        },
+        .after = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
+    };
+    gpu::cmd_texture_barrier(&commands, &to_source)!!;
+    gpu::TextureBufferCopyDesc copy_back = {
+        .texture = texture,
+        .dst     = readback.span,
+        .width   = tiles[0].extent.x,
+        .height  = tiles[0].extent.y,
+        .depth   = image_3d ? copy_depth : 0,
+    };
+    gpu::cmd_copy_texture_to_buffer(&commands, &copy_back)!!;
+    gpu::Barrier host_read = {
+        .before = { .transfer },
+        .after  = { .host },
+    };
+    gpu::cmd_barrier(&commands, &host_read)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::CompletionWait[1] waits = {{
@@ -1958,19 +1960,12 @@ fn bool run_real_sparse_bind_dimension(
     };
     gpu::CompletionPoint used = gpu::submit(queue, &submit_desc)!!;
     gpu::wait_completion(used, ulong::max)!!;
-    if (!image_3d) {
-        gpu::invalidate_mapped_span(device, readback.span)!!;
-        char[] readback_bytes =
-            gpu::get_span_mapping(device, readback.span)!!;
-        foreach (i, byte : readback_bytes) {
-            assert(byte == (char)(((usz)i * 17 + 3) & 0x7f),
-                "bound sparse tile preserves uploaded bytes through readback");
-        }
-    } else {
-        io::eprintfn(
-            "run_real_sparse_bind_dimension: 3D residency readback "
-            "not available on the stacked base, lifecycle only",
-        );
+    gpu::invalidate_mapped_span(device, readback.span)!!;
+    char[] readback_bytes =
+        gpu::get_span_mapping(device, readback.span)!!;
+    foreach (i, byte : readback_bytes) {
+        assert(byte == (char)(((usz)i * 17 + 3) & 0x7f),
+            "bound sparse tile preserves uploaded bytes through readback");
     }
 
     tiles[0].allocation = {};
@@ -1997,6 +1992,8 @@ fn void real_sparse_bind_use_and_unbind_when_supported() @test {
     gpu::DeviceDesc device_desc = {
         .enable_sparse_textures = true,
     };
+    bool ran_2d;
+    bool ran_3d;
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_desc(
@@ -2005,21 +2002,33 @@ fn void real_sparse_bind_use_and_unbind_when_supported() @test {
         )!!.supported) continue;
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
-        bool ran_2d = run_real_sparse_bind_dimension(
-            &device,
-            caps,
-            false,
-        );
-        bool ran_3d = run_real_sparse_bind_dimension(
-            &device,
-            caps,
-            true,
-        );
+        if (!ran_2d) {
+            ran_2d = run_real_sparse_bind_dimension(
+                &device,
+                caps,
+                false,
+            );
+        }
+        if (!ran_3d) {
+            ran_3d = run_real_sparse_bind_dimension(
+                &device,
+                caps,
+                true,
+            );
+        }
         gpu::destroy_device(&device)!!;
-        if (ran_2d || ran_3d) return;
+        if (ran_2d && ran_3d) return;
     }
-    io::eprintfn(
-        "real_sparse_bind_use_and_unbind_when_supported: "
-        "no compatible sparse 2D/3D adapter and format, skipping",
-    );
+    if (!ran_2d) {
+        io::eprintfn(
+            "real_sparse_bind_use_and_unbind_when_supported: "
+            "no compatible sparse 2D capability, skipping 2D proof",
+        );
+    }
+    if (!ran_3d) {
+        io::eprintfn(
+            "real_sparse_bind_use_and_unbind_when_supported: "
+            "no compatible sparse 3D capability, skipping 3D proof",
+        );
+    }
 }
