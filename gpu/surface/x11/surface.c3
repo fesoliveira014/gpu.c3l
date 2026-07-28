@@ -4,7 +4,15 @@ import gpu @public;
 import gpu::internal @public;
 import gpu::internal::vk;
 
-<* Create a runtime-owned X11 surface from native handles. *>
+<* Create a runtime-owned X11 surface from native handles.
+   The runtime retains the surface; the caller destroys it with
+   `gpu::destroy_surface`. The native display and window must remain valid
+   until then.
+
+   @param runtime : "Live runtime that will own the surface."
+   @param display : "Borrowed non-null native display handle."
+   @param window : "Borrowed nonzero native window handle."
+   @return "A runtime-owned surface token, or a recoverable invalid-argument, invalid-handle, capacity, allocation, or platform fault." *>
 fn gpu::Surface? create_surface(
     gpu::Runtime* runtime,
     DisplayHandle display,
