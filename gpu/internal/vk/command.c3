@@ -1440,21 +1440,43 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
     uint layer_count,
     uint x,
     uint y,
+    uint z,
     uint width,
     uint height,
+    uint depth,
 ) @private {
-    if (texture_slot_is_3d(slot)) return gpu::INVALID_ARGUMENT~;
     if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
-    uint layers = layer_count == 0 ? 1 : layer_count;
-    if ((ulong)base_layer + (ulong)layers > (ulong)slot.array_layers) {
+    MipExtent extent = texture_mip_extent(slot, mip);
+    bool is_3d = texture_slot_is_3d(slot);
+    if (x > extent.width || y > extent.height) {
         return gpu::INVALID_ARGUMENT~;
     }
+    if (width == 0) width = extent.width - x;
+    if (height == 0) height = extent.height - y;
 
-    MipExtent extent = texture_mip_extent(slot, mip);
-    if (width == 0) width = extent.width;
-    if (height == 0) height = extent.height;
-    if ((ulong)x + (ulong)width > (ulong)extent.width
-        || (ulong)y + (ulong)height > (ulong)extent.height) {
+    uint layers;
+    if (is_3d) {
+        if (base_layer != 0 || layer_count > 1 || z > extent.depth) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+        layers = 1;
+        if (depth == 0) depth = extent.depth - z;
+    } else {
+        if (z != 0 || depth > 1) return gpu::INVALID_ARGUMENT~;
+        layers = layer_count == 0 ? 1 : layer_count;
+        depth = 1;
+    }
+
+    if (width == 0 || height == 0 || depth == 0) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (width > extent.width - x || height > extent.height - y) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (is_3d) {
+        if (depth > extent.depth - z) return gpu::INVALID_ARGUMENT~;
+    } else if (base_layer > slot.array_layers
+        || layers > slot.array_layers - base_layer) {
         return gpu::INVALID_ARGUMENT~;
     }
     if (row_length_texels != 0 && row_length_texels < width) {
@@ -1463,15 +1485,14 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
 
     usz texel_size = format_texel_size(slot.format);
     usz row_texels = row_length_texels == 0 ? width : row_length_texels;
-    if (texel_size == 0 || row_texels == 0 || height == 0 || layers == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    usz slice_count = is_3d ? (usz)depth : (usz)layers;
+    if (texel_size == 0) return gpu::INVALID_ARGUMENT~;
     if (row_texels > usz::max / texel_size) return gpu::INVALID_ARGUMENT~;
     usz copy_bytes = row_texels * texel_size;
     if ((usz)height > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
     copy_bytes *= height;
-    if ((usz)layers > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
-    copy_bytes *= layers;
+    if (slice_count > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
+    copy_bytes *= slice_count;
     if (copy_bytes > resolved.size) return gpu::INVALID_ARGUMENT~;
     if (resolved.offset % texel_size != 0 || resolved.offset % 4 != 0) {
         return gpu::INVALID_ARGUMENT~;
@@ -1484,11 +1505,19 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
         .image_subresource   = {
             .aspect_mask      = format_aspect(slot.format),
             .mip_level        = mip,
-            .base_array_layer = base_layer,
-            .layer_count      = layers,
+            .base_array_layer = is_3d ? 0 : base_layer,
+            .layer_count      = is_3d ? 1 : layers,
         },
-        .image_offset = { .x = (int)x, .y = (int)y, .z = 0 },
-        .image_extent = { .width = width, .height = height, .depth = 1 },
+        .image_offset = {
+            .x = (int)x,
+            .y = (int)y,
+            .z = is_3d ? (int)z : 0,
+        },
+        .image_extent = {
+            .width  = width,
+            .height = height,
+            .depth  = is_3d ? depth : 1,
+        },
     };
 }
 
@@ -1524,8 +1553,10 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
             layer_count:       desc.layer_count,
             x:                 desc.x,
             y:                 desc.y,
+            z:                 desc.z,
             width:             desc.width,
             height:            desc.height,
+            depth:             desc.depth,
         )!,
     };
 }
@@ -1594,8 +1625,10 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
             layer_count:       desc.layer_count,
             x:                 desc.x,
             y:                 desc.y,
+            z:                 desc.z,
             width:             desc.width,
             height:            desc.height,
+            depth:             desc.depth,
         )!,
     };
 }

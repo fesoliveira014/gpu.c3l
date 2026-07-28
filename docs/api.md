@@ -1772,6 +1772,34 @@ BufferCopyDesc
     GpuSpan src
     GpuSpan dst
 
+BufferTextureCopyDesc
+    GpuSpan src
+    uint row_length_texels
+    TextureHandle texture
+    uint mip
+    uint base_layer
+    uint layer_count
+    uint x
+    uint y
+    uint z
+    uint width
+    uint height
+    uint depth
+
+TextureBufferCopyDesc
+    TextureHandle texture
+    GpuSpan dst
+    uint row_length_texels
+    uint mip
+    uint base_layer
+    uint layer_count
+    uint x
+    uint y
+    uint z
+    uint width
+    uint height
+    uint depth
+
 cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) -> void?
 cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) -> void?
 cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) -> void?
@@ -1780,13 +1808,31 @@ cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) -> void?
 
 Valid copy spans are nonzero, equal in size, non-overlapping, and have the
 required usage and queue access.
-Buffer/texture copy commands currently reject 3D textures; their descriptors
-select only 2D mip and array-layer regions.
 `cmd_fill_buffer` fills the exact destination span; its byte offset and
-size are 4-byte aligned. There is no zero-size shorthand. Bounded identity,
-backing range, overflow, and alignment required for safe lowering are always
-checked; `FULL` adds usage, queue, format, extent, and subresource diagnostics.
-Callers provide the surrounding barriers.
+size are 4-byte aligned. There is no zero-size shorthand.
+
+For buffer-texture copies, zero width and height select the remaining selected
+mip extent from x and y; this includes nonzero x/y offsets. On 2D textures,
+z must be zero, depth must be zero or one and normalizes to one, and
+base/layer count select array layers with zero layer count meaning one. On 3D
+textures, base layer must be zero, layer count must be zero or one, z selects
+the first slice, and zero depth selects the remaining mip depth from z.
+Positive depth selects exactly that many slices. Mip depth reduces alongside
+width and height.
+
+Zero `row_length_texels` tightly packs each row; a positive value must be at
+least the copied width. The span must contain
+`texel_size * normalized_row_texels * copy_height * slice_count`, where slice
+count is the 2D array-layer count or 3D copy depth. This deliberately includes
+every padded row of every layer or depth slice; no separate slice pitch is
+exposed.
+
+Live identities, dimension/subresource/extent bounds, exact backing range,
+byte-size overflow, and alignment required for safe lowering are always
+checked. `FULL` adds semantic usage and queue-access diagnostics and retains
+the span and texture transactionally. Copies use the transfer source or
+destination native layout, but callers remain responsible for the surrounding
+texture barriers and completion-based lifetimes.
 
 ### Direct readback
 

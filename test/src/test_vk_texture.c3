@@ -819,52 +819,6 @@ fn void three_dimensional_texture_barriers_use_one_array_layer() @test {
         "three-dimensional barrier slice selection faults before emission");
 }
 
-fn void three_dimensional_texture_copies_are_rejected() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::TextureDesc desc = {
-        .access = { .graphics, .compute, .transfer },
-        .width  = 8,
-        .height = 4,
-        .depth  = 4,
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .transfer_src, .transfer_dst },
-    };
-    if (!gpu::supports_texture_desc(&device, &desc)!!) return;
-
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    OwnedSpan buffer = allocate_owned_span(
-        device:       &device,
-        size:         8 * 4 * 4 * 4,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       desc.access,
-        debug_name:   "three_dimensional_copy_buffer",
-    )!!;
-    defer free_owned_span(&device, &buffer)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
-    gpu::CommandAllocator allocator =
-        gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-
-    gpu::BufferTextureCopyDesc upload = {
-        .src     = buffer.span,
-        .texture = texture,
-    };
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&commands, &upload))
-        == gpu::INVALID_ARGUMENT,
-        "buffer-to-texture copies reject three-dimensional textures");
-    gpu::TextureBufferCopyDesc readback = {
-        .texture = texture,
-        .dst     = buffer.span,
-    };
-    assert(@catch(gpu::cmd_copy_texture_to_buffer(&commands, &readback))
-        == gpu::INVALID_ARGUMENT,
-        "texture-to-buffer copies reject three-dimensional textures");
-}
-
 fn void default_texture_views_follow_usage_eligibility() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;

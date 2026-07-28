@@ -365,6 +365,13 @@ Readback uses `CPU_READ` allocations: record the copy and a global barrier with
 `before.transfer` and `after.host`, submit, wait or poll, invalidate, then
 read the mapping before freeing or reusing the owning allocation.
 
+Buffer-texture copy spans can cover 2D array layers or 3D depth slices. Zero
+width/height selects the remaining selected-mip extent from x/y; for 3D, zero
+depth likewise selects the remainder from z. A nonzero row length adds padding
+between rows, and the caller-owned span must contain every padded row across
+every selected layer or depth slice. There is no independent slice-pitch
+field: slices are separated by the copied height.
+
 The core does not allocate transfer storage, choose fallback policy, or create
 additional completion state. Applications may implement pooling and reuse over
 allocations, spans, commands, and completion points.
