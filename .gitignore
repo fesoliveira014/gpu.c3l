@@ -33,4 +33,5 @@ openspec/
 # Sample image dumps
 *.ppm
 .claude/
+.codex/
 .codex-worktrees/
