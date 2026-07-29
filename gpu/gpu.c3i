@@ -111,7 +111,7 @@ const SamplerIndex SAMPLER_INDEX_INVALID = {};
 
 // Public fault set. Categories describe causes, not whole fault values: one
 // value can report an always-checked cause, a FULL diagnostic, or a runtime
-// failure. docs/api.md carries the complete cause classification.
+// failure. docs/api/index.md carries the complete cause classification.
 faultdef
     // Runtime failure: the requested backend or Vulkan 1.3 driver is absent,
     // or backend creation failed.

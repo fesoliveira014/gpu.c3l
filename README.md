@@ -2,111 +2,56 @@
 
 [![ci](https://github.com/fesoliveira014/gpu.c3l/actions/workflows/ci.yml/badge.svg)](https://github.com/fesoliveira014/gpu.c3l/actions/workflows/ci.yml)
 
-A GPU programming library for [C3](https://c3-lang.org/), built on Vulkan 1.3
-— with the Vulkan kept out of your way. One public module (`gpu`), strongly-typed
-handles, C3 optionals for every error, and an execution model built around
-two ideas:
+`gpu.c3l` is a GPU programming library for [C3](https://c3-lang.org/). It
+provides a GPU-shaped public API over a private Vulkan 1.3 backend: strongly
+typed handles, explicit memory and synchronization, root-pointer shader data,
+and bindless texture and sampler heaps.
 
-- **Root pointers instead of descriptor sets.** Generic GPU data is reached
-  through 64-bit addresses; each dispatch/draw pushes one root address and the
-  shader follows pointers from that struct. No binding numbers, set layouts,
-  or descriptor churn for generic data.
-- **One bindless heap for textures and samplers.** An owner-bearing
-  `TextureView` exposes the raw `TextureIndex` stored in root data;
-  `SamplerIndex` is likewise a raw shader-visible value. Interning sampler state
-  returns one stable device-lifetime index.
+The library aims to make modern, explicit GPU programming practical without
+exposing Vulkan objects or descriptor-set management. It does not provide a
+render graph, resource streaming, hidden state transitions, implicit lifetime
+management, or a compatibility descriptor path.
 
-```c3
-gpu::GpuSpan input_span = gpu::get_allocation_span(&device, input)!;
-gpu::GpuSpan output_span = gpu::get_allocation_span(&device, output)!;
-gpu::AllocationDesc root_desc = {
-    .size         = DoublerRoot::size,
-    .alignment    = DoublerRoot::alignment,
-    .memory_class = gpu::MemoryClass.CPU_WRITE,
-    .access       = { .compute },
-    .debug_name   = "doubler_root",
-};
-gpu::GpuAllocation root_allocation =
-    gpu::allocate_memory(&device, &root_desc)!;
-gpu::GpuSpan root_span =
-    gpu::get_allocation_span(&device, root_allocation)!;
-DoublerRoot* root =
-    (DoublerRoot*)gpu::get_span_mapping(&device, root_span)!.ptr;
-root.input_gpu  = gpu::get_span_address(&device, input_span)!;
-root.output_gpu = gpu::get_span_address(&device, output_span)!;
-root.count      = COUNT;
-gpu::flush_mapped_span(&device, root_span)!;
+## Highlights
 
-gpu::cmd_bind_pipeline(&cmd, pipeline)!;
-gpu::cmd_dispatch(
-    commands: &cmd,
-    root:     gpu::get_span_address(&device, root_span)!,
-    groups:   { (COUNT + 63) / 64, 1, 1 },
-)!;
-```
+- one `gpu` module plus platform-specific surface modules;
+- root pointers (`GpuAddress`) for per-dispatch and per-draw shader data;
+- bindless texture and sampler indices;
+- VMA-backed allocations, checked spans, mapping, and explicit visibility;
+- compute and graphics pipelines, dynamic rendering, indirect and generated
+  work, sparse textures, timestamp queries, and swapchains;
+- caller-owned command allocators with explicit completion-based reuse;
+- optional full contract validation and structured diagnostics; and
+- a schema generator for matching C3 and GLSL shader ABI declarations.
 
-Keep `root_allocation` live until the submission's `CompletionPoint` finishes,
-then free or reuse it.
+`TextureIndex`, `SamplerIndex`, and `GpuAddress` are raw shader values, not
+ownership tokens. Applications must keep their backing resources alive and
+explicitly order all reuse, transitions, and destruction.
 
-## Features
+## Requirements and status
 
-- Vulkan 1.3 backend (dynamic rendering, timeline semaphores, sync2, BDA);
-  the public API is GPU-shaped, not Vulkan-shaped — no `vk::` types leak
-- Shader ABI generator: one `.abi` schema emits the C3 struct (with
-  compile-time size/offset asserts) and the GLSL include, plus a CI drift gate
-- VMA-backed memory: independent `GpuAllocation` storage with checked spans,
-  mapping/address queries, explicit transfers, and leak reporting
-- Explicit barrier model with caller-recorded texture layouts; validation-clean is a
-  test gate across the whole suite
-- GPU-driven path: portable shared-root multi-draw indirect (+ count), plus
-  capability-gated generated root records for per-work-item roots and arguments
-- Tiered threading: explicit caller-owned command allocators, thread-confined
-  recording, thread-safe submission, and completion-driven command-buffer
-  reclamation
-- Command-buffer graphics state: attachment-only render-pass begin, explicit
-  complete `GraphicsState` packets, and viewport/scissor overrides that persist
-  across compatible pass boundaries without hidden replay
-- Direct call-scoped shader descriptors with private pipeline identity,
-  pipeline dedup cache + driver-cache save/load; swapchain with present-mode
-  query; compare samplers, depth bias, MRT
-- Runs entirely on lavapipe (CPU Vulkan) — CI needs no GPU, and neither does
-  your first program
+The current release targets **C3 0.8.0** and a Vulkan 1.3 implementation with
+the required modern synchronization, dynamic-rendering, descriptor-indexing,
+buffer-device-address, and dynamic-state features. Supported library targets
+are `linux-x64` and `windows-x64`. SDL3 is used by the samples, not by the
+library itself.
 
-## Status
-
-Pre-1.0, pinned to **C3 0.8.0** (the language is pre-1.0 too; syntax moves).
-
-| Target | State |
-|---|---|
-| linux-x64 | Full library test suite, validation-clean on lavapipe |
-| windows-x64 | Full library test suite on mesa-dist-win lavapipe |
+This project is pre-1.0. See
+[features and limitations](docs/features_and_limitations.md) before adopting
+it for a platform or workload.
 
 ## Start here
 
-- **[Getting started](docs/getting_started.md)** — empty directory to a
-  running GPU compute program, backed by the compiled
-  [`examples/getting_started`](examples/getting_started/) project.
-- **[gpu.c3l-samples](https://github.com/fesoliveira014/gpu.c3l-samples)** —
-  18 runnable samples plus two helper self-tests: triangle → textured cube →
-  GPU-driven culling → shadow mapping → deferred shading → PBR → stress/perf
-  harnesses.
-- **[docs/document_index.md](docs/document_index.md)** — map of the full
-  documentation set (architecture, API, memory model, shader ABI, backend,
-  testing, style).
+- [Getting started](docs/getting_started.md) — run a minimal compute program,
+  then build an SDL3 triangle.
+- [Documentation](docs/index.md) — concepts, recipes, API reference, and
+  contributor guides.
+- [Public API](docs/api/index.md) — domain-oriented symbol reference.
+- [Sample applications](https://github.com/fesoliveira014/gpu.c3l-samples) —
+  maintained end-to-end examples.
 
-## Layout
+Clone with submodules:
 
-```text
-gpu.c3l/
-├── abi/               shader ABI schemas
-├── gpu/               public `gpu` facade and private implementation
-│   ├── surface/       public platform `.c3i`/`.c3` pairs
-│   └── internal/
-│       └── vk/        Vulkan backend (private `gpu::internal::vk`)
-├── lib/               vendored bindings: vk.c3l, vma.c3l, spvreflect.c3l
-├── include/shaders/   GLSL includes consumed by shaders
-├── scripts/           ABI generation/checking and shader builds
-├── tools/gen_shader_abi/
-├── test/              whitebox test suite (compiles library sources directly)
-└── docs/
+```sh
+git clone --recurse-submodules https://github.com/fesoliveira014/gpu.c3l.git
 ```

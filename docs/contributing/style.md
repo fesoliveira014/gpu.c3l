@@ -1,4 +1,4 @@
-# gpu.c3l Style and Project Conventions
+# Style and project conventions
 
 ## 1. Language target
 

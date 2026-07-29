@@ -1,59 +1,82 @@
-# AGENTS.md
+# Contributor instructions
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+`gpu.c3l` is a C3 GPU programming library. The public module is `gpu`; the
+private Vulkan 1.3 backend is `gpu::internal::vk`. The project targets
+**C3 0.8.0**.
 
-## What this is
+## Before changing code
 
-`gpu.c3l` — a C3 GPU programming library. Public module `gpu`; private Vulkan 1.3 backend module `gpu::vk`. Targets **C3 0.8.0** (pre-1.0; syntax changes between releases — use the C3 skills below / bundled C3 docs, don't rely on memory).
-
-## C3 skills — use when planning, reviewing, or implementing
-
-C3 is pre-1.0; invoke the bundled skills instead of relying on memory:
-
-- **`c3-expert`** — language reference: syntax, semantics, the `c3c` 0.8.0 compiler, version differences. Any C3 question, build error, or code you write/review. Verify snippets with `c3c` on PATH and confirm it reports 0.8.0.
-- **`c3-style`** — house conventions & idiom: naming, definition order, optional/fault error handling, anti-patterns to flag. Use when writing, reviewing, or refactoring `.c3`/`.c3i`.
-- **`c3-bindings`** — `.c3l` binding conventions (`extern fn`, `@cname`, opaque-vs-exposed structs, backend sub-modules). Use when touching the `vk`/`vma`/`sdl3` bindings or wrapping any C library.
-
-For exact syntax/version questions, `c3-expert` wins; for idiom, `c3-style`; for binding authoring, `c3-bindings`.
-
-## Project documentation
-
-The implementation lives under `gpu/`; the Vulkan backend is under `gpu/vk/`. Before changing a contract, read `docs/document_index.md` and the relevant topic document:
-
-- `docs/architecture.md` — module split, handle/ABI model
-- `docs/api.md` — public API shape
-- `docs/memory.md` — VMA allocator, caller-owned allocations, and mapped visibility
-- `docs/shader_abi.md` — root-pointer ABI, std430 struct layout
-- `docs/vulkan_backend.md` — backend strategy
-- `docs/style.md` — full code style guide (source of truth)
-- `docs/testing.md` — verification commands and coverage
-
-## Code style (see `docs/style.md` for the rest)
-
-- **Naming**: `snake_case` for vars, fields, params, **and functions**; `PascalCase` for structs/enums/typedefs; `SCREAMING_SNAKE_CASE` for constants and enum values; files `snake_case.c3`.
-- **Errors**: C3 optionals/faults (`allocate_memory(...) -> GpuAllocation?`), never exceptions or null. Use named faults (`INVALID_HANDLE`, `RESOURCE_IN_USE`, …).
-- **Lifecycle**: free functions `create_x()` / `destroy_x()` for project-owned resources, not `X.create` / `X.destroy`.
-- **Definition order in a file**: typedefs → aliases → constants → enums/bitstructs → structs → struct methods → free functions.
-- **Formatting**: K&R braces; calls with 4+ args use named arguments, one per line, trailing comma. No auto-formatter — hand-format to the style guide.
-- **Comments**: keep to a minimum. Code should be self-documenting. Acceptable on non-trivial logic and a one-or-two-sentence doc on a method; avoid superfluous or over-explanatory comments that restate the code.
-- No development labels in identifiers, file names, or test names.
+- Confirm `c3c --version` reports 0.8.0. C3 is pre-1.0; use the bundled
+  `c3-expert` skill and local compiler instead of remembered syntax.
+- Use `c3-style` when writing or reviewing `.c3`/`.c3i`.
+- Use `c3-bindings` when touching `vk`, `vma`, `spvreflect`, or SDL3 bindings.
+- Initialize dependencies with `git submodule update --init --recursive`.
+- Read [docs/index.md](docs/index.md), the relevant
+  [public API page](docs/api/index.md), and the source docstrings before
+  changing a public contract.
 
 ## Architecture rules
 
-- Public API is **GPU-shaped, not Vulkan-shaped**: keep `vk::` and `vma::` types out of public signatures.
-- Use strongly-typed handles, not raw `int`/`uint`/`ulong`.
+- Keep the public API GPU-shaped. No `vk::` or `vma::` type may appear in a
+  public signature.
+- Public resources use strongly typed handles, not raw integers.
+- Imports are runtime-inert; create calls are transactional; destruction adds
+  no hidden wait.
+- Preserve explicit ownership, texture state, synchronization, and
+  completion-based reuse.
+- `GpuAddress`, `TextureIndex`, and `SamplerIndex` are raw shader values, not
+  ownership tokens.
+- Respect the threading tiers and lock ordering documented in
+  [architecture.md](docs/architecture.md).
 
-## Build & deps
+## C3 style
 
-- Built with `c3c` 0.8.0. `manifest.json` provides `gpu`; native libraries are resolved from dependency manifests.
-- Backend needs a Vulkan 1.3 loader + VMA. SDL3 is used only by the separate `gpu.c3l-samples` repository, not this library.
-- Initialize dependencies with `git submodule update --init --recursive`.
-- Run the core checks from the repository root:
+The full source of truth is [docs/contributing/style.md](docs/contributing/style.md).
 
-  ```sh
-  c3c test unit --path test/cpu
-  c3c test shader_abi --path test/cpu
-  c3c build smoke --path test
-  ```
+- `snake_case` for variables, fields, parameters, functions, and filenames;
+  `PascalCase` for types; `SCREAMING_SNAKE_CASE` for constants and enum values.
+- Free functions `create_x`/`destroy_x` own project resources.
+- Use C3 optionals and named faults, never exceptions, null, or sentinel return
+  values for public failures.
+- Definition order: typedefs, aliases, constants, enums/bitstructs, structs,
+  struct methods, free functions.
+- K&R braces. Calls with four or more arguments use named arguments, one per
+  line, with a trailing comma.
+- Keep comments minimal; public docstrings state contracts rather than restate
+  code.
+- Do not put development labels in identifiers, filenames, or test names.
 
-- Vulkan targets also require the VMA static library described in `docs/platforms_and_dependencies.md`.
+## Documentation
+
+Published `README.md` and `docs/` content is for consumers. Keep it
+current-state, task-oriented, and backend-neutral. Development decisions,
+implementation plans, migration narration, and contributor workflow belong in
+OpenSpec changes, source history, or this file.
+
+When the API changes:
+
+- update the owning page under `docs/api/` and the symbol map;
+- update getting-started/cookbook examples that use it;
+- preserve ownership, fault, concurrency, and call-order details; and
+- run the documentation link and symbol-coverage checks described in
+  [docs/contributing/testing.md](docs/contributing/testing.md).
+
+## Build and verification
+
+Native libraries are resolved from dependency manifests. The backend requires a
+Vulkan 1.3 loader and the vendored VMA static library. SDL3 belongs to the
+separate samples repository, not this library.
+
+Run from the repository root:
+
+```sh
+python3 scripts/gen_abi.py --check
+python3 scripts/build_shaders.py
+c3c test unit --path test/cpu
+c3c test shader_abi --path test/cpu
+c3c build smoke --path test
+c3c run smoke --path test
+```
+
+See [testing.md](docs/contributing/testing.md) for the full matrix and
+[benchmarking.md](docs/contributing/benchmarking.md) for measurement practice.

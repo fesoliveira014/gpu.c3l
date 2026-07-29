@@ -25,9 +25,9 @@ git submodule update --init --recursive
 ```
 
 Vulkan tests require a Vulkan 1.3 loader, the VMA static library described in
-[Platforms and dependencies](platforms_and_dependencies.md), SPIRV-Reflect,
+[Architecture](../architecture.md#platform-and-dependency-boundary), SPIRV-Reflect,
 and a driver satisfying the baseline in
-[Vulkan backend](vulkan_backend.md). Install `glslc` and `spirv-as` before
+[Architecture](../architecture.md). Install `glslc` and `spirv-as` before
 building shader fixtures.
 
 On headless Linux, select lavapipe explicitly:
@@ -42,7 +42,7 @@ for additional local coverage.
 ## Public consumer and CPU checks
 
 The canonical getting-started consumer lives under
-[`examples/getting_started`](../examples/getting_started/). Build its shader,
+[`examples/getting_started`](../../examples/getting_started/). Build its shader,
 then compile and run the project from a normal checkout named `gpu.c3l`:
 
 ```sh
@@ -165,7 +165,7 @@ because neither `FULL` nor `TRUSTED` tracks that history.
 ## Manual benchmarks
 
 CI may build the manual benchmark executables to catch compiler drift, but
-does not execute or parse them. See [Performance](performance.md) for direct
+does not execute or parse them. See [Benchmarking](benchmarking.md) for direct
 commands and interpretation. In particular, `pipeline_cache_bench` records
 complete cached `GraphicsState` packets across raster permutations; its timing
 is advisory and is not compared with raster-only measurements.
