@@ -1,71 +1,49 @@
 # Getting started
 
-This walkthrough builds a minimal compute program on Linux or Windows. The
-canonical compilable copy lives in
-[`examples/getting_started`](../examples/getting_started/), and CI compiles
-and runs it on lavapipe.
+This guide has two steps. First, add `gpu.c3l` to a C3 application and run a
+minimal headless compute program. Then add SDL3 and render a triangle to a
+window.
 
-## 1. Toolchain
+The examples target **C3 0.8.0**, `linux-x64` or `windows-x64`, and Vulkan 1.3.
 
-You need three things: the **C3 compiler** (0.8.0 — the version this library
-is pinned to), a **Vulkan 1.3 loader + driver**, and **glslang** to compile
-shaders. The driver must also expose `VK_EXT_extended_dynamic_state3` and report
-`dynamicPrimitiveTopologyUnrestricted == VK_TRUE`, together with the
-extension's color blend-enable, blend-equation, and write-mask features and
-commands. This is an intentional minimum device requirement.
+## Prerequisites
 
-### Linux
+Install:
 
-Install c3c 0.8.0 from the [C3 releases](https://github.com/c3lang/c3c/releases)
-and put it on your PATH. Then:
+- C3 0.8.0 (`c3c --version`);
+- a Vulkan 1.3 loader and qualifying driver;
+- `glslangValidator` or `glslc`; and
+- Git with submodule support.
 
-```sh
-sudo apt install -y mesa-vulkan-drivers vulkan-validationlayers glslang-tools
+The vendored `vma.c3l` package must contain a static VMA library under
+`linked-libs/<target>/`. The repository includes the supported Linux artifact;
+Windows consumers use the matching release-CRT artifact. Keep `"wincrt":
+"dynamic"` when using that Windows library.
+
+## Step 1: minimal compute application
+
+### Vendor the library
+
+Use this application layout:
+
+```text
+hello_gpu/
+├── lib/
+│   └── gpu.c3l/             cloned recursively
+├── shaders/
+│   └── doubler.comp.glsl
+├── src/
+│   └── main.c3
+└── project.json
 ```
 
-`mesa-vulkan-drivers` includes **lavapipe**, a CPU implementation of
-Vulkan 1.3, and `vulkan-validationlayers` is required because the program
-below explicitly requests the Khronos layer through the full-validation helper
-— the right default while learning an explicit API. Everything in this
-walkthrough (and the entire library test suite) runs on lavapipe, so a machine
-with no GPU at all is fine. If you have a
-real GPU with a Vulkan driver, nothing changes.
-
-### Windows
-
-- c3c: download the release zip, then fetch its MSVC SDK once:
-  `echo Y | c3c.exe fetch-sdk windows` (answers the license prompt), and if
-  c3c does not find the SDK afterwards, copy the downloaded `msvc_sdk`
-  directory from `%LOCALAPPDATA%` to sit beside `c3c.exe`.
-- Vulkan: any current GPU driver ships the runtime. Without a GPU, use
-  [mesa-dist-win](https://github.com/pal1000/mesa-dist-win) (lavapipe) — note
-  that **elevated shells ignore `VK_DRIVER_FILES`**; register the ICD under
-  `HKLM\SOFTWARE\Khronos\Vulkan\Drivers` instead (see
-  `docs/platforms_and_dependencies.md`).
-- glslang: ships with the [Vulkan SDK](https://vulkan.lunarg.com/), or grab a
-  [standalone release](https://github.com/KhronosGroup/glslang/releases).
-
-## 2. Project setup
-
-Create a directory and vendor the library. `gpu.c3l` brings its own
-backend bindings (`vk`, `vma`, `spvreflect`) as submodules, so clone
-recursively:
-
 ```sh
-mkdir -p hello_gpu/lib hello_gpu/src hello_gpu/shaders
-cd hello_gpu
-git clone --quiet --recurse-submodules "${GPU_C3L_URL:-https://github.com/fesoliveira014/gpu.c3l}" lib/gpu.c3l
+mkdir -p hello_gpu/lib
+git clone --recurse-submodules \
+  https://github.com/fesoliveira014/gpu.c3l.git hello_gpu/lib/gpu.c3l
 ```
 
-(The `GPU_C3L_URL` override exists for CI mirrors; you can paste the plain
-`git clone --recurse-submodules https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l`.)
-
-On Windows, build the VMA 3.3.0 static library in the cloned dependency before
-building the program. Follow the `windows-x64 setup` section in
-[`platforms_and_dependencies.md`](platforms_and_dependencies.md).
-
-Wire it up. Two search paths — your `lib/` for `gpu`, and the library's
-own `lib/` for the bindings it vendors:
+`project.json` resolves the library plus its binding submodules:
 
 ```json
 {
@@ -73,6 +51,7 @@ own `lib/` for the bindings it vendors:
   "dependency-search-paths": [ "lib", "lib/gpu.c3l/lib" ],
   "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
   "output": "build",
+  "wincrt": "dynamic",
   "targets": {
     "hello_gpu": {
       "type": "executable",
@@ -82,54 +61,10 @@ own `lib/` for the bindings it vendors:
 }
 ```
 
-## 3. Compute shader and root pointers
+### Compile the shader
 
-If you have not written Vulkan before, here is the problem this library's
-execution model removes. In classic Vulkan, a shader cannot just be handed a
-buffer. Every resource access goes through **descriptor sets** — driver-owned
-tables of resource references. You describe each table's shape up front (a
-*descriptor set layout*: "binding 0 is a storage buffer, binding 1 is a
-uniform buffer…"), bake that shape into every pipeline (a *pipeline layout*),
-allocate tables from a *descriptor pool*, write your buffer handles into
-slots with `vkUpdateDescriptorSets`, and bind the right tables before each
-draw or dispatch. The shader side then declares matching
-`layout(set = 1, binding = 3)` plumbing. That is five API concepts and two
-places to keep in sync before the first byte of data reaches a shader — and
-changing *which* buffer a dispatch uses means rewriting or re-binding tables.
-
-The root-pointer model replaces all of it with something you already know:
-**a pointer to a struct**.
-
-```
-classic Vulkan                          root pointer
-──────────────                          ────────────
-set layouts ─┐                          struct DoublerRoot {
-pipeline layout ├─ describe shapes          input_gpu;   ← raw GPU address
-descriptor pool ─┤                          output_gpu;  ← raw GPU address
-vkUpdateDescriptorSets ─ fill slots         count;
-vkCmdBindDescriptorSets ─ bind          }
-layout(set=N, binding=M) in shader      push 1 address of that struct
-```
-
-Vulkan 1.3 lets a shader dereference raw 64-bit GPU addresses
-(`buffer_reference` — *buffer device address* on the API side). So instead
-of tables and slots: write your parameters into a plain struct in GPU-visible
-memory, push the struct's 64-bit address as the only push constant, and let
-the shader cast the address back to the struct type and follow the pointers
-inside it. Which data ranges a dispatch uses is just *data in a struct* — change
-the fields, dispatch again. Nothing to allocate, update, or bind, and the
-struct definition is shared between C3 and GLSL. The ABI generator emits both
-forms from one schema.
-
-Textures are the one thing GPUs still want tables for (samplers and image
-descriptors are opaque hardware state, not addresses) — for those the library
-manages a single global **bindless heap**. Creating a texture view returns an
-owner-bearing `TextureView`; its raw 32-bit `index` field is the value stored in
-shader data. Interning a sampler description returns a stable `SamplerIndex`.
-Put that raw index in root structs like any other field. This program needs no
-textures.
-
-The root struct below is this program's whole binding model:
+The minimal compute shader receives one root pointer, follows two
+`GpuAddress` fields, and doubles an array:
 
 ```glsl
 #version 460
@@ -141,12 +76,14 @@ layout(local_size_x = 64) in;
 layout(buffer_reference, std430) buffer DoublerRoot {
     uint64_t input_gpu;
     uint64_t output_gpu;
-    uint     count;
+    uint count;
 };
-layout(buffer_reference, std430) readonly  buffer InBuf  { float v[]; };
+layout(buffer_reference, std430) readonly buffer InBuf { float v[]; };
 layout(buffer_reference, std430) writeonly buffer OutBuf { float v[]; };
 
-layout(push_constant) uniform Push { uint64_t root_gpu; };
+layout(push_constant) uniform Push {
+    uint64_t root_gpu;
+};
 
 void main() {
     DoublerRoot root = DoublerRoot(root_gpu);
@@ -157,169 +94,35 @@ void main() {
 }
 ```
 
-Compile it to SPIR-V:
+Compile it beside the source expected by `$embed`:
 
 ```sh
-cd hello_gpu
-glslangValidator --target-env vulkan1.3 -o shaders/doubler.comp.spv shaders/doubler.comp.glsl
+glslangValidator -V --target-env vulkan1.3 \
+  shaders/doubler.comp.glsl -o shaders/doubler.comp.spv
 ```
 
-## 4. The program
+### Record and submit
 
-The C3 side declares the same 24-byte root struct, stores it in a caller-owned
-`CPU_WRITE` allocation, and hands its GPU address to `cmd_dispatch`. Errors are
-C3 optionals throughout — `!` propagates, no error codes to check:
+The complete maintained program is
+[`examples/getting_started/src/main.c3`](../examples/getting_started/src/main.c3).
+Copy it as the application's `src/main.c3`; it embeds
+`../shaders/doubler.comp.spv`.
+Its essential flow is:
 
-```c3
-module hello_gpu;
+1. create a runtime, enumerate an adapter, and create a headless device;
+2. allocate mapped input, output, and root storage;
+3. write the root's input/output addresses and flush host writes;
+4. create a compute pipeline from embedded SPIR-V;
+5. create a compute-queue command allocator;
+6. bind, dispatch, and barrier the output for host access;
+7. submit, wait, invalidate, and verify; and
+8. destroy owners in dependency order.
 
-import gpu;
-import std::io;
-
-const char[*] DOUBLER_SPIRV = $embed("../shaders/doubler.comp.spv");
-const uint COUNT = 256;
-
-struct DoublerRoot {
-    gpu::GpuAddress input_gpu;
-    gpu::GpuAddress output_gpu;
-    uint            count;
-}
-
-fn int main() {
-    if (catch err = run()) {
-        io::printfn("hello_gpu: FAIL (%s)", err);
-        return 1;
-    }
-    io::printn("hello_gpu: all 256 values doubled on the GPU");
-    return 0;
-}
-
-fn void? run() {
-    gpu::RuntimeDesc runtime_desc = gpu::full_validation_runtime_desc();
-    runtime_desc.application_name = "hello_gpu";
-    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
-    defer (void)gpu::destroy_runtime(&runtime);
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
-    gpu::Adapter adapter = adapters.get(0)!;
-    gpu::Device device = gpu::create_device(&adapter)!;
-    defer (void)gpu::destroy_device(&device);
-
-    gpu::AllocationDesc input_desc = {
-        .size         = COUNT * float::size,
-        .alignment    = 16,
-        .memory_class = gpu::MemoryClass.CPU_WRITE,
-        .access       = { .compute },
-        .debug_name   = "input",
-    };
-    gpu::AllocationDesc output_desc = input_desc;
-    output_desc.memory_class = gpu::MemoryClass.CPU_READ;
-    output_desc.debug_name = "output";
-
-    gpu::GpuAllocation input =
-        gpu::allocate_memory(&device, &input_desc)!;
-    defer (void)gpu::free_allocation(&device, &input);
-    gpu::GpuAllocation output =
-        gpu::allocate_memory(&device, &output_desc)!;
-    defer (void)gpu::free_allocation(&device, &output);
-
-    gpu::GpuSpan in_span = gpu::get_allocation_span(&device, input)!;
-    gpu::GpuSpan out_span = gpu::get_allocation_span(&device, output)!;
-    float* in_data = (float*)gpu::get_span_mapping(&device, in_span)!.ptr;
-    for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
-    gpu::flush_mapped_span(&device, in_span)!;
-
-    gpu::ShaderDesc shader_desc = {
-        .spirv       = DOUBLER_SPIRV[..],
-        .entry_point = "main",
-    };
-
-    gpu::ComputePipelineDesc pipe_desc = { .shader = shader_desc };
-    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipe_desc)!;
-    defer (void)gpu::destroy_pipeline(&device, pipeline);
-
-    gpu::AllocationDesc root_desc = {
-        .size         = DoublerRoot::size,
-        .alignment    = DoublerRoot::alignment,
-        .memory_class = gpu::MemoryClass.CPU_WRITE,
-        .access       = { .compute },
-        .debug_name   = "doubler_root",
-    };
-    gpu::GpuAllocation root_allocation =
-        gpu::allocate_memory(&device, &root_desc)!;
-    defer (void)gpu::free_allocation(&device, &root_allocation);
-    gpu::GpuSpan root_span =
-        gpu::get_allocation_span(&device, root_allocation)!;
-
-    run_compute(
-        device:      &device,
-        pipeline:    pipeline,
-        input_span:  in_span,
-        output_span: out_span,
-        root_span:   root_span,
-    )!;
-    gpu::invalidate_mapped_span(&device, out_span)!;
-    float* out_data = (float*)gpu::get_span_mapping(&device, out_span)!.ptr;
-    for (uint i = 0; i < COUNT; i++) {
-        if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
-    }
-}
-
-fn void? run_compute(
-    gpu::Device* device,
-    gpu::PipelineHandle pipeline,
-    gpu::GpuSpan input_span,
-    gpu::GpuSpan output_span,
-    gpu::GpuSpan root_span,
-) {
-    DoublerRoot* root =
-        (DoublerRoot*)gpu::get_span_mapping(device, root_span)!.ptr;
-    gpu::GpuAddress root_address =
-        gpu::get_span_address(device, root_span)!;
-    root.input_gpu  = gpu::get_span_address(device, input_span)!;
-    root.output_gpu = gpu::get_span_address(device, output_span)!;
-    root.count      = COUNT;
-    gpu::flush_mapped_span(device, root_span)!;
-
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
-    gpu::CommandAllocator allocator =
-        gpu::create_command_allocator(device, queue)!;
-    defer (void)gpu::destroy_command_allocator(&allocator);
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!;
-    defer (void)gpu::discard_commands(&cmd);
-    gpu::cmd_bind_pipeline(&cmd, pipeline)!;
-    gpu::cmd_dispatch(
-        commands: &cmd,
-        root:     root_address,
-        groups:   { (COUNT + 63) / 64, 1, 1 },
-    )!;
-    gpu::Barrier to_host = {
-        .before = { .compute = true },
-        .after  = { .host = true },
-    };
-    gpu::cmd_barrier(&cmd, &to_host)!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!;
-    defer (void)gpu::discard_executable_commands(&executable);
-
-    gpu::ExecutableCommandList[1] lists = { executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
-    gpu::wait_completion(completion)!;
-}
-```
-
-The allocator owns one exact compute-queue command pool and a fixed set of
-preallocated command buffers. Its zero descriptor uses the documented defaults.
-The completion wait retires this command buffer back to the allocator before
-the deferred allocator destruction runs. Allocator destruction never waits on
-the GPU; without that wait (or a successful poll), it would return
-`RESOURCE_IN_USE` and leave the allocator retryable.
-
-## 5. Build and run
+Build and run the application:
 
 ```sh
-cd hello_gpu
-c3c build hello_gpu
-./build/hello_gpu
+cp lib/gpu.c3l/examples/getting_started/src/main.c3 src/main.c3
+c3c run hello_gpu --path .
 ```
 
 Expected output:
@@ -328,44 +131,457 @@ Expected output:
 hello_gpu: all 256 values doubled on the GPU
 ```
 
-Troubleshooting the two most likely faults:
+This is the core model: command completion orders reuse, while the application
+retains allocations referenced by raw GPU addresses.
 
-- `UNSUPPORTED_BACKEND` — the loader found no driver. Point it at lavapipe
-  explicitly:
-  `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json ./build/hello_gpu`
-- `UNSUPPORTED_FEATURE` — `enable_vulkan_validation = true` but the Khronos
-  layer is not installed (`vulkan-validationlayers` on apt; on Windows it
-  ships with the Vulkan SDK). Install it, or leave
-  `enable_vulkan_validation = false`. Detailed library diagnostics remain
-  available by selecting `ContractValidation.FULL`; Vulkan layers are an
-  independent control.
+## Step 2: SDL3 hello triangle
 
-`full_validation_runtime_desc()` selects `FULL`, which includes command
-resource lifetime tracking, and enables Vulkan validation. For a production
-trusted path, a zero-initialized
-descriptor selects trusted checks, no command-resource
-retention, and no Vulkan layers. In that mode you must discard commands or
-observe every covering `CompletionPoint` before destroying any referenced
-resource. Both modes still protect host pointer/slice/range access, integer
-overflow, command state and internal tables, public device ownership, Vulkan
-result handling, and creation rollback. A callback or debug names can be added
-to either configuration without enabling checks, tracking, or layers.
+Add `sdl3.c3l` beside the GPU library:
 
-## 6. Where to go next
+```text
+hello_triangle/
+├── lib/
+│   ├── gpu.c3l/
+│   └── sdl3.c3l/
+├── shaders/
+│   ├── triangle.vert.glsl
+│   └── triangle.frag.glsl
+├── src/
+│   └── main.c3
+└── project.json
+```
 
-The hand-written root struct above is fine for one shader — and exactly the
-kind of thing that silently breaks when two languages each declare it. The
-real workflow generates both sides from one schema:
+Use the same project configuration as step one, add `"sdl3"` to the target's
+dependencies, and clone the binding:
 
-- **Shader ABI generator** — write a `.abi` schema, get the C3 struct
-  (with size/offset asserts) and the GLSL include from one source of truth,
-  plus a `--check` drift gate for CI. Read `docs/shader_abi.md`.
-- **Textures, samplers, and the bindless heap** — `TextureView.index` and
-  stable `SamplerIndex` values in root structs, with one global descriptor set
-  you never manage. Read `docs/api.md`.
-- **The samples repository** —
-  [gpu.c3l-samples](https://github.com/fesoliveira014/gpu.c3l-samples):
-  eighteen runnable programs from a windowed triangle through GPU-driven
-  rendering, deferred shading, PBR, and multithreaded command recording,
-  each with a README and a screenshot where it has something to show.
-- **The rest of the docs** — `docs/document_index.md` is the map.
+```sh
+git clone https://github.com/fesoliveira014/sdl3.c3l.git lib/sdl3.c3l
+```
+
+```json
+{
+  "langrev": "1",
+  "dependency-search-paths": [ "lib", "lib/gpu.c3l/lib" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
+  "output": "build",
+  "wincrt": "dynamic",
+  "targets": {
+    "hello_triangle": {
+      "type": "executable",
+      "dependencies": [ "sdl3" ],
+      "sources": [ "src/main.c3" ]
+    }
+  }
+}
+```
+
+The vertex shader generates positions from `gl_VertexIndex`; neither shader
+needs root data:
+
+```glsl
+#version 460
+
+const vec2 POSITIONS[3] = vec2[](
+    vec2(-0.8, -0.7),
+    vec2( 0.8, -0.7),
+    vec2( 0.0,  0.8)
+);
+
+void main() {
+    gl_Position = vec4(POSITIONS[gl_VertexIndex], 0.0, 1.0);
+}
+```
+
+```glsl
+#version 460
+
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    out_color = vec4(0.95, 0.35, 0.15, 1.0);
+}
+```
+
+Compile both assets:
+
+```sh
+glslangValidator -V --target-env vulkan1.3 \
+  shaders/triangle.vert.glsl -o shaders/triangle.vert.spv
+glslangValidator -V --target-env vulkan1.3 \
+  shaders/triangle.frag.glsl -o shaders/triangle.frag.spv
+```
+
+The application is intentionally one file. The surface helper converts SDL3's
+active video-driver properties to the distinct Wayland, X11, or Win32 public
+handle types.
+
+```c3
+module hello_triangle;
+
+import gpu;
+import gpu::surface::wayland;
+import gpu::surface::win32;
+import gpu::surface::x11;
+import sdl;
+import std::io;
+
+faultdef WINDOW_INIT_FAILED, UNSUPPORTED_VIDEO_DRIVER;
+
+const char[*] VERTEX_SPIRV = $embed("../shaders/triangle.vert.spv");
+const char[*] FRAGMENT_SPIRV = $embed("../shaders/triangle.frag.spv");
+const ulong ACQUIRE_TIMEOUT_NS = 2_000_000;
+
+struct WindowEvents {
+    bool quit;
+    bool resized;
+}
+
+fn int main() {
+    if (catch err = run()) {
+        io::printfn("hello_triangle: FAIL (%s)", err);
+        return 1;
+    }
+    return 0;
+}
+
+fn void? run() {
+    if (!sdl::init({ .video })) return WINDOW_INIT_FAILED~;
+    defer sdl::quit();
+
+    sdl::Window* window =
+        sdl::create_window("gpu.c3l hello triangle", 800, 600, { .resizable });
+    if (window == null) return WINDOW_INIT_FAILED~;
+    defer sdl::destroy_window(window);
+
+    gpu::RuntimeDesc runtime_desc = gpu::full_validation_runtime_desc();
+    runtime_desc.application_name = "hello_triangle";
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
+    defer (void)gpu::destroy_runtime(&runtime);
+
+    gpu::Surface surface = create_sdl_surface(&runtime, window)!;
+    defer (void)gpu::destroy_surface(&surface);
+
+    gpu::Device device = create_presentation_device(&runtime, &surface)!;
+    defer (void)gpu::destroy_device(&device);
+
+    gpu::Queue graphics_queue =
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, graphics_queue)!;
+    defer (void)gpu::destroy_command_allocator(&allocator);
+
+    uint width;
+    uint height;
+    get_pixel_size(window, &width, &height);
+    gpu::SwapchainDesc swapchain_desc = {
+        .width = width,
+        .height = height,
+        .preferred_format = gpu::Format.BGRA8_UNORM,
+        .present_mode = gpu::PresentMode.FIFO,
+        .debug_name = "hello_triangle_swapchain",
+    };
+    gpu::SwapchainHandle swapchain =
+        gpu::create_swapchain(&device, &surface, &swapchain_desc)!;
+    defer (void)destroy_swapchain_when_ready(&device, swapchain);
+    gpu::SwapchainInfo swapchain_info =
+        gpu::get_swapchain_info(&device, swapchain)!;
+
+    gpu::Format[1] color_formats = { swapchain_info.format };
+    gpu::GraphicsPipelineDesc pipeline_desc = {
+        .vertex_shader = {
+            .spirv = VERTEX_SPIRV[..],
+            .entry_point = "main",
+        },
+        .fragment_shader = {
+            .spirv = FRAGMENT_SPIRV[..],
+            .entry_point = "main",
+        },
+        .color_formats = color_formats[..],
+        .debug_name = "hello_triangle",
+    };
+    gpu::PipelineHandle pipeline;
+    bool pipeline_live;
+    defer {
+        if (pipeline_live) (void)gpu::destroy_pipeline(&device, pipeline);
+    }
+
+    gpu::CompletionPoint last_graphics;
+    bool running = true;
+    while (running) {
+        WindowEvents events = pump_events();
+        if (events.quit) break;
+        if (events.resized) {
+            if (last_graphics.is_valid()) {
+                gpu::wait_completion(last_graphics, gpu::TIMEOUT_INFINITE)!;
+            }
+            swapchain_info = recover_swapchain(&device, swapchain, window)!;
+        }
+        if (swapchain_info.dormant) {
+            sdl::delay(16);
+            continue;
+        }
+        if (!pipeline_live || color_formats[0] != swapchain_info.format) {
+            if (last_graphics.is_valid()) {
+                gpu::wait_completion(last_graphics, gpu::TIMEOUT_INFINITE)!;
+            }
+            if (pipeline_live) gpu::destroy_pipeline(&device, pipeline)!;
+            pipeline_live = false;
+            color_formats[0] = swapchain_info.format;
+            pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!;
+            pipeline_live = true;
+        }
+
+        gpu::AcquiredImage? acquired = gpu::acquire_next_image(
+            device: &device,
+            swapchain: swapchain,
+            timeout_ns: ACQUIRE_TIMEOUT_NS,
+        );
+        if (catch err = acquired) {
+            if (err == gpu::WAIT_TIMEOUT) continue;
+            if (err == gpu::SWAPCHAIN_OUT_OF_DATE) {
+                swapchain_info =
+                    recover_swapchain(&device, swapchain, window)!;
+                continue;
+            }
+            return err~;
+        }
+
+        gpu::CommandList commands = gpu::begin_commands(&allocator)!;
+        defer (void)gpu::discard_commands(&commands);
+
+        gpu::TextureBarrier to_attachment = gpu::texture_transition(
+            texture: acquired.texture,
+            before: acquired.prior_state,
+            after: {
+                .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
+        )!;
+        gpu::cmd_texture_barrier(&commands, &to_attachment)!;
+
+        gpu::ColorTargetDesc[1] colors = {{
+            .view = acquired.attachment_view,
+            .load_op = gpu::LoadOp.CLEAR,
+            .store_op = gpu::StoreOp.STORE,
+            .clear = { .rgba = { 0.04f, 0.05f, 0.10f, 1.0f } },
+        }};
+        gpu::RenderPassDesc pass = {
+            .colors = colors[..],
+            .width = swapchain_info.width,
+            .height = swapchain_info.height,
+        };
+        gpu::GraphicsState state =
+            gpu::render_geometry_state(pass.width, pass.height)!;
+        gpu::ColorTargetState[1] color_state = {
+            gpu::color_blend_disabled(),
+        };
+        state.color.targets = color_state[..];
+
+        gpu::cmd_begin_render_pass(&commands, &pass)!;
+        gpu::cmd_bind_pipeline(&commands, pipeline)!;
+        gpu::cmd_set_graphics_state(&commands, &state)!;
+        gpu::cmd_draw(
+            commands: &commands,
+            vertex_root: (gpu::GpuAddress)0,
+            fragment_root: (gpu::GpuAddress)0,
+            vertex_count: 3,
+            instance_count: 1,
+        )!;
+        gpu::cmd_end_render_pass(&commands)!;
+
+        gpu::TextureBarrier to_present = gpu::texture_transition(
+            texture: acquired.texture,
+            before: {
+                .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
+            after: { .layout = gpu::TextureLayout.PRESENT },
+        )!;
+        gpu::cmd_texture_barrier(&commands, &to_present)!;
+
+        gpu::ExecutableCommandList[1] executable = {
+            gpu::end_commands(&commands)!,
+        };
+        defer (void)gpu::discard_executable_commands(&executable[0]);
+        gpu::SubmitDesc submit_desc = {
+            .command_lists = executable[..],
+            .readiness = acquired.readiness,
+            .readiness_before = { .color_output },
+        };
+        last_graphics = gpu::submit(graphics_queue, &submit_desc)!;
+
+        if (catch err = present_when_ready(
+            &device,
+            &acquired,
+            last_graphics,
+        )) {
+            if (err != gpu::SWAPCHAIN_OUT_OF_DATE) return err~;
+            swapchain_info = recover_swapchain(&device, swapchain, window)!;
+        }
+    }
+
+    if (last_graphics.is_valid()) {
+        gpu::wait_completion(last_graphics, gpu::TIMEOUT_INFINITE)!;
+    }
+}
+
+fn gpu::Surface? create_sdl_surface(
+    gpu::Runtime* runtime,
+    sdl::Window* window,
+) {
+    sdl::PropertiesID props = sdl::get_window_properties(window);
+    ZString driver = (ZString)sdl::get_current_video_driver();
+
+    if (driver.str_view() == "wayland") {
+        return gpu::surface::wayland::create_surface(
+            runtime,
+            (gpu::surface::wayland::DisplayHandle)sdl::get_pointer_property(
+                props,
+                (char*)sdl::WindowProperties.WAYLAND_DISPLAY_POINTER,
+                null,
+            ),
+            (gpu::surface::wayland::SurfaceHandle)sdl::get_pointer_property(
+                props,
+                (char*)sdl::WindowProperties.WAYLAND_SURFACE_POINTER,
+                null,
+            ),
+        );
+    }
+    if (driver.str_view() == "x11") {
+        return gpu::surface::x11::create_surface(
+            runtime,
+            (gpu::surface::x11::DisplayHandle)sdl::get_pointer_property(
+                props,
+                (char*)sdl::WindowProperties.X11_DISPLAY_POINTER,
+                null,
+            ),
+            (gpu::surface::x11::WindowHandle)sdl::get_number_property(
+                props,
+                (char*)sdl::WindowProperties.X11_WINDOW_NUMBER,
+                0,
+            ),
+        );
+    }
+    if (driver.str_view() == "windows") {
+        return gpu::surface::win32::create_surface(
+            runtime,
+            (gpu::surface::win32::InstanceHandle)sdl::get_pointer_property(
+                props,
+                (char*)sdl::WindowProperties.WIN32_INSTANCE_POINTER,
+                null,
+            ),
+            (gpu::surface::win32::WindowHandle)sdl::get_pointer_property(
+                props,
+                (char*)sdl::WindowProperties.WIN32_HWND_POINTER,
+                null,
+            ),
+        );
+    }
+    return UNSUPPORTED_VIDEO_DRIVER~;
+}
+
+fn gpu::Device? create_presentation_device(
+    gpu::Runtime* runtime,
+    gpu::Surface* surface,
+) {
+    gpu::DeviceDesc desc = { .surface = *surface };
+    gpu::AdapterList adapters = gpu::enumerate_adapters(runtime)!;
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!;
+        if (!gpu::supports_device_desc(&adapter, &desc)!.supported) continue;
+        return gpu::create_device(&adapter, &desc);
+    }
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void get_pixel_size(
+    sdl::Window* window,
+    uint* width,
+    uint* height,
+) {
+    int w;
+    int h;
+    sdl::get_window_size_in_pixels(window, &w, &h);
+    *width = w > 0 ? (uint)w : 0;
+    *height = h > 0 ? (uint)h : 0;
+}
+
+fn gpu::SwapchainInfo? recover_swapchain(
+    gpu::Device* device,
+    gpu::SwapchainHandle swapchain,
+    sdl::Window* window,
+) {
+    uint width;
+    uint height;
+    get_pixel_size(window, &width, &height);
+    while (catch err = gpu::resize_swapchain(
+        device,
+        swapchain,
+        width,
+        height,
+    )) {
+        if (err != gpu::RESOURCE_IN_USE) return err~;
+        sdl::delay(1);
+    }
+    return gpu::get_swapchain_info(device, swapchain);
+}
+
+fn void? present_when_ready(
+    gpu::Device* device,
+    gpu::AcquiredImage* image,
+    gpu::CompletionPoint completion,
+) {
+    while (catch err = gpu::present(device, image, completion)) {
+        if (err != gpu::WAIT_TIMEOUT) return err~;
+        sdl::delay(1);
+    }
+}
+
+fn void? destroy_swapchain_when_ready(
+    gpu::Device* device,
+    gpu::SwapchainHandle swapchain,
+) {
+    while (catch err = gpu::destroy_swapchain(device, swapchain)) {
+        if (err != gpu::RESOURCE_IN_USE) return err~;
+        sdl::delay(1);
+    }
+}
+
+fn WindowEvents pump_events() {
+    WindowEvents events;
+    sdl::Event event;
+    while (sdl::poll_event(&event)) {
+        switch (event.type) {
+            case sdl::EventType.QUIT:
+                events.quit = true;
+            case sdl::EventType.WINDOW_RESIZED:
+            case sdl::EventType.WINDOW_PIXEL_SIZE_CHANGED:
+                events.resized = true;
+            default:
+                break;
+        }
+    }
+    return events;
+}
+```
+
+Build and run:
+
+```sh
+c3c run hello_triangle --path .
+```
+
+The maintained
+[`hello_triangle_sdl`](https://github.com/fesoliveira014/gpu.c3l-samples/tree/main/hello_triangle_sdl)
+sample expands this foundation with per-frame uploads, textures, screenshots,
+argument handling, and self-test behavior.
+
+## Next
+
+- [Architecture](architecture.md) for the ownership and synchronization model.
+- [Shader ABI](shader_abi.md) before designing application root data.
+- [Cookbook](cookbook.md) for uploads, readback, indirect work, and resize
+  patterns.
+- [Public API](api/index.md) for exact domain contracts.
