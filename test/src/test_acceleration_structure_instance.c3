@@ -66,13 +66,6 @@ fn void instance_packing_rejects_every_unrepresentable_value() @test {
     )) == gpu::INVALID_ARGUMENT);
 
     desc = instance_desc();
-    desc.shader_binding_table_record_offset = 1;
-    assert(@catch(gpu::internal::pack_acceleration_structure_instance(
-        &desc,
-        address,
-    )) == gpu::INVALID_ARGUMENT);
-
-    desc = instance_desc();
     desc.flags = { .force_opaque, .force_non_opaque };
     assert(@catch(gpu::internal::pack_acceleration_structure_instance(
         &desc,

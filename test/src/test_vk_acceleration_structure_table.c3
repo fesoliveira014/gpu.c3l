@@ -14,11 +14,13 @@ struct AccelerationStructureRequirementsCapture {
     vk::BuildAccelerationStructureFlagsKHR flags;
     uint geometry_count;
     vk::GeometryTypeKHR[2] geometry_types;
-    vk::Format triangle_format;
-    vk::IndexType triangle_index_type;
-    vk::DeviceSize triangle_stride;
-    uint triangle_max_vertex;
-    vk::DeviceSize aabb_stride;
+    vk::GeometryFlagsKHR[2] geometry_flags;
+    vk::Format[2] triangle_formats;
+    vk::IndexType[2] triangle_index_types;
+    vk::DeviceSize[2] triangle_strides;
+    uint[2] triangle_max_vertices;
+    vk::DeviceSize[2] aabb_strides;
+    bool[2] transform_present;
     uint[2] primitive_counts;
 }
 
@@ -151,15 +153,19 @@ fn void capture_acceleration_structure_build_sizes(
         vk::AccelerationStructureGeometryKHR* geometry =
             &build_info.p_geometries[i];
         capture.geometry_types[i] = geometry.geometry_type;
+        capture.geometry_flags[i] = geometry.flags;
         capture.primitive_counts[i] = max_primitive_counts[i];
         if (geometry.geometry_type == vk::GeometryTypeKHR.TRIANGLES_KHR) {
-            capture.triangle_format = geometry.geometry.triangles.vertex_format;
-            capture.triangle_index_type = geometry.geometry.triangles.index_type;
-            capture.triangle_stride = geometry.geometry.triangles.vertex_stride;
-            capture.triangle_max_vertex = geometry.geometry.triangles.max_vertex;
+            capture.triangle_formats[i] = geometry.geometry.triangles.vertex_format;
+            capture.triangle_index_types[i] = geometry.geometry.triangles.index_type;
+            capture.triangle_strides[i] = geometry.geometry.triangles.vertex_stride;
+            capture.triangle_max_vertices[i] = geometry.geometry.triangles.max_vertex;
+            capture.transform_present[i] =
+                geometry.geometry.triangles.transform_data.host_address
+                    != null;
         } else if (geometry.geometry_type
             == vk::GeometryTypeKHR.AABBS_KHR) {
-            capture.aabb_stride = geometry.geometry.aabbs.stride;
+            capture.aabb_strides[i] = geometry.geometry.aabbs.stride;
         }
     }
     size_info.acceleration_structure_size = 4096;
@@ -350,6 +356,7 @@ fn void acceleration_structure_requirements_lower_exact_capacity_schema() @test 
                 .max_vertex_count = 12,
                 .max_primitive_count = 4,
                 .index_type = gpu::AccelerationStructureIndexType.U16,
+                .has_transform = true,
             },
         },
         {
@@ -399,24 +406,44 @@ fn void acceleration_structure_requirements_lower_exact_capacity_schema() @test 
             && capture.geometry_count == 2,
         "requirements use one device-build query with portable flags");
     assert(capture.geometry_types[0] == vk::GeometryTypeKHR.TRIANGLES_KHR
-            && capture.triangle_format == vk::Format.R32G32B32_SFLOAT
-            && capture.triangle_index_type == vk::IndexType.UINT16
-            && capture.triangle_stride == 12
-            && capture.triangle_max_vertex == 8
+            && capture.triangle_formats[0] == vk::Format.R32G32B32_SFLOAT
+            && capture.triangle_index_types[0] == vk::IndexType.UINT16
+            && capture.triangle_strides[0] == 12
+            && capture.triangle_max_vertices[0] == 11
+            && capture.transform_present[0]
             && capture.primitive_counts[0] == 4,
         "triangle capacities lower to float32 XYZ and the chosen index width");
     assert(capture.geometry_types[1] == vk::GeometryTypeKHR.TRIANGLES_KHR
-            && capture.triangle_index_type == vk::IndexType.UINT16
-            && capture.triangle_max_vertex == 8
+            && capture.triangle_index_types[1] == vk::IndexType.UINT16
+            && capture.triangle_max_vertices[1] == 8
+            && !capture.transform_present[1]
             && capture.primitive_counts[1] == 3,
         "ordered triangle capacities lower independently");
     assert(requirements.storage_size == 4096
-            && requirements.storage_alignment
-                == ACCELERATION_STRUCTURE_STORAGE_ALIGNMENT
+            && requirements.storage_alignment == 256
             && requirements.build_scratch_size == 2048
             && requirements.update_scratch_size == 1024
             && requirements.scratch_alignment == 256,
         "public requirements preserve persistent and scratch contracts");
+
+    gpu::AccelerationStructureGeometryDesc aabb_geometry = {
+        .kind = gpu::AccelerationStructureGeometryKind.AABBS,
+        .flags = { .opaque = true },
+        .aabbs.max_primitive_count = 4,
+    };
+    desc.geometries = (&aabb_geometry)[:1];
+    desc.flags = {};
+    capture = {};
+    (void)get_acceleration_structure_requirements_with_ops(
+        &state,
+        &desc,
+        &ops,
+    )!!;
+    assert(capture.geometry_types[0] == vk::GeometryTypeKHR.AABBS_KHR
+            && capture.aabb_strides[0] == 24
+            && (uint)capture.geometry_flags[0]
+                == (uint)vk::GeometryFlagBitsKHR.OPAQUE_BIT_KHR,
+        "AABB capacity lowers the exact stride and geometry flags");
 }
 
 fn void acceleration_structure_requirements_lower_tlas_and_static_update() @test {
@@ -782,6 +809,7 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
             .max_vertex_count = 12,
             .max_primitive_count = 4,
             .index_type = gpu::AccelerationStructureIndexType.U16,
+            .has_transform = true,
         },
         {
             .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
@@ -822,6 +850,10 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
                 .vertex_stride = 12,
                 .vertex_count = 12,
                 .indices = acceleration_structure_test_span(indices, 24),
+                .transform = acceleration_structure_test_span(
+                    transform_buffer,
+                    12 * float::size,
+                ),
                 .primitive_count = 4,
             },
         },
@@ -859,6 +891,10 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
                 == 0x1000
             && native_geometries[0].geometry.triangles.index_data.device_address
                 == 0x2000
+            && native_geometries[0].geometry.triangles.index_type
+                == vk::IndexType.UINT16
+            && native_geometries[0].geometry.triangles.transform_data.device_address
+                == 0x5000
             && native_ranges[0].primitive_count == 4,
         "triangle dynamic input lowers exact addresses and primitive count");
     assert(native_geometries[1].geometry_type
@@ -869,6 +905,22 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
             && native_geometries[1].geometry.triangles.vertex_stride == 12
             && native_ranges[1].primitive_count == 3,
         "each ordered triangle input lowers independently");
+
+    inputs[0].triangles.transform = acceleration_structure_test_span(
+        transform_buffer,
+        12 * float::size - 1,
+    );
+    assert(@catch(prepare_acceleration_structure_build(
+        &record,
+        &build,
+        false,
+        true,
+    )) == gpu::INVALID_ARGUMENT,
+        "triangle transforms require the complete 3-by-4 float matrix");
+    inputs[0].triangles.transform = acceleration_structure_test_span(
+        transform_buffer,
+        12 * float::size,
+    );
 
     inputs[1].triangles.vertex_stride = 8;
     command_scratch.acceleration_structure_geometry_count = 0;
@@ -946,10 +998,7 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
     )) == gpu::INVALID_ARGUMENT,
         "BLAS updates preserve each completed max vertex value");
     inputs[0].triangles.vertex_count = 12;
-    inputs[0].triangles.transform = acceleration_structure_test_span(
-        transform_buffer,
-        12 * float::size,
-    );
+    inputs[0].triangles.transform = {};
     assert(@catch(prepare_acceleration_structure_build(
         &record,
         &build,
@@ -957,6 +1006,50 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         true,
     )) == gpu::INVALID_ARGUMENT,
         "BLAS updates preserve transform presence");
+
+    gpu::internal::NormalizedAccelerationStructureGeometry[1] aabb_schema = {
+        {
+            .kind = gpu::AccelerationStructureGeometryKind.AABBS,
+            .flags = { .opaque = true },
+            .max_primitive_count = 1,
+        },
+    };
+    AccelerationStructureSlot* destination_slot =
+        state.acceleration_structures.get(destination)!!;
+    destination_slot.desc.geometries = aabb_schema[..];
+    destination_slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.UNBUILT;
+    gpu::AccelerationStructureGeometryBuildDesc[1] aabb_inputs = {
+        {
+            .kind = gpu::AccelerationStructureGeometryKind.AABBS,
+            .aabbs = {
+                .aabbs = acceleration_structure_test_span(vertices, 24),
+                .stride = 24,
+                .primitive_count = 1,
+            },
+        },
+    };
+    build.geometries = aabb_inputs[..];
+    (void)prepare_acceleration_structure_build(
+        &record,
+        &build,
+        false,
+        true,
+    )!!;
+    assert(native_geometries[0].geometry_type
+                == vk::GeometryTypeKHR.AABBS_KHR
+            && native_geometries[0].geometry.aabbs.stride == 24
+            && (uint)native_geometries[0].flags
+                == (uint)vk::GeometryFlagBitsKHR.OPAQUE_BIT_KHR,
+        "AABB dynamic input lowers its exact stride and geometry flags");
+    aabb_inputs[0].aabbs.stride = 8;
+    assert(@catch(prepare_acceleration_structure_build(
+        &record,
+        &build,
+        false,
+        true,
+    )) == gpu::INVALID_ARGUMENT,
+        "AABB dynamic input requires a 24-byte aligned record stride");
 }
 
 fn void acceleration_structure_dynamic_tlas_uses_exact_instance_abi() @test {
@@ -1166,7 +1259,6 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
             },
             .build_eligibility =
                 gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
-            .pending_command_index = ACCELERATION_STRUCTURE_PENDING_NONE,
             .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
         })!!;
     vk::AccelerationStructureGeometryKHR[1] native_geometries;
@@ -1515,7 +1607,6 @@ fn void acceleration_structure_table_is_generation_and_owner_checked() @test {
         .desc.max_instance_count = 8,
         .build_eligibility =
             gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
-        .pending_command_index = ACCELERATION_STRUCTURE_PENDING_NONE,
         .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
     };
 

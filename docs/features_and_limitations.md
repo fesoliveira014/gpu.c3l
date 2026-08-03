@@ -124,7 +124,9 @@ acceleration-structure heap capacity. Unsupported requests fail atomically.
 |---|---:|---:|
 | texture heap | 4,096 | 65,536 |
 | sampler heap | 256 | 65,536 |
+| acceleration-structure heap | configured explicitly | selected-device descriptor limits |
 | live textures | 1,024 | 65,536 |
+| live acceleration structures | — | 4,096 |
 | live pipelines | 256 | configurable capacity |
 | swapchains | — | 8 |
 | color attachments | — | min(8, `DeviceCaps.max_color_attachments`) |

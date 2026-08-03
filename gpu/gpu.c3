@@ -72,7 +72,8 @@ fn bool TextureView.equals(self, TextureView other) @operator(==) {
         && self.index == other.index
         && self.generation == other.generation;
 }
-<* Test whether an acceleration-structure view has nonzero ownership and index fields.
+<* Test whether an acceleration-structure view has nonzero ownership, index,
+   and generation fields.
 
    @return "True for a structurally valid view; this does not prove live provenance." *>
 fn bool AccelerationStructureView.is_valid(self) {
@@ -1648,14 +1649,15 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
 
 <* Create one fixed-capacity command allocator for an exact selected queue.
    Zero capacities default to 8 command buffers, 64 tracked references per list,
-   and 4 generated-preprocess buffers per list; storage scales with their products.
+   and 4 generated-preprocess buffers per list; acceleration-structure geometry
+   capacity instead stays disabled at zero. Storage scales with their products.
    Creation may fault for invalid limits, host/device allocation failure, a full
    allocator table, device loss, or a busy/closing device.
 
    @param device : "Live device that will own the allocator."
    @param queue : "Exact selected queue the allocator records for."
    @param desc : "Borrowed capacity description; null or zero fields select defaults."
-   @return "An owning allocator, or a recoverable validation, capacity, allocation, busy, or device fault." *>
+   @return "An owning allocator, or a recoverable validation, unsupported-feature, capacity, allocation, busy, or device fault." *>
 fn CommandAllocator? create_command_allocator(
     Device* device,
     Queue queue,

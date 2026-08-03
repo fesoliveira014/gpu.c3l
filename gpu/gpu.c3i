@@ -324,6 +324,7 @@ struct AccelerationStructureTriangleGeometryDesc {
     uint                           max_vertex_count;
     uint                           max_primitive_count;
     AccelerationStructureIndexType index_type;
+    bool                           has_transform;
 }
 
 struct AccelerationStructureAabbGeometryDesc {
@@ -360,7 +361,6 @@ struct AccelerationStructureInstanceDesc {
     AccelerationStructureHandle        bottom_level;
     uint                               custom_index;
     uint                               mask;
-    uint                               shader_binding_table_record_offset;
     AccelerationStructureInstanceFlags flags;
 }
 
@@ -1202,8 +1202,9 @@ struct CommandAllocator {
     CommandAllocatorHandle handle;
 }
 
-<* Zero capacities select the documented defaults. Generated preprocess bytes
-   bound exact descriptor-driven reservations; zero disables reservations. *>
+<* Zero capacities select the documented defaults except acceleration-structure
+   geometry capacity, where zero disables build recording. Generated preprocess
+   bytes bound exact descriptor-driven reservations; zero disables reservations. *>
 struct CommandAllocatorDesc {
     uint    command_buffer_capacity;
     uint    max_resource_references_per_list;

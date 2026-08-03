@@ -87,13 +87,18 @@ and top-level acceleration structures (TLAS) through one strongly typed
 triangle geometries or one or more ordered AABB geometries; one BLAS cannot mix
 the two kinds. A TLAS descriptor instead supplies `max_instance_count`.
 Descriptors are immutable capacity schemas: every later build/update uses the
-same order, kind, index type, and counts no larger than the declared maxima.
+same order, kind, index type, declared transform presence, and counts no larger
+than the declared maxima.
 
-Triangle inputs are float32 XYZ vertices with a byte stride and either no
-indices or U16/U32 indices. Non-indexed inputs need three vertices per
-primitive. The optional transform is one row-major 3-by-4 float matrix. AABB
-inputs are records of six floats—`min_xyz` then `max_xyz`—with a byte stride of
-at least 24. Procedural intersection and candidate confirmation happen in the
+Triangle inputs are float32 XYZ vertices with a stride of at least 12 bytes and
+a 4-byte-aligned address and stride, plus either no indices or U16/U32 indices
+aligned to 2 or 4 bytes respectively. Non-indexed inputs need three vertices
+per primitive. Set `has_transform` in the capacity schema before querying
+requirements when builds will supply the optional row-major 3-by-4 float
+matrix; its address must be 16-byte aligned. AABB inputs are records of six
+floats—`min_xyz` then `max_xyz`—with an 8-byte-aligned address and a stride of
+at least 24 bytes divisible by 8. TLAS instance input addresses are 16-byte
+aligned. Procedural intersection and candidate confirmation happen in the
 shader.
 
 Call `get_acceleration_structure_requirements` before allocating storage. It

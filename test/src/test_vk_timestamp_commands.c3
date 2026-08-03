@@ -490,11 +490,12 @@ fn void timestamp_full_write_rejects_invalid_masks_without_emission() @test {
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
     TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-    gpu::StageMask[5] invalid = {
+    gpu::StageMask[6] invalid = {
         {},
         { .host },
         { .present },
         { .compute, .transfer },
+        { .acceleration_structure_build },
         (gpu::StageMask)(1 << 11),
     };
 

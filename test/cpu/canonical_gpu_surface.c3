@@ -118,6 +118,7 @@ fn void pin_acceleration_structures() {
                 .max_vertex_count = 3,
                 .max_primitive_count = 1,
                 .index_type = gpu::AccelerationStructureIndexType.NONE,
+                .has_transform = true,
             },
         },
     };
@@ -133,6 +134,25 @@ fn void pin_acceleration_structures() {
         .destination = acceleration_structure,
     };
     gpu::AccelerationStructureView view = {};
+    gpu::AccelerationStructureTriangleGeometryDesc triangle_geometry = {};
+    gpu::AccelerationStructureAabbGeometryDesc aabb_geometry = {};
+    gpu::AccelerationStructureTriangleBuildDesc triangle_build = {};
+    gpu::AccelerationStructureAabbBuildDesc aabb_build = {};
+    gpu::AccelerationStructureBuildFlags build_flags = {
+        .prefer_fast_build = true,
+        .minimize_memory = true,
+    };
+    gpu::AccelerationStructureGeometryFlags geometry_flags = {
+        .opaque = true,
+    };
+
+    (void)triangle_geometry.has_transform;
+    (void)aabb_geometry.max_primitive_count;
+    (void)triangle_build.transform;
+    (void)aabb_build.stride;
+    (void)build_flags.prefer_fast_build;
+    (void)build_flags.minimize_memory;
+    (void)geometry_flags.opaque;
 
     (void)gpu::get_acceleration_structure_requirements(&device, &desc);
     (void)gpu::create_acceleration_structure(&device, &desc);

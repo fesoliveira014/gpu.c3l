@@ -11,6 +11,8 @@
 #extension GL_EXT_ray_query : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
+#include "generated/shader_abi.glsl"
+
 layout(set = 0, binding = 5) uniform accelerationStructureEXT
     gpu_acceleration_structure_heap[];
 

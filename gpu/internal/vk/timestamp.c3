@@ -552,6 +552,7 @@ fn void? validate_full_timestamp_stage(
         && barrier_stage_mask_supported(
             stage,
             completion.queue_flags,
+            record.device_state.ray_queries_enabled,
         )) return;
     return report_timestamp_command_failure(
         state:           record.device_state,

@@ -6,6 +6,7 @@
 //   set 0, binding 2  samplers
 //   set 0, binding 3  sampled 3D images
 //   set 0, binding 4  storage 3D images
+//   set 0, binding 5  acceleration structures
 //
 // TextureIndex/SamplerIndex values are generation-free uints. Zero is invalid;
 // live values encode the zero-based heap slot plus one.

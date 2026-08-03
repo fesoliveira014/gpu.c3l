@@ -162,7 +162,6 @@ fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
     defer discard_test_commands(&commands)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     bool previous_ray_queries = record.device_state.ray_queries_enabled;
-    record.device_state.ray_queries_enabled = true;
     defer record.device_state.ray_queries_enabled = previous_ray_queries;
 
     BarrierEmitCapture capture;
@@ -174,6 +173,17 @@ fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
         .before = { .acceleration_structure_build },
         .after = { .compute },
     };
+    record.device_state.ray_queries_enabled = false;
+    assert(@catch(vk::barrier_with_injected_ops(
+        record,
+        &dependency,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT,
+        "acceleration-structure stages require the opted-in feature family");
+    assert(capture.calls == 0,
+        "an unavailable acceleration-structure stage emits no dependency");
+
+    record.device_state.ray_queries_enabled = true;
     vk::barrier_with_injected_ops(record, &dependency, &ops)!!;
 
     ulong source_access =

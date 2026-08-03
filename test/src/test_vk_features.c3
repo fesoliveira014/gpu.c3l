@@ -1123,17 +1123,26 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
         )!! == vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
         "compute queues accept indirect completion waits");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .acceleration_structure_build },
-            graphics_only,
+            stages:           { .acceleration_structure_build },
+            flags:            graphics_only,
+            generated_work:   false,
+            ray_queries:      true,
         )!! == vk::PipelineStageFlagBits2
             .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
         "graphics queues accept acceleration-structure build waits");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .acceleration_structure_build },
-            compute_only,
+            stages:           { .acceleration_structure_build },
+            flags:            compute_only,
+            generated_work:   false,
+            ray_queries:      true,
         )!! == vk::PipelineStageFlagBits2
             .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
         "compute queues accept acceleration-structure build waits");
+    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
+        { .acceleration_structure_build },
+        compute_only,
+    )) == gpu::INVALID_ARGUMENT,
+        "acceleration-structure waits require the ray-query feature family");
     ulong generated_indirect =
         (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;

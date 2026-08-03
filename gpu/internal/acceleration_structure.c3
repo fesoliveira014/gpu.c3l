@@ -20,6 +20,7 @@ struct NormalizedAccelerationStructureGeometry {
     uint                               max_vertex_count;
     uint                               max_primitive_count;
     AccelerationStructureIndexType     index_type;
+    bool                               has_transform;
     uint                               built_vertex_count;
     uint                               built_primitive_count;
     bool                               built_with_transform;
@@ -113,6 +114,7 @@ fn void? normalize_acceleration_structure_desc(
                     geometry.triangles.max_vertex_count;
                 normalized.max_primitive_count = primitive_count;
                 normalized.index_type = geometry.triangles.index_type;
+                normalized.has_transform = geometry.triangles.has_transform;
             case AccelerationStructureGeometryKind.AABBS:
                 if (geometry.aabbs.max_primitive_count == 0) {
                     return gpu::INVALID_ARGUMENT~;
@@ -151,8 +153,7 @@ fn AccelerationStructureInstance? pack_acceleration_structure_instance(
     if (desc == null
         || address == (GpuAddress)0
         || desc.custom_index > ACCELERATION_STRUCTURE_INSTANCE_FIELD_MAX
-        || desc.mask > ACCELERATION_STRUCTURE_INSTANCE_MASK_MAX
-        || desc.shader_binding_table_record_offset != 0) {
+        || desc.mask > ACCELERATION_STRUCTURE_INSTANCE_MASK_MAX) {
         return gpu::INVALID_ARGUMENT~;
     }
     uint flags = (uint)desc.flags;

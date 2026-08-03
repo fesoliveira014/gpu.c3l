@@ -676,6 +676,7 @@ fn void ray_query_device_creation_enables_the_complete_optional_family() @test {
             "injected native failure rolls optional feature state back");
         return;
     }
+    assert(false, "the controlled native target supports ray queries");
 }
 
 fn void requested_sparse_creation_enables_only_planned_features() @test {
@@ -808,6 +809,7 @@ fn void ray_query_support_and_created_caps_are_consistent() @test {
         gpu::destroy_device(&device)!!;
         return;
     }
+    assert(false, "the controlled native target supports ray queries");
 }
 
 fn void sparse_support_and_created_caps_are_consistent() @test {
@@ -1249,6 +1251,7 @@ fn void opted_in_ray_query_state_is_transactional_and_prepublication() @test {
         gpu::destroy_device(&device)!!;
         return;
     }
+    assert(false, "the controlled native target supports ray queries");
 }
 
 fn void publication_failure_rolls_back_native_state() @test {

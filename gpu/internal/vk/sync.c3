@@ -716,6 +716,7 @@ fn void? vk_cmd_barrier_with_ops(
         rejected_field = barrier_queue_rejected_field(
             barrier,
             completion.queue_flags,
+            state.ray_queries_enabled,
         );
         if (rejected_field != null) {
             invariant = "stage mask must be supported by the recording queue";

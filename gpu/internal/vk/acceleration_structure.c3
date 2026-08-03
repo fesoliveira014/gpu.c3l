@@ -84,8 +84,6 @@ fn void set_pending_acceleration_structure_builds(
         uint next = cell.value.pending_next;
         cell.value.build_eligibility = state;
         if (clear) {
-            cell.value.pending_command_index =
-                ACCELERATION_STRUCTURE_PENDING_NONE;
             cell.value.pending_next = ACCELERATION_STRUCTURE_PENDING_NONE;
         }
         index = next;
@@ -157,7 +155,6 @@ fn void? link_pending_acceleration_structure_build(
     }
     slot.build_eligibility =
         gpu::internal::AccelerationStructureBuildEligibility.PENDING;
-    slot.pending_command_index = record.identity.index;
     slot.pending_next = record.pending_acceleration_structure_head;
     record.pending_acceleration_structure_head =
         prepared.destination_handle.index;
@@ -462,6 +459,8 @@ prepare_acceleration_structure_build(
                         > schema.max_primitive_count
                     || input.triangles.vertex_stride < 12
                     || input.triangles.vertex_stride % 4 != 0
+                    || !gpu_span_is_zero(input.triangles.transform)
+                        != schema.has_transform
                     || (update
                         && (input.triangles.vertex_count
                                 != schema.built_vertex_count
@@ -663,7 +662,6 @@ struct AccelerationStructureSlot {
     uint                                            live_view_count;
     uint                                            built_instance_count;
     gpu::internal::AccelerationStructureBuildEligibility build_eligibility;
-    uint                                            pending_command_index;
     uint                                            pending_next;
     char[DEBUG_NAME_CAP]                            debug_name;
     bool                                            owns_backing_buffer;
@@ -855,7 +853,7 @@ fn void lower_acceleration_structure_geometry_capacity(
 ) {
     vk::AccelerationStructureGeometryDataKHR data;
     if (source.kind == gpu::AccelerationStructureGeometryKind.TRIANGLES) {
-        data.triangles =
+        vk::AccelerationStructureGeometryTrianglesDataKHR triangles =
             vk::acceleration_structure_geometry_triangles_data_khr()
                 .set_vertex_format(vk::Format.R32G32B32_SFLOAT)
                 .set_vertex_stride(3 * float::size)
@@ -863,6 +861,12 @@ fn void lower_acceleration_structure_geometry_capacity(
                 .set_index_type(acceleration_structure_index_type_to_vk(
                     source.index_type,
                 ));
+        if (source.has_transform) {
+            triangles = triangles.set_transform_data({
+                .host_address = (void*)1,
+            });
+        }
+        data.triangles = triangles;
         *out_geometry = vk::acceleration_structure_geometry_khr()
             .set_geometry_type(vk::GeometryTypeKHR.TRIANGLES_KHR)
             .set_geometry(data)
@@ -1125,7 +1129,6 @@ create_acceleration_structure_on_buffer_with_ops(
         .placement_offset      = offset,
         .desc                  = normalized,
         .build_eligibility     = gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
-        .pending_command_index = ACCELERATION_STRUCTURE_PENDING_NONE,
         .pending_next          = ACCELERATION_STRUCTURE_PENDING_NONE,
         .owns_backing_buffer   = owns_backing_buffer,
     };
