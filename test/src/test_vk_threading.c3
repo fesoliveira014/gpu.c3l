@@ -1204,3 +1204,202 @@ fn void concurrent_allocation_release_from_worker_threads() @test {
     assert(vk::report_resource_leaks(state) == 0,
         "concurrent allocation release leaves no live resource slots");
 }
+
+struct AccelerationStructureChurnArgs {
+    gpu::Device*                     device;
+    gpu::AccelerationStructureDesc*  desc;
+    uint                             iterations;
+    bool                             failed;
+}
+
+fn int acceleration_structure_churn_worker(void* raw_args) {
+    AccelerationStructureChurnArgs* args =
+        (AccelerationStructureChurnArgs*)raw_args;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        for (uint i = 0; i < args.iterations; i++) {
+            gpu::AccelerationStructureHandle? created =
+                gpu::create_acceleration_structure(args.device, args.desc);
+            if (catch created) {
+                args.failed = true;
+                return 1;
+            }
+            if (catch gpu::destroy_acceleration_structure(
+                args.device,
+                created,
+            )) {
+                args.failed = true;
+                return 1;
+            }
+        }
+    };
+    return 0;
+}
+
+fn void acceleration_structure_lifecycle_churn_is_thread_safe() @test {
+    gpu::Runtime runtime;
+    gpu::Device device = create_ray_query_test_device(&runtime)!!;
+    defer {
+        destroy_test_device(&device)!!;
+        runtime = {};
+    }
+    gpu::AccelerationStructureDesc desc = {
+        .kind = gpu::AccelerationStructureKind.TOP_LEVEL,
+        .max_instance_count = 1,
+    };
+    AccelerationStructureChurnArgs[THR_THREADS] args;
+    Thread[THR_THREADS] workers;
+    for (uint i = 0; i < THR_THREADS; i++) {
+        args[i] = {
+            .device = &device,
+            .desc = &desc,
+            .iterations = 8,
+        };
+        workers[i].create(&acceleration_structure_churn_worker, &args[i])!!;
+    }
+    foreach (i, &worker : workers) {
+        assert(worker.join()!! == 0 && !args[i].failed,
+            "distinct acceleration-structure lifecycle operations complete concurrently");
+    }
+}
+
+struct AccelerationStructureViewRaceArgs {
+    gpu::Device*                     device;
+    gpu::AccelerationStructureHandle acceleration_structure;
+    Atomic{bool}*                    start;
+    gpu::AccelerationStructureView   view;
+    fault                            result;
+    bool                             succeeded;
+}
+
+fn int acceleration_structure_view_race_worker(void* raw_args) {
+    AccelerationStructureViewRaceArgs* args =
+        (AccelerationStructureViewRaceArgs*)raw_args;
+    while (!args.start.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    gpu::AccelerationStructureView? view =
+        gpu::create_acceleration_structure_view(
+            args.device,
+            args.acceleration_structure,
+        );
+    if (catch create_fault = view) {
+        args.result = create_fault;
+        return 0;
+    }
+    args.view = view;
+    args.succeeded = true;
+    return 0;
+}
+
+fn void tlas_view_creation_serializes_with_destruction() @test {
+    gpu::Runtime runtime;
+    gpu::Device device = create_ray_query_test_device(&runtime)!!;
+    defer {
+        destroy_test_device(&device)!!;
+        runtime = {};
+    }
+    gpu::AccelerationStructureDesc desc = {
+        .kind = gpu::AccelerationStructureKind.TOP_LEVEL,
+        .max_instance_count = 1,
+    };
+    gpu::AccelerationStructureHandle tlas =
+        gpu::create_acceleration_structure(&device, &desc)!!;
+    Atomic{bool} start;
+    AccelerationStructureViewRaceArgs args = {
+        .device = &device,
+        .acceleration_structure = tlas,
+        .start = &start,
+    };
+    Thread worker;
+    worker.create(&acceleration_structure_view_race_worker, &args)!!;
+    start.store(true, AtomicOrdering.RELEASE);
+    fault destroy_fault;
+    bool destroyed;
+    if (catch f = gpu::destroy_acceleration_structure(&device, tlas)) {
+        destroy_fault = f;
+    } else {
+        destroyed = true;
+    }
+    worker.join()!!;
+
+    if (args.succeeded) {
+        assert(!destroyed && destroy_fault == gpu::RESOURCE_IN_USE,
+            "a published view wins atomically and blocks TLAS destruction");
+        gpu::destroy_acceleration_structure_view(&device, args.view)!!;
+        gpu::destroy_acceleration_structure(&device, tlas)!!;
+    } else {
+        assert(destroyed && args.result == gpu::INVALID_HANDLE,
+            "TLAS destruction wins atomically before view publication");
+    }
+}
+
+struct AccelerationStructureAllocationRaceArgs {
+    gpu::Device*       device;
+    gpu::GpuAllocation allocation;
+    Atomic{bool}*      start;
+    fault              result;
+    bool               succeeded;
+}
+
+fn int acceleration_structure_allocation_race_worker(void* raw_args) {
+    AccelerationStructureAllocationRaceArgs* args =
+        (AccelerationStructureAllocationRaceArgs*)raw_args;
+    while (!args.start.load(AtomicOrdering.ACQUIRE)) thread::yield();
+    if (catch free_fault = gpu::free_allocation(
+        args.device,
+        &args.allocation,
+    )) {
+        args.result = free_fault;
+        return 0;
+    }
+    args.succeeded = true;
+    return 0;
+}
+
+fn void placed_acceleration_structure_serializes_with_allocation_free() @test {
+    gpu::Runtime runtime;
+    gpu::Device device = create_ray_query_test_device(&runtime)!!;
+    defer {
+        destroy_test_device(&device)!!;
+        runtime = {};
+    }
+    gpu::AccelerationStructureDesc desc = {
+        .kind = gpu::AccelerationStructureKind.TOP_LEVEL,
+        .max_instance_count = 1,
+    };
+    gpu::AccelerationStructureRequirements requirements =
+        gpu::get_acceleration_structure_requirements(&device, &desc)!!;
+    gpu::AllocationDesc allocation_desc = {
+        .size = requirements.storage_size,
+        .alignment = requirements.storage_alignment,
+        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
+        .access = { .compute },
+    };
+    gpu::GpuAllocation allocation =
+        gpu::allocate_memory(&device, &allocation_desc)!!;
+    gpu::AccelerationStructureHandle placed =
+        gpu::create_placed_acceleration_structure(
+            &device,
+            &desc,
+            allocation,
+            0,
+        )!!;
+    Atomic{bool} start;
+    AccelerationStructureAllocationRaceArgs args = {
+        .device = &device,
+        .allocation = allocation,
+        .start = &start,
+    };
+    Thread worker;
+    worker.create(&acceleration_structure_allocation_race_worker, &args)!!;
+    start.store(true, AtomicOrdering.RELEASE);
+    gpu::destroy_acceleration_structure(&device, placed)!!;
+    worker.join()!!;
+
+    if (args.succeeded) {
+        assert(!args.allocation.is_valid(),
+            "allocation free observes placement release atomically");
+    } else {
+        assert(args.result == gpu::RESOURCE_IN_USE,
+            "allocation free observes the live placement atomically");
+        gpu::free_allocation(&device, &allocation)!!;
+    }
+}

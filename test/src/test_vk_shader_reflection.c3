@@ -20,6 +20,14 @@ const char[*] REFLECT_BAD_STORAGE_3D_SPIRV =
     $embed("shaders/bad_storage_3d_binding.comp.spv");
 const char[*] REFLECT_BAD_UNKNOWN_HEAP_SPIRV =
     $embed("shaders/bad_unknown_heap_binding.comp.spv");
+const char[*] REFLECT_RAY_QUERY_SPIRV =
+    $embed("shaders/ray_query_include.comp.spv");
+const char[*] REFLECT_BAD_RAY_QUERY_SET_SPIRV =
+    $embed("shaders/bad_ray_query_set.comp.spv");
+const char[*] REFLECT_BAD_RAY_QUERY_BINDING_SPIRV =
+    $embed("shaders/bad_ray_query_binding.comp.spv");
+const char[*] REFLECT_BAD_RAY_QUERY_TYPE_SPIRV =
+    $embed("shaders/bad_ray_query_type.comp.spv");
 const char[*] REFLECT_OVERSIZED_PUSH_SPIRV = $embed("shaders/oversized_push.comp.spv");
 const char[*] REFLECT_VERTEX_SPIRV      = $embed("shaders/offscreen.vert.spv");
 const char[*] REFLECT_FRAGMENT_SPIRV    = $embed("shaders/offscreen.frag.spv");
@@ -222,6 +230,28 @@ fn void? check_fixture_root_abi(
     vk::check_root_push_abi(reflect_module, entry_point, role)!;
 }
 
+fn void? check_fixture_heap_convention(
+    char[] spirv,
+    bool ray_queries_enabled,
+) {
+    ulong[spvreflect::SHADER_MODULE_SIZE / 8] module_storage;
+    spvreflect::ShaderModule* reflect_module =
+        (spvreflect::ShaderModule*)&module_storage;
+    if (spvreflect::create_shader_module(
+        spirv.len,
+        spirv.ptr,
+        reflect_module,
+    ) != spvreflect::ReflectResult.RESULT_SUCCESS) {
+        return gpu::SHADER_INVALID~;
+    }
+    defer reflect_module.destroy();
+    vk::check_heap_convention(
+        reflect_module,
+        "main",
+        ray_queries_enabled,
+    )!;
+}
+
 fn void assert_fixture_root_flag(
     char[] spirv,
     spvreflect::TypeFlags required,
@@ -364,6 +394,30 @@ fn void dimensional_heap_bindings_are_validated() @test {
         entry_point: "main",
         message:     "an unknown set-0 heap binding is rejected",
     );
+}
+
+fn void ray_query_heap_reflection_distinguishes_feature_and_abi_faults() @test {
+    check_fixture_heap_convention(REFLECT_RAY_QUERY_SPIRV[..], true)!!;
+    assert(@catch(check_fixture_heap_convention(
+        REFLECT_RAY_QUERY_SPIRV[..],
+        false,
+    )) == gpu::UNSUPPORTED_FEATURE,
+        "a conforming binding-5 interface requires device opt-in");
+    assert(@catch(check_fixture_heap_convention(
+        REFLECT_BAD_RAY_QUERY_SET_SPIRV[..],
+        true,
+    )) == gpu::SHADER_INVALID,
+        "an acceleration structure outside set zero is invalid");
+    assert(@catch(check_fixture_heap_convention(
+        REFLECT_BAD_RAY_QUERY_BINDING_SPIRV[..],
+        true,
+    )) == gpu::SHADER_INVALID,
+        "an acceleration structure outside binding five is invalid");
+    assert(@catch(check_fixture_heap_convention(
+        REFLECT_BAD_RAY_QUERY_TYPE_SPIRV[..],
+        true,
+    )) == gpu::SHADER_INVALID,
+        "binding five rejects non-acceleration-structure descriptors");
 }
 
 fn void null_entry_point_defaults_to_main() @test {

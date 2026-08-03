@@ -9,6 +9,45 @@ fn bool range_fits(usz limit, usz offset, usz size) @private {
     return size <= limit - offset;
 }
 
+fn bool acceleration_structure_storage_fits(
+    AccelerationStructureRequirements* requirements,
+    usz allocation_size,
+    usz allocation_alignment,
+    usz offset,
+) @private {
+    if (requirements == null
+        || requirements.storage_size == 0
+        || requirements.storage_alignment == 0
+        || (requirements.storage_alignment
+            & (requirements.storage_alignment - 1)) != 0) return false;
+    return allocation_alignment >= requirements.storage_alignment
+        && offset % requirements.storage_alignment == 0
+        && range_fits(
+            allocation_size,
+            offset,
+            requirements.storage_size,
+        );
+}
+
+fn bool acceleration_structure_scratch_fits(
+    AccelerationStructureRequirements* requirements,
+    usz span_size,
+    GpuAddress address,
+    bool update,
+) @private {
+    if (requirements == null
+        || requirements.scratch_alignment == 0
+        || (requirements.scratch_alignment
+            & (requirements.scratch_alignment - 1)) != 0
+        || address == (GpuAddress)0) return false;
+    usz required_size = update
+        ? requirements.update_scratch_size
+        : requirements.build_scratch_size;
+    return required_size > 0
+        && span_size >= required_size
+        && (ulong)address % (ulong)requirements.scratch_alignment == 0;
+}
+
 fn bool memory_class_is_known(MemoryClass memory_class) @private {
     switch (memory_class) {
         case MemoryClass.CPU_WRITE:

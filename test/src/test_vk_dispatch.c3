@@ -13,6 +13,7 @@ struct DispatchLookupCounts {
     uint device_debug;
     uint device_presentation;
     uint dynamic_color;
+    uint ray_query;
     uint unexpected;
 }
 
@@ -25,6 +26,7 @@ fn bool DispatchLookupCounts.is_empty(self) {
         && self.device_debug == 0
         && self.device_presentation == 0
         && self.dynamic_color == 0
+        && self.ray_query == 0
         && self.unexpected == 0;
 }
 
@@ -241,6 +243,12 @@ fn vk::PFN_vkVoidFunction recording_device_proc_loader(
         || proc_name == "vkCmdSetColorBlendEquationEXT"
         || proc_name == "vkCmdSetColorWriteMaskEXT") {
         counts.dynamic_color++;
+    } else if (proc_name == "vkCreateAccelerationStructureKHR"
+        || proc_name == "vkDestroyAccelerationStructureKHR"
+        || proc_name == "vkGetAccelerationStructureBuildSizesKHR"
+        || proc_name == "vkCmdBuildAccelerationStructuresKHR"
+        || proc_name == "vkGetAccelerationStructureDeviceAddressKHR") {
+        counts.ray_query++;
     } else {
         counts.unexpected++;
     }
@@ -316,6 +324,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_debug == 0
         && counts.device_presentation == 0
         && counts.dynamic_color == 3
+        && counts.ray_query == 0
         && counts.unexpected == 0,
         "the device baseline loads only the required color procedures");
 
@@ -341,7 +350,27 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_debug == 0, "presentation selection does not load debug procedures");
     assert(counts.device_presentation == 5, "presentation selection loads only device WSI");
     assert(counts.dynamic_color == 3, "presentation selection retains baseline color procedures");
+    assert(counts.ray_query == 0, "presentation selection does not load ray-query procedures");
     assert(counts.unexpected == 0, "presentation selection loads no unrelated procedures");
+
+    counts = {};
+    plan = { .ray_queries = true };
+    gpu::internal::vk::VkDeviceDispatch ray_query_dispatch =
+        gpu::internal::vk::load_vk_device_dispatch(
+            (vk::Device)&counts,
+            &recording_device_proc_loader,
+            plan,
+        );
+    assert(counts.device_debug == 0, "ray-query selection does not load debug procedures");
+    assert(counts.device_presentation == 0,
+        "ray-query selection does not load presentation procedures");
+    assert(counts.dynamic_color == 3,
+        "ray-query selection retains baseline color procedures");
+    assert(counts.ray_query == 5,
+        "ray-query selection loads the complete command family");
+    assert(counts.unexpected == 0, "ray-query selection loads no unrelated procedures");
+    assert(gpu::internal::vk::device_dispatch_supports_ray_queries(&ray_query_dispatch),
+        "the complete ray-query command family is available");
 }
 
 fn void fake_color_write_mask_a(
@@ -485,4 +514,32 @@ fn void device_color_dispatch_requires_complete_set() @test {
     missing = complete;
     missing.dynamic_color.set_write_mask = null;
     assert(!gpu::internal::vk::device_dispatch_supports_dynamic_color(&missing));
+}
+
+fn void device_ray_query_dispatch_requires_complete_set() @test {
+    gpu::internal::vk::VkDeviceDispatchPlan plan = { .ray_queries = true };
+    DispatchLookupCounts counts;
+    gpu::internal::vk::VkDeviceDispatch complete =
+        gpu::internal::vk::load_vk_device_dispatch(
+            (vk::Device)&counts,
+            &recording_device_proc_loader,
+            plan,
+        );
+    assert(gpu::internal::vk::device_dispatch_supports_ray_queries(&complete));
+
+    gpu::internal::vk::VkDeviceDispatch missing = complete;
+    missing.ray_queries.create_acceleration_structure = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
+    missing = complete;
+    missing.ray_queries.destroy_acceleration_structure = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
+    missing = complete;
+    missing.ray_queries.get_build_sizes = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
+    missing = complete;
+    missing.ray_queries.cmd_build = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
+    missing = complete;
+    missing.ray_queries.get_device_address = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
 }

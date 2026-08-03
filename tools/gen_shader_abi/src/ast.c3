@@ -103,6 +103,7 @@ fn void TypeTable.init(&self) {
     self.entries.set("GpuAddress",   { .kind = SEMANTIC, .size = 8, .alignment = 8, .scalar_width = 64, .integer = true, .c3_name = "GpuAddress", .glsl_name = "uint64_t" });
     self.entries.set("TextureIndex", { .kind = SEMANTIC, .size = 4, .alignment = 4, .scalar_width = 32, .integer = true, .c3_name = "TextureIndex", .glsl_name = "uint" });
     self.entries.set("SamplerIndex", { .kind = SEMANTIC, .size = 4, .alignment = 4, .scalar_width = 32, .integer = true, .c3_name = "SamplerIndex", .glsl_name = "uint" });
+    self.entries.set("AccelerationStructureIndex", { .kind = SEMANTIC, .size = 4, .alignment = 4, .scalar_width = 32, .integer = true, .c3_name = "AccelerationStructureIndex", .glsl_name = "uint" });
 }
 
 fn void TypeTable.free(&self) {

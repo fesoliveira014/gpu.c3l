@@ -67,7 +67,7 @@ Types: `Vec2f`, `Vec4f`, `Vec4u`, `Device`, `Runtime`, `RuntimeDesc`,
 `AdapterMemoryInfo`, `AdapterQueueInfo`, `AdapterLimits`, `AdapterInfo`,
 `BackendVersion`, `AdapterDiagnostics`, `Surface`, `QueueKind`, `QueueRoles`,
 `Queue`, `QueueInfo`, `QueueRequest`, `DeviceDesc`, `DeviceSupport`,
-`DeviceCaps`, `TimestampCaps`, and `SparseTextureCaps`.
+`DeviceCaps`, `TimestampCaps`, `SparseTextureCaps`, and `RayQueryCaps`.
 
 Constants: `DEVICE_INVALID`, `RUNTIME_INVALID`, `ADAPTER_INVALID`,
 `SURFACE_INVALID`, and `QUEUE_INVALID`.
@@ -92,10 +92,23 @@ Types: `GpuAllocation`, `GpuSpan`, `MappedGpuSpan`, `GpuAddress`,
 `SparseTextureRequirements`, `SparseTextureTileBind`,
 `SparseTextureOpaqueBind`, `SparseTextureBindDesc`, `DedicatedTexture`,
 `TextureHandle`, `TextureDesc`, `TextureViewDesc`, `TextureView`,
-`TextureViewCreateDesc`, `TextureIndex`, `SamplerIndex`, and `SamplerDesc`.
+`TextureViewCreateDesc`, `TextureIndex`, `SamplerIndex`, `SamplerDesc`,
+`AccelerationStructureHandle`, `AccelerationStructureView`,
+`AccelerationStructureIndex`, `AccelerationStructureKind`,
+`AccelerationStructureGeometryKind`, `AccelerationStructureIndexType`,
+`AccelerationStructureBuildFlags`, `AccelerationStructureGeometryFlags`,
+`AccelerationStructureInstanceFlags`,
+`AccelerationStructureTriangleGeometryDesc`,
+`AccelerationStructureAabbGeometryDesc`, `AccelerationStructureGeometryDesc`,
+`AccelerationStructureDesc`, `AccelerationStructureRequirements`,
+`AccelerationStructureInstance`, `AccelerationStructureInstanceDesc`, and
+`DedicatedAccelerationStructure`.
 
 Constants: `GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`,
 `TEXTURE_VIEW_INVALID`, `TEXTURE_INDEX_INVALID`, `SAMPLER_INDEX_INVALID`,
+`ACCELERATION_STRUCTURE_HANDLE_INVALID`,
+`ACCELERATION_STRUCTURE_VIEW_INVALID`,
+`ACCELERATION_STRUCTURE_INDEX_INVALID`,
 `MAX_MEMORY_HEAPS`, `DEFAULT_TEXTURE_CAPACITY`,
 `MAX_SPARSE_TEXTURE_ASPECTS`, `DEFAULT_TEXTURE_HEAP_CAPACITY`,
 `DEFAULT_SAMPLER_HEAP_CAPACITY`, and `MAX_SHADER_HEAP_CAPACITY`.
@@ -103,6 +116,9 @@ Constants: `GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`,
 Methods: `GpuAllocation.is_valid`, `GpuAllocation.equals`,
 `TextureHandle.is_valid`, `TextureHandle.equals`, `TextureView.is_valid`,
 `TextureView.equals`, `TextureIndex.is_valid`, `SamplerIndex.is_valid`,
+`AccelerationStructureHandle.is_valid`,
+`AccelerationStructureHandle.equals`, `AccelerationStructureView.is_valid`,
+`AccelerationStructureView.equals`, `AccelerationStructureIndex.is_valid`,
 `GpuSpan.unchecked_subspan`, `GpuSpan.checked_subspan`,
 `MappedGpuSpan.checked_subspan`, and `TextureCompatibility.is_valid`.
 
@@ -115,7 +131,13 @@ Callables: `allocate_memory`,
 `create_dedicated_texture`, `create_sparse_texture`,
 `get_sparse_texture_requirements`, `bind_sparse_texture_memory`,
 `destroy_texture`, `create_texture_view`, `create_texture_views`,
-`destroy_texture_view`, and `intern_sampler`.
+`destroy_texture_view`, `intern_sampler`,
+`get_acceleration_structure_requirements`, `create_acceleration_structure`,
+`create_placed_acceleration_structure`,
+`create_dedicated_acceleration_structure`, `destroy_acceleration_structure`,
+`get_acceleration_structure_address`, `make_acceleration_structure_instance`,
+`create_acceleration_structure_view`, and
+`destroy_acceleration_structure_view`.
 
 ### [Shaders and pipelines](shaders_and_pipelines.md)
 
@@ -144,7 +166,10 @@ Types: `CommandAllocatorHandle`, `CommandAllocator`, `CommandAllocatorDesc`,
 `GeneratedScratchDesc`, `Vec3u`, `Viewport`, `ScissorRect`, `GraphicsState`,
 `DrawIndirectCommand`, `DrawIndexedIndirectCommand`,
 `DispatchIndirectCommand`, `BufferCopyDesc`, `BufferTextureCopyDesc`,
-`TextureBufferCopyDesc`, `IndexType`, `AttachmentViewHandle`,
+`TextureBufferCopyDesc`, `AccelerationStructureTriangleBuildDesc`,
+`AccelerationStructureAabbBuildDesc`,
+`AccelerationStructureGeometryBuildDesc`, `AccelerationStructureBuildDesc`,
+`IndexType`, `AttachmentViewHandle`,
 `AttachmentViewDesc`, `LoadOp`, `StoreOp`, `ClearColor`, `ClearDepth`,
 `ColorTargetDesc`, `DepthTargetDesc`, and `RenderPassDesc`.
 
@@ -163,7 +188,8 @@ Callables:
 `reserve_generated_scratch`, `release_generated_scratch`, `begin_commands`,
 `end_commands`, `discard_commands`, `discard_executable_commands`,
 `cmd_copy_buffer`, `cmd_fill_buffer`, `cmd_copy_buffer_to_texture`,
-`cmd_copy_texture_to_buffer`, `cmd_bind_pipeline`, `cmd_dispatch`,
+`cmd_copy_texture_to_buffer`, `cmd_build_acceleration_structure`,
+`cmd_update_acceleration_structure`, `cmd_bind_pipeline`, `cmd_dispatch`,
 `cmd_dispatch_indirect`, `cmd_dispatch_generated`, `cmd_set_viewport`,
 `cmd_set_scissor`, `cmd_draw`, `cmd_draw_indexed`, `cmd_draw_indirect`,
 `cmd_draw_indexed_indirect`, `cmd_draw_indexed_indirect_count`,

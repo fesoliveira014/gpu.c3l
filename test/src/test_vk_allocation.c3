@@ -852,6 +852,29 @@ fn void check_allocation_memory_policy(gpu::MemoryClass memory_class) {
         "the published slot retains actual alignment");
 }
 
+fn void ray_query_opt_in_widens_generic_buffer_usage_only() @test {
+    vk::BufferUsage baseline = vk::allocation_buffer_usage(false);
+    vk::BufferUsage ray_query = vk::allocation_buffer_usage(true);
+    uint baseline_native = (uint)vk::buffer_usage_to_vk(baseline);
+    uint ray_query_native = (uint)vk::buffer_usage_to_vk(ray_query);
+    uint optional_bits =
+        (uint)vk::BufferUsageFlagBits.ACCELERATION_STRUCTURE_STORAGE_BIT_KHR
+        | (uint)vk::BufferUsageFlagBits
+            .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+
+    assert((baseline_native & optional_bits) == 0,
+        "baseline generic buffers request no acceleration-structure usages");
+    assert((ray_query_native & optional_bits) == optional_bits,
+        "opted-in buffers cover persistent storage and build inputs");
+    assert((ray_query_native
+            & (uint)vk::BufferUsageFlagBits.STORAGE_BUFFER_BIT) != 0
+            && (ray_query_native
+                & (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT) != 0,
+        "opted-in buffers retain scratch storage and device addressing");
+    assert((ray_query_native & ~optional_bits) == baseline_native,
+        "ray-query opt-in changes only its two optional Vulkan usage bits");
+}
+
 fn void allocation_transaction_applies_memory_class_policy() @test {
     check_allocation_memory_policy(gpu::MemoryClass.CPU_WRITE);
     check_allocation_memory_policy(gpu::MemoryClass.CPU_READ);

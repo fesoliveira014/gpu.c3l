@@ -84,6 +84,17 @@ fn Atomic{uint}*? tracked_command_reference_counter(
         TimestampPoolSlot* slot = state.timestamp_pools.get(pool)!;
         return &slot.tracked_command_references;
     }
+    if (reference.owner == state.acceleration_structures.owner) {
+        gpu::AccelerationStructureHandle acceleration_structure = {
+            .owner = reference.owner,
+            .index = reference.index,
+            .generation = reference.generation,
+        };
+        AccelerationStructureSlot* slot = state.acceleration_structures.get(
+            acceleration_structure,
+        )!;
+        return &slot.tracked_command_references;
+    }
     if (reference.owner == state.pipelines.owner) {
         gpu::PipelineHandle pipeline = {
             .owner = reference.owner, .index = reference.index,
@@ -127,6 +138,7 @@ fn void publish_pending_commands_locked(
     gpu::CompletionPoint point,
 ) {
     foreach (record : records) {
+        activate_pending_acceleration_structure_builds(record);
         record.submitted_completion = point;
         record.next_submitted = null;
         if (completion.submitted_tail == null) {
@@ -189,6 +201,7 @@ fn CommandRecord* release_pending_command_locked(
     pin_command_allocator_slot(slot);
     slot.mutex.lock()!!;
     record.state = gpu::internal::CommandState.INACTIVE;
+    complete_pending_acceleration_structure_builds(record);
     // Reference gates plus retirement/destroy serialization make resource_mutex unnecessary.
     CommandScratch* scratch = record.scratch;
     clear_command_scratch_references(scratch);

@@ -317,6 +317,7 @@ fn void destroy_shader_store(VkDeviceState* state) {
 fn void? check_heap_convention(
     spvreflect::ShaderModule* reflect_module,
     ZString entry_point,
+    bool ray_queries_enabled,
 ) @private {
     uint count = 0;
     if (reflect_module.enumerate_entry_point_descriptor_bindings(
@@ -356,6 +357,14 @@ fn void? check_heap_convention(
                 case HEAP_BINDING_SAMPLERS:
                     if (descriptor_type != (int)vk::DescriptorType.SAMPLER) {
                         return gpu::SHADER_INVALID~;
+                    }
+                case HEAP_BINDING_ACCELERATION_STRUCTURES:
+                    if (descriptor_type
+                        != (int)vk::DescriptorType.ACCELERATION_STRUCTURE_KHR) {
+                        return gpu::SHADER_INVALID~;
+                    }
+                    if (!ray_queries_enabled) {
+                        return gpu::UNSUPPORTED_FEATURE~;
                     }
                 default:
                     return gpu::SHADER_INVALID~;
@@ -774,6 +783,7 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
     if (catch heap_fault = check_heap_convention(
         reflect_module,
         selected_entry_point,
+        state.ray_queries_enabled,
     )) {
         return report_shader_contract_failure(
             state:          state,

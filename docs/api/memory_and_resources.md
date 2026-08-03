@@ -79,6 +79,71 @@ overlap, retains bound storage, and orders unbind/replacement after all prior
 users. Invalid geometry or incompatible allocations fail before a native bind
 is accepted.
 
+## Acceleration structures
+
+Ray-query-enabled devices expose bottom-level acceleration structures (BLAS)
+and top-level acceleration structures (TLAS) through one strongly typed
+`AccelerationStructureHandle`. A BLAS descriptor contains one or more ordered
+triangle geometries or one or more ordered AABB geometries; one BLAS cannot mix
+the two kinds. A TLAS descriptor instead supplies `max_instance_count`.
+Descriptors are immutable capacity schemas: every later build/update uses the
+same order, kind, index type, declared transform presence, and counts no larger
+than the declared maxima.
+
+Triangle inputs are float32 XYZ vertices with a stride of at least 12 bytes and
+a 4-byte-aligned address and stride, plus either no indices or U16/U32 indices
+aligned to 2 or 4 bytes respectively. Non-indexed inputs need three vertices
+per primitive. Set `has_transform` in the capacity schema before querying
+requirements when builds will supply the optional row-major 3-by-4 float
+matrix; its address must be 16-byte aligned. AABB inputs are records of six
+floats—`min_xyz` then `max_xyz`—with an 8-byte-aligned address and a stride of
+at least 24 bytes divisible by 8. TLAS instance input addresses are 16-byte
+aligned. Procedural intersection and candidate confirmation happen in the
+shader.
+
+Call `get_acceleration_structure_requirements` before allocating storage. It
+reports persistent storage size/alignment, full-build scratch, update scratch,
+and scratch alignment. Update scratch is zero unless `allow_update` was set.
+Creation forms are:
+
+- `create_acceleration_structure`, with hidden GPU-private storage;
+- `create_placed_acceleration_structure`, in a nonoverlapping compatible range
+  of a caller-owned generic allocation; and
+- `create_dedicated_acceleration_structure`, returning the structure and its
+  explicit `GpuAllocation` owner.
+
+Placed and dedicated allocations remain explicit owners. Destroy the
+structure before freeing its allocation. A live placement makes
+`free_allocation` return `RESOURCE_IN_USE`; destruction releases the placement
+but never frees caller-owned storage or waits.
+
+Build inputs and scratch are caller-owned `GpuSpan` values. Build scratch and
+update scratch are different queried contracts. Keep every input, transform,
+instance record, scratch range, and structure live until the covering
+submission completes. The library allocates no hidden scratch and inserts no
+barrier.
+
+`make_acceleration_structure_instance` validates a live BLAS and returns the
+exact 64-byte `AccelerationStructureInstance` ABI. Its address field is an
+ordinary `GpuAddress`; its transform is three row-major `Vec4f` rows. Custom
+index is 24 bits, mask is 8 bits, and the shader-binding-table offset must be
+zero in this ray-query-only API. Store packed records in addressable instance
+input memory before building a TLAS.
+
+`create_acceleration_structure_view` publishes a TLAS in the independently
+sized shader heap. The owner-bearing `AccelerationStructureView` contains a raw
+`AccelerationStructureIndex`. As with texture indices, the raw index has no
+owner/generation and may be recycled immediately after view destruction. Wait
+for all shader use, destroy the view, then destroy the TLAS. Destroy BLAS values
+only after all TLAS build/update work that reads their packed addresses has
+completed.
+
+Updates are in-place only. The structure must have been created with
+`allow_update`, completed one full build, retain the identical schema, and use
+the completed build's per-geometry primitive counts, triangle vertex counts
+and transform presence, or TLAS instance count. Use the queried update scratch.
+There is no distinct source structure or implicit rebuild.
+
 ## Views and bindless indices
 
 `create_texture_view` validates a `TextureViewDesc`, publishes the descriptor,
@@ -89,6 +154,9 @@ batch on failure. `destroy_texture_view` releases its slot.
 `TextureView.index` is the raw `TextureIndex` stored in shader data. It carries
 no owner or generation. Destroying the view makes the index immediately
 recyclable, so wait for all shader uses before destruction.
+
+`AccelerationStructureView.index` follows the same raw-value rule for TLAS
+descriptors, while the view itself blocks TLAS destruction until retired.
 
 Attachment views are a rendering-domain resource documented in
 [Commands and rendering](commands_and_rendering.md#attachments-and-render-passes).

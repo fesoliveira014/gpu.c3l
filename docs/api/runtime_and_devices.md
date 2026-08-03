@@ -5,6 +5,9 @@
 `RuntimeDesc` configures contract validation, optional Vulkan validation
 layers, debug names and callback delivery, public table capacities, an optional
 borrowed pipeline-cache blob, and an application name.
+`acceleration_structure_heap_capacity` independently sizes the optional
+shader-visible TLAS heap. It must be nonzero when a device requests ray
+queries and is otherwise unused.
 `full_validation_runtime_desc()` returns a useful development baseline.
 A zero descriptor selects `ContractValidation.TRUSTED` with layers and debug
 names disabled.
@@ -41,6 +44,12 @@ surface. The runtime description supplies heap and resource capacities.
 `create_device` verifies the adapter's required feature profile and exact
 capacities before publishing a `Device`.
 
+Ray queries require explicit opt-in with `DeviceDesc.enable_ray_queries`.
+`supports_device_desc` reports an unsupported request before creation when the
+adapter lacks any required ray-query, acceleration-structure, descriptor,
+address, command, or vertex-format capability. A zero-initialized device
+description keeps the optional feature family disabled.
+
 Creation is transactional and externally synchronized per runtime. On failure,
 no device or child is live. Common faults are `UNSUPPORTED_FEATURE`,
 `INVALID_ARGUMENT`, `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY`, and
@@ -52,10 +61,17 @@ no device or child is live. Common faults are `UNSUPPORTED_FEATURE`,
 - configured texture/sampler heap capacities;
 - alignment and workload limits;
 - indirect-count, generated-work, wireframe, sparse, and timestamp support;
+- actionable `RayQueryCaps` when ray queries were enabled; otherwise a fully
+  zero/false ray-query record;
 - sampler limits; and
 - the effective maximum color attachment count.
 
 Query capabilities instead of hardcoding selected-device limits.
+
+`RayQueryCaps` reports the enabled state, selected TLAS heap capacity, maximum
+geometry, primitive, and instance counts, and scratch alignment. These are
+creation and allocator bounds, not suggestions; exceeding one returns
+`UNSUPPORTED_FEATURE` or `INVALID_ARGUMENT` as documented by the operation.
 
 `destroy_device` is thread-safe against ordinary device operations but does not
 wait. It returns `RESOURCE_IN_USE` while public children remain and
@@ -89,8 +105,8 @@ device and queue identities also support equality where declared.
 lifetime or prove that a registry generation remains live.
 
 `Vec2f`, `Vec4f`, and `Vec4u` are shared ABI vector aliases.
-`SparseTextureCaps` and `TimestampCaps` are nested capability records exposed
-through `DeviceCaps`.
+`SparseTextureCaps`, `TimestampCaps`, and `RayQueryCaps` are nested capability
+records exposed through `DeviceCaps`.
 
 ## Fault and concurrency summary
 

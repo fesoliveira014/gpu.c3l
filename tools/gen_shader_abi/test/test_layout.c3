@@ -55,6 +55,31 @@ fn void material_matches_doc_example() @test {
     assert(decl.fields.get_ref(6).offset == 48);
 }
 
+fn void acceleration_structure_index_is_builtin_semantic() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        struct RayRoot {
+            AccelerationStructureIndex scene;
+            uint _pad0;
+            uint _pad1;
+            uint _pad2;
+        }
+    `, &schema, &types)!!;
+    StructDecl* decl = schema.structs.get_ref(0);
+    assert(decl.size == 16);
+    TypeInfo info = types.entries.get("AccelerationStructureIndex")!!;
+    assert(info.kind == TypeKind.SEMANTIC);
+    assert(info.size == 4);
+    assert(info.c3_name == "AccelerationStructureIndex");
+    assert(info.glsl_name == "uint");
+}
+
 fn void instance_vec_layout() @test {
     Schema schema;
     schema.init();

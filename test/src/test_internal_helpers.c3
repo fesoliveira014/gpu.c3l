@@ -373,9 +373,12 @@ fn void submit_wait_mask_shape_is_backend_independent() @test {
     assert(gpu::internal::submit_wait_stage_mask_valid({ .all }));
     assert(gpu::internal::submit_wait_stage_mask_valid({ .transfer, .compute }));
     assert(gpu::internal::submit_wait_stage_mask_valid({ .indirect }));
+    assert(gpu::internal::submit_wait_stage_mask_valid({
+        .acceleration_structure_build,
+    }));
     assert(!gpu::internal::submit_wait_stage_mask_valid({}));
     assert(!gpu::internal::submit_wait_stage_mask_valid({ .host }));
     assert(!gpu::internal::submit_wait_stage_mask_valid({ .present }));
     assert(!gpu::internal::submit_wait_stage_mask_valid({ .all, .compute }));
-    assert(!gpu::internal::submit_wait_stage_mask_valid((StageMask)(1u << 10)));
+    assert(!gpu::internal::submit_wait_stage_mask_valid((StageMask)(1u << 11)));
 }

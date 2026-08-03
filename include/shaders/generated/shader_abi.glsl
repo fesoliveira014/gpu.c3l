@@ -13,6 +13,15 @@ struct GraphicsRootPush {
     uint64_t fragment_root_gpu;
 };
 
+struct AccelerationStructureInstance {
+    vec4 transform_row_0;
+    vec4 transform_row_1;
+    vec4 transform_row_2;
+    uint custom_index_and_mask;
+    uint record_offset_and_flags;
+    uint64_t acceleration_structure;
+};
+
 struct DrawIndirectCommand {
     uint vertex_count;
     uint instance_count;

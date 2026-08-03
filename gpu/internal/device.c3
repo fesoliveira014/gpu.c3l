@@ -41,9 +41,11 @@ enum ResourceOwnerKind @private {
     COMMAND,
     COMPLETION_POINT,
     TIMESTAMP_POOL,
+    ACCELERATION_STRUCTURE,
+    ACCELERATION_STRUCTURE_VIEW,
 }
 
-$assert (ulong)ResourceOwnerKind.TIMESTAMP_POOL + 1
+$assert (ulong)ResourceOwnerKind.ACCELERATION_STRUCTURE_VIEW + 1
     == gpu::RESOURCE_OWNER_KIND_COUNT;
 
 bitstruct DeviceSlotControl : ulong @private {

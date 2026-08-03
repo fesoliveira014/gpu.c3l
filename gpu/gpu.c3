@@ -33,6 +33,21 @@ fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
         && self.index == other.index
         && self.generation == other.generation;
 }
+<* Test whether an acceleration-structure handle has nonzero owner and generation fields.
+
+   @return "True for a structurally valid handle; this does not prove live provenance." *>
+fn bool AccelerationStructureHandle.is_valid(self) =>
+    self.owner != 0 && self.generation != 0;
+<* Compare complete acceleration-structure identities.
+   @return "True when owner, index, and generation are equal." *>
+fn bool AccelerationStructureHandle.equals(
+    self,
+    AccelerationStructureHandle other,
+) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
 <* Test whether the attachment-view handle has nonzero owner and generation fields.
 
    @return "True for a structurally valid handle; this does not prove live provenance." *>
@@ -53,6 +68,23 @@ fn bool TextureView.is_valid(self) {
 <* Compare complete texture-view identities.
    @return "True when owner, index, and generation are equal." *>
 fn bool TextureView.equals(self, TextureView other) @operator(==) {
+    return self.owner == other.owner
+        && self.index == other.index
+        && self.generation == other.generation;
+}
+<* Test whether an acceleration-structure view has nonzero ownership, index,
+   and generation fields.
+
+   @return "True for a structurally valid view; this does not prove live provenance." *>
+fn bool AccelerationStructureView.is_valid(self) {
+    return self.owner != 0 && self.index.is_valid() && self.generation != 0;
+}
+<* Compare complete acceleration-structure-view identities.
+   @return "True when owner, index, and generation are equal." *>
+fn bool AccelerationStructureView.equals(
+    self,
+    AccelerationStructureView other,
+) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
@@ -135,6 +167,10 @@ fn bool TextureIndex.is_valid(self) => (uint)self != 0;
 
    @return "True for a nonzero index; this does not prove live provenance." *>
 fn bool SamplerIndex.is_valid(self) => (uint)self != 0;
+<* Test whether an acceleration-structure heap index differs from zero.
+
+   @return "True for a nonzero index; this does not prove live provenance." *>
+fn bool AccelerationStructureIndex.is_valid(self) => (uint)self != 0;
 
 <* Test whether the runtime token differs from the invalid zero value.
 
@@ -1137,6 +1173,233 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
     gpu::internal::release_device_children(&operation);
 }
 
+<* Return persistent and caller-owned scratch requirements for an acceleration
+   structure capacity descriptor.
+
+   @param device : "Live ray-query-enabled device to query."
+   @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
+   @return "Storage and scratch requirements, or a recoverable validation, support, or device fault." *>
+fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
+    Device* device,
+    AccelerationStructureDesc* desc,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    return gpu::internal::vk::vk_get_acceleration_structure_requirements(
+        operation.state,
+        desc,
+    );
+}
+
+<* Create an acceleration structure with internally managed persistent storage.
+
+   @param device : "Live ray-query-enabled device that will own the structure."
+   @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
+   @return "An owning handle, or a recoverable validation, support, capacity, allocation, or device fault." *>
+fn AccelerationStructureHandle? create_acceleration_structure(
+    Device* device,
+    AccelerationStructureDesc* desc,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    AccelerationStructureHandle acceleration_structure =
+        gpu::internal::vk::vk_create_acceleration_structure(
+            operation.state,
+            desc,
+        )!;
+    gpu::internal::retain_device_children(&operation);
+    return acceleration_structure;
+}
+
+<* Create an acceleration structure in caller-owned compatible GPU memory.
+   The allocation must outlive the structure.
+
+   @param device : "Live device that owns the placement allocation."
+   @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
+   @param allocation : "Caller-owned compatible allocation."
+   @param offset : "Aligned byte offset within the allocation."
+   @return "An owning handle, or a recoverable validation, compatibility, capacity, allocation, or device fault." *>
+fn AccelerationStructureHandle? create_placed_acceleration_structure(
+    Device* device,
+    AccelerationStructureDesc* desc,
+    GpuAllocation allocation,
+    usz offset,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    gpu::internal::validate_resource_owner(
+        &operation,
+        allocation.owner,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
+    )!;
+    AccelerationStructureHandle acceleration_structure =
+        gpu::internal::vk::vk_create_placed_acceleration_structure(
+            state:      operation.state,
+            desc:       desc,
+            allocation: allocation,
+            offset:     offset,
+        )!;
+    gpu::internal::retain_device_children(&operation);
+    return acceleration_structure;
+}
+
+<* Create an acceleration structure and dedicated persistent allocation
+   atomically. Destroy the structure before freeing the returned allocation.
+
+   @param device : "Live ray-query-enabled device that will own both resources."
+   @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
+   @return "The owning structure and allocation pair, or a recoverable validation, support, capacity, allocation, or device fault." *>
+fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
+    Device* device,
+    AccelerationStructureDesc* desc,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    DedicatedAccelerationStructure created =
+        gpu::internal::vk::vk_create_dedicated_acceleration_structure(
+            operation.state,
+            desc,
+        )!;
+    gpu::internal::retain_device_children(&operation, 2);
+    return created;
+}
+
+<* Destroy an acceleration structure without waiting. Live views or tracked
+   commands make destruction retryable.
+
+   @param device : "Live device that owns the structure."
+   @param acceleration_structure : "Owning structure handle to destroy."
+   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
+fn void? destroy_acceleration_structure(
+    Device* device,
+    AccelerationStructureHandle acceleration_structure,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
+        &operation,
+        acceleration_structure.owner,
+        gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE,
+    )!;
+    gpu::internal::vk::vk_destroy_acceleration_structure(
+        operation.state,
+        acceleration_structure,
+    )!;
+    gpu::internal::release_device_children(&operation);
+}
+
+<* Return the ordinary GPU address of a live bottom-level acceleration
+   structure. Top-level structures are not address inputs to instances.
+
+   @param device : "Live device that owns the BLAS."
+   @param acceleration_structure : "Live bottom-level structure handle."
+   @return "A nonzero BLAS address, or a recoverable argument, ownership, handle, or device fault." *>
+fn GpuAddress? get_acceleration_structure_address(
+    Device* device,
+    AccelerationStructureHandle acceleration_structure,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
+        &operation,
+        acceleration_structure.owner,
+        gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE,
+    )!;
+    return gpu::internal::vk::vk_get_acceleration_structure_address(
+        operation.state,
+        acceleration_structure,
+    );
+}
+
+<* Validate a bottom-level structure and pack one exact 64-byte TLAS instance.
+
+   @param device : "Live device that owns the referenced BLAS."
+   @param desc : "Borrowed transform, BLAS, mask, index, and flag values."
+   @return "A packed instance, or a recoverable argument, ownership, handle, or device fault." *>
+fn AccelerationStructureInstance? make_acceleration_structure_instance(
+    Device* device,
+    AccelerationStructureInstanceDesc* desc,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    gpu::internal::validate_resource_owner(
+        &operation,
+        desc.bottom_level.owner,
+        gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE,
+    )!;
+    GpuAddress address =
+        gpu::internal::vk::vk_get_acceleration_structure_address(
+            operation.state,
+            desc.bottom_level,
+        )!;
+    return gpu::internal::pack_acceleration_structure_instance(
+        desc,
+        address,
+    );
+}
+
+<* Publish a live TLAS in the shader-visible acceleration-structure heap.
+
+   @param device : "Live ray-query-enabled device that owns the TLAS."
+   @param acceleration_structure : "Live top-level structure to publish."
+   @return "An owning view containing its raw shader index, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
+fn AccelerationStructureView? create_acceleration_structure_view(
+    Device* device,
+    AccelerationStructureHandle acceleration_structure,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
+        &operation,
+        acceleration_structure.owner,
+        gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE,
+    )!;
+    AccelerationStructureView view =
+        gpu::internal::vk::vk_create_acceleration_structure_view(
+            operation.state,
+            acceleration_structure,
+        )!;
+    gpu::internal::retain_device_children(&operation);
+    return view;
+}
+
+<* Retire one shader-visible TLAS view after caller-managed GPU completion.
+
+   @param device : "Live device that owns the view."
+   @param view : "Owning acceleration-structure view to destroy."
+   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
+fn void? destroy_acceleration_structure_view(
+    Device* device,
+    AccelerationStructureView view,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(
+        &operation,
+        view.owner,
+        gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE_VIEW,
+    )!;
+    gpu::internal::vk::vk_destroy_acceleration_structure_view(
+        operation.state,
+        view,
+    )!;
+    gpu::internal::release_device_children(&operation);
+}
+
 <* Intern and publish an immutable device-lifetime sampler index. Identical
    semantic descriptions return the same value; debug_name is not semantic.
    Active anisotropy must be within the exact range reported by DeviceCaps;
@@ -1386,14 +1649,15 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
 
 <* Create one fixed-capacity command allocator for an exact selected queue.
    Zero capacities default to 8 command buffers, 64 tracked references per list,
-   and 4 generated-preprocess buffers per list; storage scales with their products.
+   and 4 generated-preprocess buffers per list; acceleration-structure geometry
+   capacity instead stays disabled at zero. Storage scales with their products.
    Creation may fault for invalid limits, host/device allocation failure, a full
    allocator table, device loss, or a busy/closing device.
 
    @param device : "Live device that will own the allocator."
    @param queue : "Exact selected queue the allocator records for."
    @param desc : "Borrowed capacity description; null or zero fields select defaults."
-   @return "An owning allocator, or a recoverable validation, capacity, allocation, busy, or device fault." *>
+   @return "An owning allocator, or a recoverable validation, unsupported-feature, capacity, allocation, busy, or device fault." *>
 fn CommandAllocator? create_command_allocator(
     Device* device,
     Queue queue,
@@ -1422,9 +1686,25 @@ fn CommandAllocator? create_command_allocator(
             > MAX_COMMAND_PREPROCESS_PER_LIST) {
         return INVALID_ARGUMENT~;
     }
+    if (normalized.max_acceleration_structure_geometries_per_build > 0) {
+        if (!operation.data.caps.ray_queries.enabled) {
+            return UNSUPPORTED_FEATURE~;
+        }
+        if (normalized.max_acceleration_structure_geometries_per_build
+            > operation.data.caps.ray_queries.max_geometry_count) {
+            return INVALID_ARGUMENT~;
+        }
+    }
     if (normalized.command_buffer_capacity
         > uint::max
             / normalized.max_generated_preprocess_buffers_per_list) {
+        return INVALID_ARGUMENT~;
+    }
+    if (normalized.max_acceleration_structure_geometries_per_build > 0
+        && normalized.command_buffer_capacity
+            > uint::max
+                / normalized
+                    .max_acceleration_structure_geometries_per_build) {
         return INVALID_ARGUMENT~;
     }
 
@@ -1720,6 +2000,39 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
     return record.ops.texture_barrier(record, barrier);
+}
+
+<* Record one full BLAS or TLAS build using caller-owned input and scratch
+   spans. The command inserts no barrier.
+
+   @param commands : "Live recording token outside a render pass."
+   @param desc : "Borrowed destination, dynamic inputs, and build scratch."
+   @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
+fn void? cmd_build_acceleration_structure(
+    CommandList* commands,
+    AccelerationStructureBuildDesc* desc,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
+    return record.ops.build_acceleration_structure(record, desc);
+}
+
+<* Record an in-place acceleration-structure update using caller-owned input
+   and update scratch spans matching the completed build shape. The command
+   inserts no barrier.
+
+   @param commands : "Live recording token outside a render pass."
+   @param desc : "Borrowed destination, matching dynamic inputs, and update scratch."
+   @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
+fn void? cmd_update_acceleration_structure(
+    CommandList* commands,
+    AccelerationStructureBuildDesc* desc,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
+    return record.ops.update_acceleration_structure(record, desc);
 }
 
 <* Bind the active compute or graphics pipeline for later commands.

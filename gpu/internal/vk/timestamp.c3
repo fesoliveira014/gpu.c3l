@@ -228,6 +228,10 @@ fn vk::PipelineStageFlags2 timestamp_stage_to_vk(
         return (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
     }
+    if (stage.acceleration_structure_build) {
+        return (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
+            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    }
     unreachable();
 }
 
@@ -548,6 +552,7 @@ fn void? validate_full_timestamp_stage(
         && barrier_stage_mask_supported(
             stage,
             completion.queue_flags,
+            record.device_state.ray_queries_enabled,
         )) return;
     return report_timestamp_command_failure(
         state:           record.device_state,

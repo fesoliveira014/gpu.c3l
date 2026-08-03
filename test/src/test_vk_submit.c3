@@ -1068,7 +1068,7 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
 
     gpu::CompletionWait[1] invalid_waits = {{
         .point  = prior,
-        .before = (gpu::StageMask)(1u << 10),
+        .before = (gpu::StageMask)(1u << 11),
     }};
     gpu::SubmitDesc invalid_scope = {
         .completion_waits = invalid_waits[..],
@@ -1437,7 +1437,7 @@ fn void completion_wait_infos_emit_every_exact_native_stage() @test {
         (ulong)vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT
             | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
     );
-    vk::PipelineStageFlags2[8] expected = {
+    vk::PipelineStageFlags2[9] expected = {
         (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
         (vk::PipelineStageFlags2)
@@ -1452,8 +1452,11 @@ fn void completion_wait_infos_emit_every_exact_native_stage() @test {
         (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
         combined,
+        (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2
+                .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
     };
-    vk::ResolvedCompletionWait[8] completion_waits;
+    vk::ResolvedCompletionWait[9] completion_waits;
     foreach (i, stage : expected) {
         completion_waits[i] = {
             .source   = &source,
@@ -1461,7 +1464,7 @@ fn void completion_wait_infos_emit_every_exact_native_stage() @test {
             .sequence = (ulong)i + 1,
         };
     }
-    vk::SemaphoreSubmitInfo[8] native_waits;
+    vk::SemaphoreSubmitInfo[9] native_waits;
 
     usz count = vk::append_completion_wait_infos(
         waits:            native_waits[..],
@@ -1579,7 +1582,7 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
     assert(lists[0].is_valid(),
         "invalid wait stages preserve the executable token");
 
-    waits[0].before = (gpu::StageMask)(1u << 10);
+    waits[0].before = (gpu::StageMask)(1u << 11);
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
         "unknown completion stage bits are rejected");
     assert(lists[0].is_valid(),

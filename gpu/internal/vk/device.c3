@@ -31,6 +31,11 @@ const ZString SWAPCHAIN_MAINTENANCE_EXTENSION = "VK_EXT_swapchain_maintenance1";
 const ZString DYNAMIC_STATE_3_EXTENSION       = "VK_EXT_extended_dynamic_state3";
 const ZString GENERATED_WORK_EXTENSION        = "VK_EXT_device_generated_commands";
 const ZString GENERATED_WORK_USAGE_EXTENSION = "VK_KHR_maintenance5";
+const ZString ACCELERATION_STRUCTURE_EXTENSION =
+    "VK_KHR_acceleration_structure";
+const ZString RAY_QUERY_EXTENSION = "VK_KHR_ray_query";
+const ZString DEFERRED_HOST_OPERATIONS_EXTENSION =
+    "VK_KHR_deferred_host_operations";
 const uint GENERATED_WORK_TOKEN_COUNT  = 2;
 const uint GENERATED_WORK_TOKEN_OFFSET = 16;
 const uint GENERATED_WORK_RECORD_SIZE  = 40;
@@ -41,6 +46,7 @@ enum DeviceCreationCheckpoint : uint {
     ALLOCATOR,
     COMMAND_STORAGE,
     DESCRIPTOR_HEAP,
+    RAY_QUERY_STATE,
     PIPELINE_SHARED,
     BEFORE_PUBLICATION,
 }
@@ -119,10 +125,15 @@ struct VkDeviceState @public {
     bool                       memory_budget_enabled;
     bool                       draw_indirect_count;
     GeneratedWorkSupport       generated_work;
+    RayQueryCandidateSupport   ray_query_support;
+    bool                       ray_queries_enabled;
+    uint                       acceleration_structure_heap_capacity;
+    VkRayQueryDispatch*        ray_query_operations;
     float                      max_sampler_anisotropy;
     BufferTable                buffers;
     AllocationTable            allocations;
     TimestampPoolTable         timestamp_pools;
+    AccelerationStructureTable acceleration_structures;
     Mutex                      resource_mutex;
     Mutex                      pipeline_creation_mutex;
     Mutex                      texture_view_cache_mutex;
@@ -163,6 +174,189 @@ struct CapsInputs {
     GeneratedWorkSupport     generated_work;
     SparseTextureFeaturePlan sparse_textures;
     gpu::QueueRoles           sparse_binding_queues;
+    bool                      ray_queries_enabled;
+    uint                      acceleration_structure_heap_capacity;
+    RayQueryCandidateSupport  ray_query_support;
+}
+
+struct RayQueryCandidateSupport {
+    bool  acceleration_structure_extension;
+    bool  ray_query_extension;
+    bool  deferred_host_operations_extension;
+    bool  acceleration_structure;
+    bool  ray_query;
+    bool  descriptor_update_after_bind;
+    bool  buffer_device_address;
+    bool  runtime_descriptor_array;
+    bool  descriptor_partially_bound;
+    bool  descriptor_update_unused_while_pending;
+    bool  spirv_1_4;
+    bool  required_commands;
+    bool  triangle_vertex_format;
+    ulong max_geometry_count;
+    ulong max_primitive_count;
+    ulong max_instance_count;
+    uint  max_descriptor_count;
+    uint  max_per_stage_descriptor_count;
+    uint  max_per_stage_resources;
+    uint  max_all_pools_descriptors;
+    uint  scratch_alignment;
+}
+
+fn bool ray_query_candidate_supported(RayQueryCandidateSupport* support) {
+    return support != null
+        && support.acceleration_structure_extension
+        && support.ray_query_extension
+        && support.deferred_host_operations_extension
+        && support.acceleration_structure
+        && support.ray_query
+        && support.descriptor_update_after_bind
+        && support.buffer_device_address
+        && support.runtime_descriptor_array
+        && support.descriptor_partially_bound
+        && support.descriptor_update_unused_while_pending
+        && support.spirv_1_4
+        && support.required_commands
+        && support.triangle_vertex_format
+        && support.max_geometry_count > 0
+        && support.max_primitive_count > 0
+        && support.max_instance_count > 0
+        && support.max_descriptor_count > 0
+        && support.max_per_stage_descriptor_count > 0
+        && support.max_per_stage_resources > 0
+        && support.max_all_pools_descriptors > 0
+        && support.scratch_alignment > 0;
+}
+
+fn bool ray_query_descriptor_heap_fits_limits(
+    uint heap_capacity,
+    uint texture_capacity,
+    uint sampler_capacity,
+    RayQueryCandidateSupport* support,
+) {
+    if (!ray_query_candidate_supported(support)) return false;
+    HeapDescriptorTotals totals = descriptor_heap_totals(
+        texture_capacity,
+        sampler_capacity,
+    );
+    return heap_capacity > 0
+        && heap_capacity <= support.max_descriptor_count
+        && heap_capacity <= support.max_per_stage_descriptor_count
+        && totals.per_stage_resources + (ulong)heap_capacity
+            <= (ulong)support.max_per_stage_resources
+        && totals.all_pools_descriptors + (ulong)heap_capacity
+            <= (ulong)support.max_all_pools_descriptors;
+}
+
+fn uint narrow_ray_query_limit(ulong value) =>
+    value > (ulong)uint::max ? uint::max : (uint)value;
+
+fn gpu::RayQueryCaps normalize_ray_query_caps(
+    bool enabled,
+    uint heap_capacity,
+    uint texture_capacity,
+    uint sampler_capacity,
+    RayQueryCandidateSupport* support,
+) {
+    if (!enabled || !ray_query_descriptor_heap_fits_limits(
+        heap_capacity,
+        texture_capacity,
+        sampler_capacity,
+        support,
+    )) return {};
+    return {
+        .enabled = true,
+        .acceleration_structure_heap_capacity = heap_capacity,
+        .max_geometry_count = narrow_ray_query_limit(
+            support.max_geometry_count,
+        ),
+        .max_primitive_count = narrow_ray_query_limit(
+            support.max_primitive_count,
+        ),
+        .max_instance_count = narrow_ray_query_limit(
+            support.max_instance_count,
+        ),
+        .scratch_alignment = (usz)support.scratch_alignment,
+    };
+}
+
+fn RayQueryCandidateSupport query_ray_query_candidate_support(
+    vk::PhysicalDevice physical_device,
+) @private {
+    vk::PhysicalDeviceAccelerationStructureFeaturesKHR acceleration_features =
+        vk::physical_device_acceleration_structure_features_khr();
+    vk::PhysicalDeviceRayQueryFeaturesKHR ray_query_features =
+        vk::physical_device_ray_query_features_khr()
+            .set_next(&acceleration_features);
+    vk::PhysicalDeviceVulkan12Features features12 =
+        vk::physical_device_vulkan12features().set_next(&ray_query_features);
+    vk::PhysicalDeviceFeatures2 features2 =
+        vk::physical_device_features2().set_next(&features12);
+    vk::get_physical_device_features2(physical_device, &features2);
+
+    vk::PhysicalDeviceAccelerationStructurePropertiesKHR properties =
+        vk::physical_device_acceleration_structure_properties_khr();
+    vk::PhysicalDeviceVulkan12Properties properties12 =
+        vk::physical_device_vulkan12properties().set_next(&properties);
+    vk::PhysicalDeviceProperties2 properties2 =
+        vk::physical_device_properties2().set_next(&properties12);
+    vk::get_physical_device_properties2(physical_device, &properties2);
+
+    vk::FormatProperties2 format_properties = vk::format_properties2();
+    vk::get_physical_device_format_properties2(
+        physical_device,
+        vk::Format.R32G32B32_SFLOAT,
+        &format_properties,
+    );
+    uint vertex_format_bit = (uint)vk::FormatFeatureFlagBits
+        .ACCELERATION_STRUCTURE_VERTEX_BUFFER_BIT_KHR;
+    bool acceleration_extension = device_supports_extension(
+        physical_device,
+        ACCELERATION_STRUCTURE_EXTENSION,
+    );
+    bool ray_query_extension = device_supports_extension(
+        physical_device,
+        RAY_QUERY_EXTENSION,
+    );
+    bool deferred_host_extension = device_supports_extension(
+        physical_device,
+        DEFERRED_HOST_OPERATIONS_EXTENSION,
+    );
+    return {
+        .acceleration_structure_extension = acceleration_extension,
+        .ray_query_extension = ray_query_extension,
+        .deferred_host_operations_extension = deferred_host_extension,
+        .acceleration_structure = acceleration_features.acceleration_structure
+            != 0,
+        .ray_query = ray_query_features.ray_query != 0,
+        .descriptor_update_after_bind = acceleration_features
+            .descriptor_binding_acceleration_structure_update_after_bind != 0,
+        .buffer_device_address = features12.buffer_device_address != 0,
+        .runtime_descriptor_array = features12.runtime_descriptor_array != 0,
+        .descriptor_partially_bound =
+            features12.descriptor_binding_partially_bound != 0,
+        .descriptor_update_unused_while_pending =
+            features12.descriptor_binding_update_unused_while_pending != 0,
+        .spirv_1_4 = properties2.properties.api_version >= API_VERSION_1_2,
+        .required_commands = acceleration_extension
+            && deferred_host_extension,
+        .triangle_vertex_format =
+            ((uint)format_properties.format_properties.buffer_features
+                & vertex_format_bit) != 0,
+        .max_geometry_count = properties.max_geometry_count,
+        .max_primitive_count = properties.max_primitive_count,
+        .max_instance_count = properties.max_instance_count,
+        .max_descriptor_count = properties
+            .max_descriptor_set_update_after_bind_acceleration_structures,
+        .max_per_stage_descriptor_count = properties
+            .max_per_stage_descriptor_update_after_bind_acceleration_structures,
+        .max_per_stage_resources = properties12
+            .max_per_stage_update_after_bind_resources,
+        .max_all_pools_descriptors = properties12
+            .max_update_after_bind_descriptors_in_all_pools,
+        .scratch_alignment = properties
+            .min_acceleration_structure_scratch_offset_alignment,
+    };
 }
 
 fn bool presentation_maintenance_supported(
@@ -288,6 +482,8 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .reset_timestamps            = &trusted_reset_timestamps,
     .write_timestamp             = &trusted_write_timestamp,
     .resolve_timestamps          = &trusted_resolve_timestamps,
+    .build_acceleration_structure  = &trusted_build_acceleration_structure,
+    .update_acceleration_structure = &trusted_update_acceleration_structure,
 };
 
 const CommandOps FULL_COMMAND_OPS @private = {
@@ -318,6 +514,8 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .reset_timestamps            = &full_reset_timestamps,
     .write_timestamp             = &full_write_timestamp,
     .resolve_timestamps          = &full_resolve_timestamps,
+    .build_acceleration_structure  = &full_build_acceleration_structure,
+    .update_acceleration_structure = &full_update_acceleration_structure,
 };
 
 fn bool contract_uses_full_validation(DeviceValidationPolicy policy) =>
@@ -385,6 +583,7 @@ fn gpu::Device? create_vk_device_with_probe(
             : null,
         queue_request:               &normalized.queues,
         enable_sparse_textures:      normalized.enable_sparse_textures,
+        enable_ray_queries:          normalized.enable_ray_queries,
         shader_heap_support:         &adapter_state.shader_heap,
         probe:                       probe,
         creation_ops:                creation_ops,
@@ -423,6 +622,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     gpu::Surface* presentation_surface_owner = null,
     gpu::QueueRequest* queue_request = null,
     bool enable_sparse_textures = false,
+    bool enable_ray_queries = false,
     ShaderHeapSupport* shader_heap_support = null,
     DeviceCreationProbe* probe = null,
     DeviceCreationOps* creation_ops = null,
@@ -459,6 +659,26 @@ fn gpu::Device? create_vk_device_from_runtime(
         state.instance_dispatch.surface = runtime_state.dispatch.surface;
     }
     state.physical_device = physical_device;
+    state.ray_queries_enabled = enable_ray_queries;
+    state.acceleration_structure_heap_capacity = enable_ray_queries
+        ? config.acceleration_structure_heap_capacity
+        : 0;
+    state.ray_query_support = query_ray_query_candidate_support(
+        physical_device,
+    );
+    if (enable_ray_queries
+        && !ray_query_candidate_supported(&state.ray_query_support)) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (enable_ray_queries
+        && !ray_query_descriptor_heap_fits_limits(
+            config.acceleration_structure_heap_capacity,
+            state.shader_heap.texture_capacity,
+            state.shader_heap.sampler_capacity,
+            &state.ray_query_support,
+        )) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     families = presentation_surface == null
         ? select_queue_families(
             physical_device: state.physical_device,
@@ -497,9 +717,22 @@ fn gpu::Device? create_vk_device_from_runtime(
         vk::physical_device_extended_dynamic_state3features_ext();
     vk::PhysicalDeviceVulkan13Features features13 =
         vk::physical_device_vulkan13features();
+    vk::PhysicalDeviceAccelerationStructureFeaturesKHR
+        acceleration_structure_features =
+            vk::physical_device_acceleration_structure_features_khr();
+    vk::PhysicalDeviceRayQueryFeaturesKHR ray_query_features =
+        vk::physical_device_ray_query_features_khr();
     if (generated_work_usage_extension) {
         maintenance5_features = maintenance5_features.set_next(&generated_work_features);
         features13 = features13.set_next(&maintenance5_features);
+    }
+    if (state.ray_queries_enabled) {
+        acceleration_structure_features =
+            acceleration_structure_features.set_next(features13.p_next);
+        ray_query_features = ray_query_features.set_next(
+            &acceleration_structure_features,
+        );
+        features13 = features13.set_next(&ray_query_features);
     }
     dynamic_color_features = dynamic_color_features.set_next(features13.p_next);
     features13 = features13.set_next(&dynamic_color_features);
@@ -605,6 +838,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         .debug          = debug_utils_enabled,
         .presentation   = state.presentation.enabled,
         .generated_work = state.generated_work.enabled,
+        .ray_queries    = state.ray_queries_enabled,
     };
     state.device_dispatch = load_vk_device_dispatch(
         state.device,
@@ -619,6 +853,13 @@ fn gpu::Device? create_vk_device_from_runtime(
     if (state.generated_work.enabled
         && !device_dispatch_supports_generated_work(&state.device_dispatch)) {
         return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (state.ray_queries_enabled
+        && !device_dispatch_supports_ray_queries(&state.device_dispatch)) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (state.ray_queries_enabled) {
+        state.ray_query_operations = &state.device_dispatch.ray_queries;
     }
     if (!device_dispatch_supports_dynamic_color(&state.device_dispatch)) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -730,8 +971,17 @@ fn gpu::Device? create_vk_device_from_runtime(
         state.presentation.swapchains.slots = mem::new_array(SwapchainCell, gpu::MAX_SWAPCHAINS);
     }
     create_sampler_table(state)!;
+    if (state.ray_queries_enabled) {
+        create_acceleration_structure_state(state)!;
+    }
     create_descriptor_heap(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;
+    if (state.ray_queries_enabled) {
+        reach_device_creation_checkpoint(
+            probe,
+            DeviceCreationCheckpoint.RAY_QUERY_STATE,
+        )!;
+    }
     create_pipeline_shared(
         state,
         config.pipeline_cache_data,
@@ -747,6 +997,10 @@ fn gpu::Device? create_vk_device_from_runtime(
         .generated_work        = state.generated_work,
         .sparse_textures       = sparse_texture_plan,
         .sparse_binding_queues = families.sparse_binding_queues,
+        .ray_queries_enabled   = state.ray_queries_enabled,
+        .acceleration_structure_heap_capacity =
+            config.acceleration_structure_heap_capacity,
+        .ray_query_support     = state.ray_query_support,
     };
     state.caps = build_caps(
         base:                    &features2.features,
@@ -884,6 +1138,7 @@ fn void destroy_state(VkDeviceState* state) @private {
             mem::free(state.command_allocators.slots.ptr);
             state.command_allocators.slots = {};
         }
+        destroy_acceleration_structure_state(state);
         // Internal buffers and device-loss leftovers remain backend-owned.
         if (state.allocator != null && state.buffers.slots.ptr != null) {
             foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {
@@ -1325,6 +1580,16 @@ fn void? create_logical_device_with_queue_infos(
             .set_dynamic_rendering(vk::TRUE)
             .set_synchronization2(vk::TRUE)
             .set_maintenance4(vk::TRUE);
+    vk::PhysicalDeviceAccelerationStructureFeaturesKHR
+        acceleration_structure_features =
+            vk::physical_device_acceleration_structure_features_khr()
+                .set_acceleration_structure(vk::TRUE)
+                .set_descriptor_binding_acceleration_structure_update_after_bind(
+                    vk::TRUE,
+                );
+    vk::PhysicalDeviceRayQueryFeaturesKHR ray_query_features =
+        vk::physical_device_ray_query_features_khr()
+            .set_ray_query(vk::TRUE);
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color_features =
         vk::physical_device_extended_dynamic_state3features_ext()
             .set_extended_dynamic_state3color_blend_enable(vk::TRUE)
@@ -1332,6 +1597,14 @@ fn void? create_logical_device_with_queue_infos(
             .set_extended_dynamic_state3color_write_mask(vk::TRUE);
     if (state.generated_work.enabled) {
         features13 = features13.set_next(&maintenance5_features);
+    }
+    if (state.ray_queries_enabled) {
+        acceleration_structure_features =
+            acceleration_structure_features.set_next(features13.p_next);
+        ray_query_features = ray_query_features.set_next(
+            &acceleration_structure_features,
+        );
+        features13 = features13.set_next(&ray_query_features);
     }
     dynamic_color_features = dynamic_color_features.set_next(features13.p_next);
     features13 = features13.set_next(&dynamic_color_features);
@@ -1377,13 +1650,18 @@ fn void? create_logical_device_with_queue_infos(
     features2.features.shader_storage_image_write_without_format = vk::TRUE;
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[7] extensions;
+    ZString[10] extensions;
     uint extension_count = 0;
     extensions[extension_count++] = DYNAMIC_STATE_3_EXTENSION;
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
     if (state.generated_work.enabled) {
         extensions[extension_count++] = GENERATED_WORK_EXTENSION;
         extensions[extension_count++] = GENERATED_WORK_USAGE_EXTENSION;
+    }
+    if (state.ray_queries_enabled) {
+        extensions[extension_count++] = ACCELERATION_STRUCTURE_EXTENSION;
+        extensions[extension_count++] = RAY_QUERY_EXTENSION;
+        extensions[extension_count++] = DEFERRED_HOST_OPERATIONS_EXTENSION;
     }
     if (state.presentation.enabled) {
         if (!device_supports_extension(
@@ -1494,6 +1772,13 @@ fn gpu::DeviceCaps build_caps(
                 .binding_queues     = inputs.sparse_binding_queues,
             }
             : {},
+        .ray_queries                = normalize_ray_query_caps(
+            inputs.ray_queries_enabled,
+            inputs.acceleration_structure_heap_capacity,
+            inputs.texture_capacity,
+            inputs.sampler_capacity,
+            &inputs.ray_query_support,
+        ),
         .texture_heap_capacity      = inputs.texture_capacity,
         .sampler_heap_capacity      = inputs.sampler_capacity,
         .max_color_attachments      = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS

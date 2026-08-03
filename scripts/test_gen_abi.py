@@ -25,6 +25,17 @@ struct RootPush {
 }
 $assert RootPush::size == 8;
 
+struct AccelerationStructureInstance {
+    Vec4f transform_row_0;
+    Vec4f transform_row_1;
+    Vec4f transform_row_2;
+    uint custom_index_and_mask;
+    uint record_offset_and_flags;
+    GpuAddress acceleration_structure;
+}
+$assert AccelerationStructureInstance::size == 64;
+$assert $reflect(AccelerationStructureInstance.acceleration_structure).offset == 56;
+
 const RootAbiSpec ROOT_PUSH_ABI @private = {
     .members = { {} },
 };
@@ -37,6 +48,9 @@ class GenAbiTest(unittest.TestCase):
         public, private = gen_abi.split_gpu_c3(GENERATED)
 
         self.assertIn("struct RootPush", public)
+        self.assertIn("struct AccelerationStructureInstance", public)
+        self.assertIn("AccelerationStructureInstance::size == 64", public)
+        self.assertIn("AccelerationStructureInstance.acceleration_structure).offset == 56", public)
         self.assertNotIn("RootAbiSpec", public)
         self.assertIn("module gpu::internal @private;", private)
         self.assertIn("struct RootAbiMemberSpec @private", private)

@@ -11,6 +11,17 @@ fn void shader_visible_scalar_widths() @test {
     assert(GpuAddress::size == 8);
     assert(TextureIndex::size == uint::size);
     assert(SamplerIndex::size == uint::size);
+    assert(AccelerationStructureIndex::size == uint::size);
+}
+
+fn void acceleration_structure_instance_layout() @test {
+    assert(AccelerationStructureInstance::size == 64);
+    assert($reflect(AccelerationStructureInstance.transform_row_0).offset == 0);
+    assert($reflect(AccelerationStructureInstance.transform_row_1).offset == 16);
+    assert($reflect(AccelerationStructureInstance.transform_row_2).offset == 32);
+    assert($reflect(AccelerationStructureInstance.custom_index_and_mask).offset == 48);
+    assert($reflect(AccelerationStructureInstance.record_offset_and_flags).offset == 52);
+    assert($reflect(AccelerationStructureInstance.acceleration_structure).offset == 56);
 }
 
 fn void root_push_layout() @test {

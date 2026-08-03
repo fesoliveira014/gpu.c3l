@@ -716,6 +716,7 @@ fn void? vk_cmd_barrier_with_ops(
         rejected_field = barrier_queue_rejected_field(
             barrier,
             completion.queue_flags,
+            state.ray_queries_enabled,
         );
         if (rejected_field != null) {
             invariant = "stage mask must be supported by the recording queue";
@@ -740,6 +741,7 @@ fn void? vk_cmd_barrier_with_ops(
     vk::MemoryBarrier2 native_barrier = barrier_to_vk(
         barrier,
         state.generated_work.enabled,
+        state.ray_queries_enabled,
     );
     emit_barrier(commands, &native_barrier, ops);
 }
@@ -758,6 +760,7 @@ fn void? trusted_barrier_with_ops(
     vk::MemoryBarrier2 native_barrier = barrier_to_vk(
         barrier,
         state.generated_work.enabled,
+        state.ray_queries_enabled,
     );
     emit_barrier(commands, &native_barrier, ops);
 }

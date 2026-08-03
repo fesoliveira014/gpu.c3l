@@ -111,6 +111,14 @@ alias CmdResolveTimestampsFn @private = fn void? (
     uint,
     gpu::GpuSpan,
 );
+alias CmdBuildAccelerationStructureFn @private = fn void? (
+    CommandRecord*,
+    gpu::AccelerationStructureBuildDesc*,
+);
+alias CmdUpdateAccelerationStructureFn @private = fn void? (
+    CommandRecord*,
+    gpu::AccelerationStructureBuildDesc*,
+);
 
 const uint MAX_COMMAND_LISTS = gpu::internal::MAX_DEVICE_COMMANDS;
 const uint COMMAND_FREE_NONE = 0;
@@ -169,6 +177,7 @@ struct CommandRecord @public {
     NativePipelineBinding            native_compute_pipeline;
     DescriptorHeapCommandBinding     descriptor_heap_binding;
     CommandScratch*                  scratch;
+    uint                             pending_acceleration_structure_head;
 }
 
 struct CommandOps @public {
@@ -199,6 +208,8 @@ struct CommandOps @public {
     CmdResetTimestampsFn          reset_timestamps;
     CmdWriteTimestampFn           write_timestamp;
     CmdResolveTimestampsFn        resolve_timestamps;
+    CmdBuildAccelerationStructureFn  build_acceleration_structure;
+    CmdUpdateAccelerationStructureFn update_acceleration_structure;
 }
 
 struct CommandCell {
@@ -431,6 +442,10 @@ fn void destroy_command_table(VkDeviceState* state) {
     if (state.commands.slots.ptr == null) return;
     foreach (&cell : state.commands.slots[:state.commands.next_new]) {
         if (cell.used) {
+            abandon_pending_acceleration_structure_builds(
+                &cell.record,
+                true,
+            );
             clear_command_references(&cell.record);
         }
     }

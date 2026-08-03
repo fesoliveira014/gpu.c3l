@@ -72,6 +72,8 @@
         "src/test_vk_device_desc.c3",
         "src/test_vk_dispatch.c3",
         "src/test_vk_features.c3",
+        "src/test_vk_acceleration_structure_table.c3",
+        "src/test_vk_ray_query.c3",
         "src/test_vk_runtime.c3",
         "src/test_vk_bootstrap.c3",
         "src/test_vk_public_contract.c3",

@@ -1230,6 +1230,7 @@ fn void rollback_submit_claim(
         if (record.state == gpu::internal::CommandState.SUBMITTING) {
             record.state = gpu::internal::CommandState.EXECUTABLE;
         }
+        abandon_pending_acceleration_structure_builds(record, false);
     }
 }
 
@@ -1255,8 +1256,10 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
         }
         if (desc.readiness_before.indirect) return gpu::INVALID_ARGUMENT~;
         inputs.readiness_stages = submit_wait_stages_to_vk(
-            desc.readiness_before,
-            target.queue_flags,
+            stages:         desc.readiness_before,
+            flags:          target.queue_flags,
+            generated_work: false,
+            ray_queries:    state.ray_queries_enabled,
         )!;
         gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
             state,
@@ -1288,9 +1291,10 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 sequence,
             )!;
             vk::PipelineStageFlags2 stages = submit_wait_stages_to_vk(
-                wait.before,
-                target.queue_flags,
-                state.generated_work.enabled,
+                stages:         wait.before,
+                flags:          target.queue_flags,
+                generated_work: state.generated_work.enabled,
+                ray_queries:    state.ray_queries_enabled,
             )!;
             inputs.completion_waits[i] = {
                 .source   = source,

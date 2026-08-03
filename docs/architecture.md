@@ -53,6 +53,8 @@ Runtime
     GpuAllocation
     TextureHandle
       TextureView / AttachmentView
+    AccelerationStructureHandle
+      AccelerationStructureView (TLAS descriptor owner)
     PipelineHandle
     TimestampPool
     CommandAllocator
@@ -119,6 +121,14 @@ Destroying the view recycles that slot immediately. `SamplerIndex` is returned
 by device-wide sampler interning and remains stable until device destruction.
 Neither index is an ownership token.
 
+Acceleration structures use the same explicit storage model. A BLAS owns
+triangle or AABB capacity metadata; a TLAS owns instance capacity. Hidden
+creation owns its backing internally, while placed and dedicated forms expose
+allocation ownership. Build inputs and scratch are caller-owned spans.
+`AccelerationStructureView` owns a recyclable descriptor slot and exposes a
+raw `AccelerationStructureIndex`; packed TLAS instances contain an ordinary
+BLAS `GpuAddress`. Neither raw value retains its owner.
+
 ## Shaders and pipelines
 
 Pipeline creation borrows SPIR-V bytes and entry-point strings only for the
@@ -131,6 +141,10 @@ Generic shader data is reached through root pointers. Compute commands push
 one `GpuAddress`; graphics commands push separate vertex and fragment root
 addresses. Textures and samplers are selected by raw heap indices stored in
 root data. See [Shader ABI](shader_abi.md).
+
+Ray-query shaders explicitly opt in through `ray_query.glsl` and select a TLAS
+through binding 5. The ordinary shader path remains extension-free. Procedural
+AABB candidates require shader-side intersection and explicit confirmation.
 
 Pipeline cache import/export deals with opaque driver data. A cache blob may be
 empty or minimally useful on a particular driver; it is an optimization, not
@@ -154,6 +168,11 @@ Direct, indirect, and generated work share the same command lifecycle.
 Generated work is capability-gated. Each allocator reserves any required
 generated preprocess storage explicitly while quiescent.
 
+Acceleration-structure builds reserve fixed geometry/range lowering arrays in
+each command unit. Full builds and in-place updates use caller-owned scratch,
+record no hidden barriers, and complete through the ordinary submission and
+retirement lifecycle. A completed full build establishes update eligibility.
+
 ## Synchronization and texture state
 
 Global `Barrier` values express execution and memory dependencies. Texture
@@ -164,6 +183,11 @@ history or repair a mismatched transition.
 Cross-queue ordering is expressed with completion waits and destination
 stages. Queue submission itself is externally synchronized per selected native
 queue; aliased semantic roles therefore share that boundary.
+
+The acceleration-structure-build stage orders BLAS/TLAS build and update
+reads/writes. Shader query access belongs to the calling compute, vertex, or
+fragment stage. Applications insert build-to-build, build/update-to-query, and
+cross-submit dependencies explicitly.
 
 Host mapping operations do not imply GPU completion. The application orders a
 flush before submission, waits for completion before invalidation/readback,
@@ -191,8 +215,9 @@ Public operations fall into three categories:
 - **Externally synchronized:** runtime/surface registry mutation, operations on
   one swapchain, and submit/present/sparse bind on one native queue.
 - **Thread-safe:** immutable adapter queries, allocation and most resource
-  operations, pipeline creation, completion polling/waiting, and operations on
-  distinct independent objects.
+  operations, acceleration-structure/view lifecycle operations, pipeline
+  creation, completion polling/waiting, and operations on distinct independent
+  objects.
 - **Thread-confined:** a recording token and all aliases, plus the allocator
   while it has live recordings. Distinct allocators may record concurrently.
 
@@ -207,7 +232,9 @@ The following describes the current backend so contributors can reason about
 contention. Lock names and decomposition are not compatibility promises.
 
 - Device resource state protects creation/destruction and fixed resource
-  tables; texture-view heap publication has a subordinate cache domain.
+  tables; texture-view heap publication has a subordinate cache domain. TLAS
+  view publication and destruction serialize with the target structure under
+  the resource domain.
 - Each selected queue has a submission domain and a shorter retirement domain.
 - Each command allocator has an independent domain; recording is normally
   confined there instead of serialized through a device-wide recording lock.

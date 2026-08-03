@@ -129,6 +129,11 @@ struct CommandScratch {
     uint                       reference_count;
     uint[]                     generated_preprocess_indices;
     uint                       generated_preprocess_count;
+    vk::AccelerationStructureGeometryKHR[]
+        acceleration_structure_geometries;
+    vk::AccelerationStructureBuildRangeInfoKHR[]
+        acceleration_structure_ranges;
+    uint acceleration_structure_geometry_count;
     bool                       in_use;
 }
 
@@ -139,6 +144,10 @@ struct CommandAllocatorSlot {
     CommandScratch[]             scratch;
     CommandResourceReference[]   reference_storage;
     uint[]                       preprocess_index_storage;
+    vk::AccelerationStructureGeometryKHR[]
+        acceleration_structure_geometry_storage;
+    vk::AccelerationStructureBuildRangeInfoKHR[]
+        acceleration_structure_range_storage;
     uint[]                       available;
     uint                         available_count;
     GeneratedPreprocessBuffer[]  reservations;
@@ -296,6 +305,18 @@ fn void destroy_command_allocator_slot_with_ops(
     if (slot.preprocess_index_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.preprocess_index_storage.ptr);
     }
+    if (slot.acceleration_structure_geometry_storage.ptr != null) {
+        alloc::free(
+            state.host_allocator,
+            slot.acceleration_structure_geometry_storage.ptr,
+        );
+    }
+    if (slot.acceleration_structure_range_storage.ptr != null) {
+        alloc::free(
+            state.host_allocator,
+            slot.acceleration_structure_range_storage.ptr,
+        );
+    }
     if (slot.available.ptr != null) alloc::free(state.host_allocator, slot.available.ptr);
     if (slot.mutex.is_initialized()) (void)slot.mutex.destroy();
     *slot = {};
@@ -389,6 +410,28 @@ fn void? initialize_command_allocator_slot_with_ops(
         }
         slot.reservations = reservations;
     }
+    uint acceleration_structure_geometry_capacity =
+        desc.max_acceleration_structure_geometries_per_build;
+    if (acceleration_structure_geometry_capacity > 0) {
+        usz total_geometry_capacity = (usz)capacity
+            * (usz)acceleration_structure_geometry_capacity;
+        vk::AccelerationStructureGeometryKHR[]? geometry_storage =
+            alloc::new_array_try(
+                state.host_allocator,
+                vk::AccelerationStructureGeometryKHR,
+                (sz)total_geometry_capacity,
+            );
+        if (catch geometry_storage) return gpu::OUT_OF_HOST_MEMORY~;
+        slot.acceleration_structure_geometry_storage = geometry_storage;
+        vk::AccelerationStructureBuildRangeInfoKHR[]? range_storage =
+            alloc::new_array_try(
+                state.host_allocator,
+                vk::AccelerationStructureBuildRangeInfoKHR,
+                (sz)total_geometry_capacity,
+            );
+        if (catch range_storage) return gpu::OUT_OF_HOST_MEMORY~;
+        slot.acceleration_structure_range_storage = range_storage;
+    }
     for (uint i = 0; i < capacity; i++) {
         if (reference_capacity > 0) {
             usz start = (usz)i * (usz)reference_capacity;
@@ -400,6 +443,18 @@ fn void? initialize_command_allocator_slot_with_ops(
             usz start = (usz)i * (usz)preprocess_capacity;
             slot.scratch[i].generated_preprocess_indices =
                 slot.preprocess_index_storage[start:preprocess_capacity];
+        }
+        if (acceleration_structure_geometry_capacity > 0) {
+            usz start = (usz)i
+                * (usz)acceleration_structure_geometry_capacity;
+            slot.scratch[i].acceleration_structure_geometries =
+                slot.acceleration_structure_geometry_storage[
+                    start:acceleration_structure_geometry_capacity
+                ];
+            slot.scratch[i].acceleration_structure_ranges =
+                slot.acceleration_structure_range_storage[
+                    start:acceleration_structure_geometry_capacity
+                ];
         }
         slot.available[i] = capacity - 1 - i;
     }
@@ -876,6 +931,7 @@ fn void return_allocator_buffer_locked(
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.reference_count = 0;
     scratch.generated_preprocess_count = 0;
+    scratch.acceleration_structure_geometry_count = 0;
     scratch.in_use = false;
     slot.available[slot.available_count++] = buffer_index;
 }
@@ -941,6 +997,7 @@ fn void? vk_begin_commands_with_ops(
     scratch.in_use = true;
     scratch.reference_count = 0;
     scratch.generated_preprocess_count = 0;
+    scratch.acceleration_structure_geometry_count = 0;
     slot.live_recordings++;
     if (!slot.recording_thread_set) {
         slot.recording_thread_identity = current_identity;
@@ -962,6 +1019,8 @@ fn void? vk_begin_commands_with_ops(
         .allocator_buffer = buffer_index,
         .queue            = allocator.queue,
         .scratch          = scratch,
+        .pending_acceleration_structure_head =
+            ACCELERATION_STRUCTURE_PENDING_NONE,
     };
     CommandRecord* record;
     {
@@ -1112,6 +1171,7 @@ fn void? vk_discard_commands(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     command.state = gpu::internal::CommandState.INACTIVE;
+    abandon_pending_acceleration_structure_builds(record, true);
     clear_command_scratch_references(record.scratch);
     recycle_generated_preprocess_indices_locked(
         state,
