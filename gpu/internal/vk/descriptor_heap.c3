@@ -265,7 +265,7 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     uint tex_capacity = state.shader_heap.texture_capacity;
     uint smp_capacity = state.shader_heap.sampler_capacity;
-    uint acceleration_structure_capacity = state.ray_queries_enabled
+    uint acceleration_structure_capacity = state.acceleration_structures_enabled
         ? state.acceleration_structure_heap_capacity
         : 0;
 
@@ -275,7 +275,7 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
     );
     heap.texture_cells          = mem::new_array(TextureDescriptorCell, tex_capacity);
     heap.texture_free           = mem::new_array(uint, tex_capacity);
-    if (state.ray_queries_enabled) {
+    if (state.acceleration_structures_enabled) {
         heap.acceleration_structure_view_owner =
             gpu::internal::resource_owner_tag(
                 state.resource_owner,
@@ -473,7 +473,7 @@ create_acceleration_structure_descriptor_view_with_ops(
     if (state == null || ops == null || ops.write == null) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (!state.ray_queries_enabled) return gpu::UNSUPPORTED_FEATURE~;
+    if (!state.acceleration_structures_enabled) return gpu::UNSUPPORTED_FEATURE~;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
 

@@ -10,6 +10,13 @@ import std::atomic;
 import std::atomic::types;
 
 alias QueueFamilyFlags @private = vk::QueueFlags;
+
+fn bool ray_tracing_queue_request_compatible(gpu::QueueRequest* request) {
+    gpu::QueueRequest normalized = request == null
+        ? gpu::internal::default_queue_request()
+        : *request;
+    return normalized.required.graphics || normalized.required.compute;
+}
 alias QueueSubmit2Fn @private = fn vk::Result (
     vk::Queue,
     uint,
@@ -1259,7 +1266,8 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             stages:         desc.readiness_before,
             flags:          target.queue_flags,
             generated_work: false,
-            ray_queries:    state.ray_queries_enabled,
+            ray_queries:    state.acceleration_structures_enabled,
+            ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
         )!;
         gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
             state,
@@ -1294,7 +1302,8 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 stages:         wait.before,
                 flags:          target.queue_flags,
                 generated_work: state.generated_work.enabled,
-                ray_queries:    state.ray_queries_enabled,
+                ray_queries:    state.acceleration_structures_enabled,
+                ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
             )!;
             inputs.completion_waits[i] = {
                 .source   = source,

@@ -322,6 +322,10 @@ fn vk::PipelineStageFlags2 barrier_before_stages_to_vk(
         mask |= (ulong)vk::PipelineStageFlagBits2
             .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
     }
+    if (stages.ray_tracing) {
+        mask |= (ulong)vk::PipelineStageFlagBits2
+            .STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+    }
     return (vk::PipelineStageFlags2)mask;
 }
 
@@ -363,6 +367,9 @@ fn vk::AccessFlags2 barrier_before_access_to_vk(
                 .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
             | (ulong)vk::AccessFlagBits2
                 .ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    }
+    if (stages.ray_tracing) {
+        mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT;
     }
     return (vk::AccessFlags2)mask;
 }
@@ -412,6 +419,14 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
                 .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
             | (ulong)vk::AccessFlagBits2
                 .ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    }
+    if (stages.ray_tracing) {
+        mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
+            | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+            | (ulong)vk::AccessFlagBits2
+                .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
+            | (ulong)vk::AccessFlagBits2
+                .ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR;
     }
     return (vk::AccessFlags2)mask;
 }
@@ -467,6 +482,7 @@ fn bool barrier_stage_mask_supported(
     gpu::StageMask stages,
     vk::QueueFlags flags,
     bool ray_queries = false,
+    bool ray_tracing_pipelines = false,
 ) @private {
     bool graphics = queue_flags_include(flags, vk::QueueFlagBits.GRAPHICS_BIT);
     bool compute = queue_flags_include(flags, vk::QueueFlagBits.COMPUTE_BIT);
@@ -480,9 +496,12 @@ fn bool barrier_stage_mask_supported(
         && !graphics) {
         return false;
     }
-    if ((stages.indirect || stages.acceleration_structure_build)
+    if ((stages.indirect
+            || stages.acceleration_structure_build
+            || stages.ray_tracing)
         && !graphics && !compute) return false;
     if (stages.acceleration_structure_build && !ray_queries) return false;
+    if (stages.ray_tracing && !ray_tracing_pipelines) return false;
     return true;
 }
 
@@ -492,11 +511,17 @@ fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
     vk::QueueFlags flags,
     bool generated_work = false,
     bool ray_queries = false,
+    bool ray_tracing_pipelines = false,
 ) {
     if (!barrier_stage_mask_valid(stages)
         || stages.host
         || stages.present
-        || !barrier_stage_mask_supported(stages, flags, ray_queries)) {
+        || !barrier_stage_mask_supported(
+            stages,
+            flags,
+            ray_queries,
+            ray_tracing_pipelines,
+        )) {
         return gpu::INVALID_ARGUMENT~;
     }
     return barrier_before_stages_to_vk(stages, generated_work);
@@ -506,11 +531,22 @@ fn ZString barrier_queue_rejected_field(
     gpu::Barrier* barrier,
     vk::QueueFlags flags,
     bool ray_queries = false,
+    bool ray_tracing_pipelines = false,
 ) {
-    if (!barrier_stage_mask_supported(barrier.before, flags, ray_queries)) {
+    if (!barrier_stage_mask_supported(
+        barrier.before,
+        flags,
+        ray_queries,
+        ray_tracing_pipelines,
+    )) {
         return "Barrier.before";
     }
-    if (!barrier_stage_mask_supported(barrier.after, flags, ray_queries)) {
+    if (!barrier_stage_mask_supported(
+        barrier.after,
+        flags,
+        ray_queries,
+        ray_tracing_pipelines,
+    )) {
         return "Barrier.after";
     }
     return null;

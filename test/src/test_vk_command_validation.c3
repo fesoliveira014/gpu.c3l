@@ -161,8 +161,8 @@ fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    bool previous_ray_queries = record.device_state.ray_queries_enabled;
-    defer record.device_state.ray_queries_enabled = previous_ray_queries;
+    bool previous_acceleration_structures = record.device_state.acceleration_structures_enabled;
+    defer record.device_state.acceleration_structures_enabled = previous_acceleration_structures;
 
     BarrierEmitCapture capture;
     vk::BarrierEmitOps ops = {
@@ -173,7 +173,7 @@ fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
         .before = { .acceleration_structure_build },
         .after = { .compute },
     };
-    record.device_state.ray_queries_enabled = false;
+    record.device_state.acceleration_structures_enabled = false;
     assert(@catch(vk::barrier_with_injected_ops(
         record,
         &dependency,
@@ -183,7 +183,7 @@ fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
     assert(capture.calls == 0,
         "an unavailable acceleration-structure stage emits no dependency");
 
-    record.device_state.ray_queries_enabled = true;
+    record.device_state.acceleration_structures_enabled = true;
     vk::barrier_with_injected_ops(record, &dependency, &ops)!!;
 
     ulong source_access =
@@ -2529,7 +2529,7 @@ fn void barrier_unknown_stage_bit_faults() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
-        .before = (gpu::StageMask)(1u << 11),
+        .before = (gpu::StageMask)(1u << 12),
         .after  = { .compute = true },
     };
 

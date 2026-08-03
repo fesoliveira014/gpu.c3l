@@ -18,7 +18,8 @@ struct VkDeviceDispatchPlan {
     bool debug;
     bool presentation;
     bool generated_work;
-    bool ray_queries;
+    bool acceleration_structures;
+    bool ray_tracing_pipelines;
 }
 
 struct VkInstanceDebugDispatch {
@@ -69,7 +70,7 @@ struct VkDynamicColorDispatch {
     vk::PFN_vkCmdSetColorWriteMaskEXT     set_write_mask;
 }
 
-struct VkRayQueryDispatch {
+struct VkAccelerationStructureDispatch {
     vk::PFN_vkCreateAccelerationStructureKHR           create_acceleration_structure;
     vk::PFN_vkDestroyAccelerationStructureKHR          destroy_acceleration_structure;
     vk::PFN_vkGetAccelerationStructureBuildSizesKHR    get_build_sizes;
@@ -77,12 +78,19 @@ struct VkRayQueryDispatch {
     vk::PFN_vkGetAccelerationStructureDeviceAddressKHR get_device_address;
 }
 
+struct VkRayTracingPipelineDispatch {
+    vk::PFN_vkCreateRayTracingPipelinesKHR          create_pipelines;
+    vk::PFN_vkGetRayTracingShaderGroupHandlesKHR    get_shader_group_handles;
+    vk::PFN_vkCmdTraceRaysKHR                       cmd_trace_rays;
+}
+
 struct VkDeviceDispatch {
     VkDeviceDebugDispatch        debug;
     VkDevicePresentationDispatch presentation;
     VkGeneratedWorkDispatch      generated_work;
     VkDynamicColorDispatch       dynamic_color;
-    VkRayQueryDispatch           ray_queries;
+    VkAccelerationStructureDispatch acceleration_structures;
+    VkRayTracingPipelineDispatch    ray_tracing_pipelines;
 }
 
 fn VkInstanceDispatch load_vk_instance_dispatch(
@@ -212,8 +220,8 @@ fn VkDeviceDispatch load_vk_device_dispatch(
             ),
         };
     }
-    if (plan.ray_queries) {
-        dispatch.ray_queries = {
+    if (plan.acceleration_structures) {
+        dispatch.acceleration_structures = {
             .create_acceleration_structure =
                 (vk::PFN_vkCreateAccelerationStructureKHR)loader(
                     device,
@@ -239,6 +247,24 @@ fn VkDeviceDispatch load_vk_device_dispatch(
                     device,
                     "vkGetAccelerationStructureDeviceAddressKHR",
                 ),
+        };
+    }
+    if (plan.ray_tracing_pipelines) {
+        dispatch.ray_tracing_pipelines = {
+            .create_pipelines =
+                (vk::PFN_vkCreateRayTracingPipelinesKHR)loader(
+                    device,
+                    "vkCreateRayTracingPipelinesKHR",
+                ),
+            .get_shader_group_handles =
+                (vk::PFN_vkGetRayTracingShaderGroupHandlesKHR)loader(
+                    device,
+                    "vkGetRayTracingShaderGroupHandlesKHR",
+                ),
+            .cmd_trace_rays = (vk::PFN_vkCmdTraceRaysKHR)loader(
+                device,
+                "vkCmdTraceRaysKHR",
+            ),
         };
     }
     dispatch.dynamic_color = {
@@ -290,12 +316,20 @@ fn bool device_dispatch_supports_generated_work(VkDeviceDispatch* dispatch) {
         && dispatch.generated_work.destroy_layout != null;
 }
 
-fn bool device_dispatch_supports_ray_queries(VkDeviceDispatch* dispatch) {
-    return dispatch.ray_queries.create_acceleration_structure != null
-        && dispatch.ray_queries.destroy_acceleration_structure != null
-        && dispatch.ray_queries.get_build_sizes != null
-        && dispatch.ray_queries.cmd_build != null
-        && dispatch.ray_queries.get_device_address != null;
+fn bool device_dispatch_supports_acceleration_structures(VkDeviceDispatch* dispatch) {
+    return dispatch.acceleration_structures.create_acceleration_structure != null
+        && dispatch.acceleration_structures.destroy_acceleration_structure != null
+        && dispatch.acceleration_structures.get_build_sizes != null
+        && dispatch.acceleration_structures.cmd_build != null
+        && dispatch.acceleration_structures.get_device_address != null;
+}
+
+fn bool device_dispatch_supports_ray_tracing_pipelines(
+    VkDeviceDispatch* dispatch,
+) {
+    return dispatch.ray_tracing_pipelines.create_pipelines != null
+        && dispatch.ray_tracing_pipelines.get_shader_group_handles != null
+        && dispatch.ray_tracing_pipelines.cmd_trace_rays != null;
 }
 
 fn bool device_dispatch_supports_dynamic_color(VkDeviceDispatch* dispatch) {

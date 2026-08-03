@@ -783,7 +783,7 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
     if (catch heap_fault = check_heap_convention(
         reflect_module,
         selected_entry_point,
-        state.ray_queries_enabled,
+        state.acceleration_structures_enabled,
     )) {
         return report_shader_contract_failure(
             state:          state,

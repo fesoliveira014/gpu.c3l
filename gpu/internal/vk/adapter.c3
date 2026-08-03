@@ -17,7 +17,7 @@ struct VkAdapterState {
     vk::PhysicalDeviceProperties       properties;
     vk::PhysicalDeviceDriverProperties driver_properties;
     ShaderHeapSupport                  shader_heap;
-    RayQueryCandidateSupport           ray_queries;
+    RayTracingCandidateSupport         ray_tracing;
     bool                               device_baseline_supported;
     gpu::AdapterInfo                   info;
     gpu::AdapterDiagnostics            diagnostics;
@@ -144,7 +144,7 @@ fn void initialize_adapter(
         config,
         &adapter.shader_heap,
     );
-    adapter.ray_queries = query_ray_query_candidate_support(physical_device);
+    adapter.ray_tracing = query_ray_tracing_candidate_support(physical_device);
 
     bool has_driver_properties = adapter.properties.api_version >= API_VERSION_1_2
         || device_supports_extension(physical_device, "VK_KHR_driver_properties");
@@ -210,7 +210,19 @@ fn bool? vk_adapter_supports_ray_queries(
         return gpu::INVALID_ARGUMENT~;
     }
     return ray_query_candidate_supported(
-        &state.adapters[adapter_index].ray_queries,
+        &state.adapters[adapter_index].ray_tracing,
+    );
+}
+
+fn bool? vk_adapter_supports_ray_tracing_pipelines(
+    VkRuntimeState* state,
+    uint adapter_index,
+) {
+    if (state == null || adapter_index >= state.adapters.len) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return ray_tracing_pipeline_candidate_supported(
+        &state.adapters[adapter_index].ray_tracing,
     );
 }
 
@@ -222,8 +234,8 @@ fn bool? vk_adapter_supports_ray_query_heap(
     if (state == null || adapter_index >= state.adapters.len) {
         return gpu::INVALID_ARGUMENT~;
     }
-    RayQueryCandidateSupport* support =
-        &state.adapters[adapter_index].ray_queries;
+    RayTracingCandidateSupport* support =
+        &state.adapters[adapter_index].ray_tracing;
     uint texture_capacity = resolve_descriptor_capacity(
         state.config.texture_heap_capacity,
         gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
@@ -232,7 +244,7 @@ fn bool? vk_adapter_supports_ray_query_heap(
         state.config.sampler_heap_capacity,
         gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
     )!;
-    return ray_query_descriptor_heap_fits_limits(
+    return acceleration_structure_descriptor_heap_fits_limits(
         heap_capacity,
         texture_capacity,
         sampler_capacity,

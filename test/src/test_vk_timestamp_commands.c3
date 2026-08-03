@@ -261,7 +261,7 @@ fn void timestamp_stage_shape_rejects_invalid_masks() @test {
         .transfer = true,
     }));
     assert(timestamp_stage_mask_valid({ .acceleration_structure_build }));
-    assert(!timestamp_stage_mask_valid((gpu::StageMask)(1 << 11)));
+    assert(!timestamp_stage_mask_valid((gpu::StageMask)(1 << 12)));
 }
 
 fn void timestamp_destination_requires_packed_ulong_alignment() @test {
@@ -496,7 +496,7 @@ fn void timestamp_full_write_rejects_invalid_masks_without_emission() @test {
         { .present },
         { .compute, .transfer },
         { .acceleration_structure_build },
-        (gpu::StageMask)(1 << 11),
+        (gpu::StageMask)(1 << 12),
     };
 
     foreach (stage : invalid) {
@@ -526,7 +526,7 @@ fn void timestamp_trusted_write_rejects_invalid_masks_without_emission() @test {
         { .host },
         { .present },
         { .compute, .transfer },
-        (gpu::StageMask)(1 << 11),
+        (gpu::StageMask)(1 << 12),
     };
 
     foreach (stage : invalid) {

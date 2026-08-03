@@ -1068,7 +1068,7 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
 
     gpu::CompletionWait[1] invalid_waits = {{
         .point  = prior,
-        .before = (gpu::StageMask)(1u << 11),
+        .before = (gpu::StageMask)(1u << 12),
     }};
     gpu::SubmitDesc invalid_scope = {
         .completion_waits = invalid_waits[..],
@@ -1582,7 +1582,7 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
     assert(lists[0].is_valid(),
         "invalid wait stages preserve the executable token");
 
-    waits[0].before = (gpu::StageMask)(1u << 11);
+    waits[0].before = (gpu::StageMask)(1u << 12);
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
         "unknown completion stage bits are rejected");
     assert(lists[0].is_valid(),

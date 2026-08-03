@@ -852,26 +852,35 @@ fn void check_allocation_memory_policy(gpu::MemoryClass memory_class) {
         "the published slot retains actual alignment");
 }
 
-fn void ray_query_opt_in_widens_generic_buffer_usage_only() @test {
-    vk::BufferUsage baseline = vk::allocation_buffer_usage(false);
-    vk::BufferUsage ray_query = vk::allocation_buffer_usage(true);
+fn void ray_tracing_opt_ins_widen_generic_buffer_usage_exactly() @test {
+    vk::BufferUsage baseline = vk::allocation_buffer_usage(false, false);
+    vk::BufferUsage ray_query = vk::allocation_buffer_usage(true, false);
+    vk::BufferUsage ray_pipeline = vk::allocation_buffer_usage(true, true);
     uint baseline_native = (uint)vk::buffer_usage_to_vk(baseline);
     uint ray_query_native = (uint)vk::buffer_usage_to_vk(ray_query);
-    uint optional_bits =
+    uint ray_pipeline_native = (uint)vk::buffer_usage_to_vk(ray_pipeline);
+    uint acceleration_structure_bits =
         (uint)vk::BufferUsageFlagBits.ACCELERATION_STRUCTURE_STORAGE_BIT_KHR
         | (uint)vk::BufferUsageFlagBits
             .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    uint sbt_bit = (uint)vk::BufferUsageFlagBits.SHADER_BINDING_TABLE_BIT_KHR;
 
-    assert((baseline_native & optional_bits) == 0,
+    assert((baseline_native & (acceleration_structure_bits | sbt_bit)) == 0,
         "baseline generic buffers request no acceleration-structure usages");
-    assert((ray_query_native & optional_bits) == optional_bits,
+    assert((ray_query_native & acceleration_structure_bits)
+            == acceleration_structure_bits,
         "opted-in buffers cover persistent storage and build inputs");
+    assert((ray_query_native & sbt_bit) == 0,
+        "query-only buffers do not request shader-binding-table usage");
+    assert((ray_pipeline_native & (acceleration_structure_bits | sbt_bit))
+            == (acceleration_structure_bits | sbt_bit),
+        "pipeline-enabled buffers add shader-binding-table usage");
     assert((ray_query_native
             & (uint)vk::BufferUsageFlagBits.STORAGE_BUFFER_BIT) != 0
             && (ray_query_native
                 & (uint)vk::BufferUsageFlagBits.SHADER_DEVICE_ADDRESS_BIT) != 0,
         "opted-in buffers retain scratch storage and device addressing");
-    assert((ray_query_native & ~optional_bits) == baseline_native,
+    assert((ray_query_native & ~acceleration_structure_bits) == baseline_native,
         "ray-query opt-in changes only its two optional Vulkan usage bits");
 }
 

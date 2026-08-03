@@ -22,6 +22,7 @@ bitstruct BufferUsage : uint {
     bool vertex       : 7;
     bool acceleration_structure_storage     : 8;
     bool acceleration_structure_build_input : 9;
+    bool shader_binding_table               : 10;
 }
 
 struct BufferHandle {
@@ -143,6 +144,9 @@ fn vk::BufferUsageFlags buffer_usage_to_vk(BufferUsage usage) @private {
     if (usage.acceleration_structure_build_input) {
         flags |= (uint)vk::BufferUsageFlagBits
             .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    }
+    if (usage.shader_binding_table) {
+        flags |= (uint)vk::BufferUsageFlagBits.SHADER_BINDING_TABLE_BIT_KHR;
     }
     return (vk::BufferUsageFlags)flags;
 }
