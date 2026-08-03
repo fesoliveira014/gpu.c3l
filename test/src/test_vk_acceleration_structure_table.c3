@@ -444,6 +444,16 @@ fn void acceleration_structure_requirements_lower_exact_capacity_schema() @test 
             && (uint)capture.geometry_flags[0]
                 == (uint)vk::GeometryFlagBitsKHR.OPAQUE_BIT_KHR,
         "AABB capacity lowers the exact stride and geometry flags");
+
+    aabb_geometry.flags = {};
+    capture = {};
+    (void)get_acceleration_structure_requirements_with_ops(
+        &state,
+        &desc,
+        &ops,
+    )!!;
+    assert((uint)capture.geometry_flags[0] == 0,
+        "a geometry without the opaque flag lowers to no geometry flags");
 }
 
 fn void acceleration_structure_requirements_lower_tlas_and_static_update() @test {
