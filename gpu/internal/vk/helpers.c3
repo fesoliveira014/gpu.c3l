@@ -318,6 +318,10 @@ fn vk::PipelineStageFlags2 barrier_before_stages_to_vk(
             mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
         }
     }
+    if (stages.acceleration_structure_build) {
+        mask |= (ulong)vk::PipelineStageFlagBits2
+            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    }
     return (vk::PipelineStageFlags2)mask;
 }
 
@@ -328,7 +332,10 @@ fn vk::PipelineStageFlags2 barrier_after_stages_to_vk(
     return barrier_before_stages_to_vk(stages, generated_work);
 }
 
-fn vk::AccessFlags2 barrier_before_access_to_vk(gpu::StageMask stages) {
+fn vk::AccessFlags2 barrier_before_access_to_vk(
+    gpu::StageMask stages,
+    bool ray_queries_enabled = false,
+) {
     ulong mask;
     if (stages.all) mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_MEMORY_WRITE_BIT;
     if (stages.host) mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_HOST_WRITE_BIT;
@@ -337,6 +344,10 @@ fn vk::AccessFlags2 barrier_before_access_to_vk(gpu::StageMask stages) {
     }
     if (stages.compute || stages.vertex_shader || stages.fragment_shader) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT;
+        if (ray_queries_enabled) {
+            mask |= (ulong)vk::AccessFlagBits2
+                .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        }
     }
     if (stages.color_output) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
@@ -347,12 +358,19 @@ fn vk::AccessFlags2 barrier_before_access_to_vk(gpu::StageMask stages) {
     if (stages.present) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT;
     }
+    if (stages.acceleration_structure_build) {
+        mask |= (ulong)vk::AccessFlagBits2
+                .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
+            | (ulong)vk::AccessFlagBits2
+                .ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    }
     return (vk::AccessFlags2)mask;
 }
 
 fn vk::AccessFlags2 barrier_after_access_to_vk(
     gpu::StageMask stages,
     bool generated_work = false,
+    bool ray_queries_enabled = false,
 ) {
     ulong mask;
     if (stages.all) {
@@ -367,6 +385,10 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
     if (stages.compute || stages.vertex_shader || stages.fragment_shader) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
             | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT;
+        if (ray_queries_enabled) {
+            mask |= (ulong)vk::AccessFlagBits2
+                .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        }
     }
     if (stages.color_output) {
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT
@@ -385,19 +407,29 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
             mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV;
         }
     }
+    if (stages.acceleration_structure_build) {
+        mask |= (ulong)vk::AccessFlagBits2
+                .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
+            | (ulong)vk::AccessFlagBits2
+                .ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    }
     return (vk::AccessFlags2)mask;
 }
 
 fn vk::MemoryBarrier2 barrier_to_vk(
     gpu::Barrier* barrier,
     bool generated_work = false,
+    bool ray_queries_enabled = false,
 ) {
     return vk::memory_barrier2()
         .set_src_stage_mask(barrier_before_stages_to_vk(
             barrier.before,
             generated_work,
         ))
-        .set_src_access_mask(barrier_before_access_to_vk(barrier.before))
+        .set_src_access_mask(barrier_before_access_to_vk(
+            barrier.before,
+            ray_queries_enabled,
+        ))
         .set_dst_stage_mask(barrier_after_stages_to_vk(
             barrier.after,
             generated_work,
@@ -405,6 +437,7 @@ fn vk::MemoryBarrier2 barrier_to_vk(
         .set_dst_access_mask(barrier_after_access_to_vk(
             barrier.after,
             generated_work,
+            ray_queries_enabled,
         ));
 }
 
@@ -446,7 +479,8 @@ fn bool barrier_stage_mask_supported(
         && !graphics) {
         return false;
     }
-    if (stages.indirect && !graphics && !compute) return false;
+    if ((stages.indirect || stages.acceleration_structure_build)
+        && !graphics && !compute) return false;
     return true;
 }
 

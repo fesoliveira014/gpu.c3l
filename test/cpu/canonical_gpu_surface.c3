@@ -4,6 +4,7 @@ import gpu;
 
 fn void pin_runtime_adapter_device() {
     gpu::RuntimeDesc runtime_desc = {
+        .acceleration_structure_heap_capacity = 16,
     };
     gpu::Runtime runtime = {};
     gpu::AdapterList adapters = {};
@@ -18,6 +19,7 @@ fn void pin_runtime_adapter_device() {
     gpu::DeviceDesc device_desc = {
         .queues                 = queues,
         .enable_sparse_textures = true,
+        .enable_ray_queries     = true,
     };
     gpu::Device device = {};
     gpu::DeviceCaps caps = {
@@ -33,6 +35,14 @@ fn void pin_runtime_adapter_device() {
             .compute_valid_bits  = 64,
             .transfer_valid_bits = 64,
             .period_ns           = 1.0f,
+        },
+        .ray_queries                 = {
+            .enabled                              = true,
+            .acceleration_structure_heap_capacity = 16,
+            .max_geometry_count                   = 8,
+            .max_primitive_count                  = 1024,
+            .max_instance_count                   = 128,
+            .scratch_alignment                    = 256,
         },
         .sparse_textures              = {
             .image_2d           = true,
@@ -77,6 +87,7 @@ fn void pin_runtime_adapter_device() {
     (void)caps.queues;
     (void)caps.line_polygon_mode;
     (void)caps.timestamps;
+    (void)caps.ray_queries;
     (void)caps.sparse_textures;
     (void)caps.sparse_textures.image_2d;
     (void)caps.sparse_textures.image_3d;
@@ -94,6 +105,60 @@ fn void pin_runtime_adapter_device() {
     (void)caps.min_texel_buffer_alignment;
     (void)caps.max_sampler_lod_bias;
     (void)caps.max_sampler_anisotropy;
+}
+
+fn void pin_acceleration_structures() {
+    gpu::Device device = {};
+    gpu::GpuAllocation allocation = {};
+    gpu::CommandList commands = {};
+    gpu::AccelerationStructureGeometryDesc[1] geometry = {
+        {
+            .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
+            .triangles = {
+                .max_vertex_count = 3,
+                .max_primitive_count = 1,
+                .index_type = gpu::AccelerationStructureIndexType.NONE,
+            },
+        },
+    };
+    gpu::AccelerationStructureDesc desc = {
+        .kind = gpu::AccelerationStructureKind.BOTTOM_LEVEL,
+        .geometries = geometry[..],
+    };
+    gpu::AccelerationStructureHandle acceleration_structure = {};
+    gpu::AccelerationStructureInstanceDesc instance_desc = {
+        .bottom_level = acceleration_structure,
+    };
+    gpu::AccelerationStructureBuildDesc build_desc = {
+        .destination = acceleration_structure,
+    };
+    gpu::AccelerationStructureView view = {};
+
+    (void)gpu::get_acceleration_structure_requirements(&device, &desc);
+    (void)gpu::create_acceleration_structure(&device, &desc);
+    (void)gpu::create_placed_acceleration_structure(
+        device:     &device,
+        desc:       &desc,
+        allocation: allocation,
+        offset:     0,
+    );
+    (void)gpu::create_dedicated_acceleration_structure(&device, &desc);
+    (void)gpu::destroy_acceleration_structure(
+        &device,
+        acceleration_structure,
+    );
+    (void)gpu::get_acceleration_structure_address(
+        &device,
+        acceleration_structure,
+    );
+    (void)gpu::make_acceleration_structure_instance(&device, &instance_desc);
+    (void)gpu::create_acceleration_structure_view(
+        &device,
+        acceleration_structure,
+    );
+    (void)gpu::destroy_acceleration_structure_view(&device, view);
+    (void)gpu::cmd_build_acceleration_structure(&commands, &build_desc);
+    (void)gpu::cmd_update_acceleration_structure(&commands, &build_desc);
 }
 
 fn void pin_timestamps() {
@@ -321,7 +386,9 @@ fn void pin_commands_and_completion() {
     gpu::Device device = {};
     gpu::Queue queue = {};
     gpu::CommandAllocator allocator = {};
-    gpu::CommandAllocatorDesc command_allocator_desc = {};
+    gpu::CommandAllocatorDesc command_allocator_desc = {
+        .max_acceleration_structure_geometries_per_build = 8,
+    };
     gpu::CommandList commands = {};
     gpu::ExecutableCommandList executable = {};
     (void)commands.is_valid();
@@ -337,6 +404,7 @@ fn void pin_commands_and_completion() {
             .compute      = true,
             .depth_output = true,
             .indirect     = true,
+            .acceleration_structure_build = true,
         },
     };
     gpu::TextureHandle texture = {};

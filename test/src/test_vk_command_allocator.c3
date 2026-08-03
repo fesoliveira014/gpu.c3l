@@ -426,6 +426,64 @@ fn void command_allocator_native_creation_is_transactional() @test {
         "successful slot cleanup destroys the injected pool once");
 }
 
+fn void command_allocator_preallocates_fixed_acceleration_structure_arrays() @test {
+    gpu::internal::vk::QueueCompletionState[1] completions = {{
+        .native_id = 7ull << 32,
+        .timeline  = (vk::Semaphore)(uptr)0x20,
+        .bound     = true,
+    }};
+    gpu::internal::vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
+        .queue_completions = completions[..],
+    };
+    gpu::CommandAllocatorDesc desc = {
+        .command_buffer_capacity = 2,
+        .max_resource_references_per_list = 1,
+        .max_generated_preprocess_buffers_per_list = 1,
+        .max_acceleration_structure_geometries_per_build = 3,
+    };
+    gpu::Queue queue = { .id = 0 };
+    gpu::internal::vk::CommandAllocatorSlot slot;
+    CommandAllocatorCreateProbe probe;
+    gpu::internal::vk::CommandPoolOps ops = {
+        .user_data = &probe,
+        .create    = &probe_create_command_pool,
+        .destroy   = &probe_destroy_command_pool,
+        .allocate  = &probe_allocate_command_buffers,
+    };
+    gpu::internal::vk::initialize_command_allocator_slot_with_ops(
+        state: &state,
+        queue: queue,
+        desc:  &desc,
+        slot:  &slot,
+        ops:   &ops,
+    )!!;
+    defer gpu::internal::vk::destroy_command_allocator_slot_with_ops(
+        &state,
+        &slot,
+        &ops,
+    );
+
+    assert(slot.acceleration_structure_geometry_storage.len == 6
+            && slot.acceleration_structure_range_storage.len == 6,
+        "allocator storage is command capacity times geometry capacity");
+    assert(slot.scratch[0].acceleration_structure_geometries.len == 3
+            && slot.scratch[1].acceleration_structure_geometries.len == 3
+            && slot.scratch[0].acceleration_structure_geometries.ptr
+                != slot.scratch[1].acceleration_structure_geometries.ptr
+            && slot.scratch[0].acceleration_structure_ranges.ptr
+                != slot.scratch[1].acceleration_structure_ranges.ptr,
+        "each command unit owns disjoint fixed geometry and range slices");
+
+    slot.available_count = 0;
+    slot.scratch[0].in_use = true;
+    slot.scratch[0].acceleration_structure_geometry_count = 3;
+    gpu::internal::vk::return_allocator_buffer_locked(&slot, 0);
+    assert(slot.scratch[0].acceleration_structure_geometry_count == 0
+            && !slot.scratch[0].in_use,
+        "reuse resets logical counts without releasing fixed arrays");
+}
+
 fn void command_allocator_host_failure_sweep_is_transactional() @test {
     gpu::internal::vk::QueueCompletionState[1] completions = {{
         .native_id = 7ull << 32,

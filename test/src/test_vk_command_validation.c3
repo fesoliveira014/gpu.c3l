@@ -42,6 +42,7 @@ struct BarrierEmitCapture {
     uint calls;
     uint memory_barriers;
     uint image_barriers;
+    vk::MemoryBarrier2 memory_barrier;
 }
 
 fn void capture_sync_diagnostic(gpu::DebugMessage* message, void* user_data) {
@@ -76,6 +77,9 @@ fn void capture_barrier_emit(
     capture.calls++;
     capture.memory_barriers = dependency.memory_barrier_count;
     capture.image_barriers = dependency.image_memory_barrier_count;
+    if (dependency.memory_barrier_count == 1) {
+        capture.memory_barrier = dependency.p_memory_barriers[0];
+    }
 }
 
 fn gpu::Device make_sync_diagnostic_device(SyncDiagnosticCapture* capture) {
@@ -145,6 +149,54 @@ fn void global_barrier_emits_no_texture_barrier() @test {
             && capture.image_barriers == 0,
         "the submitted dependency contains one memory barrier and no image barrier"
     );
+}
+
+fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    bool previous_ray_queries = record.device_state.ray_queries_enabled;
+    record.device_state.ray_queries_enabled = true;
+    defer record.device_state.ray_queries_enabled = previous_ray_queries;
+
+    BarrierEmitCapture capture;
+    vk::BarrierEmitOps ops = {
+        .user_data = &capture,
+        .emit = &capture_barrier_emit,
+    };
+    gpu::Barrier dependency = {
+        .before = { .acceleration_structure_build },
+        .after = { .compute },
+    };
+    vk::barrier_with_injected_ops(record, &dependency, &ops)!!;
+
+    ulong source_access =
+        (ulong)vk::AccessFlagBits2
+            .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
+        | (ulong)vk::AccessFlagBits2
+            .ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    ulong destination_access =
+        (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2
+            .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    assert(capture.calls == 1 && capture.memory_barriers == 1
+            && capture.image_barriers == 0
+            && capture.memory_barrier.src_stage_mask
+                == vk::PipelineStageFlagBits2
+                    .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+            && (ulong)capture.memory_barrier.src_access_mask == source_access
+            && capture.memory_barrier.dst_stage_mask
+                == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
+            && (ulong)capture.memory_barrier.dst_access_mask
+                == destination_access,
+        "build-to-query records one exact caller-requested native barrier");
 }
 
 fn void reference_capacity_preflight_counts_unique_identities() @test {
@@ -2467,7 +2519,7 @@ fn void barrier_unknown_stage_bit_faults() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
-        .before = (gpu::StageMask)(1u << 10),
+        .before = (gpu::StageMask)(1u << 11),
         .after  = { .compute = true },
     };
 

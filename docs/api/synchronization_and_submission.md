@@ -19,6 +19,35 @@ The caller owns texture history. `before` asserts the state established by
 earlier ordered work; the library does not look up or repair it. A global
 barrier cannot establish a texture layout.
 
+`StageMask.acceleration_structure_build` names both BLAS/TLAS build and update
+execution. On either side of a global barrier it carries acceleration-structure
+read/write access. On a ray-query-enabled device, compute, vertex, and fragment
+stages also include acceleration-structure read access for shader queries.
+
+Order consecutive builds or updates explicitly:
+
+```c3
+gpu::Barrier build_to_build = {
+    .before = { .acceleration_structure_build },
+    .after  = { .acceleration_structure_build },
+};
+gpu::cmd_barrier(&commands, &build_to_build)!;
+```
+
+Before a compute query, use build-to-compute; before a graphics query, use the
+calling shader stage or stages:
+
+```c3
+gpu::Barrier build_to_query = {
+    .before = { .acceleration_structure_build },
+    .after  = { .compute },
+};
+gpu::cmd_barrier(&commands, &build_to_query)!;
+```
+
+The same rule applies after an in-place update. Build/update commands insert no
+implicit dependency.
+
 ## Completion points
 
 `CompletionPoint` identifies an ordered timeline value on one selected queue.
@@ -42,6 +71,9 @@ every command allocator was created.
 Each `CompletionWait` pairs a prior point with destination stages supported by
 the destination queue. Cross-queue dependencies must name at least one valid
 device stage; host and presentation stages are not wait destinations.
+Use `.acceleration_structure_build` when the receiving compute/graphics queue
+will build or update a structure, and use the receiving shader stage when it
+will query one. Transfer-only queues reject the build stage.
 
 Submission is externally synchronized on the target native queue. It:
 

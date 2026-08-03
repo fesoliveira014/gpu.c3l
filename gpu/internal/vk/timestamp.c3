@@ -228,6 +228,10 @@ fn vk::PipelineStageFlags2 timestamp_stage_to_vk(
         return (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
     }
+    if (stage.acceleration_structure_build) {
+        return (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
+            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+    }
     unreachable();
 }
 

@@ -53,6 +53,18 @@ fn void unknown_contract_validation_is_rejected() @test {
     );
 }
 
+fn void acceleration_structure_heap_capacity_is_zero_compatible_and_bounded() @test {
+    RuntimeDesc baseline = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&baseline)!!;
+    gpu::destroy_runtime(&runtime)!!;
+
+    RuntimeDesc oversized = runtime_desc();
+    oversized.acceleration_structure_heap_capacity =
+        gpu::MAX_SHADER_HEAP_CAPACITY + 1;
+    assert(@catch(gpu::create_runtime(&oversized)) == gpu::INVALID_ARGUMENT,
+        "the acceleration-structure heap shares the shader heap ceiling");
+}
+
 fn void runtime_and_adapter_tokens_are_compact() @test {
     assert(Runtime::size == ulong::size, "Runtime is one opaque 64-bit token");
     assert(Adapter::size == ulong::size, "Adapter is one opaque 64-bit token");

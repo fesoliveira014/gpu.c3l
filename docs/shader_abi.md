@@ -79,6 +79,35 @@ between devices.
 The backend owns the descriptor set/layout implementation. Shaders consume the
 published helper contract; applications do not create or bind descriptor sets.
 
+## Ray-query values and binding 5
+
+`AccelerationStructureIndex` is a 32-bit shader-visible TLAS heap value. Its
+owner-bearing CPU twin is `AccelerationStructureView`; destroying that view
+makes the index recyclable. The index contains slot plus one, so zero is
+invalid. Keep the view and TLAS alive through every query.
+
+Ray-query shaders explicitly include `include/shaders/ray_query.glsl`. The
+include requires `GL_EXT_ray_query`, declares the unbounded set-0 binding-5
+acceleration-structure array, and provides
+`GPU_ACCELERATION_STRUCTURE(index)` and `GPU_RAY_QUERY_INITIALIZE(...)`.
+Ordinary shaders and generated ABI includes do not enable the extension or
+declare binding 5.
+
+The generated `AccelerationStructureInstance` is exactly 64 bytes: three
+row-major transform rows at offsets 0, 16, and 32; packed custom-index/mask and
+record-offset/flags words at offsets 48 and 52; and an ordinary 64-bit
+`GpuAddress` at offset 56. CPU code normally uses
+`make_acceleration_structure_instance`; GPU-authored records may use
+`gpu_make_acceleration_structure_instance` after keeping fields within their
+24-bit/8-bit contracts. The record offset is always zero because this API has
+no shader binding tables.
+
+Triangle candidates may commit through normal ray-query traversal. An AABB is
+only a broad-phase candidate: compute the true procedural intersection inside
+the `rayQueryProceedEXT` loop and call
+`GPU_RAY_QUERY_CONFIRM_AABB(query, t)` only when accepted. Leaving a candidate
+unconfirmed rejects it.
+
 ## Graphics and indirect work
 
 Direct graphics commands provide independent vertex and fragment roots. Do not
@@ -159,6 +188,7 @@ Validation checks:
 - push-block count, size, members, order, offsets, scalar width, signedness,
   and integer shape;
 - the device-wide texture/sampler heap convention;
+- the opted-in acceleration-structure heap at set 0 binding 5;
 - explicit stage interface locations; and
 - absence of unexpected descriptor sets.
 

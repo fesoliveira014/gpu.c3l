@@ -146,6 +146,14 @@ alias CmdResolveTimestampsFn @private = fn void? (
     uint,
     gpu::GpuSpan,
 );
+alias CmdBuildAccelerationStructureFn @private = fn void? (
+    CommandRecord*,
+    gpu::AccelerationStructureBuildDesc*,
+);
+alias CmdUpdateAccelerationStructureFn @private = fn void? (
+    CommandRecord*,
+    gpu::AccelerationStructureBuildDesc*,
+);
 
 const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
@@ -189,11 +197,102 @@ struct CommandOps @public {
     CmdResetTimestampsFn          reset_timestamps;
     CmdWriteTimestampFn           write_timestamp;
     CmdResolveTimestampsFn        resolve_timestamps;
+    CmdBuildAccelerationStructureFn  build_acceleration_structure;
+    CmdUpdateAccelerationStructureFn update_acceleration_structure;
 }
 
 struct VkRuntimeState @public {
     gpu::Runtime runtime;
     uint         adapter_count;
+    uint         acceleration_structure_heap_capacity;
+}
+
+fn uint vk_acceleration_structure_heap_capacity(VkRuntimeState* state) =>
+    state == null ? 0 : state.acceleration_structure_heap_capacity;
+
+fn gpu::AccelerationStructureRequirements?
+vk_get_acceleration_structure_requirements(
+    VkDeviceState* state,
+    gpu::AccelerationStructureDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::AccelerationStructureHandle? vk_create_acceleration_structure(
+    VkDeviceState* state,
+    gpu::AccelerationStructureDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::AccelerationStructureHandle? vk_create_placed_acceleration_structure(
+    VkDeviceState* state,
+    gpu::AccelerationStructureDesc* desc,
+    gpu::GpuAllocation allocation,
+    usz offset,
+) {
+    (void)state;
+    (void)desc;
+    (void)allocation;
+    (void)offset;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::DedicatedAccelerationStructure?
+vk_create_dedicated_acceleration_structure(
+    VkDeviceState* state,
+    gpu::AccelerationStructureDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_destroy_acceleration_structure(
+    VkDeviceState* state,
+    gpu::AccelerationStructureHandle acceleration_structure,
+) {
+    (void)state;
+    (void)acceleration_structure;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::GpuAddress? vk_get_acceleration_structure_address(
+    VkDeviceState* state,
+    gpu::AccelerationStructureHandle acceleration_structure,
+) {
+    if (state == null
+        || !state.acceleration_structure_live
+        || state.acceleration_structure != acceleration_structure) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.acceleration_structure_kind
+        != gpu::AccelerationStructureKind.BOTTOM_LEVEL) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return state.acceleration_structure_address;
+}
+
+fn gpu::AccelerationStructureView? vk_create_acceleration_structure_view(
+    VkDeviceState* state,
+    gpu::AccelerationStructureHandle acceleration_structure,
+) {
+    (void)state;
+    (void)acceleration_structure;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_destroy_acceleration_structure_view(
+    VkDeviceState* state,
+    gpu::AccelerationStructureView view,
+) {
+    (void)state;
+    (void)view;
+    return gpu::UNSUPPORTED_FEATURE~;
 }
 
 struct StubSamplerSlot {
@@ -212,6 +311,10 @@ struct VkDeviceState @public {
     gpu::GpuAllocation   allocation;
     gpu::AllocationDesc  allocation_desc;
     gpu::TextureHandle   texture;
+    gpu::AccelerationStructureHandle acceleration_structure;
+    gpu::AccelerationStructureKind   acceleration_structure_kind;
+    gpu::GpuAddress                  acceleration_structure_address;
+    bool                             acceleration_structure_live;
     gpu::SwapchainHandle swapchain;
     gpu::SwapchainInfo   swapchain_info;
     char[128]            allocation_mapping;
@@ -286,8 +389,22 @@ struct VkDeviceState @public {
     bool                 lose_during_submit;
 }
 
+fn void stub_set_acceleration_structure(
+    VkDeviceState* state,
+    gpu::AccelerationStructureHandle acceleration_structure,
+    gpu::AccelerationStructureKind kind,
+    gpu::GpuAddress address,
+) {
+    state.acceleration_structure = acceleration_structure;
+    state.acceleration_structure_kind = kind;
+    state.acceleration_structure_address = address;
+    state.acceleration_structure_live = true;
+}
+
 uint configured_adapter_count @private = 1;
 bool configured_device_baseline_support @private = true;
+bool configured_ray_query_support @private = true;
+uint configured_ray_query_heap_limit @private = uint::max;
 bool configured_sparse_texture_support @private;
 bool configured_sparse_queue_support @private;
 uint device_support_queries @private;
@@ -721,6 +838,29 @@ fn bool? vk_adapter_supports_device_baseline(
     return configured_device_baseline_support;
 }
 
+fn bool? vk_adapter_supports_ray_queries(
+    VkRuntimeState* state,
+    uint adapter_index,
+) {
+    if (state == null || adapter_index >= state.adapter_count) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return configured_ray_query_support;
+}
+
+fn bool? vk_adapter_supports_ray_query_heap(
+    VkRuntimeState* state,
+    uint adapter_index,
+    uint heap_capacity,
+) {
+    if (state == null || adapter_index >= state.adapter_count) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return configured_ray_query_support
+        && heap_capacity > 0
+        && heap_capacity <= configured_ray_query_heap_limit;
+}
+
 fn bool? vk_adapter_supports_sparse_textures(
     VkRuntimeState* state,
     uint adapter_index,
@@ -825,6 +965,8 @@ fn bool? vk_supports_queue_request(
 fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     VkRuntimeState* state = mem::new(VkRuntimeState);
     state.adapter_count = configured_adapter_count;
+    state.acceleration_structure_heap_capacity =
+        desc.acceleration_structure_heap_capacity;
     runtime_creates++;
     defer catch destroy_vk_runtime_state(state);
     gpu::Runtime runtime = gpu::internal::register_runtime(
@@ -854,12 +996,22 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
 fn void stub_set_adapter_count(uint count) {
     configured_adapter_count = count;
     configured_device_baseline_support = true;
+    configured_ray_query_support = true;
+    configured_ray_query_heap_limit = uint::max;
     configured_sparse_texture_support = false;
     configured_sparse_queue_support = false;
 }
 
 fn void stub_set_device_baseline_support(bool supported) {
     configured_device_baseline_support = supported;
+}
+
+fn void stub_set_ray_query_support(bool supported) {
+    configured_ray_query_support = supported;
+}
+
+fn void stub_set_ray_query_heap_limit(uint limit) {
+    configured_ray_query_heap_limit = limit;
 }
 
 fn void stub_set_sparse_texture_support(bool supported) {
@@ -1476,10 +1628,24 @@ fn gpu::Device? create_vk_device(
         transfer_aliases_graphics:   true,
         transfer_aliases_compute:    true,
     )!;
+    gpu::internal::RuntimeData* runtime_data =
+        gpu::internal::resolve_runtime(retained_runtime);
+    if (runtime_data == null) return gpu::INVALID_HANDLE~;
     gpu::DeviceCaps caps = {
         .presentation_enabled = normalized.surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
+        .ray_queries = normalized.enable_ray_queries
+            ? (gpu::RayQueryCaps){
+                .enabled = true,
+                .acceleration_structure_heap_capacity =
+                    runtime_data.state.acceleration_structure_heap_capacity,
+                .max_geometry_count = uint::max,
+                .max_primitive_count = uint::max,
+                .max_instance_count = uint::max,
+                .scratch_alignment = 256,
+            }
+            : {},
     };
     return gpu::internal::register_device(
         state:                state,

@@ -36,6 +36,14 @@ struct DeviceFeatureChainCapture {
     bool indexing_features_enabled;
     bool found_dynamic_color;
     bool dynamic_color_features_enabled;
+    bool found_acceleration_structure;
+    bool acceleration_structure_enabled;
+    bool acceleration_structure_descriptor_update_after_bind;
+    bool found_ray_query;
+    bool ray_query_enabled;
+    bool acceleration_structure_extension;
+    bool ray_query_extension;
+    bool deferred_host_operations_extension;
 }
 
 fn void capture_baseline_support_diagnostic(
@@ -82,6 +90,18 @@ fn vk::Result capture_device_feature_chain(
     DeviceFeatureChainCapture* capture =
         (DeviceFeatureChainCapture*)user_data;
     capture.calls++;
+
+    for (uint i = 0; i < create_info.enabled_extension_count; i++) {
+        String extension = ((ZString)create_info
+            .pp_enabled_extension_names[i]).str_view();
+        if (extension == "VK_KHR_acceleration_structure") {
+            capture.acceleration_structure_extension = true;
+        } else if (extension == "VK_KHR_ray_query") {
+            capture.ray_query_extension = true;
+        } else if (extension == "VK_KHR_deferred_host_operations") {
+            capture.deferred_host_operations_extension = true;
+        }
+    }
 
     vk::BaseInStructure* feature =
         (vk::BaseInStructure*)create_info.p_next;
@@ -133,6 +153,25 @@ fn vk::Result capture_device_feature_chain(
                     == vk::TRUE
                 && dynamic_color.extended_dynamic_state3color_write_mask
                     == vk::TRUE;
+        } else if (feature.s_type
+            == vk::StructureType
+                .PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR) {
+            vk::PhysicalDeviceAccelerationStructureFeaturesKHR*
+                acceleration_structure =
+                    (vk::PhysicalDeviceAccelerationStructureFeaturesKHR*)feature;
+            capture.found_acceleration_structure = true;
+            capture.acceleration_structure_enabled =
+                acceleration_structure.acceleration_structure == vk::TRUE;
+            capture.acceleration_structure_descriptor_update_after_bind =
+                acceleration_structure
+                    .descriptor_binding_acceleration_structure_update_after_bind
+                    == vk::TRUE;
+        } else if (feature.s_type
+            == vk::StructureType.PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR) {
+            vk::PhysicalDeviceRayQueryFeaturesKHR* ray_query =
+                (vk::PhysicalDeviceRayQueryFeaturesKHR*)feature;
+            capture.found_ray_query = true;
+            capture.ray_query_enabled = ray_query.ray_query == vk::TRUE;
         }
         feature = feature.p_next;
     }
@@ -567,6 +606,12 @@ fn void device_creation_enables_required_native_features() @test {
         assert(capture.found_dynamic_color
                 && capture.dynamic_color_features_enabled,
             "device creation chains and enables all required color features");
+        assert(!capture.found_acceleration_structure
+                && !capture.found_ray_query
+                && !capture.acceleration_structure_extension
+                && !capture.ray_query_extension
+                && !capture.deferred_host_operations_extension,
+            "baseline creation requests no ray-query feature family");
         assert(
             probe.reached == gpu::internal::vk::DeviceCreationCheckpoint.NONE
                 && probe.rollback_count == 1
@@ -576,6 +621,61 @@ fn void device_creation_enables_required_native_features() @test {
         return;
     }
     assert(false, "the pinned Vulkan adapter supports the device baseline");
+}
+
+fn void ray_query_device_creation_enables_the_complete_optional_family() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_ray_query_feature_chain_test",
+        .acceleration_structure_heap_capacity = 8,
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceDesc device_desc = { .enable_ray_queries = true };
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::DeviceSupport support =
+            gpu::supports_device_desc(&adapter, &device_desc)!!;
+        if (!support.supported) {
+            assert(@catch(gpu::create_device(&adapter, &device_desc))
+                == gpu::UNSUPPORTED_FEATURE);
+            continue;
+        }
+        DeviceFeatureChainCapture capture;
+        gpu::internal::vk::DeviceCreationProbe probe;
+        gpu::internal::vk::DeviceCreationOps creation_ops = {
+            .user_data = &capture,
+            .create    = &capture_device_feature_chain,
+        };
+        gpu::Runtime retained_runtime = runtime;
+        gpu::internal::runtime_retain_device(&retained_runtime)!!;
+        fault rejected =
+            @catch(gpu::internal::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                device_desc:      &device_desc,
+                retained_runtime: &retained_runtime,
+                probe:            &probe,
+                creation_ops:     &creation_ops,
+            ));
+        gpu::internal::runtime_release_device(&retained_runtime)!!;
+
+        assert(rejected == gpu::UNSUPPORTED_BACKEND);
+        assert(capture.found_acceleration_structure
+                && capture.acceleration_structure_enabled
+                && capture.acceleration_structure_descriptor_update_after_bind,
+            "opt-in enables the complete acceleration-structure feature node");
+        assert(capture.found_ray_query && capture.ray_query_enabled,
+            "opt-in enables the ray-query feature node");
+        assert(capture.acceleration_structure_extension
+                && capture.ray_query_extension
+                && capture.deferred_host_operations_extension,
+            "opt-in requests the complete extension family together");
+        assert(probe.reached == gpu::internal::vk::DeviceCreationCheckpoint.NONE
+                && probe.rollback_count == 1,
+            "injected native failure rolls optional feature state back");
+        return;
+    }
 }
 
 fn void requested_sparse_creation_enables_only_planned_features() @test {
@@ -649,10 +749,63 @@ fn void default_device_caps_hide_sparse_support() @test {
                 && !caps.sparse_textures.nonresident_strict
                 && (uint)caps.sparse_textures.binding_queues == 0,
             "a zero DeviceDesc publishes entirely zero sparse capabilities");
+        assert(!caps.ray_queries.enabled
+                && caps.ray_queries.acceleration_structure_heap_capacity == 0
+                && caps.ray_queries.max_geometry_count == 0
+                && caps.ray_queries.max_primitive_count == 0
+                && caps.ray_queries.max_instance_count == 0
+                && caps.ray_queries.scratch_alignment == 0,
+            "a zero DeviceDesc publishes entirely zero ray-query capabilities");
         gpu::destroy_device(&device)!!;
         return;
     }
     assert(false, "the controlled native target supports the device baseline");
+}
+
+fn void ray_query_support_and_created_caps_are_consistent() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_ray_query_caps_test",
+        .acceleration_structure_heap_capacity = 7,
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceDesc device_desc = { .enable_ray_queries = true };
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::DeviceSupport support =
+            gpu::supports_device_desc(&adapter, &device_desc)!!;
+        if (!support.supported) {
+            assert(@catch(gpu::create_device(&adapter, &device_desc))
+                == gpu::UNSUPPORTED_FEATURE);
+            continue;
+        }
+
+        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::internal::vk::VkDeviceState* state =
+            gpu::internal::device_slots[device.index].data.state;
+        gpu::RayQueryCaps expected =
+            gpu::internal::vk::normalize_ray_query_caps(
+                true,
+                runtime_desc.acceleration_structure_heap_capacity,
+                &state.ray_query_support,
+            );
+        assert(caps.ray_queries.enabled
+                && caps.ray_queries.acceleration_structure_heap_capacity == 7
+                && caps.ray_queries.max_geometry_count
+                    == expected.max_geometry_count
+                && caps.ray_queries.max_primitive_count
+                    == expected.max_primitive_count
+                && caps.ray_queries.max_instance_count
+                    == expected.max_instance_count
+                && caps.ray_queries.scratch_alignment
+                    == expected.scratch_alignment,
+            "created caps exactly normalize the selected device properties");
+        gpu::destroy_device(&device)!!;
+        return;
+    }
 }
 
 fn void sparse_support_and_created_caps_are_consistent() @test {
@@ -1032,6 +1185,65 @@ fn void device_loads_required_dynamic_color_dispatch() @test {
             ),
             "successful device creation loads the complete color dispatch"
         );
+        assert(state.acceleration_structures.slots.ptr == null
+                && state.shader_heap.descriptors
+                    .acceleration_structure_cells.ptr == null
+                && state.shader_heap.descriptors
+                    .acceleration_structure_free.ptr == null
+                && state.ray_query_operations == null,
+            "baseline creation allocates no optional ray-query state");
+        gpu::destroy_device(&device)!!;
+        return;
+    }
+}
+
+fn void opted_in_ray_query_state_is_transactional_and_prepublication() @test {
+    gpu::RuntimeDesc desc = {
+        .application_name = "gpu_vk_ray_query_state_test",
+        .acceleration_structure_heap_capacity = 7,
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceDesc device_desc = { .enable_ray_queries = true };
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            continue;
+        }
+
+        gpu::internal::vk::DeviceCreationProbe probe = {
+            .fail_at = gpu::internal::vk::DeviceCreationCheckpoint
+                .RAY_QUERY_STATE,
+        };
+        uint live_slots_before = live_device_slot_count();
+        assert(run_injected_device_create(
+                runtime:     &runtime,
+                adapter:     &adapter,
+                device_desc: &device_desc,
+                probe:       &probe,
+            ) == gpu::BACKEND_ERROR,
+            "an optional-state checkpoint failure aborts creation");
+        assert(probe.reached
+                == gpu::internal::vk::DeviceCreationCheckpoint
+                    .RAY_QUERY_STATE
+                && probe.rollback_count == 1
+                && live_device_slot_count() == live_slots_before,
+            "optional-state failure unwinds without public registration");
+
+        gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
+        gpu::internal::vk::VkDeviceState* state =
+            gpu::internal::device_slots[device.index].data.state;
+        assert(state.acceleration_structures.slots.ptr != null
+                && state.ray_query_operations
+                    == &state.device_dispatch.ray_queries,
+            "opt-in establishes the resource and operation tables");
+        assert(state.shader_heap.descriptors
+                    .acceleration_structure_cells.len == 7
+                && state.shader_heap.descriptors
+                    .acceleration_structure_free.len == 7,
+            "opt-in establishes independently sized descriptor storage");
         gpu::destroy_device(&device)!!;
         return;
     }

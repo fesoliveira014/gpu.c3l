@@ -13,8 +13,11 @@ const uint HEAP_BINDING_STORAGE_2D = 1;
 const uint HEAP_BINDING_SAMPLERS = 2;
 const uint HEAP_BINDING_SAMPLED_3D = 3;
 const uint HEAP_BINDING_STORAGE_3D = 4;
-const uint HEAP_BINDING_COUNT = 5;
-const uint HEAP_POOL_SIZE_COUNT = 3;
+const uint HEAP_BINDING_ACCELERATION_STRUCTURES = 5;
+const uint HEAP_BASE_BINDING_COUNT = 5;
+const uint HEAP_BINDING_COUNT = 6;
+const uint HEAP_BASE_POOL_SIZE_COUNT = 3;
+const uint HEAP_POOL_SIZE_COUNT = 4;
 const uint TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP = 64;
 
 enum TextureDescriptorKind : char {
@@ -30,6 +33,24 @@ struct TextureDescriptorCell {
     bool               used;
 }
 
+struct AccelerationStructureDescriptorCell {
+    gpu::AccelerationStructureHandle owner;
+    uint                             generation;
+    bool                             used;
+}
+
+alias AccelerationStructureDescriptorWriteFn = fn void (
+    void* user_data,
+    VkDeviceState* state,
+    uint slot,
+    vk::AccelerationStructureKHR acceleration_structure,
+);
+
+struct AccelerationStructureDescriptorOps {
+    void*                                  user_data;
+    AccelerationStructureDescriptorWriteFn write;
+}
+
 struct DescriptorHeapState {
     ulong                   texture_view_owner;
     TextureDescriptorCell[] texture_cells;
@@ -37,6 +58,11 @@ struct DescriptorHeapState {
     uint                    sampler_next_new;
     uint[]                  texture_free;
     uint                    texture_free_count;
+    ulong                   acceleration_structure_view_owner;
+    AccelerationStructureDescriptorCell[] acceleration_structure_cells;
+    uint[]                  acceleration_structure_free;
+    uint                    acceleration_structure_next_new;
+    uint                    acceleration_structure_free_count;
     vk::DescriptorSetLayout set_layout;
     vk::DescriptorPool      descriptor_pool;
     vk::DescriptorSet       descriptor_set;
@@ -50,15 +76,18 @@ struct PendingTextureWrite {
 struct DescriptorHeapLayoutPlan {
     vk::DescriptorSetLayoutBinding[HEAP_BINDING_COUNT] bindings;
     vk::DescriptorBindingFlags[HEAP_BINDING_COUNT]     binding_flags;
+    uint                                               count;
 }
 
 struct DescriptorHeapPoolPlan {
     vk::DescriptorPoolSize[HEAP_POOL_SIZE_COUNT] sizes;
+    uint                                         count;
 }
 
 fn DescriptorHeapLayoutPlan descriptor_heap_layout_plan(
     uint tex_capacity,
     uint smp_capacity,
+    uint acceleration_structure_capacity = 0,
 ) @private {
     uint binding_flag_bits =
         (uint)vk::DescriptorBindingFlagBits.UPDATE_AFTER_BIND_BIT
@@ -66,7 +95,7 @@ fn DescriptorHeapLayoutPlan descriptor_heap_layout_plan(
         | (uint)vk::DescriptorBindingFlagBits.PARTIALLY_BOUND_BIT;
     vk::DescriptorBindingFlags binding_flags =
         (vk::DescriptorBindingFlags)binding_flag_bits;
-    return {
+    DescriptorHeapLayoutPlan plan = {
         .bindings = {
             {
                 .binding          = HEAP_BINDING_SAMPLED_2D,
@@ -98,6 +127,13 @@ fn DescriptorHeapLayoutPlan descriptor_heap_layout_plan(
                 .descriptor_count = tex_capacity,
                 .stage_flags      = vk::ShaderStageFlagBits.ALL,
             },
+            {
+                .binding = HEAP_BINDING_ACCELERATION_STRUCTURES,
+                .descriptor_type =
+                    vk::DescriptorType.ACCELERATION_STRUCTURE_KHR,
+                .descriptor_count = acceleration_structure_capacity,
+                .stage_flags = vk::ShaderStageFlagBits.ALL,
+            },
         },
         .binding_flags = {
             binding_flags,
@@ -105,13 +141,19 @@ fn DescriptorHeapLayoutPlan descriptor_heap_layout_plan(
             binding_flags,
             binding_flags,
             binding_flags,
+            binding_flags,
         },
+        .count = acceleration_structure_capacity > 0
+            ? HEAP_BINDING_COUNT
+            : HEAP_BASE_BINDING_COUNT,
     };
+    return plan;
 }
 
 fn DescriptorHeapPoolPlan descriptor_heap_pool_plan(
     uint tex_capacity,
     uint smp_capacity,
+    uint acceleration_structure_capacity = 0,
 ) @private {
     return {
         .sizes = {
@@ -127,7 +169,14 @@ fn DescriptorHeapPoolPlan descriptor_heap_pool_plan(
                 .type             = vk::DescriptorType.SAMPLER,
                 .descriptor_count = smp_capacity,
             },
+            {
+                .type = vk::DescriptorType.ACCELERATION_STRUCTURE_KHR,
+                .descriptor_count = acceleration_structure_capacity,
+            },
         },
+        .count = acceleration_structure_capacity > 0
+            ? HEAP_POOL_SIZE_COUNT
+            : HEAP_BASE_POOL_SIZE_COUNT,
     };
 }
 
@@ -192,21 +241,23 @@ fn vk::Result create_descriptor_heap_layout(
     vk::Device device,
     uint tex_capacity,
     uint smp_capacity,
+    uint acceleration_structure_capacity,
     vk::DescriptorSetLayout* out_layout,
 ) @private {
     DescriptorHeapLayoutPlan plan = descriptor_heap_layout_plan(
         tex_capacity,
         smp_capacity,
+        acceleration_structure_capacity,
     );
     vk::DescriptorSetLayoutBindingFlagsCreateInfo flags_info =
         vk::descriptor_set_layout_binding_flags_create_info()
-            .set_binding_flags(plan.binding_flags[..]);
+            .set_binding_flags(plan.binding_flags[:plan.count]);
 
     vk::DescriptorSetLayoutCreateInfo layout_info =
         vk::descriptor_set_layout_create_info()
             .set_next(&flags_info)
             .set_flags(vk::DescriptorSetLayoutCreateFlagBits.UPDATE_AFTER_BIND_POOL_BIT)
-            .set_bindings(plan.bindings[..]);
+            .set_bindings(plan.bindings[:plan.count]);
     return vk::create_descriptor_set_layout(device, &layout_info, null, out_layout);
 }
 
@@ -214,6 +265,9 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     uint tex_capacity = state.shader_heap.texture_capacity;
     uint smp_capacity = state.shader_heap.sampler_capacity;
+    uint acceleration_structure_capacity = state.ray_queries_enabled
+        ? state.acceleration_structure_heap_capacity
+        : 0;
 
     heap.texture_view_owner     = gpu::internal::resource_owner_tag(
         state.resource_owner,
@@ -221,6 +275,21 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
     );
     heap.texture_cells          = mem::new_array(TextureDescriptorCell, tex_capacity);
     heap.texture_free           = mem::new_array(uint, tex_capacity);
+    if (state.ray_queries_enabled) {
+        heap.acceleration_structure_view_owner =
+            gpu::internal::resource_owner_tag(
+                state.resource_owner,
+                gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE_VIEW,
+            );
+        heap.acceleration_structure_cells = mem::new_array(
+            AccelerationStructureDescriptorCell,
+            acceleration_structure_capacity,
+        );
+        heap.acceleration_structure_free = mem::new_array(
+            uint,
+            acceleration_structure_capacity,
+        );
+    }
 
     check_backend_result(
         state:     state,
@@ -229,6 +298,8 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
             device:       state.device,
             tex_capacity: tex_capacity,
             smp_capacity: smp_capacity,
+            acceleration_structure_capacity:
+                acceleration_structure_capacity,
             out_layout:   &heap.set_layout,
         ),
     )!;
@@ -236,11 +307,12 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
     DescriptorHeapPoolPlan pool = descriptor_heap_pool_plan(
         tex_capacity,
         smp_capacity,
+        acceleration_structure_capacity,
     );
     vk::DescriptorPoolCreateInfo pool_info = vk::descriptor_pool_create_info()
         .set_flags(vk::DescriptorPoolCreateFlagBits.UPDATE_AFTER_BIND_BIT)
         .set_max_sets(1)
-        .set_pool_sizes(pool.sizes[..]);
+        .set_pool_sizes(pool.sizes[:pool.count]);
     check_descriptor_pool_backend_result(
         state:     state,
         operation: "create_device",
@@ -280,6 +352,15 @@ fn void destroy_descriptor_heap(VkDeviceState* state) {
     }
     if (heap.texture_cells.ptr != null)          { mem::free(heap.texture_cells.ptr); heap.texture_cells = {}; }
     if (heap.texture_free.ptr != null)           { mem::free(heap.texture_free.ptr); heap.texture_free = {}; }
+    if (heap.acceleration_structure_cells.ptr != null) {
+        mem::free(heap.acceleration_structure_cells.ptr);
+        heap.acceleration_structure_cells = {};
+    }
+    if (heap.acceleration_structure_free.ptr != null) {
+        mem::free(heap.acceleration_structure_free.ptr);
+        heap.acceleration_structure_free = {};
+    }
+    heap.acceleration_structure_view_owner = 0;
 }
 
 fn void report_descriptor_leaks(VkDeviceState* state) {
@@ -300,6 +381,28 @@ fn void report_descriptor_leaks(VkDeviceState* state) {
             }
         }
     }
+    if (heap.acceleration_structure_cells.ptr != null) {
+        foreach (i, &cell : heap.acceleration_structure_cells[
+            :heap.acceleration_structure_next_new
+        ]) {
+            if (!cell.used) continue;
+            if (!report_resource_lifetime(
+                state:               state,
+                resource_kind:       gpu::DebugResourceKind.ACCELERATION_STRUCTURE_VIEW,
+                has_public_identity: true,
+                index:               (uint)i,
+                generation:          (uint)cell.generation,
+                debug_name:          null,
+                backend_text:        "acceleration-structure descriptor remains live",
+            )) {
+                io::eprintfn(
+                    "gpu: leaked acceleration-structure descriptor slot %d (owner acceleration-structure index %d)",
+                    i,
+                    cell.owner.index,
+                );
+            }
+        }
+    }
 }
 
 fn uint texture_index_slot(gpu::TextureIndex index) @private {
@@ -308,6 +411,138 @@ fn uint texture_index_slot(gpu::TextureIndex index) @private {
 
 fn gpu::TextureIndex texture_index_from_slot(uint slot) @private {
     return { .value = slot + 1 };
+}
+
+fn uint acceleration_structure_index_slot(
+    gpu::AccelerationStructureIndex index,
+) @private {
+    return index.value - 1;
+}
+
+fn gpu::AccelerationStructureIndex acceleration_structure_index_from_slot(
+    uint slot,
+) @private {
+    return { .value = slot + 1 };
+}
+
+fn AccelerationStructureDescriptorCell*?
+acceleration_structure_descriptor_cell_get(
+    VkDeviceState* state,
+    gpu::AccelerationStructureView view,
+) @private {
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
+    if (view.owner != heap.acceleration_structure_view_owner
+        || !view.index.is_valid()) return gpu::INVALID_HANDLE~;
+    uint slot = acceleration_structure_index_slot(view.index);
+    if (slot >= heap.acceleration_structure_cells.len
+        || !heap.acceleration_structure_cells[slot].used
+        || heap.acceleration_structure_cells[slot].generation
+            != view.generation) return gpu::INVALID_HANDLE~;
+    return &heap.acceleration_structure_cells[slot];
+}
+
+fn void write_acceleration_structure_descriptor_real(
+    void* user_data,
+    VkDeviceState* state,
+    uint slot,
+    vk::AccelerationStructureKHR acceleration_structure,
+) {
+    (void)user_data;
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
+    vk::WriteDescriptorSetAccelerationStructureKHR acceleration_info =
+        vk::write_descriptor_set_acceleration_structure_khr()
+            .set_acceleration_structures((&acceleration_structure)[:1]);
+    vk::WriteDescriptorSet write = vk::write_descriptor_set()
+        .set_next(&acceleration_info)
+        .set_dst_set(heap.descriptor_set)
+        .set_dst_binding(HEAP_BINDING_ACCELERATION_STRUCTURES)
+        .set_dst_array_element(slot)
+        .set_descriptor_count(1)
+        .set_descriptor_type(
+            vk::DescriptorType.ACCELERATION_STRUCTURE_KHR,
+        );
+    vk::update_descriptor_sets(state.device, 1, &write, 0, null);
+}
+
+fn gpu::AccelerationStructureView?
+create_acceleration_structure_descriptor_view_with_ops(
+    VkDeviceState* state,
+    gpu::AccelerationStructureHandle acceleration_structure,
+    AccelerationStructureDescriptorOps* ops,
+) {
+    if (state == null || ops == null || ops.write == null) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (!state.ray_queries_enabled) return gpu::UNSUPPORTED_FEATURE~;
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+
+    AccelerationStructureSlot* owner =
+        state.acceleration_structures.get(acceleration_structure)!;
+    if (owner.desc.kind != gpu::AccelerationStructureKind.TOP_LEVEL) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
+    uint headroom = heap.acceleration_structure_free_count
+        + (uint)heap.acceleration_structure_cells.len
+        - heap.acceleration_structure_next_new;
+    if (headroom == 0) return gpu::DESCRIPTOR_HEAP_FULL~;
+    if (owner.live_view_count
+        >= (uint)heap.acceleration_structure_cells.len) {
+        return gpu::BACKEND_ERROR~;
+    }
+
+    bool recycled = heap.acceleration_structure_free_count > 0;
+    uint slot = recycled
+        ? heap.acceleration_structure_free[
+            heap.acceleration_structure_free_count - 1
+        ]
+        : heap.acceleration_structure_next_new;
+    AccelerationStructureDescriptorCell* cell =
+        &heap.acceleration_structure_cells[slot];
+    uint generation = next_handle_generation(cell.generation)!;
+
+    ops.write(ops.user_data, state, slot, owner.native);
+    if (recycled) {
+        heap.acceleration_structure_free_count--;
+    } else {
+        heap.acceleration_structure_next_new++;
+    }
+    cell.owner = acceleration_structure;
+    cell.generation = generation;
+    cell.used = true;
+    owner.live_view_count++;
+    return {
+        .owner = heap.acceleration_structure_view_owner,
+        .index = acceleration_structure_index_from_slot(slot),
+        .generation = generation,
+    };
+}
+
+fn void? destroy_acceleration_structure_descriptor_view(
+    VkDeviceState* state,
+    gpu::AccelerationStructureView view,
+) {
+    if (state == null) return gpu::INVALID_ARGUMENT~;
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    DescriptorHeapState* heap = &state.shader_heap.descriptors;
+    AccelerationStructureDescriptorCell* cell =
+        acceleration_structure_descriptor_cell_get(state, view)!;
+    AccelerationStructureSlot* owner =
+        state.acceleration_structures.get(cell.owner)!;
+    if (owner.live_view_count == 0) return gpu::BACKEND_ERROR~;
+
+    cell.used = false;
+    owner.live_view_count--;
+    if (!should_recycle_handle_generation(cell.generation)) {
+        cell.generation = HANDLE_GENERATION_MAX;
+        return;
+    }
+    cell.generation = next_handle_generation(cell.generation)!;
+    heap.acceleration_structure_free[
+        heap.acceleration_structure_free_count++
+    ] = acceleration_structure_index_slot(view.index);
 }
 
 fn vk::ImageLayout texture_descriptor_layout(

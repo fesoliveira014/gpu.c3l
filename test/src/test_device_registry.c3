@@ -514,7 +514,9 @@ fn void command_allocator_public_lifecycle_is_transactional() @test {
             == gpu::DEFAULT_COMMAND_REFERENCES_PER_LIST
         && fixture.state.allocator_desc
             .max_generated_preprocess_buffers_per_list
-            == gpu::DEFAULT_COMMAND_PREPROCESS_PER_LIST,
+            == gpu::DEFAULT_COMMAND_PREPROCESS_PER_LIST
+        && fixture.state.allocator_desc
+            .max_acceleration_structure_geometries_per_build == 0,
         "zero descriptor fields normalize before backend dispatch");
     assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 1,
         "a published allocator retains one device child");

@@ -75,6 +75,90 @@ fn void invalid_desc_and_stale_adapter_fault_before_backend_work() @test {
     assert(gpu::internal::vk::stub_device_support_query_count() == 0);
 }
 
+fn void ray_query_opt_in_requires_a_configured_runtime_heap() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc desc = { .enable_ray_queries = true };
+
+    assert(@catch(gpu::supports_device_desc(&adapter, &desc))
+        == gpu::INVALID_ARGUMENT);
+    assert(gpu::internal::vk::stub_device_support_query_count() == 0,
+        "incoherent opt-in faults before backend capability work");
+}
+
+fn void coherent_ray_query_opt_in_reaches_capability_evaluation() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    runtime_desc.acceleration_structure_heap_capacity = 17;
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc desc = { .enable_ray_queries = true };
+
+    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
+
+    assert(support.supported);
+
+    Device device = gpu::create_device(&adapter, &desc)!!;
+    DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    assert(caps.ray_queries.enabled
+            && caps.ray_queries.acceleration_structure_heap_capacity == 17
+            && caps.ray_queries.max_geometry_count == uint::max
+            && caps.ray_queries.max_primitive_count == uint::max
+            && caps.ray_queries.max_instance_count == uint::max
+            && caps.ray_queries.scratch_alignment == 256,
+        "the public device fixture exposes the enabled actionable caps");
+    gpu::destroy_device(&device)!!;
+}
+
+fn void unavailable_ray_queries_are_reported_semantically() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_set_ray_query_support(false);
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    runtime_desc.acceleration_structure_heap_capacity = 1;
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc desc = { .enable_ray_queries = true };
+
+    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
+    assert(!support.supported);
+    assert(support.unmet_requirement == "ray queries");
+    assert(@catch(gpu::create_device(&adapter, &desc))
+        == gpu::UNSUPPORTED_FEATURE);
+
+    gpu::internal::vk::stub_set_ray_query_support(true);
+}
+
+fn void oversized_ray_query_heap_is_reported_semantically() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_set_ray_query_heap_limit(16);
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    runtime_desc.acceleration_structure_heap_capacity = 17;
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc desc = { .enable_ray_queries = true };
+
+    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
+    assert(!support.supported);
+    assert(support.unmet_requirement
+        == "acceleration structure heap capacity");
+    assert(@catch(gpu::create_device(&adapter, &desc))
+        == gpu::UNSUPPORTED_FEATURE);
+
+    gpu::internal::vk::stub_set_ray_query_heap_limit(uint::max);
+}
+
 fn void unavailable_queue_topology_is_reported_semantically() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
     gpu::internal::vk::stub_set_device_baseline_support(true);

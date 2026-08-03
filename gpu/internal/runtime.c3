@@ -123,7 +123,9 @@ fn void? validate_runtime_desc(RuntimeDesc* desc) @private {
     if (desc.texture_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
         || desc.sampler_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
         || desc.texture_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
-        || desc.pipeline_capacity > gpu::MAX_SHADER_HEAP_CAPACITY) {
+        || desc.pipeline_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
+        || desc.acceleration_structure_heap_capacity
+            > gpu::MAX_SHADER_HEAP_CAPACITY) {
         return gpu::INVALID_ARGUMENT~;
     }
     if (desc.pipeline_cache_data.len > 0

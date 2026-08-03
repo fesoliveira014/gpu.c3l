@@ -13,28 +13,30 @@ fn void descriptor_heap_layout_and_pool_plans_are_exact() @test {
         (uint)vk::DescriptorBindingFlagBits.UPDATE_AFTER_BIND_BIT
         | (uint)vk::DescriptorBindingFlagBits.UPDATE_UNUSED_WHILE_PENDING_BIT
         | (uint)vk::DescriptorBindingFlagBits.PARTIALLY_BOUND_BIT;
-    uint[HEAP_BINDING_COUNT] expected_bindings = {
+    uint[HEAP_BASE_BINDING_COUNT] expected_bindings = {
         HEAP_BINDING_SAMPLED_2D,
         HEAP_BINDING_STORAGE_2D,
         HEAP_BINDING_SAMPLERS,
         HEAP_BINDING_SAMPLED_3D,
         HEAP_BINDING_STORAGE_3D,
     };
-    vk::DescriptorType[HEAP_BINDING_COUNT] expected_types = {
+    vk::DescriptorType[HEAP_BASE_BINDING_COUNT] expected_types = {
         vk::DescriptorType.SAMPLED_IMAGE,
         vk::DescriptorType.STORAGE_IMAGE,
         vk::DescriptorType.SAMPLER,
         vk::DescriptorType.SAMPLED_IMAGE,
         vk::DescriptorType.STORAGE_IMAGE,
     };
-    uint[HEAP_BINDING_COUNT] expected_counts = {
+    uint[HEAP_BASE_BINDING_COUNT] expected_counts = {
         texture_capacity,
         texture_capacity,
         sampler_capacity,
         texture_capacity,
         texture_capacity,
     };
-    for (uint i = 0; i < HEAP_BINDING_COUNT; i++) {
+    assert(layout.count == HEAP_BASE_BINDING_COUNT,
+        "the baseline heap retains exactly five bindings");
+    for (uint i = 0; i < layout.count; i++) {
         assert(layout.bindings[i].binding == expected_bindings[i],
             "heap layout binding number is exact");
         assert(layout.bindings[i].descriptor_type == expected_types[i],
@@ -51,6 +53,8 @@ fn void descriptor_heap_layout_and_pool_plans_are_exact() @test {
         texture_capacity,
         sampler_capacity,
     );
+    assert(pool.count == HEAP_BASE_POOL_SIZE_COUNT,
+        "the baseline heap retains exactly three descriptor pool kinds");
     assert(pool.sizes[0].type == vk::DescriptorType.SAMPLED_IMAGE
             && pool.sizes[0].descriptor_count == texture_capacity * 2,
         "sampled pool capacity covers both dimensional bindings");
@@ -74,4 +78,42 @@ fn void descriptor_heap_layout_and_pool_plans_are_exact() @test {
     assert(totals.all_pools_descriptors
             == (ulong)texture_capacity * 4 + (ulong)sampler_capacity,
         "pool total includes all image bindings and samplers");
+}
+
+fn void ray_query_heap_plan_appends_binding_five_independently() @test {
+    uint texture_capacity = 100;
+    uint sampler_capacity = 50;
+    uint acceleration_structure_capacity = 17;
+    DescriptorHeapLayoutPlan layout = descriptor_heap_layout_plan(
+        texture_capacity,
+        sampler_capacity,
+        acceleration_structure_capacity,
+    );
+    uint expected_flags =
+        (uint)vk::DescriptorBindingFlagBits.UPDATE_AFTER_BIND_BIT
+        | (uint)vk::DescriptorBindingFlagBits.UPDATE_UNUSED_WHILE_PENDING_BIT
+        | (uint)vk::DescriptorBindingFlagBits.PARTIALLY_BOUND_BIT;
+    assert(layout.count == HEAP_BINDING_COUNT);
+    assert(layout.bindings[5].binding
+            == HEAP_BINDING_ACCELERATION_STRUCTURES
+            && layout.bindings[5].descriptor_type
+                == vk::DescriptorType.ACCELERATION_STRUCTURE_KHR
+            && layout.bindings[5].descriptor_count
+                == acceleration_structure_capacity
+            && layout.bindings[5].stage_flags == vk::ShaderStageFlagBits.ALL,
+        "ray-query opt-in appends the exact independent binding 5");
+    assert((uint)layout.binding_flags[5] == expected_flags,
+        "binding 5 uses the required update-after-bind flags");
+
+    DescriptorHeapPoolPlan pool = descriptor_heap_pool_plan(
+        texture_capacity,
+        sampler_capacity,
+        acceleration_structure_capacity,
+    );
+    assert(pool.count == HEAP_POOL_SIZE_COUNT);
+    assert(pool.sizes[3].type
+            == vk::DescriptorType.ACCELERATION_STRUCTURE_KHR
+            && pool.sizes[3].descriptor_count
+                == acceleration_structure_capacity,
+        "ray-query pool storage is independently sized");
 }

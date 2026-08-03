@@ -77,6 +77,70 @@ gpu::SamplerIndex sampler_index = gpu::intern_sampler(&device, &sampler_desc)!;
 
 Sampler indices remain stable until device destruction.
 
+## Build a triangle BLAS and TLAS
+
+Enable ray queries on the device and give the runtime a nonzero
+`acceleration_structure_heap_capacity`. Query a triangle BLAS schema, create
+it, allocate the reported build scratch, and reserve geometry capacity on the
+command allocator:
+
+```c3
+gpu::AccelerationStructureGeometryDesc[1] geometries = {{
+    .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
+    .flags = { .opaque },
+    .triangles = {
+        .max_vertex_count = 3,
+        .max_primitive_count = 1,
+        .index_type = gpu::AccelerationStructureIndexType.NONE,
+    },
+}};
+gpu::AccelerationStructureDesc blas_desc = {
+    .kind = gpu::AccelerationStructureKind.BOTTOM_LEVEL,
+    .geometries = geometries[..],
+};
+gpu::AccelerationStructureHandle blas =
+    gpu::create_acceleration_structure(&device, &blas_desc)!;
+```
+
+Record `cmd_build_acceleration_structure` with a matching triangle build input
+and caller-owned scratch. After that build completes, use
+`make_acceleration_structure_instance` to pack the BLAS into a 64-byte instance
+record, build a TLAS from the instance span, and publish it with
+`create_acceleration_structure_view`. Store `view.index` in shader root data.
+
+Before querying in the same command list, record an
+`acceleration_structure_build`-to-`compute` barrier. Across submissions, wait
+on the build completion at `.compute`. Teardown order is: wait for the last
+query, destroy the view, destroy the TLAS, destroy BLAS values, then release
+their separately owned allocations and scratch.
+
+## Confirm procedural AABB intersections
+
+An AABB BLAS uses six-float `min_xyz`/`max_xyz` records. Traversal reports a
+broad-phase candidate; the shader must calculate the actual procedural shape
+and explicitly confirm it:
+
+```glsl
+#include "generated/shader_abi.glsl"
+#include "ray_query.glsl"
+
+rayQueryEXT query;
+GPU_RAY_QUERY_INITIALIZE(
+    query, root.tlas_index, gl_RayFlagsNoneEXT, 0xffu,
+    origin, 0.0, direction, 1000.0);
+while (rayQueryProceedEXT(query)) {
+    if (GPU_RAY_QUERY_CANDIDATE_IS_AABB(query)) {
+        float t;
+        if (intersect_procedural_shape(origin, direction, t)) {
+            GPU_RAY_QUERY_CONFIRM_AABB(query, t);
+        }
+    }
+}
+```
+
+Do not confirm a rejected candidate. Triangle and AABB geometry cannot share
+one BLAS; put separate BLAS instances beneath the same TLAS for mixed scenes.
+
 ## Blocking readback
 
 Record the producer-to-copy barrier, copy into `CPU_READ` storage, submit, wait

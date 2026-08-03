@@ -47,6 +47,36 @@ fn DeviceSupport? evaluate_device_desc_support(
     DeviceDesc normalized,
     bool creation_diagnostics = false,
 ) @private {
+    if (normalized.enable_ray_queries
+        && gpu::internal::vk::vk_acceleration_structure_heap_capacity(
+            data.state,
+        ) == 0) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (normalized.enable_ray_queries
+        && !gpu::internal::vk::vk_adapter_supports_ray_queries(
+            data.state,
+            adapter.adapter_index,
+        )!) {
+        return {
+            .supported         = false,
+            .unmet_requirement = "ray queries",
+        };
+    }
+    if (normalized.enable_ray_queries
+        && !gpu::internal::vk::vk_adapter_supports_ray_query_heap(
+            data.state,
+            adapter.adapter_index,
+            gpu::internal::vk::vk_acceleration_structure_heap_capacity(
+                data.state,
+            ),
+        )!) {
+        return {
+            .supported         = false,
+            .unmet_requirement = "acceleration structure heap capacity",
+        };
+    }
+
     void* backend_surface = null;
     if (normalized.surface.is_valid()) {
         SurfaceData* surface_data = resolve_surface(&normalized.surface);

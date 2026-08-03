@@ -11,6 +11,15 @@ push GraphicsRootPush {
     GpuAddress fragment_root_gpu;
 }
 
+struct AccelerationStructureInstance {
+    vec4       transform_row_0;
+    vec4       transform_row_1;
+    vec4       transform_row_2;
+    uint       custom_index_and_mask;
+    uint       record_offset_and_flags;
+    GpuAddress acceleration_structure;
+}
+
 // Indirect argument layouts, byte-identical to Vulkan's. The C3 declarations
 // live in gpu/command.c3 (public API); these entries generate the GLSL twins and
 // the drift-detecting offset asserts.

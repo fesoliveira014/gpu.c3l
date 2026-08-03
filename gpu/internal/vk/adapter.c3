@@ -17,6 +17,7 @@ struct VkAdapterState {
     vk::PhysicalDeviceProperties       properties;
     vk::PhysicalDeviceDriverProperties driver_properties;
     ShaderHeapSupport                  shader_heap;
+    RayQueryCandidateSupport           ray_queries;
     bool                               device_baseline_supported;
     gpu::AdapterInfo                   info;
     gpu::AdapterDiagnostics            diagnostics;
@@ -143,6 +144,7 @@ fn void initialize_adapter(
         config,
         &adapter.shader_heap,
     );
+    adapter.ray_queries = query_ray_query_candidate_support(physical_device);
 
     bool has_driver_properties = adapter.properties.api_version >= API_VERSION_1_2
         || device_supports_extension(physical_device, "VK_KHR_driver_properties");
@@ -198,6 +200,33 @@ fn bool? vk_adapter_supports_device_baseline(
         return gpu::INVALID_ARGUMENT~;
     }
     return state.adapters[adapter_index].device_baseline_supported;
+}
+
+fn bool? vk_adapter_supports_ray_queries(
+    VkRuntimeState* state,
+    uint adapter_index,
+) {
+    if (state == null || adapter_index >= state.adapters.len) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return ray_query_candidate_supported(
+        &state.adapters[adapter_index].ray_queries,
+    );
+}
+
+fn bool? vk_adapter_supports_ray_query_heap(
+    VkRuntimeState* state,
+    uint adapter_index,
+    uint heap_capacity,
+) {
+    if (state == null || adapter_index >= state.adapters.len) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    RayQueryCandidateSupport* support =
+        &state.adapters[adapter_index].ray_queries;
+    return ray_query_candidate_supported(support)
+        && heap_capacity > 0
+        && heap_capacity <= support.max_descriptor_count;
 }
 
 fn void? enumerate_vk_adapters(VkRuntimeState* state) {

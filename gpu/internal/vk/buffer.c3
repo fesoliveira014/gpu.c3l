@@ -20,6 +20,8 @@ bitstruct BufferUsage : uint {
     bool indirect     : 5;
     bool index        : 6;
     bool vertex       : 7;
+    bool acceleration_structure_storage     : 8;
+    bool acceleration_structure_build_input : 9;
 }
 
 struct BufferHandle {
@@ -134,6 +136,14 @@ fn vk::BufferUsageFlags buffer_usage_to_vk(BufferUsage usage) @private {
     if (usage.indirect)     flags |= (uint)vk::BufferUsageFlagBits.INDIRECT_BUFFER_BIT;
     if (usage.index)        flags |= (uint)vk::BufferUsageFlagBits.INDEX_BUFFER_BIT;
     if (usage.vertex)       flags |= (uint)vk::BufferUsageFlagBits.VERTEX_BUFFER_BIT;
+    if (usage.acceleration_structure_storage) {
+        flags |= (uint)vk::BufferUsageFlagBits
+            .ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+    }
+    if (usage.acceleration_structure_build_input) {
+        flags |= (uint)vk::BufferUsageFlagBits
+            .ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    }
     return (vk::BufferUsageFlags)flags;
 }
 

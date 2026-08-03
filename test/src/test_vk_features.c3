@@ -22,6 +22,131 @@ fn vk::PhysicalDeviceFeatures base_with_required() {
     return base;
 }
 
+fn gpu::internal::vk::RayQueryCandidateSupport
+ray_query_candidate_with_required() {
+    return {
+        .acceleration_structure_extension = true,
+        .ray_query_extension = true,
+        .deferred_host_operations_extension = true,
+        .acceleration_structure = true,
+        .ray_query = true,
+        .descriptor_update_after_bind = true,
+        .buffer_device_address = true,
+        .runtime_descriptor_array = true,
+        .descriptor_partially_bound = true,
+        .descriptor_update_unused_while_pending = true,
+        .spirv_1_4 = true,
+        .required_commands = true,
+        .triangle_vertex_format = true,
+        .max_geometry_count = 1,
+        .max_primitive_count = 1,
+        .max_instance_count = 1,
+        .max_descriptor_count = 1,
+        .scratch_alignment = 256,
+    };
+}
+
+fn void ray_query_candidate_gate_requires_the_complete_family() @test {
+    gpu::internal::vk::RayQueryCandidateSupport support =
+        ray_query_candidate_with_required();
+    assert(gpu::internal::vk::ray_query_candidate_supported(&support));
+
+    support.acceleration_structure_extension = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.ray_query_extension = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.deferred_host_operations_extension = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.acceleration_structure = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.ray_query = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.descriptor_update_after_bind = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.buffer_device_address = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.runtime_descriptor_array = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.descriptor_partially_bound = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.descriptor_update_unused_while_pending = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.spirv_1_4 = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.required_commands = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.triangle_vertex_format = false;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+}
+
+fn void ray_query_candidate_gate_requires_actionable_limits() @test {
+    gpu::internal::vk::RayQueryCandidateSupport support =
+        ray_query_candidate_with_required();
+    support.max_geometry_count = 0;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.max_primitive_count = 0;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.max_instance_count = 0;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.max_descriptor_count = 0;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    support = ray_query_candidate_with_required();
+    support.scratch_alignment = 0;
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+}
+
+fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
+    gpu::internal::vk::RayQueryCandidateSupport support =
+        ray_query_candidate_with_required();
+    support.max_geometry_count = (ulong)uint::max + 17;
+    support.max_primitive_count = 29;
+    support.max_instance_count = (ulong)uint::max + 1;
+    support.max_descriptor_count = 31;
+    support.scratch_alignment = 512;
+
+    gpu::RayQueryCaps disabled =
+        gpu::internal::vk::normalize_ray_query_caps(false, 7, &support);
+    assert(!disabled.enabled
+            && disabled.acceleration_structure_heap_capacity == 0
+            && disabled.max_geometry_count == 0
+            && disabled.max_primitive_count == 0
+            && disabled.max_instance_count == 0
+            && disabled.scratch_alignment == 0,
+        "the disabled path publishes a false zero capability record");
+
+    gpu::RayQueryCaps enabled =
+        gpu::internal::vk::normalize_ray_query_caps(true, 7, &support);
+    assert(enabled.enabled
+            && enabled.acceleration_structure_heap_capacity == 7
+            && enabled.max_geometry_count == uint::max
+            && enabled.max_primitive_count == 29
+            && enabled.max_instance_count == uint::max
+            && enabled.scratch_alignment == 512,
+        "enabled public caps preserve exact limits and saturate wide values");
+
+    assert(!gpu::internal::vk::normalize_ray_query_caps(
+            true,
+            support.max_descriptor_count + 1,
+            &support,
+        ).enabled,
+        "the configured binding capacity must fit the descriptor path");
+}
+
 fn vk::PhysicalDeviceVulkan11Features v11_with_required() {
     return vk::physical_device_vulkan11features()
         .set_shader_draw_parameters(vk::TRUE);
@@ -860,12 +985,15 @@ fn void semantic_barrier_stage_masks_map_exactly() @test {
         .color_output = true,
         .depth_output = true,
         .indirect = true,
+        .acceleration_structure_build = true,
     };
     ulong expected = (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT
-        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
+        | (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT
+        | (ulong)vk::PipelineStageFlagBits2
+            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
     assert((ulong)gpu::internal::vk::barrier_before_stages_to_vk(stages) == expected,
         "combined semantic producer stages map exactly");
 
@@ -964,6 +1092,18 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             compute_only,
         )!! == vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
         "compute queues accept indirect completion waits");
+    assert(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .acceleration_structure_build },
+            graphics_only,
+        )!! == vk::PipelineStageFlagBits2
+            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+        "graphics queues accept acceleration-structure build waits");
+    assert(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .acceleration_structure_build },
+            compute_only,
+        )!! == vk::PipelineStageFlagBits2
+            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+        "compute queues accept acceleration-structure build waits");
     ulong generated_indirect =
         (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
@@ -1019,7 +1159,12 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             transfer_only,
         )) == gpu::INVALID_ARGUMENT,
         "transfer-only queues reject indirect destinations");
-    gpu::StageMask unknown = (gpu::StageMask)(1u << 10);
+    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .acceleration_structure_build },
+            transfer_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "transfer-only queues reject acceleration-structure build waits");
+    gpu::StageMask unknown = (gpu::StageMask)(1u << 11);
     assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
             unknown,
             graphics_only,
@@ -1106,6 +1251,71 @@ fn void semantic_barrier_native_wiring_preserves_direction() @test {
         "generated work extends the wired destination access scope");
 }
 
+fn void acceleration_structure_barrier_scopes_map_exactly() @test {
+    ulong acceleration_structure_access =
+        (ulong)vk::AccessFlagBits2
+            .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
+        | (ulong)vk::AccessFlagBits2
+            .ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+    gpu::Barrier build_to_build = {
+        .before = { .acceleration_structure_build },
+        .after = { .acceleration_structure_build },
+    };
+    vk::MemoryBarrier2 native_build_to_build =
+        gpu::internal::vk::barrier_to_vk(&build_to_build, false, true);
+    assert(native_build_to_build.src_stage_mask
+            == vk::PipelineStageFlagBits2
+                .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+            && native_build_to_build.dst_stage_mask
+                == vk::PipelineStageFlagBits2
+                    .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+            && (ulong)native_build_to_build.src_access_mask
+                == acceleration_structure_access
+            && (ulong)native_build_to_build.dst_access_mask
+                == acceleration_structure_access,
+        "build-to-build barriers expose exact AS read/write scopes");
+
+    gpu::Barrier build_to_query = {
+        .before = { .acceleration_structure_build },
+        .after = { .compute },
+    };
+    vk::MemoryBarrier2 native_build_to_query =
+        gpu::internal::vk::barrier_to_vk(&build_to_query, false, true);
+    ulong query_access =
+        (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2
+            .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    assert((ulong)native_build_to_query.src_access_mask
+            == acceleration_structure_access
+            && native_build_to_query.dst_stage_mask
+                == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
+            && (ulong)native_build_to_query.dst_access_mask == query_access,
+        "build-to-query adds AS traversal reads to the calling shader stage");
+    gpu::StageMask graphics_query = {
+        .vertex_shader,
+        .fragment_shader,
+    };
+    ulong graphics_query_access =
+        (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2
+            .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(
+            graphics_query,
+            false,
+            true,
+        ) == graphics_query_access,
+        "vertex and fragment query scopes include AS traversal reads");
+    assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(
+            { .compute },
+            false,
+            false,
+        ) == (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
+                | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT,
+        "baseline shader scopes remain free of AS traversal access");
+}
+
 fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
     gpu::Barrier valid = {
         .before = { .compute = true },
@@ -1135,7 +1345,7 @@ fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
         "present cannot be combined with a device stage");
 
     gpu::Barrier unknown_stage = valid;
-    unknown_stage.before = (gpu::StageMask)((uint)valid.before | 0x400u);
+    unknown_stage.before = (gpu::StageMask)((uint)valid.before | 0x800u);
     assert(!gpu::internal::vk::barrier_masks_valid(&unknown_stage),
         "mixed known and unknown stage-mask bits are invalid");
 }

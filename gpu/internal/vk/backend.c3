@@ -18,6 +18,7 @@ struct VkDeviceDispatchPlan {
     bool debug;
     bool presentation;
     bool generated_work;
+    bool ray_queries;
 }
 
 struct VkInstanceDebugDispatch {
@@ -68,11 +69,20 @@ struct VkDynamicColorDispatch {
     vk::PFN_vkCmdSetColorWriteMaskEXT     set_write_mask;
 }
 
+struct VkRayQueryDispatch {
+    vk::PFN_vkCreateAccelerationStructureKHR           create_acceleration_structure;
+    vk::PFN_vkDestroyAccelerationStructureKHR          destroy_acceleration_structure;
+    vk::PFN_vkGetAccelerationStructureBuildSizesKHR    get_build_sizes;
+    vk::PFN_vkCmdBuildAccelerationStructuresKHR        cmd_build;
+    vk::PFN_vkGetAccelerationStructureDeviceAddressKHR get_device_address;
+}
+
 struct VkDeviceDispatch {
     VkDeviceDebugDispatch        debug;
     VkDevicePresentationDispatch presentation;
     VkGeneratedWorkDispatch      generated_work;
     VkDynamicColorDispatch       dynamic_color;
+    VkRayQueryDispatch           ray_queries;
 }
 
 fn VkInstanceDispatch load_vk_instance_dispatch(
@@ -202,6 +212,35 @@ fn VkDeviceDispatch load_vk_device_dispatch(
             ),
         };
     }
+    if (plan.ray_queries) {
+        dispatch.ray_queries = {
+            .create_acceleration_structure =
+                (vk::PFN_vkCreateAccelerationStructureKHR)loader(
+                    device,
+                    "vkCreateAccelerationStructureKHR",
+                ),
+            .destroy_acceleration_structure =
+                (vk::PFN_vkDestroyAccelerationStructureKHR)loader(
+                    device,
+                    "vkDestroyAccelerationStructureKHR",
+                ),
+            .get_build_sizes =
+                (vk::PFN_vkGetAccelerationStructureBuildSizesKHR)loader(
+                    device,
+                    "vkGetAccelerationStructureBuildSizesKHR",
+                ),
+            .cmd_build =
+                (vk::PFN_vkCmdBuildAccelerationStructuresKHR)loader(
+                    device,
+                    "vkCmdBuildAccelerationStructuresKHR",
+                ),
+            .get_device_address =
+                (vk::PFN_vkGetAccelerationStructureDeviceAddressKHR)loader(
+                    device,
+                    "vkGetAccelerationStructureDeviceAddressKHR",
+                ),
+        };
+    }
     dispatch.dynamic_color = {
         .set_blend_enable = (vk::PFN_vkCmdSetColorBlendEnableEXT)loader(
             device,
@@ -249,6 +288,14 @@ fn bool device_dispatch_supports_generated_work(VkDeviceDispatch* dispatch) {
         && dispatch.generated_work.get_memory_requirements != null
         && dispatch.generated_work.create_layout != null
         && dispatch.generated_work.destroy_layout != null;
+}
+
+fn bool device_dispatch_supports_ray_queries(VkDeviceDispatch* dispatch) {
+    return dispatch.ray_queries.create_acceleration_structure != null
+        && dispatch.ray_queries.destroy_acceleration_structure != null
+        && dispatch.ray_queries.get_build_sizes != null
+        && dispatch.ray_queries.cmd_build != null
+        && dispatch.ray_queries.get_device_address != null;
 }
 
 fn bool device_dispatch_supports_dynamic_color(VkDeviceDispatch* dispatch) {

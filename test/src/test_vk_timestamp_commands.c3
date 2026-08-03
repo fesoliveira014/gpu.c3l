@@ -247,6 +247,9 @@ fn void timestamp_stage_mapping_is_one_to_one() @test {
     assert(timestamp_stage_to_vk({ .indirect = true }) ==
         (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT);
+    assert(timestamp_stage_to_vk({ .acceleration_structure_build = true }) ==
+        (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
+            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR);
 }
 
 fn void timestamp_stage_shape_rejects_invalid_masks() @test {
@@ -257,7 +260,8 @@ fn void timestamp_stage_shape_rejects_invalid_masks() @test {
         .compute = true,
         .transfer = true,
     }));
-    assert(!timestamp_stage_mask_valid((gpu::StageMask)(1 << 10)));
+    assert(timestamp_stage_mask_valid({ .acceleration_structure_build }));
+    assert(!timestamp_stage_mask_valid((gpu::StageMask)(1 << 11)));
 }
 
 fn void timestamp_destination_requires_packed_ulong_alignment() @test {
@@ -491,7 +495,7 @@ fn void timestamp_full_write_rejects_invalid_masks_without_emission() @test {
         { .host },
         { .present },
         { .compute, .transfer },
-        (gpu::StageMask)(1 << 10),
+        (gpu::StageMask)(1 << 11),
     };
 
     foreach (stage : invalid) {
@@ -521,7 +525,7 @@ fn void timestamp_trusted_write_rejects_invalid_masks_without_emission() @test {
         { .host },
         { .present },
         { .compute, .transfer },
-        (gpu::StageMask)(1 << 10),
+        (gpu::StageMask)(1 << 11),
     };
 
     foreach (stage : invalid) {

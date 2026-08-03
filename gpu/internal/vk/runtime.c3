@@ -16,6 +16,7 @@ struct RuntimeConfig {
     char[]                    pipeline_cache_data;
     gpu::DebugMessageCallback debug_callback;
     void*                     debug_user_data;
+    uint                      acceleration_structure_heap_capacity;
 }
 
 struct VkRuntimeState @public {
@@ -26,6 +27,9 @@ struct VkRuntimeState @public {
     VkAdapterState[]            adapters;
     RuntimeConfig               config;
 }
+
+fn uint vk_acceleration_structure_heap_capacity(VkRuntimeState* state) =>
+    state == null ? 0 : state.config.acceleration_structure_heap_capacity;
 
 fn uint route_runtime_debug_message(
     VkRuntimeState* state,
@@ -177,6 +181,8 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     state.config.sampler_heap_capacity = desc.sampler_heap_capacity;
     state.config.texture_capacity = desc.texture_capacity;
     state.config.pipeline_capacity = desc.pipeline_capacity;
+    state.config.acceleration_structure_heap_capacity =
+        desc.acceleration_structure_heap_capacity;
     state.config.debug_callback = desc.debug_callback;
     state.config.debug_user_data = desc.debug_user_data;
     if (desc.pipeline_cache_data.len > 0) {

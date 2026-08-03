@@ -36,6 +36,10 @@ bitstruct SamplerIndex : uint {
     uint value : 0..31;
 }
 
+bitstruct AccelerationStructureIndex : uint {
+    uint value : 0..31;
+}
+
 <* Owning token for device-scoped generic GPU data. *>
 struct GpuAllocation {
     ulong owner;
@@ -50,6 +54,14 @@ struct TextureHandle {
     uint  generation;
 }
 $assert TextureHandle::size <= ulong::size * 2;
+
+<* Owning token for one bottom- or top-level acceleration structure. *>
+struct AccelerationStructureHandle {
+    ulong owner;
+    uint  index;
+    uint  generation;
+}
+$assert AccelerationStructureHandle::size <= ulong::size * 2;
 
 struct AttachmentViewHandle {
     ulong owner;
@@ -66,6 +78,14 @@ struct TextureView {
     uint         generation;
 }
 $assert TextureView::size <= ulong::size * 2;
+
+<* Owning CPU token for one published top-level acceleration structure. *>
+struct AccelerationStructureView {
+    ulong                      owner;
+    AccelerationStructureIndex index;
+    uint                       generation;
+}
+$assert AccelerationStructureView::size <= ulong::size * 2;
 
 struct PipelineHandle {
     ulong owner;
@@ -99,8 +119,10 @@ $assert TimestampPoolHandle::size <= ulong::size * 2;
 const Device                 DEVICE_INVALID                   = {};
 const GpuAllocation          GPU_ALLOCATION_INVALID           = {};
 const TextureHandle          TEXTURE_HANDLE_INVALID           = {};
+const AccelerationStructureHandle ACCELERATION_STRUCTURE_HANDLE_INVALID = {};
 const AttachmentViewHandle   ATTACHMENT_VIEW_HANDLE_INVALID   = {};
 const TextureView            TEXTURE_VIEW_INVALID             = {};
+const AccelerationStructureView ACCELERATION_STRUCTURE_VIEW_INVALID = {};
 const PipelineHandle         PIPELINE_HANDLE_INVALID          = {};
 const SwapchainHandle        SWAPCHAIN_HANDLE_INVALID         = {};
 const CommandAllocatorHandle COMMAND_ALLOCATOR_HANDLE_INVALID = {};
@@ -108,6 +130,7 @@ const TimestampPoolHandle    TIMESTAMP_POOL_HANDLE_INVALID    = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
+const AccelerationStructureIndex ACCELERATION_STRUCTURE_INDEX_INVALID = {};
 
 // Public fault set. Categories describe causes, not whole fault values: one
 // value can report an always-checked cause, a FULL diagnostic, or a runtime
@@ -187,6 +210,22 @@ $assert GraphicsRootPush::size == 16;
 $assert $reflect(GraphicsRootPush.vertex_root_gpu).offset == 0;
 $assert $reflect(GraphicsRootPush.fragment_root_gpu).offset == 8;
 
+struct AccelerationStructureInstance {
+    Vec4f      transform_row_0;
+    Vec4f      transform_row_1;
+    Vec4f      transform_row_2;
+    uint       custom_index_and_mask;
+    uint       record_offset_and_flags;
+    GpuAddress acceleration_structure;
+}
+$assert AccelerationStructureInstance::size == 64;
+$assert $reflect(AccelerationStructureInstance.transform_row_0).offset == 0;
+$assert $reflect(AccelerationStructureInstance.transform_row_1).offset == 16;
+$assert $reflect(AccelerationStructureInstance.transform_row_2).offset == 32;
+$assert $reflect(AccelerationStructureInstance.custom_index_and_mask).offset == 48;
+$assert $reflect(AccelerationStructureInstance.record_offset_and_flags).offset == 52;
+$assert $reflect(AccelerationStructureInstance.acceleration_structure).offset == 56;
+
 $assert DrawIndirectCommand::size == 16;
 $assert $reflect(DrawIndirectCommand.vertex_count).offset == 0;
 $assert $reflect(DrawIndirectCommand.instance_count).offset == 4;
@@ -247,6 +286,84 @@ enum QueueKind : int {
     TRANSFER,
 }
 
+enum AccelerationStructureKind : int {
+    BOTTOM_LEVEL,
+    TOP_LEVEL,
+}
+
+enum AccelerationStructureGeometryKind : int {
+    TRIANGLES,
+    AABBS,
+}
+
+enum AccelerationStructureIndexType : int {
+    NONE,
+    U16,
+    U32,
+}
+
+bitstruct AccelerationStructureBuildFlags : uint {
+    bool allow_update      : 0;
+    bool prefer_fast_trace : 1;
+    bool prefer_fast_build : 2;
+    bool minimize_memory   : 3;
+}
+
+bitstruct AccelerationStructureGeometryFlags : uint {
+    bool opaque : 0;
+}
+
+bitstruct AccelerationStructureInstanceFlags : uint {
+    bool triangle_cull_disable : 0;
+    bool triangle_facing_flip  : 1;
+    bool force_opaque          : 2;
+    bool force_non_opaque      : 3;
+}
+
+struct AccelerationStructureTriangleGeometryDesc {
+    uint                           max_vertex_count;
+    uint                           max_primitive_count;
+    AccelerationStructureIndexType index_type;
+}
+
+struct AccelerationStructureAabbGeometryDesc {
+    uint max_primitive_count;
+}
+
+struct AccelerationStructureGeometryDesc {
+    AccelerationStructureGeometryKind         kind;
+    AccelerationStructureGeometryFlags        flags;
+    AccelerationStructureTriangleGeometryDesc triangles;
+    AccelerationStructureAabbGeometryDesc     aabbs;
+}
+
+struct AccelerationStructureDesc {
+    AccelerationStructureKind          kind;
+    AccelerationStructureGeometryDesc[] geometries;
+    uint                                max_instance_count;
+    AccelerationStructureBuildFlags     flags;
+    ZString                             debug_name;
+}
+
+struct AccelerationStructureRequirements {
+    usz storage_size;
+    usz storage_alignment;
+    usz build_scratch_size;
+    usz update_scratch_size;
+    usz scratch_alignment;
+}
+
+struct AccelerationStructureInstanceDesc {
+    Vec4f                              transform_row_0;
+    Vec4f                              transform_row_1;
+    Vec4f                              transform_row_2;
+    AccelerationStructureHandle        bottom_level;
+    uint                               custom_index;
+    uint                               mask;
+    uint                               shader_binding_table_record_offset;
+    AccelerationStructureInstanceFlags flags;
+}
+
 struct TimestampPoolDesc {
     uint    capacity;
     ZString debug_name;
@@ -270,6 +387,15 @@ struct SparseTextureCaps {
     QueueRoles binding_queues;
 }
 
+struct RayQueryCaps {
+    bool enabled;
+    uint acceleration_structure_heap_capacity;
+    uint max_geometry_count;
+    uint max_primitive_count;
+    uint max_instance_count;
+    usz  scratch_alignment;
+}
+
 <* Capabilities of the created device. Query with get_device_caps instead of
    hardcoding limits. *>
 struct DeviceCaps {
@@ -283,6 +409,7 @@ struct DeviceCaps {
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
     TimestampCaps timestamps;
+    RayQueryCaps ray_queries;
     // Configured semantic heap capacity, not the hardware maximum.
     uint texture_heap_capacity;
     // Configured semantic heap capacity, not the hardware maximum.
@@ -331,6 +458,8 @@ enum DebugResourceKind : int {
     ALLOCATION,
     ATTACHMENT_VIEW,
     TIMESTAMP_POOL,
+    ACCELERATION_STRUCTURE,
+    ACCELERATION_STRUCTURE_VIEW,
 }
 
 bitstruct DebugMessageCategory : uint {
@@ -407,6 +536,7 @@ struct RuntimeDesc {
     ZString               application_name;
     DebugMessageCallback  debug_callback;
     void*                 debug_user_data;
+    uint                  acceleration_structure_heap_capacity;
 }
 
 enum AdapterClass : int {
@@ -486,7 +616,7 @@ bitstruct Surface : ulong {
 
 const Surface SURFACE_INVALID = {};
 
-const ulong RESOURCE_OWNER_KIND_COUNT = 11;
+const ulong RESOURCE_OWNER_KIND_COUNT = 13;
 const ulong MAX_DEVICE_RESOURCE_OWNER =
     ulong::max / RESOURCE_OWNER_KIND_COUNT;
 
@@ -508,6 +638,40 @@ struct GpuSpan {
     uint  generation;
     usz   offset;
     usz   size;
+}
+
+struct AccelerationStructureTriangleBuildDesc {
+    GpuSpan vertices;
+    usz     vertex_stride;
+    uint    vertex_count;
+    GpuSpan indices;
+    uint    primitive_count;
+    GpuSpan transform;
+}
+
+struct AccelerationStructureAabbBuildDesc {
+    GpuSpan aabbs;
+    usz     stride;
+    uint    primitive_count;
+}
+
+struct AccelerationStructureGeometryBuildDesc {
+    AccelerationStructureGeometryKind      kind;
+    AccelerationStructureTriangleBuildDesc triangles;
+    AccelerationStructureAabbBuildDesc     aabbs;
+}
+
+struct AccelerationStructureBuildDesc {
+    AccelerationStructureHandle              destination;
+    AccelerationStructureGeometryBuildDesc[] geometries;
+    GpuSpan                                  instances;
+    uint                                     instance_count;
+    GpuSpan                                  scratch;
+}
+
+struct DedicatedAccelerationStructure {
+    AccelerationStructureHandle acceleration_structure;
+    GpuAllocation               allocation;
 }
 
 <* Consistent non-owning CPU and GPU views of one mapped span.
@@ -1046,6 +1210,7 @@ struct CommandAllocatorDesc {
     uint    max_generated_preprocess_buffers_per_list;
     usz     generated_preprocess_bytes;
     ZString debug_name;
+    uint    max_acceleration_structure_geometries_per_build;
 }
 
 <* A recording token whose fields are library-owned. Never construct, mutate,
@@ -1194,6 +1359,7 @@ bitstruct StageMask : uint {
     bool depth_output    : 7;
     bool present         : 8;
     bool indirect        : 9;
+    bool acceleration_structure_build : 10;
 }
 
 <* Texture layout for explicit transitions. *>
@@ -1290,6 +1456,7 @@ struct DeviceDesc {
     Surface      surface;
     QueueRequest queues;
     bool         enable_sparse_textures;
+    bool         enable_ray_queries;
 }
 
 <* Result of a read-only semantic support query. unmet_requirement is a

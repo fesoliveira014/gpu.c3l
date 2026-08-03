@@ -22,6 +22,8 @@ application must design around.
 - Optional full contract validation, structured diagnostics, object naming,
   and leak reporting.
 - Shader ABI schemas that generate matching C3 and GLSL std430 declarations.
+- Explicitly opted-in compute/graphics ray queries with triangle and procedural
+  AABB BLAS values, TLAS instances, in-place updates, and a bindless TLAS heap.
 
 ## Deliberate exclusions
 
@@ -36,6 +38,11 @@ application must design around.
 - No public compatibility profile for older Vulkan versions.
 - No package-registry distribution; consumers vendor the repository and its
   submodules.
+- No ray-tracing pipelines, shader binding tables, callable/miss/closest-hit
+  stages, or trace-rays commands.
+- No acceleration-structure compaction, copy/clone, serialization, indirect
+  builds, host builds, or updates into a distinct destination. Builds and
+  in-place updates are device commands using caller-owned scratch.
 
 ## Required capability profile
 
@@ -54,15 +61,22 @@ is required to build GLSL examples.
 Optional capabilities are reported in `DeviceCaps`, including asynchronous
 compute, indirect-count draws, generated work, wireframe polygon mode, sparse
 textures, anisotropy limits, timestamp support, and workload limits.
+Ray queries are also optional, but unlike passive capability discovery they
+must be requested with `DeviceDesc.enable_ray_queries` and a nonzero runtime
+acceleration-structure heap capacity. Unsupported requests fail atomically.
 
 ## Ownership and ordering constraints
 
-- `GpuAddress`, `TextureIndex`, and `SamplerIndex` are raw shader-visible
-  values. They carry no device owner or generation. Keep the owner-bearing
-  allocation, view, or device alive until every use completes.
+- `GpuAddress`, `TextureIndex`, `SamplerIndex`, and
+  `AccelerationStructureIndex` are raw shader-visible values. They carry no
+  device owner or generation. Keep the owner-bearing allocation, view, or
+  device alive until every use completes.
 - A `TextureView` owns a recyclable texture-heap slot. Destroying the view
   immediately makes its index reusable. Sampler indices remain stable until
   device destruction.
+- An `AccelerationStructureView` owns a recyclable TLAS-heap slot. Wait for
+  query completion before destroying it; the view blocks destruction of its
+  TLAS while live.
 - Allocations are not relocated. A `GpuAddress` remains numerically stable
   while its allocation is alive, but it becomes invalid immediately when that
   allocation is freed.
@@ -100,6 +114,9 @@ textures, anisotropy limits, timestamp support, and workload limits.
 - Generated root records are optional. Shared-root direct and indirect work
   remains available when `DeviceCaps.generated_work` is false.
 - The ABI schema has no matrix type. Represent a matrix as vector columns.
+- One BLAS contains only triangles or only AABBs. Mixed scenes use separate
+  BLAS instances beneath one TLAS. AABB traversal supplies candidates; shaders
+  calculate and explicitly confirm procedural intersections.
 
 ## Default and maximum capacities
 
