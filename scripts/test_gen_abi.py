@@ -44,6 +44,20 @@ $assert ROOT_PUSH_ABI.block_size == RootPush::size;
 
 
 class GenAbiTest(unittest.TestCase):
+    def test_ray_shader_headers_share_only_the_acceleration_structure_heap(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        shared = (root / "include/shaders/internal/acceleration_structure_heap.glsl").read_text()
+        ray_query = (root / "include/shaders/ray_query.glsl").read_text()
+        ray_tracing = (root / "include/shaders/ray_tracing.glsl").read_text()
+
+        self.assertIn("layout(set = 0, binding = 5)", shared)
+        self.assertIn("GPU_ACCELERATION_STRUCTURE_SLOT", shared)
+        self.assertIn("GL_EXT_ray_query", ray_query)
+        self.assertIn('internal/acceleration_structure_heap.glsl', ray_query)
+        self.assertIn("GL_EXT_ray_tracing", ray_tracing)
+        self.assertNotIn("GL_EXT_ray_query", ray_tracing)
+        self.assertIn('internal/acceleration_structure_heap.glsl', ray_tracing)
+
     def test_splits_public_declarations_from_private_metadata(self) -> None:
         public, private = gen_abi.split_gpu_c3(GENERATED)
 

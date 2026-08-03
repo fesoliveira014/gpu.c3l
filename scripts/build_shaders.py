@@ -16,7 +16,19 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-STAGES = {".comp": "compute", ".vert": "vertex", ".frag": "fragment"}
+STAGES = {
+    ".comp": "compute",
+    ".vert": "vertex",
+    ".frag": "fragment",
+}
+RAY_TRACING_STAGES = {
+    ".rgen": "rgen",
+    ".rmiss": "rmiss",
+    ".rchit": "rchit",
+    ".rahit": "rahit",
+    ".rint": "rint",
+    ".rcall": "rcall",
+}
 SHADER_TREES = (
     (ROOT / "test" / "shaders", ROOT / "test" / "src" / "shaders"),
     (
@@ -30,20 +42,42 @@ def main():
     glslc = shutil.which(os.environ.get("GLSLC", "glslc"))
     if glslc is None:
         sys.exit("build_shaders: glslc not found (set GLSLC or add it to PATH)")
+    glslang = shutil.which(
+        os.environ.get("GLSLANG_VALIDATOR", "glslangValidator")
+    )
     include_dir = ROOT / "include" / "shaders"
     for source_dir, out_dir in SHADER_TREES:
         out_dir.mkdir(parents=True, exist_ok=True)
         for src in sorted(source_dir.glob("*.glsl")):
             stage = STAGES.get(Path(src.stem).suffix)
-            if stage is None:
+            ray_stage = RAY_TRACING_STAGES.get(Path(src.stem).suffix)
+            if stage is None and ray_stage is None:
                 print(
                     f"build_shaders: unknown shader stage for {src}",
                     file=sys.stderr,
                 )
                 sys.exit(1)
             out = out_dir / (src.stem + ".spv")
-            subprocess.run(
-                [
+            if ray_stage is not None:
+                if glslang is None:
+                    sys.exit(
+                        "build_shaders: glslangValidator not found "
+                        "(set GLSLANG_VALIDATOR or add it to PATH)"
+                    )
+                command = [
+                    glslang,
+                    "-V",
+                    "--target-env",
+                    "vulkan1.3",
+                    f"-I{include_dir}",
+                    "-S",
+                    ray_stage,
+                    str(src),
+                    "-o",
+                    str(out),
+                ]
+            else:
+                command = [
                     glslc,
                     f"-fshader-stage={stage}",
                     "--target-env=vulkan1.3",
@@ -52,9 +86,8 @@ def main():
                     str(src),
                     "-o",
                     str(out),
-                ],
-                check=True,
-            )
+                ]
+            subprocess.run(command, check=True)
             print(f"built {out}")
 
     assembly_sources = sorted((ROOT / "test" / "shaders").glob("*.spvasm"))
