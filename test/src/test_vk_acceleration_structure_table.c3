@@ -173,10 +173,10 @@ fn void capture_acceleration_structure_build_sizes(
     size_info.update_scratch_size = 1024;
 }
 
-fn gpu::RayQueryCaps acceleration_structure_test_caps() {
+fn gpu::AccelerationStructureCaps acceleration_structure_test_caps() {
     return {
         .enabled = true,
-        .acceleration_structure_heap_capacity = 8,
+        .heap_capacity = 8,
         .max_geometry_count = 4,
         .max_primitive_count = 16,
         .max_instance_count = 32,
@@ -185,7 +185,7 @@ fn gpu::RayQueryCaps acceleration_structure_test_caps() {
 }
 
 fn void acceleration_structure_desc_normalization_is_capacity_first() @test {
-    gpu::RayQueryCaps caps = acceleration_structure_test_caps();
+    gpu::AccelerationStructureCaps caps = acceleration_structure_test_caps();
     gpu::AccelerationStructureGeometryDesc[2] geometries = {
         {
             .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
@@ -242,7 +242,7 @@ fn void acceleration_structure_desc_normalization_is_capacity_first() @test {
 }
 
 fn void acceleration_structure_desc_normalization_rejects_invalid_shapes() @test {
-    gpu::RayQueryCaps caps = acceleration_structure_test_caps();
+    gpu::AccelerationStructureCaps caps = acceleration_structure_test_caps();
     gpu::internal::NormalizedAccelerationStructureGeometry[1] storage;
     gpu::internal::NormalizedAccelerationStructureDesc normalized;
     gpu::AccelerationStructureGeometryDesc geometry = {
@@ -379,7 +379,7 @@ fn void acceleration_structure_requirements_lower_exact_capacity_schema() @test 
     };
     VkDeviceState state = {
         .ray_queries_enabled = true,
-        .caps.ray_queries = acceleration_structure_test_caps(),
+        .caps.acceleration_structures = acceleration_structure_test_caps(),
     };
     AccelerationStructureRequirementsCapture capture;
     AccelerationStructureRequirementsOps ops = {
@@ -463,9 +463,9 @@ fn void acceleration_structure_requirements_lower_tlas_and_static_update() @test
     };
     VkDeviceState state = {
         .ray_queries_enabled = true,
-        .caps.ray_queries = acceleration_structure_test_caps(),
+        .caps.acceleration_structures = acceleration_structure_test_caps(),
     };
-    state.caps.ray_queries.max_instance_count = 17;
+    state.caps.acceleration_structures.max_instance_count = 17;
     AccelerationStructureRequirementsCapture capture;
     AccelerationStructureRequirementsOps ops = {
         .user_data = &capture,
@@ -507,7 +507,7 @@ fn void acceleration_structure_native_creation_is_transactional() @test {
     defer mem::free(cells.ptr);
     VkDeviceState state = {
         .ray_queries_enabled = true,
-        .caps.ray_queries = acceleration_structure_test_caps(),
+        .caps.acceleration_structures = acceleration_structure_test_caps(),
         .acceleration_structures = {
             .slots = cells,
             .owner = 0xB5,

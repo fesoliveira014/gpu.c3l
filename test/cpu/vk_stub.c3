@@ -1635,10 +1635,10 @@ fn gpu::Device? create_vk_device(
         .presentation_enabled = normalized.surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
-        .ray_queries = normalized.enable_ray_queries
-            ? (gpu::RayQueryCaps){
+        .acceleration_structures = normalized.enable_ray_queries
+            ? (gpu::AccelerationStructureCaps){
                 .enabled = true,
-                .acceleration_structure_heap_capacity =
+                .heap_capacity =
                     runtime_data.state.acceleration_structure_heap_capacity,
                 .max_geometry_count = uint::max,
                 .max_primitive_count = uint::max,
@@ -1646,6 +1646,7 @@ fn gpu::Device? create_vk_device(
                 .scratch_alignment = 256,
             }
             : {},
+        .ray_queries = { .enabled = normalized.enable_ray_queries },
     };
     return gpu::internal::register_device(
         state:                state,

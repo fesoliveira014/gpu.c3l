@@ -1691,7 +1691,7 @@ fn CommandAllocator? create_command_allocator(
             return UNSUPPORTED_FEATURE~;
         }
         if (normalized.max_acceleration_structure_geometries_per_build
-            > operation.data.caps.ray_queries.max_geometry_count) {
+            > operation.data.caps.acceleration_structures.max_geometry_count) {
             return INVALID_ARGUMENT~;
         }
     }

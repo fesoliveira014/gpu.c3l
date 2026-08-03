@@ -87,6 +87,7 @@
         "../src/test_handles.c3",
         "../src/test_acceleration_structure_values.c3",
         "../src/test_acceleration_structure_instance.c3",
+        "../src/test_ray_tracing_values.c3",
         "../src/test_timestamp_values.c3",
         "../src/test_sampler_identity.c3",
         "../src/test_runtime.c3",

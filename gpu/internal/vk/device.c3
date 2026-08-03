@@ -251,7 +251,7 @@ fn bool ray_query_descriptor_heap_fits_limits(
 fn uint narrow_ray_query_limit(ulong value) =>
     value > (ulong)uint::max ? uint::max : (uint)value;
 
-fn gpu::RayQueryCaps normalize_ray_query_caps(
+fn gpu::AccelerationStructureCaps normalize_acceleration_structure_caps(
     bool enabled,
     uint heap_capacity,
     uint texture_capacity,
@@ -266,7 +266,7 @@ fn gpu::RayQueryCaps normalize_ray_query_caps(
     )) return {};
     return {
         .enabled = true,
-        .acceleration_structure_heap_capacity = heap_capacity,
+        .heap_capacity = heap_capacity,
         .max_geometry_count = narrow_ray_query_limit(
             support.max_geometry_count,
         ),
@@ -1772,13 +1772,16 @@ fn gpu::DeviceCaps build_caps(
                 .binding_queues     = inputs.sparse_binding_queues,
             }
             : {},
-        .ray_queries                = normalize_ray_query_caps(
+        .acceleration_structures    = normalize_acceleration_structure_caps(
             inputs.ray_queries_enabled,
             inputs.acceleration_structure_heap_capacity,
             inputs.texture_capacity,
             inputs.sampler_capacity,
             &inputs.ray_query_support,
         ),
+        .ray_queries                = {
+            .enabled = inputs.ray_queries_enabled,
+        },
         .texture_heap_capacity      = inputs.texture_capacity,
         .sampler_heap_capacity      = inputs.sampler_capacity,
         .max_color_attachments      = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS

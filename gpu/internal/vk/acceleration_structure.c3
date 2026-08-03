@@ -908,7 +908,7 @@ get_acceleration_structure_requirements_with_ops(
         gpu::internal::NormalizedAccelerationStructureDesc normalized_desc;
         gpu::internal::normalize_acceleration_structure_desc(
             desc,
-            &state.caps.ray_queries,
+            &state.caps.acceleration_structures,
             normalized,
             &normalized_desc,
         )!;
@@ -981,7 +981,7 @@ get_acceleration_structure_requirements_with_ops(
             .update_scratch_size = normalized_desc.flags.allow_update
                 ? (usz)size_info.update_scratch_size
                 : 0,
-            .scratch_alignment = state.caps.ray_queries.scratch_alignment,
+            .scratch_alignment = state.caps.acceleration_structures.scratch_alignment,
         };
     };
 }
@@ -1102,7 +1102,7 @@ create_acceleration_structure_on_buffer_with_ops(
     gpu::internal::NormalizedAccelerationStructureDesc normalized;
     gpu::internal::normalize_acceleration_structure_desc(
         desc,
-        &state.caps.ray_queries,
+        &state.caps.acceleration_structures,
         schema,
         &normalized,
     )!;

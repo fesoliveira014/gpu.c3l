@@ -387,13 +387,28 @@ struct SparseTextureCaps {
     QueueRoles binding_queues;
 }
 
-struct RayQueryCaps {
+struct AccelerationStructureCaps {
     bool enabled;
-    uint acceleration_structure_heap_capacity;
+    uint heap_capacity;
     uint max_geometry_count;
     uint max_primitive_count;
     uint max_instance_count;
     usz  scratch_alignment;
+}
+
+struct RayQueryCaps {
+    bool enabled;
+}
+
+struct RayTracingPipelineCaps {
+    bool enabled;
+    uint max_recursion_depth;
+    uint max_ray_dispatch_invocation_count;
+    uint shader_group_handle_size;
+    uint shader_group_handle_alignment;
+    uint shader_group_base_alignment;
+    uint max_shader_group_stride;
+    uint max_hit_attribute_size;
 }
 
 <* Capabilities of the created device. Query with get_device_caps instead of
@@ -409,7 +424,9 @@ struct DeviceCaps {
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
     TimestampCaps timestamps;
+    AccelerationStructureCaps acceleration_structures;
     RayQueryCaps ray_queries;
+    RayTracingPipelineCaps ray_tracing_pipelines;
     // Configured semantic heap capacity, not the hardware maximum.
     uint texture_heap_capacity;
     // Configured semantic heap capacity, not the hardware maximum.
@@ -1028,6 +1045,11 @@ enum IndexType : int {
     U16,
 }
 
+enum RayTracingHitGroupType : int {
+    TRIANGLES,
+    PROCEDURAL,
+}
+
 <* Color channels written by one graphics target; zero disables all writes. *>
 bitstruct ColorWriteMask : uint {
     bool red   : 0;
@@ -1108,6 +1130,47 @@ struct GraphicsPipelineDesc {
     SampleCount  sample_count;
     PolygonMode  polygon_mode;
     ZString      debug_name;
+}
+
+struct RayTracingHitGroupDesc {
+    RayTracingHitGroupType type;
+    ShaderDesc*            closest_hit_shader;
+    ShaderDesc*            any_hit_shader;
+    ShaderDesc*            intersection_shader;
+}
+
+struct RayTracingPipelineDesc {
+    ShaderDesc[]             ray_generation_shaders;
+    ShaderDesc[]             miss_shaders;
+    RayTracingHitGroupDesc[] hit_groups;
+    ShaderDesc[]             callable_shaders;
+    uint                     max_recursion_depth;
+    ZString                  debug_name;
+}
+
+struct RayTracingShaderGroupRange {
+    uint first_group;
+    uint group_count;
+}
+
+struct RayTracingPipelineInfo {
+    RayTracingShaderGroupRange ray_generation;
+    RayTracingShaderGroupRange miss;
+    RayTracingShaderGroupRange hit;
+    RayTracingShaderGroupRange callable;
+    uint                       total_group_count;
+}
+
+struct RayTracingShaderBindingTableRegion {
+    GpuSpan span;
+    usz     stride;
+}
+
+struct RayTracingShaderBindingTable {
+    RayTracingShaderBindingTableRegion ray_generation;
+    RayTracingShaderBindingTableRegion miss;
+    RayTracingShaderBindingTableRegion hit;
+    RayTracingShaderBindingTableRegion callable;
 }
 
 const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
@@ -1361,6 +1424,7 @@ bitstruct StageMask : uint {
     bool present         : 8;
     bool indirect        : 9;
     bool acceleration_structure_build : 10;
+    bool ray_tracing     : 11;
 }
 
 <* Texture layout for explicit transitions. *>
@@ -1458,6 +1522,7 @@ struct DeviceDesc {
     QueueRequest queues;
     bool         enable_sparse_textures;
     bool         enable_ray_queries;
+    bool         enable_ray_tracing_pipelines;
 }
 
 <* Result of a read-only semantic support query. unmet_requirement is a

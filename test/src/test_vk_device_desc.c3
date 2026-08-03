@@ -751,11 +751,11 @@ fn void default_device_caps_hide_sparse_support() @test {
                 && (uint)caps.sparse_textures.binding_queues == 0,
             "a zero DeviceDesc publishes entirely zero sparse capabilities");
         assert(!caps.ray_queries.enabled
-                && caps.ray_queries.acceleration_structure_heap_capacity == 0
-                && caps.ray_queries.max_geometry_count == 0
-                && caps.ray_queries.max_primitive_count == 0
-                && caps.ray_queries.max_instance_count == 0
-                && caps.ray_queries.scratch_alignment == 0,
+                && caps.acceleration_structures.heap_capacity == 0
+                && caps.acceleration_structures.max_geometry_count == 0
+                && caps.acceleration_structures.max_primitive_count == 0
+                && caps.acceleration_structures.max_instance_count == 0
+                && caps.acceleration_structures.scratch_alignment == 0,
             "a zero DeviceDesc publishes entirely zero ray-query capabilities");
         gpu::destroy_device(&device)!!;
         return;
@@ -787,8 +787,8 @@ fn void ray_query_support_and_created_caps_are_consistent() @test {
         gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
         gpu::internal::vk::VkDeviceState* state =
             gpu::internal::device_slots[device.index].data.state;
-        gpu::RayQueryCaps expected =
-            gpu::internal::vk::normalize_ray_query_caps(
+        gpu::AccelerationStructureCaps expected =
+            gpu::internal::vk::normalize_acceleration_structure_caps(
                 true,
                 runtime_desc.acceleration_structure_heap_capacity,
                 state.shader_heap.texture_capacity,
@@ -796,14 +796,14 @@ fn void ray_query_support_and_created_caps_are_consistent() @test {
                 &state.ray_query_support,
             );
         assert(caps.ray_queries.enabled
-                && caps.ray_queries.acceleration_structure_heap_capacity == 7
-                && caps.ray_queries.max_geometry_count
+                && caps.acceleration_structures.heap_capacity == 7
+                && caps.acceleration_structures.max_geometry_count
                     == expected.max_geometry_count
-                && caps.ray_queries.max_primitive_count
+                && caps.acceleration_structures.max_primitive_count
                     == expected.max_primitive_count
-                && caps.ray_queries.max_instance_count
+                && caps.acceleration_structures.max_instance_count
                     == expected.max_instance_count
-                && caps.ray_queries.scratch_alignment
+                && caps.acceleration_structures.scratch_alignment
                     == expected.scratch_alignment,
             "created caps exactly normalize the selected device properties");
         gpu::destroy_device(&device)!!;

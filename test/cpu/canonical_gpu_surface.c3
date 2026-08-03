@@ -20,6 +20,7 @@ fn void pin_runtime_adapter_device() {
         .queues                 = queues,
         .enable_sparse_textures = true,
         .enable_ray_queries     = true,
+        .enable_ray_tracing_pipelines = true,
     };
     gpu::Device device = {};
     gpu::DeviceCaps caps = {
@@ -36,13 +37,24 @@ fn void pin_runtime_adapter_device() {
             .transfer_valid_bits = 64,
             .period_ns           = 1.0f,
         },
-        .ray_queries                 = {
-            .enabled                              = true,
-            .acceleration_structure_heap_capacity = 16,
-            .max_geometry_count                   = 8,
-            .max_primitive_count                  = 1024,
-            .max_instance_count                   = 128,
-            .scratch_alignment                    = 256,
+        .acceleration_structures       = {
+            .enabled             = true,
+            .heap_capacity       = 16,
+            .max_geometry_count  = 8,
+            .max_primitive_count = 1024,
+            .max_instance_count  = 128,
+            .scratch_alignment   = 256,
+        },
+        .ray_queries                  = { .enabled = true },
+        .ray_tracing_pipelines        = {
+            .enabled                           = true,
+            .max_recursion_depth               = 2,
+            .max_ray_dispatch_invocation_count = 1024,
+            .shader_group_handle_size          = 32,
+            .shader_group_handle_alignment     = 32,
+            .shader_group_base_alignment       = 64,
+            .max_shader_group_stride           = 4096,
+            .max_hit_attribute_size            = 32,
         },
         .sparse_textures              = {
             .image_2d           = true,
@@ -87,7 +99,9 @@ fn void pin_runtime_adapter_device() {
     (void)caps.queues;
     (void)caps.line_polygon_mode;
     (void)caps.timestamps;
+    (void)caps.acceleration_structures;
     (void)caps.ray_queries;
+    (void)caps.ray_tracing_pipelines;
     (void)caps.sparse_textures;
     (void)caps.sparse_textures.image_2d;
     (void)caps.sparse_textures.image_3d;
@@ -105,6 +119,38 @@ fn void pin_runtime_adapter_device() {
     (void)caps.min_texel_buffer_alignment;
     (void)caps.max_sampler_lod_bias;
     (void)caps.max_sampler_anisotropy;
+}
+
+fn void pin_ray_tracing_pipeline_values() {
+    gpu::ShaderDesc raygen = {};
+    gpu::ShaderDesc closest_hit = {};
+    gpu::RayTracingHitGroupDesc[1] hit_groups = {
+        {
+            .type               = gpu::RayTracingHitGroupType.TRIANGLES,
+            .closest_hit_shader = &closest_hit,
+        },
+    };
+    gpu::RayTracingPipelineDesc pipeline_desc = {
+        .ray_generation_shaders = (&raygen)[:1],
+        .hit_groups             = hit_groups[..],
+        .max_recursion_depth    = 2,
+        .debug_name             = "canonical_ray_tracing_pipeline",
+    };
+    gpu::RayTracingPipelineInfo info = {
+        .ray_generation = { .first_group = 0, .group_count = 1 },
+        .hit            = { .first_group = 1, .group_count = 1 },
+        .total_group_count = 2,
+    };
+    gpu::RayTracingShaderBindingTable table = {
+        .ray_generation = { .stride = 32 },
+        .hit            = { .stride = 32 },
+    };
+    gpu::StageMask stage = { .ray_tracing = true };
+
+    (void)pipeline_desc;
+    (void)info;
+    (void)table;
+    (void)stage;
 }
 
 fn void pin_acceleration_structures() {

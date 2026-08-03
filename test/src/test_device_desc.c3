@@ -15,7 +15,9 @@ fn bool device_desc_equal(gpu::DeviceDesc first, gpu::DeviceDesc second) {
     return (ulong)first.surface == (ulong)second.surface
         && queue_requests_equal(first.queues, second.queues)
         && first.enable_sparse_textures == second.enable_sparse_textures
-        && first.enable_ray_queries == second.enable_ray_queries;
+        && first.enable_ray_queries == second.enable_ray_queries
+        && first.enable_ray_tracing_pipelines
+            == second.enable_ray_tracing_pipelines;
 }
 
 fn void null_and_zero_device_desc_use_default_queues() @test {
@@ -39,6 +41,8 @@ fn void null_and_zero_device_desc_use_default_queues() @test {
     assert(!zero_normalized.enable_sparse_textures);
     assert(!null_normalized.enable_ray_queries);
     assert(!zero_normalized.enable_ray_queries);
+    assert(!null_normalized.enable_ray_tracing_pipelines);
+    assert(!zero_normalized.enable_ray_tracing_pipelines);
 }
 
 fn void normalization_preserves_explicit_desc_without_mutation() @test {
@@ -53,6 +57,7 @@ fn void normalization_preserves_explicit_desc_without_mutation() @test {
         },
         .enable_sparse_textures = true,
         .enable_ray_queries = true,
+        .enable_ray_tracing_pipelines = true,
     };
     gpu::DeviceDesc original = desc;
 

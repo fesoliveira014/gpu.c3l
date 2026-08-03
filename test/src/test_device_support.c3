@@ -109,11 +109,11 @@ fn void coherent_ray_query_opt_in_reaches_capability_evaluation() @test {
     Device device = gpu::create_device(&adapter, &desc)!!;
     DeviceCaps caps = gpu::get_device_caps(&device)!!;
     assert(caps.ray_queries.enabled
-            && caps.ray_queries.acceleration_structure_heap_capacity == 17
-            && caps.ray_queries.max_geometry_count == uint::max
-            && caps.ray_queries.max_primitive_count == uint::max
-            && caps.ray_queries.max_instance_count == uint::max
-            && caps.ray_queries.scratch_alignment == 256,
+            && caps.acceleration_structures.heap_capacity == 17
+            && caps.acceleration_structures.max_geometry_count == uint::max
+            && caps.acceleration_structures.max_primitive_count == uint::max
+            && caps.acceleration_structures.max_instance_count == uint::max
+            && caps.acceleration_structures.scratch_alignment == 256,
         "the public device fixture exposes the enabled actionable caps");
     gpu::destroy_device(&device)!!;
 }

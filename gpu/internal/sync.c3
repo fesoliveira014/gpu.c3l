@@ -1,7 +1,7 @@
 module gpu::internal @private;
 
 import gpu;
-const uint STAGE_MASK_BITS @private = 0x07FF;
+const uint STAGE_MASK_BITS @private = 0x0FFF;
 
 
 

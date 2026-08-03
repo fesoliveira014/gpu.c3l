@@ -113,7 +113,7 @@ fn void ray_query_candidate_gate_requires_actionable_limits() @test {
     assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
 }
 
-fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
+fn void acceleration_structure_caps_are_exact_saturating_and_opt_in_only() @test {
     gpu::internal::vk::RayQueryCandidateSupport support =
         ray_query_candidate_with_required();
     support.max_geometry_count = (ulong)uint::max + 17;
@@ -123,27 +123,27 @@ fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
     support.max_per_stage_descriptor_count = 31;
     support.scratch_alignment = 512;
 
-    gpu::RayQueryCaps disabled =
-        gpu::internal::vk::normalize_ray_query_caps(false, 7, 0, 0, &support);
+    gpu::AccelerationStructureCaps disabled =
+        gpu::internal::vk::normalize_acceleration_structure_caps(false, 7, 0, 0, &support);
     assert(!disabled.enabled
-            && disabled.acceleration_structure_heap_capacity == 0
+            && disabled.heap_capacity == 0
             && disabled.max_geometry_count == 0
             && disabled.max_primitive_count == 0
             && disabled.max_instance_count == 0
             && disabled.scratch_alignment == 0,
         "the disabled path publishes a false zero capability record");
 
-    gpu::RayQueryCaps enabled =
-        gpu::internal::vk::normalize_ray_query_caps(true, 7, 0, 0, &support);
+    gpu::AccelerationStructureCaps enabled =
+        gpu::internal::vk::normalize_acceleration_structure_caps(true, 7, 0, 0, &support);
     assert(enabled.enabled
-            && enabled.acceleration_structure_heap_capacity == 7
+            && enabled.heap_capacity == 7
             && enabled.max_geometry_count == uint::max
             && enabled.max_primitive_count == 29
             && enabled.max_instance_count == uint::max
             && enabled.scratch_alignment == 512,
         "enabled public caps preserve exact limits and saturate wide values");
 
-    assert(!gpu::internal::vk::normalize_ray_query_caps(
+    assert(!gpu::internal::vk::normalize_acceleration_structure_caps(
             true,
             support.max_descriptor_count + 1,
             0,
