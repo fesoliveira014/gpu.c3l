@@ -2017,7 +2017,8 @@ fn void? cmd_build_acceleration_structure(
 }
 
 <* Record an in-place acceleration-structure update using caller-owned input
-   and update scratch spans. The command inserts no barrier.
+   and update scratch spans matching the completed build shape. The command
+   inserts no barrier.
 
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, matching dynamic inputs, and update scratch."

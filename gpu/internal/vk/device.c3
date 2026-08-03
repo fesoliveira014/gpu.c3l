@@ -197,6 +197,9 @@ struct RayQueryCandidateSupport {
     ulong max_primitive_count;
     ulong max_instance_count;
     uint  max_descriptor_count;
+    uint  max_per_stage_descriptor_count;
+    uint  max_per_stage_resources;
+    uint  max_all_pools_descriptors;
     uint  scratch_alignment;
 }
 
@@ -219,7 +222,30 @@ fn bool ray_query_candidate_supported(RayQueryCandidateSupport* support) {
         && support.max_primitive_count > 0
         && support.max_instance_count > 0
         && support.max_descriptor_count > 0
+        && support.max_per_stage_descriptor_count > 0
+        && support.max_per_stage_resources > 0
+        && support.max_all_pools_descriptors > 0
         && support.scratch_alignment > 0;
+}
+
+fn bool ray_query_descriptor_heap_fits_limits(
+    uint heap_capacity,
+    uint texture_capacity,
+    uint sampler_capacity,
+    RayQueryCandidateSupport* support,
+) {
+    if (!ray_query_candidate_supported(support)) return false;
+    HeapDescriptorTotals totals = descriptor_heap_totals(
+        texture_capacity,
+        sampler_capacity,
+    );
+    return heap_capacity > 0
+        && heap_capacity <= support.max_descriptor_count
+        && heap_capacity <= support.max_per_stage_descriptor_count
+        && totals.per_stage_resources + (ulong)heap_capacity
+            <= (ulong)support.max_per_stage_resources
+        && totals.all_pools_descriptors + (ulong)heap_capacity
+            <= (ulong)support.max_all_pools_descriptors;
 }
 
 fn uint narrow_ray_query_limit(ulong value) =>
@@ -228,11 +254,16 @@ fn uint narrow_ray_query_limit(ulong value) =>
 fn gpu::RayQueryCaps normalize_ray_query_caps(
     bool enabled,
     uint heap_capacity,
+    uint texture_capacity,
+    uint sampler_capacity,
     RayQueryCandidateSupport* support,
 ) {
-    if (!enabled || !ray_query_candidate_supported(support)) return {};
-    if (heap_capacity == 0
-        || heap_capacity > support.max_descriptor_count) return {};
+    if (!enabled || !ray_query_descriptor_heap_fits_limits(
+        heap_capacity,
+        texture_capacity,
+        sampler_capacity,
+        support,
+    )) return {};
     return {
         .enabled = true,
         .acceleration_structure_heap_capacity = heap_capacity,
@@ -265,8 +296,10 @@ fn RayQueryCandidateSupport query_ray_query_candidate_support(
 
     vk::PhysicalDeviceAccelerationStructurePropertiesKHR properties =
         vk::physical_device_acceleration_structure_properties_khr();
+    vk::PhysicalDeviceVulkan12Properties properties12 =
+        vk::physical_device_vulkan12properties().set_next(&properties);
     vk::PhysicalDeviceProperties2 properties2 =
-        vk::physical_device_properties2().set_next(&properties);
+        vk::physical_device_properties2().set_next(&properties12);
     vk::get_physical_device_properties2(physical_device, &properties2);
 
     vk::FormatProperties2 format_properties = vk::format_properties2();
@@ -315,6 +348,12 @@ fn RayQueryCandidateSupport query_ray_query_candidate_support(
         .max_instance_count = properties.max_instance_count,
         .max_descriptor_count = properties
             .max_descriptor_set_update_after_bind_acceleration_structures,
+        .max_per_stage_descriptor_count = properties
+            .max_per_stage_descriptor_update_after_bind_acceleration_structures,
+        .max_per_stage_resources = properties12
+            .max_per_stage_update_after_bind_resources,
+        .max_all_pools_descriptors = properties12
+            .max_update_after_bind_descriptors_in_all_pools,
         .scratch_alignment = properties
             .min_acceleration_structure_scratch_offset_alignment,
     };
@@ -632,9 +671,12 @@ fn gpu::Device? create_vk_device_from_runtime(
         return gpu::UNSUPPORTED_FEATURE~;
     }
     if (enable_ray_queries
-        && (config.acceleration_structure_heap_capacity == 0
-            || config.acceleration_structure_heap_capacity
-                > state.ray_query_support.max_descriptor_count)) {
+        && !ray_query_descriptor_heap_fits_limits(
+            config.acceleration_structure_heap_capacity,
+            state.shader_heap.texture_capacity,
+            state.shader_heap.sampler_capacity,
+            &state.ray_query_support,
+        )) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     families = presentation_surface == null
@@ -1733,6 +1775,8 @@ fn gpu::DeviceCaps build_caps(
         .ray_queries                = normalize_ray_query_caps(
             inputs.ray_queries_enabled,
             inputs.acceleration_structure_heap_capacity,
+            inputs.texture_capacity,
+            inputs.sampler_capacity,
             &inputs.ray_query_support,
         ),
         .texture_heap_capacity      = inputs.texture_capacity,

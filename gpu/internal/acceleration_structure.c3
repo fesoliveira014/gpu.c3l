@@ -20,6 +20,9 @@ struct NormalizedAccelerationStructureGeometry {
     uint                               max_vertex_count;
     uint                               max_primitive_count;
     AccelerationStructureIndexType     index_type;
+    uint                               built_vertex_count;
+    uint                               built_primitive_count;
+    bool                               built_with_transform;
 }
 
 struct NormalizedAccelerationStructureDesc {
@@ -127,6 +130,9 @@ fn void? normalize_acceleration_structure_desc(
             return gpu::INVALID_ARGUMENT~;
         }
         primitive_total += primitive_count;
+        if (primitive_total > caps.max_primitive_count) {
+            return gpu::UNSUPPORTED_FEATURE~;
+        }
         geometry_storage[i] = normalized;
     }
 

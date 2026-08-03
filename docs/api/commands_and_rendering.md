@@ -82,8 +82,10 @@ caller-owned build scratch satisfying the queried size and alignment.
 
 `cmd_update_acceleration_structure` updates the destination in place. It is
 valid only after a prior full build has completed, when the structure was
-created with `allow_update`, and with the same ordered schema and capacities.
-It uses the queried update scratch; there is no separate source handle.
+created with `allow_update`, and with the same per-geometry primitive counts,
+triangle vertex counts and transform presence, or TLAS instance count, as that
+completed build. It uses the queried update scratch; there is no separate
+source handle.
 
 Both commands are valid on selected compute or graphics queues and invalid
 during a render pass or on transfer-only queues. They insert no barrier and do

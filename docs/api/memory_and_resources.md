@@ -135,8 +135,9 @@ completed.
 
 Updates are in-place only. The structure must have been created with
 `allow_update`, completed one full build, retain the identical schema, and use
-the queried update scratch. There is no distinct source structure or implicit
-rebuild.
+the completed build's per-geometry primitive counts, triangle vertex counts
+and transform presence, or TLAS instance count. Use the queried update scratch.
+There is no distinct source structure or implicit rebuild.
 
 ## Views and bindless indices
 

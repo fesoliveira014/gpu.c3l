@@ -42,6 +42,9 @@ ray_query_candidate_with_required() {
         .max_primitive_count = 1,
         .max_instance_count = 1,
         .max_descriptor_count = 1,
+        .max_per_stage_descriptor_count = 1,
+        .max_per_stage_resources = uint::max,
+        .max_all_pools_descriptors = uint::max,
         .scratch_alignment = 256,
     };
 }
@@ -117,10 +120,11 @@ fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
     support.max_primitive_count = 29;
     support.max_instance_count = (ulong)uint::max + 1;
     support.max_descriptor_count = 31;
+    support.max_per_stage_descriptor_count = 31;
     support.scratch_alignment = 512;
 
     gpu::RayQueryCaps disabled =
-        gpu::internal::vk::normalize_ray_query_caps(false, 7, &support);
+        gpu::internal::vk::normalize_ray_query_caps(false, 7, 0, 0, &support);
     assert(!disabled.enabled
             && disabled.acceleration_structure_heap_capacity == 0
             && disabled.max_geometry_count == 0
@@ -130,7 +134,7 @@ fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
         "the disabled path publishes a false zero capability record");
 
     gpu::RayQueryCaps enabled =
-        gpu::internal::vk::normalize_ray_query_caps(true, 7, &support);
+        gpu::internal::vk::normalize_ray_query_caps(true, 7, 0, 0, &support);
     assert(enabled.enabled
             && enabled.acceleration_structure_heap_capacity == 7
             && enabled.max_geometry_count == uint::max
@@ -142,9 +146,35 @@ fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
     assert(!gpu::internal::vk::normalize_ray_query_caps(
             true,
             support.max_descriptor_count + 1,
+            0,
+            0,
             &support,
         ).enabled,
         "the configured binding capacity must fit the descriptor path");
+
+    support.max_per_stage_descriptor_count = 6;
+    assert(!gpu::internal::vk::ray_query_descriptor_heap_fits_limits(
+        7,
+        3,
+        2,
+        &support,
+    ), "the acceleration-structure heap fits the per-stage type limit");
+    support.max_per_stage_descriptor_count = 31;
+    support.max_per_stage_resources = 18;
+    assert(!gpu::internal::vk::ray_query_descriptor_heap_fits_limits(
+        7,
+        3,
+        2,
+        &support,
+    ), "the acceleration-structure heap joins per-stage resource accounting");
+    support.max_per_stage_resources = uint::max;
+    support.max_all_pools_descriptors = 20;
+    assert(!gpu::internal::vk::ray_query_descriptor_heap_fits_limits(
+        7,
+        3,
+        2,
+        &support,
+    ), "the acceleration-structure heap joins all-pools accounting");
 }
 
 fn vk::PhysicalDeviceVulkan11Features v11_with_required() {

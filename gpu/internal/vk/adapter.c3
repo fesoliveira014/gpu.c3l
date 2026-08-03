@@ -224,9 +224,20 @@ fn bool? vk_adapter_supports_ray_query_heap(
     }
     RayQueryCandidateSupport* support =
         &state.adapters[adapter_index].ray_queries;
-    return ray_query_candidate_supported(support)
-        && heap_capacity > 0
-        && heap_capacity <= support.max_descriptor_count;
+    uint texture_capacity = resolve_descriptor_capacity(
+        state.config.texture_heap_capacity,
+        gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
+    )!;
+    uint sampler_capacity = resolve_descriptor_capacity(
+        state.config.sampler_heap_capacity,
+        gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
+    )!;
+    return ray_query_descriptor_heap_fits_limits(
+        heap_capacity,
+        texture_capacity,
+        sampler_capacity,
+        support,
+    );
 }
 
 fn void? enumerate_vk_adapters(VkRuntimeState* state) {

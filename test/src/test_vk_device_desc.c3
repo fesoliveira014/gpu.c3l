@@ -790,6 +790,8 @@ fn void ray_query_support_and_created_caps_are_consistent() @test {
             gpu::internal::vk::normalize_ray_query_caps(
                 true,
                 runtime_desc.acceleration_structure_heap_capacity,
+                state.shader_heap.texture_capacity,
+                state.shader_heap.sampler_capacity,
                 &state.ray_query_support,
             );
         assert(caps.ray_queries.enabled

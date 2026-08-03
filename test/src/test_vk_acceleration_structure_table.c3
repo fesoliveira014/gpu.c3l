@@ -278,6 +278,35 @@ fn void acceleration_structure_desc_normalization_rejects_invalid_shapes() @test
     )) == gpu::UNSUPPORTED_FEATURE,
         "device primitive limits reject otherwise representable schemas");
 
+    gpu::AccelerationStructureGeometryDesc[2] over_total = {
+        {
+            .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
+            .triangles = {
+                .max_vertex_count = 9,
+                .max_primitive_count = 9,
+                .index_type = gpu::AccelerationStructureIndexType.U32,
+            },
+        },
+        {
+            .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
+            .triangles = {
+                .max_vertex_count = 8,
+                .max_primitive_count = 8,
+                .index_type = gpu::AccelerationStructureIndexType.U32,
+            },
+        },
+    };
+    gpu::internal::NormalizedAccelerationStructureGeometry[2]
+        over_total_storage;
+    desc.geometries = over_total[..];
+    assert(@catch(gpu::internal::normalize_acceleration_structure_desc(
+        &desc,
+        &caps,
+        over_total_storage[..],
+        &normalized,
+    )) == gpu::UNSUPPORTED_FEATURE,
+        "the device primitive limit applies to the whole BLAS");
+
     desc.flags = {
         .prefer_fast_trace = true,
         .prefer_fast_build = true,
@@ -488,6 +517,54 @@ fn void acceleration_structure_native_creation_is_transactional() @test {
         mem::free(released.desc.geometries.ptr);
     }
 
+    gpu::AccelerationStructureGeometryDesc geometry = {
+        .kind = gpu::AccelerationStructureGeometryKind.AABBS,
+        .aabbs.max_primitive_count = 1,
+    };
+    gpu::AccelerationStructureDesc blas_desc = {
+        .kind = gpu::AccelerationStructureKind.BOTTOM_LEVEL,
+        .geometries = (&geometry)[:1],
+    };
+    state.host_allocator = &allocators::LIBC_ALLOCATOR;
+    capture = {};
+    mem::@scoped(&allocators::NULL_ALLOCATOR) {
+        handle = create_acceleration_structure_on_buffer_with_ops(
+            state:               &state,
+            desc:                &blas_desc,
+            requirements:        requirements,
+            buffer:              buffer,
+            offset:              256,
+            backing_buffer:      {},
+            placement:           {},
+            owns_backing_buffer: false,
+            ops:                 &ops,
+        )!!;
+    };
+    released = state.acceleration_structures.free(handle)!!;
+    ops.destroy(ops.user_data, state.device, released.native);
+    if (released.desc.geometries.ptr != null) {
+        alloc::free(state.host_allocator, released.desc.geometries.ptr);
+    }
+    assert(capture.create_count == 1 && capture.destroy_count == 1,
+        "persistent schema storage uses the device host allocator");
+
+    state.host_allocator = &allocators::NULL_ALLOCATOR;
+    capture = {};
+    assert(@catch(create_acceleration_structure_on_buffer_with_ops(
+        state:               &state,
+        desc:                &blas_desc,
+        requirements:        requirements,
+        buffer:              buffer,
+        offset:              256,
+        backing_buffer:      {},
+        placement:           {},
+        owns_backing_buffer: false,
+        ops:                 &ops,
+    )) == gpu::OUT_OF_HOST_MEMORY);
+    assert(capture.create_count == 0 && capture.destroy_count == 0,
+        "schema allocation failure precedes native creation");
+    state.host_allocator = &allocators::LIBC_ALLOCATOR;
+
     capture = { .result = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY };
     assert(@catch(create_acceleration_structure_on_buffer_with_ops(
         state:               &state,
@@ -651,7 +728,7 @@ fn gpu::GpuSpan acceleration_structure_test_span(
 }
 
 fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
-    BufferCell[] buffer_cells = mem::new_array(BufferCell, 4);
+    BufferCell[] buffer_cells = mem::new_array(BufferCell, 5);
     defer mem::free(buffer_cells.ptr);
     AccelerationStructureCell[] acceleration_structure_cells =
         mem::new_array(AccelerationStructureCell, 1);
@@ -690,6 +767,12 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         .size = 2048,
         .gpu_base = (gpu::GpuAddress)0x4000,
         .usage = { .addressable, .storage },
+        .access = { .compute },
+    })!!;
+    BufferHandle transform_buffer = state.buffers.alloc({
+        .size = 12 * float::size,
+        .gpu_base = (gpu::GpuAddress)0x5000,
+        .usage = input_usage,
         .access = { .compute },
     })!!;
     gpu::internal::NormalizedAccelerationStructureGeometry[2] schema = {
@@ -830,6 +913,50 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
             && record.pending_acceleration_structure_head
                 == ACCELERATION_STRUCTURE_PENDING_NONE,
         "N+1 geometries reject before emission, references, lowering count, or pending-state mutation");
+
+    command_scratch.acceleration_structure_geometries =
+        native_geometries[..];
+    command_scratch.acceleration_structure_ranges = native_ranges[..];
+    inputs[1].triangles.vertex_stride = 12;
+    record_acceleration_structure_build_with_ops(
+        &record,
+        &build,
+        false,
+        true,
+        false,
+        &ops,
+    )!!;
+    complete_pending_acceleration_structure_builds(&record);
+
+    inputs[0].triangles.primitive_count = 3;
+    assert(@catch(prepare_acceleration_structure_build(
+        &record,
+        &build,
+        true,
+        true,
+    )) == gpu::INVALID_ARGUMENT,
+        "BLAS updates preserve each completed primitive count");
+    inputs[0].triangles.primitive_count = 4;
+    inputs[0].triangles.vertex_count = 11;
+    assert(@catch(prepare_acceleration_structure_build(
+        &record,
+        &build,
+        true,
+        true,
+    )) == gpu::INVALID_ARGUMENT,
+        "BLAS updates preserve each completed max vertex value");
+    inputs[0].triangles.vertex_count = 12;
+    inputs[0].triangles.transform = acceleration_structure_test_span(
+        transform_buffer,
+        12 * float::size,
+    );
+    assert(@catch(prepare_acceleration_structure_build(
+        &record,
+        &build,
+        true,
+        true,
+    )) == gpu::INVALID_ARGUMENT,
+        "BLAS updates preserve transform presence");
 }
 
 fn void acceleration_structure_dynamic_tlas_uses_exact_instance_abi() @test {
@@ -903,6 +1030,97 @@ fn void acceleration_structure_dynamic_tlas_uses_exact_instance_abi() @test {
                 == 0x5000
             && native_ranges[0].primitive_count == 4,
         "TLAS lowering consumes exact 64-byte instance records");
+}
+
+fn void acceleration_structure_scratch_rejects_destination_overlap() @test {
+    BufferCell[] buffer_cells = mem::new_array(BufferCell, 1);
+    defer mem::free(buffer_cells.ptr);
+    AllocationCell[] allocation_cells = mem::new_array(AllocationCell, 1);
+    defer mem::free(allocation_cells.ptr);
+    AccelerationStructureCell[] acceleration_structure_cells =
+        mem::new_array(AccelerationStructureCell, 1);
+    defer mem::free(acceleration_structure_cells.ptr);
+    VkDeviceState state = {
+        .ray_queries_enabled = true,
+        .buffers = { .slots = buffer_cells, .owner = 0xF31 },
+        .allocations = { .slots = allocation_cells, .owner = 0xF32 },
+        .acceleration_structures = {
+            .slots = acceleration_structure_cells,
+            .owner = 0xF33,
+        },
+    };
+    BufferHandle instances = state.buffers.alloc({
+        .size = gpu::AccelerationStructureInstance::size,
+        .gpu_base = (gpu::GpuAddress)0x7000,
+        .usage = { .addressable, .acceleration_structure_build_input },
+        .access = { .compute },
+    })!!;
+    gpu::GpuAllocation placement = state.allocations.alloc({
+        .size = 1024,
+        .backing = {
+            .size = 1024,
+            .gpu_base = (gpu::GpuAddress)0x8000,
+            .usage = { .addressable, .storage,
+                .acceleration_structure_storage },
+            .access = { .compute },
+        },
+    })!!;
+    gpu::AccelerationStructureHandle destination =
+        state.acceleration_structures.alloc({
+            .placement = placement,
+            .placement_offset = 256,
+            .desc = {
+                .kind = gpu::AccelerationStructureKind.TOP_LEVEL,
+                .max_instance_count = 1,
+                .requirements = {
+                    .storage_size = 512,
+                    .build_scratch_size = 256,
+                    .scratch_alignment = 256,
+                },
+            },
+        })!!;
+    vk::AccelerationStructureGeometryKHR[1] native_geometries;
+    vk::AccelerationStructureBuildRangeInfoKHR[1] native_ranges;
+    CommandScratch command_scratch = {
+        .acceleration_structure_geometries = native_geometries[..],
+        .acceleration_structure_ranges = native_ranges[..],
+    };
+    CommandRecord record = {
+        .device_state = &state,
+        .state = gpu::internal::CommandState.RECORDING,
+        .queue.roles = { .compute },
+        .scratch = &command_scratch,
+    };
+    gpu::AccelerationStructureBuildDesc build = {
+        .destination = destination,
+        .instances = acceleration_structure_test_span(
+            instances,
+            gpu::AccelerationStructureInstance::size,
+        ),
+        .instance_count = 1,
+        .scratch = {
+            .owner = placement.owner,
+            .index = placement.index,
+            .generation = placement.generation,
+            .offset = 512,
+            .size = 256,
+        },
+    };
+
+    assert(@catch(prepare_acceleration_structure_build(
+        &record,
+        &build,
+        false,
+        true,
+    )) == gpu::INVALID_ARGUMENT,
+        "scratch cannot overlap placed acceleration-structure storage");
+    build.scratch.offset = 768;
+    (void)prepare_acceleration_structure_build(
+        &record,
+        &build,
+        false,
+        true,
+    )!!;
 }
 
 fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @test {
@@ -1033,6 +1251,16 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
     assert(destination_slot.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == 0);
+
+    build.instance_count = 1;
+    assert(@catch(prepare_acceleration_structure_build(
+        &record,
+        &build,
+        true,
+        true,
+    )) == gpu::INVALID_ARGUMENT,
+        "TLAS updates preserve the completed build instance count");
+    build.instance_count = 2;
 
     command_scratch.acceleration_structure_geometry_count = 0;
     capture = {};
