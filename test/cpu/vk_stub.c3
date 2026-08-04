@@ -1715,6 +1715,11 @@ fn gpu::Device? create_vk_device(
                 .enabled = true,
                 .max_recursion_depth = 4,
                 .max_ray_dispatch_invocation_count = uint::max,
+                .max_ray_dispatch_dimensions = {
+                    uint::max,
+                    uint::max,
+                    uint::max,
+                },
                 .shader_group_handle_size = 32,
                 .shader_group_handle_alignment = 32,
                 .shader_group_base_alignment = 64,

@@ -409,6 +409,7 @@ struct RayTracingPipelineCaps {
     bool enabled;
     uint max_recursion_depth;
     uint max_ray_dispatch_invocation_count;
+    Vec3u max_ray_dispatch_dimensions;
     uint shader_group_handle_size;
     uint shader_group_handle_alignment;
     uint shader_group_base_alignment;
@@ -1052,7 +1053,7 @@ enum IndexType : int {
 
 <* Native ray-tracing hit-group topology. Procedural groups require an
    intersection shader; triangle groups prohibit one. *>
-enum RayTracingHitGroupType : int {
+enum RayTracingHitGroupKind : int {
     TRIANGLES,
     PROCEDURAL,
 }
@@ -1140,9 +1141,9 @@ struct GraphicsPipelineDesc {
 }
 
 <* One borrowed hit-group declaration. Shader inputs and pointed descriptors
-   are call-scoped; group type determines required and prohibited roles. *>
+   are call-scoped; group kind determines required and prohibited roles. *>
 struct RayTracingHitGroupDesc {
-    RayTracingHitGroupType type;
+    RayTracingHitGroupKind kind;
     ShaderDesc*            closest_hit_shader;
     ShaderDesc*            any_hit_shader;
     ShaderDesc*            intersection_shader;

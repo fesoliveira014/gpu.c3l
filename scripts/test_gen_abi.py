@@ -44,16 +44,20 @@ $assert ROOT_PUSH_ABI.block_size == RootPush::size;
 
 
 class GenAbiTest(unittest.TestCase):
-    def test_direct_ray_tracing_fixture_manifest_covers_every_role(self) -> None:
-        fixtures = build_shaders.REQUIRED_RAY_TRACING_FIXTURES
+    def test_shader_stage_table_uses_one_glslc_toolchain(self) -> None:
+        expected = {
+            ".comp": "compute",
+            ".vert": "vertex",
+            ".frag": "fragment",
+            ".rgen": "rgen",
+            ".rmiss": "rmiss",
+            ".rchit": "rchit",
+            ".rahit": "rahit",
+            ".rint": "rint",
+            ".rcall": "rcall",
+        }
 
-        for suffix in build_shaders.RAY_TRACING_STAGES:
-            self.assertTrue(any(name.endswith(suffix) for name in fixtures))
-        self.assertIn("ray_trace_functional_primary.rmiss", fixtures)
-        self.assertIn("ray_trace_functional_secondary.rmiss", fixtures)
-        self.assertIn("ray_trace_functional_triangle.rchit", fixtures)
-        self.assertIn("ray_trace_functional_procedural.rint", fixtures)
-        self.assertIn("ray_trace_functional_procedural.rchit", fixtures)
+        self.assertEqual(build_shaders.STAGES, expected)
 
     def test_ray_shader_headers_share_only_the_acceleration_structure_heap(self) -> None:
         root = Path(__file__).resolve().parent.parent

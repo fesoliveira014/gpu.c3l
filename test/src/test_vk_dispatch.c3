@@ -331,6 +331,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
         && counts.device_presentation == 0
         && counts.dynamic_color == 3
         && counts.ray_query == 0
+        && counts.ray_tracing_pipeline == 0
         && counts.unexpected == 0,
         "the device baseline loads only the required color procedures");
 
@@ -344,6 +345,8 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_debug == 3, "debug selection loads only device diagnostics");
     assert(counts.device_presentation == 0, "debug selection does not load presentation procedures");
     assert(counts.dynamic_color == 3, "debug selection retains baseline color procedures");
+    assert(counts.ray_tracing_pipeline == 0,
+        "debug selection does not load ray-tracing-pipeline procedures");
     assert(counts.unexpected == 0, "debug selection loads no unrelated procedures");
 
     counts = {};
@@ -357,6 +360,8 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_presentation == 5, "presentation selection loads only device WSI");
     assert(counts.dynamic_color == 3, "presentation selection retains baseline color procedures");
     assert(counts.ray_query == 0, "presentation selection does not load ray-query procedures");
+    assert(counts.ray_tracing_pipeline == 0,
+        "presentation selection does not load ray-tracing-pipeline procedures");
     assert(counts.unexpected == 0, "presentation selection loads no unrelated procedures");
 
     counts = {};
@@ -374,6 +379,8 @@ fn void device_dispatch_loads_only_selected_groups() @test {
         "ray-query selection retains baseline color procedures");
     assert(counts.ray_query == 5,
         "ray-query selection loads the complete command family");
+    assert(counts.ray_tracing_pipeline == 0,
+        "acceleration-structure selection does not load pipeline procedures");
     assert(counts.unexpected == 0, "ray-query selection loads no unrelated procedures");
     assert(gpu::internal::vk::device_dispatch_supports_acceleration_structures(&ray_query_dispatch),
         "the complete ray-query command family is available");

@@ -203,6 +203,7 @@ fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
         .scratch_alignment = 256,
         .max_ray_recursion_depth = 4,
         .max_ray_dispatch_invocation_count = 65_536,
+        .max_ray_dispatch_dimensions = { 1024, 512, 256 },
         .shader_group_handle_size = 32,
         .shader_group_handle_alignment = 32,
         .shader_group_base_alignment = 64,
@@ -218,6 +219,9 @@ fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
         gpu::internal::vk::normalize_ray_tracing_pipeline_caps(true, &support);
     assert(caps.enabled && caps.max_recursion_depth == 4);
     assert(caps.max_ray_dispatch_invocation_count == 65_536);
+    assert(caps.max_ray_dispatch_dimensions.x == 1024
+        && caps.max_ray_dispatch_dimensions.y == 512
+        && caps.max_ray_dispatch_dimensions.z == 256);
     assert(caps.shader_group_handle_size == 32);
     assert(caps.shader_group_handle_alignment == 32);
     assert(caps.shader_group_base_alignment == 64);
@@ -227,6 +231,40 @@ fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
         false,
         &support,
     ).enabled);
+
+    gpu::internal::vk::RayTracingCandidateSupport rejected = support;
+    rejected.ray_tracing_pipeline_extension = false;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.ray_tracing_pipeline = false;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.ray_tracing_pipeline_required_commands = false;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_ray_recursion_depth = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_ray_dispatch_invocation_count = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_ray_dispatch_dimensions.x = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.shader_group_handle_size = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.shader_group_handle_alignment = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.shader_group_base_alignment = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_shader_group_stride = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_ray_hit_attribute_size = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
 }
 
 fn vk::PhysicalDeviceVulkan11Features v11_with_required() {

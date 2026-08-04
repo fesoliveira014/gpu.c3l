@@ -262,6 +262,9 @@ fn bool ray_tracing_pipeline_candidate_supported(
         && support.ray_tracing_pipeline_required_commands
         && support.max_ray_recursion_depth > 0
         && support.max_ray_dispatch_invocation_count > 0
+        && support.max_ray_dispatch_dimensions.x > 0
+        && support.max_ray_dispatch_dimensions.y > 0
+        && support.max_ray_dispatch_dimensions.z > 0
         && support.shader_group_handle_size > 0
         && support.shader_group_handle_alignment > 0
         && support.shader_group_base_alignment > 0
@@ -333,6 +336,8 @@ fn gpu::RayTracingPipelineCaps normalize_ray_tracing_pipeline_caps(
         .max_recursion_depth               = support.max_ray_recursion_depth,
         .max_ray_dispatch_invocation_count =
             support.max_ray_dispatch_invocation_count,
+        .max_ray_dispatch_dimensions       =
+            support.max_ray_dispatch_dimensions,
         .shader_group_handle_size          = support.shader_group_handle_size,
         .shader_group_handle_alignment     =
             support.shader_group_handle_alignment,

@@ -78,10 +78,12 @@ Query capabilities instead of hardcoding selected-device limits.
 heap capacity, maximum geometry, primitive, and instance counts, and scratch
 alignment. These are creation and allocator bounds, not suggestions.
 `RayQueryCaps` reports its independent enabled bit.
-`RayTracingPipelineCaps` reports direct-dispatch, recursion, shader-group
-handle/alignment/stride, and hit-attribute limits. Disabled capability records
-are fully zero/false. Exceeding an enabled bound returns `UNSUPPORTED_FEATURE`
-or `INVALID_ARGUMENT` as documented by the operation.
+`RayTracingPipelineCaps` reports the total direct-dispatch invocation limit,
+`max_ray_dispatch_dimensions` for the selected device's per-axis launch limits,
+recursion depth, shader-group handle/alignment/stride requirements, and the
+hit-attribute limit. Disabled capability records are fully zero/false.
+Exceeding an enabled bound returns `UNSUPPORTED_FEATURE` or `INVALID_ARGUMENT`
+as documented by the operation.
 
 `destroy_device` is thread-safe against ordinary device operations but does not
 wait. It returns `RESOURCE_IN_USE` while public children remain and

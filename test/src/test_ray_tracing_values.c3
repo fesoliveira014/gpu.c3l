@@ -29,6 +29,7 @@ fn void ray_tracing_capabilities_separate_shared_and_pipeline_limits() @test {
             .enabled                           = true,
             .max_recursion_depth               = 4,
             .max_ray_dispatch_invocation_count = 65_536,
+            .max_ray_dispatch_dimensions       = { 1024, 512, 256 },
             .shader_group_handle_size          = 32,
             .shader_group_handle_alignment     = 32,
             .shader_group_base_alignment       = 64,
@@ -45,6 +46,9 @@ fn void ray_tracing_capabilities_separate_shared_and_pipeline_limits() @test {
     assert(caps.ray_queries.enabled);
     assert(caps.ray_tracing_pipelines.max_recursion_depth == 4);
     assert(caps.ray_tracing_pipelines.max_ray_dispatch_invocation_count == 65_536);
+    assert(caps.ray_tracing_pipelines.max_ray_dispatch_dimensions.x == 1024
+        && caps.ray_tracing_pipelines.max_ray_dispatch_dimensions.y == 512
+        && caps.ray_tracing_pipelines.max_ray_dispatch_dimensions.z == 256);
     assert(caps.ray_tracing_pipelines.shader_group_handle_size == 32);
     assert(caps.ray_tracing_pipelines.shader_group_handle_alignment == 32);
     assert(caps.ray_tracing_pipelines.shader_group_base_alignment == 64);
@@ -56,9 +60,9 @@ fn void ray_tracing_descriptors_preserve_group_and_sbt_structure() @test {
     ShaderDesc raygen = {};
     ShaderDesc closest_hit = {};
     RayTracingHitGroupDesc[2] groups = {
-        { .type = RayTracingHitGroupType.TRIANGLES },
+        { .kind = RayTracingHitGroupKind.TRIANGLES },
         {
-            .type               = RayTracingHitGroupType.PROCEDURAL,
+            .kind               = RayTracingHitGroupKind.PROCEDURAL,
             .closest_hit_shader = &closest_hit,
             .intersection_shader = &closest_hit,
         },
@@ -76,6 +80,7 @@ fn void ray_tracing_descriptors_preserve_group_and_sbt_structure() @test {
         .callable         = { .first_group = 3, .group_count = 0 },
         .total_group_count = 3,
     };
+    RayTracingShaderGroupRange hit_range = info.hit;
     GpuSpan raygen_span = {
         .owner      = 1,
         .index      = 2,
@@ -93,6 +98,7 @@ fn void ray_tracing_descriptors_preserve_group_and_sbt_structure() @test {
     assert(desc.hit_groups[1].intersection_shader == &closest_hit);
     assert(info.ray_generation.first_group == 0);
     assert(info.hit.first_group == 1 && info.hit.group_count == 2);
+    assert(hit_range.first_group == 1 && hit_range.group_count == 2);
     assert(info.total_group_count == 3);
     assert(table.ray_generation.span.size == 32);
     assert(table.ray_generation.stride == 32);

@@ -147,7 +147,7 @@ Types: `RootPush`, `GraphicsRootPush`, `GeneratedDrawRecord`,
 `PrimitiveTopology`, `CompareOp`, `CullMode`, `FrontFace`, `PolygonMode`,
 `BlendFactor`, `BlendOp`, `ColorWriteMask`, `ShaderDesc`, `DepthState`,
 `BlendState`, `ColorTargetState`, `ColorState`, `DynamicRasterState`,
-`ComputePipelineDesc`, `GraphicsPipelineDesc`, `RayTracingHitGroupType`,
+`ComputePipelineDesc`, `GraphicsPipelineDesc`, `RayTracingHitGroupKind`,
 `RayTracingHitGroupDesc`, `RayTracingPipelineDesc`,
 `RayTracingShaderGroupRange`, `RayTracingPipelineInfo`,
 `RayTracingShaderBindingTableRegion`, and

@@ -27,6 +27,21 @@ struct TraceFunctionalRoot {
 }
 $assert TraceFunctionalRoot::size == 16;
 
+struct TraceValidationCapture {
+    uint errors;
+}
+
+fn void capture_trace_validation_error(
+    gpu::DebugMessage* message,
+    void* user_data,
+) {
+    if (message.severity == gpu::DebugMessageSeverity.ERROR
+        && message.category.validation) {
+        TraceValidationCapture* capture = (TraceValidationCapture*)user_data;
+        capture.errors++;
+    }
+}
+
 fn usz trace_align_up(usz value, usz alignment) {
     return (value + alignment - 1) & ~(alignment - 1);
 }
@@ -56,11 +71,14 @@ fn OwnedSpan? allocate_trace_span(
 
 fn gpu::Device? create_ray_tracing_test_device(
     gpu::Runtime* out_runtime,
+    TraceValidationCapture* validation,
 ) {
     gpu::RuntimeDesc runtime_desc = {
         .application_name = "gpu_ray_tracing_test",
         .contract_validation = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
+        .debug_callback = &capture_trace_validation_error,
+        .debug_user_data = validation,
         .acceleration_structure_heap_capacity = 32,
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
@@ -80,6 +98,7 @@ fn gpu::Device? create_ray_tracing_test_device(
             return f~;
         }
         *out_runtime = runtime;
+        validation.errors = 0;
         return candidate;
     }
     return gpu::UNSUPPORTED_FEATURE~;
@@ -130,11 +149,11 @@ fn gpu::PipelineHandle? create_functional_ray_tracing_pipeline(
     };
     gpu::RayTracingHitGroupDesc[2] hit_groups = {
         {
-            .type               = gpu::RayTracingHitGroupType.TRIANGLES,
+            .kind               = gpu::RayTracingHitGroupKind.TRIANGLES,
             .closest_hit_shader = &triangle_hit_shader,
         },
         {
-            .type                = gpu::RayTracingHitGroupType.PROCEDURAL,
+            .kind                = gpu::RayTracingHitGroupKind.PROCEDURAL,
             .closest_hit_shader  = &procedural_hit_shader,
             .intersection_shader = &procedural_intersection_shader,
         },
@@ -238,7 +257,11 @@ fn OwnedSpan? create_functional_sbt(
 
 fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     gpu::Runtime runtime;
-    gpu::Device device = create_ray_tracing_test_device(&runtime)!!;
+    TraceValidationCapture validation;
+    gpu::Device device = create_ray_tracing_test_device(
+        &runtime,
+        &validation,
+    )!!;
     defer {
         destroy_test_device(&device)!!;
         runtime = {};
@@ -576,4 +599,6 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         "the primary miss group reports its exact category");
     assert(results[3] == 0x14,
         "the secondary miss group and callable stage both execute");
+    assert(validation.errors == 0,
+        "the direct ray-tracing path emits no Vulkan validation errors");
 }

@@ -65,9 +65,9 @@ fn void capture_trace_rays(
         && ray_generation.device_address == 0x1000
         && ray_generation.stride == 32
         && ray_generation.size == 32
-        && miss.device_address == 0x1020
+        && miss.device_address == 0x1000
         && miss.stride == 32
-        && miss.size == 32
+        && miss.size == 64
         && hit.device_address == 0
         && hit.stride == 0
         && hit.size == 0
@@ -91,20 +91,17 @@ struct TraceRaysFixture {
 
 fn void init_trace_rays_fixture(TraceRaysFixture* fixture) {
     init_span_resolver_fixture(&fixture.spans);
+    fixture.spans.buffer_cells[0].value.size = 128;
     fixture.spans.buffer_cells[0].value.usage.shader_binding_table = true;
     fixture.spans.state.ray_tracing_pipelines_enabled = true;
     fixture.spans.state.caps.ray_tracing_pipelines = {
         .enabled                           = true,
         .max_ray_dispatch_invocation_count = 128,
+        .max_ray_dispatch_dimensions       = { 7, 6, 5 },
         .shader_group_handle_size          = 32,
         .shader_group_handle_alignment     = 32,
-        .shader_group_base_alignment       = 32,
+        .shader_group_base_alignment       = 64,
         .max_shader_group_stride           = 64,
-    };
-    fixture.spans.state.ray_tracing_support.max_ray_dispatch_dimensions = {
-        7,
-        6,
-        5,
     };
     fixture.spans.state.pipelines.owner =
         gpu::internal::resource_owner_tag(
@@ -154,7 +151,7 @@ fn void init_trace_rays_fixture(TraceRaysFixture* fixture) {
             .stride = 32,
         },
         .miss = {
-            .span   = fixture_buffer_span(&fixture.spans, 32, 32),
+            .span   = fixture_buffer_span(&fixture.spans, 0, 64),
             .stride = 32,
         },
     };
@@ -182,6 +179,28 @@ fn void trusted_trace_lowers_exact_regions_root_and_dimensions() @test {
         &ops,
     )!!;
     assert(capture.matched && capture.pushes == 1 && capture.traces == 1);
+}
+
+fn void trusted_trace_rejects_a_device_without_ray_tracing_enabled() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    fixture.spans.state.ray_tracing_pipelines_enabled = false;
+    fixture.spans.state.caps.ray_tracing_pipelines = {};
+    TraceRaysCapture capture = { .matched = true };
+    vk::TraceRaysOps ops = {
+        .user_data = &capture,
+        .push_root = &capture_trace_root,
+        .trace     = &capture_trace_rays,
+    };
+
+    assert(@catch(vk::trusted_trace_rays_with_ops(
+        record:     &fixture.record,
+        root:       (gpu::GpuAddress)1,
+        table:      &fixture.table,
+        dimensions: { 1, 1, 1 },
+        ops:        &ops,
+    )) == gpu::UNSUPPORTED_FEATURE);
+    assert(capture.pushes == 0 && capture.traces == 0);
 }
 
 fn void ray_tracing_bind_uses_distinct_native_bind_point_and_cache() @test {
@@ -246,7 +265,7 @@ fn void full_trace_validation_rejects_shape_usage_and_dimensions() @test {
         { 2, 3, 4 },
     )!!;
     assert(trace.ray_generation.device_address == 0x1000);
-    assert(trace.miss.device_address == 0x1020);
+    assert(trace.miss.device_address == 0x1000);
 
     fixture.table.ray_generation.stride = 16;
     assert(@catch(vk::full_prepare_trace_rays(
@@ -256,6 +275,24 @@ fn void full_trace_validation_rejects_shape_usage_and_dimensions() @test {
         { 2, 3, 4 },
     )) == gpu::INVALID_ARGUMENT);
     fixture.table.ray_generation.stride = 32;
+    fixture.table.miss.span = fixture_buffer_span(&fixture.spans, 32, 64);
+    assert(@catch(vk::full_prepare_trace_rays(
+        &fixture.record,
+        (gpu::GpuAddress)1,
+        &fixture.table,
+        { 2, 3, 4 },
+    )) == gpu::INVALID_ARGUMENT,
+        "SBT bases use base alignment rather than handle alignment");
+    fixture.table.miss.span = fixture_buffer_span(&fixture.spans, 0, 64);
+    fixture.table.ray_generation.span.size = 64;
+    assert(@catch(vk::full_prepare_trace_rays(
+        &fixture.record,
+        (gpu::GpuAddress)1,
+        &fixture.table,
+        { 2, 3, 4 },
+    )) == gpu::INVALID_ARGUMENT,
+        "the ray-generation region contains exactly one record");
+    fixture.table.ray_generation.span.size = 32;
     fixture.spans.buffer_cells[0].value.usage.shader_binding_table = false;
     assert(@catch(vk::full_prepare_trace_rays(
         &fixture.record,

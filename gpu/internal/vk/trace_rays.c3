@@ -69,11 +69,11 @@ fn void? validate_trace_dimensions(
                 > state.caps.ray_tracing_pipelines
                     .max_ray_dispatch_invocation_count
             || dimensions.x
-                > state.ray_tracing_support.max_ray_dispatch_dimensions.x
+                > state.caps.ray_tracing_pipelines.max_ray_dispatch_dimensions.x
             || dimensions.y
-                > state.ray_tracing_support.max_ray_dispatch_dimensions.y
+                > state.caps.ray_tracing_pipelines.max_ray_dispatch_dimensions.y
             || dimensions.z
-                > state.ray_tracing_support.max_ray_dispatch_dimensions.z)) {
+                > state.caps.ray_tracing_pipelines.max_ray_dispatch_dimensions.z)) {
             return gpu::INVALID_ARGUMENT~;
     }
 }
@@ -88,9 +88,7 @@ fn vk::StridedDeviceAddressRegionKHR? lower_trace_region(
     }
     if (region.span.size == 0) return gpu::INVALID_ARGUMENT~;
     ResolvedSpan resolved = resolve_span(state, &region.span)!;
-    if ((ulong)resolved.address == 0
-        || region.span.size > ulong::max
-        || region.stride > ulong::max) {
+    if ((ulong)resolved.address == 0) {
         return gpu::INVALID_ARGUMENT~;
     }
     return {
@@ -145,9 +143,7 @@ fn vk::StridedDeviceAddressRegionKHR? validate_and_lower_trace_region(
     )!;
     if (!resolved.slot.usage.shader_binding_table
         || (ulong)resolved.address == 0
-        || (ulong)resolved.address % caps.shader_group_base_alignment != 0
-        || region.span.size > ulong::max
-        || region.stride > ulong::max) {
+        || (ulong)resolved.address % caps.shader_group_base_alignment != 0) {
         return gpu::INVALID_ARGUMENT~;
     }
     return {
@@ -166,6 +162,10 @@ fn PreparedTraceRays? lower_trace_rays(
     if (record == null || table == null) return gpu::INVALID_ARGUMENT~;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    if (record.device_state == null
+        || !record.device_state.ray_tracing_pipelines_enabled) {
+        return gpu::UNSUPPORTED_FEATURE~;
     }
     validate_trace_dimensions(record.device_state, dimensions, false)!;
     return {
@@ -221,28 +221,28 @@ fn PreparedTraceRays? full_prepare_trace_rays(
     return {
         .pipeline            = pipeline,
         .ray_generation      = validate_and_lower_trace_region(
-            state,
-            record,
-            &table.ray_generation,
-            true,
+            state:          state,
+            record:         record,
+            region:         &table.ray_generation,
+            ray_generation: true,
         )!,
         .miss                = validate_and_lower_trace_region(
-            state,
-            record,
-            &table.miss,
-            false,
+            state:          state,
+            record:         record,
+            region:         &table.miss,
+            ray_generation: false,
         )!,
         .hit                 = validate_and_lower_trace_region(
-            state,
-            record,
-            &table.hit,
-            false,
+            state:          state,
+            record:         record,
+            region:         &table.hit,
+            ray_generation: false,
         )!,
         .callable            = validate_and_lower_trace_region(
-            state,
-            record,
-            &table.callable,
-            false,
+            state:          state,
+            record:         record,
+            region:         &table.callable,
+            ray_generation: false,
         )!,
         .ray_generation_span = table.ray_generation.span,
         .miss_span           = table.miss.span,

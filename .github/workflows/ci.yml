@@ -41,7 +41,7 @@ jobs:
       - name: Install shader tools and lavapipe
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y glslang-tools glslc mesa-vulkan-drivers spirv-tools vulkan-validationlayers vulkan-tools
+          sudo apt-get install -y glslc mesa-vulkan-drivers spirv-tools vulkan-validationlayers vulkan-tools
 
       - name: Select lavapipe and validation
         run: |

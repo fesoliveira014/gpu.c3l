@@ -24,6 +24,10 @@ alias RayTracingGroupHandleGetFn @private = fn vk::Result (
     void* data,
 );
 
+const uint RAY_TRACING_HIT_CLOSEST_PRESENT = 0x1;
+const uint RAY_TRACING_HIT_ANY_PRESENT = 0x2;
+const uint RAY_TRACING_HIT_INTERSECTION_PRESENT = 0x4;
+
 struct RayTracingPipelineCreateOps {
     ShaderModuleCreateOps       shader_module;
     void*                       user_data;
@@ -35,10 +39,6 @@ struct RayTracingGroupHandleOps {
     void*                       user_data;
     RayTracingGroupHandleGetFn  get;
 }
-
-const uint RAY_TRACING_HIT_CLOSEST_PRESENT = 0x1;
-const uint RAY_TRACING_HIT_ANY_PRESENT = 0x2;
-const uint RAY_TRACING_HIT_INTERSECTION_PRESENT = 0x4;
 
 struct RayTracingPipelineShape {
     gpu::RayTracingPipelineInfo info;
@@ -85,12 +85,12 @@ fn RayTracingPipelineShape? normalize_ray_tracing_pipeline_desc(
         + desc.miss_shaders.len
         + desc.callable_shaders.len;
     foreach (&group : desc.hit_groups) {
-        switch (group.type) {
-            case gpu::RayTracingHitGroupType.TRIANGLES:
+        switch (group.kind) {
+            case gpu::RayTracingHitGroupKind.TRIANGLES:
                 if (group.intersection_shader != null) {
                     return gpu::INVALID_ARGUMENT~;
                 }
-            case gpu::RayTracingHitGroupType.PROCEDURAL:
+            case gpu::RayTracingHitGroupKind.PROCEDURAL:
                 if (group.intersection_shader == null) {
                     return gpu::INVALID_ARGUMENT~;
                 }
@@ -215,7 +215,7 @@ fn void build_ray_tracing_hit_keys(
     usz shader_index = first_hit_shader;
     foreach (index, &group : desc.hit_groups) {
         RayTracingHitGroupKey key = {
-            .type                = group.type,
+            .kind                = group.kind,
             .closest_hit_shader  = SHADER_ID_INVALID,
             .any_hit_shader      = SHADER_ID_INVALID,
             .intersection_shader = SHADER_ID_INVALID,
@@ -277,7 +277,7 @@ fn void lower_ray_tracing_stages_and_groups(
         if (group.any_hit_shader != null) any_hit = shader_index++;
         if (group.intersection_shader != null) intersection = shader_index++;
         vk::RayTracingShaderGroupTypeKHR type =
-            group.type == gpu::RayTracingHitGroupType.TRIANGLES
+            group.kind == gpu::RayTracingHitGroupKind.TRIANGLES
                 ? vk::RayTracingShaderGroupTypeKHR.TRIANGLES_HIT_GROUP_KHR
                 : vk::RayTracingShaderGroupTypeKHR.PROCEDURAL_HIT_GROUP_KHR;
         groups[group_index++] = vk::ray_tracing_shader_group_create_info_khr()
@@ -576,7 +576,7 @@ fn gpu::PipelineHandle? vk_create_ray_tracing_pipeline_with_ops(
         alloc::free(state.host_allocator, hit_keys.ptr);
     }
     bool shader_ids_transferred;
-    gpu::PipelineHandle pipeline =
+    gpu::PipelineHandle? pipeline =
         create_ray_tracing_pipeline_from_prepared(
             state:         state,
             desc:          desc,
@@ -587,9 +587,9 @@ fn gpu::PipelineHandle? vk_create_ray_tracing_pipeline_with_ops(
             hit_keys:      hit_keys,
             create_ops:    create_ops,
             shader_ids_transferred: &shader_ids_transferred,
-        )!;
+        );
     if (shader_ids_transferred) shader_ids_owned = false;
-    return pipeline;
+    return pipeline!;
 }
 
 fn gpu::PipelineHandle? vk_create_ray_tracing_pipeline(

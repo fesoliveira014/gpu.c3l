@@ -29,7 +29,7 @@ struct OwnedRayTracingPipelineKey {
 }
 
 struct RayTracingHitGroupKey {
-    gpu::RayTracingHitGroupType type;
+    gpu::RayTracingHitGroupKind kind;
     uint                        presence_mask;
     ShaderId                    closest_hit_shader;
     ShaderId                    any_hit_shader;
@@ -72,6 +72,19 @@ struct PipelineCacheEntry {
     bool                           used;
 }
 
+struct PipelineCacheTable {
+    PipelineCacheEntry[]  entries;
+    // Pow2-sized, +1-encoded like next_free/next_in_bucket; 0 = empty bucket.
+    uint[]                bucket_heads;
+    uint                  free_head;
+    uint                  next_new;
+}
+
+struct PipelineCacheCreateOps @private {
+    void*                 user_data;
+    PipelineCacheCreateFn create;
+}
+
 fn gpu::RayTracingPipelineInfo? ray_tracing_pipeline_info_for_counts(
     uint ray_generation_count,
     uint miss_count,
@@ -112,8 +125,6 @@ fn vk::ShaderStageFlags ray_tracing_shader_stage_flags() {
         | vk::ShaderStageFlagBits.INTERSECTION_BIT_KHR
         | vk::ShaderStageFlagBits.CALLABLE_BIT_KHR;
 }
-
-fn uint ray_tracing_root_push_size() => gpu::RootPush::size;
 
 fn void write_ray_tracing_key_u32(
     char[] bytes,
@@ -187,7 +198,7 @@ fn OwnedRayTracingPipelineKey? create_ray_tracing_pipeline_key(
         write_ray_tracing_key_u32(bytes, &cursor, (uint)shader);
     }
     foreach (&group : input.hit_groups) {
-        write_ray_tracing_key_u32(bytes, &cursor, (uint)group.type);
+        write_ray_tracing_key_u32(bytes, &cursor, (uint)group.kind);
         write_ray_tracing_key_u32(bytes, &cursor, group.presence_mask);
         write_ray_tracing_key_u32(
             bytes,
@@ -234,19 +245,6 @@ fn void destroy_ray_tracing_pipeline_key(
         alloc::free(state.host_allocator, key.bytes.ptr);
     }
     *key = {};
-}
-
-struct PipelineCacheTable {
-    PipelineCacheEntry[]  entries;
-    // Pow2-sized, +1-encoded like next_free/next_in_bucket; 0 = empty bucket.
-    uint[]                bucket_heads;
-    uint                  free_head;
-    uint                  next_new;
-}
-
-struct PipelineCacheCreateOps @private {
-    void*                 user_data;
-    PipelineCacheCreateFn create;
 }
 
 fn fault report_pipeline_cache_backend_failure(
@@ -616,7 +614,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         vk::PushConstantRange ray_tracing_root = {
             .stage_flags = ray_tracing_shader_stage_flags(),
             .offset      = 0,
-            .size        = ray_tracing_root_push_size(),
+            .size        = gpu::RootPush::size,
         };
         vk::PipelineLayoutCreateInfo ray_tracing_layout_info =
             vk::pipeline_layout_create_info()

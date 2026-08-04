@@ -11,6 +11,8 @@ const char[*] RT_PIPELINE_MISS_SPIRV =
     $embed("shaders/ray_stage.rmiss.spv");
 const char[*] RT_PIPELINE_CLOSEST_HIT_SPIRV =
     $embed("shaders/ray_stage.rchit.spv");
+const char[*] RT_PIPELINE_ALT_CLOSEST_HIT_SPIRV =
+    $embed("shaders/ray_trace_functional_triangle.rchit.spv");
 const char[*] RT_PIPELINE_ANY_HIT_SPIRV =
     $embed("shaders/ray_stage.rahit.spv");
 const char[*] RT_PIPELINE_INTERSECTION_SPIRV =
@@ -23,12 +25,54 @@ struct RayTracingPipelineCreateCapture {
     vk::Result         result;
     uint               calls;
     bool               matched;
+    bool               key_matched;
 }
 
 struct RayTracingGroupHandleCapture {
     vk::Pipeline expected_pipeline;
     uint         calls;
     bool         matched;
+}
+
+struct RayTracingLateSlotFailureCapture {
+    RayTracingPipelineCreateCapture create;
+    uint saved_free_head;
+    uint saved_next_new;
+}
+
+fn uint? insert_ray_tracing_cache_then_exhaust_pipeline_slots(
+    void* raw_capture,
+    vk::VkDeviceState* state,
+    vk::PipelineCacheEntry value,
+) {
+    RayTracingLateSlotFailureCapture* capture =
+        (RayTracingLateSlotFailureCapture*)raw_capture;
+    uint index = vk::insert_entry(state, value)!;
+    capture.saved_free_head = state.pipelines.free_head;
+    capture.saved_next_new = state.pipelines.next_new;
+    state.pipelines.free_head = vk::PIPELINE_FREE_NONE;
+    state.pipelines.next_new = (uint)state.pipelines.slots.len;
+    return index;
+}
+
+fn uint read_ray_tracing_key_u32(char[] bytes, usz offset) {
+    return (uint)bytes[offset]
+        | (uint)bytes[offset + 1] << 8
+        | (uint)bytes[offset + 2] << 16
+        | (uint)bytes[offset + 3] << 24;
+}
+
+fn uint? capture_ray_tracing_cache_insert(
+    void* raw_capture,
+    vk::VkDeviceState* state,
+    vk::PipelineCacheEntry value,
+) {
+    RayTracingPipelineCreateCapture* capture =
+        (RayTracingPipelineCreateCapture*)raw_capture;
+    capture.key_matched = capture.key_matched
+        && read_ray_tracing_key_u32(value.ray_tracing_key.bytes, 40)
+            == (uint)value.ray_tracing_shader_ids[2];
+    return vk::insert_entry(state, value);
 }
 
 fn vk::Result capture_ray_tracing_pipeline_create(
@@ -123,6 +167,29 @@ fn gpu::ShaderDesc ray_tracing_test_shader(char[] spirv) {
     };
 }
 
+fn void ray_tracing_hit_key_starts_after_ray_generation_and_miss() @test {
+    gpu::ShaderDesc closest_hit =
+        ray_tracing_test_shader(RT_PIPELINE_CLOSEST_HIT_SPIRV[..]);
+    gpu::RayTracingHitGroupDesc[1] groups = {{
+        .kind               = gpu::RayTracingHitGroupKind.TRIANGLES,
+        .closest_hit_shader = &closest_hit,
+    }};
+    gpu::RayTracingPipelineDesc desc = { .hit_groups = groups[..] };
+    vk::ShaderId[3] shader_ids = {
+        (vk::ShaderId)11,
+        (vk::ShaderId)13,
+        (vk::ShaderId)17,
+    };
+    vk::RayTracingHitGroupKey[1] keys;
+    vk::build_ray_tracing_hit_keys(
+        desc:             &desc,
+        shader_ids:       shader_ids[..],
+        hit_keys:         keys[..],
+        first_hit_shader: 2,
+    );
+    assert(keys[0].closest_hit_shader == (vk::ShaderId)17);
+}
+
 fn void ray_tracing_descriptor_normalizes_depth_ranges_and_stage_count() @test {
     gpu::ShaderDesc[2] ray_generation = {
         ray_tracing_test_shader(RT_PIPELINE_RGEN_SPIRV[..]),
@@ -141,14 +208,14 @@ fn void ray_tracing_descriptor_normalizes_depth_ranges_and_stage_count() @test {
         ray_tracing_test_shader(RT_PIPELINE_CALLABLE_SPIRV[..]),
     };
     gpu::RayTracingHitGroupDesc[3] hit_groups = {
-        { .type = gpu::RayTracingHitGroupType.TRIANGLES },
+        { .kind = gpu::RayTracingHitGroupKind.TRIANGLES },
         {
-            .type               = gpu::RayTracingHitGroupType.TRIANGLES,
+            .kind               = gpu::RayTracingHitGroupKind.TRIANGLES,
             .closest_hit_shader = &closest_hit,
             .any_hit_shader     = &any_hit,
         },
         {
-            .type                = gpu::RayTracingHitGroupType.PROCEDURAL,
+            .kind                = gpu::RayTracingHitGroupKind.PROCEDURAL,
             .intersection_shader = &intersection,
         },
     };
@@ -212,7 +279,7 @@ fn void ray_tracing_descriptor_rejects_unsupported_and_invalid_groups() @test {
     )) == gpu::INVALID_ARGUMENT);
     desc.max_recursion_depth = 1;
     group = {
-        .type                = gpu::RayTracingHitGroupType.TRIANGLES,
+        .kind                = gpu::RayTracingHitGroupKind.TRIANGLES,
         .intersection_shader = &intersection,
     };
     assert(@catch(vk::normalize_ray_tracing_pipeline_desc(
@@ -220,7 +287,7 @@ fn void ray_tracing_descriptor_rejects_unsupported_and_invalid_groups() @test {
         &desc,
     )) == gpu::INVALID_ARGUMENT);
     group = {
-        .type               = gpu::RayTracingHitGroupType.PROCEDURAL,
+        .kind               = gpu::RayTracingHitGroupKind.PROCEDURAL,
         .closest_hit_shader = &closest_hit,
     };
     assert(@catch(vk::normalize_ray_tracing_pipeline_desc(
@@ -274,12 +341,12 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
         ray_tracing_test_shader(RT_PIPELINE_CALLABLE_SPIRV[..]);
     gpu::RayTracingHitGroupDesc[2] hit_groups = {
         {
-            .type               = gpu::RayTracingHitGroupType.TRIANGLES,
+            .kind               = gpu::RayTracingHitGroupKind.TRIANGLES,
             .closest_hit_shader = &closest_hit,
             .any_hit_shader     = &any_hit,
         },
         {
-            .type                = gpu::RayTracingHitGroupType.PROCEDURAL,
+            .kind                = gpu::RayTracingHitGroupKind.PROCEDURAL,
             .intersection_shader = &intersection,
         },
     };
@@ -293,12 +360,14 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
     RayTracingPipelineCreateCapture capture = {
         .expected_layout = state.ray_tracing_layout,
         .matched         = true,
+        .key_matched     = true,
     };
     vk::RayTracingPipelineCreateOps ops =
         vk::ray_tracing_pipeline_create_ops_real();
     ops.user_data = &capture;
     ops.create = &capture_ray_tracing_pipeline_create;
     ops.shader_module.create = &create_null_ray_tracing_shader_module;
+    ops.insert_cache_entry = &capture_ray_tracing_cache_insert;
 
     gpu::PipelineHandle first =
         vk::vk_create_ray_tracing_pipeline_with_ops(
@@ -313,8 +382,22 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
             &desc,
             &ops,
         )!!;
-    assert(capture.matched && capture.calls == 1);
+    assert(capture.matched && capture.key_matched && capture.calls == 1);
     assert(first != second && cache_entry_count(&device) == 1);
+    gpu::ShaderDesc alternate_closest_hit =
+        ray_tracing_test_shader(RT_PIPELINE_ALT_CLOSEST_HIT_SPIRV[..]);
+    hit_groups[0].closest_hit_shader = &alternate_closest_hit;
+    gpu::PipelineHandle distinct_hit_pipeline =
+        vk::vk_create_ray_tracing_pipeline_with_ops(
+            state,
+            &desc,
+            &ops,
+        )!!;
+    assert(capture.key_matched
+        && capture.calls == 2
+        && cache_entry_count(&device) == 2,
+        "hit-only shader differences produce distinct cache identities");
+    hit_groups[0].closest_hit_shader = &closest_hit;
     assert(vk::vk_get_ray_tracing_pipeline_info(state, first)!!.total_group_count
         == 5);
     RayTracingGroupHandleCapture handles_capture = {
@@ -374,8 +457,10 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
     vk::vk_destroy_pipeline(state, compute)!!;
 
     vk::vk_destroy_pipeline(state, first)!!;
-    assert(cache_entry_count(&device) == 1);
+    assert(cache_entry_count(&device) == 2);
     vk::vk_destroy_pipeline(state, second)!!;
+    assert(cache_entry_count(&device) == 1);
+    vk::vk_destroy_pipeline(state, distinct_hit_pipeline)!!;
     assert(cache_entry_count(&device) == 0);
     assert(vk::shader_store_live_count(state) == 0);
 
@@ -383,6 +468,7 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
         .expected_layout = state.ray_tracing_layout,
         .result          = vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
         .matched         = true,
+        .key_matched     = true,
     };
     ops.user_data = &capture;
     assert(@catch(vk::vk_create_ray_tracing_pipeline_with_ops(
@@ -400,6 +486,26 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
         &desc,
         &ops,
     )) == gpu::SLOT_TABLE_FULL);
+    assert(cache_entry_count(&device) == 0
+        && vk::shader_store_live_count(state) == 0);
+
+    RayTracingLateSlotFailureCapture late_failure = {
+        .create = {
+            .expected_layout = state.ray_tracing_layout,
+            .matched         = true,
+            .key_matched     = true,
+        },
+    };
+    ops.user_data = &late_failure;
+    ops.insert_cache_entry =
+        &insert_ray_tracing_cache_then_exhaust_pipeline_slots;
+    assert(@catch(vk::vk_create_ray_tracing_pipeline_with_ops(
+        state,
+        &desc,
+        &ops,
+    )) == gpu::SLOT_TABLE_FULL);
+    state.pipelines.free_head = late_failure.saved_free_head;
+    state.pipelines.next_new = late_failure.saved_next_new;
     assert(cache_entry_count(&device) == 0
         && vk::shader_store_live_count(state) == 0);
 }

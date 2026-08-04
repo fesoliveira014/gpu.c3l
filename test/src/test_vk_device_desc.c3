@@ -706,8 +706,6 @@ fn void ray_tracing_pipeline_device_creation_is_independent_from_ray_queries() @
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::DeviceDesc device_desc = { .enable_ray_tracing_pipelines = true };
-    bool checked_unsupported;
-
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         gpu::DeviceSupport support =
@@ -715,7 +713,6 @@ fn void ray_tracing_pipeline_device_creation_is_independent_from_ray_queries() @
         if (!support.supported) {
             assert(@catch(gpu::create_device(&adapter, &device_desc))
                 == gpu::UNSUPPORTED_FEATURE);
-            checked_unsupported = true;
             continue;
         }
         DeviceFeatureChainCapture capture;
@@ -747,8 +744,8 @@ fn void ray_tracing_pipeline_device_creation_is_independent_from_ray_queries() @
                 && capture.deferred_host_operations_extension);
         return;
     }
-    assert(checked_unsupported,
-        "the controlled target exposes a pipeline positive or negative path");
+    assert(false,
+        "the controlled native target supports ray-tracing pipelines");
 }
 
 fn void combined_ray_tracing_opt_in_enables_both_frontends() @test {
@@ -763,14 +760,11 @@ fn void combined_ray_tracing_opt_in_enables_both_frontends() @test {
         .enable_ray_queries = true,
         .enable_ray_tracing_pipelines = true,
     };
-    bool checked_unsupported;
-
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             assert(@catch(gpu::create_device(&adapter, &device_desc))
                 == gpu::UNSUPPORTED_FEATURE);
-            checked_unsupported = true;
             continue;
         }
         DeviceFeatureChainCapture capture;
@@ -803,8 +797,8 @@ fn void combined_ray_tracing_opt_in_enables_both_frontends() @test {
                 && capture.deferred_host_operations_extension);
         return;
     }
-    assert(checked_unsupported,
-        "combined opt-in has a verified positive or negative path");
+    assert(false,
+        "the controlled native target supports combined ray traversal");
 }
 
 fn void requested_sparse_creation_enables_only_planned_features() @test {

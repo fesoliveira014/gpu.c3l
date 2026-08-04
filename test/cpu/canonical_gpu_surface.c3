@@ -50,6 +50,7 @@ fn void pin_runtime_adapter_device() {
             .enabled                           = true,
             .max_recursion_depth               = 2,
             .max_ray_dispatch_invocation_count = 1024,
+            .max_ray_dispatch_dimensions       = { 64, 32, 16 },
             .shader_group_handle_size          = 32,
             .shader_group_handle_alignment     = 32,
             .shader_group_base_alignment       = 64,
@@ -126,7 +127,7 @@ fn void pin_ray_tracing_pipeline_values() {
     gpu::ShaderDesc closest_hit = {};
     gpu::RayTracingHitGroupDesc[1] hit_groups = {
         {
-            .type               = gpu::RayTracingHitGroupType.TRIANGLES,
+            .kind               = gpu::RayTracingHitGroupKind.TRIANGLES,
             .closest_hit_shader = &closest_hit,
         },
     };
@@ -141,6 +142,11 @@ fn void pin_ray_tracing_pipeline_values() {
         .hit            = { .first_group = 1, .group_count = 1 },
         .total_group_count = 2,
     };
+    gpu::RayQueryCaps ray_query_caps = { .enabled = true };
+    gpu::RayTracingShaderGroupRange ray_generation_range = {
+        .first_group = 0,
+        .group_count = 1,
+    };
     gpu::RayTracingShaderBindingTable table = {
         .ray_generation = { .stride = 32 },
         .hit            = { .stride = 32 },
@@ -148,6 +154,8 @@ fn void pin_ray_tracing_pipeline_values() {
     gpu::StageMask stage = { .ray_tracing = true };
 
     (void)pipeline_desc;
+    (void)ray_query_caps;
+    (void)ray_generation_range;
     (void)info;
     (void)table;
     (void)stage;

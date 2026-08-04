@@ -2178,7 +2178,6 @@ fn void ray_tracing_layout_uses_all_six_stages_and_shared_root() @test {
         | vk::ShaderStageFlagBits.INTERSECTION_BIT_KHR
         | vk::ShaderStageFlagBits.CALLABLE_BIT_KHR;
     assert(vk::ray_tracing_shader_stage_flags() == expected);
-    assert(vk::ray_tracing_root_push_size() == gpu::RootPush::size);
 }
 
 fn void ray_tracing_cache_keys_are_exact_owned_and_collision_safe() @test {
@@ -2197,14 +2196,14 @@ fn void ray_tracing_cache_keys_are_exact_owned_and_collision_safe() @test {
     vk::ShaderId[1] callable = { (vk::ShaderId)23 };
     vk::RayTracingHitGroupKey[2] hit_groups = {
         {
-            .type               = gpu::RayTracingHitGroupType.TRIANGLES,
+            .kind               = gpu::RayTracingHitGroupKind.TRIANGLES,
             .presence_mask      = 0x3,
             .closest_hit_shader = (vk::ShaderId)19,
             .any_hit_shader     = (vk::ShaderId)29,
             .intersection_shader = vk::SHADER_ID_INVALID,
         },
         {
-            .type                = gpu::RayTracingHitGroupType.PROCEDURAL,
+            .kind                = gpu::RayTracingHitGroupKind.PROCEDURAL,
             .presence_mask       = 0x4,
             .closest_hit_shader  = vk::SHADER_ID_INVALID,
             .any_hit_shader      = vk::SHADER_ID_INVALID,
