@@ -387,6 +387,8 @@ struct SparseTextureCaps {
     QueueRoles binding_queues;
 }
 
+<* Shared acceleration-structure support and limits. The zero value means the
+   device did not enable acceleration structures. *>
 struct AccelerationStructureCaps {
     bool enabled;
     uint heap_capacity;
@@ -396,10 +398,13 @@ struct AccelerationStructureCaps {
     usz  scratch_alignment;
 }
 
+<* Shader ray-query support enabled independently of direct tracing. *>
 struct RayQueryCaps {
     bool enabled;
 }
 
+<* Direct ray-tracing pipeline support, launch limits, and caller-owned SBT
+   packing requirements. The zero value means the feature was not enabled. *>
 struct RayTracingPipelineCaps {
     bool enabled;
     uint max_recursion_depth;
@@ -1045,6 +1050,8 @@ enum IndexType : int {
     U16,
 }
 
+<* Native ray-tracing hit-group topology. Procedural groups require an
+   intersection shader; triangle groups prohibit one. *>
 enum RayTracingHitGroupType : int {
     TRIANGLES,
     PROCEDURAL,
@@ -1132,6 +1139,8 @@ struct GraphicsPipelineDesc {
     ZString      debug_name;
 }
 
+<* One borrowed hit-group declaration. Shader inputs and pointed descriptors
+   are call-scoped; group type determines required and prohibited roles. *>
 struct RayTracingHitGroupDesc {
     RayTracingHitGroupType type;
     ShaderDesc*            closest_hit_shader;
@@ -1139,6 +1148,8 @@ struct RayTracingHitGroupDesc {
     ShaderDesc*            intersection_shader;
 }
 
+<* Borrowed ordered shader categories for one direct ray-tracing pipeline.
+   Creation copies all inputs and publishes deterministically ordered groups. *>
 struct RayTracingPipelineDesc {
     ShaderDesc[]             ray_generation_shaders;
     ShaderDesc[]             miss_shaders;
@@ -1148,11 +1159,13 @@ struct RayTracingPipelineDesc {
     ZString                  debug_name;
 }
 
+<* Half-open category range in the pipeline's deterministic group order. *>
 struct RayTracingShaderGroupRange {
     uint first_group;
     uint group_count;
 }
 
+<* Deterministic ray-generation, miss, hit, and callable group ranges. *>
 struct RayTracingPipelineInfo {
     RayTracingShaderGroupRange ray_generation;
     RayTracingShaderGroupRange miss;
@@ -1161,11 +1174,15 @@ struct RayTracingPipelineInfo {
     uint                       total_group_count;
 }
 
+<* Caller-owned SBT records in GPU-addressable memory. Empty optional regions
+   use the canonical zero value; nonempty spans retain caller ownership. *>
 struct RayTracingShaderBindingTableRegion {
     GpuSpan span;
     usz     stride;
 }
 
+<* Caller-packed SBT regions for one direct trace. The ray-generation region is
+   required and contains exactly one record. *>
 struct RayTracingShaderBindingTable {
     RayTracingShaderBindingTableRegion ray_generation;
     RayTracingShaderBindingTableRegion miss;
