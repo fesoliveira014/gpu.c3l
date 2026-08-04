@@ -1761,7 +1761,7 @@ fn CommandAllocator? create_command_allocator(
         return INVALID_ARGUMENT~;
     }
     if (normalized.max_acceleration_structure_geometries_per_build > 0) {
-        if (!operation.data.caps.ray_queries.enabled) {
+        if (!operation.data.caps.acceleration_structures.enabled) {
             return UNSUPPORTED_FEATURE~;
         }
         if (normalized.max_acceleration_structure_geometries_per_build

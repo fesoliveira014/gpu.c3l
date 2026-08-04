@@ -126,6 +126,13 @@
         "src/test_vk_timestamp_queries.c3"
       ]
     },
+    // Explicit capable-device acceptance target. It enables Vulkan validation,
+    // exercises direct KHR ray tracing, and fails UNSUPPORTED_FEATURE instead
+    // of passing as a skip when no adapter supports ray-tracing pipelines.
+    "vk_ray_tracing": {
+      "type": "test",
+      "sources": [ "src/test_vk_ray_tracing.c3" ]
+    },
     "vk_sparse_texture": {
       "type": "test",
       "sources": [ "src/test_vk_sparse_texture.c3" ]

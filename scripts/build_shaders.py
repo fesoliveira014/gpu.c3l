@@ -29,6 +29,21 @@ RAY_TRACING_STAGES = {
     ".rint": "rint",
     ".rcall": "rcall",
 }
+REQUIRED_RAY_TRACING_FIXTURES = (
+    "ray_stage.rgen",
+    "ray_stage.rmiss",
+    "ray_stage.rchit",
+    "ray_stage.rahit",
+    "ray_stage.rint",
+    "ray_stage.rcall",
+    "ray_trace_functional.rgen",
+    "ray_trace_functional_primary.rmiss",
+    "ray_trace_functional_secondary.rmiss",
+    "ray_trace_functional_triangle.rchit",
+    "ray_trace_functional_procedural.rint",
+    "ray_trace_functional_procedural.rchit",
+    "ray_trace_functional.rcall",
+)
 SHADER_TREES = (
     (ROOT / "test" / "shaders", ROOT / "test" / "src" / "shaders"),
     (
@@ -89,6 +104,17 @@ def main():
                 ]
             subprocess.run(command, check=True)
             print(f"built {out}")
+
+    fixture_output = ROOT / "test" / "src" / "shaders"
+    missing_fixtures = [
+        name for name in REQUIRED_RAY_TRACING_FIXTURES
+        if not (fixture_output / f"{name}.spv").is_file()
+    ]
+    if missing_fixtures:
+        sys.exit(
+            "build_shaders: missing required ray-tracing outputs: "
+            + ", ".join(missing_fixtures)
+        )
 
     assembly_sources = sorted((ROOT / "test" / "shaders").glob("*.spvasm"))
     if not assembly_sources:

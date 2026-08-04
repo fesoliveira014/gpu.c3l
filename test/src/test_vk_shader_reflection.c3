@@ -66,6 +66,20 @@ const char[*] REFLECT_INTERSECTION_SPIRV =
 const char[*] REFLECT_CALLABLE_SPIRV    = $embed("shaders/ray_stage.rcall.spv");
 const char[*] REFLECT_RAY_BAD_ROOT_SPIRV =
     $embed("shaders/ray_bad_root.rgen.spv");
+const char[*] REFLECT_FUNCTIONAL_RAYGEN_SPIRV =
+    $embed("shaders/ray_trace_functional.rgen.spv");
+const char[*] REFLECT_FUNCTIONAL_PRIMARY_MISS_SPIRV =
+    $embed("shaders/ray_trace_functional_primary.rmiss.spv");
+const char[*] REFLECT_FUNCTIONAL_SECONDARY_MISS_SPIRV =
+    $embed("shaders/ray_trace_functional_secondary.rmiss.spv");
+const char[*] REFLECT_FUNCTIONAL_TRIANGLE_HIT_SPIRV =
+    $embed("shaders/ray_trace_functional_triangle.rchit.spv");
+const char[*] REFLECT_FUNCTIONAL_PROCEDURAL_INTERSECTION_SPIRV =
+    $embed("shaders/ray_trace_functional_procedural.rint.spv");
+const char[*] REFLECT_FUNCTIONAL_PROCEDURAL_HIT_SPIRV =
+    $embed("shaders/ray_trace_functional_procedural.rchit.spv");
+const char[*] REFLECT_FUNCTIONAL_CALLABLE_SPIRV =
+    $embed("shaders/ray_trace_functional.rcall.spv");
 
 const ZString ENTRY_POINT_OVER_CAP = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
@@ -687,6 +701,51 @@ fn void ray_tracing_binding_five_requires_only_shared_acceleration_structures() 
         REFLECT_RAYGEN_SPIRV[..],
         false,
     )) == gpu::UNSUPPORTED_FEATURE);
+}
+
+fn void functional_ray_tracing_fixtures_pin_roles_root_heap_and_entry() @test {
+    char[][] fixtures = {
+        REFLECT_FUNCTIONAL_RAYGEN_SPIRV[..],
+        REFLECT_FUNCTIONAL_PRIMARY_MISS_SPIRV[..],
+        REFLECT_FUNCTIONAL_SECONDARY_MISS_SPIRV[..],
+        REFLECT_FUNCTIONAL_TRIANGLE_HIT_SPIRV[..],
+        REFLECT_FUNCTIONAL_PROCEDURAL_INTERSECTION_SPIRV[..],
+        REFLECT_FUNCTIONAL_PROCEDURAL_HIT_SPIRV[..],
+        REFLECT_FUNCTIONAL_CALLABLE_SPIRV[..],
+    };
+    gpu::internal::ShaderRole[] roles = {
+        gpu::internal::ShaderRole.RAY_GENERATION,
+        gpu::internal::ShaderRole.MISS,
+        gpu::internal::ShaderRole.MISS,
+        gpu::internal::ShaderRole.CLOSEST_HIT,
+        gpu::internal::ShaderRole.INTERSECTION,
+        gpu::internal::ShaderRole.CLOSEST_HIT,
+        gpu::internal::ShaderRole.CALLABLE,
+    };
+    vk::ShaderStageFlagBits[] stages = {
+        vk::ShaderStageFlagBits.RAYGEN_BIT_KHR,
+        vk::ShaderStageFlagBits.MISS_BIT_KHR,
+        vk::ShaderStageFlagBits.MISS_BIT_KHR,
+        vk::ShaderStageFlagBits.CLOSEST_HIT_BIT_KHR,
+        vk::ShaderStageFlagBits.INTERSECTION_BIT_KHR,
+        vk::ShaderStageFlagBits.CLOSEST_HIT_BIT_KHR,
+        vk::ShaderStageFlagBits.CALLABLE_BIT_KHR,
+    };
+
+    foreach (index, fixture : fixtures) {
+        assert_ray_tracing_stage_fixture(
+            fixture:      fixture,
+            role:         roles[index],
+            native_stage: stages[index],
+        );
+        check_fixture_heap_convention(fixture, true)!!;
+        assert(@catch(check_fixture_root_abi(
+            spirv:       fixture,
+            role:        roles[index],
+            entry_point: "missing",
+        )) == gpu::SHADER_INVALID,
+            "every functional stage rejects an absent selected entry point");
+    }
 }
 
 fn void reversed_graphics_member_order_rejected() @test {

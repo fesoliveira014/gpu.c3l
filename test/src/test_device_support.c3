@@ -138,6 +138,16 @@ fn void ray_tracing_pipeline_opt_in_is_independent_and_actionable() @test {
     assert(!caps.ray_queries.enabled);
     assert(caps.ray_tracing_pipelines.enabled
             && caps.ray_tracing_pipelines.max_recursion_depth == 4);
+    Queue queue = gpu::get_queue(&device, QueueKind.GRAPHICS)!!;
+    CommandAllocatorDesc allocator_desc = {
+        .max_acceleration_structure_geometries_per_build = 1,
+    };
+    CommandAllocator allocator = gpu::create_command_allocator(
+        device: &device,
+        queue:  queue,
+        desc:   &allocator_desc,
+    )!!;
+    gpu::destroy_command_allocator(&allocator)!!;
     gpu::destroy_device(&device)!!;
     gpu::internal::vk::stub_set_ray_query_support(true);
 }
