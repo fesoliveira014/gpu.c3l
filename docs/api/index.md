@@ -67,7 +67,8 @@ Types: `Vec2f`, `Vec4f`, `Vec4u`, `Device`, `Runtime`, `RuntimeDesc`,
 `AdapterMemoryInfo`, `AdapterQueueInfo`, `AdapterLimits`, `AdapterInfo`,
 `BackendVersion`, `AdapterDiagnostics`, `Surface`, `QueueKind`, `QueueRoles`,
 `Queue`, `QueueInfo`, `QueueRequest`, `DeviceDesc`, `DeviceSupport`,
-`DeviceCaps`, `TimestampCaps`, `SparseTextureCaps`, and `RayQueryCaps`.
+`DeviceCaps`, `TimestampCaps`, `SparseTextureCaps`,
+`AccelerationStructureCaps`, `RayQueryCaps`, and `RayTracingPipelineCaps`.
 
 Constants: `DEVICE_INVALID`, `RUNTIME_INVALID`, `ADAPTER_INVALID`,
 `SURFACE_INVALID`, and `QUEUE_INVALID`.
@@ -146,7 +147,11 @@ Types: `RootPush`, `GraphicsRootPush`, `GeneratedDrawRecord`,
 `PrimitiveTopology`, `CompareOp`, `CullMode`, `FrontFace`, `PolygonMode`,
 `BlendFactor`, `BlendOp`, `ColorWriteMask`, `ShaderDesc`, `DepthState`,
 `BlendState`, `ColorTargetState`, `ColorState`, `DynamicRasterState`,
-`ComputePipelineDesc`, and `GraphicsPipelineDesc`.
+`ComputePipelineDesc`, `GraphicsPipelineDesc`, `RayTracingHitGroupType`,
+`RayTracingHitGroupDesc`, `RayTracingPipelineDesc`,
+`RayTracingShaderGroupRange`, `RayTracingPipelineInfo`,
+`RayTracingShaderBindingTableRegion`, and
+`RayTracingShaderBindingTable`.
 
 Constants: `PIPELINE_HANDLE_INVALID`, `COLOR_WRITE_ALL`, `MAX_PIPELINES`, and
 `MAX_COLOR_ATTACHMENTS`.
@@ -156,8 +161,9 @@ Methods: `PipelineHandle.is_valid` and `PipelineHandle.equals`.
 Callables: `color_blend_disabled`,
 `alpha_blend`, `premultiplied_alpha_blend`, `additive_blend`,
 `uniform_color_state`, `create_compute_pipeline`,
-`create_graphics_pipeline`, `destroy_pipeline`, `get_pipeline_cache_size`,
-and `get_pipeline_cache_data`.
+`create_graphics_pipeline`, `create_ray_tracing_pipeline`,
+`get_ray_tracing_pipeline_info`, `get_ray_tracing_shader_group_handles`,
+`destroy_pipeline`, `get_pipeline_cache_size`, and `get_pipeline_cache_data`.
 
 ### [Commands and rendering](commands_and_rendering.md)
 
@@ -190,7 +196,8 @@ Callables:
 `cmd_copy_buffer`, `cmd_fill_buffer`, `cmd_copy_buffer_to_texture`,
 `cmd_copy_texture_to_buffer`, `cmd_build_acceleration_structure`,
 `cmd_update_acceleration_structure`, `cmd_bind_pipeline`, `cmd_dispatch`,
-`cmd_dispatch_indirect`, `cmd_dispatch_generated`, `cmd_set_viewport`,
+`cmd_dispatch_indirect`, `cmd_dispatch_generated`, `cmd_trace_rays`,
+`cmd_set_viewport`,
 `cmd_set_scissor`, `cmd_draw`, `cmd_draw_indexed`, `cmd_draw_indirect`,
 `cmd_draw_indexed_indirect`, `cmd_draw_indexed_indirect_count`,
 `cmd_draw_generated`, `cmd_draw_indexed_generated`,

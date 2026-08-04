@@ -18,15 +18,17 @@ management, or a compatibility descriptor path.
 - root pointers (`GpuAddress`) for per-dispatch and per-draw shader data;
 - bindless texture and sampler indices;
 - VMA-backed allocations, checked spans, mapping, and explicit visibility;
-- compute and graphics pipelines, dynamic rendering, indirect and generated
-  work, sparse textures, timestamp queries, and swapchains;
+- compute, graphics, and explicitly opted-in direct ray-tracing pipelines;
+- dynamic rendering, indirect and generated work, acceleration structures,
+  ray queries, sparse textures, timestamp queries, and swapchains;
 - caller-owned command allocators with explicit completion-based reuse;
 - optional full contract validation and structured diagnostics; and
 - a schema generator for matching C3 and GLSL shader ABI declarations.
 
-`TextureIndex`, `SamplerIndex`, and `GpuAddress` are raw shader values, not
-ownership tokens. Applications must keep their backing resources alive and
-explicitly order all reuse, transitions, and destruction.
+`TextureIndex`, `SamplerIndex`, `AccelerationStructureIndex`, and `GpuAddress`
+are raw shader values, not ownership tokens. Applications must keep their
+backing resources alive and explicitly order all reuse, transitions, and
+destruction.
 
 ## Requirements and status
 

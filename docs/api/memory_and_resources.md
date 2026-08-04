@@ -81,9 +81,10 @@ is accepted.
 
 ## Acceleration structures
 
-Ray-query-enabled devices expose bottom-level acceleration structures (BLAS)
-and top-level acceleration structures (TLAS) through one strongly typed
-`AccelerationStructureHandle`. A BLAS descriptor contains one or more ordered
+Devices opted into ray queries or ray-tracing pipelines expose bottom-level
+acceleration structures (BLAS) and top-level acceleration structures (TLAS)
+through one strongly typed `AccelerationStructureHandle`. A BLAS descriptor
+contains one or more ordered
 triangle geometries or one or more ordered AABB geometries; one BLAS cannot mix
 the two kinds. A TLAS descriptor instead supplies `max_instance_count`.
 Descriptors are immutable capacity schemas: every later build/update uses the
@@ -126,9 +127,10 @@ barrier.
 `make_acceleration_structure_instance` validates a live BLAS and returns the
 exact 64-byte `AccelerationStructureInstance` ABI. Its address field is an
 ordinary `GpuAddress`; its transform is three row-major `Vec4f` rows. Custom
-index is 24 bits, mask is 8 bits, and the shader-binding-table offset must be
-zero in this ray-query-only API. Store packed records in addressable instance
-input memory before building a TLAS.
+index is 24 bits, mask is 8 bits, and the shader-binding-table record offset is
+currently fixed at zero. A ray-generation shader may still select an SBT hit
+record through the trace instruction's record offset. Store packed records in
+addressable instance input memory before building a TLAS.
 
 `create_acceleration_structure_view` publishes a TLAS in the independently
 sized shader heap. The owner-bearing `AccelerationStructureView` contains a raw
@@ -143,6 +145,26 @@ Updates are in-place only. The structure must have been created with
 the completed build's per-geometry primitive counts, triangle vertex counts
 and transform presence, or TLAS instance count. Use the queried update scratch.
 There is no distinct source structure or implicit rebuild.
+
+## Shader binding table storage
+
+An SBT is ordinary caller-owned addressable allocation storage described by
+four `RayTracingShaderBindingTableRegion` values. Allocate it only on a device
+created with `enable_ray_tracing_pipelines`; such generic allocations carry the
+required shader-binding-table usage in addition to their normal addressable
+buffer usage.
+
+Use `RayTracingPipelineCaps.shader_group_handle_size`,
+`shader_group_handle_alignment`, `shader_group_base_alignment`, and
+`max_shader_group_stride` when packing records. Fetch exact handle bytes with
+`get_ray_tracing_shader_group_handles`, copy each handle at the start of its
+record, and flush CPU-written SBT storage before submission. The ray-generation
+region contains exactly one record. Miss, hit, and callable regions may be
+canonical empty regions or whole-record spans.
+
+The library neither allocates nor populates the SBT. Every nonempty region is a
+borrowed `GpuSpan`; keep its allocation alive through completion. Under full
+validation, recorded spans are retained as explicit command references.
 
 ## Views and bindless indices
 

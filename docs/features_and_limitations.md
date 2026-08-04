@@ -24,6 +24,8 @@ application must design around.
 - Shader ABI schemas that generate matching C3 and GLSL std430 declarations.
 - Explicitly opted-in compute/graphics ray queries with triangle and procedural
   AABB BLAS values, TLAS instances, in-place updates, and a bindless TLAS heap.
+- Independently opted-in direct KHR ray-tracing pipelines with all six shader
+  roles, triangle/procedural hit groups, caller-owned SBTs, and direct traces.
 
 ## Deliberate exclusions
 
@@ -38,8 +40,8 @@ application must design around.
 - No public compatibility profile for older Vulkan versions.
 - No package-registry distribution; consumers vendor the repository and its
   submodules.
-- No ray-tracing pipelines, shader binding tables, callable/miss/closest-hit
-  stages, or trace-rays commands.
+- No ray-tracing pipeline libraries/linking, capture replay, deferred creation,
+  dynamic stack sizing, or indirect trace commands.
 - No acceleration-structure compaction, copy/clone, serialization, indirect
   builds, host builds, or updates into a distinct destination. Builds and
   in-place updates are device commands using caller-owned scratch.
@@ -61,9 +63,11 @@ is required to build GLSL examples.
 Optional capabilities are reported in `DeviceCaps`, including asynchronous
 compute, indirect-count draws, generated work, wireframe polygon mode, sparse
 textures, anisotropy limits, timestamp support, and workload limits.
-Ray queries are also optional, but unlike passive capability discovery they
-must be requested with `DeviceDesc.enable_ray_queries` and a nonzero runtime
-acceleration-structure heap capacity. Unsupported requests fail atomically.
+Ray queries and ray-tracing pipelines are also optional, but unlike passive
+capability discovery they must be requested independently with their
+`DeviceDesc` flags and a nonzero runtime acceleration-structure heap capacity.
+Either opt-in enables the shared acceleration-structure foundation.
+Unsupported requests fail atomically.
 
 ## Ownership and ordering constraints
 

@@ -43,6 +43,34 @@ Relevant types are:
 `ColorTargetState` values. `uniform_color_state` repeats one target state over
 an exact color-format count. `COLOR_WRITE_ALL` enables all channels.
 
+## Ray-tracing pipelines
+
+`RayTracingPipelineDesc` supplies ordered ray-generation shaders, miss
+shaders, structured hit groups, callable shaders, and a recursion depth. The
+supported roles are ray generation, miss, closest hit, any hit, intersection,
+and callable. Every shader uses the same eight-byte `RootPush` contract and the
+global heap layout; include `ray_tracing.glsl` for binding 5 without enabling
+the separate ray-query shader extension.
+
+`RayTracingHitGroupDesc` selects `TRIANGLES` or `PROCEDURAL`. A triangle group
+may contain closest-hit and any-hit shaders and must not contain an
+intersection shader. A procedural group requires an intersection shader and
+may also contain closest-hit and any-hit shaders. Empty optional shader
+pointers mean that role is absent.
+
+`create_ray_tracing_pipeline` requires
+`DeviceDesc.enable_ray_tracing_pipelines`. Zero recursion depth normalizes to
+one; higher values must fit
+`DeviceCaps.ray_tracing_pipelines.max_recursion_depth`.
+`get_ray_tracing_pipeline_info` returns deterministic ray-generation, miss,
+hit, and callable `RayTracingShaderGroupRange` values in that order.
+`get_ray_tracing_shader_group_handles` copies one exact contiguous range into
+caller storage whose length is `group_count * shader_group_handle_size`.
+
+The direct slice deliberately excludes pipeline libraries/linking, capture
+replay, deferred creation, dynamic stack sizing, and indirect trace commands.
+SBT allocation and packing remain application responsibilities.
+
 ## Ownership and destruction
 
 `destroy_pipeline` releases one pipeline owner only after all recording,

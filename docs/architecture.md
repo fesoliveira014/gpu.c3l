@@ -139,12 +139,17 @@ device-wide deduplication cache.
 
 Generic shader data is reached through root pointers. Compute commands push
 one `GpuAddress`; graphics commands push separate vertex and fragment root
-addresses. Textures and samplers are selected by raw heap indices stored in
-root data. See [Shader ABI](shader_abi.md).
+addresses; ray-tracing commands push one address to all six ray stages.
+Textures and samplers are selected by raw heap indices stored in root data.
+See [Shader ABI](shader_abi.md).
 
 Ray-query shaders explicitly opt in through `ray_query.glsl` and select a TLAS
 through binding 5. The ordinary shader path remains extension-free. Procedural
 AABB candidates require shader-side intersection and explicit confirmation.
+Direct ray-tracing shaders independently opt in through `ray_tracing.glsl`.
+Their pipeline identity encodes the ordered stage and hit-group structure plus
+recursion depth. The application owns SBT allocation, packing, synchronization,
+and lifetime; command recording emits no hidden allocation or barrier.
 
 Pipeline cache import/export deals with opaque driver data. A cache blob may be
 empty or minimally useful on a particular driver; it is an optimization, not

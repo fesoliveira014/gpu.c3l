@@ -79,10 +79,10 @@ Sampler indices remain stable until device destruction.
 
 ## Build a triangle BLAS and TLAS
 
-Enable ray queries on the device and give the runtime a nonzero
-`acceleration_structure_heap_capacity`. Query a triangle BLAS schema, create
-it, allocate the reported build scratch, and reserve geometry capacity on the
-command allocator:
+Enable ray queries or ray-tracing pipelines on the device and give the runtime
+a nonzero `acceleration_structure_heap_capacity`. Query a triangle BLAS schema,
+create it, allocate the reported build scratch, and reserve geometry capacity
+on the command allocator:
 
 ```c3
 gpu::AccelerationStructureGeometryDesc[1] geometries = {{
@@ -140,6 +140,49 @@ while (rayQueryProceedEXT(query)) {
 
 Do not confirm a rejected candidate. Triangle and AABB geometry cannot share
 one BLAS; put separate BLAS instances beneath the same TLAS for mixed scenes.
+
+## Pack an SBT and trace directly
+
+Request `DeviceDesc.enable_ray_tracing_pipelines`, then use the published
+`RayTracingPipelineCaps` instead of fixed record sizes. Align each record
+stride to `shader_group_handle_alignment` and each region start to
+`shader_group_base_alignment`. Fetch the deterministic group ranges with
+`get_ray_tracing_pipeline_info`, fetch exact handle bytes, and copy each handle
+to the beginning of its caller-owned record.
+
+```c3
+gpu::RayTracingPipelineInfo info =
+    gpu::get_ray_tracing_pipeline_info(&device, pipeline)!;
+gpu::get_ray_tracing_shader_group_handles(
+    device:      &device,
+    pipeline:    pipeline,
+    first_group: 0,
+    group_count: info.total_group_count,
+    out:         handle_bytes,
+)!;
+gpu::flush_mapped_span(&device, sbt_span)!;
+```
+
+Build the TLAS, order it to the ray-tracing stage, bind the pipeline, and trace:
+
+```c3
+gpu::Barrier build_to_trace = {
+    .before = { .acceleration_structure_build },
+    .after  = { .ray_tracing },
+};
+gpu::cmd_barrier(&commands, &build_to_trace)!;
+gpu::cmd_bind_pipeline(&commands, pipeline)!;
+gpu::cmd_trace_rays(
+    commands:             &commands,
+    root:                 root_gpu,
+    shader_binding_table: &sbt,
+    dimensions:           { width, height, 1 },
+)!;
+```
+
+Keep the SBT allocation, TLAS view, root data, and every raw-address target live
+until the trace completion point retires. The library inserts no hidden upload,
+barrier, bind, wait, or SBT allocation.
 
 ## Blocking readback
 
