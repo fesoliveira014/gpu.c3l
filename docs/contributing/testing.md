@@ -147,10 +147,10 @@ c3c test vk_ray_tracing --path test --test-show-output
   behavior, scratch reservation/exhaustion, caller-owned spans, and observable
   output when the driver supports the capability.
 - `vk_ray_tracing` is an explicit capable-device acceptance target. It enables
-  Vulkan validation, builds triangle and AABB BLASes plus a TLAS, packs a
-  caller-owned SBT, and checks direct hit/miss/callable output. Running it on
-  an unsupported adapter fails with `UNSUPPORTED_FEATURE`; it is not a passing
-  skip.
+  Vulkan validation, builds triangle and AABB BLASes, waits, clones the triangle
+  BLAS, waits again, builds a TLAS from the clone's address, packs a caller-owned
+  SBT, and checks direct hit/miss/callable output. Running it on an unsupported
+  adapter fails with `UNSUPPORTED_FEATURE`; it is not a passing skip.
 
 Capability-specific tests query support in C3 and handle an unavailable
 feature explicitly. CI does not parse `EXERCISED` text or require a particular

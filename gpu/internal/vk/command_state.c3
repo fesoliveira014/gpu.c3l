@@ -125,6 +125,11 @@ alias CmdUpdateAccelerationStructureFn @private = fn void? (
     CommandRecord*,
     gpu::AccelerationStructureBuildDesc*,
 );
+alias CmdCloneAccelerationStructureFn @private = fn void? (
+    CommandRecord*,
+    gpu::AccelerationStructureHandle,
+    gpu::AccelerationStructureHandle,
+);
 
 const uint MAX_COMMAND_LISTS = gpu::internal::MAX_DEVICE_COMMANDS;
 const uint COMMAND_FREE_NONE = 0;
@@ -219,6 +224,7 @@ struct CommandOps @public {
     CmdResolveTimestampsFn        resolve_timestamps;
     CmdBuildAccelerationStructureFn  build_acceleration_structure;
     CmdUpdateAccelerationStructureFn update_acceleration_structure;
+    CmdCloneAccelerationStructureFn  clone_acceleration_structure;
 }
 
 struct CommandCell {

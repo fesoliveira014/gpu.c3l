@@ -249,6 +249,7 @@ fn vk::PFN_vkVoidFunction recording_device_proc_loader(
         || proc_name == "vkDestroyAccelerationStructureKHR"
         || proc_name == "vkGetAccelerationStructureBuildSizesKHR"
         || proc_name == "vkCmdBuildAccelerationStructuresKHR"
+        || proc_name == "vkCmdCopyAccelerationStructureKHR"
         || proc_name == "vkGetAccelerationStructureDeviceAddressKHR") {
         counts.ray_query++;
     } else if (proc_name == "vkCreateRayTracingPipelinesKHR"
@@ -377,7 +378,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
         "ray-query selection does not load presentation procedures");
     assert(counts.dynamic_color == 3,
         "ray-query selection retains baseline color procedures");
-    assert(counts.ray_query == 5,
+    assert(counts.ray_query == 6,
         "ray-query selection loads the complete command family");
     assert(counts.ray_tracing_pipeline == 0,
         "acceleration-structure selection does not load pipeline procedures");
@@ -553,6 +554,9 @@ fn void device_ray_query_dispatch_requires_complete_set() @test {
     assert(!gpu::internal::vk::device_dispatch_supports_acceleration_structures(&missing));
     missing = complete;
     missing.acceleration_structures.cmd_build = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_acceleration_structures(&missing));
+    missing = complete;
+    missing.acceleration_structures.cmd_copy = null;
     assert(!gpu::internal::vk::device_dispatch_supports_acceleration_structures(&missing));
     missing = complete;
     missing.acceleration_structures.get_device_address = null;

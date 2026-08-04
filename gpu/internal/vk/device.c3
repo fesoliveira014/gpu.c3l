@@ -601,6 +601,7 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .resolve_timestamps          = &trusted_resolve_timestamps,
     .build_acceleration_structure  = &trusted_build_acceleration_structure,
     .update_acceleration_structure = &trusted_update_acceleration_structure,
+    .clone_acceleration_structure  = &trusted_clone_acceleration_structure,
 };
 
 const CommandOps FULL_COMMAND_OPS @private = {
@@ -634,6 +635,7 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .resolve_timestamps          = &full_resolve_timestamps,
     .build_acceleration_structure  = &full_build_acceleration_structure,
     .update_acceleration_structure = &full_update_acceleration_structure,
+    .clone_acceleration_structure  = &full_clone_acceleration_structure,
 };
 
 fn bool contract_uses_full_validation(DeviceValidationPolicy policy) =>

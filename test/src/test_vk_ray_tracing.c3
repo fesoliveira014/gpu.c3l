@@ -361,6 +361,9 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     gpu::AccelerationStructureHandle triangle_blas =
         gpu::create_acceleration_structure(&device, &triangle_desc)!!;
     defer gpu::destroy_acceleration_structure(&device, triangle_blas)!!;
+    gpu::AccelerationStructureHandle triangle_clone =
+        gpu::create_acceleration_structure(&device, &triangle_desc)!!;
+    defer gpu::destroy_acceleration_structure(&device, triangle_clone)!!;
     OwnedSpan triangle_scratch = allocate_trace_span(
         device:       &device,
         size:         triangle_requirements.build_scratch_size,
@@ -383,19 +386,9 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         .transform_row_0 = { 1.0, 0.0, 0.0, 0.0 },
         .transform_row_1 = { 0.0, 1.0, 0.0, 0.0 },
         .transform_row_2 = { 0.0, 0.0, 1.0, 0.0 },
-        .bottom_level    = triangle_blas,
+        .bottom_level    = triangle_clone,
         .custom_index    = 0xBEEF,
         .mask            = 0xff,
-    };
-    gpu::AccelerationStructureInstance[2] instance_values = {
-        gpu::make_acceleration_structure_instance(
-            &device,
-            &aabb_instance_desc,
-        )!!,
-        gpu::make_acceleration_structure_instance(
-            &device,
-            &triangle_instance_desc,
-        )!!,
     };
     OwnedSpan instances = allocate_trace_span(
         device:       &device,
@@ -406,14 +399,6 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         debug_name:   "trace_functional_instances",
     )!!;
     defer free_owned_span(&device, &instances)!!;
-    gpu::AccelerationStructureInstance* instance_data =
-        (gpu::AccelerationStructureInstance*)test_span_mapping(
-            &device,
-            instances.span,
-        ).ptr;
-    instance_data[0:2] = instance_values[..];
-    gpu::flush_mapped_span(&device, instances.span)!!;
-
     gpu::AccelerationStructureDesc tlas_desc = {
         .kind               = gpu::AccelerationStructureKind.TOP_LEVEL,
         .max_instance_count = 2,
@@ -510,14 +495,8 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         &texture_desc,
     )!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    gpu::TextureBarrier texture_to_storage = gpu::texture_transition(
-        texture: texture,
-        before:  { .layout = gpu::TextureLayout.UNDEFINED },
-        after:   gpu::storage_at({ .ray_tracing }, { .read, .write }),
-    )!!;
-    gpu::cmd_texture_barrier(&commands, &texture_to_storage)!!;
+    gpu::CommandList build_commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&build_commands)!!;
     gpu::AccelerationStructureGeometryBuildDesc[1] aabb_inputs = {{
         .kind = gpu::AccelerationStructureGeometryKind.AABBS,
         .aabbs = {
@@ -531,12 +510,7 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         .geometries  = aabb_inputs[..],
         .scratch     = aabb_scratch.span,
     };
-    gpu::cmd_build_acceleration_structure(&commands, &aabb_build)!!;
-    gpu::Barrier build_to_build = {
-        .before = { .acceleration_structure_build },
-        .after  = { .acceleration_structure_build },
-    };
-    gpu::cmd_barrier(&commands, &build_to_build)!!;
+    gpu::cmd_build_acceleration_structure(&build_commands, &aabb_build)!!;
     gpu::AccelerationStructureGeometryBuildDesc[1] triangle_inputs = {{
         .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
         .triangles = {
@@ -551,23 +525,74 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         .geometries  = triangle_inputs[..],
         .scratch     = triangle_scratch.span,
     };
-    gpu::cmd_build_acceleration_structure(&commands, &triangle_build)!!;
-    gpu::cmd_barrier(&commands, &build_to_build)!!;
+    gpu::cmd_build_acceleration_structure(
+        &build_commands,
+        &triangle_build,
+    )!!;
+    gpu::ExecutableCommandList build_executable =
+        gpu::end_commands(&build_commands)!!;
+    gpu::ExecutableCommandList[1] build_lists = { build_executable };
+    gpu::SubmitDesc build_submit = { .command_lists = build_lists[..] };
+    gpu::CompletionPoint build_completion =
+        gpu::submit(queue, &build_submit)!!;
+    gpu::wait_completion(build_completion)!!;
+
+    gpu::CommandList clone_commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&clone_commands)!!;
+    gpu::cmd_clone_acceleration_structure(
+        &clone_commands,
+        triangle_blas,
+        triangle_clone,
+    )!!;
+    gpu::ExecutableCommandList clone_executable =
+        gpu::end_commands(&clone_commands)!!;
+    gpu::ExecutableCommandList[1] clone_lists = { clone_executable };
+    gpu::SubmitDesc clone_submit = { .command_lists = clone_lists[..] };
+    gpu::CompletionPoint clone_completion =
+        gpu::submit(queue, &clone_submit)!!;
+    gpu::wait_completion(clone_completion)!!;
+
+    gpu::AccelerationStructureInstance[2] instance_values = {
+        gpu::make_acceleration_structure_instance(
+            &device,
+            &aabb_instance_desc,
+        )!!,
+        gpu::make_acceleration_structure_instance(
+            &device,
+            &triangle_instance_desc,
+        )!!,
+    };
+    gpu::AccelerationStructureInstance* instance_data =
+        (gpu::AccelerationStructureInstance*)test_span_mapping(
+            &device,
+            instances.span,
+        ).ptr;
+    instance_data[0:2] = instance_values[..];
+    gpu::flush_mapped_span(&device, instances.span)!!;
+
+    gpu::CommandList trace_commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&trace_commands)!!;
+    gpu::TextureBarrier texture_to_storage = gpu::texture_transition(
+        texture: texture,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   gpu::storage_at({ .ray_tracing }, { .read, .write }),
+    )!!;
+    gpu::cmd_texture_barrier(&trace_commands, &texture_to_storage)!!;
     gpu::AccelerationStructureBuildDesc tlas_build = {
         .destination    = tlas,
         .instances      = instances.span,
         .instance_count = 2,
         .scratch        = tlas_scratch.span,
     };
-    gpu::cmd_build_acceleration_structure(&commands, &tlas_build)!!;
+    gpu::cmd_build_acceleration_structure(&trace_commands, &tlas_build)!!;
     gpu::Barrier build_to_trace = {
         .before = { .acceleration_structure_build },
         .after  = { .ray_tracing },
     };
-    gpu::cmd_barrier(&commands, &build_to_trace)!!;
-    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::cmd_barrier(&trace_commands, &build_to_trace)!!;
+    gpu::cmd_bind_pipeline(&trace_commands, pipeline)!!;
     gpu::cmd_trace_rays(
-        commands:   &commands,
+        commands:   &trace_commands,
         root:       test_span_address(&device, root_owned.span),
         shader_binding_table: &table,
         dimensions: { TRACE_FUNCTIONAL_RAY_COUNT, 1, 1 },
@@ -577,17 +602,19 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         before:  texture_to_storage.after,
         after:   gpu::sampled_at({ .ray_tracing }),
     )!!;
-    gpu::cmd_texture_barrier(&commands, &texture_to_sampled)!!;
+    gpu::cmd_texture_barrier(&trace_commands, &texture_to_sampled)!!;
     gpu::Barrier trace_to_host = {
         .before = { .ray_tracing },
         .after  = { .host },
     };
-    gpu::cmd_barrier(&commands, &trace_to_host)!!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    gpu::ExecutableCommandList[1] lists = { executable };
-    gpu::SubmitDesc submit_desc = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = gpu::submit(queue, &submit_desc)!!;
-    gpu::wait_completion(completion)!!;
+    gpu::cmd_barrier(&trace_commands, &trace_to_host)!!;
+    gpu::ExecutableCommandList trace_executable =
+        gpu::end_commands(&trace_commands)!!;
+    gpu::ExecutableCommandList[1] trace_lists = { trace_executable };
+    gpu::SubmitDesc trace_submit = { .command_lists = trace_lists[..] };
+    gpu::CompletionPoint trace_completion =
+        gpu::submit(queue, &trace_submit)!!;
+    gpu::wait_completion(trace_completion)!!;
 
     gpu::invalidate_mapped_span(&device, output.span)!!;
     uint* results = (uint*)test_span_mapping(&device, output.span).ptr;

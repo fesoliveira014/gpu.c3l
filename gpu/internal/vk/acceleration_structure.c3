@@ -67,6 +67,68 @@ struct AccelerationStructureBuildCommandOps {
     AccelerationStructureBuildCommandFn build;
 }
 
+struct PreparedAccelerationStructureClone {
+    AccelerationStructureSlot*       source;
+    AccelerationStructureSlot*       destination;
+    gpu::AccelerationStructureHandle destination_handle;
+}
+
+alias AccelerationStructureCloneCommandFn = fn void (
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::CopyAccelerationStructureInfoKHR* info,
+);
+
+struct AccelerationStructureCloneCommandOps {
+    void*                               user_data;
+    AccelerationStructureCloneCommandFn clone;
+}
+
+fn bool acceleration_structure_clone_compatible(
+    AccelerationStructureSlot* source,
+    AccelerationStructureSlot* destination,
+) {
+    if (source.desc.kind != destination.desc.kind
+        || (uint)source.desc.flags != (uint)destination.desc.flags
+        || source.desc.max_instance_count
+            != destination.desc.max_instance_count
+        || source.desc.geometries.len != destination.desc.geometries.len
+        || destination.desc.requirements.storage_size
+            < source.desc.requirements.storage_size) return false;
+    foreach (i, &source_geometry : source.desc.geometries) {
+        gpu::internal::NormalizedAccelerationStructureGeometry*
+            destination_geometry = &destination.desc.geometries[i];
+        if (source_geometry.kind != destination_geometry.kind
+            || (uint)source_geometry.flags
+                != (uint)destination_geometry.flags
+            || source_geometry.max_vertex_count
+                != destination_geometry.max_vertex_count
+            || source_geometry.max_primitive_count
+                != destination_geometry.max_primitive_count
+            || source_geometry.index_type != destination_geometry.index_type
+            || source_geometry.has_transform
+                != destination_geometry.has_transform) return false;
+    }
+    return true;
+}
+
+fn void copy_completed_acceleration_structure_shape(
+    AccelerationStructureSlot* source,
+    AccelerationStructureSlot* destination,
+) {
+    destination.built_instance_count = source.built_instance_count;
+    foreach (i, &source_geometry : source.desc.geometries) {
+        gpu::internal::NormalizedAccelerationStructureGeometry*
+            destination_geometry = &destination.desc.geometries[i];
+        destination_geometry.built_vertex_count =
+            source_geometry.built_vertex_count;
+        destination_geometry.built_primitive_count =
+            source_geometry.built_primitive_count;
+        destination_geometry.built_with_transform =
+            source_geometry.built_with_transform;
+    }
+}
+
 fn void set_pending_acceleration_structure_builds(
     CommandRecord* record,
     gpu::internal::AccelerationStructureBuildEligibility state,
@@ -125,6 +187,17 @@ fn void complete_pending_acceleration_structure_builds(
     );
 }
 
+fn void link_pending_acceleration_structure(
+    CommandRecord* record,
+    gpu::AccelerationStructureHandle handle,
+    AccelerationStructureSlot* slot,
+) {
+    slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.PENDING;
+    slot.pending_next = record.pending_acceleration_structure_head;
+    record.pending_acceleration_structure_head = handle.index;
+}
+
 fn void? link_pending_acceleration_structure_build(
     CommandRecord* record,
     PreparedAccelerationStructureBuild* prepared,
@@ -153,11 +226,11 @@ fn void? link_pending_acceleration_structure_build(
             }
         }
     }
-    slot.build_eligibility =
-        gpu::internal::AccelerationStructureBuildEligibility.PENDING;
-    slot.pending_next = record.pending_acceleration_structure_head;
-    record.pending_acceleration_structure_head =
-        prepared.destination_handle.index;
+    link_pending_acceleration_structure(
+        record,
+        prepared.destination_handle,
+        slot,
+    );
 }
 
 fn void? track_acceleration_structure_build_references(
@@ -296,6 +369,117 @@ fn void? record_acceleration_structure_build_with_ops(
         desc,
     )!;
     emit_acceleration_structure_build(record, &prepared, ops);
+}
+
+fn PreparedAccelerationStructureClone?
+prepare_acceleration_structure_clone(
+    CommandRecord* record,
+    gpu::AccelerationStructureHandle source,
+    gpu::AccelerationStructureHandle destination,
+) {
+    if (record == null) return gpu::INVALID_ARGUMENT~;
+    if (record.state != gpu::internal::CommandState.RECORDING) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    if (!record.queue.roles.graphics && !record.queue.roles.compute) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    VkDeviceState* state = record.device_state;
+    if (state == null || !state.acceleration_structures_enabled) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (source.owner == destination.owner
+        && source.index == destination.index
+        && source.generation == destination.generation) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    AccelerationStructureSlot* source_slot =
+        state.acceleration_structures.get(source)!;
+    AccelerationStructureSlot* destination_slot =
+        state.acceleration_structures.get(destination)!;
+    if (source_slot.build_eligibility
+        != gpu::internal::AccelerationStructureBuildEligibility.BUILT) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (destination_slot.build_eligibility
+        != gpu::internal::AccelerationStructureBuildEligibility.UNBUILT) {
+        return gpu::RESOURCE_IN_USE~;
+    }
+    if (!acceleration_structure_clone_compatible(
+        source_slot,
+        destination_slot,
+    )) return gpu::INVALID_ARGUMENT~;
+    return {
+        .source             = source_slot,
+        .destination        = destination_slot,
+        .destination_handle = destination,
+    };
+}
+
+fn void acceleration_structure_clone_command_real(
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::CopyAccelerationStructureInfoKHR* info,
+) {
+    VkAccelerationStructureDispatch* dispatch =
+        (VkAccelerationStructureDispatch*)user_data;
+    dispatch.cmd_copy(command_buffer, info);
+}
+
+fn void emit_acceleration_structure_clone(
+    CommandRecord* record,
+    PreparedAccelerationStructureClone* prepared,
+    AccelerationStructureCloneCommandOps* ops,
+) {
+    vk::CopyAccelerationStructureInfoKHR info =
+        vk::copy_acceleration_structure_info_khr()
+            .set_src(prepared.source.native)
+            .set_dst(prepared.destination.native)
+            .set_mode(vk::CopyAccelerationStructureModeKHR.CLONE_KHR);
+    ops.clone(ops.user_data, record.command_buffer, &info);
+}
+
+fn void? record_acceleration_structure_clone_with_ops(
+    CommandRecord* record,
+    gpu::AccelerationStructureHandle source,
+    gpu::AccelerationStructureHandle destination,
+    bool track_references,
+    AccelerationStructureCloneCommandOps* ops,
+) {
+    PreparedAccelerationStructureClone prepared =
+        prepare_acceleration_structure_clone(
+            record,
+            source,
+            destination,
+        )!;
+    uint reference_checkpoint = record.scratch.reference_count;
+    defer catch rollback_command_references(record, reference_checkpoint);
+    if (track_references) {
+        track_command_reference(
+            state:      record.device_state,
+            record:     record,
+            owner:      source.owner,
+            index:      source.index,
+            generation: source.generation,
+        )!;
+        track_command_reference(
+            state:      record.device_state,
+            record:     record,
+            owner:      destination.owner,
+            index:      destination.index,
+            generation: destination.generation,
+        )!;
+    }
+    emit_acceleration_structure_clone(record, &prepared, ops);
+    copy_completed_acceleration_structure_shape(
+        prepared.source,
+        prepared.destination,
+    );
+    link_pending_acceleration_structure(
+        record,
+        prepared.destination_handle,
+        prepared.destination,
+    );
 }
 
 fn usz? acceleration_structure_strided_bytes(
@@ -1470,5 +1654,41 @@ fn void? full_update_acceleration_structure(
         true,
         true,
         &ops,
+    );
+}
+
+fn void? trusted_clone_acceleration_structure(
+    CommandRecord* record,
+    gpu::AccelerationStructureHandle source,
+    gpu::AccelerationStructureHandle destination,
+) {
+    AccelerationStructureCloneCommandOps ops = {
+        .user_data = record.device_state.acceleration_structure_operations,
+        .clone = &acceleration_structure_clone_command_real,
+    };
+    return record_acceleration_structure_clone_with_ops(
+        record:           record,
+        source:           source,
+        destination:      destination,
+        track_references: false,
+        ops:              &ops,
+    );
+}
+
+fn void? full_clone_acceleration_structure(
+    CommandRecord* record,
+    gpu::AccelerationStructureHandle source,
+    gpu::AccelerationStructureHandle destination,
+) {
+    AccelerationStructureCloneCommandOps ops = {
+        .user_data = record.device_state.acceleration_structure_operations,
+        .clone = &acceleration_structure_clone_command_real,
+    };
+    return record_acceleration_structure_clone_with_ops(
+        record:           record,
+        source:           source,
+        destination:      destination,
+        track_references: true,
+        ops:              &ops,
     );
 }
