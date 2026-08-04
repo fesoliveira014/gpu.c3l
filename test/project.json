@@ -105,6 +105,7 @@
         "src/offscreen_abi.c3",
         "src/test_vk_shader_reflection.c3",
         "src/test_vk_offscreen_triangle.c3",
+        "src/test_vk_ray_tracing_pipeline.c3",
         "src/test_vk_pipeline_cache.c3",
         "src/test_vk_pipeline_cache_io.c3",
         "src/test_vk_immediate_lifetime.c3",

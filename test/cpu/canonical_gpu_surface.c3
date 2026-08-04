@@ -429,6 +429,11 @@ fn void pin_shaders_and_pipelines() {
         .polygon_mode    = gpu::PolygonMode.FILL,
         .debug_name      = "graphics",
     };
+    gpu::ShaderDesc[1] ray_generation_shaders = { shader_desc };
+    gpu::RayTracingPipelineDesc ray_tracing_desc = {
+        .ray_generation_shaders = ray_generation_shaders[..],
+        .debug_name             = "ray tracing",
+    };
     gpu::ColorTargetState[1] color_targets;
     gpu::ColorTargetState color_target =
         gpu::color_blend_disabled();
@@ -439,6 +444,15 @@ fn void pin_shaders_and_pipelines() {
 
     (void)gpu::create_compute_pipeline(&device, &compute_desc);
     (void)gpu::create_graphics_pipeline(&device, &graphics_desc);
+    (void)gpu::create_ray_tracing_pipeline(&device, &ray_tracing_desc);
+    (void)gpu::get_ray_tracing_pipeline_info(&device, pipeline);
+    (void)gpu::get_ray_tracing_shader_group_handles(
+        &device,
+        pipeline,
+        0,
+        0,
+        {},
+    );
     color_target = gpu::alpha_blend();
     color_target = gpu::premultiplied_alpha_blend();
     color_target = gpu::additive_blend();

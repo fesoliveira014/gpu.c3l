@@ -27,6 +27,7 @@ struct PipelineSlot {
     vk::Pipeline                    pipeline;
     vk::PipelineLayout              layout;
     vk::IndirectCommandsLayoutEXT   generated_dispatch_layout;
+    gpu::RayTracingPipelineInfo     ray_tracing_info;
     uint                            entry;
     Atomic{uint}                    tracked_command_references;
 }

@@ -755,6 +755,39 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn gpu::PipelineHandle? vk_create_ray_tracing_pipeline(
+    VkDeviceState* state,
+    gpu::RayTracingPipelineDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::RayTracingPipelineInfo? vk_get_ray_tracing_pipeline_info(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+) {
+    (void)state;
+    (void)pipeline;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_get_ray_tracing_shader_group_handles(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+    uint first_group,
+    uint group_count,
+    char[] out,
+) {
+    (void)state;
+    (void)pipeline;
+    (void)first_group;
+    (void)group_count;
+    (void)out;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn void? vk_destroy_pipeline(
     VkDeviceState* state,
     gpu::PipelineHandle pipeline,
