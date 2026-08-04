@@ -248,11 +248,13 @@ fn void assert_texture_state_accepted(
     vk::TextureSlot* slot,
     vk::QueueFlags flags,
     bool before,
+    bool ray_tracing_pipelines = false,
 ) {
     vk::TextureBarrierRejection rejection = vk::texture_state_rejection(
         texture_state: texture_state,
         slot:          slot,
         flags:         flags,
+        ray_tracing_pipelines: ray_tracing_pipelines,
         before:        before,
     );
     assert(rejection.field == null, "texture state is accepted by the semantic matrix");
@@ -264,11 +266,13 @@ fn void assert_texture_state_rejected(
     vk::QueueFlags flags,
     bool before,
     ZString expected_field,
+    bool ray_tracing_pipelines = false,
 ) {
     vk::TextureBarrierRejection rejection = vk::texture_state_rejection(
         texture_state: texture_state,
         slot:          slot,
         flags:         flags,
+        ray_tracing_pipelines: ray_tracing_pipelines,
         before:        before,
     );
     assert(rejection.field != null,
@@ -327,6 +331,50 @@ fn void texture_shader_state_matrix_accepts_combinations_and_access_modes() @tes
         slot:          &slot,
         flags:         graphics_compute,
         before:        false,
+    );
+}
+
+fn void texture_ray_tracing_state_matrix_requires_opt_in_and_shader_queue() @test {
+    vk::TextureSlot slot = {
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled, .storage },
+    };
+    vk::QueueFlags compute =
+        (vk::QueueFlags)(uint)vk::QueueFlagBits.COMPUTE_BIT;
+    assert_texture_state_accepted(
+        texture_state: gpu::sampled_at({ .ray_tracing }),
+        slot:          &slot,
+        flags:         compute,
+        before:        false,
+        ray_tracing_pipelines: true,
+    );
+    assert_texture_state_accepted(
+        texture_state: gpu::storage_at(
+            { .ray_tracing },
+            { .read, .write },
+        ),
+        slot:          &slot,
+        flags:         compute,
+        before:        false,
+        ray_tracing_pipelines: true,
+    );
+    assert_texture_state_rejected(
+        texture_state: gpu::sampled_at({ .ray_tracing }),
+        slot:          &slot,
+        flags:         compute,
+        before:        false,
+        expected_field: "TextureBarrier.after.stages",
+    );
+    assert_texture_state_rejected(
+        texture_state: gpu::storage_at(
+            { .ray_tracing },
+            { .read, .write },
+        ),
+        slot:          &slot,
+        flags:         (vk::QueueFlags)(uint)vk::QueueFlagBits.TRANSFER_BIT,
+        before:        false,
+        expected_field: "TextureBarrier.after.stages",
+        ray_tracing_pipelines: true,
     );
 }
 
