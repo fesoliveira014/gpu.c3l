@@ -1318,8 +1318,7 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     after_expected |=
-        (ulong)vk::AccessFlagBits2.ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
-        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR;
+        (ulong)vk::AccessFlagBits2.ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
     assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages)
             == after_expected,
         "consumer stages map to required access scopes");

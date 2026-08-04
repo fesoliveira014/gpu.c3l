@@ -474,8 +474,27 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         desc:   &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::TextureDesc texture_desc = {
+        .width      = 1,
+        .height     = 1,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .storage },
+        .access     = access,
+        .debug_name = "trace_functional_texture_state",
+    };
+    gpu::TextureHandle texture = gpu::create_texture(
+        &device,
+        &texture_desc,
+    )!!;
+    defer gpu::destroy_texture(&device, texture)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
+    gpu::TextureBarrier texture_to_storage = gpu::texture_transition(
+        texture: texture,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   gpu::storage_at({ .ray_tracing }, { .read, .write }),
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &texture_to_storage)!!;
     gpu::AccelerationStructureGeometryBuildDesc[1] aabb_inputs = {{
         .kind = gpu::AccelerationStructureGeometryKind.AABBS,
         .aabbs = {
@@ -530,6 +549,12 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         shader_binding_table: &table,
         dimensions: { TRACE_FUNCTIONAL_RAY_COUNT, 1, 1 },
     )!!;
+    gpu::TextureBarrier texture_to_sampled = gpu::texture_transition(
+        texture: texture,
+        before:  texture_to_storage.after,
+        after:   gpu::sampled_at({ .ray_tracing }),
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &texture_to_sampled)!!;
     gpu::Barrier trace_to_host = {
         .before = { .ray_tracing },
         .after  = { .host },

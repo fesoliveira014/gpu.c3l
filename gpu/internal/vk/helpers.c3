@@ -426,9 +426,7 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
         mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT
             | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
             | (ulong)vk::AccessFlagBits2
-                .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
-            | (ulong)vk::AccessFlagBits2
-                .ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR;
+                .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
     }
     return (vk::AccessFlags2)mask;
 }
