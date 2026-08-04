@@ -8,7 +8,8 @@ fn bool queue_requests_equal(
     gpu::QueueRequest second,
 ) {
     return (uint)first.required == (uint)second.required
-        && (uint)first.distinct == (uint)second.distinct;
+        && (uint)first.distinct == (uint)second.distinct
+        && first.single_queue == second.single_queue;
 }
 
 fn bool device_desc_equal(gpu::DeviceDesc first, gpu::DeviceDesc second) {
@@ -31,6 +32,8 @@ fn void null_and_zero_device_desc_use_default_queues() @test {
     assert(null_normalized.queues.required.compute);
     assert(null_normalized.queues.required.transfer);
     assert((uint)null_normalized.queues.distinct == 0);
+    assert(!null_normalized.queues.single_queue);
+    assert(!zero_normalized.queues.single_queue);
     assert(queue_requests_equal(
         zero_normalized.queues,
         null_normalized.queues,
@@ -54,6 +57,7 @@ fn void normalization_preserves_explicit_desc_without_mutation() @test {
         .queues = {
             .required = { .graphics, .compute },
             .distinct = { .compute },
+            .single_queue = false,
         },
         .enable_sparse_textures = true,
         .enable_ray_queries = true,
@@ -103,4 +107,24 @@ fn void normalization_rejects_invalid_queue_descriptions() @test {
     assert(@catch(gpu::internal::normalize_device_desc(
         &presentation_without_graphics,
     )) == gpu::INVALID_ARGUMENT);
+}
+
+fn void normalization_rejects_single_queue_without_required_or_with_distinct() @test {
+    gpu::DeviceDesc empty_required = {
+        .queues = {
+            .single_queue = true,
+        },
+    };
+    gpu::DeviceDesc distinct_role = {
+        .queues = {
+            .required = { .graphics, .compute, .transfer },
+            .distinct = { .transfer },
+            .single_queue = true,
+        },
+    };
+
+    assert(@catch(gpu::internal::normalize_device_desc(&empty_required))
+        == gpu::INVALID_ARGUMENT);
+    assert(@catch(gpu::internal::normalize_device_desc(&distinct_role))
+        == gpu::INVALID_ARGUMENT);
 }

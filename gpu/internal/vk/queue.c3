@@ -266,12 +266,15 @@ fn bool selection_satisfies_request(
             || (request.required.compute && compute_transfer_alias(selection)));
     return !(request.distinct.graphics && graphics_alias)
         && !(request.distinct.compute && compute_alias)
-        && !(request.distinct.transfer && transfer_alias);
+        && !(request.distinct.transfer && transfer_alias)
+        && (!request.single_queue
+            || selected_native_identity_count(selection) == 1);
 }
 
 fn bool assign_presentation_queue(
     QueueFamilies* selection,
     bool[] presentation_support,
+    bool selected_only = false,
 ) @private {
     if (selection.selected.graphics
         && presentation_support[selection.graphics]) {
@@ -294,6 +297,7 @@ fn bool assign_presentation_queue(
         selection.presentation = true;
         return true;
     }
+    if (selected_only) return false;
     foreach (family, supported : presentation_support) {
         if (!supported) continue;
         selection.present = (uint)family;
@@ -558,6 +562,7 @@ fn QueueFamilies? pick_queue_families_impl(
                                 && !assign_presentation_queue(
                                     &candidate,
                                     presentation_support,
+                                    request.single_queue,
                                 )) {
                                 continue;
                             }

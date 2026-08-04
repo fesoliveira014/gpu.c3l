@@ -1525,10 +1525,13 @@ struct QueueInfo {
 }
 
 <* Semantic queues required at device creation. A marked distinct role must be
-   required and may not alias another required role. *>
+   required and may not alias another required role. When `single_queue` is
+   true, every required role and presentation must use one exact native queue
+   identity; `distinct` must be empty. *>
 struct QueueRequest {
     QueueRoles required;
     QueueRoles distinct;
+    bool       single_queue;
 }
 
 <* Plain semantic requirements for device creation. A zero value selects the

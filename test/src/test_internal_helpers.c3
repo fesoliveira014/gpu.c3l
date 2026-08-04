@@ -340,6 +340,54 @@ fn void queue_selection_rejects_distinct_role_aliases() @test {
     );
 }
 
+fn void queue_selection_accepts_single_queue_alias() @test {
+    QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .single_queue = true,
+    };
+    gpu::internal::QueueSelection selection =
+        gpu::internal::queue_selection_from_native_ids(
+            request:  request,
+            graphics: 10,
+            compute:  10,
+            transfer: 10,
+        )!!;
+
+    assert(selection.single_queue, "canonical selection retains the request policy");
+    assert(selection.identity_count == 1, "all roles use one native identity");
+    assert(
+        gpu::internal::queue_selection_id(&selection, QueueKind.GRAPHICS)
+            == gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE)
+        && gpu::internal::queue_selection_id(&selection, QueueKind.COMPUTE)
+            == gpu::internal::queue_selection_id(&selection, QueueKind.TRANSFER),
+        "all required roles alias one queue identity"
+    );
+    assert(
+        (uint)gpu::internal::queue_selection_roles(
+            &selection,
+            QueueKind.GRAPHICS,
+        ) == (uint)(QueueRoles){ .graphics, .compute, .transfer },
+        "the aliased identity reports every requested role"
+    );
+}
+
+fn void queue_selection_rejects_single_queue_split_native_ids() @test {
+    QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .single_queue = true,
+    };
+
+    assert(
+        @catch(gpu::internal::queue_selection_from_native_ids(
+            request:  request,
+            graphics: 10,
+            compute:  20,
+            transfer: 30,
+        )) == UNSUPPORTED_FEATURE,
+        "split native identities are unavailable for single-queue selection"
+    );
+}
+
 fn void queue_selection_ignores_aliases_to_absent_roles() @test {
     QueueRequest request = {
         .required = { .compute, .transfer },

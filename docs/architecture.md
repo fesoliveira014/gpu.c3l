@@ -86,9 +86,21 @@ objects. A presentation device and swapchain use the exact surface supplied in
 the device description. Keep native windowing objects alive until the surface
 is destroyed.
 
-Queue roles may alias one native queue. A distinct compute queue is exposed
-only when supported. The API reports semantic queue capabilities and requires
-the caller to express every cross-queue dependency.
+Queue roles may alias one native queue. `QueueRequest.single_queue` opts into
+one exact native family-and-queue-index identity for every required role. With
+a presentation surface, that identity must also be the selected graphics
+queue's presentation identity; the private presentation fallback remains
+available only when `single_queue` is `false`. A valid policy with no matching
+topology is unsupported, while a contradictory policy is invalid.
+
+The private Vulkan backend keeps the request policy through the same canonical
+selection used by support preflight and authoritative creation. Alias checks
+compare both family and queue index, because family-level presentation support
+does not make two different native queues equal. When `single_queue` is false,
+the existing required/distinct validation, default normalization, and
+preference order—including asynchronous-compute and transfer preferences—
+remain unchanged. The API reports semantic queue capabilities and requires the
+caller to express every cross-queue dependency.
 
 ## Memory and resources
 

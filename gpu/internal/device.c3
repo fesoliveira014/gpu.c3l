@@ -401,6 +401,7 @@ fn Device? register_device(
     }
     caps.presentation_enabled = registered_surface.is_valid();
     if ((uint)queues.selected == 0) {
+        if (queues.single_queue) return gpu::INVALID_ARGUMENT~;
         queues = default_queue_selection(&caps);
     }
     if (!queue_selection_is_well_formed(&queues)) return gpu::INVALID_ARGUMENT~;

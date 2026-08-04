@@ -53,6 +53,69 @@ fn void default_selection_prefers_dedicated_compute_and_transfer() @test {
         "transfer prefers the dedicated transfer family");
     assert(picked.async_compute,
         "the default selection preserves asynchronous compute");
+
+    gpu::QueueRequest explicit_false_request = {
+        .required = { .graphics, .compute, .transfer },
+        .single_queue = false,
+    };
+    vk::QueueFamilies explicit_false =
+        vk::pick_queue_families_for_request(table[..], explicit_false_request)!!;
+    assert(
+        explicit_false.graphics == picked.graphics
+            && explicit_false.graphics_index == picked.graphics_index
+            && explicit_false.compute == picked.compute
+            && explicit_false.compute_index == picked.compute_index
+            && explicit_false.transfer == picked.transfer
+            && explicit_false.transfer_index == picked.transfer_index
+            && explicit_false.async_compute == picked.async_compute,
+        "explicitly disabling single-queue selection preserves default ranking"
+    );
+}
+
+fn void single_queue_selection_uses_one_exact_queue_index() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 3),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .single_queue = true,
+    };
+
+    vk::QueueFamilies picked =
+        vk::pick_queue_families_for_request(table[..], request)!!;
+
+    assert(
+        picked.graphics == 0
+            && picked.compute == 0
+            && picked.transfer == 0,
+        "single-queue selection keeps every role in one family"
+    );
+    assert(
+        picked.graphics_index == 0
+            && picked.compute_index == 0
+            && picked.transfer_index == 0,
+        "single-queue selection keeps every role on one exact queue index"
+    );
+    assert(!picked.async_compute,
+        "one exact queue identity does not report asynchronous compute");
+}
+
+fn void single_queue_selection_rejects_split_only_topology() @test {
+    vk::QueueFamilyProperties[3] table = {
+        family(QF_G, 1),
+        family(QF_C, 1),
+        family(QF_T, 1),
+    };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .single_queue = true,
+    };
+
+    fault result =
+        @catch(vk::pick_queue_families_for_request(table[..], request));
+
+    assert(result == gpu::UNSUPPORTED_FEATURE,
+        "split-only queue families cannot satisfy a single identity");
 }
 
 fn void no_graphics_family_faults_for_default_request() @test {
@@ -414,6 +477,58 @@ fn void presentation_can_use_a_private_queue_family() @test {
     assert(picked.graphics == 0 && picked.compute == 0);
     assert(picked.transfer == 0);
     assert(picked.present == 1 && picked.presentation);
+}
+
+fn void single_queue_presentation_uses_the_selected_identity() @test {
+    vk::QueueFamilyProperties[1] table = {
+        family(QF_G | QF_C | QF_T, 2),
+    };
+    bool[1] presentation_support = { true };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .single_queue = true,
+    };
+
+    vk::QueueFamilies picked = vk::pick_queue_families_for_surface_request(
+        table[..],
+        presentation_support[..],
+        request,
+    )!!;
+
+    assert(
+        picked.graphics == picked.compute
+            && picked.compute == picked.transfer
+            && picked.transfer == picked.present,
+        "single-queue presentation stays in the selected family"
+    );
+    assert(
+        picked.graphics_index == picked.compute_index
+            && picked.compute_index == picked.transfer_index
+            && picked.transfer_index == picked.present_index,
+        "single-queue presentation stays on the selected exact queue"
+    );
+    assert(picked.presentation, "the selected queue provides presentation");
+}
+
+fn void single_queue_presentation_rejects_private_fallback() @test {
+    vk::QueueFamilyProperties[2] table = {
+        family(QF_G | QF_C | QF_T, 1),
+        family(0, 1),
+    };
+    bool[2] presentation_support = { false, true };
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .single_queue = true,
+    };
+
+    fault result = @catch(vk::pick_queue_families_for_surface_request(
+        table[..],
+        presentation_support[..],
+        request,
+    ));
+
+    assert(result == gpu::UNSUPPORTED_FEATURE,
+        "single-queue presentation does not add a private queue");
 }
 
 fn void presentation_support_must_cover_every_queue_family() @test {

@@ -18,6 +18,7 @@ $assert(MAX_SELECTED_QUEUE_IDENTITIES <= 1 << COMPLETION_QUEUE_BITS);
 struct QueueSelection @private {
     QueueRoles selected;
     QueueRoles distinct;
+    bool single_queue;
     uint identity_count;
     ushort graphics_id;
     ushort compute_id;
@@ -158,8 +159,9 @@ fn QueueSelection? queue_selection_from_native_ids(
     }
 
     QueueSelection selection = {
-        .selected = request.required,
-        .distinct = request.distinct,
+        .selected     = request.required,
+        .distinct     = request.distinct,
+        .single_queue = request.single_queue,
     };
     ulong[MAX_SELECTED_QUEUE_IDENTITIES] identity_keys;
     if (request.required.graphics) {
@@ -192,6 +194,9 @@ fn QueueSelection? queue_selection_from_native_ids(
         if (queue_roles_violate_distinct(roles, request.distinct)) {
             return gpu::UNSUPPORTED_FEATURE~;
         }
+    }
+    if (request.single_queue && selection.identity_count != 1) {
+        return gpu::UNSUPPORTED_FEATURE~;
     }
     return selection;
 }
@@ -262,12 +267,14 @@ fn QueueSelection default_queue_selection(DeviceCaps* caps = null) @private {
 fn bool queue_selection_is_well_formed(QueueSelection* selection) @private {
     if (selection == null) return false;
     QueueRequest request = {
-        .required = selection.selected,
-        .distinct = selection.distinct,
+        .required     = selection.selected,
+        .distinct     = selection.distinct,
+        .single_queue = selection.single_queue,
     };
     if (!gpu::internal::queue_request_is_valid(request)
         || selection.identity_count == 0
-        || selection.identity_count > MAX_SELECTED_QUEUE_IDENTITIES) {
+        || selection.identity_count > MAX_SELECTED_QUEUE_IDENTITIES
+        || (selection.single_queue && selection.identity_count != 1)) {
         return false;
     }
 
