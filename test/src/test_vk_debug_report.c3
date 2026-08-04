@@ -78,6 +78,8 @@ struct LeakCapture {
     uint shaders;
     uint command_allocators;
     uint timestamp_pools;
+    uint acceleration_structures;
+    uint acceleration_structure_views;
 
     uint texture_descriptors;
     uint samplers;
@@ -85,7 +87,15 @@ struct LeakCapture {
     bool metadata_valid;
     gpu::PipelineHandle expected_pipeline_a;
     gpu::PipelineHandle expected_pipeline_b;
+    gpu::AccelerationStructureHandle expected_acceleration_structure_a;
+    gpu::AccelerationStructureHandle expected_acceleration_structure_b;
+    uint expected_acceleration_structure_view_index;
+    uint expected_acceleration_structure_view_generation;
     bool pipeline_identity_valid;
+    bool acceleration_structure_identity_valid;
+    bool acceleration_structure_a_seen;
+    bool acceleration_structure_b_seen;
+    bool acceleration_structure_view_identity_valid;
     bool private_span_identity_hidden;
     bool private_span_wording_valid;
     bool named_resources_valid;
@@ -148,6 +158,41 @@ fn void capture_leak_message(gpu::DebugMessage* message, void* user_data) {
             capture.named_resources_valid = capture.named_resources_valid
                 && message.resource.debug_name != null
                 && message.resource.debug_name.str_view() == "leaky_timestamp_pool";
+        case gpu::DebugResourceKind.ACCELERATION_STRUCTURE:
+            capture.acceleration_structures++;
+            bool first_acceleration_structure =
+                message.resource.index
+                    == capture.expected_acceleration_structure_a.index
+                && message.resource.generation
+                    == capture.expected_acceleration_structure_a.generation;
+            bool second_acceleration_structure =
+                message.resource.index
+                    == capture.expected_acceleration_structure_b.index
+                && message.resource.generation
+                    == capture.expected_acceleration_structure_b.generation;
+            capture.acceleration_structure_a_seen =
+                capture.acceleration_structure_a_seen
+                || first_acceleration_structure;
+            capture.acceleration_structure_b_seen =
+                capture.acceleration_structure_b_seen
+                || second_acceleration_structure;
+            capture.acceleration_structure_identity_valid =
+                capture.acceleration_structure_identity_valid
+                && message.resource.has_public_identity
+                && (first_acceleration_structure
+                    || second_acceleration_structure);
+            capture.named_resources_valid = capture.named_resources_valid
+                && message.resource.debug_name != null
+                && message.resource.debug_name.str_view()
+                    == "leaky_acceleration_structure";
+        case gpu::DebugResourceKind.ACCELERATION_STRUCTURE_VIEW:
+            capture.acceleration_structure_views++;
+            capture.acceleration_structure_view_identity_valid =
+                message.resource.has_public_identity
+                && message.resource.index
+                    == capture.expected_acceleration_structure_view_index
+                && message.resource.generation
+                    == capture.expected_acceleration_structure_view_generation;
 
         case gpu::DebugResourceKind.TEXTURE_DESCRIPTOR: capture.texture_descriptors++;
         case gpu::DebugResourceKind.SAMPLER:            capture.samplers++;
@@ -306,7 +351,33 @@ fn void vulkan_debug_message_routes_structured_fields() @test {
     assert(capture.last.resource.kind == gpu::DebugResourceKind.DEVICE, "Vulkan device maps to public device resource kind");
     assert(capture.device_name_matches, "callback observes the borrowed device name while valid");
     assert(!capture.last.resource.has_public_identity, "native device handle does not become a public identity");
+    object.object_type = vk::ObjectType.ACCELERATION_STRUCTURE_KHR;
+    object.object_handle = 0x9abc;
+    object.p_object_name = (char*)"named_acceleration_structure";
+    data.p_message_id_name = (char*)"VUID-AccelerationStructure-Test";
+    data.message_id_number = 1618;
+    vk::route_debug_message(
+        state:        &state,
+        severity:     (vk::DebugUtilsMessageSeverityFlagsEXT)severity,
+        message_type: (vk::DebugUtilsMessageTypeFlagsEXT)types,
+        data:         &data,
+    );
+    assert(capture.calls == 3,
+        "fabricated acceleration-structure message is routed");
+    assert(capture.last.resource.kind
+            == gpu::DebugResourceKind.ACCELERATION_STRUCTURE,
+        "native Vulkan acceleration structure maps to its semantic kind");
+    assert(capture.last.resource.debug_name != null
+            && capture.last.resource.debug_name.str_view()
+                == "named_acceleration_structure",
+        "callback observes the borrowed acceleration-structure name");
+    assert(!capture.last.resource.has_public_identity,
+        "native acceleration-structure handle does not become a public identity");
+    assert(capture.last.resource.index == 0
+            && capture.last.resource.generation == 0,
+        "native acceleration-structure identity remains hidden");
 }
+
 
 fn void vulkan_debug_message_prefers_named_resource_and_falls_back_to_kind() @test {
     DebugCapture capture;
@@ -659,6 +730,115 @@ fn void leak_reporters_count_leaks() @test {
     assert(vk::report_resource_leaks(state) == 0, "clean state reports zero leaks");
     assert(capture.total == 7, "clean leak report emits nothing");
     destroy_test_device(&device)!!;
+}
+
+fn void acceleration_structure_leaks_route_semantic_diagnostics() @test {
+    vk::VkDeviceState state;
+    state.acceleration_structures.slots =
+        mem::new_array(vk::AccelerationStructureCell, 3);
+    defer mem::free(state.acceleration_structures.slots.ptr);
+    state.acceleration_structures.next_new = 3;
+
+    vk::AccelerationStructureCell* first =
+        &state.acceleration_structures.slots[0];
+    first.used = true;
+    first.generation = 17;
+    vk::copy_debug_name(
+        &first.value.debug_name[0],
+        "leaky_acceleration_structure",
+    );
+    vk::AccelerationStructureCell* second =
+        &state.acceleration_structures.slots[2];
+    second.used = true;
+    second.generation = 23;
+    vk::copy_debug_name(
+        &second.value.debug_name[0],
+        "leaky_acceleration_structure",
+    );
+
+    vk::DescriptorHeapState* heap = &state.shader_heap.descriptors;
+    heap.acceleration_structure_cells =
+        mem::new_array(vk::AccelerationStructureDescriptorCell, 1);
+    defer mem::free(heap.acceleration_structure_cells.ptr);
+    heap.acceleration_structure_next_new = 1;
+    vk::AccelerationStructureDescriptorCell* view =
+        &heap.acceleration_structure_cells[0];
+    view.used = true;
+    view.generation = 31;
+    view.owner = { .index = 2, .generation = 23 };
+
+    LeakCapture capture = {
+        .metadata_valid        = true,
+        .named_resources_valid = true,
+        .expected_acceleration_structure_a = {
+            .index      = 0,
+            .generation = 17,
+        },
+        .expected_acceleration_structure_b = {
+            .index      = 2,
+            .generation = 23,
+        },
+        .expected_acceleration_structure_view_index = 0,
+        .expected_acceleration_structure_view_generation = 31,
+        .acceleration_structure_identity_valid = true,
+    };
+    state.debug_callback = &capture_leak_message;
+    state.debug_user_data = &capture;
+
+    assert(vk::report_resource_leaks(&state) == 2,
+        "every live acceleration-structure owner is counted across gaps");
+    vk::report_descriptor_leaks(&state);
+    assert(capture.total == 3
+            && capture.acceleration_structures == 2
+            && capture.acceleration_structure_views == 1,
+        "owners and the descriptor view each emit one semantic warning");
+    assert(capture.public_identities == 3,
+        "owner and view leaks carry their public slot identities");
+    assert(capture.acceleration_structure_identity_valid
+            && capture.acceleration_structure_a_seen
+            && capture.acceleration_structure_b_seen
+            && capture.acceleration_structure_view_identity_valid,
+        "owner and view diagnostics preserve their exact slot identities");
+    assert(capture.metadata_valid && capture.named_resources_valid,
+        "acceleration-structure leaks preserve standard metadata and names");
+}
+
+fn void full_validation_teardown_reports_live_acceleration_structure() @test {
+    gpu::Runtime runtime;
+    gpu::Device device = create_ray_query_test_device(&runtime)!!;
+    gpu::AccelerationStructureDesc desc = {
+        .kind               = gpu::AccelerationStructureKind.TOP_LEVEL,
+        .max_instance_count = 1,
+        .debug_name         = "leaky_acceleration_structure",
+    };
+    gpu::AccelerationStructureHandle acceleration_structure =
+        gpu::create_acceleration_structure(&device, &desc)!!;
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    LeakCapture capture = {
+        .metadata_valid        = true,
+        .named_resources_valid = true,
+        .expected_acceleration_structure_a = acceleration_structure,
+        .acceleration_structure_identity_valid = true,
+    };
+    state.debug_callback = &capture_leak_message;
+    state.debug_user_data = &capture;
+
+    gpu::internal::mark_device_lost(&device);
+    destroy_test_device(&device)!!;
+    runtime = {};
+
+    assert(!device.is_valid(),
+        "device-loss teardown consumes the device with a live structure");
+    assert(capture.total == 1
+            && capture.acceleration_structures == 1
+            && capture.acceleration_structure_a_seen,
+        "FULL teardown routes the live acceleration-structure owner once");
+    assert(capture.acceleration_structure_identity_valid
+            && capture.public_identities == 1,
+        "FULL teardown preserves the exact live owner identity");
+    assert(capture.metadata_valid && capture.named_resources_valid,
+        "FULL teardown preserves standard leak metadata and name");
 }
 
 fn void debug_name_copy_is_independent() @test {

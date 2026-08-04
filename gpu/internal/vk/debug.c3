@@ -60,6 +60,8 @@ fn gpu::DebugResourceKind debug_resource_kind(vk::ObjectType object_type) {
         case vk::ObjectType.COMMAND_BUFFER: return gpu::DebugResourceKind.COMMAND_LIST;
         case vk::ObjectType.SAMPLER:        return gpu::DebugResourceKind.SAMPLER;
         case vk::ObjectType.QUERY_POOL:     return gpu::DebugResourceKind.TIMESTAMP_POOL;
+        case vk::ObjectType.ACCELERATION_STRUCTURE_KHR:
+            return gpu::DebugResourceKind.ACCELERATION_STRUCTURE;
         default:                            return gpu::DebugResourceKind.NONE;
     }
 }
@@ -286,6 +288,35 @@ fn uint report_attachment_view_leaks(VkDeviceState* state) {
     return count;
 }
 
+fn uint report_acceleration_structure_leaks(VkDeviceState* state) {
+    uint count;
+    if (state.acceleration_structures.slots.ptr == null) return 0;
+    foreach (i, &cell : state.acceleration_structures.slots[
+        :state.acceleration_structures.next_new
+    ]) {
+        if (!cell.used) continue;
+        ZString name = slot_name(&cell.value.debug_name[0]);
+        if (!report_resource_lifetime(
+            state:               state,
+            resource_kind:       gpu::DebugResourceKind.ACCELERATION_STRUCTURE,
+            has_public_identity: true,
+            index:               (uint)i,
+            generation:          cell.generation,
+            debug_name:          name,
+            backend_text:        "acceleration structure remains live",
+        )) {
+            io::eprintfn(
+                "gpu: leaked acceleration structure '%s' (index %d, generation %d)",
+                name,
+                i,
+                cell.generation,
+            );
+        }
+        count++;
+    }
+    return count;
+}
+
 fn uint report_pipeline_leaks(VkDeviceState* state) {
     uint count = 0;
     if (state.pipeline_cache.entries.ptr == null) return 0;
@@ -384,6 +415,7 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     count += report_attachment_view_leaks(state);
     count += report_pipeline_leaks(state);
     count += report_command_allocator_leaks(state);
+    count += report_acceleration_structure_leaks(state);
     count += report_timestamp_pool_leaks(state);
     return count;
 }
