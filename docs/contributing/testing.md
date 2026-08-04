@@ -192,6 +192,7 @@ smoke link/run
 vk_core
 vk_wsi
 vk_optional_generated_work
+vk_ray_tracing
 ```
 
 Linux also uploads `c3c docgen` output as an unparsed whole-compile reference.
