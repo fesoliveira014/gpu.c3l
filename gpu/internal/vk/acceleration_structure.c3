@@ -1189,6 +1189,7 @@ fn gpu::AccelerationStructureHandle? vk_create_acceleration_structure(
         if (owns_backing) (void)destroy_buffer_for_state(state, backing);
     }
     BufferSlot* buffer = state.buffers.get(backing)!;
+    buffer.internal = true;
     AccelerationStructureNativeOps ops =
         acceleration_structure_native_ops(state);
     state.resource_mutex.lock()!!;
