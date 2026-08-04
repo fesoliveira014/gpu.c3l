@@ -2109,6 +2109,27 @@ fn void? cmd_update_acceleration_structure(
     return record.ops.update_acceleration_structure(record, desc);
 }
 
+<* Record one device clone from a completed acceleration structure into a
+   distinct, matching unbuilt destination. The command inserts no barrier.
+
+   @param commands : "Live recording token outside a render pass."
+   @param source : "Completed source kept live through clone completion."
+   @param destination : "Matching unbuilt destination kept live through completion."
+   @return "Success, or a recoverable command, validation, ownership, capacity, support, or device fault." *>
+fn void? cmd_clone_acceleration_structure(
+    CommandList* commands,
+    AccelerationStructureHandle source,
+    AccelerationStructureHandle destination,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    return record.ops.clone_acceleration_structure(
+        record,
+        source,
+        destination,
+    );
+}
+
 <* Bind the active compute or graphics pipeline for later commands.
    Preconditions: the pipeline is live and valid for later use on this queue.
    Always checked: token phase, pipeline identity, ownership, descriptor-heap

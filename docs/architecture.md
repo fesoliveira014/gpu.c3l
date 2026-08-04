@@ -136,10 +136,14 @@ Neither index is an ownership token.
 Acceleration structures use the same explicit storage model. A BLAS owns
 triangle or AABB capacity metadata; a TLAS owns instance capacity. Hidden
 creation owns its backing internally, while placed and dedicated forms expose
-allocation ownership. Build inputs and scratch are caller-owned spans.
+allocation ownership. Build inputs and scratch are caller-owned spans. Device
+clone copies a completed structure into a distinct caller-created matching
+destination without hidden storage or scratch.
 `AccelerationStructureView` owns a recyclable descriptor slot and exposes a
 raw `AccelerationStructureIndex`; packed TLAS instances contain an ordinary
-BLAS `GpuAddress`. Neither raw value retains its owner.
+BLAS `GpuAddress`. Neither raw value retains its owner. A cloned BLAS has a new
+address, while existing instance bytes keep the source address; a cloned TLAS
+needs its own view.
 
 ## Shaders and pipelines
 
@@ -187,8 +191,11 @@ generated preprocess storage explicitly while quiescent.
 
 Acceleration-structure builds reserve fixed geometry/range lowering arrays in
 each command unit. Full builds and in-place updates use caller-owned scratch,
-record no hidden barriers, and complete through the ordinary submission and
-retirement lifecycle. A completed full build establishes update eligibility.
+while clone uses no scratch. All record no hidden barriers and complete through
+the ordinary submission and retirement lifecycle. A completed full build or
+clone establishes update eligibility from its completed shape. Full validation
+retains exactly the clone source and destination; trusted recording performs no
+reference work.
 
 ## Synchronization and texture state
 
@@ -201,10 +208,10 @@ Cross-queue ordering is expressed with completion waits and destination
 stages. Queue submission itself is externally synchronized per selected native
 queue; aliased semantic roles therefore share that boundary.
 
-The acceleration-structure-build stage orders BLAS/TLAS build and update
-reads/writes. Shader query access belongs to the calling compute, vertex, or
-fragment stage. Applications insert build-to-build, build/update-to-query, and
-cross-submit dependencies explicitly.
+The acceleration-structure-build stage orders BLAS/TLAS build, update, and
+clone reads/writes. Shader query access belongs to the calling compute, vertex,
+fragment, or ray-tracing stage. Applications insert construction-to-
+construction, construction-to-query, and cross-submit dependencies explicitly.
 
 Host mapping operations do not imply GPU completion. The application orders a
 flush before submission, waits for completion before invalidation/readback,

@@ -23,7 +23,8 @@ application must design around.
   and leak reporting.
 - Shader ABI schemas that generate matching C3 and GLSL std430 declarations.
 - Explicitly opted-in compute/graphics ray queries with triangle and procedural
-  AABB BLAS values, TLAS instances, in-place updates, and a bindless TLAS heap.
+  AABB BLAS values, TLAS instances, in-place updates, singular device clones,
+  and a bindless TLAS heap.
 - Independently opted-in direct KHR ray-tracing pipelines with all six shader
   roles, triangle/procedural hit groups, caller-owned SBTs, and direct traces.
 
@@ -42,9 +43,10 @@ application must design around.
   submodules.
 - No ray-tracing pipeline libraries/linking, capture replay, deferred creation,
   dynamic stack sizing, or indirect trace commands.
-- No acceleration-structure compaction, copy/clone, serialization, indirect
-  builds, host builds, or updates into a distinct destination. Builds and
-  in-place updates are device commands using caller-owned scratch.
+- No acceleration-structure compaction, serialization/deserialization,
+  indirect builds, host builds/copies, updates into a distinct destination,
+  handle-preserving relocation, or automatic address/view repair. Singular
+  device clone into a distinct matching destination is the only copy form.
 
 ## Required capability profile
 

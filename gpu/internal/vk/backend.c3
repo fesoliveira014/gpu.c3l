@@ -75,6 +75,7 @@ struct VkAccelerationStructureDispatch {
     vk::PFN_vkDestroyAccelerationStructureKHR          destroy_acceleration_structure;
     vk::PFN_vkGetAccelerationStructureBuildSizesKHR    get_build_sizes;
     vk::PFN_vkCmdBuildAccelerationStructuresKHR        cmd_build;
+    vk::PFN_vkCmdCopyAccelerationStructureKHR          cmd_copy;
     vk::PFN_vkGetAccelerationStructureDeviceAddressKHR get_device_address;
 }
 
@@ -242,6 +243,11 @@ fn VkDeviceDispatch load_vk_device_dispatch(
                     device,
                     "vkCmdBuildAccelerationStructuresKHR",
                 ),
+            .cmd_copy =
+                (vk::PFN_vkCmdCopyAccelerationStructureKHR)loader(
+                    device,
+                    "vkCmdCopyAccelerationStructureKHR",
+                ),
             .get_device_address =
                 (vk::PFN_vkGetAccelerationStructureDeviceAddressKHR)loader(
                     device,
@@ -321,6 +327,7 @@ fn bool device_dispatch_supports_acceleration_structures(VkDeviceDispatch* dispa
         && dispatch.acceleration_structures.destroy_acceleration_structure != null
         && dispatch.acceleration_structures.get_build_sizes != null
         && dispatch.acceleration_structures.cmd_build != null
+        && dispatch.acceleration_structures.cmd_copy != null
         && dispatch.acceleration_structures.get_device_address != null;
 }
 

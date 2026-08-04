@@ -72,7 +72,7 @@ queue support, bounds, usage, alignment, and state according to the contract
 policy. Transfers do not insert texture transitions or host visibility
 operations.
 
-## Acceleration-structure builds and updates
+## Acceleration-structure builds, updates, and clones
 
 `cmd_build_acceleration_structure` records one full BLAS or TLAS build outside
 a render pass. A BLAS supplies an ordered
@@ -81,19 +81,26 @@ schema. A TLAS instead supplies an instance span and count. Both supply
 caller-owned build scratch satisfying the queried size and alignment.
 
 `cmd_update_acceleration_structure` updates the destination in place. It is
-valid only after a prior full build has completed, when the structure was
-created with `allow_update`, and with the same per-geometry primitive counts,
-triangle vertex counts and transform presence, or TLAS instance count, as that
-completed build. It uses the queried update scratch; there is no separate
-source handle.
+valid only after a prior full build or clone has completed, when the structure
+was created with `allow_update`, and with the same per-geometry primitive
+counts, triangle vertex counts and transform presence, or TLAS instance count,
+as that completed structure. It uses the queried update scratch; there is no
+separate source handle.
 
-Both commands are valid on selected compute or graphics queues and invalid
-during a render pass or on transfer-only queues. They insert no barrier and do
-not allocate scratch. The caller explicitly orders host writes, consecutive
-builds/updates, later ray queries, and cross-submit consumers. Under full
-validation the command retains the destination and every explicit backing
-span until retirement; raw BLAS addresses already packed into TLAS instances
-remain caller-owned.
+`cmd_clone_acceleration_structure` records one device clone from a completed
+source into a distinct, matching, caller-created unbuilt destination. It uses
+no input or scratch span. A successfully recorded destination is pending until
+submission retirement; discarding the command restores it to unbuilt. Clone
+does not create storage, submit, wait, or publish a TLAS view.
+
+All three commands are valid on selected compute or graphics queues and
+invalid during a render pass or on transfer-only queues. They insert no
+barrier. The caller explicitly orders host writes, construction commands,
+later ray queries, and cross-submit consumers. Under full validation builds
+and updates retain the destination and every explicit backing span, while a
+clone retains exactly its source and destination until retirement. Raw BLAS
+addresses already packed into TLAS instances remain caller-owned and are not
+rewritten by cloning.
 
 ## Compute work
 

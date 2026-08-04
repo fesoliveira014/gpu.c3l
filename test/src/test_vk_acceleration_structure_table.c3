@@ -40,6 +40,11 @@ struct AccelerationStructureBuildCapture {
     vk::AccelerationStructureBuildRangeInfoKHR range;
 }
 
+struct AccelerationStructureCloneCapture {
+    uint calls;
+    vk::CopyAccelerationStructureInfoKHR info;
+}
+
 struct AccelerationStructureDescriptorCapture {
     uint                         calls;
     uint                         slot;
@@ -60,6 +65,18 @@ fn void capture_acceleration_structure_build(
     assert(info_count == 1);
     capture.info = build_infos[0];
     capture.range = build_ranges[0][0];
+}
+
+fn void capture_acceleration_structure_clone(
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::CopyAccelerationStructureInfoKHR* info,
+) {
+    (void)command_buffer;
+    AccelerationStructureCloneCapture* capture =
+        (AccelerationStructureCloneCapture*)user_data;
+    capture.calls++;
+    capture.info = *info;
 }
 
 fn void capture_acceleration_structure_descriptor(
@@ -1471,6 +1488,361 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
             && destination_slot.build_eligibility
                 == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
         "reference exhaustion rolls back before emission and pending state");
+}
+
+fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @test {
+    BufferCell[] buffer_cells = mem::new_array(BufferCell, 3);
+    defer mem::free(buffer_cells.ptr);
+    AccelerationStructureCell[] acceleration_structure_cells =
+        mem::new_array(AccelerationStructureCell, 5);
+    defer mem::free(acceleration_structure_cells.ptr);
+    VkDeviceState state = {
+        .acceleration_structures_enabled = true,
+        .buffers = { .slots = buffer_cells, .owner = 0xC11 },
+        .acceleration_structures = {
+            .slots = acceleration_structure_cells,
+            .owner = 0xC12,
+        },
+    };
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
+
+    gpu::internal::NormalizedAccelerationStructureGeometry[1]
+        source_geometries = {
+            {
+                .kind                  = gpu::AccelerationStructureGeometryKind.TRIANGLES,
+                .flags                 = { .opaque = true },
+                .max_vertex_count      = 3,
+                .max_primitive_count   = 1,
+                .index_type            = gpu::AccelerationStructureIndexType.NONE,
+                .has_transform         = true,
+                .built_vertex_count    = 3,
+                .built_primitive_count = 1,
+                .built_with_transform  = true,
+            },
+        };
+    gpu::internal::NormalizedAccelerationStructureGeometry[1]
+        destination_geometries = {
+            {
+                .kind                = gpu::AccelerationStructureGeometryKind.TRIANGLES,
+                .flags               = { .opaque = true },
+                .max_vertex_count    = 3,
+                .max_primitive_count = 1,
+                .index_type          = gpu::AccelerationStructureIndexType.NONE,
+                .has_transform       = true,
+            },
+        };
+    gpu::internal::NormalizedAccelerationStructureGeometry[1]
+        incompatible_geometries = {
+            {
+                .kind                = gpu::AccelerationStructureGeometryKind.TRIANGLES,
+                .flags               = { .opaque = true },
+                .max_vertex_count    = 6,
+                .max_primitive_count = 2,
+                .index_type          = gpu::AccelerationStructureIndexType.NONE,
+            },
+        };
+    gpu::AccelerationStructureRequirements requirements = {
+        .storage_size       = 4096,
+        .update_scratch_size = 256,
+        .scratch_alignment  = 256,
+    };
+    gpu::AccelerationStructureHandle source =
+        state.acceleration_structures.alloc({
+            .native = (vk::AccelerationStructureKHR)(uptr)0xC501,
+            .desc = {
+                .kind         = gpu::AccelerationStructureKind.BOTTOM_LEVEL,
+                .geometries   = source_geometries[..],
+                .flags        = { .allow_update = true },
+                .requirements = requirements,
+            },
+            .build_eligibility =
+                gpu::internal::AccelerationStructureBuildEligibility.BUILT,
+            .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
+        })!!;
+    gpu::AccelerationStructureHandle destination =
+        state.acceleration_structures.alloc({
+            .native = (vk::AccelerationStructureKHR)(uptr)0xC502,
+            .desc = {
+                .kind         = gpu::AccelerationStructureKind.BOTTOM_LEVEL,
+                .geometries   = destination_geometries[..],
+                .flags        = { .allow_update = true },
+                .requirements = requirements,
+            },
+            .build_eligibility =
+                gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
+            .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
+        })!!;
+    gpu::AccelerationStructureHandle incompatible =
+        state.acceleration_structures.alloc({
+            .native = (vk::AccelerationStructureKHR)(uptr)0xC503,
+            .desc = {
+                .kind         = gpu::AccelerationStructureKind.BOTTOM_LEVEL,
+                .geometries   = incompatible_geometries[..],
+                .flags        = { .allow_update = true },
+                .requirements = requirements,
+            },
+            .build_eligibility =
+                gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
+            .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
+        })!!;
+    gpu::AccelerationStructureHandle tlas_source =
+        state.acceleration_structures.alloc({
+            .native = (vk::AccelerationStructureKHR)(uptr)0xC504,
+            .desc = {
+                .kind               = gpu::AccelerationStructureKind.TOP_LEVEL,
+                .max_instance_count = 8,
+                .flags              = { .allow_update = true },
+                .requirements       = requirements,
+            },
+            .built_instance_count = 7,
+            .build_eligibility =
+                gpu::internal::AccelerationStructureBuildEligibility.BUILT,
+            .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
+        })!!;
+    gpu::AccelerationStructureHandle tlas_destination =
+        state.acceleration_structures.alloc({
+            .native = (vk::AccelerationStructureKHR)(uptr)0xC505,
+            .desc = {
+                .kind               = gpu::AccelerationStructureKind.TOP_LEVEL,
+                .max_instance_count = 8,
+                .flags              = { .allow_update = true },
+                .requirements       = requirements,
+            },
+            .build_eligibility =
+                gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
+            .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
+        })!!;
+
+    CommandResourceReference[2] references;
+    vk::AccelerationStructureGeometryKHR[1] native_geometries;
+    vk::AccelerationStructureBuildRangeInfoKHR[1] native_ranges;
+    CommandScratch command_scratch = {
+        .references = references[..],
+        .acceleration_structure_geometries = native_geometries[..],
+        .acceleration_structure_ranges = native_ranges[..],
+    };
+    CommandRecord record = {
+        .device_state = &state,
+        .state = gpu::internal::CommandState.RECORDING,
+        .queue.roles = { .compute },
+        .scratch = &command_scratch,
+        .pending_acceleration_structure_head =
+            ACCELERATION_STRUCTURE_PENDING_NONE,
+    };
+    AccelerationStructureCloneCapture capture;
+    AccelerationStructureCloneCommandOps ops = {
+        .user_data = &capture,
+        .clone = &capture_acceleration_structure_clone,
+    };
+
+    assert(@catch(record_acceleration_structure_clone_with_ops(
+        record:           &record,
+        source:           source,
+        destination:      source,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    AccelerationStructureSlot* source_slot =
+        state.acceleration_structures.get(source)!!;
+    source_slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.UNBUILT;
+    assert(@catch(record_acceleration_structure_clone_with_ops(
+        record:           &record,
+        source:           source,
+        destination:      destination,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    source_slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.PENDING;
+    assert(@catch(record_acceleration_structure_clone_with_ops(
+        record:           &record,
+        source:           source,
+        destination:      destination,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    source_slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.BUILT;
+    assert(@catch(record_acceleration_structure_clone_with_ops(
+        record:           &record,
+        source:           source,
+        destination:      incompatible,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    AccelerationStructureSlot* destination_slot =
+        state.acceleration_structures.get(destination)!!;
+    destination_slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.BUILT;
+    assert(@catch(record_acceleration_structure_clone_with_ops(
+        record:           &record,
+        source:           source,
+        destination:      destination,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::RESOURCE_IN_USE);
+    destination_slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.UNBUILT;
+    assert(capture.calls == 0
+            && command_scratch.reference_count == 0
+            && record.pending_acceleration_structure_head
+                == ACCELERATION_STRUCTURE_PENDING_NONE,
+        "invalid clone endpoints cause no observable mutation");
+
+    record_acceleration_structure_clone_with_ops(
+        record:           &record,
+        source:           source,
+        destination:      destination,
+        track_references: true,
+        ops:              &ops,
+    )!!;
+    assert(capture.calls == 1
+            && capture.info.src == source_slot.native
+            && capture.info.dst == destination_slot.native
+            && capture.info.mode
+                == vk::CopyAccelerationStructureModeKHR.CLONE_KHR,
+        "one clone emits the exact source, destination, and native mode");
+    assert(command_scratch.reference_count == 2
+            && source_slot.tracked_command_references.load(
+                AtomicOrdering.RELAXED,
+            ) == 1
+            && destination_slot.tracked_command_references.load(
+                AtomicOrdering.RELAXED,
+            ) == 1,
+        "full clone retains exactly its two explicit endpoints");
+    assert(destination_slot.build_eligibility
+                == gpu::internal::AccelerationStructureBuildEligibility.PENDING
+            && destination_slot.desc.geometries[0].built_vertex_count == 3
+            && destination_slot.desc.geometries[0].built_primitive_count == 1
+            && destination_slot.desc.geometries[0].built_with_transform,
+        "clone copies completed BLAS shape before linking the destination");
+
+    abandon_pending_acceleration_structure_builds(&record, false);
+    assert(destination_slot.build_eligibility
+        == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT);
+    activate_pending_acceleration_structure_builds(&record);
+    assert(destination_slot.build_eligibility
+        == gpu::internal::AccelerationStructureBuildEligibility.PENDING);
+    complete_pending_acceleration_structure_builds(&record);
+    assert(destination_slot.build_eligibility
+            == gpu::internal::AccelerationStructureBuildEligibility.BUILT
+            && record.pending_acceleration_structure_head
+                == ACCELERATION_STRUCTURE_PENDING_NONE,
+        "discard, accepted retry, and retirement use the existing lifecycle");
+    clear_command_scratch_references(&command_scratch);
+
+    BufferUsage input_usage = {
+        .addressable,
+        .acceleration_structure_build_input,
+    };
+    BufferHandle vertices = state.buffers.alloc({
+        .size = 36,
+        .gpu_base = (gpu::GpuAddress)0x9000,
+        .usage = input_usage,
+        .access = { .compute },
+    })!!;
+    BufferHandle scratch_buffer = state.buffers.alloc({
+        .size = 256,
+        .gpu_base = (gpu::GpuAddress)0xA000,
+        .usage = { .addressable, .storage },
+        .access = { .compute },
+    })!!;
+    BufferHandle transform_buffer = state.buffers.alloc({
+        .size = 12 * float::size,
+        .gpu_base = (gpu::GpuAddress)0xB000,
+        .usage = input_usage,
+        .access = { .compute },
+    })!!;
+    gpu::AccelerationStructureGeometryBuildDesc[1] update_geometries = {
+        {
+            .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
+            .triangles = {
+                .vertices = acceleration_structure_test_span(vertices, 36),
+                .vertex_stride = 12,
+                .vertex_count = 3,
+                .transform = acceleration_structure_test_span(
+                    transform_buffer,
+                    12 * float::size,
+                ),
+                .primitive_count = 1,
+            },
+        },
+    };
+    gpu::AccelerationStructureBuildDesc update = {
+        .destination = destination,
+        .geometries = update_geometries[..],
+        .scratch = acceleration_structure_test_span(scratch_buffer, 256),
+    };
+    (void)prepare_acceleration_structure_build(
+        &record,
+        &update,
+        true,
+        true,
+    )!!;
+    command_scratch.acceleration_structure_geometry_count = 0;
+
+    record_acceleration_structure_clone_with_ops(
+        record:           &record,
+        source:           tlas_source,
+        destination:      tlas_destination,
+        track_references: false,
+        ops:              &ops,
+    )!!;
+    AccelerationStructureSlot* tlas_destination_slot =
+        state.acceleration_structures.get(tlas_destination)!!;
+    assert(tlas_destination_slot.built_instance_count == 7
+            && tlas_destination_slot.build_eligibility
+                == gpu::internal::AccelerationStructureBuildEligibility.PENDING,
+        "TLAS clone copies its completed instance shape");
+    abandon_pending_acceleration_structure_builds(&record, true);
+
+    command_scratch.references = references[:1];
+    command_scratch.reference_count = 0;
+    destination_slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.UNBUILT;
+    capture = {};
+    assert(@catch(record_acceleration_structure_clone_with_ops(
+        record:           &record,
+        source:           source,
+        destination:      destination,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
+    assert(capture.calls == 0
+            && command_scratch.reference_count == 0
+            && source_slot.tracked_command_references.load(
+                AtomicOrdering.RELAXED,
+            ) == 0
+            && destination_slot.tracked_command_references.load(
+                AtomicOrdering.RELAXED,
+            ) == 0
+            && destination_slot.build_eligibility
+                == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT
+            && record.pending_acceleration_structure_head
+                == ACCELERATION_STRUCTURE_PENDING_NONE,
+        "second-endpoint retention failure rolls back before emission");
+
+    command_scratch.references = references[..];
+    capture = {};
+    mem::@scoped(&allocators::NULL_ALLOCATOR) {
+        for (uint i = 0; i < 64; i++) {
+            record_acceleration_structure_clone_with_ops(
+                record:           &record,
+                source:           source,
+                destination:      destination,
+                track_references: false,
+                ops:              &ops,
+            )!!;
+            abandon_pending_acceleration_structure_builds(&record, true);
+        }
+    };
+    assert(capture.calls == 64
+            && command_scratch.reference_count == 0
+            && destination_slot.build_eligibility
+                == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
+        "warm trusted clone uses fixed storage and performs no allocation");
 }
 
 fn void acceleration_structure_views_are_transactional_and_generation_checked() @test {

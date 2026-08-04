@@ -19,10 +19,12 @@ The caller owns texture history. `before` asserts the state established by
 earlier ordered work; the library does not look up or repair it. A global
 barrier cannot establish a texture layout.
 
-`StageMask.acceleration_structure_build` names both BLAS/TLAS build and update
-execution. On either side of a global barrier it carries acceleration-structure
-read/write access. On a ray-query-enabled device, compute, vertex, and fragment
-stages also include acceleration-structure read access for shader queries.
+`StageMask.acceleration_structure_build` names BLAS/TLAS build, update, and
+device-clone execution. On either side of a global barrier it carries
+acceleration-structure read/write access, including clone source reads and
+destination writes. On a ray-query-enabled device, compute, vertex, and
+fragment stages also include acceleration-structure read access for shader
+queries.
 `StageMask.ray_tracing` names all direct ray-tracing shader stages. As a source
 it carries shader-write and acceleration-structure-read access; as a
 destination it carries shader read/write and acceleration-structure read
@@ -31,7 +33,7 @@ requiring the out-of-scope ray-tracing-maintenance extension. Sampled and
 storage texture states accept `.ray_tracing` on an opted-in device and a
 compatible graphics or compute queue.
 
-Order consecutive builds or updates explicitly:
+Order consecutive builds, updates, or clones explicitly:
 
 ```c3
 gpu::Barrier build_to_build = {
@@ -52,11 +54,12 @@ gpu::Barrier build_to_query = {
 gpu::cmd_barrier(&commands, &build_to_query)!;
 ```
 
-The same rule applies after an in-place update. Build/update commands insert no
+The same rule applies before or after a clone. Construction commands insert no
 implicit dependency.
 
-Before `cmd_trace_rays`, use build-to-ray-tracing for a newly built or updated
-TLAS and use upload-to-ray-tracing for GPU-produced root/SBT data:
+Before `cmd_trace_rays`, use construction-to-ray-tracing for a newly built,
+updated, or cloned TLAS and use upload-to-ray-tracing for GPU-produced root/SBT
+data:
 
 ```c3
 gpu::Barrier build_to_trace = {
@@ -93,10 +96,10 @@ Each `CompletionWait` pairs a prior point with destination stages supported by
 the destination queue. Cross-queue dependencies must name at least one valid
 device stage; host and presentation stages are not wait destinations.
 Use `.acceleration_structure_build` when the receiving compute/graphics queue
-will build or update a structure, and use the receiving shader stage when it
-will query or trace one. `.ray_tracing` is a valid wait destination only on an
-enabled compatible graphics/compute queue. Transfer-only queues reject both
-ray execution stages.
+will build, update, or clone a structure, and use the receiving shader stage
+when it will query or trace one. `.ray_tracing` is a valid wait destination
+only on an enabled compatible graphics/compute queue. Transfer-only queues
+reject both ray execution stages.
 
 Submission is externally synchronized on the target native queue. It:
 

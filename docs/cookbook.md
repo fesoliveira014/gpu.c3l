@@ -114,6 +114,38 @@ on the build completion at `.compute`. Teardown order is: wait for the last
 query, destroy the view, destroy the TLAS, destroy BLAS values, then release
 their separately owned allocations and scratch.
 
+## Clone a completed acceleration structure
+
+Create the destination from the same semantic capacity descriptor as the
+source, using hidden, placed, or dedicated storage independently. The source
+must already have completed construction and the destination must still be
+unbuilt:
+
+```c3
+gpu::wait_completion(source_built)!;
+gpu::AccelerationStructureHandle clone =
+    gpu::create_acceleration_structure(&device, &blas_desc)!;
+
+gpu::CommandList clone_commands = gpu::begin_commands(&allocator)!;
+gpu::cmd_clone_acceleration_structure(&clone_commands, blas, clone)!;
+gpu::ExecutableCommandList clone_executable =
+    gpu::end_commands(&clone_commands)!;
+gpu::ExecutableCommandList[1] clone_lists = { clone_executable };
+gpu::SubmitDesc clone_submit = { .command_lists = clone_lists[..] };
+gpu::CompletionPoint clone_done = gpu::submit(queue, &clone_submit)!;
+gpu::wait_completion(clone_done)!;
+```
+
+Use `StageMask.acceleration_structure_build` on both sides of an in-list
+construction dependency; cross-submit waits use the same destination stage.
+After completion, query the cloned BLAS address before packing new TLAS
+instances. Existing instance bytes keep the source address. For a cloned TLAS,
+create a new `AccelerationStructureView`; no view or raw index is inherited.
+
+Wait for all independent uses, destroy each TLAS view before its structure,
+destroy source and destination in either permitted order, then free any
+caller-owned allocations. Clone does not retire the source or free storage.
+
 ## Confirm procedural AABB intersections
 
 An AABB BLAS uses six-float `min_xyz`/`max_xyz` records. Traversal reports a

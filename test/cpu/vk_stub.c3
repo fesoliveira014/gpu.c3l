@@ -160,6 +160,11 @@ alias CmdUpdateAccelerationStructureFn @private = fn void? (
     CommandRecord*,
     gpu::AccelerationStructureBuildDesc*,
 );
+alias CmdCloneAccelerationStructureFn @private = fn void? (
+    CommandRecord*,
+    gpu::AccelerationStructureHandle,
+    gpu::AccelerationStructureHandle,
+);
 
 const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
@@ -206,6 +211,7 @@ struct CommandOps @public {
     CmdResolveTimestampsFn        resolve_timestamps;
     CmdBuildAccelerationStructureFn  build_acceleration_structure;
     CmdUpdateAccelerationStructureFn update_acceleration_structure;
+    CmdCloneAccelerationStructureFn  clone_acceleration_structure;
 }
 
 struct VkRuntimeState @public {

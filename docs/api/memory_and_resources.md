@@ -89,7 +89,8 @@ triangle geometries or one or more ordered AABB geometries; one BLAS cannot mix
 the two kinds. A TLAS descriptor instead supplies `max_instance_count`.
 Descriptors are immutable capacity schemas: every later build/update uses the
 same order, kind, index type, declared transform presence, and counts no larger
-than the declared maxima.
+than the declared maxima. A clone destination uses the same semantic capacity
+descriptor as its source, though its debug name and storage form may differ.
 
 Triangle inputs are float32 XYZ vertices with a stride of at least 12 bytes and
 a 4-byte-aligned address and stride, plus either no indices or U16/U32 indices
@@ -124,6 +125,15 @@ instance record, scratch range, and structure live until the covering
 submission completes. The library allocates no hidden scratch and inserts no
 barrier.
 
+`cmd_clone_acceleration_structure` copies one completed BLAS or TLAS into a
+distinct unbuilt destination created through any existing creation form with
+the same capacity schema. Clone consumes no scratch and does not allocate,
+submit, wait, or insert a barrier. Keep both handles and any separately owned
+storage live until clone completion. Under full validation the command retains
+exactly those two handles; trusted validation leaves their lifetime entirely
+to the caller. The destination becomes built only when the accepted submission
+retires, and recording or executable discard restores it to unbuilt.
+
 `make_acceleration_structure_instance` validates a live BLAS and returns the
 exact 64-byte `AccelerationStructureInstance` ABI. Its address field is an
 ordinary `GpuAddress`; its transform is three row-major `Vec4f` rows. Custom
@@ -131,6 +141,12 @@ index is 24 bits, mask is 8 bits, and the shader-binding-table record offset is
 currently fixed at zero. A ray-generation shader may still select an SBT hit
 record through the trace instruction's record offset. Store packed records in
 addressable instance input memory before building a TLAS.
+
+A cloned BLAS has its own `GpuAddress`. Instance bytes packed before the clone
+continue to reference the source address; rebuild or update a TLAS explicitly
+when it should reference the clone. A cloned TLAS does not inherit a view or
+raw index. After clone completion, create a separate
+`AccelerationStructureView` for the destination.
 
 `create_acceleration_structure_view` publishes a TLAS in the independently
 sized shader heap. The owner-bearing `AccelerationStructureView` contains a raw
@@ -141,10 +157,15 @@ only after all TLAS build/update work that reads their packed addresses has
 completed.
 
 Updates are in-place only. The structure must have been created with
-`allow_update`, completed one full build, retain the identical schema, and use
-the completed build's per-geometry primitive counts, triangle vertex counts
-and transform presence, or TLAS instance count. Use the queried update scratch.
-There is no distinct source structure or implicit rebuild.
+`allow_update`, completed one full build or clone, retain the identical schema,
+and use the completed structure's per-geometry primitive counts, triangle
+vertex counts and transform presence, or TLAS instance count. Use the queried
+update scratch. There is no distinct update destination or implicit rebuild.
+
+Teardown remains explicit. Wait for clone and every later use, destroy any
+destination TLAS view, destroy destination and source structures in either
+order once independent uses allow it, then free each caller-owned allocation.
+Destruction never waits.
 
 ## Shader binding table storage
 
