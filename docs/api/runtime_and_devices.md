@@ -92,10 +92,40 @@ On a retryable failure the handle remains live.
 
 ## Queues
 
-`QueueKind` names `GRAPHICS`, `COMPUTE`, and `TRANSFER`. `get_queue` returns
-the exact selected queue or `UNSUPPORTED_FEATURE`; `QueueInfo` reports its
-semantic roles. A compute role may alias graphics, and transfer may alias
-another selected queue.
+`QueueKind` names `GRAPHICS`, `COMPUTE`, and `TRANSFER`. `QueueRequest`
+controls which semantic roles a device must provide: `required` marks roles
+that must be selected, and `distinct` marks required roles that must not alias
+another required role.
+
+When `single_queue` is `false` (the zero/default value), existing
+`required`/`distinct` validation, default role normalization, and queue-family
+preference order are unchanged. A zero queue request still selects the
+documented default roles with the existing asynchronous-compute and transfer
+preferences.
+
+When `single_queue` is `true`, every role in `required` must resolve to one
+exact selected queue identity. A nonzero `distinct` conflicts with this policy,
+and an empty `required` set is invalid rather than being normalized to
+defaults. `supports_device_desc` and `create_device` return
+`INVALID_ARGUMENT` for either invalid policy. If the policy is valid but no
+single identity can satisfy all required roles, support evaluation returns
+`DeviceSupport.supported == false` and authoritative device creation returns
+`UNSUPPORTED_FEATURE`.
+
+With a presentation surface, single-queue selection also requires the
+presentation queue to equal the same exact selected graphics identity. A
+separate private presentation queue is not used for this policy; it remains a
+fallback only when `single_queue` is `false`.
+
+Appending `single_queue` changes the public C3 `QueueRequest` layout, so
+consumers must rebuild against the updated package. Existing named and
+zero-value initializers remain source-compatible. `QueueRequest` is not a C
+ABI or host/shader ABI record, so generated shader records and C3/GLSL offsets
+are unchanged.
+
+`get_queue` returns the exact selected queue or `UNSUPPORTED_FEATURE`;
+`QueueInfo` reports its semantic roles. A compute role may alias graphics, and
+transfer may alias another selected queue.
 
 Queues are borrowed from the device. `Queue.is_valid` and `Queue.equals` are
 value operations. Queue-targeting `submit`, sparse bind, and presentation are

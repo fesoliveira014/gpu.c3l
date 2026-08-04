@@ -159,6 +159,76 @@ fn void selected_queue_roles_round_trip_canonical_identities() @test {
     assert(gpu::get_device_caps(&device)!!.queues.transfer);
 }
 
+fn void single_queue_request_publishes_one_all_role_identity() @test {
+    gpu::internal::vk::VkDeviceState state;
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute, .transfer },
+        .single_queue = true,
+    };
+    gpu::internal::QueueSelection selection =
+        gpu::internal::queue_selection_from_native_ids(
+            request:  request,
+            graphics: 10,
+            compute:  10,
+            transfer: 10,
+        )!!;
+    gpu::Device device = gpu::internal::register_device(
+        state:  &state,
+        caps:   {},
+        queues: selection,
+    )!!;
+    defer gpu::destroy_device(&device)!!;
+
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+
+    assert(graphics == compute && compute == transfer,
+        "single-queue requests publish one exact queue token");
+    assert(queue_roles_are_all(graphics.roles),
+        "the exact queue token reports all required roles");
+}
+
+fn void queue_registration_rejects_split_single_queue_selection() @test {
+    gpu::internal::vk::VkDeviceState state;
+    gpu::QueueRequest request = {
+        .required = { .graphics, .compute },
+    };
+    gpu::internal::QueueSelection selection =
+        gpu::internal::queue_selection_from_native_ids(
+            request:  request,
+            graphics: 10,
+            compute:  20,
+            transfer: 0,
+        )!!;
+    selection.single_queue = true;
+
+    assert(
+        @catch(gpu::internal::register_device(
+            state:  &state,
+            caps:   {},
+            queues: selection,
+        )) == gpu::INVALID_ARGUMENT,
+        "canonical validation rejects split single-queue identities"
+    );
+}
+
+fn void queue_registration_rejects_empty_single_queue_selection() @test {
+    gpu::internal::vk::VkDeviceState state;
+    gpu::internal::QueueSelection selection = {
+        .single_queue = true,
+    };
+
+    assert(
+        @catch(gpu::internal::register_device(
+            state:  &state,
+            caps:   {},
+            queues: selection,
+        )) == gpu::INVALID_ARGUMENT,
+        "an empty single-queue policy cannot normalize to default queues"
+    );
+}
+
 fn void queue_registration_rejects_malformed_identity_roles() @test {
     gpu::internal::vk::VkDeviceState state;
     gpu::internal::QueueSelection selection =

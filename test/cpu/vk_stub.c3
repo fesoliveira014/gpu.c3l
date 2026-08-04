@@ -415,6 +415,8 @@ bool configured_ray_tracing_pipeline_support @private = true;
 uint configured_ray_query_heap_limit @private = uint::max;
 bool configured_sparse_texture_support @private;
 bool configured_sparse_queue_support @private;
+bool configured_single_queue_support @private = true;
+bool configured_single_queue_presentation_support @private = true;
 uint device_support_queries @private;
 uint device_temporary_creates @private;
 uint device_temporary_destroys @private;
@@ -1006,6 +1008,14 @@ fn bool? vk_supports_queue_request(
     if (require_sparse_binding && !configured_sparse_queue_support) {
         return false;
     }
+    if (request.single_queue && !configured_single_queue_support) {
+        return false;
+    }
+    if (request.single_queue
+        && backend_surface != null
+        && !configured_single_queue_presentation_support) {
+        return false;
+    }
     gpu::internal::QueueSelection? selection = gpu::internal::queue_selection_for_request(
         request:                    *request,
         compute_aliases_graphics:    true,
@@ -1058,6 +1068,8 @@ fn void stub_set_adapter_count(uint count) {
     configured_ray_query_heap_limit = uint::max;
     configured_sparse_texture_support = false;
     configured_sparse_queue_support = false;
+    configured_single_queue_support = true;
+    configured_single_queue_presentation_support = true;
 }
 
 fn void stub_set_device_baseline_support(bool supported) {
@@ -1082,6 +1094,14 @@ fn void stub_set_sparse_texture_support(bool supported) {
 
 fn void stub_set_sparse_queue_support(bool supported) {
     configured_sparse_queue_support = supported;
+}
+
+fn void stub_set_single_queue_support(bool supported) {
+    configured_single_queue_support = supported;
+}
+
+fn void stub_set_single_queue_presentation_support(bool supported) {
+    configured_single_queue_presentation_support = supported;
 }
 
 fn void stub_reset_device_counts() {
