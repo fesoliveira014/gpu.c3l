@@ -23,6 +23,13 @@ barrier cannot establish a texture layout.
 execution. On either side of a global barrier it carries acceleration-structure
 read/write access. On a ray-query-enabled device, compute, vertex, and fragment
 stages also include acceleration-structure read access for shader queries.
+`StageMask.ray_tracing` names all direct ray-tracing shader stages. As a source
+it carries shader-write and acceleration-structure-read access; as a
+destination it carries shader read/write and acceleration-structure read
+access. The generic shader-read scope covers caller-owned SBT contents without
+requiring the out-of-scope ray-tracing-maintenance extension. Sampled and
+storage texture states accept `.ray_tracing` on an opted-in device and a
+compatible graphics or compute queue.
 
 Order consecutive builds or updates explicitly:
 
@@ -47,6 +54,20 @@ gpu::cmd_barrier(&commands, &build_to_query)!;
 
 The same rule applies after an in-place update. Build/update commands insert no
 implicit dependency.
+
+Before `cmd_trace_rays`, use build-to-ray-tracing for a newly built or updated
+TLAS and use upload-to-ray-tracing for GPU-produced root/SBT data:
+
+```c3
+gpu::Barrier build_to_trace = {
+    .before = { .acceleration_structure_build },
+    .after  = { .ray_tracing },
+};
+gpu::cmd_barrier(&commands, &build_to_trace)!;
+```
+
+Ray-tracing stages are valid only when the device opt-in is enabled and on
+selected graphics or compute queues. They are rejected on transfer-only queues.
 
 ## Completion points
 
@@ -73,7 +94,9 @@ the destination queue. Cross-queue dependencies must name at least one valid
 device stage; host and presentation stages are not wait destinations.
 Use `.acceleration_structure_build` when the receiving compute/graphics queue
 will build or update a structure, and use the receiving shader stage when it
-will query one. Transfer-only queues reject the build stage.
+will query or trace one. `.ray_tracing` is a valid wait destination only on an
+enabled compatible graphics/compute queue. Transfer-only queues reject both
+ray execution stages.
 
 Submission is externally synchronized on the target native queue. It:
 

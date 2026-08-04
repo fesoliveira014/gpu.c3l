@@ -173,10 +173,10 @@ fn void capture_acceleration_structure_build_sizes(
     size_info.update_scratch_size = 1024;
 }
 
-fn gpu::RayQueryCaps acceleration_structure_test_caps() {
+fn gpu::AccelerationStructureCaps acceleration_structure_test_caps() {
     return {
         .enabled = true,
-        .acceleration_structure_heap_capacity = 8,
+        .heap_capacity = 8,
         .max_geometry_count = 4,
         .max_primitive_count = 16,
         .max_instance_count = 32,
@@ -185,7 +185,7 @@ fn gpu::RayQueryCaps acceleration_structure_test_caps() {
 }
 
 fn void acceleration_structure_desc_normalization_is_capacity_first() @test {
-    gpu::RayQueryCaps caps = acceleration_structure_test_caps();
+    gpu::AccelerationStructureCaps caps = acceleration_structure_test_caps();
     gpu::AccelerationStructureGeometryDesc[2] geometries = {
         {
             .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
@@ -242,7 +242,7 @@ fn void acceleration_structure_desc_normalization_is_capacity_first() @test {
 }
 
 fn void acceleration_structure_desc_normalization_rejects_invalid_shapes() @test {
-    gpu::RayQueryCaps caps = acceleration_structure_test_caps();
+    gpu::AccelerationStructureCaps caps = acceleration_structure_test_caps();
     gpu::internal::NormalizedAccelerationStructureGeometry[1] storage;
     gpu::internal::NormalizedAccelerationStructureDesc normalized;
     gpu::AccelerationStructureGeometryDesc geometry = {
@@ -378,8 +378,8 @@ fn void acceleration_structure_requirements_lower_exact_capacity_schema() @test 
         },
     };
     VkDeviceState state = {
-        .ray_queries_enabled = true,
-        .caps.ray_queries = acceleration_structure_test_caps(),
+        .acceleration_structures_enabled = true,
+        .caps.acceleration_structures = acceleration_structure_test_caps(),
     };
     AccelerationStructureRequirementsCapture capture;
     AccelerationStructureRequirementsOps ops = {
@@ -462,10 +462,10 @@ fn void acceleration_structure_requirements_lower_tlas_and_static_update() @test
         .max_instance_count = 17,
     };
     VkDeviceState state = {
-        .ray_queries_enabled = true,
-        .caps.ray_queries = acceleration_structure_test_caps(),
+        .acceleration_structures_enabled = true,
+        .caps.acceleration_structures = acceleration_structure_test_caps(),
     };
-    state.caps.ray_queries.max_instance_count = 17;
+    state.caps.acceleration_structures.max_instance_count = 17;
     AccelerationStructureRequirementsCapture capture;
     AccelerationStructureRequirementsOps ops = {
         .user_data = &capture,
@@ -506,8 +506,8 @@ fn void acceleration_structure_native_creation_is_transactional() @test {
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(cells.ptr);
     VkDeviceState state = {
-        .ray_queries_enabled = true,
-        .caps.ray_queries = acceleration_structure_test_caps(),
+        .acceleration_structures_enabled = true,
+        .caps.acceleration_structures = acceleration_structure_test_caps(),
         .acceleration_structures = {
             .slots = cells,
             .owner = 0xB5,
@@ -645,13 +645,13 @@ fn void acceleration_structure_destroy_checks_use_without_waiting() @test {
     defer mem::free(cells.ptr);
     AllocationCell[] allocations = mem::new_array(AllocationCell, 1);
     defer mem::free(allocations.ptr);
-    VkRayQueryDispatch dispatch = {
+    VkAccelerationStructureDispatch dispatch = {
         .destroy_acceleration_structure =
             &count_acceleration_structure_destroy,
     };
     VkDeviceState state = {
-        .ray_queries_enabled = true,
-        .ray_query_operations = &dispatch,
+        .acceleration_structures_enabled = true,
+        .acceleration_structure_operations = &dispatch,
         .acceleration_structures = {
             .slots = cells,
             .owner = 0xC5,
@@ -713,12 +713,12 @@ fn void acceleration_structure_address_is_blas_only_and_generation_checked() @te
     AccelerationStructureCell[] cells =
         mem::new_array(AccelerationStructureCell, 2);
     defer mem::free(cells.ptr);
-    VkRayQueryDispatch dispatch = {
+    VkAccelerationStructureDispatch dispatch = {
         .get_device_address = &return_acceleration_structure_address,
     };
     VkDeviceState state = {
-        .ray_queries_enabled = true,
-        .ray_query_operations = &dispatch,
+        .acceleration_structures_enabled = true,
+        .acceleration_structure_operations = &dispatch,
         .acceleration_structures = {
             .slots = cells,
             .owner = 0xD5,
@@ -771,7 +771,7 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(acceleration_structure_cells.ptr);
     VkDeviceState state = {
-        .ray_queries_enabled = true,
+        .acceleration_structures_enabled = true,
         .buffers = { .slots = buffer_cells, .owner = 0xE1 },
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
@@ -1069,7 +1069,7 @@ fn void acceleration_structure_dynamic_tlas_uses_exact_instance_abi() @test {
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(acceleration_structure_cells.ptr);
     VkDeviceState state = {
-        .ray_queries_enabled = true,
+        .acceleration_structures_enabled = true,
         .buffers = { .slots = buffer_cells, .owner = 0xF1 },
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
@@ -1144,7 +1144,7 @@ fn void acceleration_structure_scratch_rejects_destination_overlap() @test {
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(acceleration_structure_cells.ptr);
     VkDeviceState state = {
-        .ray_queries_enabled = true,
+        .acceleration_structures_enabled = true,
         .buffers = { .slots = buffer_cells, .owner = 0xF31 },
         .allocations = { .slots = allocation_cells, .owner = 0xF32 },
         .acceleration_structures = {
@@ -1233,7 +1233,7 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(acceleration_structure_cells.ptr);
     VkDeviceState state = {
-        .ray_queries_enabled = true,
+        .acceleration_structures_enabled = true,
         .buffers = { .slots = buffer_cells, .owner = 0xA11 },
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
@@ -1483,7 +1483,7 @@ fn void acceleration_structure_views_are_transactional_and_generation_checked() 
     uint[] descriptor_free = mem::new_array(uint, 1);
     defer mem::free(descriptor_free.ptr);
     VkDeviceState state = {
-        .ray_queries_enabled = true,
+        .acceleration_structures_enabled = true,
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
             .owner = 0xD51,

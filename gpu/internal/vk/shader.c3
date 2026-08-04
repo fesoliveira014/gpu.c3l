@@ -317,7 +317,7 @@ fn void destroy_shader_store(VkDeviceState* state) {
 fn void? check_heap_convention(
     spvreflect::ShaderModule* reflect_module,
     ZString entry_point,
-    bool ray_queries_enabled,
+    bool acceleration_structures_enabled,
 ) @private {
     uint count = 0;
     if (reflect_module.enumerate_entry_point_descriptor_bindings(
@@ -363,7 +363,7 @@ fn void? check_heap_convention(
                         != (int)vk::DescriptorType.ACCELERATION_STRUCTURE_KHR) {
                         return gpu::SHADER_INVALID~;
                     }
-                    if (!ray_queries_enabled) {
+                    if (!acceleration_structures_enabled) {
                         return gpu::UNSUPPORTED_FEATURE~;
                     }
                 default:
@@ -383,6 +383,45 @@ fn gpu::internal::ShaderRole? shader_role_from_spv(
             return gpu::internal::ShaderRole.VERTEX;
         case spvreflect::ShaderStage.SHADER_STAGE_FRAGMENT:
             return gpu::internal::ShaderRole.FRAGMENT;
+        case spvreflect::ShaderStage.SHADER_STAGE_RAYGEN_KHR:
+            return gpu::internal::ShaderRole.RAY_GENERATION;
+        case spvreflect::ShaderStage.SHADER_STAGE_MISS_KHR:
+            return gpu::internal::ShaderRole.MISS;
+        case spvreflect::ShaderStage.SHADER_STAGE_CLOSEST_HIT_KHR:
+            return gpu::internal::ShaderRole.CLOSEST_HIT;
+        case spvreflect::ShaderStage.SHADER_STAGE_ANY_HIT_KHR:
+            return gpu::internal::ShaderRole.ANY_HIT;
+        case spvreflect::ShaderStage.SHADER_STAGE_INTERSECTION_KHR:
+            return gpu::internal::ShaderRole.INTERSECTION;
+        case spvreflect::ShaderStage.SHADER_STAGE_CALLABLE_KHR:
+            return gpu::internal::ShaderRole.CALLABLE;
+        default:
+            return gpu::SHADER_INVALID~;
+    }
+}
+
+fn vk::ShaderStageFlagBits? shader_role_to_vk(
+    gpu::internal::ShaderRole role,
+) {
+    switch (role) {
+        case gpu::internal::ShaderRole.COMPUTE:
+            return vk::ShaderStageFlagBits.COMPUTE_BIT;
+        case gpu::internal::ShaderRole.VERTEX:
+            return vk::ShaderStageFlagBits.VERTEX_BIT;
+        case gpu::internal::ShaderRole.FRAGMENT:
+            return vk::ShaderStageFlagBits.FRAGMENT_BIT;
+        case gpu::internal::ShaderRole.RAY_GENERATION:
+            return vk::ShaderStageFlagBits.RAYGEN_BIT_KHR;
+        case gpu::internal::ShaderRole.MISS:
+            return vk::ShaderStageFlagBits.MISS_BIT_KHR;
+        case gpu::internal::ShaderRole.CLOSEST_HIT:
+            return vk::ShaderStageFlagBits.CLOSEST_HIT_BIT_KHR;
+        case gpu::internal::ShaderRole.ANY_HIT:
+            return vk::ShaderStageFlagBits.ANY_HIT_BIT_KHR;
+        case gpu::internal::ShaderRole.INTERSECTION:
+            return vk::ShaderStageFlagBits.INTERSECTION_BIT_KHR;
+        case gpu::internal::ShaderRole.CALLABLE:
+            return vk::ShaderStageFlagBits.CALLABLE_BIT_KHR;
         default:
             return gpu::SHADER_INVALID~;
     }
@@ -397,6 +436,13 @@ fn gpu::internal::RootAbiSpec root_abi_for_role(
         case gpu::internal::ShaderRole.VERTEX:
         case gpu::internal::ShaderRole.FRAGMENT:
             return gpu::internal::GRAPHICS_ROOT_PUSH_ABI;
+        case gpu::internal::ShaderRole.RAY_GENERATION:
+        case gpu::internal::ShaderRole.MISS:
+        case gpu::internal::ShaderRole.CLOSEST_HIT:
+        case gpu::internal::ShaderRole.ANY_HIT:
+        case gpu::internal::ShaderRole.INTERSECTION:
+        case gpu::internal::ShaderRole.CALLABLE:
+            return gpu::internal::ROOT_PUSH_ABI;
     }
 }
 
@@ -783,7 +829,7 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
     if (catch heap_fault = check_heap_convention(
         reflect_module,
         selected_entry_point,
-        state.ray_queries_enabled,
+        state.acceleration_structures_enabled,
     )) {
         return report_shader_contract_failure(
             state:          state,

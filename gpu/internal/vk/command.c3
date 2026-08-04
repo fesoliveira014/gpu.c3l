@@ -2095,12 +2095,19 @@ fn void? record_bound_pipeline_with_ops(
 ) {
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
-    NativePipelineBinding* native = bound.kind == PipelineKind.COMPUTE
-        ? &record.native_compute_pipeline
-        : &record.native_graphics_pipeline;
-    vk::PipelineBindPoint bind_point = bound.kind == PipelineKind.COMPUTE
-        ? vk::PipelineBindPoint.COMPUTE
-        : vk::PipelineBindPoint.GRAPHICS;
+    NativePipelineBinding* native;
+    vk::PipelineBindPoint bind_point;
+    switch (bound.kind) {
+        case PipelineKind.COMPUTE:
+            native = &record.native_compute_pipeline;
+            bind_point = vk::PipelineBindPoint.COMPUTE;
+        case PipelineKind.GRAPHICS:
+            native = &record.native_graphics_pipeline;
+            bind_point = vk::PipelineBindPoint.GRAPHICS;
+        case PipelineKind.RAY_TRACING:
+            native = &record.native_ray_tracing_pipeline;
+            bind_point = vk::PipelineBindPoint.RAY_TRACING_KHR;
+    }
     bool native_match = native.pipeline != null
         && native.pipeline == bound.pipeline
         && native.cache_entry == bound.cache_entry;

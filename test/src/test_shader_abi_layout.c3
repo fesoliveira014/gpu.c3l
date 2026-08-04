@@ -29,6 +29,19 @@ fn void root_push_layout() @test {
     assert($reflect(RootPush.root_gpu).offset == 0);
 }
 
+fn void ray_tracing_shader_binding_table_layout() @test {
+    assert($reflect(RayTracingShaderBindingTableRegion.span).offset == 0);
+    assert($reflect(RayTracingShaderBindingTableRegion.stride).offset
+        == GpuSpan::size);
+    assert($reflect(RayTracingShaderBindingTable.ray_generation).offset == 0);
+    assert($reflect(RayTracingShaderBindingTable.miss).offset
+        == RayTracingShaderBindingTableRegion::size);
+    assert($reflect(RayTracingShaderBindingTable.hit).offset
+        == 2 * RayTracingShaderBindingTableRegion::size);
+    assert($reflect(RayTracingShaderBindingTable.callable).offset
+        == 3 * RayTracingShaderBindingTableRegion::size);
+}
+
 fn void graphics_root_push_layout() @test {
     assert(GraphicsRootPush::size == 16);
     assert($reflect(GraphicsRootPush.vertex_root_gpu).offset == 0);

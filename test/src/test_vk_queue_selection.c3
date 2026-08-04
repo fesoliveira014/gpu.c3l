@@ -10,6 +10,16 @@ const uint QF_C = (uint)vk::QueueFlagBits.COMPUTE_BIT;
 const uint QF_T = (uint)vk::QueueFlagBits.TRANSFER_BIT;
 const uint QF_S = (uint)vk::QueueFlagBits.SPARSE_BINDING_BIT;
 
+fn void ray_tracing_pipeline_requires_a_dispatch_capable_queue_role() @test {
+    gpu::QueueRequest graphics = { .required = { .graphics } };
+    gpu::QueueRequest compute = { .required = { .compute } };
+    gpu::QueueRequest transfer = { .required = { .transfer } };
+
+    assert(gpu::internal::vk::ray_tracing_queue_request_compatible(&graphics));
+    assert(gpu::internal::vk::ray_tracing_queue_request_compatible(&compute));
+    assert(!gpu::internal::vk::ray_tracing_queue_request_compatible(&transfer));
+}
+
 fn vk::QueueFamilyProperties family(uint flags, uint count) {
     return { .queue_flags = (vk::QueueFlags)flags, .queue_count = count };
 }

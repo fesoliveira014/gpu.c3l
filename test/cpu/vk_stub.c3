@@ -41,6 +41,12 @@ alias CmdDispatchFn @private = fn void? (
     gpu::GpuAddress,
     gpu::Vec3u,
 );
+alias CmdTraceRaysFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::RayTracingShaderBindingTable*,
+    gpu::Vec3u,
+);
 alias CmdBeginRenderPassFn @private = fn void? (
     CommandRecord*,
     gpu::RenderPassDesc*,
@@ -179,6 +185,7 @@ struct CommandOps @public {
     CmdBindPipelineFn             bind_pipeline;
     CmdSetGraphicsStateFn         set_graphics_state;
     CmdDispatchFn                 dispatch;
+    CmdTraceRaysFn                trace_rays;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;
@@ -404,6 +411,7 @@ fn void stub_set_acceleration_structure(
 uint configured_adapter_count @private = 1;
 bool configured_device_baseline_support @private = true;
 bool configured_ray_query_support @private = true;
+bool configured_ray_tracing_pipeline_support @private = true;
 uint configured_ray_query_heap_limit @private = uint::max;
 bool configured_sparse_texture_support @private;
 bool configured_sparse_queue_support @private;
@@ -754,6 +762,39 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn gpu::PipelineHandle? vk_create_ray_tracing_pipeline(
+    VkDeviceState* state,
+    gpu::RayTracingPipelineDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::RayTracingPipelineInfo? vk_get_ray_tracing_pipeline_info(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+) {
+    (void)state;
+    (void)pipeline;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_get_ray_tracing_shader_group_handles(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+    uint first_group,
+    uint group_count,
+    char[] out,
+) {
+    (void)state;
+    (void)pipeline;
+    (void)first_group;
+    (void)group_count;
+    (void)out;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn void? vk_destroy_pipeline(
     VkDeviceState* state,
     gpu::PipelineHandle pipeline,
@@ -848,6 +889,23 @@ fn bool? vk_adapter_supports_ray_queries(
     return configured_ray_query_support;
 }
 
+fn bool? vk_adapter_supports_ray_tracing_pipelines(
+    VkRuntimeState* state,
+    uint adapter_index,
+) {
+    if (state == null || adapter_index >= state.adapter_count) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return configured_ray_tracing_pipeline_support;
+}
+
+fn bool ray_tracing_queue_request_compatible(gpu::QueueRequest* request) {
+    gpu::QueueRequest normalized = request == null
+        ? gpu::internal::default_queue_request()
+        : *request;
+    return normalized.required.graphics || normalized.required.compute;
+}
+
 fn bool? vk_adapter_supports_ray_query_heap(
     VkRuntimeState* state,
     uint adapter_index,
@@ -856,8 +914,7 @@ fn bool? vk_adapter_supports_ray_query_heap(
     if (state == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_ARGUMENT~;
     }
-    return configured_ray_query_support
-        && heap_capacity > 0
+    return heap_capacity > 0
         && heap_capacity <= configured_ray_query_heap_limit;
 }
 
@@ -997,6 +1054,7 @@ fn void stub_set_adapter_count(uint count) {
     configured_adapter_count = count;
     configured_device_baseline_support = true;
     configured_ray_query_support = true;
+    configured_ray_tracing_pipeline_support = true;
     configured_ray_query_heap_limit = uint::max;
     configured_sparse_texture_support = false;
     configured_sparse_queue_support = false;
@@ -1008,6 +1066,10 @@ fn void stub_set_device_baseline_support(bool supported) {
 
 fn void stub_set_ray_query_support(bool supported) {
     configured_ray_query_support = supported;
+}
+
+fn void stub_set_ray_tracing_pipeline_support(bool supported) {
+    configured_ray_tracing_pipeline_support = supported;
 }
 
 fn void stub_set_ray_query_heap_limit(uint limit) {
@@ -1635,15 +1697,34 @@ fn gpu::Device? create_vk_device(
         .presentation_enabled = normalized.surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
-        .ray_queries = normalized.enable_ray_queries
-            ? (gpu::RayQueryCaps){
+        .acceleration_structures = (normalized.enable_ray_queries
+                || normalized.enable_ray_tracing_pipelines)
+            ? (gpu::AccelerationStructureCaps){
                 .enabled = true,
-                .acceleration_structure_heap_capacity =
+                .heap_capacity =
                     runtime_data.state.acceleration_structure_heap_capacity,
                 .max_geometry_count = uint::max,
                 .max_primitive_count = uint::max,
                 .max_instance_count = uint::max,
                 .scratch_alignment = 256,
+            }
+            : {},
+        .ray_queries = { .enabled = normalized.enable_ray_queries },
+        .ray_tracing_pipelines = normalized.enable_ray_tracing_pipelines
+            ? (gpu::RayTracingPipelineCaps){
+                .enabled = true,
+                .max_recursion_depth = 4,
+                .max_ray_dispatch_invocation_count = uint::max,
+                .max_ray_dispatch_dimensions = {
+                    uint::max,
+                    uint::max,
+                    uint::max,
+                },
+                .shader_group_handle_size = 32,
+                .shader_group_handle_alignment = 32,
+                .shader_group_base_alignment = 64,
+                .max_shader_group_stride = 4096,
+                .max_hit_attribute_size = 32,
             }
             : {},
     };

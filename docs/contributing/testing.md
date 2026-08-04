@@ -119,6 +119,7 @@ c3c test vk_sparse_bind --path test --test-show-output
 c3c test vk_core --path test --test-show-output
 c3c test vk_wsi --path test --test-show-output
 c3c test vk_optional_generated_work --path test --test-show-output
+c3c test vk_ray_tracing --path test --test-show-output
 ```
 
 - `vk_sparse_texture` is the fast deterministic target for sparse descriptor
@@ -145,6 +146,11 @@ c3c test vk_optional_generated_work --path test --test-show-output
 - `vk_optional_generated_work` covers indirect and generated dispatch/draw
   behavior, scratch reservation/exhaustion, caller-owned spans, and observable
   output when the driver supports the capability.
+- `vk_ray_tracing` is an explicit capable-device acceptance target. It enables
+  Vulkan validation, builds triangle and AABB BLASes plus a TLAS, packs a
+  caller-owned SBT, and checks direct hit/miss/callable output. Running it on
+  an unsupported adapter fails with `UNSUPPORTED_FEATURE`; it is not a passing
+  skip.
 
 Capability-specific tests query support in C3 and handle an unavailable
 feature explicitly. CI does not parse `EXERCISED` text or require a particular
@@ -186,6 +192,7 @@ smoke link/run
 vk_core
 vk_wsi
 vk_optional_generated_work
+vk_ray_tracing
 ```
 
 Linux also uploads `c3c docgen` output as an unparsed whole-compile reference.
@@ -224,5 +231,6 @@ c3c test vk_sparse_bind --path test --test-show-output
 c3c test vk_core --path test --test-show-output
 c3c test vk_wsi --path test --test-show-output
 c3c test vk_optional_generated_work --path test --test-show-output
+c3c test vk_ray_tracing --path test --test-show-output
 git diff --check
 ```

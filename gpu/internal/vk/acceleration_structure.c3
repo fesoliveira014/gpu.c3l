@@ -215,7 +215,7 @@ fn void acceleration_structure_build_command_real(
     vk::AccelerationStructureBuildGeometryInfoKHR* build_infos,
     vk::AccelerationStructureBuildRangeInfoKHR** build_ranges,
 ) {
-    VkRayQueryDispatch* dispatch = (VkRayQueryDispatch*)user_data;
+    VkAccelerationStructureDispatch* dispatch = (VkAccelerationStructureDispatch*)user_data;
     dispatch.cmd_build(
         command_buffer,
         info_count,
@@ -374,7 +374,7 @@ prepare_acceleration_structure_build(
         return gpu::INVALID_ARGUMENT~;
     }
     VkDeviceState* state = record.device_state;
-    if (state == null || !state.ray_queries_enabled) {
+    if (state == null || !state.acceleration_structures_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     AccelerationStructureSlot* destination =
@@ -750,7 +750,7 @@ fn AccelerationStructureSlot? AccelerationStructureTable.free(
 }
 
 fn void? create_acceleration_structure_state(VkDeviceState* state) {
-    if (state == null || !state.ray_queries_enabled) {
+    if (state == null || !state.acceleration_structures_enabled) {
         return gpu::INVALID_ARGUMENT~;
     }
     state.acceleration_structures.owner =
@@ -770,10 +770,10 @@ fn void destroy_acceleration_structure_state(VkDeviceState* state) {
             :state.acceleration_structures.next_new
         ]) {
             if (cell.used && cell.value.native != null
-                && state.ray_query_operations != null
-                && state.ray_query_operations
+                && state.acceleration_structure_operations != null
+                && state.acceleration_structure_operations
                     .destroy_acceleration_structure != null) {
-                state.ray_query_operations.destroy_acceleration_structure(
+                state.acceleration_structure_operations.destroy_acceleration_structure(
                     state.device,
                     cell.value.native,
                     null,
@@ -792,7 +792,7 @@ fn void destroy_acceleration_structure_state(VkDeviceState* state) {
         state.acceleration_structures.slots = {};
     }
     state.acceleration_structures.owner = 0;
-    state.ray_query_operations = null;
+    state.acceleration_structure_operations = null;
 }
 
 fn vk::AccelerationStructureTypeKHR acceleration_structure_type_to_vk(
@@ -893,7 +893,7 @@ get_acceleration_structure_requirements_with_ops(
 ) {
     if (state == null || desc == null || ops == null
         || ops.get_build_sizes == null) return gpu::INVALID_ARGUMENT~;
-    if (!state.ray_queries_enabled) return gpu::UNSUPPORTED_FEATURE~;
+    if (!state.acceleration_structures_enabled) return gpu::UNSUPPORTED_FEATURE~;
 
     @pool() {
         usz normalized_count = desc.kind
@@ -908,7 +908,7 @@ get_acceleration_structure_requirements_with_ops(
         gpu::internal::NormalizedAccelerationStructureDesc normalized_desc;
         gpu::internal::normalize_acceleration_structure_desc(
             desc,
-            &state.caps.ray_queries,
+            &state.caps.acceleration_structures,
             normalized,
             &normalized_desc,
         )!;
@@ -981,7 +981,7 @@ get_acceleration_structure_requirements_with_ops(
             .update_scratch_size = normalized_desc.flags.allow_update
                 ? (usz)size_info.update_scratch_size
                 : 0,
-            .scratch_alignment = state.caps.ray_queries.scratch_alignment,
+            .scratch_alignment = state.caps.acceleration_structures.scratch_alignment,
         };
     };
 }
@@ -994,7 +994,7 @@ fn void acceleration_structure_get_build_sizes_real(
     uint* max_primitive_counts,
     vk::AccelerationStructureBuildSizesInfoKHR* size_info,
 ) {
-    VkRayQueryDispatch* dispatch = (VkRayQueryDispatch*)user_data;
+    VkAccelerationStructureDispatch* dispatch = (VkAccelerationStructureDispatch*)user_data;
     dispatch.get_build_sizes(
         device,
         build_type,
@@ -1010,7 +1010,7 @@ fn vk::Result acceleration_structure_create_real(
     vk::AccelerationStructureCreateInfoKHR* create_info,
     vk::AccelerationStructureKHR* out_acceleration_structure,
 ) {
-    VkRayQueryDispatch* dispatch = (VkRayQueryDispatch*)user_data;
+    VkAccelerationStructureDispatch* dispatch = (VkAccelerationStructureDispatch*)user_data;
     return dispatch.create_acceleration_structure(
         device,
         create_info,
@@ -1024,7 +1024,7 @@ fn void acceleration_structure_destroy_real(
     vk::Device device,
     vk::AccelerationStructureKHR acceleration_structure,
 ) {
-    VkRayQueryDispatch* dispatch = (VkRayQueryDispatch*)user_data;
+    VkAccelerationStructureDispatch* dispatch = (VkAccelerationStructureDispatch*)user_data;
     dispatch.destroy_acceleration_structure(
         device,
         acceleration_structure,
@@ -1036,7 +1036,7 @@ fn AccelerationStructureNativeOps acceleration_structure_native_ops(
     VkDeviceState* state,
 ) {
     return {
-        .user_data = state.ray_query_operations,
+        .user_data = state.acceleration_structure_operations,
         .create    = &acceleration_structure_create_real,
         .destroy   = &acceleration_structure_destroy_real,
     };
@@ -1102,7 +1102,7 @@ create_acceleration_structure_on_buffer_with_ops(
     gpu::internal::NormalizedAccelerationStructureDesc normalized;
     gpu::internal::normalize_acceleration_structure_desc(
         desc,
-        &state.caps.ray_queries,
+        &state.caps.acceleration_structures,
         schema,
         &normalized,
     )!;
@@ -1153,11 +1153,11 @@ vk_get_acceleration_structure_requirements(
     VkDeviceState* state,
     gpu::AccelerationStructureDesc* desc,
 ) {
-    if (state == null || state.ray_query_operations == null) {
+    if (state == null || state.acceleration_structure_operations == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     AccelerationStructureRequirementsOps ops = {
-        .user_data = state.ray_query_operations,
+        .user_data = state.acceleration_structure_operations,
         .get_build_sizes = &acceleration_structure_get_build_sizes_real,
     };
     return get_acceleration_structure_requirements_with_ops(
@@ -1303,8 +1303,8 @@ fn void? vk_destroy_acceleration_structure(
     VkDeviceState* state,
     gpu::AccelerationStructureHandle acceleration_structure,
 ) {
-    if (state == null || !state.ray_queries_enabled
-        || state.ray_query_operations == null) {
+    if (state == null || !state.acceleration_structures_enabled
+        || state.acceleration_structure_operations == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     AccelerationStructureSlot released;
@@ -1342,7 +1342,7 @@ fn void? vk_destroy_acceleration_structure(
     )!;
     state.resource_mutex.unlock();
 
-    state.ray_query_operations.destroy_acceleration_structure(
+    state.acceleration_structure_operations.destroy_acceleration_structure(
         state.device,
         released.native,
         null,
@@ -1359,8 +1359,8 @@ fn gpu::GpuAddress? vk_get_acceleration_structure_address(
     VkDeviceState* state,
     gpu::AccelerationStructureHandle acceleration_structure,
 ) {
-    if (state == null || !state.ray_queries_enabled
-        || state.ray_query_operations == null) {
+    if (state == null || !state.acceleration_structures_enabled
+        || state.acceleration_structure_operations == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     state.resource_mutex.lock()!!;
@@ -1373,7 +1373,7 @@ fn gpu::GpuAddress? vk_get_acceleration_structure_address(
     vk::AccelerationStructureDeviceAddressInfoKHR info =
         vk::acceleration_structure_device_address_info_khr()
             .set_acceleration_structure(slot.native);
-    vk::DeviceAddress address = state.ray_query_operations
+    vk::DeviceAddress address = state.acceleration_structure_operations
         .get_device_address(state.device, &info);
     if (address == 0) return gpu::BACKEND_ERROR~;
     return (gpu::GpuAddress)address;
@@ -1405,7 +1405,7 @@ fn void? trusted_build_acceleration_structure(
     gpu::AccelerationStructureBuildDesc* desc,
 ) {
     AccelerationStructureBuildCommandOps ops = {
-        .user_data = record.device_state.ray_query_operations,
+        .user_data = record.device_state.acceleration_structure_operations,
         .build = &acceleration_structure_build_command_real,
     };
     return record_acceleration_structure_build_with_ops(
@@ -1423,7 +1423,7 @@ fn void? full_build_acceleration_structure(
     gpu::AccelerationStructureBuildDesc* desc,
 ) {
     AccelerationStructureBuildCommandOps ops = {
-        .user_data = record.device_state.ray_query_operations,
+        .user_data = record.device_state.acceleration_structure_operations,
         .build = &acceleration_structure_build_command_real,
     };
     return record_acceleration_structure_build_with_ops(
@@ -1441,7 +1441,7 @@ fn void? trusted_update_acceleration_structure(
     gpu::AccelerationStructureBuildDesc* desc,
 ) {
     AccelerationStructureBuildCommandOps ops = {
-        .user_data = record.device_state.ray_query_operations,
+        .user_data = record.device_state.acceleration_structure_operations,
         .build = &acceleration_structure_build_command_real,
     };
     return record_acceleration_structure_build_with_ops(
@@ -1459,7 +1459,7 @@ fn void? full_update_acceleration_structure(
     gpu::AccelerationStructureBuildDesc* desc,
 ) {
     AccelerationStructureBuildCommandOps ops = {
-        .user_data = record.device_state.ray_query_operations,
+        .user_data = record.device_state.acceleration_structure_operations,
         .build = &acceleration_structure_build_command_real,
     };
     return record_acceleration_structure_build_with_ops(

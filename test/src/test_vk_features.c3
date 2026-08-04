@@ -22,7 +22,7 @@ fn vk::PhysicalDeviceFeatures base_with_required() {
     return base;
 }
 
-fn gpu::internal::vk::RayQueryCandidateSupport
+fn gpu::internal::vk::RayTracingCandidateSupport
 ray_query_candidate_with_required() {
     return {
         .acceleration_structure_extension = true,
@@ -36,7 +36,7 @@ ray_query_candidate_with_required() {
         .descriptor_partially_bound = true,
         .descriptor_update_unused_while_pending = true,
         .spirv_1_4 = true,
-        .required_commands = true,
+        .acceleration_structure_required_commands = true,
         .triangle_vertex_format = true,
         .max_geometry_count = 1,
         .max_primitive_count = 1,
@@ -50,7 +50,7 @@ ray_query_candidate_with_required() {
 }
 
 fn void ray_query_candidate_gate_requires_the_complete_family() @test {
-    gpu::internal::vk::RayQueryCandidateSupport support =
+    gpu::internal::vk::RayTracingCandidateSupport support =
         ray_query_candidate_with_required();
     assert(gpu::internal::vk::ray_query_candidate_supported(&support));
 
@@ -87,7 +87,7 @@ fn void ray_query_candidate_gate_requires_the_complete_family() @test {
     support.spirv_1_4 = false;
     assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
     support = ray_query_candidate_with_required();
-    support.required_commands = false;
+    support.acceleration_structure_required_commands = false;
     assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
     support = ray_query_candidate_with_required();
     support.triangle_vertex_format = false;
@@ -95,7 +95,7 @@ fn void ray_query_candidate_gate_requires_the_complete_family() @test {
 }
 
 fn void ray_query_candidate_gate_requires_actionable_limits() @test {
-    gpu::internal::vk::RayQueryCandidateSupport support =
+    gpu::internal::vk::RayTracingCandidateSupport support =
         ray_query_candidate_with_required();
     support.max_geometry_count = 0;
     assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
@@ -113,8 +113,8 @@ fn void ray_query_candidate_gate_requires_actionable_limits() @test {
     assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
 }
 
-fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
-    gpu::internal::vk::RayQueryCandidateSupport support =
+fn void acceleration_structure_caps_are_exact_saturating_and_opt_in_only() @test {
+    gpu::internal::vk::RayTracingCandidateSupport support =
         ray_query_candidate_with_required();
     support.max_geometry_count = (ulong)uint::max + 17;
     support.max_primitive_count = 29;
@@ -123,27 +123,27 @@ fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
     support.max_per_stage_descriptor_count = 31;
     support.scratch_alignment = 512;
 
-    gpu::RayQueryCaps disabled =
-        gpu::internal::vk::normalize_ray_query_caps(false, 7, 0, 0, &support);
+    gpu::AccelerationStructureCaps disabled =
+        gpu::internal::vk::normalize_acceleration_structure_caps(false, 7, 0, 0, &support);
     assert(!disabled.enabled
-            && disabled.acceleration_structure_heap_capacity == 0
+            && disabled.heap_capacity == 0
             && disabled.max_geometry_count == 0
             && disabled.max_primitive_count == 0
             && disabled.max_instance_count == 0
             && disabled.scratch_alignment == 0,
         "the disabled path publishes a false zero capability record");
 
-    gpu::RayQueryCaps enabled =
-        gpu::internal::vk::normalize_ray_query_caps(true, 7, 0, 0, &support);
+    gpu::AccelerationStructureCaps enabled =
+        gpu::internal::vk::normalize_acceleration_structure_caps(true, 7, 0, 0, &support);
     assert(enabled.enabled
-            && enabled.acceleration_structure_heap_capacity == 7
+            && enabled.heap_capacity == 7
             && enabled.max_geometry_count == uint::max
             && enabled.max_primitive_count == 29
             && enabled.max_instance_count == uint::max
             && enabled.scratch_alignment == 512,
         "enabled public caps preserve exact limits and saturate wide values");
 
-    assert(!gpu::internal::vk::normalize_ray_query_caps(
+    assert(!gpu::internal::vk::normalize_acceleration_structure_caps(
             true,
             support.max_descriptor_count + 1,
             0,
@@ -153,7 +153,7 @@ fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
         "the configured binding capacity must fit the descriptor path");
 
     support.max_per_stage_descriptor_count = 6;
-    assert(!gpu::internal::vk::ray_query_descriptor_heap_fits_limits(
+    assert(!gpu::internal::vk::acceleration_structure_descriptor_heap_fits_limits(
         7,
         3,
         2,
@@ -161,7 +161,7 @@ fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
     ), "the acceleration-structure heap fits the per-stage type limit");
     support.max_per_stage_descriptor_count = 31;
     support.max_per_stage_resources = 18;
-    assert(!gpu::internal::vk::ray_query_descriptor_heap_fits_limits(
+    assert(!gpu::internal::vk::acceleration_structure_descriptor_heap_fits_limits(
         7,
         3,
         2,
@@ -169,12 +169,102 @@ fn void ray_query_caps_are_exact_saturating_and_opt_in_only() @test {
     ), "the acceleration-structure heap joins per-stage resource accounting");
     support.max_per_stage_resources = uint::max;
     support.max_all_pools_descriptors = 20;
-    assert(!gpu::internal::vk::ray_query_descriptor_heap_fits_limits(
+    assert(!gpu::internal::vk::acceleration_structure_descriptor_heap_fits_limits(
         7,
         3,
         2,
         &support,
     ), "the acceleration-structure heap joins all-pools accounting");
+}
+
+fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
+    gpu::internal::vk::RayTracingCandidateSupport support = {
+        .acceleration_structure_extension = true,
+        .ray_tracing_pipeline_extension = true,
+        .deferred_host_operations_extension = true,
+        .acceleration_structure = true,
+        .ray_tracing_pipeline = true,
+        .descriptor_update_after_bind = true,
+        .buffer_device_address = true,
+        .runtime_descriptor_array = true,
+        .descriptor_partially_bound = true,
+        .descriptor_update_unused_while_pending = true,
+        .spirv_1_4 = true,
+        .acceleration_structure_required_commands = true,
+        .ray_tracing_pipeline_required_commands = true,
+        .triangle_vertex_format = true,
+        .max_geometry_count = 1,
+        .max_primitive_count = 1,
+        .max_instance_count = 1,
+        .max_descriptor_count = 1,
+        .max_per_stage_descriptor_count = 1,
+        .max_per_stage_resources = uint::max,
+        .max_all_pools_descriptors = uint::max,
+        .scratch_alignment = 256,
+        .max_ray_recursion_depth = 4,
+        .max_ray_dispatch_invocation_count = 65_536,
+        .max_ray_dispatch_dimensions = { 1024, 512, 256 },
+        .shader_group_handle_size = 32,
+        .shader_group_handle_alignment = 32,
+        .shader_group_base_alignment = 64,
+        .max_shader_group_stride = 4096,
+        .max_ray_hit_attribute_size = 32,
+    };
+
+    assert(gpu::internal::vk::acceleration_structure_candidate_supported(&support));
+    assert(!gpu::internal::vk::ray_query_candidate_supported(&support));
+    assert(gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&support));
+
+    gpu::RayTracingPipelineCaps caps =
+        gpu::internal::vk::normalize_ray_tracing_pipeline_caps(true, &support);
+    assert(caps.enabled && caps.max_recursion_depth == 4);
+    assert(caps.max_ray_dispatch_invocation_count == 65_536);
+    assert(caps.max_ray_dispatch_dimensions.x == 1024
+        && caps.max_ray_dispatch_dimensions.y == 512
+        && caps.max_ray_dispatch_dimensions.z == 256);
+    assert(caps.shader_group_handle_size == 32);
+    assert(caps.shader_group_handle_alignment == 32);
+    assert(caps.shader_group_base_alignment == 64);
+    assert(caps.max_shader_group_stride == 4096);
+    assert(caps.max_hit_attribute_size == 32);
+    assert(!gpu::internal::vk::normalize_ray_tracing_pipeline_caps(
+        false,
+        &support,
+    ).enabled);
+
+    gpu::internal::vk::RayTracingCandidateSupport rejected = support;
+    rejected.ray_tracing_pipeline_extension = false;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.ray_tracing_pipeline = false;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.ray_tracing_pipeline_required_commands = false;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_ray_recursion_depth = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_ray_dispatch_invocation_count = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_ray_dispatch_dimensions.x = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.shader_group_handle_size = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.shader_group_handle_alignment = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.shader_group_base_alignment = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_shader_group_stride = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
+    rejected = support;
+    rejected.max_ray_hit_attribute_size = 0;
+    assert(!gpu::internal::vk::ray_tracing_pipeline_candidate_supported(&rejected));
 }
 
 fn vk::PhysicalDeviceVulkan11Features v11_with_required() {
@@ -1015,6 +1105,7 @@ fn void semantic_barrier_stage_masks_map_exactly() @test {
         .color_output = true,
         .depth_output = true,
         .indirect = true,
+        .ray_tracing = true,
         .acceleration_structure_build = true,
     };
     ulong expected = (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
@@ -1023,7 +1114,9 @@ fn void semantic_barrier_stage_masks_map_exactly() @test {
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT
         | (ulong)vk::PipelineStageFlagBits2
-            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+        | (ulong)vk::PipelineStageFlagBits2
+            .STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
     assert((ulong)gpu::internal::vk::barrier_before_stages_to_vk(stages) == expected,
         "combined semantic producer stages map exactly");
 
@@ -1203,7 +1296,29 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             transfer_only,
         )) == gpu::INVALID_ARGUMENT,
         "transfer-only queues reject acceleration-structure build waits");
-    gpu::StageMask unknown = (gpu::StageMask)(1u << 11);
+    assert(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .ray_tracing },
+            graphics_only,
+            false,
+            false,
+            true,
+        )!! == vk::PipelineStageFlagBits2
+            .STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+        "enabled ray tracing is a graphics/compute wait destination");
+    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .ray_tracing },
+            graphics_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "ray tracing waits require pipeline opt-in");
+    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .ray_tracing },
+            transfer_only,
+            false,
+            false,
+            true,
+        )) == gpu::INVALID_ARGUMENT,
+        "transfer-only queues reject ray tracing waits");
+    gpu::StageMask unknown = (gpu::StageMask)(1u << 12);
     assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
             unknown,
             graphics_only,
@@ -1219,10 +1334,12 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
         .color_output = true,
         .depth_output = true,
         .indirect = true,
+        .ray_tracing = true,
     };
     ulong before_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_HOST_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
         | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     assert((ulong)gpu::internal::vk::barrier_before_access_to_vk(stages) == before_expected,
@@ -1238,6 +1355,8 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
         | (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    after_expected |=
+        (ulong)vk::AccessFlagBits2.ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
     assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages)
             == after_expected,
         "consumer stages map to required access scopes");
@@ -1384,7 +1503,7 @@ fn void semantic_barrier_masks_reject_empty_and_contradictory_values() @test {
         "present cannot be combined with a device stage");
 
     gpu::Barrier unknown_stage = valid;
-    unknown_stage.before = (gpu::StageMask)((uint)valid.before | 0x800u);
+    unknown_stage.before = (gpu::StageMask)((uint)valid.before | 0x1000u);
     assert(!gpu::internal::vk::barrier_masks_valid(&unknown_stage),
         "mixed known and unknown stage-mask bits are invalid");
 }

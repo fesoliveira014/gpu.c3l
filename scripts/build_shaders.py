@@ -16,7 +16,17 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-STAGES = {".comp": "compute", ".vert": "vertex", ".frag": "fragment"}
+STAGES = {
+    ".comp": "compute",
+    ".vert": "vertex",
+    ".frag": "fragment",
+    ".rgen": "rgen",
+    ".rmiss": "rmiss",
+    ".rchit": "rchit",
+    ".rahit": "rahit",
+    ".rint": "rint",
+    ".rcall": "rcall",
+}
 SHADER_TREES = (
     (ROOT / "test" / "shaders", ROOT / "test" / "src" / "shaders"),
     (
@@ -42,19 +52,17 @@ def main():
                 )
                 sys.exit(1)
             out = out_dir / (src.stem + ".spv")
-            subprocess.run(
-                [
-                    glslc,
-                    f"-fshader-stage={stage}",
-                    "--target-env=vulkan1.3",
-                    "-I",
-                    str(include_dir),
-                    str(src),
-                    "-o",
-                    str(out),
-                ],
-                check=True,
-            )
+            command = [
+                glslc,
+                f"-fshader-stage={stage}",
+                "--target-env=vulkan1.3",
+                "-I",
+                str(include_dir),
+                str(src),
+                "-o",
+                str(out),
+            ]
+            subprocess.run(command, check=True)
             print(f"built {out}")
 
     assembly_sources = sorted((ROOT / "test" / "shaders").glob("*.spvasm"))

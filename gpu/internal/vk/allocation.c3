@@ -268,7 +268,10 @@ fn AllocationNativeOps allocation_native_ops_real() {
     };
 }
 
-fn BufferUsage allocation_buffer_usage(bool ray_queries_enabled = false) {
+fn BufferUsage allocation_buffer_usage(
+    bool acceleration_structures_enabled = false,
+    bool ray_tracing_pipelines_enabled = false,
+) {
     BufferUsage usage = {
         .transfer_src,
         .transfer_dst,
@@ -279,10 +282,11 @@ fn BufferUsage allocation_buffer_usage(bool ray_queries_enabled = false) {
         .indirect,
         .addressable,
     };
-    if (ray_queries_enabled) {
+    if (acceleration_structures_enabled) {
         usage.acceleration_structure_storage = true;
         usage.acceleration_structure_build_input = true;
     }
+    if (ray_tracing_pipelines_enabled) usage.shader_binding_table = true;
     return usage;
 }
 
@@ -314,11 +318,15 @@ fn vma::AllocationCreateInfo? memory_class_to_vma(
 fn vk::BufferCreateInfo? allocation_buffer_create_info(
     gpu::AllocationDesc* desc,
     uint[] queue_families,
-    bool ray_queries_enabled = false,
+    bool acceleration_structures_enabled = false,
+    bool ray_tracing_pipelines_enabled = false,
 ) {
     BufferDesc backing = {
         .size         = desc.size,
-        .usage        = allocation_buffer_usage(ray_queries_enabled),
+        .usage        = allocation_buffer_usage(
+            acceleration_structures_enabled,
+            ray_tracing_pipelines_enabled,
+        ),
         .memory_class = desc.memory_class,
         .access       = desc.access,
     };
@@ -421,7 +429,8 @@ fn gpu::GpuAllocation? allocate_memory_for_state_with_ops(
     vk::BufferCreateInfo buffer_info = allocation_buffer_create_info(
         desc,
         families[:family_count],
-        state.ray_queries_enabled,
+        state.acceleration_structures_enabled,
+        state.ray_tracing_pipelines_enabled,
     )!;
     vma::AllocationCreateInfo allocation_info =
         memory_class_to_vma(desc.memory_class)!;
@@ -509,7 +518,8 @@ fn gpu::GpuAllocation? allocate_memory_for_state_with_ops(
             .cpu_base        = requires_mapping ? native_info.mapped_data : null,
             .size            = desc.size,
             .usage           = allocation_buffer_usage(
-                state.ray_queries_enabled,
+                state.acceleration_structures_enabled,
+                state.ray_tracing_pipelines_enabled,
             ),
             .access          = desc.access,
             .memory_class    = desc.memory_class,

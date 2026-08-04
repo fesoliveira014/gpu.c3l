@@ -20,6 +20,7 @@ const gpu::StageMask TEXTURE_STATE_STAGE_MASK @private = {
     .compute,
     .vertex_shader,
     .fragment_shader,
+    .ray_tracing,
     .color_output,
     .depth_output,
     .present,
@@ -30,6 +31,7 @@ const gpu::StageMask TEXTURE_SHADER_STAGE_MASK @private = {
     .compute,
     .vertex_shader,
     .fragment_shader,
+    .ray_tracing,
 };
 const gpu::StageMask TEXTURE_COLOR_OUTPUT_STAGE @private = { .color_output };
 const gpu::StageMask TEXTURE_DEPTH_OUTPUT_STAGE @private = { .depth_output };
@@ -255,11 +257,16 @@ fn ZString texture_state_field(
 fn bool texture_shader_stages_supported(
     gpu::StageMask stages,
     vk::QueueFlags flags,
+    bool           ray_tracing_pipelines,
 ) @private {
     bool graphics = queue_flags_include(flags, vk::QueueFlagBits.GRAPHICS_BIT);
     bool compute = queue_flags_include(flags, vk::QueueFlagBits.COMPUTE_BIT);
     if (stages.compute && !compute) return false;
     if ((stages.vertex_shader || stages.fragment_shader) && !graphics) {
+        return false;
+    }
+    if (stages.ray_tracing && (!(graphics || compute)
+            || !ray_tracing_pipelines)) {
         return false;
     }
     return true;
@@ -269,6 +276,7 @@ fn TextureBarrierRejection texture_state_rejection(
     gpu::TextureState texture_state,
     TextureSlot* slot,
     vk::QueueFlags flags,
+    bool ray_tracing_pipelines,
     bool before,
 ) @private {
     TextureStateSide side = before
@@ -306,7 +314,8 @@ fn TextureBarrierRejection texture_state_rejection(
     bool shader_queue = graphics || compute;
     bool shader_stages = texture_state.stages.compute
         || texture_state.stages.vertex_shader
-        || texture_state.stages.fragment_shader;
+        || texture_state.stages.fragment_shader
+        || texture_state.stages.ray_tracing;
     bool exact_read = access == (uint)TEXTURE_READ_ACCESS;
     bool exact_write = access == (uint)TEXTURE_WRITE_ACCESS;
     bool concrete_access = access != 0;
@@ -379,7 +388,11 @@ fn TextureBarrierRejection texture_state_rejection(
             if (!(all || (shader_stages
                     && (stages & ~(uint)TEXTURE_SHADER_STAGE_MASK) == 0))
                 || !shader_queue
-                || !texture_shader_stages_supported(texture_state.stages, flags)) {
+                || !texture_shader_stages_supported(
+                    texture_state.stages,
+                    flags,
+                    ray_tracing_pipelines,
+                )) {
                 return {
                     .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "sampled textures require supported shader stages or all",
@@ -401,7 +414,11 @@ fn TextureBarrierRejection texture_state_rejection(
             if (!(all || (shader_stages
                     && (stages & ~(uint)TEXTURE_SHADER_STAGE_MASK) == 0))
                 || !shader_queue
-                || !texture_shader_stages_supported(texture_state.stages, flags)) {
+                || !texture_shader_stages_supported(
+                    texture_state.stages,
+                    flags,
+                    ray_tracing_pipelines,
+                )) {
                 return {
                     .field     = texture_state_field(side, TextureStateMember.STAGES),
                     .invariant = "storage textures require supported shader stages or all",
@@ -579,6 +596,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         texture_state: barrier.before,
         slot:          slot,
         flags:         completion.queue_flags,
+        ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
         before:        true,
     );
     if (rejection.field != null) {
@@ -600,6 +618,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         texture_state: barrier.after,
         slot:          slot,
         flags:         completion.queue_flags,
+        ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
         before:        false,
     );
     if (rejection.field != null) {
@@ -716,7 +735,8 @@ fn void? vk_cmd_barrier_with_ops(
         rejected_field = barrier_queue_rejected_field(
             barrier,
             completion.queue_flags,
-            state.ray_queries_enabled,
+            state.acceleration_structures_enabled,
+            state.ray_tracing_pipelines_enabled,
         );
         if (rejected_field != null) {
             invariant = "stage mask must be supported by the recording queue";
@@ -741,7 +761,7 @@ fn void? vk_cmd_barrier_with_ops(
     vk::MemoryBarrier2 native_barrier = barrier_to_vk(
         barrier,
         state.generated_work.enabled,
-        state.ray_queries_enabled,
+        state.acceleration_structures_enabled,
     );
     emit_barrier(commands, &native_barrier, ops);
 }
@@ -760,7 +780,7 @@ fn void? trusted_barrier_with_ops(
     vk::MemoryBarrier2 native_barrier = barrier_to_vk(
         barrier,
         state.generated_work.enabled,
-        state.ray_queries_enabled,
+        state.acceleration_structures_enabled,
     );
     emit_barrier(commands, &native_barrier, ops);
 }

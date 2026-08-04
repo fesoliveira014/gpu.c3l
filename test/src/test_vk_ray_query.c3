@@ -62,10 +62,10 @@ fn void lavapipe_ray_query_device_path_is_actionable() @test {
     }
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
     assert(caps.ray_queries.enabled
-            && caps.ray_queries.acceleration_structure_heap_capacity == 32
-            && caps.ray_queries.max_geometry_count > 0
-            && caps.ray_queries.max_instance_count > 0
-            && caps.ray_queries.scratch_alignment > 0,
+            && caps.acceleration_structures.heap_capacity == 32
+            && caps.acceleration_structures.max_geometry_count > 0
+            && caps.acceleration_structures.max_instance_count > 0
+            && caps.acceleration_structures.scratch_alignment > 0,
         "the selected opted-in device publishes actionable ray-query caps");
 }
 

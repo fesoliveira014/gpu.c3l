@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 import gpu::internal::vk @public;
 import spvreflect;
+import vk;
 
 // Headless (lavapipe): pipeline-time reflection validation against the
 // heap convention. Fixtures come from test/shaders/ via scripts/build_shaders.py.
@@ -56,6 +57,29 @@ const char[*] REFLECT_GRAPHICS_SIZE_8_SPIRV =
 const char[*] REFLECT_GRAPHICS_SECOND_OFFSET_4_SPIRV =
     $embed("shaders/graphics_second_offset_4.vert.spv");
 const char[*] REFLECT_RENAMED_SPIRV     = $embed("shaders/root_renamed.comp.spv");
+const char[*] REFLECT_RAYGEN_SPIRV      = $embed("shaders/ray_stage.rgen.spv");
+const char[*] REFLECT_MISS_SPIRV        = $embed("shaders/ray_stage.rmiss.spv");
+const char[*] REFLECT_CLOSEST_HIT_SPIRV = $embed("shaders/ray_stage.rchit.spv");
+const char[*] REFLECT_ANY_HIT_SPIRV     = $embed("shaders/ray_stage.rahit.spv");
+const char[*] REFLECT_INTERSECTION_SPIRV =
+    $embed("shaders/ray_stage.rint.spv");
+const char[*] REFLECT_CALLABLE_SPIRV    = $embed("shaders/ray_stage.rcall.spv");
+const char[*] REFLECT_RAY_BAD_ROOT_SPIRV =
+    $embed("shaders/ray_bad_root.rgen.spv");
+const char[*] REFLECT_FUNCTIONAL_RAYGEN_SPIRV =
+    $embed("shaders/ray_trace_functional.rgen.spv");
+const char[*] REFLECT_FUNCTIONAL_PRIMARY_MISS_SPIRV =
+    $embed("shaders/ray_trace_functional_primary.rmiss.spv");
+const char[*] REFLECT_FUNCTIONAL_SECONDARY_MISS_SPIRV =
+    $embed("shaders/ray_trace_functional_secondary.rmiss.spv");
+const char[*] REFLECT_FUNCTIONAL_TRIANGLE_HIT_SPIRV =
+    $embed("shaders/ray_trace_functional_triangle.rchit.spv");
+const char[*] REFLECT_FUNCTIONAL_PROCEDURAL_INTERSECTION_SPIRV =
+    $embed("shaders/ray_trace_functional_procedural.rint.spv");
+const char[*] REFLECT_FUNCTIONAL_PROCEDURAL_HIT_SPIRV =
+    $embed("shaders/ray_trace_functional_procedural.rchit.spv");
+const char[*] REFLECT_FUNCTIONAL_CALLABLE_SPIRV =
+    $embed("shaders/ray_trace_functional.rcall.spv");
 
 const ZString ENTRY_POINT_OVER_CAP = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
@@ -232,7 +256,7 @@ fn void? check_fixture_root_abi(
 
 fn void? check_fixture_heap_convention(
     char[] spirv,
-    bool ray_queries_enabled,
+    bool acceleration_structures_enabled,
 ) {
     ulong[spvreflect::SHADER_MODULE_SIZE / 8] module_storage;
     spvreflect::ShaderModule* reflect_module =
@@ -248,7 +272,7 @@ fn void? check_fixture_heap_convention(
     vk::check_heap_convention(
         reflect_module,
         "main",
-        ray_queries_enabled,
+        acceleration_structures_enabled,
     )!;
 }
 
@@ -593,6 +617,135 @@ fn void exact_compute_vertex_and_fragment_roots_accepted() @test {
         role:        gpu::internal::ShaderRole.COMPUTE,
         entry_point: "main",
     )!!;
+}
+
+fn void assert_ray_tracing_stage_fixture(
+    char[]                    fixture,
+    gpu::internal::ShaderRole role,
+    vk::ShaderStageFlagBits   native_stage,
+) {
+    ulong[spvreflect::SHADER_MODULE_SIZE / 8] module_storage;
+    spvreflect::ShaderModule* reflect_module =
+        (spvreflect::ShaderModule*)&module_storage;
+    assert(spvreflect::create_shader_module(
+        fixture.len,
+        fixture.ptr,
+        reflect_module,
+    ) == spvreflect::ReflectResult.RESULT_SUCCESS);
+    defer reflect_module.destroy();
+    spvreflect::EntryPoint* entry = reflect_module.get_entry_point("main");
+    assert(entry != null);
+    gpu::internal::ShaderRole reflected_role =
+        vk::shader_role_from_spv(entry.stage())!!;
+    vk::ShaderStageFlagBits reflected_native_stage =
+        vk::shader_role_to_vk(role)!!;
+    assert(reflected_role == role);
+    assert(reflected_native_stage == native_stage);
+    vk::check_root_push_abi(reflect_module, "main", role)!!;
+}
+
+fn void all_ray_tracing_stages_reflect_their_exact_roles_and_root() @test {
+    char[][] fixtures = {
+        REFLECT_RAYGEN_SPIRV[..],
+        REFLECT_MISS_SPIRV[..],
+        REFLECT_CLOSEST_HIT_SPIRV[..],
+        REFLECT_ANY_HIT_SPIRV[..],
+        REFLECT_INTERSECTION_SPIRV[..],
+        REFLECT_CALLABLE_SPIRV[..],
+    };
+    gpu::internal::ShaderRole[] roles = {
+        gpu::internal::ShaderRole.RAY_GENERATION,
+        gpu::internal::ShaderRole.MISS,
+        gpu::internal::ShaderRole.CLOSEST_HIT,
+        gpu::internal::ShaderRole.ANY_HIT,
+        gpu::internal::ShaderRole.INTERSECTION,
+        gpu::internal::ShaderRole.CALLABLE,
+    };
+    vk::ShaderStageFlagBits[] native_stages = {
+        vk::ShaderStageFlagBits.RAYGEN_BIT_KHR,
+        vk::ShaderStageFlagBits.MISS_BIT_KHR,
+        vk::ShaderStageFlagBits.CLOSEST_HIT_BIT_KHR,
+        vk::ShaderStageFlagBits.ANY_HIT_BIT_KHR,
+        vk::ShaderStageFlagBits.INTERSECTION_BIT_KHR,
+        vk::ShaderStageFlagBits.CALLABLE_BIT_KHR,
+    };
+
+    foreach (index, fixture : fixtures) {
+        assert_ray_tracing_stage_fixture(
+            fixture:      fixture,
+            role:         roles[index],
+            native_stage: native_stages[index],
+        );
+    }
+}
+
+fn void ray_tracing_stage_mismatch_and_root_mismatch_are_rejected() @test {
+    gpu::Device device = make_reflection_test_device();
+    defer destroy_test_device(&device)!!;
+    assert_reflected_shader_rejected(
+        device:      &device,
+        spirv:       REFLECT_RAYGEN_SPIRV[..],
+        role:        gpu::internal::ShaderRole.COMPUTE,
+        message:     "ray generation cannot satisfy a compute field",
+    );
+    assert(@catch(check_fixture_root_abi(
+        spirv:       REFLECT_RAY_BAD_ROOT_SPIRV[..],
+        role:        gpu::internal::ShaderRole.RAY_GENERATION,
+        entry_point: "main",
+    )) == gpu::SHADER_INVALID);
+}
+
+fn void ray_tracing_binding_five_requires_only_shared_acceleration_structures() @test {
+    check_fixture_heap_convention(REFLECT_RAYGEN_SPIRV[..], true)!!;
+    assert(@catch(check_fixture_heap_convention(
+        REFLECT_RAYGEN_SPIRV[..],
+        false,
+    )) == gpu::UNSUPPORTED_FEATURE);
+}
+
+fn void functional_ray_tracing_fixtures_pin_roles_root_heap_and_entry() @test {
+    char[][] fixtures = {
+        REFLECT_FUNCTIONAL_RAYGEN_SPIRV[..],
+        REFLECT_FUNCTIONAL_PRIMARY_MISS_SPIRV[..],
+        REFLECT_FUNCTIONAL_SECONDARY_MISS_SPIRV[..],
+        REFLECT_FUNCTIONAL_TRIANGLE_HIT_SPIRV[..],
+        REFLECT_FUNCTIONAL_PROCEDURAL_INTERSECTION_SPIRV[..],
+        REFLECT_FUNCTIONAL_PROCEDURAL_HIT_SPIRV[..],
+        REFLECT_FUNCTIONAL_CALLABLE_SPIRV[..],
+    };
+    gpu::internal::ShaderRole[] roles = {
+        gpu::internal::ShaderRole.RAY_GENERATION,
+        gpu::internal::ShaderRole.MISS,
+        gpu::internal::ShaderRole.MISS,
+        gpu::internal::ShaderRole.CLOSEST_HIT,
+        gpu::internal::ShaderRole.INTERSECTION,
+        gpu::internal::ShaderRole.CLOSEST_HIT,
+        gpu::internal::ShaderRole.CALLABLE,
+    };
+    vk::ShaderStageFlagBits[] stages = {
+        vk::ShaderStageFlagBits.RAYGEN_BIT_KHR,
+        vk::ShaderStageFlagBits.MISS_BIT_KHR,
+        vk::ShaderStageFlagBits.MISS_BIT_KHR,
+        vk::ShaderStageFlagBits.CLOSEST_HIT_BIT_KHR,
+        vk::ShaderStageFlagBits.INTERSECTION_BIT_KHR,
+        vk::ShaderStageFlagBits.CLOSEST_HIT_BIT_KHR,
+        vk::ShaderStageFlagBits.CALLABLE_BIT_KHR,
+    };
+
+    foreach (index, fixture : fixtures) {
+        assert_ray_tracing_stage_fixture(
+            fixture:      fixture,
+            role:         roles[index],
+            native_stage: stages[index],
+        );
+        check_fixture_heap_convention(fixture, true)!!;
+        assert(@catch(check_fixture_root_abi(
+            spirv:       fixture,
+            role:        roles[index],
+            entry_point: "missing",
+        )) == gpu::SHADER_INVALID,
+            "every functional stage rejects an absent selected entry point");
+    }
 }
 
 fn void reversed_graphics_member_order_rejected() @test {

@@ -14,6 +14,7 @@ struct DispatchLookupCounts {
     uint device_presentation;
     uint dynamic_color;
     uint ray_query;
+    uint ray_tracing_pipeline;
     uint unexpected;
 }
 
@@ -27,6 +28,7 @@ fn bool DispatchLookupCounts.is_empty(self) {
         && self.device_presentation == 0
         && self.dynamic_color == 0
         && self.ray_query == 0
+        && self.ray_tracing_pipeline == 0
         && self.unexpected == 0;
 }
 
@@ -249,6 +251,10 @@ fn vk::PFN_vkVoidFunction recording_device_proc_loader(
         || proc_name == "vkCmdBuildAccelerationStructuresKHR"
         || proc_name == "vkGetAccelerationStructureDeviceAddressKHR") {
         counts.ray_query++;
+    } else if (proc_name == "vkCreateRayTracingPipelinesKHR"
+        || proc_name == "vkGetRayTracingShaderGroupHandlesKHR"
+        || proc_name == "vkCmdTraceRaysKHR") {
+        counts.ray_tracing_pipeline++;
     } else {
         counts.unexpected++;
     }
@@ -325,6 +331,7 @@ fn void device_dispatch_loads_only_selected_groups() @test {
         && counts.device_presentation == 0
         && counts.dynamic_color == 3
         && counts.ray_query == 0
+        && counts.ray_tracing_pipeline == 0
         && counts.unexpected == 0,
         "the device baseline loads only the required color procedures");
 
@@ -338,6 +345,8 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_debug == 3, "debug selection loads only device diagnostics");
     assert(counts.device_presentation == 0, "debug selection does not load presentation procedures");
     assert(counts.dynamic_color == 3, "debug selection retains baseline color procedures");
+    assert(counts.ray_tracing_pipeline == 0,
+        "debug selection does not load ray-tracing-pipeline procedures");
     assert(counts.unexpected == 0, "debug selection loads no unrelated procedures");
 
     counts = {};
@@ -351,10 +360,12 @@ fn void device_dispatch_loads_only_selected_groups() @test {
     assert(counts.device_presentation == 5, "presentation selection loads only device WSI");
     assert(counts.dynamic_color == 3, "presentation selection retains baseline color procedures");
     assert(counts.ray_query == 0, "presentation selection does not load ray-query procedures");
+    assert(counts.ray_tracing_pipeline == 0,
+        "presentation selection does not load ray-tracing-pipeline procedures");
     assert(counts.unexpected == 0, "presentation selection loads no unrelated procedures");
 
     counts = {};
-    plan = { .ray_queries = true };
+    plan = { .acceleration_structures = true };
     gpu::internal::vk::VkDeviceDispatch ray_query_dispatch =
         gpu::internal::vk::load_vk_device_dispatch(
             (vk::Device)&counts,
@@ -368,8 +379,10 @@ fn void device_dispatch_loads_only_selected_groups() @test {
         "ray-query selection retains baseline color procedures");
     assert(counts.ray_query == 5,
         "ray-query selection loads the complete command family");
+    assert(counts.ray_tracing_pipeline == 0,
+        "acceleration-structure selection does not load pipeline procedures");
     assert(counts.unexpected == 0, "ray-query selection loads no unrelated procedures");
-    assert(gpu::internal::vk::device_dispatch_supports_ray_queries(&ray_query_dispatch),
+    assert(gpu::internal::vk::device_dispatch_supports_acceleration_structures(&ray_query_dispatch),
         "the complete ray-query command family is available");
 }
 
@@ -517,7 +530,9 @@ fn void device_color_dispatch_requires_complete_set() @test {
 }
 
 fn void device_ray_query_dispatch_requires_complete_set() @test {
-    gpu::internal::vk::VkDeviceDispatchPlan plan = { .ray_queries = true };
+    gpu::internal::vk::VkDeviceDispatchPlan plan = {
+        .acceleration_structures = true,
+    };
     DispatchLookupCounts counts;
     gpu::internal::vk::VkDeviceDispatch complete =
         gpu::internal::vk::load_vk_device_dispatch(
@@ -525,21 +540,54 @@ fn void device_ray_query_dispatch_requires_complete_set() @test {
             &recording_device_proc_loader,
             plan,
         );
-    assert(gpu::internal::vk::device_dispatch_supports_ray_queries(&complete));
+    assert(gpu::internal::vk::device_dispatch_supports_acceleration_structures(&complete));
 
     gpu::internal::vk::VkDeviceDispatch missing = complete;
-    missing.ray_queries.create_acceleration_structure = null;
-    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
+    missing.acceleration_structures.create_acceleration_structure = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_acceleration_structures(&missing));
     missing = complete;
-    missing.ray_queries.destroy_acceleration_structure = null;
-    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
+    missing.acceleration_structures.destroy_acceleration_structure = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_acceleration_structures(&missing));
     missing = complete;
-    missing.ray_queries.get_build_sizes = null;
-    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
+    missing.acceleration_structures.get_build_sizes = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_acceleration_structures(&missing));
     missing = complete;
-    missing.ray_queries.cmd_build = null;
-    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
+    missing.acceleration_structures.cmd_build = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_acceleration_structures(&missing));
     missing = complete;
-    missing.ray_queries.get_device_address = null;
-    assert(!gpu::internal::vk::device_dispatch_supports_ray_queries(&missing));
+    missing.acceleration_structures.get_device_address = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_acceleration_structures(&missing));
+}
+
+fn void device_ray_tracing_pipeline_dispatch_requires_complete_set() @test {
+    gpu::internal::vk::VkDeviceDispatchPlan plan = {
+        .ray_tracing_pipelines = true,
+    };
+    DispatchLookupCounts counts;
+    gpu::internal::vk::VkDeviceDispatch complete =
+        gpu::internal::vk::load_vk_device_dispatch(
+            (vk::Device)&counts,
+            &recording_device_proc_loader,
+            plan,
+        );
+    assert(counts.ray_tracing_pipeline == 3);
+    assert(gpu::internal::vk::device_dispatch_supports_ray_tracing_pipelines(
+        &complete,
+    ));
+
+    gpu::internal::vk::VkDeviceDispatch missing = complete;
+    missing.ray_tracing_pipelines.create_pipelines = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_tracing_pipelines(
+        &missing,
+    ));
+    missing = complete;
+    missing.ray_tracing_pipelines.get_shader_group_handles = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_tracing_pipelines(
+        &missing,
+    ));
+    missing = complete;
+    missing.ray_tracing_pipelines.cmd_trace_rays = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_tracing_pipelines(
+        &missing,
+    ));
 }

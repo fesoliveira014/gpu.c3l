@@ -1604,6 +1604,80 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     return pipeline;
 }
 
+<* Create a direct KHR ray-tracing pipeline. Shader groups are ordered ray
+   generation, miss, hit, then callable. A zero recursion depth selects one.
+   Identical immutable descriptors may alias one backend pipeline under
+   distinct owning handles. All descriptor slices and shader bytes are borrowed
+   only for the call.
+
+   @param device : "Live device created with enable_ray_tracing_pipelines."
+   @param desc : "Borrowed structured ray-tracing pipeline description."
+   @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, compilation, or device fault." *>
+fn PipelineHandle? create_ray_tracing_pipeline(
+    Device* device,
+    RayTracingPipelineDesc* desc,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    PipelineHandle pipeline =
+        gpu::internal::vk::vk_create_ray_tracing_pipeline(
+            operation.state,
+            desc,
+        )!;
+    gpu::internal::retain_device_children(&operation);
+    return pipeline;
+}
+
+<* Return deterministic ray-generation, miss, hit, and callable group ranges
+   for a live ray-tracing pipeline. The result contains no borrowed storage.
+
+   @param device : "Live device that owns pipeline."
+   @param pipeline : "Live ray-tracing pipeline handle."
+   @return "The pipeline group ranges, or a recoverable ownership, kind, or device fault." *>
+fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(
+    Device* device,
+    PipelineHandle pipeline,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    return gpu::internal::vk::vk_get_ray_tracing_pipeline_info(
+        operation.state,
+        pipeline,
+    );
+}
+
+<* Copy exact native shader-group handles for a contiguous group range.
+   `out.len` must equal `group_count * shader_group_handle_size`; zero groups
+   require an empty output and perform no backend call.
+
+   @param device : "Live device that owns pipeline."
+   @param pipeline : "Live ray-tracing pipeline handle."
+   @param first_group : "First group in the deterministic pipeline order."
+   @param group_count : "Number of contiguous handles to copy."
+   @param out : "Caller-owned exact-size output bytes."
+   @return "Success, or a recoverable ownership, kind, range, output-size, or device fault." *>
+fn void? get_ray_tracing_shader_group_handles(
+    Device* device,
+    PipelineHandle pipeline,
+    uint first_group,
+    uint group_count,
+    char[] out,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::vk::vk_get_ray_tracing_shader_group_handles(
+        operation.state,
+        pipeline,
+        first_group,
+        group_count,
+        out,
+    )!;
+}
+
 <* Release one returned pipeline handle.
    Preconditions: recorded and submitted use of this handle is complete.
    Always checked: live identity, ownership, and detected command use.
@@ -1687,11 +1761,11 @@ fn CommandAllocator? create_command_allocator(
         return INVALID_ARGUMENT~;
     }
     if (normalized.max_acceleration_structure_geometries_per_build > 0) {
-        if (!operation.data.caps.ray_queries.enabled) {
+        if (!operation.data.caps.acceleration_structures.enabled) {
             return UNSUPPORTED_FEATURE~;
         }
         if (normalized.max_acceleration_structure_geometries_per_build
-            > operation.data.caps.ray_queries.max_geometry_count) {
+            > operation.data.caps.acceleration_structures.max_geometry_count) {
             return INVALID_ARGUMENT~;
         }
     }
@@ -2065,6 +2139,33 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     return record.ops.dispatch(record, root, groups);
+}
+
+<* Record one direct ray dispatch through the active ray-tracing pipeline.
+   The caller owns, populates, uploads, synchronizes, and retains every SBT
+   span. The command pushes one RootPush value and inserts no hidden barrier,
+   bind, upload, submission, or wait.
+
+   @param commands : "Live recording token outside a render pass."
+   @param root : "Root GPU address passed unchanged to all ray-tracing stages."
+   @param shader_binding_table : "Borrowed caller-owned SBT regions."
+   @param dimensions : "Nonzero direct trace width, height, and depth within the selected device limits."
+   @return "Success, or a recoverable command, pipeline, SBT, range, limit, ownership, or device fault." *>
+fn void? cmd_trace_rays(
+    CommandList* commands,
+    GpuAddress root,
+    RayTracingShaderBindingTable* shader_binding_table,
+    Vec3u dimensions,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    if (shader_binding_table == null) return INVALID_ARGUMENT~;
+    return record.ops.trace_rays(
+        record,
+        root,
+        shader_binding_table,
+        dimensions,
+    );
 }
 
 <* Set one dynamic viewport before or during a pass.

@@ -10,6 +10,12 @@ enum ShaderRole : int {
     COMPUTE,
     VERTEX,
     FRAGMENT,
+    RAY_GENERATION,
+    MISS,
+    CLOSEST_HIT,
+    ANY_HIT,
+    INTERSECTION,
+    CALLABLE,
 }
 
 fn ulong shader_identity_hash(char[] spirv) @private {

@@ -97,8 +97,8 @@ remain caller-owned.
 
 ## Compute work
 
-`cmd_bind_pipeline` selects a compatible compute or graphics pipeline in the
-command state.
+`cmd_bind_pipeline` selects a compatible compute, graphics, or ray-tracing
+pipeline in the command state.
 
 - `cmd_dispatch` supplies one root and `Vec3u` group counts.
 - `cmd_dispatch_indirect` reads one `DispatchIndirectCommand`.
@@ -107,6 +107,27 @@ command state.
 Direct counts must fit `DeviceCaps.max_compute_work_group_count`.
 Indirect argument storage and count storage are ordinary `GpuSpan` values
 whose contents and lifetime are caller-owned.
+
+## Direct ray tracing
+
+Bind a ray-tracing pipeline, then call `cmd_trace_rays` outside a render pass
+with one root `GpuAddress`, a caller-owned `RayTracingShaderBindingTable`, and
+nonzero `Vec3u` dimensions. The command is valid on a compatible selected
+graphics or compute queue. The invocation product must fit
+`DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_invocation_count`. Each axis
+must also fit the corresponding component of
+`DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_dimensions`; full validation
+rejects an oversized width, height, or depth before native recording.
+
+The ray-generation SBT region contains exactly one record. Optional miss, hit,
+and callable regions use canonical empty values when absent; nonempty regions
+must satisfy device base/handle alignment, stride, range, ownership, and usage
+requirements. Record a ray-tracing pipeline bind before tracing.
+
+`cmd_trace_rays` pushes the root to all six ray stages and emits one direct
+trace. It allocates nothing and inserts no pipeline bind, barrier, submission,
+or wait. Keep the bound pipeline, every nonempty SBT allocation, root data,
+TLAS view, and all raw-address/index targets live through completion.
 
 ## Graphics state and drawing
 

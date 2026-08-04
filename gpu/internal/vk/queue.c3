@@ -97,6 +97,13 @@ struct SubmitInputs {
     vk::PipelineStageFlags2         readiness_stages;
 }
 
+fn bool ray_tracing_queue_request_compatible(gpu::QueueRequest* request) {
+    gpu::QueueRequest normalized = request == null
+        ? gpu::internal::default_queue_request()
+        : *request;
+    return normalized.required.graphics || normalized.required.compute;
+}
+
 fn vk::Result real_queue_submit2(
     vk::Queue queue,
     uint submit_count,
@@ -1259,7 +1266,8 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             stages:         desc.readiness_before,
             flags:          target.queue_flags,
             generated_work: false,
-            ray_queries:    state.ray_queries_enabled,
+            ray_queries:    state.acceleration_structures_enabled,
+            ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
         )!;
         gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
             state,
@@ -1294,7 +1302,8 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 stages:         wait.before,
                 flags:          target.queue_flags,
                 generated_work: state.generated_work.enabled,
-                ray_queries:    state.ray_queries_enabled,
+                ray_queries:    state.acceleration_structures_enabled,
+                ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
             )!;
             inputs.completion_waits[i] = {
                 .source   = source,

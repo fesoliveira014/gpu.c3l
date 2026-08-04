@@ -109,13 +109,69 @@ fn void coherent_ray_query_opt_in_reaches_capability_evaluation() @test {
     Device device = gpu::create_device(&adapter, &desc)!!;
     DeviceCaps caps = gpu::get_device_caps(&device)!!;
     assert(caps.ray_queries.enabled
-            && caps.ray_queries.acceleration_structure_heap_capacity == 17
-            && caps.ray_queries.max_geometry_count == uint::max
-            && caps.ray_queries.max_primitive_count == uint::max
-            && caps.ray_queries.max_instance_count == uint::max
-            && caps.ray_queries.scratch_alignment == 256,
+            && caps.acceleration_structures.heap_capacity == 17
+            && caps.acceleration_structures.max_geometry_count == uint::max
+            && caps.acceleration_structures.max_primitive_count == uint::max
+            && caps.acceleration_structures.max_instance_count == uint::max
+            && caps.acceleration_structures.scratch_alignment == 256,
         "the public device fixture exposes the enabled actionable caps");
     gpu::destroy_device(&device)!!;
+}
+
+fn void ray_tracing_pipeline_opt_in_is_independent_and_actionable() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_set_ray_query_support(false);
+    gpu::internal::vk::stub_set_ray_tracing_pipeline_support(true);
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    runtime_desc.acceleration_structure_heap_capacity = 9;
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc desc = { .enable_ray_tracing_pipelines = true };
+
+    assert(gpu::supports_device_desc(&adapter, &desc)!!.supported);
+    Device device = gpu::create_device(&adapter, &desc)!!;
+    DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    assert(caps.acceleration_structures.enabled
+            && caps.acceleration_structures.heap_capacity == 9);
+    assert(!caps.ray_queries.enabled);
+    assert(caps.ray_tracing_pipelines.enabled
+            && caps.ray_tracing_pipelines.max_recursion_depth == 4);
+    Queue queue = gpu::get_queue(&device, QueueKind.GRAPHICS)!!;
+    CommandAllocatorDesc allocator_desc = {
+        .max_acceleration_structure_geometries_per_build = 1,
+    };
+    CommandAllocator allocator = gpu::create_command_allocator(
+        device: &device,
+        queue:  queue,
+        desc:   &allocator_desc,
+    )!!;
+    gpu::destroy_command_allocator(&allocator)!!;
+    gpu::destroy_device(&device)!!;
+    gpu::internal::vk::stub_set_ray_query_support(true);
+}
+
+fn void ray_tracing_pipeline_support_reports_frontend_and_queue_failures() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    runtime_desc.acceleration_structure_heap_capacity = 1;
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc desc = { .enable_ray_tracing_pipelines = true };
+
+    gpu::internal::vk::stub_set_ray_tracing_pipeline_support(false);
+    DeviceSupport unsupported = gpu::supports_device_desc(&adapter, &desc)!!;
+    assert(!unsupported.supported
+            && unsupported.unmet_requirement == "ray tracing pipelines");
+
+    gpu::internal::vk::stub_set_ray_tracing_pipeline_support(true);
+    desc.queues.required = { .transfer };
+    DeviceSupport wrong_queue = gpu::supports_device_desc(&adapter, &desc)!!;
+    assert(!wrong_queue.supported
+            && wrong_queue.unmet_requirement == "ray tracing queue topology");
 }
 
 fn void unavailable_ray_queries_are_reported_semantically() @test {

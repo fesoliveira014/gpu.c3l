@@ -134,6 +134,13 @@ hello_gpu: all 256 values doubled on the GPU
 This is the core model: command completion orders reuse, while the application
 retains allocations referenced by raw GPU addresses.
 
+The optional direct ray-tracing path uses the same ownership model with an
+explicit acceleration-structure opt-in, caller-built BLAS/TLAS values, and a
+caller-packed shader binding table. Follow the
+[SBT/direct-trace recipe](cookbook.md#pack-an-sbt-and-trace-directly) after the
+compute introduction; the companion samples repository contains the complete
+interactive Cornell Box application.
+
 ## Step 2: SDL3 hello triangle
 
 Add `sdl3.c3l` beside the GPU library:

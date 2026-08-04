@@ -15,6 +15,7 @@ fn void ray_query_configuration_values_are_zero_compatible() @test {
     assert(runtime_desc.acceleration_structure_heap_capacity == 0);
     assert(!device_desc.enable_ray_queries);
     assert(allocator_desc.max_acceleration_structure_geometries_per_build == 0);
+    assert(!caps.acceleration_structures.enabled);
     assert(!caps.ray_queries.enabled);
     assert((uint)acceleration_structure_build == (1 << 10));
 }
@@ -223,14 +224,14 @@ fn void acceleration_structure_dynamic_inputs_are_gpu_spans() @test {
     assert(build.scratch.size == 256);
 }
 
-fn void ray_query_caps_and_requirements_are_actionable() @test {
-    RayQueryCaps caps = {
-        .enabled                         = true,
-        .acceleration_structure_heap_capacity = 64,
-        .max_geometry_count              = 8,
-        .max_primitive_count             = 4096,
-        .max_instance_count              = 1024,
-        .scratch_alignment               = 256,
+fn void acceleration_structure_caps_and_requirements_are_actionable() @test {
+    AccelerationStructureCaps caps = {
+        .enabled             = true,
+        .heap_capacity       = 64,
+        .max_geometry_count  = 8,
+        .max_primitive_count = 4096,
+        .max_instance_count  = 1024,
+        .scratch_alignment   = 256,
     };
     AccelerationStructureRequirements requirements = {
         .storage_size      = 4096,
@@ -240,7 +241,7 @@ fn void ray_query_caps_and_requirements_are_actionable() @test {
         .scratch_alignment = 256,
     };
 
-    assert(caps.enabled && caps.acceleration_structure_heap_capacity == 64);
+    assert(caps.enabled && caps.heap_capacity == 64);
     assert(caps.max_geometry_count == 8 && caps.max_instance_count == 1024);
     assert(requirements.storage_size == 4096);
     assert(requirements.build_scratch_size == 2048);

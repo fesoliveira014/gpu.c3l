@@ -36,7 +36,7 @@ struct NormalizedAccelerationStructureDesc {
 
 fn void? normalize_acceleration_structure_desc(
     AccelerationStructureDesc* desc,
-    RayQueryCaps* caps,
+    AccelerationStructureCaps* caps,
     NormalizedAccelerationStructureGeometry[] geometry_storage,
     NormalizedAccelerationStructureDesc* out_desc,
 ) @private {

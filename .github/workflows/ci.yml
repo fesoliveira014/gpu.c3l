@@ -100,6 +100,7 @@ jobs:
           c3c test vk_core --path test --test-show-output
           c3c test vk_wsi --path test --test-show-output
           c3c test vk_optional_generated_work --path test --test-show-output
+          c3c test vk_ray_tracing --path test --test-show-output
 
       # Whole-compile reference (public module gpu + gpu::internal::vk; a
       # scoped docgen needs a closed source set, which only the whitebox test
@@ -280,3 +281,4 @@ jobs:
           c3c test vk_core --path test --test-show-output
           c3c test vk_wsi --path test --test-show-output
           c3c test vk_optional_generated_work --path test --test-show-output
+          c3c test vk_ray_tracing --path test --test-show-output
