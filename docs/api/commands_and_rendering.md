@@ -114,7 +114,10 @@ Bind a ray-tracing pipeline, then call `cmd_trace_rays` outside a render pass
 with one root `GpuAddress`, a caller-owned `RayTracingShaderBindingTable`, and
 nonzero `Vec3u` dimensions. The command is valid on a compatible selected
 graphics or compute queue. The invocation product must fit
-`DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_invocation_count`.
+`DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_invocation_count`. Each axis
+must also fit the selected device's effective core ray-launch limit; full
+validation rejects an oversized width, height, or depth before native
+recording.
 
 The ray-generation SBT region contains exactly one record. Optional miss, hit,
 and callable regions use canonical empty values when absent; nonempty regions

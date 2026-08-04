@@ -2149,7 +2149,7 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address passed unchanged to all ray-tracing stages."
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
-   @param dimensions : "Nonzero direct trace width, height, and depth."
+   @param dimensions : "Nonzero direct trace width, height, and depth within the selected device limits."
    @return "Success, or a recoverable command, pipeline, SBT, range, limit, ownership, or device fault." *>
 fn void? cmd_trace_rays(
     CommandList* commands,

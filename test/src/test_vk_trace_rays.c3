@@ -101,6 +101,11 @@ fn void init_trace_rays_fixture(TraceRaysFixture* fixture) {
         .shader_group_base_alignment       = 32,
         .max_shader_group_stride           = 64,
     };
+    fixture.spans.state.ray_tracing_support.max_ray_dispatch_dimensions = {
+        7,
+        6,
+        5,
+    };
     fixture.spans.state.pipelines.owner =
         gpu::internal::resource_owner_tag(
             SPAN_RESOLVER_DEVICE_OWNER,
@@ -276,6 +281,24 @@ fn void full_trace_validation_rejects_shape_usage_and_dimensions() @test {
         (gpu::GpuAddress)1,
         &fixture.table,
         { 8, 8, 3 },
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::full_prepare_trace_rays(
+        &fixture.record,
+        (gpu::GpuAddress)1,
+        &fixture.table,
+        { 8, 1, 1 },
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::full_prepare_trace_rays(
+        &fixture.record,
+        (gpu::GpuAddress)1,
+        &fixture.table,
+        { 1, 7, 1 },
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::full_prepare_trace_rays(
+        &fixture.record,
+        (gpu::GpuAddress)1,
+        &fixture.table,
+        { 1, 1, 6 },
     )) == gpu::INVALID_ARGUMENT);
 }
 

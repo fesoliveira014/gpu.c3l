@@ -214,6 +214,7 @@ struct RayTracingCandidateSupport {
     uint  scratch_alignment;
     uint  max_ray_recursion_depth;
     uint  max_ray_dispatch_invocation_count;
+    gpu::Vec3u max_ray_dispatch_dimensions;
     uint  shader_group_handle_size;
     uint  shader_group_handle_alignment;
     uint  shader_group_base_alignment;
@@ -343,6 +344,11 @@ fn gpu::RayTracingPipelineCaps normalize_ray_tracing_pipeline_caps(
     };
 }
 
+fn uint ray_dispatch_dimension_limit(uint group_count, uint group_size) {
+    ulong limit = (ulong)group_count * group_size;
+    return limit > uint::max ? uint::max : (uint)limit;
+}
+
 fn RayTracingCandidateSupport query_ray_tracing_candidate_support(
     vk::PhysicalDevice physical_device,
 ) @private {
@@ -437,6 +443,20 @@ fn RayTracingCandidateSupport query_ray_tracing_candidate_support(
             ray_pipeline_properties.max_ray_recursion_depth,
         .max_ray_dispatch_invocation_count =
             ray_pipeline_properties.max_ray_dispatch_invocation_count,
+        .max_ray_dispatch_dimensions = {
+            .x = ray_dispatch_dimension_limit(
+                properties2.properties.limits.max_compute_work_group_count[0],
+                properties2.properties.limits.max_compute_work_group_size[0],
+            ),
+            .y = ray_dispatch_dimension_limit(
+                properties2.properties.limits.max_compute_work_group_count[1],
+                properties2.properties.limits.max_compute_work_group_size[1],
+            ),
+            .z = ray_dispatch_dimension_limit(
+                properties2.properties.limits.max_compute_work_group_count[2],
+                properties2.properties.limits.max_compute_work_group_size[2],
+            ),
+        },
         .shader_group_handle_size =
             ray_pipeline_properties.shader_group_handle_size,
         .shader_group_handle_alignment =

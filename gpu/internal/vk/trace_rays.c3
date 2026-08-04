@@ -65,10 +65,16 @@ fn void? validate_trace_dimensions(
     }
     ulong invocations = xy * dimensions.z;
     if (validate_limit
-        && invocations
-            > state.caps.ray_tracing_pipelines
-                .max_ray_dispatch_invocation_count) {
-        return gpu::INVALID_ARGUMENT~;
+        && (invocations
+                > state.caps.ray_tracing_pipelines
+                    .max_ray_dispatch_invocation_count
+            || dimensions.x
+                > state.ray_tracing_support.max_ray_dispatch_dimensions.x
+            || dimensions.y
+                > state.ray_tracing_support.max_ray_dispatch_dimensions.y
+            || dimensions.z
+                > state.ray_tracing_support.max_ray_dispatch_dimensions.z)) {
+            return gpu::INVALID_ARGUMENT~;
     }
 }
 
