@@ -152,6 +152,7 @@ struct VkDeviceState @public {
     PipelineCacheTable         pipeline_cache;
     vk::PipelineLayout         graphics_layout;
     vk::PipelineLayout         compute_layout;
+    vk::PipelineLayout         ray_tracing_layout;
     vk::DescriptorSetLayout    shader_pipeline_set_layout;
     vk::IndirectCommandsLayoutEXT generated_draw_layout;
     vk::IndirectCommandsLayoutEXT generated_indexed_draw_layout;

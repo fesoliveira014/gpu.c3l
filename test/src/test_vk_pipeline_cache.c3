@@ -2150,3 +2150,128 @@ fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test 
         gpu::destroy_pipeline(&device, pipeline)!!;
     }
 }
+
+fn void ray_tracing_group_ranges_follow_category_order() @test {
+    gpu::RayTracingPipelineInfo info =
+        vk::ray_tracing_pipeline_info_for_counts(2, 3, 4, 5)!!;
+    assert(info.ray_generation.first_group == 0
+        && info.ray_generation.group_count == 2);
+    assert(info.miss.first_group == 2 && info.miss.group_count == 3);
+    assert(info.hit.first_group == 5 && info.hit.group_count == 4);
+    assert(info.callable.first_group == 9
+        && info.callable.group_count == 5);
+    assert(info.total_group_count == 14);
+    assert(@catch(vk::ray_tracing_pipeline_info_for_counts(
+        uint::max,
+        1,
+        0,
+        0,
+    )) == gpu::INVALID_ARGUMENT);
+}
+
+fn void ray_tracing_layout_uses_all_six_stages_and_shared_root() @test {
+    vk::ShaderStageFlags expected =
+        vk::ShaderStageFlagBits.RAYGEN_BIT_KHR
+        | vk::ShaderStageFlagBits.MISS_BIT_KHR
+        | vk::ShaderStageFlagBits.CLOSEST_HIT_BIT_KHR
+        | vk::ShaderStageFlagBits.ANY_HIT_BIT_KHR
+        | vk::ShaderStageFlagBits.INTERSECTION_BIT_KHR
+        | vk::ShaderStageFlagBits.CALLABLE_BIT_KHR;
+    assert(vk::ray_tracing_shader_stage_flags() == expected);
+    assert(vk::ray_tracing_root_push_size() == gpu::RootPush::size);
+}
+
+fn void ray_tracing_cache_keys_are_exact_owned_and_collision_safe() @test {
+    vk::VkDeviceState state = {
+        .host_allocator = &allocators::LIBC_ALLOCATOR,
+    };
+    vk::ShaderId[2] ray_generation = {
+        (vk::ShaderId)11,
+        (vk::ShaderId)13,
+    };
+    vk::ShaderId[2] reversed_ray_generation = {
+        (vk::ShaderId)13,
+        (vk::ShaderId)11,
+    };
+    vk::ShaderId[1] miss = { (vk::ShaderId)17 };
+    vk::ShaderId[1] callable = { (vk::ShaderId)23 };
+    vk::RayTracingHitGroupKey[2] hit_groups = {
+        {
+            .type               = gpu::RayTracingHitGroupType.TRIANGLES,
+            .presence_mask      = 0x3,
+            .closest_hit_shader = (vk::ShaderId)19,
+            .any_hit_shader     = (vk::ShaderId)29,
+            .intersection_shader = vk::SHADER_ID_INVALID,
+        },
+        {
+            .type                = gpu::RayTracingHitGroupType.PROCEDURAL,
+            .presence_mask       = 0x4,
+            .closest_hit_shader  = vk::SHADER_ID_INVALID,
+            .any_hit_shader      = vk::SHADER_ID_INVALID,
+            .intersection_shader = (vk::ShaderId)31,
+        },
+    };
+    vk::RayTracingPipelineKeyInput input = {
+        .ray_generation_shaders = ray_generation[..],
+        .miss_shaders           = miss[..],
+        .hit_groups             = hit_groups[..],
+        .callable_shaders       = callable[..],
+    };
+    vk::OwnedRayTracingPipelineKey key =
+        vk::create_ray_tracing_pipeline_key(&state, &input, 2)!!;
+    defer vk::destroy_ray_tracing_pipeline_key(&state, &key);
+    vk::OwnedRayTracingPipelineKey same =
+        vk::create_ray_tracing_pipeline_key(&state, &input, 2)!!;
+    defer vk::destroy_ray_tracing_pipeline_key(&state, &same);
+
+    assert(key.bytes.ptr != null && key.bytes.ptr != same.bytes.ptr);
+    assert(vk::ray_tracing_pipeline_key_equals(&key, &same));
+    assert(key.hash == same.hash);
+    assert(key.bytes.len == 24 + 4 * (2 + 1 + 2 * 5 + 1));
+
+    vk::RayTracingPipelineKeyInput reordered_input = input;
+    reordered_input.ray_generation_shaders = reversed_ray_generation[..];
+    vk::OwnedRayTracingPipelineKey reordered =
+        vk::create_ray_tracing_pipeline_key(
+            &state,
+            &reordered_input,
+            2,
+        )!!;
+    defer vk::destroy_ray_tracing_pipeline_key(&state, &reordered);
+    assert(!vk::ray_tracing_pipeline_key_equals(&key, &reordered));
+
+    vk::OwnedRayTracingPipelineKey recursion =
+        vk::create_ray_tracing_pipeline_key(&state, &input, 3)!!;
+    defer vk::destroy_ray_tracing_pipeline_key(&state, &recursion);
+    assert(!vk::ray_tracing_pipeline_key_equals(&key, &recursion));
+
+    vk::RayTracingHitGroupKey saved = hit_groups[0];
+    hit_groups[0].presence_mask = 0x1;
+    hit_groups[0].any_hit_shader = vk::SHADER_ID_INVALID;
+    vk::OwnedRayTracingPipelineKey distinct_group =
+        vk::create_ray_tracing_pipeline_key(&state, &input, 2)!!;
+    defer vk::destroy_ray_tracing_pipeline_key(&state, &distinct_group);
+    hit_groups[0] = saved;
+    assert(!vk::ray_tracing_pipeline_key_equals(&key, &distinct_group));
+
+    reordered.hash = key.hash;
+    assert(!vk::ray_tracing_pipeline_key_equals(&key, &reordered),
+        "equal hashes still compare the complete canonical bytes");
+}
+
+fn void ray_tracing_key_allocation_failure_publishes_no_owned_bytes() @test {
+    FailOnNAllocator fail_allocator = { .fail_on = 1 };
+    vk::VkDeviceState state = {
+        .host_allocator = &fail_allocator,
+    };
+    vk::ShaderId[1] ray_generation = { (vk::ShaderId)7 };
+    vk::RayTracingPipelineKeyInput input = {
+        .ray_generation_shaders = ray_generation[..],
+    };
+    fault allocation_fault = @catch(
+        vk::create_ray_tracing_pipeline_key(&state, &input, 1));
+    assert(allocation_fault == gpu::OUT_OF_HOST_MEMORY);
+    assert(fail_allocator.acquires == 0
+        && fail_allocator.releases == 0
+        && fail_allocator.outstanding == 0);
+}
