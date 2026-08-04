@@ -1067,6 +1067,7 @@ fn void semantic_barrier_stage_masks_map_exactly() @test {
         .color_output = true,
         .depth_output = true,
         .indirect = true,
+        .ray_tracing = true,
         .acceleration_structure_build = true,
     };
     ulong expected = (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
@@ -1075,7 +1076,9 @@ fn void semantic_barrier_stage_masks_map_exactly() @test {
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT
         | (ulong)vk::PipelineStageFlagBits2
-            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+            .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR
+        | (ulong)vk::PipelineStageFlagBits2
+            .STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
     assert((ulong)gpu::internal::vk::barrier_before_stages_to_vk(stages) == expected,
         "combined semantic producer stages map exactly");
 
@@ -1255,6 +1258,28 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             transfer_only,
         )) == gpu::INVALID_ARGUMENT,
         "transfer-only queues reject acceleration-structure build waits");
+    assert(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .ray_tracing },
+            graphics_only,
+            false,
+            false,
+            true,
+        )!! == vk::PipelineStageFlagBits2
+            .STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
+        "enabled ray tracing is a graphics/compute wait destination");
+    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .ray_tracing },
+            graphics_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "ray tracing waits require pipeline opt-in");
+    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .ray_tracing },
+            transfer_only,
+            false,
+            false,
+            true,
+        )) == gpu::INVALID_ARGUMENT,
+        "transfer-only queues reject ray tracing waits");
     gpu::StageMask unknown = (gpu::StageMask)(1u << 12);
     assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
             unknown,
@@ -1271,10 +1296,12 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
         .color_output = true,
         .depth_output = true,
         .indirect = true,
+        .ray_tracing = true,
     };
     ulong before_expected = (ulong)vk::AccessFlagBits2.ACCESS_2_HOST_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
         | (ulong)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     assert((ulong)gpu::internal::vk::barrier_before_access_to_vk(stages) == before_expected,
@@ -1290,6 +1317,9 @@ fn void semantic_barrier_access_masks_map_exactly() @test {
         | (ulong)vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    after_expected |=
+        (ulong)vk::AccessFlagBits2.ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
+        | (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR;
     assert((ulong)gpu::internal::vk::barrier_after_access_to_vk(stages)
             == after_expected,
         "consumer stages map to required access scopes");

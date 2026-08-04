@@ -12,6 +12,19 @@ const char[*] POLICY_MATRIX_VERT_SPIRV =
 const char[*] POLICY_MATRIX_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
+fn void trace_rays_uses_policy_specific_command_entries() @test {
+    gpu::internal::vk::DeviceValidationPolicy policy;
+    gpu::internal::vk::CommandOps* trusted =
+        gpu::internal::vk::select_command_ops(policy);
+    policy.contract = gpu::ContractValidation.FULL;
+    gpu::internal::vk::CommandOps* full =
+        gpu::internal::vk::select_command_ops(policy);
+
+    assert(trusted.trace_rays != null);
+    assert(full.trace_rays != null);
+    assert((uptr)trusted.trace_rays != (uptr)full.trace_rays);
+}
+
 fn void full_invalid_barrier_is_rejected() @test {
     PolicyDiagnosticCapture capture;
     gpu::RuntimeDesc desc = policy_runtime_desc(

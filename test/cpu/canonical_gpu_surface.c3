@@ -585,6 +585,13 @@ fn void pin_commands_and_completion() {
         root:     {},
         groups:   { 1, 1, 1 },
     );
+    gpu::RayTracingShaderBindingTable shader_binding_table;
+    (void)gpu::cmd_trace_rays(
+        commands:             &commands,
+        root:                 {},
+        shader_binding_table: &shader_binding_table,
+        dimensions:           { 1, 1, 1 },
+    );
     (void)gpu::cmd_dispatch_indirect(&commands, {}, span);
     (void)gpu::cmd_dispatch_generated(
         commands:           &commands,

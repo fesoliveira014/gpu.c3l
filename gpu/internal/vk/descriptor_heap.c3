@@ -719,10 +719,18 @@ fn void? bind_descriptor_heap(
 ) {
     validate_descriptor_heap_binding(state)!;
     DescriptorHeapCommandBinding* binding = &record.descriptor_heap_binding;
-    bool set_bound = bind_point == vk::PipelineBindPoint.COMPUTE
-        ? binding.compute_set_bound
-        : binding.graphics_set_bound;
-    if (set_bound) return;
+    bool* set_bound;
+    switch (bind_point) {
+        case vk::PipelineBindPoint.COMPUTE:
+            set_bound = &binding.compute_set_bound;
+        case vk::PipelineBindPoint.GRAPHICS:
+            set_bound = &binding.graphics_set_bound;
+        case vk::PipelineBindPoint.RAY_TRACING_KHR:
+            set_bound = &binding.ray_tracing_set_bound;
+        default:
+            return gpu::INVALID_ARGUMENT~;
+    }
+    if (*set_bound) return;
     vk::cmd_bind_descriptor_sets(
         command_buffer:        record.command_buffer,
         pipeline_bind_point:   bind_point,
@@ -733,11 +741,7 @@ fn void? bind_descriptor_heap(
         dynamic_offset_count:  0,
         p_dynamic_offsets:     null,
     );
-    if (bind_point == vk::PipelineBindPoint.COMPUTE) {
-        binding.compute_set_bound = true;
-    } else {
-        binding.graphics_set_bound = true;
-    }
+    *set_bound = true;
 }
 
 fn TextureSlot*? resolve_descriptor_texture(

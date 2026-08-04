@@ -2141,6 +2141,33 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
     return record.ops.dispatch(record, root, groups);
 }
 
+<* Record one direct ray dispatch through the active ray-tracing pipeline.
+   The caller owns, populates, uploads, synchronizes, and retains every SBT
+   span. The command pushes one RootPush value and inserts no hidden barrier,
+   bind, upload, submission, or wait.
+
+   @param commands : "Live recording token outside a render pass."
+   @param root : "Root GPU address passed unchanged to all ray-tracing stages."
+   @param shader_binding_table : "Borrowed caller-owned SBT regions."
+   @param dimensions : "Nonzero direct trace width, height, and depth."
+   @return "Success, or a recoverable command, pipeline, SBT, range, limit, ownership, or device fault." *>
+fn void? cmd_trace_rays(
+    CommandList* commands,
+    GpuAddress root,
+    RayTracingShaderBindingTable* shader_binding_table,
+    Vec3u dimensions,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    if (shader_binding_table == null) return INVALID_ARGUMENT~;
+    return record.ops.trace_rays(
+        record,
+        root,
+        shader_binding_table,
+        dimensions,
+    );
+}
+
 <* Set one dynamic viewport before or during a pass.
    Preconditions: values are finite, representable, within device bounds, and height is nonzero.
    Always checked: token phase and required pointer.

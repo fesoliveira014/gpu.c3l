@@ -15,6 +15,12 @@ alias CmdTextureBarrierFn @private           = fn void? (CommandRecord*, gpu::Te
 alias CmdBindPipelineFn @private             = fn void? (CommandRecord*, gpu::PipelineHandle);
 alias CmdSetGraphicsStateFn @private         = fn void? (CommandRecord*, gpu::GraphicsState*);
 alias CmdDispatchFn @private                 = fn void? (CommandRecord*, gpu::GpuAddress, gpu::Vec3u);
+alias CmdTraceRaysFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::RayTracingShaderBindingTable*,
+    gpu::Vec3u,
+);
 alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, gpu::RenderPassDesc*);
 alias CmdSetViewportFn @private              = fn void? (CommandRecord*, gpu::Viewport*);
 alias CmdSetScissorFn @private               = fn void? (CommandRecord*, gpu::ScissorRect*);
@@ -153,6 +159,7 @@ struct NativePipelineBinding {
 struct DescriptorHeapCommandBinding {
     bool graphics_set_bound;
     bool compute_set_bound;
+    bool ray_tracing_set_bound;
 }
 
 struct CommandRecord @public {
@@ -175,6 +182,7 @@ struct CommandRecord @public {
     BoundPipeline                    logical_pipeline;
     NativePipelineBinding            native_graphics_pipeline;
     NativePipelineBinding            native_compute_pipeline;
+    NativePipelineBinding            native_ray_tracing_pipeline;
     DescriptorHeapCommandBinding     descriptor_heap_binding;
     CommandScratch*                  scratch;
     uint                             pending_acceleration_structure_head;
@@ -190,6 +198,7 @@ struct CommandOps @public {
     CmdBindPipelineFn             bind_pipeline;
     CmdSetGraphicsStateFn         set_graphics_state;
     CmdDispatchFn                 dispatch;
+    CmdTraceRaysFn                trace_rays;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;

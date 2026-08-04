@@ -250,6 +250,9 @@ fn void timestamp_stage_mapping_is_one_to_one() @test {
     assert(timestamp_stage_to_vk({ .acceleration_structure_build = true }) ==
         (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
             .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR);
+    assert(timestamp_stage_to_vk({ .ray_tracing = true }) ==
+        (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
+            .STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
 }
 
 fn void timestamp_stage_shape_rejects_invalid_masks() @test {
@@ -261,6 +264,7 @@ fn void timestamp_stage_shape_rejects_invalid_masks() @test {
         .transfer = true,
     }));
     assert(timestamp_stage_mask_valid({ .acceleration_structure_build }));
+    assert(timestamp_stage_mask_valid({ .ray_tracing }));
     assert(!timestamp_stage_mask_valid((gpu::StageMask)(1 << 12)));
 }
 

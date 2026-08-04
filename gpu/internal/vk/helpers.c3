@@ -369,7 +369,9 @@ fn vk::AccessFlags2 barrier_before_access_to_vk(
                 .ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
     }
     if (stages.ray_tracing) {
-        mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT;
+        mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT
+            | (ulong)vk::AccessFlagBits2
+                .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
     }
     return (vk::AccessFlags2)mask;
 }
