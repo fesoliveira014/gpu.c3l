@@ -233,11 +233,7 @@ fn void pin_acceleration_structures() {
     (void)gpu::destroy_acceleration_structure_view(&device, view);
     (void)gpu::cmd_build_acceleration_structure(&commands, &build_desc);
     (void)gpu::cmd_update_acceleration_structure(&commands, &build_desc);
-    (void)gpu::cmd_clone_acceleration_structure(
-        &commands,
-        acceleration_structure,
-        acceleration_structure,
-    );
+    (void)gpu::cmd_clone_acceleration_structure(&commands, acceleration_structure, acceleration_structure);
 }
 
 fn void pin_timestamps() {
