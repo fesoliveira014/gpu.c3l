@@ -25,8 +25,11 @@ read/write access. On a ray-query-enabled device, compute, vertex, and fragment
 stages also include acceleration-structure read access for shader queries.
 `StageMask.ray_tracing` names all direct ray-tracing shader stages. As a source
 it carries shader-write and acceleration-structure-read access; as a
-destination it carries shader read/write, acceleration-structure read, and SBT
-read access.
+destination it carries shader read/write and acceleration-structure read
+access. The generic shader-read scope covers caller-owned SBT contents without
+requiring the out-of-scope ray-tracing-maintenance extension. Sampled and
+storage texture states accept `.ray_tracing` on an opted-in device and a
+compatible graphics or compute queue.
 
 Order consecutive builds or updates explicitly:
 
