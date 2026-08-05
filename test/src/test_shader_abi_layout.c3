@@ -61,6 +61,25 @@ fn void indirect_command_layouts() @test {
     assert($reflect(TraceRaysIndirectCommand.depth).offset == 8);
 }
 
+fn void trace_rays_indirect2_command_layout() @test {
+    assert(TraceRaysIndirectCommand2::size == 104);
+    assert($reflect(TraceRaysIndirectCommand2.ray_generation_record_address).offset == 0);
+    assert($reflect(TraceRaysIndirectCommand2.ray_generation_record_size).offset == 8);
+    assert($reflect(TraceRaysIndirectCommand2.miss_table_address).offset == 16);
+    assert($reflect(TraceRaysIndirectCommand2.miss_table_size).offset == 24);
+    assert($reflect(TraceRaysIndirectCommand2.miss_table_stride).offset == 32);
+    assert($reflect(TraceRaysIndirectCommand2.hit_table_address).offset == 40);
+    assert($reflect(TraceRaysIndirectCommand2.hit_table_size).offset == 48);
+    assert($reflect(TraceRaysIndirectCommand2.hit_table_stride).offset == 56);
+    assert($reflect(TraceRaysIndirectCommand2.callable_table_address).offset == 64);
+    assert($reflect(TraceRaysIndirectCommand2.callable_table_size).offset == 72);
+    assert($reflect(TraceRaysIndirectCommand2.callable_table_stride).offset == 80);
+    assert($reflect(TraceRaysIndirectCommand2.width).offset == 88);
+    assert($reflect(TraceRaysIndirectCommand2.height).offset == 92);
+    assert($reflect(TraceRaysIndirectCommand2.depth).offset == 96);
+    assert($reflect(TraceRaysIndirectCommand2._pad0).offset == 100);
+}
+
 fn void generated_work_record_layouts() @test {
     assert(GeneratedDrawRecord::size == 32);
     assert($reflect(GeneratedDrawRecord.vertex_root_gpu).offset == 0);

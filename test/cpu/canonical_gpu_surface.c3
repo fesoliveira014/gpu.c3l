@@ -49,6 +49,7 @@ fn void pin_runtime_adapter_device() {
         .ray_tracing_pipelines        = {
             .enabled                           = true,
             .indirect_dispatch                 = true,
+            .indirect2_dispatch                = true,
             .max_recursion_depth               = 2,
             .max_ray_dispatch_invocation_count = 1024,
             .max_ray_dispatch_dimensions       = { 64, 32, 16 },
@@ -105,6 +106,7 @@ fn void pin_runtime_adapter_device() {
     (void)caps.ray_queries;
     (void)caps.ray_tracing_pipelines;
     (void)caps.ray_tracing_pipelines.indirect_dispatch;
+    (void)caps.ray_tracing_pipelines.indirect2_dispatch;
     (void)caps.sparse_textures;
     (void)caps.sparse_textures.image_2d;
     (void)caps.sparse_textures.image_3d;
@@ -614,7 +616,29 @@ fn void pin_commands_and_completion() {
         .height = 1,
         .depth  = 1,
     };
+    gpu::TraceRaysIndirectCommand2 indirect2 = {
+        .ray_generation_record_address = (gpu::GpuAddress)0x1000,
+        .ray_generation_record_size    = 32,
+        .miss_table_address            = (gpu::GpuAddress)0x2000,
+        .miss_table_size               = 64,
+        .miss_table_stride             = 32,
+        .hit_table_address             = (gpu::GpuAddress)0x3000,
+        .hit_table_size                = 96,
+        .hit_table_stride              = 32,
+        .callable_table_address        = {},
+        .callable_table_size           = 0,
+        .callable_table_stride         = 0,
+        .width                         = 4,
+        .height                        = 2,
+        .depth                         = 1,
+        ._pad0                         = 0,
+    };
+    assert(gpu::TraceRaysIndirectCommand2::size == 104);
+    assert($reflect(gpu::TraceRaysIndirectCommand2.width).offset == 88);
+    assert($reflect(gpu::TraceRaysIndirectCommand2._pad0).offset == 100);
+    gpu::GpuSpan args = {};
     (void)ray_args;
+    (void)indirect2;
     (void)gpu::cmd_trace_rays(
         commands:             &commands,
         root:                 {},
@@ -627,6 +651,7 @@ fn void pin_commands_and_completion() {
         shader_binding_table: &shader_binding_table,
         args:     span,
     );
+    (void)gpu::cmd_trace_rays_indirect2(&commands, {}, args);
     (void)gpu::cmd_set_ray_tracing_pipeline_stack_size(&commands, 1);
     (void)gpu::cmd_dispatch_indirect(&commands, {}, span);
     (void)gpu::cmd_dispatch_generated(

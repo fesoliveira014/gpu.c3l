@@ -49,6 +49,24 @@ struct TraceRaysIndirectCommand {
     uint depth;
 };
 
+struct TraceRaysIndirectCommand2 {
+    uint64_t ray_generation_record_address;
+    uint64_t ray_generation_record_size;
+    uint64_t miss_table_address;
+    uint64_t miss_table_size;
+    uint64_t miss_table_stride;
+    uint64_t hit_table_address;
+    uint64_t hit_table_size;
+    uint64_t hit_table_stride;
+    uint64_t callable_table_address;
+    uint64_t callable_table_size;
+    uint64_t callable_table_stride;
+    uint width;
+    uint height;
+    uint depth;
+    uint _pad0;
+};
+
 struct GeneratedDrawRecord {
     uint64_t vertex_root_gpu;
     uint64_t fragment_root_gpu;
