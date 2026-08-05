@@ -52,8 +52,9 @@ struct TraceIndirectBuildRoot {
     gpu::GpuAddress callable_table_address;
     ulong           callable_table_size;
     ulong           callable_table_stride;
+    gpu::GpuAddress acceleration_structure_range_gpu;
 }
-$assert TraceIndirectBuildRoot::size == 104;
+$assert TraceIndirectBuildRoot::size == 112;
 
 struct TraceValidationCapture {
     uint errors;
@@ -373,11 +374,13 @@ fn void assert_trace_functional_results(
     gpu::Device* device,
     OwnedSpan*   output,
     String       dispatch,
+    bool         indirect_acceleration_structure,
 ) {
     gpu::invalidate_mapped_span(device, output.span)!!;
     uint* results = (uint*)test_span_mapping(device, output.span).ptr;
-    assert(results[0] == 0x12,
-        "the procedural AABB group consumes its selected SBT record under %s",
+    uint first_expected = indirect_acceleration_structure ? 0x13 : 0x12;
+    assert(results[0] == first_expected,
+        "the selected TLAS range controls the first ray result under %s",
         dispatch);
     assert(results[1] == 0x11,
         "the triangle closest-hit group consumes its selected SBT record under %s",
@@ -648,6 +651,15 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         debug_name:   "trace_functional_indirect2_args",
     )!!;
     defer free_owned_span(&device, &indirect2_args)!!;
+    OwnedSpan indirect_as_range = allocate_trace_span(
+        device:       &device,
+        size:         gpu::AccelerationStructureIndirectBuildRange::size,
+        alignment:    4,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       access,
+        debug_name:   "trace_functional_indirect_as_range",
+    )!!;
+    defer free_owned_span(&device, &indirect_as_range)!!;
     OwnedSpan indirect_root = allocate_trace_span(
         device:       &device,
         size:         TraceIndirectBuildRoot::size,
@@ -669,6 +681,10 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     indirect_root_data.arguments2_gpu = test_span_address(
         &device,
         indirect2_args.span,
+    );
+    indirect_root_data.acceleration_structure_range_gpu = test_span_address(
+        &device,
+        indirect_as_range.span,
     );
 
     OwnedSpan indirect_output = allocate_trace_span(
@@ -892,13 +908,45 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         after:   gpu::storage_at({ .ray_tracing }, { .read, .write }),
     )!!;
     gpu::cmd_texture_barrier(&trace_commands, &texture_to_storage)!!;
+    if (caps.ray_tracing_pipelines.indirect_dispatch
+        || caps.ray_tracing_pipelines.indirect2_dispatch
+        || caps.acceleration_structures.indirect_build) {
+        gpu::cmd_bind_pipeline(
+            &trace_commands,
+            indirect_build_pipeline,
+        )!!;
+        gpu::cmd_dispatch(
+            commands: &trace_commands,
+            root:     test_span_address(&device, indirect_root.span),
+            groups:   { 1, 1, 1 },
+        )!!;
+        gpu::Barrier args_ready = {
+            .before = { .compute },
+            .after = {
+                .indirect,
+                .acceleration_structure_build,
+            },
+        };
+        gpu::cmd_barrier(&trace_commands, &args_ready)!!;
+    }
     gpu::AccelerationStructureBuildDesc tlas_build = {
         .destination    = tlas,
         .instances      = instances.span,
         .instance_count = 2,
         .scratch        = tlas_scratch.span,
     };
-    gpu::cmd_build_acceleration_structure(&trace_commands, &tlas_build)!!;
+    if (caps.acceleration_structures.indirect_build) {
+        gpu::cmd_build_acceleration_structure_indirect(
+            &trace_commands,
+            &tlas_build,
+            indirect_as_range.span,
+        )!!;
+    } else {
+        io::printfn(
+            "indirect acceleration-structure builds unavailable; direct TLAS proof preserved",
+        );
+        gpu::cmd_build_acceleration_structure(&trace_commands, &tlas_build)!!;
+    }
     gpu::Barrier build_to_trace = {
         .before = { .acceleration_structure_build },
         .after  = { .ray_tracing },
@@ -912,23 +960,8 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         .after  = { .ray_tracing },
     };
     gpu::cmd_barrier(&trace_commands, &output_clear_to_trace)!!;
-    if (caps.ray_tracing_pipelines.indirect_dispatch
-        || caps.ray_tracing_pipelines.indirect2_dispatch) {
-        gpu::cmd_bind_pipeline(
-            &trace_commands,
-            indirect_build_pipeline,
-        )!!;
-        gpu::cmd_dispatch(
-            commands: &trace_commands,
-            root:     test_span_address(&device, indirect_root.span),
-            groups:   { 1, 1, 1 },
-        )!!;
-        gpu::Barrier args_ready = {
-            .before = { .compute },
-            .after  = { .indirect },
-        };
-        gpu::cmd_barrier(&trace_commands, &args_ready)!!;
-    } else {
+    if (!caps.ray_tracing_pipelines.indirect_dispatch
+        && !caps.ray_tracing_pipelines.indirect2_dispatch) {
         io::printfn("basic indirect ray tracing unavailable; direct proof preserved");
     }
     gpu::cmd_bind_pipeline(&trace_commands, pipeline)!!;
@@ -994,7 +1027,13 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         gpu::submit(queue, &trace_submit)!!;
     gpu::wait_completion(trace_completion)!!;
 
-    assert_trace_functional_results(&device, &output, "a direct dispatch");
+    assert_trace_functional_results(
+        device:                          &device,
+        output:                          &output,
+        dispatch:                        "a direct dispatch",
+        indirect_acceleration_structure:
+            caps.acceleration_structures.indirect_build,
+    );
     assert_trace_fifth_miss_result(&device, &output, "a direct dispatch");
     assert_trace_launch(
         device:   &device,
@@ -1004,9 +1043,11 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     );
     if (caps.ray_tracing_pipelines.indirect_dispatch) {
         assert_trace_functional_results(
-            &device,
-            &indirect_output,
-            "an indirect dispatch",
+            device:                          &device,
+            output:                          &indirect_output,
+            dispatch:                        "an indirect dispatch",
+            indirect_acceleration_structure:
+                caps.acceleration_structures.indirect_build,
         );
         assert_trace_fifth_miss_result(
             &device,
@@ -1022,9 +1063,11 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     }
     if (caps.ray_tracing_pipelines.indirect2_dispatch) {
         assert_trace_functional_results(
-            &device,
-            &indirect2_output,
-            "an indirect2 dispatch",
+            device:                          &device,
+            output:                          &indirect2_output,
+            dispatch:                        "an indirect2 dispatch",
+            indirect_acceleration_structure:
+                caps.acceleration_structures.indirect_build,
         );
         assert_trace_launch(
             device:   &device,

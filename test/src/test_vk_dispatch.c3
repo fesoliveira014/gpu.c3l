@@ -14,6 +14,7 @@ struct DispatchLookupCounts {
     uint device_presentation;
     uint dynamic_color;
     uint ray_query;
+    uint acceleration_structure_indirect_build;
     uint ray_tracing_pipeline;
     uint ray_tracing_indirect2;
     uint unexpected;
@@ -29,6 +30,7 @@ fn bool DispatchLookupCounts.is_empty(self) {
         && self.device_presentation == 0
         && self.dynamic_color == 0
         && self.ray_query == 0
+        && self.acceleration_structure_indirect_build == 0
         && self.ray_tracing_pipeline == 0
         && self.ray_tracing_indirect2 == 0
         && self.unexpected == 0;
@@ -263,6 +265,8 @@ fn vk::PFN_vkVoidFunction recording_device_proc_loader(
         counts.ray_tracing_pipeline++;
     } else if (proc_name == "vkCmdTraceRaysIndirect2KHR") {
         counts.ray_tracing_indirect2++;
+    } else if (proc_name == "vkCmdBuildAccelerationStructuresIndirectKHR") {
+        counts.acceleration_structure_indirect_build++;
     } else {
         counts.unexpected++;
     }
@@ -568,6 +572,43 @@ fn void device_ray_query_dispatch_requires_complete_set() @test {
     missing = complete;
     missing.acceleration_structures.get_device_address = null;
     assert(!gpu::internal::vk::device_dispatch_supports_acceleration_structures(&missing));
+}
+
+fn void indirect_acceleration_structure_dispatch_loads_only_when_planned() @test {
+    gpu::internal::vk::VkDeviceDispatchPlan plan = {
+        .acceleration_structures = true,
+    };
+    DispatchLookupCounts counts;
+    gpu::internal::vk::VkDeviceDispatch dispatch =
+        gpu::internal::vk::load_vk_device_dispatch(
+            (vk::Device)&counts,
+            &recording_device_proc_loader,
+            plan,
+        );
+    assert(counts.acceleration_structure_indirect_build == 0);
+    assert(!gpu::internal::vk::device_dispatch_supports_indirect_acceleration_structure_builds(
+        &dispatch,
+    ));
+
+    counts = {};
+    plan.acceleration_structure_indirect_build = true;
+    dispatch = gpu::internal::vk::load_vk_device_dispatch(
+        (vk::Device)&counts,
+        &recording_device_proc_loader,
+        plan,
+    );
+    assert(counts.acceleration_structure_indirect_build == 1);
+    assert(gpu::internal::vk::device_dispatch_supports_indirect_acceleration_structure_builds(
+        &dispatch,
+    ));
+
+    dispatch.acceleration_structures.cmd_build_indirect = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_indirect_acceleration_structure_builds(
+        &dispatch,
+    ));
+    assert(gpu::internal::vk::device_dispatch_supports_acceleration_structures(
+        &dispatch,
+    ));
 }
 
 fn void device_ray_tracing_pipeline_dispatch_requires_complete_set() @test {

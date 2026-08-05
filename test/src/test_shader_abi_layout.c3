@@ -24,6 +24,14 @@ fn void acceleration_structure_instance_layout() @test {
     assert($reflect(AccelerationStructureInstance.acceleration_structure).offset == 56);
 }
 
+fn void acceleration_structure_indirect_build_range_layout() @test {
+    assert(AccelerationStructureIndirectBuildRange::size == 16);
+    assert($reflect(AccelerationStructureIndirectBuildRange.primitive_count).offset == 0);
+    assert($reflect(AccelerationStructureIndirectBuildRange.primitive_offset).offset == 4);
+    assert($reflect(AccelerationStructureIndirectBuildRange.first_vertex).offset == 8);
+    assert($reflect(AccelerationStructureIndirectBuildRange.transform_offset).offset == 12);
+}
+
 fn void root_push_layout() @test {
     assert(RootPush::size == 8);
     assert($reflect(RootPush.root_gpu).offset == 0);

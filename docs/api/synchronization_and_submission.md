@@ -34,7 +34,8 @@ storage texture states accept `.ray_tracing` on an opted-in device and a
 compatible graphics or compute queue.
 
 `StageMask.indirect` names indirect-command argument reads, including basic
-indirect ray dimensions and the complete `TraceRaysIndirectCommand2` packet.
+indirect ray dimensions, the complete `TraceRaysIndirectCommand2` packet, and
+`AccelerationStructureIndirectBuildRange` records.
 Order a compute-produced packet with a compute-to-indirect barrier; this is
 separate from `.ray_tracing`, which describes the later shader execution and
 resource access. The same explicit dependency makes GPU-authored SBT addresses
@@ -48,6 +49,18 @@ gpu::Barrier args_ready = {
     .after  = { .indirect },
 };
 gpu::cmd_barrier(&commands, &args_ready)!;
+```
+
+An indirect acceleration-structure build reads its packet with indirect-command
+access while executing at the acceleration-structure-build stage. Compose both
+destinations after a compute producer:
+
+```c3
+gpu::Barrier ranges_ready = {
+    .before = { .compute },
+    .after  = { .indirect, .acceleration_structure_build },
+};
+gpu::cmd_barrier(&commands, &ranges_ready)!;
 ```
 
 Order consecutive builds, updates, or clones explicitly:

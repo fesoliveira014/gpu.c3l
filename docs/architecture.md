@@ -139,6 +139,12 @@ creation owns its backing internally, while placed and dedicated forms expose
 allocation ownership. Build inputs and scratch are caller-owned spans. Device
 clone copies a completed structure into a distinct caller-created matching
 destination without hidden storage or scratch.
+Capability-gated indirect construction reuses the same descriptors, resource
+tables, geometry lowering, and command-unit scratch. Each command unit owns a
+fixed dense maximum-count slice, so warm recording allocates nothing. Private
+construction state records whether completed counts are exact or only CPU
+maxima; direct builds establish exact counts, indirect builds establish
+maximum-only knowledge, and clones preserve that distinction.
 `AccelerationStructureView` owns a recyclable descriptor slot and exposes a
 raw `AccelerationStructureIndex`; packed TLAS instances contain an ordinary
 BLAS `GpuAddress`. Neither raw value retains its owner. A cloned BLAS has a new

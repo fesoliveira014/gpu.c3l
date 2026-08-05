@@ -175,6 +175,11 @@ alias CmdUpdateAccelerationStructureFn @private = fn void? (
     CommandRecord*,
     gpu::AccelerationStructureBuildDesc*,
 );
+alias CmdAccelerationStructureIndirectFn @private = fn void? (
+    CommandRecord*,
+    gpu::AccelerationStructureBuildDesc*,
+    gpu::GpuSpan,
+);
 alias CmdCloneAccelerationStructureFn @private = fn void? (
     CommandRecord*,
     gpu::AccelerationStructureHandle,
@@ -229,6 +234,8 @@ struct CommandOps @public {
     CmdResolveTimestampsFn        resolve_timestamps;
     CmdBuildAccelerationStructureFn  build_acceleration_structure;
     CmdUpdateAccelerationStructureFn update_acceleration_structure;
+    CmdAccelerationStructureIndirectFn build_acceleration_structure_indirect;
+    CmdAccelerationStructureIndirectFn update_acceleration_structure_indirect;
     CmdCloneAccelerationStructureFn  clone_acceleration_structure;
 }
 
@@ -1768,6 +1775,7 @@ fn gpu::Device? create_vk_device(
                 || normalized.enable_ray_tracing_pipelines)
             ? (gpu::AccelerationStructureCaps){
                 .enabled = true,
+                .indirect_build = true,
                 .heap_capacity =
                     runtime_data.state.acceleration_structure_heap_capacity,
                 .max_geometry_count = uint::max,

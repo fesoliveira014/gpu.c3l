@@ -68,6 +68,13 @@ extern struct TraceRaysIndirectCommand2 {
     uint       _pad0;
 }
 
+extern struct AccelerationStructureIndirectBuildRange {
+    uint primitive_count;
+    uint primitive_offset;
+    uint first_vertex;
+    uint transform_offset;
+}
+
 // GPU-writable roots and arguments consumed as one generated work item.
 struct GeneratedDrawRecord {
     GpuAddress          vertex_root_gpu;

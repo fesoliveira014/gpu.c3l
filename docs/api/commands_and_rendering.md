@@ -87,13 +87,36 @@ counts, triangle vertex counts and transform presence, or TLAS instance count,
 as that completed structure. It uses the queried update scratch; there is no
 separate source handle.
 
+When `DeviceCaps.acceleration_structures.indirect_build` is true,
+`cmd_build_acceleration_structure_indirect` and
+`cmd_update_acceleration_structure_indirect` use the same descriptor and
+scratch contracts but read build ranges from a caller-owned `GpuSpan`.
+Descriptor primitive and instance counts are CPU maxima for these commands;
+triangle `vertex_count` is the exact `maxVertex + 1` bound. The packet contains
+one `AccelerationStructureIndirectBuildRange` per ordered BLAS geometry, or one
+for a TLAS, at fixed 16-byte stride. Its address is four-byte aligned and its
+allocation supports indirect use. Trailing bytes are ignored.
+
+`primitive_count` may be zero, is no greater than its descriptor maximum, and
+together with the remaining fields stays within the explicit input spans.
+`primitive_offset` is a byte offset aligned to the index element for indexed
+triangles, the smallest vertex-format component size for non-indexed triangles,
+8 bytes for AABBs, or 16 bytes for TLAS instances. `transform_offset` is 16-byte
+aligned. For triangles, `first_vertex` offsets vertex addressing; every
+resulting vertex index, including an indexed value plus `first_vertex`, is less
+than the descriptor's exact `vertex_count` bound. Indirect updates additionally
+require every actual count to equal the preceding build or update's actual
+count. The library does not inspect or read back the packet. A direct update is
+rejected after an indirect construction whose actual counts are unknown;
+continue with indirect updates or rebuild directly.
+
 `cmd_clone_acceleration_structure` records one device clone from a completed
 source into a distinct, matching, caller-created unbuilt destination. It uses
 no input or scratch span. A successfully recorded destination is pending until
 submission retirement; discarding the command restores it to unbuilt. Clone
 does not create storage, submit, wait, or publish a TLAS view.
 
-All three commands are valid on selected compute or graphics queues and
+All construction commands are valid on selected compute or graphics queues and
 invalid during a render pass or on transfer-only queues. They insert no
 barrier. The caller explicitly orders host writes, construction commands,
 later ray queries, and cross-submit consumers. Under full validation builds
@@ -101,6 +124,13 @@ and updates retain the destination and every explicit backing span, while a
 clone retains exactly its source and destination until retirement. Raw BLAS
 addresses already packed into TLAS instances remain caller-owned and are not
 rewritten by cloning.
+
+FULL validation also retains the indirect range span. TRUSTED performs no
+reference tracking, but still checks the command token, destination identity,
+fixed packet range, address alignment, indirect usage, capability, and safe
+native lowering. Neither policy inserts a dependency; order a compute-written
+packet with a destination containing both `.indirect` and
+`.acceleration_structure_build`.
 
 ## Compute work
 

@@ -125,6 +125,14 @@ instance record, scratch range, and structure live until the covering
 submission completes. The library allocates no hidden scratch and inserts no
 barrier.
 
+Direct build descriptors carry actual primitive or instance counts. Indirect
+build descriptors instead carry CPU maxima used for input bounds and native
+safety; triangle `vertex_count` remains the exact highest accessible vertex
+plus one. The GPU packet supplies the actual primitive count and input offsets.
+Keep its allocation live alongside every explicit input and scratch span.
+Under full validation all of these named owners are retained; trusted
+validation leaves their lifetime to the caller.
+
 `cmd_clone_acceleration_structure` copies one completed BLAS or TLAS into a
 distinct unbuilt destination created through any existing creation form with
 the same capacity schema. Clone consumes no scratch and does not allocate,
@@ -161,6 +169,12 @@ Updates are in-place only. The structure must have been created with
 and use the completed structure's per-geometry primitive counts, triangle
 vertex counts and transform presence, or TLAS instance count. Use the queried
 update scratch. There is no distinct update destination or implicit rebuild.
+
+After an indirect build, actual counts are not known to the CPU. An indirect
+update may follow when its GPU counts equal the preceding actual counts. A
+direct update cannot prove that condition and is rejected; perform another
+indirect update or a new direct full build. Cloning preserves whether counts
+are exact or maximum-only.
 
 Teardown remains explicit. Wait for clone and every later use, destroy any
 destination TLAS view, destroy destination and source structures in either

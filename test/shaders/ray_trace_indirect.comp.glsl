@@ -14,6 +14,10 @@ layout(buffer_reference, std430) writeonly buffer TraceArgs2 {
     TraceRaysIndirectCommand2 command2;
 };
 
+layout(buffer_reference, std430) writeonly buffer IndirectBuildRange {
+    AccelerationStructureIndirectBuildRange range;
+};
+
 layout(buffer_reference, std430) readonly buffer TraceArgsRoot {
     uint64_t arguments_gpu;
     uint64_t arguments2_gpu;
@@ -28,6 +32,7 @@ layout(buffer_reference, std430) readonly buffer TraceArgsRoot {
     uint64_t callable_table_address;
     uint64_t callable_table_size;
     uint64_t callable_table_stride;
+    uint64_t acceleration_structure_range_gpu;
 };
 
 layout(push_constant) uniform Push {
@@ -55,4 +60,6 @@ void main() {
         1u,
         0u
     );
+    IndirectBuildRange(root.acceleration_structure_range_gpu).range =
+        AccelerationStructureIndirectBuildRange(1u, 64u, 0u, 0u);
 }

@@ -75,6 +75,12 @@ capability discovery they must be requested independently with their
 Either opt-in enables the shared acceleration-structure foundation.
 Unsupported requests fail atomically.
 
+Indirect acceleration-structure builds are an independently reported optional
+part of that foundation. The current API records one BLAS or TLAS per command
+with fixed 16-byte range records. It does not expose batched builds, variable
+strides, GPU-authored build descriptions or handles, host builds, compaction,
+copy modes beyond device clone, serialization, or capture/replay.
+
 ## Ownership and ordering constraints
 
 - `GpuAddress`, `TextureIndex`, `SamplerIndex`, and

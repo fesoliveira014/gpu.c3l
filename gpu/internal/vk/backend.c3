@@ -19,6 +19,7 @@ struct VkDeviceDispatchPlan {
     bool presentation;
     bool generated_work;
     bool acceleration_structures;
+    bool acceleration_structure_indirect_build;
     bool ray_tracing_pipelines;
     bool ray_tracing_indirect2;
 }
@@ -76,6 +77,7 @@ struct VkAccelerationStructureDispatch {
     vk::PFN_vkDestroyAccelerationStructureKHR          destroy_acceleration_structure;
     vk::PFN_vkGetAccelerationStructureBuildSizesKHR    get_build_sizes;
     vk::PFN_vkCmdBuildAccelerationStructuresKHR        cmd_build;
+    vk::PFN_vkCmdBuildAccelerationStructuresIndirectKHR cmd_build_indirect;
     vk::PFN_vkCmdCopyAccelerationStructureKHR          cmd_copy;
     vk::PFN_vkGetAccelerationStructureDeviceAddressKHR get_device_address;
 }
@@ -259,6 +261,13 @@ fn VkDeviceDispatch load_vk_device_dispatch(
                     "vkGetAccelerationStructureDeviceAddressKHR",
                 ),
         };
+        if (plan.acceleration_structure_indirect_build) {
+            dispatch.acceleration_structures.cmd_build_indirect =
+                (vk::PFN_vkCmdBuildAccelerationStructuresIndirectKHR)loader(
+                    device,
+                    "vkCmdBuildAccelerationStructuresIndirectKHR",
+                );
+        }
     }
     if (plan.ray_tracing_pipelines) {
         dispatch.ray_tracing_pipelines = {
@@ -356,6 +365,12 @@ fn bool device_dispatch_supports_acceleration_structures(VkDeviceDispatch* dispa
         && dispatch.acceleration_structures.cmd_build != null
         && dispatch.acceleration_structures.cmd_copy != null
         && dispatch.acceleration_structures.get_device_address != null;
+}
+
+fn bool device_dispatch_supports_indirect_acceleration_structure_builds(
+    VkDeviceDispatch* dispatch,
+) {
+    return dispatch.acceleration_structures.cmd_build_indirect != null;
 }
 
 fn bool device_dispatch_supports_ray_tracing_pipelines(
