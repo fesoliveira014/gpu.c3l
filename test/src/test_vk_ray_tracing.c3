@@ -173,9 +173,78 @@ fn gpu::PipelineHandle? create_functional_ray_tracing_pipeline(
         .hit_groups             = hit_groups[..],
         .callable_shaders       = callable_shaders[..],
         .max_recursion_depth    = 1,
+        .dynamic_stack_size     = true,
         .debug_name             = "trace_functional_pipeline",
     };
     return gpu::create_ray_tracing_pipeline(device, &desc);
+}
+
+fn ulong? functional_pipeline_stack_size(
+    gpu::Device* device,
+    gpu::PipelineHandle pipeline,
+    gpu::RayTracingPipelineInfo* info,
+) {
+    ulong ray_generation =
+        gpu::get_ray_tracing_shader_group_stack_size(
+            device:       device,
+            pipeline:     pipeline,
+            group:        info.ray_generation.first_group,
+            group_shader: gpu::RayTracingGroupShader.GENERAL,
+        )!;
+    ulong primary_miss =
+        gpu::get_ray_tracing_shader_group_stack_size(
+            device:       device,
+            pipeline:     pipeline,
+            group:        info.miss.first_group,
+            group_shader: gpu::RayTracingGroupShader.GENERAL,
+        )!;
+    ulong secondary_miss =
+        gpu::get_ray_tracing_shader_group_stack_size(
+            device:       device,
+            pipeline:     pipeline,
+            group:        info.miss.first_group + 1,
+            group_shader: gpu::RayTracingGroupShader.GENERAL,
+        )!;
+    ulong triangle_hit =
+        gpu::get_ray_tracing_shader_group_stack_size(
+            device:       device,
+            pipeline:     pipeline,
+            group:        info.hit.first_group,
+            group_shader: gpu::RayTracingGroupShader.CLOSEST_HIT,
+        )!;
+    ulong procedural_hit =
+        gpu::get_ray_tracing_shader_group_stack_size(
+            device:       device,
+            pipeline:     pipeline,
+            group:        info.hit.first_group + 1,
+            group_shader: gpu::RayTracingGroupShader.CLOSEST_HIT,
+        )!;
+    ulong intersection =
+        gpu::get_ray_tracing_shader_group_stack_size(
+            device:       device,
+            pipeline:     pipeline,
+            group:        info.hit.first_group + 1,
+            group_shader: gpu::RayTracingGroupShader.INTERSECTION,
+        )!;
+    ulong callable = gpu::get_ray_tracing_shader_group_stack_size(
+        device:       device,
+        pipeline:     pipeline,
+        group:        info.callable.first_group,
+        group_shader: gpu::RayTracingGroupShader.GENERAL,
+    )!;
+    ulong miss = primary_miss > secondary_miss
+        ? primary_miss
+        : secondary_miss;
+    ulong closest_hit = triangle_hit > procedural_hit
+        ? triangle_hit
+        : procedural_hit;
+    ulong trace = miss > closest_hit ? miss : closest_hit;
+    if (intersection > trace) trace = intersection;
+    ulong stack_size = ray_generation + trace + 2 * callable;
+    if (stack_size > uint::max) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    return stack_size;
 }
 
 fn gpu::PipelineHandle? create_trace_indirect_build_pipeline(
@@ -566,6 +635,13 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
             && pipeline_info.hit.group_count == 2
             && pipeline_info.callable.group_count == 1,
         "the functional SBT packs every declared group category");
+    assert(pipeline_info.dynamic_stack_size
+        && pipeline_info.max_recursion_depth == 1);
+    ulong pipeline_stack_size = functional_pipeline_stack_size(
+        &device,
+        pipeline,
+        &pipeline_info,
+    )!!;
     gpu::RayTracingShaderBindingTable table;
     OwnedSpan sbt = create_functional_sbt(
         device:   &device,
@@ -713,6 +789,10 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         io::printfn("basic indirect ray tracing unavailable; direct proof only");
     }
     gpu::cmd_bind_pipeline(&trace_commands, pipeline)!!;
+    gpu::cmd_set_ray_tracing_pipeline_stack_size(
+        &trace_commands,
+        pipeline_stack_size,
+    )!!;
     gpu::cmd_trace_rays(
         commands:             &trace_commands,
         root:                 test_span_address(&device, root_owned.span),

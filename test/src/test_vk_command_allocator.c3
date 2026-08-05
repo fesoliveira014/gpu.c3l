@@ -256,6 +256,7 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
         device_state: null,
         value: {
             .command_buffer = (vk::CommandBuffer)(uptr)1,
+            .ray_tracing_stack_size_set = true,
         },
     )!!;
     gpu::internal::CommandListHandle first_identity = first.identity;
@@ -283,6 +284,8 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
     assert(replacement.identity.index == first_identity.index
         && replacement.identity.generation != first_identity.generation,
         "the cancelled cell rejoins the current free list with new identity");
+    assert(!replacement.ray_tracing_stack_size_set,
+        "recycled command records clear dynamic ray-tracing stack state");
     assert(table.get(concurrent_identity)!! == concurrent
         && concurrent.identity == concurrent_identity,
         "replacement publication leaves the interleaved claim unchanged");

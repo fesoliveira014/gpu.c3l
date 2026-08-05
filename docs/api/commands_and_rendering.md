@@ -135,6 +135,17 @@ and callable regions use canonical empty values when absent; nonempty regions
 must satisfy device base/handle alignment, stride, range, ownership, and usage
 requirements. Record a ray-tracing pipeline bind before tracing.
 
+For a pipeline created with `dynamic_stack_size = true`, bind the pipeline and
+then call `cmd_set_ray_tracing_pipeline_stack_size` with a caller-derived
+byte count before each direct or indirect trace that needs the state. The
+value must fit `uint` and be sufficient for every possible shader execution
+in the dispatch; it may be zero when no group reports a stack requirement.
+The library exposes per-group role requirements but
+does not derive a whole-pipeline value. Binding another dynamic-stack ray
+pipeline preserves the recorded value. A successful logical bind of any
+static-stack ray pipeline invalidates it, including when the native bind is
+deduplicated; later dynamic tracing requires another setter call.
+
 `cmd_trace_rays` pushes the root to all six ray stages and emits one direct
 trace. It allocates nothing and inserts no pipeline bind, barrier, submission,
 or wait. Keep the bound pipeline, every nonempty SBT allocation, root data,
@@ -156,6 +167,12 @@ completion. Under trusted validation those lifetimes are caller preconditions.
 No path inserts a barrier, readback, bind, submission, wait, or allocation.
 If the capability is false, the command returns `UNSUPPORTED_FEATURE`; the
 application may choose direct tracing as its fallback.
+
+The stack-size command is valid only while recording outside a render pass on a
+selected graphics or compute queue whose native family supports compute. FULL
+validation reports phase, queue, scope, active-pipeline mode, and numeric misuse
+before native emission or state mutation. TRUSTED validation treats those
+semantic checks, representability, and sufficiency as caller preconditions.
 
 ## Graphics state and drawing
 

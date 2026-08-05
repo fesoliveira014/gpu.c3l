@@ -53,6 +53,10 @@ alias CmdTraceRaysIndirectFn @private = fn void? (
     gpu::RayTracingShaderBindingTable*,
     gpu::GpuSpan,
 );
+alias CmdSetRayTracingPipelineStackSizeFn @private = fn void? (
+    CommandRecord*,
+    ulong,
+);
 alias CmdBeginRenderPassFn @private = fn void? (
     CommandRecord*,
     gpu::RenderPassDesc*,
@@ -198,6 +202,7 @@ struct CommandOps @public {
     CmdDispatchFn                 dispatch;
     CmdTraceRaysFn                trace_rays;
     CmdTraceRaysIndirectFn        trace_rays_indirect;
+    CmdSetRayTracingPipelineStackSizeFn set_ray_tracing_pipeline_stack_size;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;
@@ -808,6 +813,19 @@ fn void? vk_get_ray_tracing_shader_group_handles(
     (void)first_group;
     (void)group_count;
     (void)out;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn ulong? vk_get_ray_tracing_shader_group_stack_size(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+    uint group,
+    gpu::RayTracingGroupShader group_shader,
+) {
+    (void)state;
+    (void)pipeline;
+    (void)group;
+    (void)group_shader;
     return gpu::UNSUPPORTED_FEATURE~;
 }
 

@@ -1604,7 +1604,7 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     return pipeline;
 }
 
-<* Create a direct KHR ray-tracing pipeline. Shader groups are ordered ray
+<* Create a KHR ray-tracing pipeline. Shader groups are ordered ray
    generation, miss, hit, then callable. A zero recursion depth selects one.
    Identical immutable descriptors may alias one backend pipeline under
    distinct owning handles. All descriptor slices and shader bytes are borrowed
@@ -1676,6 +1676,31 @@ fn void? get_ray_tracing_shader_group_handles(
         group_count,
         out,
     )!;
+}
+
+<* Return the byte requirement for one present shader role in a live
+   ray-tracing group. The role and group category must match.
+
+   @param device : "Live device that owns pipeline."
+   @param pipeline : "Live ray-tracing pipeline handle."
+   @param group : "Group index in the deterministic pipeline order."
+   @param group_shader : "Shader role present in the selected group."
+   @return "The native byte requirement, or a recoverable ownership, kind, enum, range, role, or device fault." *>
+fn ulong? get_ray_tracing_shader_group_stack_size(
+    Device* device,
+    PipelineHandle pipeline,
+    uint group,
+    RayTracingGroupShader group_shader,
+) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    return gpu::internal::vk::vk_get_ray_tracing_shader_group_stack_size(
+        state:        operation.state,
+        pipeline:     pipeline,
+        group:        group,
+        group_shader: group_shader,
+    );
 }
 
 <* Release one returned pipeline handle.
@@ -2130,7 +2155,7 @@ fn void? cmd_clone_acceleration_structure(
     );
 }
 
-<* Bind the active compute or graphics pipeline for later commands.
+<* Bind the active compute, graphics, or ray-tracing pipeline for later commands.
    Preconditions: the pipeline is live and valid for later use on this queue.
    Always checked: token phase, pipeline identity, ownership, descriptor-heap
    binding prerequisites, and a safe native snapshot.
@@ -2138,7 +2163,7 @@ fn void? cmd_clone_acceleration_structure(
    failure preserves the prior logical bind.
 
    @param commands : "Live recording token."
-   @param pipeline : "Compute or graphics pipeline to bind."
+   @param pipeline : "Compute, graphics, or ray-tracing pipeline to bind."
    @return "Success, or a recoverable command, ownership, compatibility, invalid-handle, or device fault." *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2212,6 +2237,24 @@ fn void? cmd_trace_rays_indirect(
         root,
         shader_binding_table,
         args,
+    );
+}
+
+<* Set a caller-derived byte size after binding a dynamic-stack ray pipeline.
+   The value must fit uint and cover every shader execution in later traces.
+
+   @param commands : "Live recording token outside a render pass on a compute-capable graphics or compute family."
+   @param pipeline_stack_size : "Sufficient byte count, which may be zero; FULL checks uint representability."
+   @return "Success, or a recoverable command, pipeline, queue, scope, range, support, or device fault." *>
+fn void? cmd_set_ray_tracing_pipeline_stack_size(
+    CommandList* commands,
+    ulong pipeline_stack_size,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    return record.ops.set_ray_tracing_pipeline_stack_size(
+        record,
+        pipeline_stack_size,
     );
 }
 

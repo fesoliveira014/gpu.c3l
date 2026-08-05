@@ -80,10 +80,12 @@ struct VkAccelerationStructureDispatch {
 }
 
 struct VkRayTracingPipelineDispatch {
-    vk::PFN_vkCreateRayTracingPipelinesKHR          create_pipelines;
-    vk::PFN_vkGetRayTracingShaderGroupHandlesKHR    get_shader_group_handles;
-    vk::PFN_vkCmdTraceRaysKHR                       cmd_trace_rays;
-    vk::PFN_vkCmdTraceRaysIndirectKHR               cmd_trace_rays_indirect;
+    vk::PFN_vkCreateRayTracingPipelinesKHR         create_pipelines;
+    vk::PFN_vkGetRayTracingShaderGroupHandlesKHR   get_shader_group_handles;
+    vk::PFN_vkGetRayTracingShaderGroupStackSizeKHR get_shader_group_stack_size;
+    vk::PFN_vkCmdSetRayTracingPipelineStackSizeKHR cmd_set_stack_size;
+    vk::PFN_vkCmdTraceRaysKHR                      cmd_trace_rays;
+    vk::PFN_vkCmdTraceRaysIndirectKHR              cmd_trace_rays_indirect;
 }
 
 struct VkDeviceDispatch {
@@ -268,6 +270,16 @@ fn VkDeviceDispatch load_vk_device_dispatch(
                     device,
                     "vkGetRayTracingShaderGroupHandlesKHR",
                 ),
+            .get_shader_group_stack_size =
+                (vk::PFN_vkGetRayTracingShaderGroupStackSizeKHR)loader(
+                    device,
+                    "vkGetRayTracingShaderGroupStackSizeKHR",
+                ),
+            .cmd_set_stack_size =
+                (vk::PFN_vkCmdSetRayTracingPipelineStackSizeKHR)loader(
+                    device,
+                    "vkCmdSetRayTracingPipelineStackSizeKHR",
+                ),
             .cmd_trace_rays = (vk::PFN_vkCmdTraceRaysKHR)loader(
                 device,
                 "vkCmdTraceRaysKHR",
@@ -342,6 +354,8 @@ fn bool device_dispatch_supports_ray_tracing_pipelines(
 ) {
     return dispatch.ray_tracing_pipelines.create_pipelines != null
         && dispatch.ray_tracing_pipelines.get_shader_group_handles != null
+        && dispatch.ray_tracing_pipelines.get_shader_group_stack_size != null
+        && dispatch.ray_tracing_pipelines.cmd_set_stack_size != null
         && dispatch.ray_tracing_pipelines.cmd_trace_rays != null;
 }
 

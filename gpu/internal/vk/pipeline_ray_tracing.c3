@@ -24,6 +24,14 @@ alias RayTracingGroupHandleGetFn @private = fn vk::Result (
     void* data,
 );
 
+alias RayTracingGroupStackSizeGetFn @private = fn vk::DeviceSize (
+    void* user_data,
+    vk::Device device,
+    vk::Pipeline pipeline,
+    uint group,
+    vk::ShaderGroupShaderKHR group_shader,
+);
+
 const uint RAY_TRACING_HIT_CLOSEST_PRESENT = 0x1;
 const uint RAY_TRACING_HIT_ANY_PRESENT = 0x2;
 const uint RAY_TRACING_HIT_INTERSECTION_PRESENT = 0x4;
@@ -38,6 +46,11 @@ struct RayTracingPipelineCreateOps {
 struct RayTracingGroupHandleOps {
     void*                       user_data;
     RayTracingGroupHandleGetFn  get;
+}
+
+struct RayTracingGroupStackSizeOps {
+    void*                         user_data;
+    RayTracingGroupStackSizeGetFn get;
 }
 
 struct RayTracingPipelineShape {
@@ -81,6 +94,8 @@ fn RayTracingPipelineShape? normalize_ray_tracing_pipeline_desc(
             (uint)desc.hit_groups.len,
             (uint)desc.callable_shaders.len,
         )!;
+    info.max_recursion_depth = recursion_depth;
+    info.dynamic_stack_size = desc.dynamic_stack_size;
     ulong stage_count = desc.ray_generation_shaders.len
         + desc.miss_shaders.len
         + desc.callable_shaders.len;
@@ -336,9 +351,10 @@ fn gpu::PipelineHandle? create_ray_tracing_pipeline_from_prepared(
         ],
     };
     OwnedRayTracingPipelineKey key = create_ray_tracing_pipeline_key(
-        state,
-        &key_input,
-        shape.recursion_depth,
+        state:                      state,
+        input:                      &key_input,
+        normalized_recursion_depth: shape.recursion_depth,
+        dynamic_stack_size:         shape.info.dynamic_stack_size,
     )!;
     bool key_owned = true;
     defer if (key_owned) destroy_ray_tracing_pipeline_key(state, &key);
@@ -419,11 +435,18 @@ fn gpu::PipelineHandle? create_ray_tracing_pipeline_from_prepared(
 
     vk::RayTracingPipelineCreateInfoKHR info =
         vk::ray_tracing_pipeline_create_info_khr();
+    vk::DynamicState stack_state =
+        vk::DynamicState.RAY_TRACING_PIPELINE_STACK_SIZE_KHR;
+    vk::PipelineDynamicStateCreateInfo dynamic_state =
+        vk::pipeline_dynamic_state_create_info();
+    dynamic_state.dynamic_state_count = 1;
+    dynamic_state.p_dynamic_states = &stack_state;
     info.stage_count = shape.stage_count;
     info.p_stages = stages.ptr;
     info.group_count = shape.info.total_group_count;
     info.p_groups = groups.ptr;
     info.max_pipeline_ray_recursion_depth = shape.recursion_depth;
+    if (shape.info.dynamic_stack_size) info.p_dynamic_state = &dynamic_state;
     info.layout = state.ray_tracing_layout;
     vk::Pipeline pipeline;
     check_pipeline_create_device_result(
@@ -701,5 +724,154 @@ fn void? vk_get_ray_tracing_shader_group_handles(
         group_count,
         out,
         &ops,
+    );
+}
+
+fn vk::ShaderGroupShaderKHR? lower_ray_tracing_group_shader(
+    gpu::RayTracingGroupShader shader,
+) {
+    switch (shader) {
+        case gpu::RayTracingGroupShader.GENERAL:
+            return vk::ShaderGroupShaderKHR.GENERAL_KHR;
+        case gpu::RayTracingGroupShader.CLOSEST_HIT:
+            return vk::ShaderGroupShaderKHR.CLOSEST_HIT_KHR;
+        case gpu::RayTracingGroupShader.ANY_HIT:
+            return vk::ShaderGroupShaderKHR.ANY_HIT_KHR;
+        case gpu::RayTracingGroupShader.INTERSECTION:
+            return vk::ShaderGroupShaderKHR.INTERSECTION_KHR;
+        default:
+            return gpu::INVALID_ARGUMENT~;
+    }
+}
+
+fn uint? read_ray_tracing_key_word(
+    OwnedRayTracingPipelineKey* key,
+    usz word,
+) @private {
+    if (key == null || word > (usz::max / uint::size)) {
+        return gpu::BACKEND_ERROR~;
+    }
+    usz offset = word * uint::size;
+    if (offset > key.bytes.len || key.bytes.len - offset < uint::size) {
+        return gpu::BACKEND_ERROR~;
+    }
+    return (uint)key.bytes[offset]
+        | (uint)key.bytes[offset + 1] << 8
+        | (uint)key.bytes[offset + 2] << 16
+        | (uint)key.bytes[offset + 3] << 24;
+}
+
+fn bool? ray_tracing_group_shader_present(
+    PipelineCacheEntry* entry,
+    gpu::RayTracingPipelineInfo* info,
+    uint group,
+    gpu::RayTracingGroupShader group_shader,
+) @private {
+    ulong hit_end = (ulong)info.hit.first_group + info.hit.group_count;
+    bool hit_group = group >= info.hit.first_group && (ulong)group < hit_end;
+    if (!hit_group) return group_shader == gpu::RayTracingGroupShader.GENERAL;
+    if (group_shader == gpu::RayTracingGroupShader.GENERAL) return false;
+
+    usz hit_index = (usz)(group - info.hit.first_group);
+    if (hit_index > (usz::max - RAY_TRACING_KEY_HEADER_WORDS
+        - info.ray_generation.group_count
+        - info.miss.group_count
+        - RAY_TRACING_HIT_PRESENCE_WORD)
+        / RAY_TRACING_HIT_KEY_WORDS) {
+        return gpu::BACKEND_ERROR~;
+    }
+    usz presence_word = RAY_TRACING_KEY_HEADER_WORDS
+        + info.ray_generation.group_count
+        + info.miss.group_count
+        + hit_index * RAY_TRACING_HIT_KEY_WORDS
+        + RAY_TRACING_HIT_PRESENCE_WORD;
+    uint presence = read_ray_tracing_key_word(
+        &entry.ray_tracing_key,
+        presence_word,
+    )!;
+    switch (group_shader) {
+        case gpu::RayTracingGroupShader.CLOSEST_HIT:
+            return (presence & RAY_TRACING_HIT_CLOSEST_PRESENT) != 0;
+        case gpu::RayTracingGroupShader.ANY_HIT:
+            return (presence & RAY_TRACING_HIT_ANY_PRESENT) != 0;
+        case gpu::RayTracingGroupShader.INTERSECTION:
+            return (presence & RAY_TRACING_HIT_INTERSECTION_PRESENT) != 0;
+        default:
+            return false;
+    }
+}
+
+fn vk::DeviceSize get_ray_tracing_group_stack_size_real(
+    void* user_data,
+    vk::Device device,
+    vk::Pipeline pipeline,
+    uint group,
+    vk::ShaderGroupShaderKHR group_shader,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)user_data;
+    return state.ray_tracing_pipeline_operations.get_shader_group_stack_size(
+        device,
+        pipeline,
+        group,
+        group_shader,
+    );
+}
+
+fn ulong? vk_get_ray_tracing_shader_group_stack_size_with_ops(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+    uint group,
+    gpu::RayTracingGroupShader group_shader,
+    RayTracingGroupStackSizeOps* ops,
+) {
+    if (state == null || ops == null || ops.get == null) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    vk::ShaderGroupShaderKHR lowered =
+        lower_ray_tracing_group_shader(group_shader)!;
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    PipelineSlot* slot = state.pipelines.get(pipeline)!;
+    if (!pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (group >= slot.ray_tracing_info.total_group_count) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    PipelineCacheEntry* entry =
+        &state.pipeline_cache.entries[slot.entry];
+    if (!ray_tracing_group_shader_present(
+        entry,
+        &slot.ray_tracing_info,
+        group,
+        group_shader,
+    )!) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return (ulong)ops.get(
+        ops.user_data,
+        state.device,
+        slot.pipeline,
+        group,
+        lowered,
+    );
+}
+
+fn ulong? vk_get_ray_tracing_shader_group_stack_size(
+    VkDeviceState* state,
+    gpu::PipelineHandle pipeline,
+    uint group,
+    gpu::RayTracingGroupShader group_shader,
+) {
+    RayTracingGroupStackSizeOps ops = {
+        .user_data = state,
+        .get       = &get_ray_tracing_group_stack_size_real,
+    };
+    return vk_get_ray_tracing_shader_group_stack_size_with_ops(
+        state:        state,
+        pipeline:     pipeline,
+        group:        group,
+        group_shader: group_shader,
+        ops:          &ops,
     );
 }

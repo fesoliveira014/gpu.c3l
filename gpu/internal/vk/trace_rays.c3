@@ -33,11 +33,22 @@ alias TraceRaysIndirectEmitFn @private = fn void (
     vk::DeviceAddress indirect_address,
 );
 
+alias RayTracingStackSizeSetFn @private = fn void (
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    uint pipeline_stack_size,
+);
+
 struct TraceRaysOps {
     void*                   user_data;
     TraceRaysPushRootFn     push_root;
     TraceRaysEmitFn         trace;
     TraceRaysIndirectEmitFn trace_indirect;
+}
+
+struct RayTracingStackSizeOps {
+    void*                    user_data;
+    RayTracingStackSizeSetFn set;
 }
 
 struct PreparedTraceRaysState {
@@ -251,6 +262,22 @@ fn PreparedTraceRaysState? full_prepare_trace_rays_state(
     if (!pipeline.handle.is_valid()
         || pipeline.kind != PipelineKind.RAY_TRACING) {
         return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    if (pipeline.dynamic_ray_tracing_stack_size
+        && !record.ray_tracing_stack_size_set) {
+        return report_contract_failure(
+            state:               state,
+            operation:           operation,
+            public_fault:        gpu::INVALID_RESOURCE_STATE,
+            resource_kind:       gpu::DebugResourceKind.PIPELINE,
+            has_public_identity: true,
+            index:               pipeline.handle.index,
+            generation:          pipeline.handle.generation,
+            debug_name:          null,
+            rejected_field:      "pipeline_stack_size",
+            invariant:           "dynamic ray-tracing stack size must be set before tracing",
+            backend_text:        null,
+        )~;
     }
     return {
         .pipeline            = pipeline,
@@ -507,6 +534,167 @@ fn TraceRaysOps trace_rays_ops_real(VkDeviceState* state) {
         .trace          = &emit_trace_rays_real,
         .trace_indirect = &emit_trace_rays_indirect_real,
     };
+}
+
+fn void set_ray_tracing_pipeline_stack_size_real(
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    uint pipeline_stack_size,
+) @private {
+    VkDeviceState* state = (VkDeviceState*)user_data;
+    state.ray_tracing_pipeline_operations.cmd_set_stack_size(
+        command_buffer,
+        pipeline_stack_size,
+    );
+}
+
+fn RayTracingStackSizeOps ray_tracing_stack_size_ops_real(
+    VkDeviceState* state,
+) @private {
+    return {
+        .user_data = state,
+        .set       = &set_ray_tracing_pipeline_stack_size_real,
+    };
+}
+
+fn void? trusted_set_ray_tracing_pipeline_stack_size_with_ops(
+    CommandRecord* record,
+    ulong pipeline_stack_size,
+    RayTracingStackSizeOps* ops,
+) {
+    if (record == null || ops == null || ops.set == null) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    ops.set(
+        ops.user_data,
+        record.command_buffer,
+        (uint)pipeline_stack_size,
+    );
+    record.ray_tracing_stack_size_set = true;
+}
+
+fn void? full_set_ray_tracing_pipeline_stack_size_with_ops(
+    CommandRecord* record,
+    ulong pipeline_stack_size,
+    RayTracingStackSizeOps* ops,
+) {
+    if (record == null || ops == null || ops.set == null) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (record.state != gpu::internal::CommandState.RECORDING) {
+        return report_contract_failure(
+            state:               record.device_state,
+            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
+            public_fault:        gpu::COMMAND_RECORDING_ERROR,
+            resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
+            has_public_identity: record.identity.is_valid(),
+            index:               record.identity.index,
+            generation:          record.identity.generation,
+            debug_name:          null,
+            rejected_field:      "CommandList.state",
+            invariant:           "command must be recording outside a render pass",
+            backend_text:        null,
+        )~;
+    }
+    VkDeviceState* state = record.device_state;
+    if (state == null || !state.ray_tracing_pipelines_enabled) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if ((!record.queue.roles.graphics && !record.queue.roles.compute)
+        || !trace_rays_queue_supported(state, record.queue.id)) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "CommandList.queue",
+            invariant:           "selected queue family must support compute operations",
+            backend_text:        null,
+        )~;
+    }
+    BoundPipeline* pipeline = &record.logical_pipeline;
+    if (!pipeline.handle.is_valid()) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
+            public_fault:        gpu::COMMAND_RECORDING_ERROR,
+            resource_kind:       gpu::DebugResourceKind.PIPELINE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "pipeline",
+            invariant:           "a dynamic-stack ray-tracing pipeline must be active",
+            backend_text:        null,
+        )~;
+    }
+    if (pipeline.kind != PipelineKind.RAY_TRACING
+        || !pipeline.dynamic_ray_tracing_stack_size) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.PIPELINE,
+            has_public_identity: true,
+            index:               pipeline.handle.index,
+            generation:          pipeline.handle.generation,
+            debug_name:          null,
+            rejected_field:      "pipeline",
+            invariant:           "active pipeline must be a dynamic-stack ray-tracing pipeline",
+            backend_text:        null,
+        )~;
+    }
+    if (pipeline_stack_size > uint::max) {
+        return report_contract_failure(
+            state:               state,
+            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
+            public_fault:        gpu::INVALID_ARGUMENT,
+            resource_kind:       gpu::DebugResourceKind.NONE,
+            has_public_identity: false,
+            index:               0,
+            generation:          0,
+            debug_name:          null,
+            rejected_field:      "pipeline_stack_size",
+            invariant:           "stack size must be representable by uint",
+            backend_text:        null,
+        )~;
+    }
+    ops.set(
+        ops.user_data,
+        record.command_buffer,
+        (uint)pipeline_stack_size,
+    );
+    record.ray_tracing_stack_size_set = true;
+}
+
+fn void? trusted_set_ray_tracing_pipeline_stack_size(
+    CommandRecord* record,
+    ulong pipeline_stack_size,
+) {
+    RayTracingStackSizeOps ops =
+        ray_tracing_stack_size_ops_real(record.device_state);
+    return trusted_set_ray_tracing_pipeline_stack_size_with_ops(
+        record,
+        pipeline_stack_size,
+        &ops,
+    );
+}
+
+fn void? full_set_ray_tracing_pipeline_stack_size(
+    CommandRecord* record,
+    ulong pipeline_stack_size,
+) {
+    RayTracingStackSizeOps ops =
+        ray_tracing_stack_size_ops_real(record.device_state);
+    return full_set_ray_tracing_pipeline_stack_size_with_ops(
+        record,
+        pipeline_stack_size,
+        &ops,
+    );
 }
 
 fn void record_trace_rays_with_ops(

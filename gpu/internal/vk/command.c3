@@ -2041,6 +2041,8 @@ fn BoundPipeline? lower_bound_pipeline(
         .cache_entry               = slot.entry,
         .kind                      = (PipelineKind)entry.key.kind,
         .render                    = pipeline_render_compatibility(&entry.key),
+        .dynamic_ray_tracing_stack_size =
+            slot.ray_tracing_info.dynamic_stack_size,
     };
 }
 
@@ -2129,6 +2131,10 @@ fn void? record_bound_pipeline_with_ops(
         layout:     bound.layout,
         bind_point: bind_point,
     )!;
+    if (bound.kind == PipelineKind.RAY_TRACING
+        && !bound.dynamic_ray_tracing_stack_size) {
+        record.ray_tracing_stack_size_set = false;
+    }
     record.logical_pipeline = *bound;
 }
 

@@ -137,13 +137,18 @@ fn void pin_ray_tracing_pipeline_values() {
         .ray_generation_shaders = (&raygen)[:1],
         .hit_groups             = hit_groups[..],
         .max_recursion_depth    = 2,
+        .dynamic_stack_size     = true,
         .debug_name             = "canonical_ray_tracing_pipeline",
     };
     gpu::RayTracingPipelineInfo info = {
         .ray_generation = { .first_group = 0, .group_count = 1 },
         .hit            = { .first_group = 1, .group_count = 1 },
         .total_group_count = 2,
+        .max_recursion_depth = 2,
+        .dynamic_stack_size  = true,
     };
+    gpu::RayTracingGroupShader group_shader =
+        gpu::RayTracingGroupShader.CLOSEST_HIT;
     gpu::RayQueryCaps ray_query_caps = { .enabled = true };
     gpu::RayTracingShaderGroupRange ray_generation_range = {
         .first_group = 0,
@@ -159,6 +164,7 @@ fn void pin_ray_tracing_pipeline_values() {
     (void)ray_query_caps;
     (void)ray_generation_range;
     (void)info;
+    (void)group_shader;
     (void)table;
     (void)stage;
 }
@@ -464,6 +470,12 @@ fn void pin_shaders_and_pipelines() {
         0,
         {},
     );
+    (void)gpu::get_ray_tracing_shader_group_stack_size(
+        device:       &device,
+        pipeline:     pipeline,
+        group:        0,
+        group_shader: gpu::RayTracingGroupShader.GENERAL,
+    );
     color_target = gpu::alpha_blend();
     color_target = gpu::premultiplied_alpha_blend();
     color_target = gpu::additive_blend();
@@ -615,6 +627,7 @@ fn void pin_commands_and_completion() {
         shader_binding_table: &shader_binding_table,
         args:     span,
     );
+    (void)gpu::cmd_set_ray_tracing_pipeline_stack_size(&commands, 1);
     (void)gpu::cmd_dispatch_indirect(&commands, {}, span);
     (void)gpu::cmd_dispatch_generated(
         commands:           &commands,

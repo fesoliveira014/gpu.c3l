@@ -2217,30 +2217,46 @@ fn void ray_tracing_cache_keys_are_exact_owned_and_collision_safe() @test {
         .callable_shaders       = callable[..],
     };
     vk::OwnedRayTracingPipelineKey key =
-        vk::create_ray_tracing_pipeline_key(&state, &input, 2)!!;
+        vk::create_ray_tracing_pipeline_key(
+            state:                      &state,
+            input:                      &input,
+            normalized_recursion_depth: 2,
+            dynamic_stack_size:         false,
+        )!!;
     defer vk::destroy_ray_tracing_pipeline_key(&state, &key);
     vk::OwnedRayTracingPipelineKey same =
-        vk::create_ray_tracing_pipeline_key(&state, &input, 2)!!;
+        vk::create_ray_tracing_pipeline_key(
+            state:                      &state,
+            input:                      &input,
+            normalized_recursion_depth: 2,
+            dynamic_stack_size:         false,
+        )!!;
     defer vk::destroy_ray_tracing_pipeline_key(&state, &same);
 
     assert(key.bytes.ptr != null && key.bytes.ptr != same.bytes.ptr);
     assert(vk::ray_tracing_pipeline_key_equals(&key, &same));
     assert(key.hash == same.hash);
-    assert(key.bytes.len == 24 + 4 * (2 + 1 + 2 * 5 + 1));
+    assert(key.bytes.len == 28 + 4 * (2 + 1 + 2 * 5 + 1));
 
     vk::RayTracingPipelineKeyInput reordered_input = input;
     reordered_input.ray_generation_shaders = reversed_ray_generation[..];
     vk::OwnedRayTracingPipelineKey reordered =
         vk::create_ray_tracing_pipeline_key(
-            &state,
-            &reordered_input,
-            2,
+            state:                      &state,
+            input:                      &reordered_input,
+            normalized_recursion_depth: 2,
+            dynamic_stack_size:         false,
         )!!;
     defer vk::destroy_ray_tracing_pipeline_key(&state, &reordered);
     assert(!vk::ray_tracing_pipeline_key_equals(&key, &reordered));
 
     vk::OwnedRayTracingPipelineKey recursion =
-        vk::create_ray_tracing_pipeline_key(&state, &input, 3)!!;
+        vk::create_ray_tracing_pipeline_key(
+            state:                      &state,
+            input:                      &input,
+            normalized_recursion_depth: 3,
+            dynamic_stack_size:         false,
+        )!!;
     defer vk::destroy_ray_tracing_pipeline_key(&state, &recursion);
     assert(!vk::ray_tracing_pipeline_key_equals(&key, &recursion));
 
@@ -2248,10 +2264,25 @@ fn void ray_tracing_cache_keys_are_exact_owned_and_collision_safe() @test {
     hit_groups[0].presence_mask = 0x1;
     hit_groups[0].any_hit_shader = vk::SHADER_ID_INVALID;
     vk::OwnedRayTracingPipelineKey distinct_group =
-        vk::create_ray_tracing_pipeline_key(&state, &input, 2)!!;
+        vk::create_ray_tracing_pipeline_key(
+            state:                      &state,
+            input:                      &input,
+            normalized_recursion_depth: 2,
+            dynamic_stack_size:         false,
+        )!!;
     defer vk::destroy_ray_tracing_pipeline_key(&state, &distinct_group);
     hit_groups[0] = saved;
     assert(!vk::ray_tracing_pipeline_key_equals(&key, &distinct_group));
+
+    vk::OwnedRayTracingPipelineKey dynamic =
+        vk::create_ray_tracing_pipeline_key(
+            state:                      &state,
+            input:                      &input,
+            normalized_recursion_depth: 2,
+            dynamic_stack_size:         true,
+        )!!;
+    defer vk::destroy_ray_tracing_pipeline_key(&state, &dynamic);
+    assert(!vk::ray_tracing_pipeline_key_equals(&key, &dynamic));
 
     reordered.hash = key.hash;
     assert(!vk::ray_tracing_pipeline_key_equals(&key, &reordered),
@@ -2268,7 +2299,12 @@ fn void ray_tracing_key_allocation_failure_publishes_no_owned_bytes() @test {
         .ray_generation_shaders = ray_generation[..],
     };
     fault allocation_fault = @catch(
-        vk::create_ray_tracing_pipeline_key(&state, &input, 1));
+        vk::create_ray_tracing_pipeline_key(
+            state:                      &state,
+            input:                      &input,
+            normalized_recursion_depth: 1,
+            dynamic_stack_size:         false,
+        ));
     assert(allocation_fault == gpu::OUT_OF_HOST_MEMORY);
     assert(fail_allocator.acquires == 0
         && fail_allocator.releases == 0
