@@ -47,10 +47,10 @@ application must design around.
 - No ray-tracing pipeline libraries/linking, capture replay, deferred creation,
   automatic stack-size derivation, multi/count/batched ray dispatch, or
   GPU-authored root/SBT helpers.
-- No acceleration-structure compaction, serialization/deserialization,
-  indirect builds, host builds/copies, updates into a distinct destination,
-  handle-preserving relocation, or automatic address/view repair. Singular
-  device clone into a distinct matching destination is the only copy form.
+- No acceleration-structure compaction, serialization/deserialization, host
+  builds/copies, updates into a distinct destination, handle-preserving
+  relocation, or automatic address/view repair. Singular device clone into a
+  distinct matching destination is the only copy form.
 
 ## Required capability profile
 
@@ -80,6 +80,11 @@ part of that foundation. The current API records one BLAS or TLAS per command
 with fixed 16-byte range records. It does not expose batched builds, variable
 strides, GPU-authored build descriptions or handles, host builds, compaction,
 copy modes beyond device clone, serialization, or capture/replay.
+
+The indirect-build recording path is covered by CPU and compile-time tests but
+has not yet been submitted on capable hardware. Tested adapters reported the
+capability as unavailable, so hardware testing exercised the explicit direct
+fallback.
 
 ## Ownership and ordering constraints
 
