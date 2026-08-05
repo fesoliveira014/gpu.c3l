@@ -10,8 +10,24 @@ layout(buffer_reference, std430) writeonly buffer TraceArgs {
     TraceRaysIndirectCommand command;
 };
 
+layout(buffer_reference, std430) writeonly buffer TraceArgs2 {
+    TraceRaysIndirectCommand2 command2;
+};
+
 layout(buffer_reference, std430) readonly buffer TraceArgsRoot {
     uint64_t arguments_gpu;
+    uint64_t arguments2_gpu;
+    uint64_t ray_generation_record_address;
+    uint64_t ray_generation_record_size;
+    uint64_t miss_table_address;
+    uint64_t miss_table_size;
+    uint64_t miss_table_stride;
+    uint64_t hit_table_address;
+    uint64_t hit_table_size;
+    uint64_t hit_table_stride;
+    uint64_t callable_table_address;
+    uint64_t callable_table_size;
+    uint64_t callable_table_stride;
 };
 
 layout(push_constant) uniform Push {
@@ -21,5 +37,22 @@ layout(push_constant) uniform Push {
 void main() {
     TraceArgsRoot root = TraceArgsRoot(pc.root_gpu);
     TraceArgs(root.arguments_gpu).command =
-        TraceRaysIndirectCommand(4u, 1u, 1u);
+        TraceRaysIndirectCommand(5u, 1u, 1u);
+    TraceArgs2(root.arguments2_gpu).command2 = TraceRaysIndirectCommand2(
+        root.ray_generation_record_address,
+        root.ray_generation_record_size,
+        root.miss_table_address,
+        root.miss_table_size,
+        root.miss_table_stride,
+        root.hit_table_address,
+        root.hit_table_size,
+        root.hit_table_stride,
+        root.callable_table_address,
+        root.callable_table_size,
+        root.callable_table_stride,
+        4u,
+        1u,
+        1u,
+        0u
+    );
 }
