@@ -177,7 +177,7 @@ fn void acceleration_structure_caps_are_exact_saturating_and_opt_in_only() @test
     ), "the acceleration-structure heap joins all-pools accounting");
 }
 
-fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
+fn void indirect2_ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
     gpu::internal::vk::RayTracingCandidateSupport support = {
         .acceleration_structure_extension = true,
         .ray_tracing_pipeline_extension = true,
@@ -185,6 +185,8 @@ fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
         .acceleration_structure = true,
         .ray_tracing_pipeline = true,
         .ray_tracing_pipeline_trace_rays_indirect = true,
+        .ray_tracing_maintenance1_extension = true,
+        .ray_tracing_pipeline_trace_rays_indirect2 = true,
         .descriptor_update_after_bind = true,
         .buffer_device_address = true,
         .runtime_descriptor_array = true,
@@ -220,6 +222,7 @@ fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
         gpu::internal::vk::normalize_ray_tracing_pipeline_caps(true, &support);
     assert(caps.enabled && caps.max_recursion_depth == 4);
     assert(caps.indirect_dispatch);
+    assert(caps.indirect2_dispatch);
     assert(caps.max_ray_dispatch_invocation_count == 65_536);
     assert(caps.max_ray_dispatch_dimensions.x == 1024
         && caps.max_ray_dispatch_dimensions.y == 512
@@ -238,14 +241,41 @@ fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
         &support,
     ).indirect_dispatch);
 
-    gpu::internal::vk::RayTracingCandidateSupport direct_only = support;
-    direct_only.ray_tracing_pipeline_trace_rays_indirect = false;
-    gpu::RayTracingPipelineCaps direct_caps =
+    support.ray_tracing_pipeline_trace_rays_indirect = false;
+    caps = gpu::internal::vk::normalize_ray_tracing_pipeline_caps(true, &support);
+    assert(!caps.indirect_dispatch && caps.indirect2_dispatch);
+
+    gpu::internal::vk::RayTracingCandidateSupport basic_only = support;
+    basic_only.ray_tracing_pipeline_trace_rays_indirect = true;
+    basic_only.ray_tracing_pipeline_trace_rays_indirect2 = false;
+    gpu::RayTracingPipelineCaps basic_caps =
         gpu::internal::vk::normalize_ray_tracing_pipeline_caps(
             true,
-            &direct_only,
+            &basic_only,
         );
-    assert(direct_caps.enabled && !direct_caps.indirect_dispatch);
+    assert(basic_caps.enabled
+        && basic_caps.indirect_dispatch
+        && !basic_caps.indirect2_dispatch);
+
+    gpu::internal::vk::RayTracingCandidateSupport neither = basic_only;
+    neither.ray_tracing_pipeline_trace_rays_indirect = false;
+    gpu::RayTracingPipelineCaps neither_caps =
+        gpu::internal::vk::normalize_ray_tracing_pipeline_caps(
+            true,
+            &neither,
+        );
+    assert(neither_caps.enabled
+        && !neither_caps.indirect_dispatch
+        && !neither_caps.indirect2_dispatch);
+
+    gpu::internal::vk::RayTracingCandidateSupport maintenance_missing = support;
+    maintenance_missing.ray_tracing_maintenance1_extension = false;
+    caps = gpu::internal::vk::normalize_ray_tracing_pipeline_caps(
+        true,
+        &maintenance_missing,
+    );
+    assert(!caps.indirect2_dispatch,
+        "Indirect2 requires the ray-tracing-maintenance1 extension");
 
     gpu::internal::vk::RayTracingCandidateSupport rejected = support;
     rejected.ray_tracing_pipeline_extension = false;

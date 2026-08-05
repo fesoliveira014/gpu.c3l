@@ -44,10 +44,14 @@ struct DeviceFeatureChainCapture {
     bool found_ray_tracing_pipeline;
     bool ray_tracing_pipeline_enabled;
     bool ray_tracing_pipeline_trace_rays_indirect_enabled;
+    bool found_ray_tracing_maintenance1;
+    bool ray_tracing_maintenance1_enabled;
+    bool ray_tracing_pipeline_trace_rays_indirect2_enabled;
     bool acceleration_structure_extension;
     bool ray_query_extension;
     bool ray_tracing_pipeline_extension;
     bool deferred_host_operations_extension;
+    bool ray_tracing_maintenance1_extension;
 }
 
 fn void capture_baseline_support_diagnostic(
@@ -106,6 +110,8 @@ fn vk::Result capture_device_feature_chain(
             capture.ray_tracing_pipeline_extension = true;
         } else if (extension == "VK_KHR_deferred_host_operations") {
             capture.deferred_host_operations_extension = true;
+        } else if (extension == "VK_KHR_ray_tracing_maintenance1") {
+            capture.ray_tracing_maintenance1_extension = true;
         }
     }
 
@@ -188,6 +194,18 @@ fn vk::Result capture_device_feature_chain(
                 ray_pipeline.ray_tracing_pipeline == vk::TRUE;
             capture.ray_tracing_pipeline_trace_rays_indirect_enabled =
                 ray_pipeline.ray_tracing_pipeline_trace_rays_indirect
+                    == vk::TRUE;
+        } else if (feature.s_type
+            == vk::StructureType
+                .PHYSICAL_DEVICE_RAY_TRACING_MAINTENANCE_1_FEATURES_KHR) {
+            vk::PhysicalDeviceRayTracingMaintenance1FeaturesKHR*
+                maintenance1 =
+                    (vk::PhysicalDeviceRayTracingMaintenance1FeaturesKHR*)feature;
+            capture.found_ray_tracing_maintenance1 = true;
+            capture.ray_tracing_maintenance1_enabled =
+                maintenance1.ray_tracing_maintenance1 == vk::TRUE;
+            capture.ray_tracing_pipeline_trace_rays_indirect2_enabled =
+                maintenance1.ray_tracing_pipeline_trace_rays_indirect2
                     == vk::TRUE;
         }
         feature = feature.p_next;
@@ -275,6 +293,23 @@ load_device_dispatch_without_indirect_trace(
             plan,
         );
     dispatch.ray_tracing_pipelines.cmd_trace_rays_indirect = null;
+    return dispatch;
+}
+
+fn gpu::internal::vk::VkDeviceDispatch
+load_device_dispatch_without_indirect2_trace(
+    void* user_data,
+    vk::Device device,
+    gpu::internal::vk::VkDeviceDispatchPlan plan,
+) @private {
+    (void)user_data;
+    gpu::internal::vk::VkDeviceDispatch dispatch =
+        gpu::internal::vk::load_vk_device_dispatch(
+            device,
+            &vk::get_device_proc_addr,
+            plan,
+        );
+    dispatch.ray_tracing_pipelines.cmd_trace_rays_indirect2 = null;
     return dispatch;
 }
 
@@ -692,10 +727,12 @@ fn void device_creation_enables_required_native_features() @test {
         assert(!capture.found_acceleration_structure
                 && !capture.found_ray_query
                 && !capture.found_ray_tracing_pipeline
+                && !capture.found_ray_tracing_maintenance1
                 && !capture.acceleration_structure_extension
                 && !capture.ray_query_extension
                 && !capture.ray_tracing_pipeline_extension
-                && !capture.deferred_host_operations_extension,
+                && !capture.deferred_host_operations_extension
+                && !capture.ray_tracing_maintenance1_extension,
             "baseline creation requests no ray-query feature family");
         assert(
             probe.reached == gpu::internal::vk::DeviceCreationCheckpoint.NONE
@@ -781,6 +818,8 @@ fn void ray_tracing_pipeline_device_creation_is_independent_from_ray_queries() @
     gpu::DeviceDesc device_desc = { .enable_ray_tracing_pipelines = true };
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::internal::vk::RayTracingCandidateSupport* ray_tracing =
+            &runtime_state.adapters[adapter.adapter_index].ray_tracing;
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter, &device_desc)!!;
         if (!support.supported) {
@@ -815,6 +854,16 @@ fn void ray_tracing_pipeline_device_creation_is_independent_from_ray_queries() @
                 == runtime_state.adapters[adapter.adapter_index].ray_tracing
                     .ray_tracing_pipeline_trace_rays_indirect,
             "logical creation enables indirect tracing exactly when advertised");
+        bool indirect2_enabled = ray_tracing
+            .ray_tracing_maintenance1_extension
+            && ray_tracing.ray_tracing_pipeline_trace_rays_indirect2;
+        assert(capture.ray_tracing_maintenance1_extension == indirect2_enabled
+                && capture.found_ray_tracing_maintenance1 == indirect2_enabled
+                && (!indirect2_enabled
+                    || (!capture.ray_tracing_maintenance1_enabled
+                        && capture
+                            .ray_tracing_pipeline_trace_rays_indirect2_enabled)),
+            "logical creation enables only the Indirect2 maintenance feature bit");
         assert(!capture.found_ray_query && !capture.ray_query_extension);
         assert(capture.acceleration_structure_extension
                 && capture.ray_tracing_pipeline_extension
@@ -823,6 +872,56 @@ fn void ray_tracing_pipeline_device_creation_is_independent_from_ray_queries() @
     }
     assert(false,
         "the controlled native target supports ray-tracing pipelines");
+}
+
+fn void indirect2_ray_tracing_device_creation_chains_optional_feature() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_indirect2_feature_chain_test",
+        .acceleration_structure_heap_capacity = 8,
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::internal::RuntimeData* runtime_data =
+        gpu::internal::resolve_runtime(&runtime);
+    gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
+    gpu::DeviceDesc device_desc = { .enable_ray_tracing_pipelines = true };
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::internal::vk::RayTracingCandidateSupport* ray_tracing =
+            &runtime_state.adapters[adapter.adapter_index].ray_tracing;
+        if (!ray_tracing.ray_tracing_maintenance1_extension
+            || !ray_tracing.ray_tracing_pipeline_trace_rays_indirect2
+            || !gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            continue;
+        }
+        DeviceFeatureChainCapture capture;
+        gpu::internal::vk::DeviceCreationProbe probe;
+        gpu::internal::vk::DeviceCreationOps creation_ops = {
+            .user_data = &capture,
+            .create    = &capture_device_feature_chain,
+        };
+        gpu::Runtime retained_runtime = runtime;
+        gpu::internal::runtime_retain_device(&retained_runtime)!!;
+        fault rejected =
+            @catch(gpu::internal::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                device_desc:      &device_desc,
+                retained_runtime: &retained_runtime,
+                probe:            &probe,
+                creation_ops:     &creation_ops,
+            ));
+        gpu::internal::runtime_release_device(&retained_runtime)!!;
+
+        assert(rejected == gpu::UNSUPPORTED_BACKEND);
+        assert(capture.ray_tracing_maintenance1_extension);
+        assert(capture.found_ray_tracing_maintenance1);
+        assert(!capture.ray_tracing_maintenance1_enabled);
+        assert(capture.ray_tracing_pipeline_trace_rays_indirect2_enabled);
+        return;
+    }
+    io::printfn("Indirect2 ray tracing unavailable; feature-chain check skipped");
 }
 
 fn void missing_negotiated_indirect_trace_proc_rolls_creation_back() @test {
@@ -871,6 +970,59 @@ fn void missing_negotiated_indirect_trace_proc_rolls_creation_back() @test {
     io::printfn(
         "basic indirect ray tracing unavailable; dispatch rollback skipped",
     );
+}
+
+fn void missing_indirect2_trace_proc_downgrades_capability() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_indirect2_trace_dispatch_downgrade_test",
+        .acceleration_structure_heap_capacity = 8,
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::internal::RuntimeData* runtime_data =
+        gpu::internal::resolve_runtime(&runtime);
+    gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
+    gpu::DeviceDesc device_desc = { .enable_ray_tracing_pipelines = true };
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::internal::vk::RayTracingCandidateSupport* ray_tracing =
+            &runtime_state.adapters[adapter.adapter_index].ray_tracing;
+        if (!ray_tracing.ray_tracing_maintenance1_extension
+            || !ray_tracing.ray_tracing_pipeline_trace_rays_indirect2
+            || !gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            continue;
+        }
+        gpu::internal::vk::DeviceCreationProbe probe;
+        gpu::internal::vk::DeviceCreationOps creation_ops = {
+            .create        = &create_native_device_for_dispatch_test,
+            .load_dispatch = &load_device_dispatch_without_indirect2_trace,
+        };
+        gpu::Runtime retained_runtime = runtime;
+        gpu::internal::runtime_retain_device(&retained_runtime)!!;
+        gpu::Device? creation_result =
+            gpu::internal::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                device_desc:      &device_desc,
+                retained_runtime: &retained_runtime,
+                probe:            &probe,
+                creation_ops:     &creation_ops,
+            );
+        fault creation_fault = @catch(creation_result);
+        if (creation_fault) {
+            gpu::internal::runtime_release_device(&retained_runtime)!!;
+            assert(false, "a missing optional Indirect2 procedure must not reject creation");
+        }
+        gpu::Device device = creation_result!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        assert(caps.ray_tracing_pipelines.enabled
+                && !caps.ray_tracing_pipelines.indirect2_dispatch,
+            "a missing optional Indirect2 procedure clears only its capability");
+        gpu::destroy_device(&device)!!;
+        return;
+    }
+    io::printfn("Indirect2 ray tracing unavailable; dispatch downgrade skipped");
 }
 
 fn void missing_dynamic_stack_procs_roll_creation_back() @test {
