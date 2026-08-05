@@ -27,6 +27,10 @@ alias CmdTraceRaysIndirectFn @private = fn void? (
     gpu::RayTracingShaderBindingTable*,
     gpu::GpuSpan,
 );
+alias CmdSetRayTracingPipelineStackSizeFn @private = fn void? (
+    CommandRecord*,
+    ulong,
+);
 alias CmdBeginRenderPassFn @private          = fn void? (CommandRecord*, gpu::RenderPassDesc*);
 alias CmdSetViewportFn @private              = fn void? (CommandRecord*, gpu::Viewport*);
 alias CmdSetScissorFn @private               = fn void? (CommandRecord*, gpu::ScissorRect*);
@@ -160,6 +164,7 @@ struct BoundPipeline {
     uint                              cache_entry;
     PipelineKind                      kind;
     RenderCompatibility               render;
+    bool                              dynamic_ray_tracing_stack_size;
 }
 
 struct NativePipelineBinding {
@@ -195,6 +200,7 @@ struct CommandRecord @public {
     NativePipelineBinding            native_compute_pipeline;
     NativePipelineBinding            native_ray_tracing_pipeline;
     DescriptorHeapCommandBinding     descriptor_heap_binding;
+    bool                             ray_tracing_stack_size_set;
     CommandScratch*                  scratch;
     uint                             pending_acceleration_structure_head;
 }
@@ -211,6 +217,7 @@ struct CommandOps @public {
     CmdDispatchFn                 dispatch;
     CmdTraceRaysFn                trace_rays;
     CmdTraceRaysIndirectFn        trace_rays_indirect;
+    CmdSetRayTracingPipelineStackSizeFn set_ray_tracing_pipeline_stack_size;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;

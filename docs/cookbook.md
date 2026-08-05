@@ -216,6 +216,54 @@ Keep the SBT allocation, TLAS view, root data, and every raw-address target live
 until the trace completion point retires. The library inserts no hidden upload,
 barrier, bind, wait, or SBT allocation.
 
+## Set an explicit ray-tracing stack size
+
+Set `RayTracingPipelineDesc.dynamic_stack_size = true` when an application can
+derive a tighter stack bound for its known shader graph. Query only roles that
+are present. This example assumes exactly one ray-generation shader, one miss
+shader, and one triangle closest-hit group, with recursion depth one and no
+any-hit, intersection, callable, or recursive trace invocation. For that graph,
+the required bound is the ray-generation requirement plus the larger reachable
+miss or closest-hit requirement.
+
+```c3
+ulong raygen = gpu::get_ray_tracing_shader_group_stack_size(
+    device:       &device,
+    pipeline:     pipeline,
+    group:        info.ray_generation.first_group,
+    group_shader: gpu::RayTracingGroupShader.GENERAL,
+)!;
+ulong miss = gpu::get_ray_tracing_shader_group_stack_size(
+    device:       &device,
+    pipeline:     pipeline,
+    group:        info.miss.first_group,
+    group_shader: gpu::RayTracingGroupShader.GENERAL,
+)!;
+ulong closest_hit = gpu::get_ray_tracing_shader_group_stack_size(
+    device:       &device,
+    pipeline:     pipeline,
+    group:        info.hit.first_group,
+    group_shader: gpu::RayTracingGroupShader.CLOSEST_HIT,
+)!;
+ulong stack_size = raygen + (miss > closest_hit ? miss : closest_hit);
+
+gpu::cmd_bind_pipeline(&commands, pipeline)!;
+gpu::cmd_set_ray_tracing_pipeline_stack_size(&commands, stack_size)!;
+gpu::cmd_trace_rays(
+    commands:             &commands,
+    root:                 root_gpu,
+    shader_binding_table: &sbt,
+    dimensions:           { width, height, 1 },
+)!;
+```
+
+This is an example for a deliberately simple graph, not a universal formula.
+Account for the pipeline recursion depth, all reachable hit/miss paths, and
+callable nesting in the application’s actual graph. The setter takes `ulong`
+for arithmetic convenience, but the recorded value must be nonzero and fit
+`uint`. Bind first and set again after a static ray-pipeline bind invalidates
+the dynamic state.
+
 ## Trace with GPU-written dimensions
 
 After requesting ray-tracing pipelines, query

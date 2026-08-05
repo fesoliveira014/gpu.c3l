@@ -148,7 +148,7 @@ Types: `RootPush`, `GraphicsRootPush`, `GeneratedDrawRecord`,
 `BlendFactor`, `BlendOp`, `ColorWriteMask`, `ShaderDesc`, `DepthState`,
 `BlendState`, `ColorTargetState`, `ColorState`, `DynamicRasterState`,
 `ComputePipelineDesc`, `GraphicsPipelineDesc`, `RayTracingHitGroupKind`,
-`RayTracingHitGroupDesc`, `RayTracingPipelineDesc`,
+`RayTracingGroupShader`, `RayTracingHitGroupDesc`, `RayTracingPipelineDesc`,
 `RayTracingShaderGroupRange`, `RayTracingPipelineInfo`,
 `RayTracingShaderBindingTableRegion`, and
 `RayTracingShaderBindingTable`.
@@ -163,6 +163,7 @@ Callables: `color_blend_disabled`,
 `uniform_color_state`, `create_compute_pipeline`,
 `create_graphics_pipeline`, `create_ray_tracing_pipeline`,
 `get_ray_tracing_pipeline_info`, `get_ray_tracing_shader_group_handles`,
+`get_ray_tracing_shader_group_stack_size`,
 `destroy_pipeline`, `get_pipeline_cache_size`, and `get_pipeline_cache_data`.
 
 ### [Commands and rendering](commands_and_rendering.md)
@@ -199,7 +200,7 @@ Callables:
 `cmd_update_acceleration_structure`, `cmd_clone_acceleration_structure`,
 `cmd_bind_pipeline`, `cmd_dispatch`,
 `cmd_dispatch_indirect`, `cmd_dispatch_generated`, `cmd_trace_rays`,
-`cmd_trace_rays_indirect`,
+`cmd_trace_rays_indirect`, `cmd_set_ray_tracing_pipeline_stack_size`,
 `cmd_set_viewport`,
 `cmd_set_scissor`, `cmd_draw`, `cmd_draw_indexed`, `cmd_draw_indirect`,
 `cmd_draw_indexed_indirect`, `cmd_draw_indexed_indirect_count`,

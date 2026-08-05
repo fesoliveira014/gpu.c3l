@@ -254,6 +254,8 @@ fn vk::PFN_vkVoidFunction recording_device_proc_loader(
         counts.ray_query++;
     } else if (proc_name == "vkCreateRayTracingPipelinesKHR"
         || proc_name == "vkGetRayTracingShaderGroupHandlesKHR"
+        || proc_name == "vkGetRayTracingShaderGroupStackSizeKHR"
+        || proc_name == "vkCmdSetRayTracingPipelineStackSizeKHR"
         || proc_name == "vkCmdTraceRaysKHR"
         || proc_name == "vkCmdTraceRaysIndirectKHR") {
         counts.ray_tracing_pipeline++;
@@ -575,7 +577,7 @@ fn void device_ray_tracing_pipeline_dispatch_requires_complete_set() @test {
             &recording_device_proc_loader,
             plan,
         );
-    assert(counts.ray_tracing_pipeline == 4);
+    assert(counts.ray_tracing_pipeline == 6);
     assert(gpu::internal::vk::device_dispatch_supports_ray_tracing_pipelines(
         &complete,
     ));
@@ -587,6 +589,16 @@ fn void device_ray_tracing_pipeline_dispatch_requires_complete_set() @test {
     ));
     missing = complete;
     missing.ray_tracing_pipelines.get_shader_group_handles = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_tracing_pipelines(
+        &missing,
+    ));
+    missing = complete;
+    missing.ray_tracing_pipelines.get_shader_group_stack_size = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_ray_tracing_pipelines(
+        &missing,
+    ));
+    missing = complete;
+    missing.ray_tracing_pipelines.cmd_set_stack_size = null;
     assert(!gpu::internal::vk::device_dispatch_supports_ray_tracing_pipelines(
         &missing,
     ));

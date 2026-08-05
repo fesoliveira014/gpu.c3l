@@ -16,6 +16,9 @@ alias PipelineCacheCreateFn @private = fn vk::Result (void*, vk::Device, vk::Pip
 // shared. Monomorphic table, same c3c 0.8.0 rationale as PipelineTable.
 
 const uint PIPELINE_ENTRY_NONE = uint::max;
+const usz RAY_TRACING_KEY_HEADER_WORDS = 7;
+const usz RAY_TRACING_HIT_KEY_WORDS = 5;
+const usz RAY_TRACING_HIT_PRESENCE_WORD = 1;
 
 enum PipelineKind : int {
     COMPUTE,
@@ -142,6 +145,7 @@ fn OwnedRayTracingPipelineKey? create_ray_tracing_pipeline_key(
     VkDeviceState* state,
     RayTracingPipelineKeyInput* input,
     uint normalized_recursion_depth,
+    bool dynamic_stack_size,
 ) {
     if (state == null || state.host_allocator == null || input == null) {
         return gpu::INVALID_ARGUMENT~;
@@ -156,11 +160,12 @@ fn OwnedRayTracingPipelineKey? create_ray_tracing_pipeline_key(
         || callable_count > uint::max) {
         return gpu::INVALID_ARGUMENT~;
     }
-    usz word_count = 6;
-    if (hit_count > (usz::max - word_count) / 5) {
+    usz word_count = RAY_TRACING_KEY_HEADER_WORDS;
+    if (hit_count
+        > (usz::max - word_count) / RAY_TRACING_HIT_KEY_WORDS) {
         return gpu::INVALID_ARGUMENT~;
     }
-    word_count += hit_count * 5;
+    word_count += hit_count * RAY_TRACING_HIT_KEY_WORDS;
     if (ray_generation_count > usz::max - word_count) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -187,6 +192,11 @@ fn OwnedRayTracingPipelineKey? create_ray_tracing_pipeline_key(
         (uint)PipelineKind.RAY_TRACING,
     );
     write_ray_tracing_key_u32(bytes, &cursor, normalized_recursion_depth);
+    write_ray_tracing_key_u32(
+        bytes,
+        &cursor,
+        dynamic_stack_size ? 1 : 0,
+    );
     write_ray_tracing_key_u32(bytes, &cursor, (uint)ray_generation_count);
     write_ray_tracing_key_u32(bytes, &cursor, (uint)miss_count);
     write_ray_tracing_key_u32(bytes, &cursor, (uint)hit_count);

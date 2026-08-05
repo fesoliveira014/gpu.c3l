@@ -62,15 +62,26 @@ pointers mean that role is absent.
 `DeviceDesc.enable_ray_tracing_pipelines`. Zero recursion depth normalizes to
 one; higher values must fit
 `DeviceCaps.ray_tracing_pipelines.max_recursion_depth`.
+The zero-value `dynamic_stack_size` field creates a static-stack pipeline.
+Set it to `true` only when the application will derive and record an explicit
+stack size before tracing. Static and dynamic descriptors are distinct cache
+identities.
 `get_ray_tracing_pipeline_info` returns deterministic ray-generation, miss,
-hit, and callable `RayTracingShaderGroupRange` values in that order.
+hit, and callable `RayTracingShaderGroupRange` values in that order, together
+with the normalized recursion depth and dynamic-stack mode.
 `get_ray_tracing_shader_group_handles` copies one exact contiguous range into
 caller storage whose length is `group_count * shader_group_handle_size`.
+`get_ray_tracing_shader_group_stack_size` returns the native byte requirement
+for one shader role that is present in one group. `GENERAL` is valid only for
+ray-generation, miss, and callable groups; `CLOSEST_HIT`, `ANY_HIT`, and
+`INTERSECTION` are valid only when that role is present in the selected hit
+group.
 
 Ray-tracing pipelines do not support pipeline libraries/linking, capture
-replay, deferred creation, dynamic stack sizing, Indirect2, or batched trace
-commands. Basic indirect tracing changes only where dimensions are read; SBT
-allocation and packing remain application responsibilities.
+replay, deferred creation, automatic stack-size derivation, Indirect2, or
+batched trace commands. Basic indirect tracing changes only where dimensions
+are read; SBT allocation, packing, and sufficient stack-size calculation remain
+application responsibilities.
 
 ## Ownership and destruction
 

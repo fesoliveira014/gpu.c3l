@@ -27,7 +27,9 @@ application must design around.
   and a bindless TLAS heap.
 - Independently opted-in KHR ray-tracing pipelines with all six shader roles,
   triangle/procedural hit groups, caller-owned SBTs, direct traces, and
-  capability-gated basic indirect dimensions.
+  capability-gated basic indirect dimensions. Per-group stack queries are
+  available for every ray-tracing pipeline; pipelines may explicitly opt in to
+  caller-recorded dynamic stack sizing.
 
 ## Deliberate exclusions
 
@@ -43,8 +45,8 @@ application must design around.
 - No package-registry distribution; consumers vendor the repository and its
   submodules.
 - No ray-tracing pipeline libraries/linking, capture replay, deferred creation,
-  dynamic stack sizing, Indirect2, multi/count/batched ray dispatch, or
-  GPU-authored root/SBT helpers.
+  automatic stack-size derivation, Indirect2, multi/count/batched ray dispatch,
+  or GPU-authored root/SBT helpers.
 - No acceleration-structure compaction, serialization/deserialization,
   indirect builds, host builds/copies, updates into a distinct destination,
   handle-preserving relocation, or automatic address/view repair. Singular

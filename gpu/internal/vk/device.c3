@@ -593,6 +593,8 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .dispatch                    = &trusted_dispatch,
     .trace_rays                  = &trusted_trace_rays,
     .trace_rays_indirect         = &trusted_trace_rays_indirect,
+    .set_ray_tracing_pipeline_stack_size =
+        &trusted_set_ray_tracing_pipeline_stack_size,
     .begin_render_pass           = &trusted_begin_render_pass,
     .set_viewport                = &trusted_set_viewport,
     .set_scissor                 = &trusted_set_scissor,
@@ -628,6 +630,8 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .dispatch                    = &full_dispatch,
     .trace_rays                  = &full_trace_rays,
     .trace_rays_indirect         = &full_trace_rays_indirect,
+    .set_ray_tracing_pipeline_stack_size =
+        &full_set_ray_tracing_pipeline_stack_size,
     .begin_render_pass           = &full_begin_render_pass,
     .set_viewport                = &full_set_viewport,
     .set_scissor                 = &full_set_scissor,

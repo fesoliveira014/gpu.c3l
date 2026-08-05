@@ -20,6 +20,12 @@ struct RayTracingBindCapture {
     bool matched;
 }
 
+struct RayTracingStackSizeCapture {
+    uint expected_size;
+    uint calls;
+    bool matched;
+}
+
 fn void capture_ray_tracing_bind(
     void* raw_capture,
     vk::CommandBuffer command_buffer,
@@ -33,6 +39,19 @@ fn void capture_ray_tracing_bind(
     capture.matched = capture.matched
         && bind_point == vk::PipelineBindPoint.RAY_TRACING_KHR
         && pipeline == (vk::Pipeline)(uptr)0x55;
+}
+
+fn void capture_ray_tracing_stack_size(
+    void* raw_capture,
+    vk::CommandBuffer command_buffer,
+    uint pipeline_stack_size,
+) {
+    (void)command_buffer;
+    RayTracingStackSizeCapture* capture =
+        (RayTracingStackSizeCapture*)raw_capture;
+    capture.calls++;
+    capture.matched = capture.matched
+        && pipeline_stack_size == capture.expected_size;
 }
 
 fn void capture_trace_root(
@@ -321,6 +340,214 @@ fn void ray_tracing_bind_uses_distinct_native_bind_point_and_cache() @test {
     assert(capture.matched && capture.calls == 1);
     assert(fixture.record.native_ray_tracing_pipeline.pipeline
         == bound.pipeline);
+}
+
+fn void dynamic_stack_size_sets_only_after_full_validation() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    fixture.record.logical_pipeline.dynamic_ray_tracing_stack_size = true;
+    RayTracingStackSizeCapture capture = {
+        .expected_size = 37,
+        .matched       = true,
+    };
+    vk::RayTracingStackSizeOps ops = {
+        .user_data = &capture,
+        .set       = &capture_ray_tracing_stack_size,
+    };
+
+    vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        37,
+        &ops,
+    )!!;
+    assert(capture.matched && capture.calls == 1);
+    assert(fixture.record.ray_tracing_stack_size_set);
+
+    fixture.record.ray_tracing_stack_size_set = false;
+    SyncDiagnosticCapture diagnostic = {
+        .expected_operation      = "cmd_set_ray_tracing_pipeline_stack_size",
+        .expected_rejected_field = "pipeline_stack_size",
+        .expected_invariant      = "stack size must be nonzero and representable by uint",
+    };
+    fixture.spans.state.debug_callback = &capture_sync_diagnostic;
+    fixture.spans.state.debug_user_data = &diagnostic;
+    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        0,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(diagnostic.calls == 1
+        && diagnostic.public_contract
+        && diagnostic.public_fault == gpu::INVALID_ARGUMENT
+        && diagnostic.operation_matches
+        && diagnostic.rejected_field_matches
+        && diagnostic.invariant_matches,
+        "FULL stack-size misuse emits one structured diagnostic");
+    fixture.spans.state.debug_callback = null;
+    fixture.spans.state.debug_user_data = null;
+    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        (ulong)uint::max + 1,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.record.logical_pipeline.dynamic_ray_tracing_stack_size = false;
+    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        37,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.record.logical_pipeline.handle = {};
+    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        37,
+        &ops,
+    )) == gpu::COMMAND_RECORDING_ERROR);
+    fixture.record.logical_pipeline.handle = {
+        .owner      = fixture.spans.state.pipelines.owner,
+        .generation = 3,
+    };
+    fixture.record.logical_pipeline.kind = vk::PipelineKind.COMPUTE;
+    fixture.record.logical_pipeline.dynamic_ray_tracing_stack_size = true;
+    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        37,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.record.logical_pipeline.kind = vk::PipelineKind.GRAPHICS;
+    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        37,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.record.logical_pipeline.kind = vk::PipelineKind.RAY_TRACING;
+    fixture.record.state =
+        gpu::internal::CommandState.RECORDING_RENDER_PASS;
+    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        37,
+        &ops,
+    )) == gpu::COMMAND_RECORDING_ERROR);
+    fixture.record.state = gpu::internal::CommandState.RECORDING;
+    fixture.record.queue.roles = { .transfer };
+    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        37,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.record.queue.roles = { .graphics };
+    fixture.completions[0].queue_flags = vk::QueueFlagBits.GRAPHICS_BIT;
+    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        37,
+        &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(capture.calls == 1);
+    assert(!fixture.record.ray_tracing_stack_size_set);
+}
+
+fn void trusted_dynamic_stack_size_lowers_without_reference_work() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    RayTracingStackSizeCapture capture = {
+        .expected_size = 19,
+        .matched       = true,
+    };
+    vk::RayTracingStackSizeOps ops = {
+        .user_data = &capture,
+        .set       = &capture_ray_tracing_stack_size,
+    };
+
+    vk::trusted_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        19,
+        &ops,
+    )!!;
+    assert(capture.matched && capture.calls == 1);
+    assert(fixture.record.ray_tracing_stack_size_set);
+    assert(fixture.scratch.reference_count == 0);
+}
+
+fn void static_ray_bind_invalidates_dynamic_stack_state() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    fixture.record.descriptor_heap_binding.ray_tracing_set_bound = true;
+    RayTracingBindCapture capture = { .matched = true };
+    vk::PipelineBindOps ops = {
+        .user_data = &capture,
+        .bind      = &capture_ray_tracing_bind,
+    };
+    vk::BoundPipeline dynamic = fixture.record.logical_pipeline;
+    dynamic.dynamic_ray_tracing_stack_size = true;
+    fixture.record.ray_tracing_stack_size_set = true;
+    vk::record_bound_pipeline_with_ops(&fixture.record, &dynamic, &ops)!!;
+    assert(fixture.record.ray_tracing_stack_size_set);
+
+    vk::BoundPipeline static_pipeline = dynamic;
+    static_pipeline.dynamic_ray_tracing_stack_size = false;
+    vk::record_bound_pipeline_with_ops(
+        &fixture.record,
+        &static_pipeline,
+        &ops,
+    )!!;
+    assert(capture.calls == 1,
+        "logical static rebinding can suppress the native bind");
+    assert(!fixture.record.ray_tracing_stack_size_set);
+    fixture.record.ray_tracing_stack_size_set = true;
+    vk::record_bound_pipeline_with_ops(&fixture.record, &dynamic, &ops)!!;
+    assert(fixture.record.ray_tracing_stack_size_set);
+}
+
+fn void full_dynamic_trace_requires_current_stack_state() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    fixture.record.logical_pipeline.dynamic_ray_tracing_stack_size = true;
+    gpu::GpuSpan args = fixture_trace_args(&fixture);
+    SyncDiagnosticCapture diagnostic = {
+        .expected_operation      = "cmd_trace_rays",
+        .expected_rejected_field = "pipeline_stack_size",
+        .expected_invariant      = "dynamic ray-tracing stack size must be set before tracing",
+    };
+    fixture.spans.state.debug_callback = &capture_sync_diagnostic;
+    fixture.spans.state.debug_user_data = &diagnostic;
+
+    assert(@catch(vk::full_prepare_trace_rays(
+        &fixture.record,
+        {},
+        &fixture.table,
+        { 1, 1, 1 },
+    )) == gpu::INVALID_RESOURCE_STATE);
+    assert(diagnostic.calls == 1
+        && diagnostic.public_contract
+        && diagnostic.public_fault == gpu::INVALID_RESOURCE_STATE
+        && diagnostic.operation_matches
+        && diagnostic.rejected_field_matches
+        && diagnostic.invariant_matches,
+        "FULL direct trace reports missing dynamic stack state");
+    diagnostic.expected_operation = "cmd_trace_rays_indirect";
+    diagnostic.operation_matches = false;
+    assert(@catch(vk::full_prepare_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::INVALID_RESOURCE_STATE);
+    assert(diagnostic.calls == 2 && diagnostic.operation_matches,
+        "FULL indirect trace reports missing dynamic stack state");
+    fixture.spans.state.debug_callback = null;
+    fixture.spans.state.debug_user_data = null;
+    fixture.record.ray_tracing_stack_size_set = true;
+    (void)vk::full_prepare_trace_rays(
+        &fixture.record,
+        {},
+        &fixture.table,
+        { 1, 1, 1 },
+    )!!;
+    (void)vk::full_prepare_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )!!;
 }
 
 fn void full_trace_tracks_pipeline_and_unique_sbt_backing() @test {

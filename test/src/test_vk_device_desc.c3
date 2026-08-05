@@ -278,6 +278,40 @@ load_device_dispatch_without_indirect_trace(
     return dispatch;
 }
 
+fn gpu::internal::vk::VkDeviceDispatch
+load_device_dispatch_without_group_stack_size(
+    void* user_data,
+    vk::Device device,
+    gpu::internal::vk::VkDeviceDispatchPlan plan,
+) @private {
+    (void)user_data;
+    gpu::internal::vk::VkDeviceDispatch dispatch =
+        gpu::internal::vk::load_vk_device_dispatch(
+            device,
+            &vk::get_device_proc_addr,
+            plan,
+        );
+    dispatch.ray_tracing_pipelines.get_shader_group_stack_size = null;
+    return dispatch;
+}
+
+fn gpu::internal::vk::VkDeviceDispatch
+load_device_dispatch_without_stack_size_command(
+    void* user_data,
+    vk::Device device,
+    gpu::internal::vk::VkDeviceDispatchPlan plan,
+) @private {
+    (void)user_data;
+    gpu::internal::vk::VkDeviceDispatch dispatch =
+        gpu::internal::vk::load_vk_device_dispatch(
+            device,
+            &vk::get_device_proc_addr,
+            plan,
+        );
+    dispatch.ray_tracing_pipelines.cmd_set_stack_size = null;
+    return dispatch;
+}
+
 fn void destroy_registry_blockers(gpu::Device[] blockers) @private {
     foreach (&blocker : blockers) {
         if (blocker.is_valid()) (void)gpu::destroy_device(blocker);
@@ -837,6 +871,52 @@ fn void missing_negotiated_indirect_trace_proc_rolls_creation_back() @test {
     io::printfn(
         "basic indirect ray tracing unavailable; dispatch rollback skipped",
     );
+}
+
+fn void missing_dynamic_stack_procs_roll_creation_back() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_dynamic_stack_dispatch_rollback_test",
+        .acceleration_structure_heap_capacity = 8,
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::DeviceDesc device_desc = { .enable_ray_tracing_pipelines = true };
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            continue;
+        }
+        gpu::internal::vk::DeviceDispatchLoadFn[2] missing_procs = {
+            &load_device_dispatch_without_group_stack_size,
+            &load_device_dispatch_without_stack_size_command,
+        };
+        foreach (&load_dispatch : missing_procs) {
+            uint live_before = live_device_slot_count();
+            gpu::internal::vk::DeviceCreationProbe probe;
+            gpu::internal::vk::DeviceCreationOps creation_ops = {
+                .create        = &create_native_device_for_dispatch_test,
+                .load_dispatch = *load_dispatch,
+            };
+            fault rejected = run_injected_device_create(
+                &runtime,
+                &adapter,
+                &device_desc,
+                &probe,
+                &creation_ops,
+            );
+            assert(rejected == gpu::UNSUPPORTED_FEATURE);
+            assert(probe.reached
+                    == gpu::internal::vk::DeviceCreationCheckpoint.LOGICAL_DEVICE
+                    && probe.rollback_count == 1,
+                "missing dynamic-stack procedure rolls native state back once");
+            assert(live_device_slot_count() == live_before,
+                "missing dynamic-stack procedure publishes no public device");
+        }
+        return;
+    }
+    assert(false, "the controlled native target supports ray-tracing pipelines");
 }
 
 fn void combined_ray_tracing_opt_in_enables_both_frontends() @test {

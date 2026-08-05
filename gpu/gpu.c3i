@@ -1064,6 +1064,14 @@ enum RayTracingHitGroupKind : int {
     PROCEDURAL,
 }
 
+<* Shader role selected by a per-group ray-tracing stack-size query. *>
+enum RayTracingGroupShader : int {
+    GENERAL,
+    CLOSEST_HIT,
+    ANY_HIT,
+    INTERSECTION,
+}
+
 <* Color channels written by one graphics target; zero disables all writes. *>
 bitstruct ColorWriteMask : uint {
     bool red   : 0;
@@ -1155,14 +1163,15 @@ struct RayTracingHitGroupDesc {
     ShaderDesc*            intersection_shader;
 }
 
-<* Borrowed ordered shader categories for one direct ray-tracing pipeline.
-   Creation copies all inputs and publishes deterministically ordered groups. *>
+<* Borrowed ordered shader categories for one ray-tracing pipeline. Creation
+   copies all inputs; dynamic stack sizing is an explicit opt-in. *>
 struct RayTracingPipelineDesc {
     ShaderDesc[]             ray_generation_shaders;
     ShaderDesc[]             miss_shaders;
     RayTracingHitGroupDesc[] hit_groups;
     ShaderDesc[]             callable_shaders;
     uint                     max_recursion_depth;
+    bool                     dynamic_stack_size;
     ZString                  debug_name;
 }
 
@@ -1179,6 +1188,8 @@ struct RayTracingPipelineInfo {
     RayTracingShaderGroupRange hit;
     RayTracingShaderGroupRange callable;
     uint                       total_group_count;
+    uint                       max_recursion_depth;
+    bool                       dynamic_stack_size;
 }
 
 <* Caller-owned SBT records in GPU-addressable memory. Empty optional regions
