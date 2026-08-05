@@ -27,9 +27,9 @@ application must design around.
   and a bindless TLAS heap.
 - Independently opted-in KHR ray-tracing pipelines with all six shader roles,
   triangle/procedural hit groups, caller-owned SBTs, direct traces, and
-  capability-gated basic indirect dimensions. Per-group stack queries are
-  available for every ray-tracing pipeline; pipelines may explicitly opt in to
-  caller-recorded dynamic stack sizing.
+  capability-gated basic indirect dimensions or GPU-authored SBT/dimension
+  packets. Per-group stack queries are available for every ray-tracing pipeline;
+  pipelines may explicitly opt in to caller-recorded dynamic stack sizing.
 
 ## Deliberate exclusions
 
@@ -45,8 +45,8 @@ application must design around.
 - No package-registry distribution; consumers vendor the repository and its
   submodules.
 - No ray-tracing pipeline libraries/linking, capture replay, deferred creation,
-  automatic stack-size derivation, Indirect2, multi/count/batched ray dispatch,
-  or GPU-authored root/SBT helpers.
+  automatic stack-size derivation, multi/count/batched ray dispatch, or
+  GPU-authored root/SBT helpers.
 - No acceleration-structure compaction, serialization/deserialization,
   indirect builds, host builds/copies, updates into a distinct destination,
   handle-preserving relocation, or automatic address/view repair. Singular
@@ -93,8 +93,9 @@ Unsupported requests fail atomically.
 - `CompletionPoint` orders work; it does not own arbitrary application memory
   reached through GPU pointers or indices.
 - Under `ContractValidation.FULL`, command lists retain explicitly named
-  resources. Raw GPU pointers and shader indices remain caller-owned. Under
-  `TRUSTED`, all resource lifetime is caller-owned.
+  resources. For Indirect2, this retains the packet span and pipeline, not the
+  raw SBT addresses in the packet. Raw GPU pointers and shader indices remain
+  caller-owned. Under `TRUSTED`, all resource lifetime is caller-owned.
 - Creation is transactional. A failed create call leaves no live public
   object. Destruction does not insert a hidden device wait and may return
   `RESOURCE_IN_USE` or `DEVICE_BUSY`.

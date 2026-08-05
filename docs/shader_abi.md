@@ -122,12 +122,24 @@ The generated ABI includes byte-identical twins for:
 - `DrawIndirectCommand` (16 bytes);
 - `DrawIndexedIndirectCommand` (20 bytes); and
 - `DispatchIndirectCommand` (12 bytes); and
-- `TraceRaysIndirectCommand` (12 bytes: `width`, `height`, `depth`).
+- `TraceRaysIndirectCommand` (12 bytes: `width`, `height`, `depth`); and
+- `TraceRaysIndirectCommand2` (104 bytes: ray-generation address/size; miss,
+  hit, and callable address/size/stride triples; `width`, `height`, `depth`,
+  and `_pad0`).
 
 A compute shader may write `TraceRaysIndirectCommand` through the generated
 GLSL declaration. `cmd_trace_rays_indirect` consumes those exact bytes without
 translation or host inspection; its direct root and SBT are not part of the
 record.
+
+A compute shader may also write the generated `TraceRaysIndirectCommand2`
+declaration. `cmd_trace_rays_indirect2` consumes its complete 104-byte packet
+without translation or host inspection: the root is still pushed directly, but
+the packet supplies all SBT regions and dimensions. The producer must write
+valid addresses, SBT layout, nonzero in-limit dimensions, and zero-valued empty
+regions, then make the packet visible with an explicit compute-to-indirect
+barrier. Keep the owners of every raw SBT address and root-reachable target live
+through completion; no command records or creates those owners implicitly.
 
 Capability-gated generated work stores roots and arguments together in
 `GeneratedDrawRecord`, `GeneratedDrawIndexedRecord`, or
