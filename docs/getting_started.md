@@ -138,7 +138,7 @@ The optional ray-tracing pipeline path uses the same ownership model with an
 explicit acceleration-structure opt-in, caller-built BLAS/TLAS values, and a
 caller-packed shader binding table. Follow the
 [SBT/direct-trace recipe](cookbook.md#pack-an-sbt-and-trace-directly) and the
-[GPU-written dimensions recipe](cookbook.md#trace-with-gpu-written-dimensions)
+[GPU-written ray-work recipe](cookbook.md#trace-with-gpu-written-ray-work)
 after the compute introduction; the companion samples repository contains the
 complete interactive Cornell Box application.
 

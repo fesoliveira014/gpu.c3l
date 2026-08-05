@@ -168,6 +168,51 @@ No path inserts a barrier, readback, bind, submission, wait, or allocation.
 If the capability is false, the command returns `UNSUPPORTED_FEATURE`; the
 application may choose direct tracing as its fallback.
 
+When `DeviceCaps.ray_tracing_pipelines.indirect2_dispatch` is true,
+`cmd_trace_rays_indirect2` reads one `TraceRaysIndirectCommand2` from the
+first 104 bytes of an indirect-capable, four-byte-aligned `GpuSpan`; trailing
+bytes are ignored. It still pushes the caller's direct `root`, but reads the
+ray-generation record, optional miss/hit/callable SBT regions, and dimensions
+from the GPU-authored packet. The active pipeline, recording scope, queue, and
+dynamic-stack requirements are otherwise the same as direct tracing.
+
+`TraceRaysIndirectCommand2` has this exact generated layout:
+
+| Offset | Field |
+|---:|---|
+| 0 | `ray_generation_record_address` (`GpuAddress`) |
+| 8 | `ray_generation_record_size` (`ulong`) |
+| 16 | `miss_table_address` (`GpuAddress`) |
+| 24 | `miss_table_size` (`ulong`) |
+| 32 | `miss_table_stride` (`ulong`) |
+| 40 | `hit_table_address` (`GpuAddress`) |
+| 48 | `hit_table_size` (`ulong`) |
+| 56 | `hit_table_stride` (`ulong`) |
+| 64 | `callable_table_address` (`GpuAddress`) |
+| 72 | `callable_table_size` (`ulong`) |
+| 80 | `callable_table_stride` (`ulong`) |
+| 88 | `width` (`uint`) |
+| 92 | `height` (`uint`) |
+| 96 | `depth` (`uint`) |
+| 100 | `_pad0` (`uint`) |
+
+The ray-generation region contains exactly one valid record. Empty optional
+regions use the canonical zero address, size, and stride; nonempty regions must
+meet the selected device's SBT alignment, stride, range, addressability, and
+usage requirements. GPU-authored dimensions must be nonzero, fit the published
+per-axis limits, and have a product within the invocation limit. The library
+does not inspect, repair, upload, or synchronize this packet or its raw SBT
+addresses. Record a compute-to-indirect barrier after a GPU producer.
+
+Under `ContractValidation.FULL`, the command retains the named bound pipeline
+and packet span through completion. The SBT addresses carried inside the packet,
+root-reachable data, TLAS view, and every other raw-address target remain
+caller-owned under every validation policy; retain their owners through the
+completion point. Under `TRUSTED`, the packet span is caller-owned too. If
+`indirect2_dispatch` is false, choose basic indirect or direct tracing; the
+Indirect2 command returns `UNSUPPORTED_FEATURE`. It inserts no hidden barrier,
+readback, pipeline bind, upload, allocation, submission, or wait.
+
 The stack-size command is valid only while recording outside a render pass on a
 selected graphics or compute queue whose native family supports compute. FULL
 validation reports phase, queue, scope, active-pipeline mode, and numeric misuse

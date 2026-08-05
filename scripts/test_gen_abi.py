@@ -73,6 +73,40 @@ class GenAbiTest(unittest.TestCase):
         self.assertNotIn("GL_EXT_ray_query", ray_tracing)
         self.assertIn('internal/acceleration_structure_heap.glsl', ray_tracing)
 
+    def test_trace_rays_indirect2_packet_is_emitted_for_c3_and_glsl(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        c3 = " ".join((root / "gpu/gpu.c3i").read_text().split())
+        glsl = (root / "include/shaders/generated/shader_abi.glsl").read_text()
+        fields = [
+            ("GpuAddress", "ray_generation_record_address", 0),
+            ("ulong", "ray_generation_record_size", 8),
+            ("GpuAddress", "miss_table_address", 16),
+            ("ulong", "miss_table_size", 24),
+            ("ulong", "miss_table_stride", 32),
+            ("GpuAddress", "hit_table_address", 40),
+            ("ulong", "hit_table_size", 48),
+            ("ulong", "hit_table_stride", 56),
+            ("GpuAddress", "callable_table_address", 64),
+            ("ulong", "callable_table_size", 72),
+            ("ulong", "callable_table_stride", 80),
+            ("uint", "width", 88),
+            ("uint", "height", 92),
+            ("uint", "depth", 96),
+            ("uint", "_pad0", 100),
+        ]
+
+        self.assertIn("struct TraceRaysIndirectCommand2 {", c3)
+        self.assertIn("$assert TraceRaysIndirectCommand2::size == 104;", c3)
+        self.assertIn("struct TraceRaysIndirectCommand2 {", glsl)
+        for c3_type, name, offset in fields:
+            self.assertIn(f"{c3_type} {name};", c3)
+            self.assertIn(
+                f"$assert $reflect(TraceRaysIndirectCommand2.{name}).offset == {offset};",
+                c3,
+            )
+            glsl_type = "uint64_t" if c3_type in {"GpuAddress", "ulong"} else c3_type
+            self.assertIn(f"{glsl_type} {name};", glsl)
+
     def test_splits_public_declarations_from_private_metadata(self) -> None:
         public, private = gen_abi.split_gpu_c3(GENERATED)
 

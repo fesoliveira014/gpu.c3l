@@ -41,6 +41,8 @@ const ZString ACCELERATION_STRUCTURE_EXTENSION =
 const ZString RAY_QUERY_EXTENSION = "VK_KHR_ray_query";
 const ZString RAY_TRACING_PIPELINE_EXTENSION =
     "VK_KHR_ray_tracing_pipeline";
+const ZString RAY_TRACING_MAINTENANCE1_EXTENSION =
+    "VK_KHR_ray_tracing_maintenance1";
 const ZString DEFERRED_HOST_OPERATIONS_EXTENSION =
     "VK_KHR_deferred_host_operations";
 const uint GENERATED_WORK_TOKEN_COUNT  = 2;
@@ -197,11 +199,13 @@ struct RayTracingCandidateSupport {
     bool  acceleration_structure_extension;
     bool  ray_query_extension;
     bool  ray_tracing_pipeline_extension;
+    bool  ray_tracing_maintenance1_extension;
     bool  deferred_host_operations_extension;
     bool  acceleration_structure;
     bool  ray_query;
     bool  ray_tracing_pipeline;
     bool  ray_tracing_pipeline_trace_rays_indirect;
+    bool  ray_tracing_pipeline_trace_rays_indirect2;
     bool  descriptor_update_after_bind;
     bool  buffer_device_address;
     bool  runtime_descriptor_array;
@@ -279,6 +283,14 @@ fn bool ray_tracing_pipeline_candidate_supported(
         && support.max_ray_hit_attribute_size > 0;
 }
 
+fn bool ray_tracing_indirect2_candidate_supported(
+    RayTracingCandidateSupport* support,
+) {
+    return support != null
+        && support.ray_tracing_maintenance1_extension
+        && support.ray_tracing_pipeline_trace_rays_indirect2;
+}
+
 fn bool acceleration_structure_descriptor_heap_fits_limits(
     uint heap_capacity,
     uint texture_capacity,
@@ -342,6 +354,8 @@ fn gpu::RayTracingPipelineCaps normalize_ray_tracing_pipeline_caps(
         .enabled                           = true,
         .indirect_dispatch                 =
             support.ray_tracing_pipeline_trace_rays_indirect,
+        .indirect2_dispatch                =
+            ray_tracing_indirect2_candidate_supported(support),
         .max_recursion_depth               = support.max_ray_recursion_depth,
         .max_ray_dispatch_invocation_count =
             support.max_ray_dispatch_invocation_count,
@@ -371,9 +385,12 @@ fn RayTracingCandidateSupport query_ray_tracing_candidate_support(
     vk::PhysicalDeviceRayQueryFeaturesKHR ray_query_features =
         vk::physical_device_ray_query_features_khr()
             .set_next(&acceleration_features);
+    vk::PhysicalDeviceRayTracingMaintenance1FeaturesKHR maintenance1_features =
+        vk::physical_device_ray_tracing_maintenance1features_khr()
+            .set_next(&ray_query_features);
     vk::PhysicalDeviceRayTracingPipelineFeaturesKHR ray_pipeline_features =
         vk::physical_device_ray_tracing_pipeline_features_khr()
-            .set_next(&ray_query_features);
+            .set_next(&maintenance1_features);
     vk::PhysicalDeviceVulkan12Features features12 =
         vk::physical_device_vulkan12features().set_next(&ray_pipeline_features);
     vk::PhysicalDeviceFeatures2 features2 =
@@ -412,6 +429,10 @@ fn RayTracingCandidateSupport query_ray_tracing_candidate_support(
         physical_device,
         RAY_TRACING_PIPELINE_EXTENSION,
     );
+    bool ray_tracing_maintenance1_extension = device_supports_extension(
+        physical_device,
+        RAY_TRACING_MAINTENANCE1_EXTENSION,
+    );
     bool deferred_host_extension = device_supports_extension(
         physical_device,
         DEFERRED_HOST_OPERATIONS_EXTENSION,
@@ -420,6 +441,8 @@ fn RayTracingCandidateSupport query_ray_tracing_candidate_support(
         .acceleration_structure_extension = acceleration_extension,
         .ray_query_extension = ray_query_extension,
         .ray_tracing_pipeline_extension = ray_pipeline_extension,
+        .ray_tracing_maintenance1_extension =
+            ray_tracing_maintenance1_extension,
         .deferred_host_operations_extension = deferred_host_extension,
         .acceleration_structure = acceleration_features.acceleration_structure
             != 0,
@@ -427,6 +450,8 @@ fn RayTracingCandidateSupport query_ray_tracing_candidate_support(
         .ray_tracing_pipeline = ray_pipeline_features.ray_tracing_pipeline != 0,
         .ray_tracing_pipeline_trace_rays_indirect = ray_pipeline_features
             .ray_tracing_pipeline_trace_rays_indirect != 0,
+        .ray_tracing_pipeline_trace_rays_indirect2 = maintenance1_features
+            .ray_tracing_pipeline_trace_rays_indirect2 != 0,
         .descriptor_update_after_bind = acceleration_features
             .descriptor_binding_acceleration_structure_update_after_bind != 0,
         .buffer_device_address = features12.buffer_device_address != 0,
@@ -593,6 +618,7 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .dispatch                    = &trusted_dispatch,
     .trace_rays                  = &trusted_trace_rays,
     .trace_rays_indirect         = &trusted_trace_rays_indirect,
+    .trace_rays_indirect2        = &trusted_trace_rays_indirect2,
     .set_ray_tracing_pipeline_stack_size =
         &trusted_set_ray_tracing_pipeline_stack_size,
     .begin_render_pass           = &trusted_begin_render_pass,
@@ -630,6 +656,7 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .dispatch                    = &full_dispatch,
     .trace_rays                  = &full_trace_rays,
     .trace_rays_indirect         = &full_trace_rays_indirect,
+    .trace_rays_indirect2        = &full_trace_rays_indirect2,
     .set_ray_tracing_pipeline_stack_size =
         &full_set_ray_tracing_pipeline_stack_size,
     .begin_render_pass           = &full_begin_render_pass,
@@ -1025,6 +1052,10 @@ fn gpu::Device? create_vk_device_from_runtime(
         .generated_work          = state.generated_work.enabled,
         .acceleration_structures = state.acceleration_structures_enabled,
         .ray_tracing_pipelines   = state.ray_tracing_pipelines_enabled,
+        .ray_tracing_indirect2   = state.ray_tracing_pipelines_enabled
+            && ray_tracing_indirect2_candidate_supported(
+                &state.ray_tracing_support,
+            ),
     };
     state.device_dispatch = creation_ops != null
             && creation_ops.load_dispatch != null
@@ -1057,6 +1088,11 @@ fn gpu::Device? create_vk_device_from_runtime(
         )) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
+    state.ray_tracing_support.ray_tracing_pipeline_trace_rays_indirect2 =
+        dispatch_plan.ray_tracing_indirect2
+        && device_dispatch_supports_indirect2_ray_tracing(
+            &state.device_dispatch,
+        );
     if (state.ray_tracing_pipelines_enabled
         && state.ray_tracing_support
             .ray_tracing_pipeline_trace_rays_indirect
@@ -1815,6 +1851,9 @@ fn void? create_logical_device_with_queue_infos(
                     ? vk::TRUE
                     : vk::FALSE,
             );
+    vk::PhysicalDeviceRayTracingMaintenance1FeaturesKHR maintenance1_features =
+        vk::physical_device_ray_tracing_maintenance1features_khr()
+            .set_ray_tracing_pipeline_trace_rays_indirect2(vk::TRUE);
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color_features =
         vk::physical_device_extended_dynamic_state3features_ext()
             .set_extended_dynamic_state3color_blend_enable(vk::TRUE)
@@ -1835,6 +1874,14 @@ fn void? create_logical_device_with_queue_infos(
         features13 = features13.set_next(&ray_query_features);
     }
     if (state.ray_tracing_pipelines_enabled) {
+        if (ray_tracing_indirect2_candidate_supported(
+                &state.ray_tracing_support,
+            )) {
+            maintenance1_features = maintenance1_features.set_next(
+                features13.p_next,
+            );
+            features13 = features13.set_next(&maintenance1_features);
+        }
         ray_pipeline_features = ray_pipeline_features.set_next(
             features13.p_next,
         );
@@ -1884,7 +1931,7 @@ fn void? create_logical_device_with_queue_infos(
     features2.features.shader_storage_image_write_without_format = vk::TRUE;
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[11] extensions;
+    ZString[12] extensions;
     uint extension_count = 0;
     extensions[extension_count++] = DYNAMIC_STATE_3_EXTENSION;
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
@@ -1901,6 +1948,11 @@ fn void? create_logical_device_with_queue_infos(
     }
     if (state.ray_tracing_pipelines_enabled) {
         extensions[extension_count++] = RAY_TRACING_PIPELINE_EXTENSION;
+        if (ray_tracing_indirect2_candidate_supported(
+                &state.ray_tracing_support,
+            )) {
+            extensions[extension_count++] = RAY_TRACING_MAINTENANCE1_EXTENSION;
+        }
     }
     if (state.presentation.enabled) {
         if (!device_supports_extension(

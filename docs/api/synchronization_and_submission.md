@@ -34,10 +34,13 @@ storage texture states accept `.ray_tracing` on an opted-in device and a
 compatible graphics or compute queue.
 
 `StageMask.indirect` names indirect-command argument reads, including basic
-indirect ray dimensions. Order a compute-produced
-`TraceRaysIndirectCommand` with a compute-to-indirect barrier; this is separate
-from `.ray_tracing`, which describes the later shader execution and resource
-access. The library inserts neither dependency automatically.
+indirect ray dimensions and the complete `TraceRaysIndirectCommand2` packet.
+Order a compute-produced packet with a compute-to-indirect barrier; this is
+separate from `.ray_tracing`, which describes the later shader execution and
+resource access. The same explicit dependency makes GPU-authored SBT addresses
+and dimensions visible to `cmd_trace_rays_indirect2`; it does not make the SBT
+allocations or other raw-address targets into retained owners. The library
+inserts neither dependency automatically.
 
 ```c3
 gpu::Barrier args_ready = {

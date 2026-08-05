@@ -15,6 +15,7 @@ struct DispatchLookupCounts {
     uint dynamic_color;
     uint ray_query;
     uint ray_tracing_pipeline;
+    uint ray_tracing_indirect2;
     uint unexpected;
 }
 
@@ -29,6 +30,7 @@ fn bool DispatchLookupCounts.is_empty(self) {
         && self.dynamic_color == 0
         && self.ray_query == 0
         && self.ray_tracing_pipeline == 0
+        && self.ray_tracing_indirect2 == 0
         && self.unexpected == 0;
 }
 
@@ -259,6 +261,8 @@ fn vk::PFN_vkVoidFunction recording_device_proc_loader(
         || proc_name == "vkCmdTraceRaysKHR"
         || proc_name == "vkCmdTraceRaysIndirectKHR") {
         counts.ray_tracing_pipeline++;
+    } else if (proc_name == "vkCmdTraceRaysIndirect2KHR") {
+        counts.ray_tracing_indirect2++;
     } else {
         counts.unexpected++;
     }
@@ -616,6 +620,39 @@ fn void device_ray_tracing_pipeline_dispatch_requires_complete_set() @test {
         &missing,
     ));
     assert(gpu::internal::vk::device_dispatch_supports_indirect_ray_tracing(
+        &complete,
+    ));
+}
+
+fn void indirect2_ray_tracing_dispatch_loads_only_when_planned() @test {
+    gpu::internal::vk::VkDeviceDispatchPlan plan = {
+        .ray_tracing_pipelines = true,
+    };
+    DispatchLookupCounts counts;
+    (void)gpu::internal::vk::load_vk_device_dispatch(
+        (vk::Device)&counts,
+        &recording_device_proc_loader,
+        plan,
+    );
+    assert(counts.ray_tracing_indirect2 == 0,
+        "an indirect2-disabled plan does not query its optional procedure");
+
+    counts = {};
+    plan.ray_tracing_indirect2 = true;
+    gpu::internal::vk::VkDeviceDispatch complete =
+        gpu::internal::vk::load_vk_device_dispatch(
+            (vk::Device)&counts,
+            &recording_device_proc_loader,
+            plan,
+        );
+    assert(counts.ray_tracing_indirect2 == 1,
+        "an indirect2-enabled plan queries its optional procedure once");
+    assert(gpu::internal::vk::device_dispatch_supports_indirect2_ray_tracing(
+        &complete,
+    ));
+
+    complete.ray_tracing_pipelines.cmd_trace_rays_indirect2 = null;
+    assert(!gpu::internal::vk::device_dispatch_supports_indirect2_ray_tracing(
         &complete,
     ));
 }

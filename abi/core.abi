@@ -50,6 +50,24 @@ extern struct TraceRaysIndirectCommand {
     uint depth;
 }
 
+extern struct TraceRaysIndirectCommand2 {
+    GpuAddress ray_generation_record_address;
+    u64        ray_generation_record_size;
+    GpuAddress miss_table_address;
+    u64        miss_table_size;
+    u64        miss_table_stride;
+    GpuAddress hit_table_address;
+    u64        hit_table_size;
+    u64        hit_table_stride;
+    GpuAddress callable_table_address;
+    u64        callable_table_size;
+    u64        callable_table_stride;
+    uint       width;
+    uint       height;
+    uint       depth;
+    uint       _pad0;
+}
+
 // GPU-writable roots and arguments consumed as one generated work item.
 struct GeneratedDrawRecord {
     GpuAddress          vertex_root_gpu;

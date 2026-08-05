@@ -78,10 +78,12 @@ ray-generation, miss, and callable groups; `CLOSEST_HIT`, `ANY_HIT`, and
 group.
 
 Ray-tracing pipelines do not support pipeline libraries/linking, capture
-replay, deferred creation, automatic stack-size derivation, Indirect2, or
-batched trace commands. Basic indirect tracing changes only where dimensions
-are read; SBT allocation, packing, and sufficient stack-size calculation remain
-application responsibilities.
+replay, deferred creation, automatic stack-size derivation, or batched trace
+commands. Basic indirect tracing changes only where dimensions are read.
+Capability-gated Indirect2 additionally reads GPU-authored SBT regions and
+dimensions, but its root remains direct. In both paths, SBT allocation, packing,
+lifetime, and sufficient stack-size calculation remain application
+responsibilities.
 
 ## Ownership and destruction
 

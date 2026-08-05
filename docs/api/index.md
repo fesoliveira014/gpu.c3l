@@ -70,6 +70,8 @@ Types: `Vec2f`, `Vec4f`, `Vec4u`, `Device`, `Runtime`, `RuntimeDesc`,
 `DeviceCaps`, `TimestampCaps`, `SparseTextureCaps`,
 `AccelerationStructureCaps`, `RayQueryCaps`, and `RayTracingPipelineCaps`.
 
+Fields: `RayTracingPipelineCaps.indirect2_dispatch`.
+
 Constants: `DEVICE_INVALID`, `RUNTIME_INVALID`, `ADAPTER_INVALID`,
 `SURFACE_INVALID`, and `QUEUE_INVALID`.
 
@@ -172,7 +174,8 @@ Types: `CommandAllocatorHandle`, `CommandAllocator`, `CommandAllocatorDesc`,
 `CommandList`, `ExecutableCommandList`, `GeneratedWorkKind`,
 `GeneratedScratchDesc`, `Vec3u`, `Viewport`, `ScissorRect`, `GraphicsState`,
 `DrawIndirectCommand`, `DrawIndexedIndirectCommand`,
-`DispatchIndirectCommand`, `TraceRaysIndirectCommand`, `BufferCopyDesc`,
+`DispatchIndirectCommand`, `TraceRaysIndirectCommand`,
+`TraceRaysIndirectCommand2`, `BufferCopyDesc`,
 `BufferTextureCopyDesc`,
 `TextureBufferCopyDesc`, `AccelerationStructureTriangleBuildDesc`,
 `AccelerationStructureAabbBuildDesc`,
@@ -200,7 +203,8 @@ Callables:
 `cmd_update_acceleration_structure`, `cmd_clone_acceleration_structure`,
 `cmd_bind_pipeline`, `cmd_dispatch`,
 `cmd_dispatch_indirect`, `cmd_dispatch_generated`, `cmd_trace_rays`,
-`cmd_trace_rays_indirect`, `cmd_set_ray_tracing_pipeline_stack_size`,
+`cmd_trace_rays_indirect`, `cmd_trace_rays_indirect2`,
+`cmd_set_ray_tracing_pipeline_stack_size`,
 `cmd_set_viewport`,
 `cmd_set_scissor`, `cmd_draw`, `cmd_draw_indexed`, `cmd_draw_indirect`,
 `cmd_draw_indexed_indirect`, `cmd_draw_indexed_indirect_count`,

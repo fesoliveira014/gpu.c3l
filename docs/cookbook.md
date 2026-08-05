@@ -260,11 +260,11 @@ gpu::cmd_trace_rays(
 This is an example for a deliberately simple graph, not a universal formula.
 Account for the pipeline recursion depth, all reachable hit/miss paths, and
 callable nesting in the application’s actual graph. The setter takes `ulong`
-for arithmetic convenience, but the recorded value must be nonzero and fit
-`uint`. Bind first and set again after a static ray-pipeline bind invalidates
-the dynamic state.
+for arithmetic convenience, but the recorded value must fit `uint`. It may be
+zero when no shader group reports a stack requirement. Bind first and set
+again after a static ray-pipeline bind invalidates the dynamic state.
 
-## Trace with GPU-written dimensions
+## Trace with GPU-written ray work
 
 After requesting ray-tracing pipelines, query
 `caps.ray_tracing_pipelines.indirect_dispatch`. If true, let compute write one
@@ -293,6 +293,31 @@ repair them. Full validation retains the named pipeline, SBT, and argument
 resources, while trusted validation leaves all lifetime management to the
 caller. Use direct tracing as an application-selected fallback when the
 capability is false.
+
+For GPU-authored SBT regions and dimensions, query
+`caps.ray_tracing_pipelines.indirect2_dispatch`. Have the producer write one
+generated 104-byte `TraceRaysIndirectCommand2`, use the same compute-to-indirect
+barrier, then bind and record the pipeline:
+
+```c3
+gpu::Barrier indirect2_ready = {
+    .before = { .compute },
+    .after  = { .indirect },
+};
+gpu::cmd_barrier(&commands, &indirect2_ready)!;
+gpu::cmd_bind_pipeline(&commands, ray_pipeline)!;
+gpu::cmd_trace_rays_indirect2(&commands, root_gpu, indirect2_args)!;
+```
+
+The packet supplies its ray-generation record plus optional miss, hit, and
+callable SBT address/size/stride triples, followed by width, height, depth, and
+padding. Its ray-generation record, nonempty SBT regions, and dimensions must
+meet the same SBT and ray-dispatch limits as direct tracing. Keep every SBT
+allocation, its raw-address targets, root data, and TLAS view live through
+completion. Full validation retains the bound pipeline and packet span, not the
+raw addresses contained in it; trusted validation retains neither. The command
+adds no upload, barrier, bind, allocation, submission, or wait. Fall back to
+basic indirect or direct tracing when the capability is false.
 
 ## Blocking readback
 

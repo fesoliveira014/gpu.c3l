@@ -2240,6 +2240,25 @@ fn void? cmd_trace_rays_indirect(
     );
 }
 
+<* Record one Indirect2 ray dispatch through the active ray-tracing pipeline.
+   The root stays direct; the shader binding table regions and dimensions all
+   come from the GPU packet. The command inserts no hidden synchronization or
+   work.
+
+   @param commands : "Live recording token outside a render pass."
+   @param root : "Root GPU address pushed unchanged; zero is valid."
+   @param args : "Span beginning with one GPU-written TraceRaysIndirectCommand2; FULL retains the span but never the raw addresses inside it, and TRUSTED retains neither, so every referenced shader binding table allocation stays caller-owned through completion."
+   @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
+fn void? cmd_trace_rays_indirect2(
+    CommandList* commands,
+    GpuAddress root,
+    GpuSpan args,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    return record.ops.trace_rays_indirect2(record, root, args);
+}
+
 <* Set a caller-derived byte size after binding a dynamic-stack ray pipeline.
    The value must fit uint and cover every shader execution in later traces.
 

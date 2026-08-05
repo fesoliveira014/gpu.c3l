@@ -249,6 +249,23 @@ $assert $reflect(TraceRaysIndirectCommand.width).offset == 0;
 $assert $reflect(TraceRaysIndirectCommand.height).offset == 4;
 $assert $reflect(TraceRaysIndirectCommand.depth).offset == 8;
 
+$assert TraceRaysIndirectCommand2::size == 104;
+$assert $reflect(TraceRaysIndirectCommand2.ray_generation_record_address).offset == 0;
+$assert $reflect(TraceRaysIndirectCommand2.ray_generation_record_size).offset == 8;
+$assert $reflect(TraceRaysIndirectCommand2.miss_table_address).offset == 16;
+$assert $reflect(TraceRaysIndirectCommand2.miss_table_size).offset == 24;
+$assert $reflect(TraceRaysIndirectCommand2.miss_table_stride).offset == 32;
+$assert $reflect(TraceRaysIndirectCommand2.hit_table_address).offset == 40;
+$assert $reflect(TraceRaysIndirectCommand2.hit_table_size).offset == 48;
+$assert $reflect(TraceRaysIndirectCommand2.hit_table_stride).offset == 56;
+$assert $reflect(TraceRaysIndirectCommand2.callable_table_address).offset == 64;
+$assert $reflect(TraceRaysIndirectCommand2.callable_table_size).offset == 72;
+$assert $reflect(TraceRaysIndirectCommand2.callable_table_stride).offset == 80;
+$assert $reflect(TraceRaysIndirectCommand2.width).offset == 88;
+$assert $reflect(TraceRaysIndirectCommand2.height).offset == 92;
+$assert $reflect(TraceRaysIndirectCommand2.depth).offset == 96;
+$assert $reflect(TraceRaysIndirectCommand2._pad0).offset == 100;
+
 struct GeneratedDrawRecord {
     GpuAddress          vertex_root_gpu;
     GpuAddress          fragment_root_gpu;
@@ -413,6 +430,7 @@ struct RayQueryCaps {
 struct RayTracingPipelineCaps {
     bool enabled;
     bool indirect_dispatch;
+    bool indirect2_dispatch;
     uint max_recursion_depth;
     uint max_ray_dispatch_invocation_count;
     Vec3u max_ray_dispatch_dimensions;
@@ -1299,6 +1317,25 @@ struct TraceRaysIndirectCommand {
     uint depth;
 }
 $assert TraceRaysIndirectCommand::size == 12;
+
+struct TraceRaysIndirectCommand2 {
+    GpuAddress ray_generation_record_address;
+    ulong      ray_generation_record_size;
+    GpuAddress miss_table_address;
+    ulong      miss_table_size;
+    ulong      miss_table_stride;
+    GpuAddress hit_table_address;
+    ulong      hit_table_size;
+    ulong      hit_table_stride;
+    GpuAddress callable_table_address;
+    ulong      callable_table_size;
+    ulong      callable_table_stride;
+    uint       width;
+    uint       height;
+    uint       depth;
+    uint       _pad0;
+}
+$assert TraceRaysIndirectCommand2::size == 104;
 
 <* A fixed-capacity command recording owner bound to one exact queue. One
    allocator is confined to one recording thread while recordings are live. *>
