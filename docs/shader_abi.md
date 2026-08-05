@@ -121,7 +121,13 @@ The generated ABI includes byte-identical twins for:
 
 - `DrawIndirectCommand` (16 bytes);
 - `DrawIndexedIndirectCommand` (20 bytes); and
-- `DispatchIndirectCommand` (12 bytes).
+- `DispatchIndirectCommand` (12 bytes); and
+- `TraceRaysIndirectCommand` (12 bytes: `width`, `height`, `depth`).
+
+A compute shader may write `TraceRaysIndirectCommand` through the generated
+GLSL declaration. `cmd_trace_rays_indirect` consumes those exact bytes without
+translation or host inspection; its direct root and SBT are not part of the
+record.
 
 Capability-gated generated work stores roots and arguments together in
 `GeneratedDrawRecord`, `GeneratedDrawIndexedRecord`, or

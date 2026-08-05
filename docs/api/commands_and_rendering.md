@@ -115,12 +115,16 @@ Direct counts must fit `DeviceCaps.max_compute_work_group_count`.
 Indirect argument storage and count storage are ordinary `GpuSpan` values
 whose contents and lifetime are caller-owned.
 
-## Direct ray tracing
+## Ray tracing
 
 Bind a ray-tracing pipeline, then call `cmd_trace_rays` outside a render pass
 with one root `GpuAddress`, a caller-owned `RayTracingShaderBindingTable`, and
-nonzero `Vec3u` dimensions. The command is valid on a compatible selected
-graphics or compute queue. The invocation product must fit
+nonzero `Vec3u` dimensions. The command requires a selected graphics or compute
+queue whose native family supports compute operations. A selected compute queue
+always satisfies this contract; a selected graphics queue does only when its
+native family also supports compute. Full validation rejects an incompatible
+family, while trusted validation treats native queue compatibility as a caller
+precondition. The invocation product must fit
 `DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_invocation_count`. Each axis
 must also fit the corresponding component of
 `DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_dimensions`; full validation
@@ -135,6 +139,23 @@ requirements. Record a ray-tracing pipeline bind before tracing.
 trace. It allocates nothing and inserts no pipeline bind, barrier, submission,
 or wait. Keep the bound pipeline, every nonempty SBT allocation, root data,
 TLAS view, and all raw-address/index targets live through completion.
+
+When `DeviceCaps.ray_tracing_pipelines.indirect_dispatch` is true,
+`cmd_trace_rays_indirect` reads only width, height, and depth from the first
+12 bytes of a caller-owned `GpuSpan`. The root and SBT remain direct. The span
+must begin with one `TraceRaysIndirectCommand`; trailing bytes are ignored.
+Its resolved device address must be four-byte aligned and its allocation must
+support indirect use. The command otherwise has the same pipeline, queue,
+render-scope, SBT, and root contract as `cmd_trace_rays`.
+
+The library does not inspect GPU-authored dimensions. At execution, every axis
+must fit `max_ray_dispatch_dimensions` and their product must fit
+`max_ray_dispatch_invocation_count`. Under full validation the command retains
+the bound pipeline, nonempty SBT allocations, and argument allocation through
+completion. Under trusted validation those lifetimes are caller preconditions.
+No path inserts a barrier, readback, bind, submission, wait, or allocation.
+If the capability is false, the command returns `UNSUPPORTED_FEATURE`; the
+application may choose direct tracing as its fallback.
 
 ## Graphics state and drawing
 

@@ -162,10 +162,13 @@ See [Shader ABI](shader_abi.md).
 Ray-query shaders explicitly opt in through `ray_query.glsl` and select a TLAS
 through binding 5. The ordinary shader path remains extension-free. Procedural
 AABB candidates require shader-side intersection and explicit confirmation.
-Direct ray-tracing shaders independently opt in through `ray_tracing.glsl`.
+Ray-tracing shaders independently opt in through `ray_tracing.glsl`.
 Their pipeline identity encodes the ordered stage and hit-group structure plus
 recursion depth. The application owns SBT allocation, packing, synchronization,
-and lifetime; command recording emits no hidden allocation or barrier.
+and lifetime; command recording emits no hidden allocation or barrier. Direct
+tracing supplies dimensions on the host. Capability-gated basic indirect
+tracing reads only dimensions from one caller-owned span; the root and SBT
+stay direct and use the same ownership model.
 
 Pipeline cache import/export deals with opaque driver data. A cache blob may be
 empty or minimally useful on a particular driver; it is an optimization, not

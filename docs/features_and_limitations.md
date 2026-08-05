@@ -25,8 +25,9 @@ application must design around.
 - Explicitly opted-in compute/graphics ray queries with triangle and procedural
   AABB BLAS values, TLAS instances, in-place updates, singular device clones,
   and a bindless TLAS heap.
-- Independently opted-in direct KHR ray-tracing pipelines with all six shader
-  roles, triangle/procedural hit groups, caller-owned SBTs, and direct traces.
+- Independently opted-in KHR ray-tracing pipelines with all six shader roles,
+  triangle/procedural hit groups, caller-owned SBTs, direct traces, and
+  capability-gated basic indirect dimensions.
 
 ## Deliberate exclusions
 
@@ -42,7 +43,8 @@ application must design around.
 - No package-registry distribution; consumers vendor the repository and its
   submodules.
 - No ray-tracing pipeline libraries/linking, capture replay, deferred creation,
-  dynamic stack sizing, or indirect trace commands.
+  dynamic stack sizing, Indirect2, multi/count/batched ray dispatch, or
+  GPU-authored root/SBT helpers.
 - No acceleration-structure compaction, serialization/deserialization,
   indirect builds, host builds/copies, updates into a distinct destination,
   handle-preserving relocation, or automatic address/view repair. Singular

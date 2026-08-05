@@ -149,8 +149,12 @@ c3c test vk_ray_tracing --path test --test-show-output
 - `vk_ray_tracing` is an explicit capable-device acceptance target. It enables
   Vulkan validation, builds triangle and AABB BLASes, waits, clones the triangle
   BLAS, waits again, builds a TLAS from the clone's address, packs a caller-owned
-  SBT, and checks direct hit/miss/callable output. Running it on an unsupported
-  adapter fails with `UNSUPPORTED_FEATURE`; it is not a passing skip.
+  SBT, lets compute write a `TraceRaysIndirectCommand`, records an explicit
+  compute-to-indirect barrier, and checks indirect hit/miss/callable output
+  when basic indirect tracing is available. A direct-only device reports that
+  capability boundary and runs the direct proof. Running it on an adapter
+  without ray-tracing pipelines fails with `UNSUPPORTED_FEATURE`; it is not a
+  passing skip.
 
 Capability-specific tests query support in C3 and handle an unavailable
 feature explicitly. CI does not parse `EXERCISED` text or require a particular

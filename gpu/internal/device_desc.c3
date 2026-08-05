@@ -137,12 +137,15 @@ fn DeviceSupport? evaluate_device_desc_support(
         request:                &queues,
         backend_surface:        backend_surface,
         require_sparse_binding: normalized.enable_sparse_textures,
+        require_ray_tracing:    normalized.enable_ray_tracing_pipelines,
     )!) {
         return {
             .supported         = false,
             .unmet_requirement = normalized.enable_sparse_textures
                 ? "sparse queue topology"
-                : "queue topology",
+                : normalized.enable_ray_tracing_pipelines
+                    ? "ray tracing queue topology"
+                    : "queue topology",
         };
     }
     if (!gpu::internal::vk::vk_adapter_supports_device_baseline(

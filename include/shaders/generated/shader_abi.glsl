@@ -43,6 +43,12 @@ struct DispatchIndirectCommand {
     uint z;
 };
 
+struct TraceRaysIndirectCommand {
+    uint width;
+    uint height;
+    uint depth;
+};
+
 struct GeneratedDrawRecord {
     uint64_t vertex_root_gpu;
     uint64_t fragment_root_gpu;

@@ -83,6 +83,7 @@ struct VkRayTracingPipelineDispatch {
     vk::PFN_vkCreateRayTracingPipelinesKHR          create_pipelines;
     vk::PFN_vkGetRayTracingShaderGroupHandlesKHR    get_shader_group_handles;
     vk::PFN_vkCmdTraceRaysKHR                       cmd_trace_rays;
+    vk::PFN_vkCmdTraceRaysIndirectKHR               cmd_trace_rays_indirect;
 }
 
 struct VkDeviceDispatch {
@@ -271,6 +272,11 @@ fn VkDeviceDispatch load_vk_device_dispatch(
                 device,
                 "vkCmdTraceRaysKHR",
             ),
+            .cmd_trace_rays_indirect =
+                (vk::PFN_vkCmdTraceRaysIndirectKHR)loader(
+                    device,
+                    "vkCmdTraceRaysIndirectKHR",
+                ),
         };
     }
     dispatch.dynamic_color = {
@@ -337,6 +343,12 @@ fn bool device_dispatch_supports_ray_tracing_pipelines(
     return dispatch.ray_tracing_pipelines.create_pipelines != null
         && dispatch.ray_tracing_pipelines.get_shader_group_handles != null
         && dispatch.ray_tracing_pipelines.cmd_trace_rays != null;
+}
+
+fn bool device_dispatch_supports_indirect_ray_tracing(
+    VkDeviceDispatch* dispatch,
+) {
+    return dispatch.ray_tracing_pipelines.cmd_trace_rays_indirect != null;
 }
 
 fn bool device_dispatch_supports_dynamic_color(VkDeviceDispatch* dispatch) {

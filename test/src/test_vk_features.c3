@@ -184,6 +184,7 @@ fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
         .deferred_host_operations_extension = true,
         .acceleration_structure = true,
         .ray_tracing_pipeline = true,
+        .ray_tracing_pipeline_trace_rays_indirect = true,
         .descriptor_update_after_bind = true,
         .buffer_device_address = true,
         .runtime_descriptor_array = true,
@@ -218,6 +219,7 @@ fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
     gpu::RayTracingPipelineCaps caps =
         gpu::internal::vk::normalize_ray_tracing_pipeline_caps(true, &support);
     assert(caps.enabled && caps.max_recursion_depth == 4);
+    assert(caps.indirect_dispatch);
     assert(caps.max_ray_dispatch_invocation_count == 65_536);
     assert(caps.max_ray_dispatch_dimensions.x == 1024
         && caps.max_ray_dispatch_dimensions.y == 512
@@ -231,6 +233,19 @@ fn void ray_tracing_pipeline_support_is_independent_from_ray_queries() @test {
         false,
         &support,
     ).enabled);
+    assert(!gpu::internal::vk::normalize_ray_tracing_pipeline_caps(
+        false,
+        &support,
+    ).indirect_dispatch);
+
+    gpu::internal::vk::RayTracingCandidateSupport direct_only = support;
+    direct_only.ray_tracing_pipeline_trace_rays_indirect = false;
+    gpu::RayTracingPipelineCaps direct_caps =
+        gpu::internal::vk::normalize_ray_tracing_pipeline_caps(
+            true,
+            &direct_only,
+        );
+    assert(direct_caps.enabled && !direct_caps.indirect_dispatch);
 
     gpu::internal::vk::RayTracingCandidateSupport rejected = support;
     rejected.ray_tracing_pipeline_extension = false;

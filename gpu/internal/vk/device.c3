@@ -25,6 +25,11 @@ alias DeviceCreateFn = fn vk::Result (
     vk::DeviceCreateInfo* create_info,
     vk::Device* device,
 );
+alias DeviceDispatchLoadFn = fn VkDeviceDispatch (
+    void* user_data,
+    vk::Device device,
+    VkDeviceDispatchPlan plan,
+);
 
 const ZString SWAPCHAIN_EXTENSION             = "VK_KHR_swapchain";
 const ZString SWAPCHAIN_MAINTENANCE_EXTENSION = "VK_EXT_swapchain_maintenance1";
@@ -65,8 +70,9 @@ struct DeviceCreationProbe {
 }
 
 struct DeviceCreationOps {
-    void*          user_data;
-    DeviceCreateFn create;
+    void*                user_data;
+    DeviceCreateFn       create;
+    DeviceDispatchLoadFn load_dispatch;
 }
 
 struct VkPresentationState {
@@ -195,6 +201,7 @@ struct RayTracingCandidateSupport {
     bool  acceleration_structure;
     bool  ray_query;
     bool  ray_tracing_pipeline;
+    bool  ray_tracing_pipeline_trace_rays_indirect;
     bool  descriptor_update_after_bind;
     bool  buffer_device_address;
     bool  runtime_descriptor_array;
@@ -333,6 +340,8 @@ fn gpu::RayTracingPipelineCaps normalize_ray_tracing_pipeline_caps(
     }
     return {
         .enabled                           = true,
+        .indirect_dispatch                 =
+            support.ray_tracing_pipeline_trace_rays_indirect,
         .max_recursion_depth               = support.max_ray_recursion_depth,
         .max_ray_dispatch_invocation_count =
             support.max_ray_dispatch_invocation_count,
@@ -416,6 +425,8 @@ fn RayTracingCandidateSupport query_ray_tracing_candidate_support(
             != 0,
         .ray_query = ray_query_features.ray_query != 0,
         .ray_tracing_pipeline = ray_pipeline_features.ray_tracing_pipeline != 0,
+        .ray_tracing_pipeline_trace_rays_indirect = ray_pipeline_features
+            .ray_tracing_pipeline_trace_rays_indirect != 0,
         .descriptor_update_after_bind = acceleration_features
             .descriptor_binding_acceleration_structure_update_after_bind != 0,
         .buffer_device_address = features12.buffer_device_address != 0,
@@ -581,6 +592,7 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .set_graphics_state          = &trusted_set_graphics_state,
     .dispatch                    = &trusted_dispatch,
     .trace_rays                  = &trusted_trace_rays,
+    .trace_rays_indirect         = &trusted_trace_rays_indirect,
     .begin_render_pass           = &trusted_begin_render_pass,
     .set_viewport                = &trusted_set_viewport,
     .set_scissor                 = &trusted_set_scissor,
@@ -615,6 +627,7 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .set_graphics_state          = &full_set_graphics_state,
     .dispatch                    = &full_dispatch,
     .trace_rays                  = &full_trace_rays,
+    .trace_rays_indirect         = &full_trace_rays_indirect,
     .begin_render_pass           = &full_begin_render_pass,
     .set_viewport                = &full_set_viewport,
     .set_scissor                 = &full_set_scissor,
@@ -834,6 +847,21 @@ fn gpu::Device? create_vk_device_from_runtime(
             request:                queue_request,
             require_sparse_binding: enable_sparse_textures,
         )!;
+    if (enable_ray_tracing_pipelines) {
+        vk::QueueFlags graphics_flags = (vk::QueueFlags)0;
+        if (families.selected.graphics) {
+            graphics_flags = query_queue_family_flags(
+                state.physical_device,
+                families.graphics,
+            )!;
+        }
+        if (!ray_tracing_queue_selection_compatible(
+            &families,
+            graphics_flags,
+        )) {
+            return gpu::UNSUPPORTED_FEATURE~;
+        }
+    }
 
     bool swapchain_maintenance_extension = state.presentation.enabled
         && device_supports_extension(
@@ -994,11 +1022,18 @@ fn gpu::Device? create_vk_device_from_runtime(
         .acceleration_structures = state.acceleration_structures_enabled,
         .ray_tracing_pipelines   = state.ray_tracing_pipelines_enabled,
     };
-    state.device_dispatch = load_vk_device_dispatch(
-        state.device,
-        &vk::get_device_proc_addr,
-        dispatch_plan,
-    );
+    state.device_dispatch = creation_ops != null
+            && creation_ops.load_dispatch != null
+        ? creation_ops.load_dispatch(
+            creation_ops.user_data,
+            state.device,
+            dispatch_plan,
+        )
+        : load_vk_device_dispatch(
+            state.device,
+            &vk::get_device_proc_addr,
+            dispatch_plan,
+        );
     if (state.presentation.enabled
         && (!instance_dispatch_supports_presentation(&state.instance_dispatch)
             || !device_dispatch_supports_presentation(&state.device_dispatch))) {
@@ -1014,6 +1049,14 @@ fn gpu::Device? create_vk_device_from_runtime(
     }
     if (state.ray_tracing_pipelines_enabled
         && !device_dispatch_supports_ray_tracing_pipelines(
+            &state.device_dispatch,
+        )) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (state.ray_tracing_pipelines_enabled
+        && state.ray_tracing_support
+            .ray_tracing_pipeline_trace_rays_indirect
+        && !device_dispatch_supports_indirect_ray_tracing(
             &state.device_dispatch,
         )) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -1761,7 +1804,13 @@ fn void? create_logical_device_with_queue_infos(
             .set_ray_query(vk::TRUE);
     vk::PhysicalDeviceRayTracingPipelineFeaturesKHR ray_pipeline_features =
         vk::physical_device_ray_tracing_pipeline_features_khr()
-            .set_ray_tracing_pipeline(vk::TRUE);
+            .set_ray_tracing_pipeline(vk::TRUE)
+            .set_ray_tracing_pipeline_trace_rays_indirect(
+                state.ray_tracing_support
+                        .ray_tracing_pipeline_trace_rays_indirect
+                    ? vk::TRUE
+                    : vk::FALSE,
+            );
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_color_features =
         vk::physical_device_extended_dynamic_state3features_ext()
             .set_extended_dynamic_state3color_blend_enable(vk::TRUE)

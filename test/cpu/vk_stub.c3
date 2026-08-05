@@ -47,6 +47,12 @@ alias CmdTraceRaysFn @private = fn void? (
     gpu::RayTracingShaderBindingTable*,
     gpu::Vec3u,
 );
+alias CmdTraceRaysIndirectFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::RayTracingShaderBindingTable*,
+    gpu::GpuSpan,
+);
 alias CmdBeginRenderPassFn @private = fn void? (
     CommandRecord*,
     gpu::RenderPassDesc*,
@@ -191,6 +197,7 @@ struct CommandOps @public {
     CmdSetGraphicsStateFn         set_graphics_state;
     CmdDispatchFn                 dispatch;
     CmdTraceRaysFn                trace_rays;
+    CmdTraceRaysIndirectFn        trace_rays_indirect;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;
@@ -418,6 +425,7 @@ uint configured_adapter_count @private = 1;
 bool configured_device_baseline_support @private = true;
 bool configured_ray_query_support @private = true;
 bool configured_ray_tracing_pipeline_support @private = true;
+bool configured_ray_tracing_queue_support @private = true;
 uint configured_ray_query_heap_limit @private = uint::max;
 bool configured_sparse_texture_support @private;
 bool configured_sparse_queue_support @private;
@@ -1006,12 +1014,16 @@ fn bool? vk_supports_queue_request(
     gpu::QueueRequest* request,
     void* backend_surface,
     bool require_sparse_binding = false,
+    bool require_ray_tracing = false,
 ) {
     (void)backend_surface;
     if (state == null || request == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_HANDLE~;
     }
     if (require_sparse_binding && !configured_sparse_queue_support) {
+        return false;
+    }
+    if (require_ray_tracing && !configured_ray_tracing_queue_support) {
         return false;
     }
     if (request.single_queue && !configured_single_queue_support) {
@@ -1071,6 +1083,7 @@ fn void stub_set_adapter_count(uint count) {
     configured_device_baseline_support = true;
     configured_ray_query_support = true;
     configured_ray_tracing_pipeline_support = true;
+    configured_ray_tracing_queue_support = true;
     configured_ray_query_heap_limit = uint::max;
     configured_sparse_texture_support = false;
     configured_sparse_queue_support = false;
@@ -1088,6 +1101,10 @@ fn void stub_set_ray_query_support(bool supported) {
 
 fn void stub_set_ray_tracing_pipeline_support(bool supported) {
     configured_ray_tracing_pipeline_support = supported;
+}
+
+fn void stub_set_ray_tracing_queue_support(bool supported) {
+    configured_ray_tracing_queue_support = supported;
 }
 
 fn void stub_set_ray_query_heap_limit(uint limit) {

@@ -20,6 +20,24 @@ fn void ray_tracing_pipeline_requires_a_dispatch_capable_queue_role() @test {
     assert(!gpu::internal::vk::ray_tracing_queue_request_compatible(&transfer));
 }
 
+fn void ray_tracing_pipeline_requires_a_compute_capable_selected_family() @test {
+    vk::QueueFamilies graphics = { .selected = { .graphics } };
+    vk::QueueFamilies compute = { .selected = { .compute } };
+
+    assert(!gpu::internal::vk::ray_tracing_queue_selection_compatible(
+        &graphics,
+        (vk::QueueFlags)QF_G,
+    ));
+    assert(gpu::internal::vk::ray_tracing_queue_selection_compatible(
+        &graphics,
+        (vk::QueueFlags)(QF_G | QF_C),
+    ));
+    assert(gpu::internal::vk::ray_tracing_queue_selection_compatible(
+        &compute,
+        (vk::QueueFlags)0,
+    ));
+}
+
 fn vk::QueueFamilyProperties family(uint flags, uint count) {
     return { .queue_flags = (vk::QueueFlags)flags, .queue_count = count };
 }
