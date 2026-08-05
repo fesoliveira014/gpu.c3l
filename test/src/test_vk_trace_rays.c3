@@ -115,6 +115,7 @@ struct TraceRaysFixture {
     gpu::RayTracingShaderBindingTable table;
     vk::PipelineCell[1]    pipeline_cells;
     vk::PipelineCacheEntry[1] pipeline_entries;
+    vk::QueueCompletionState[1] completions;
     vk::CommandResourceReference[4] references;
     vk::CommandScratch     scratch;
 }
@@ -162,6 +163,12 @@ fn void init_trace_rays_fixture(TraceRaysFixture* fixture) {
         .used = true,
     };
     fixture.scratch.references = fixture.references[..];
+    fixture.completions[0] = {
+        .timeline    = (vk::Semaphore)(uptr)0x66,
+        .queue_flags = vk::QueueFlagBits.COMPUTE_BIT,
+        .bound       = true,
+    };
+    fixture.spans.state.queue_completions = fixture.completions[..];
     fixture.record = {
         .device_state = &fixture.spans.state,
         .state        = gpu::internal::CommandState.RECORDING,
@@ -454,6 +461,23 @@ fn void indirect_trace_reuses_pipeline_queue_and_render_scope_validation() @test
         &fixture.table,
         args,
     )) == gpu::INVALID_ARGUMENT);
+    fixture.record.queue.roles = { .graphics };
+    fixture.spans.buffer_cells[0].value.access = { .graphics };
+    fixture.spans.allocation_cells[0].value.backing.access = { .graphics };
+    fixture.completions[0].queue_flags = vk::QueueFlagBits.GRAPHICS_BIT;
+    assert(@catch(vk::full_prepare_trace_rays(
+        &fixture.record,
+        {},
+        &fixture.table,
+        { 1, 1, 1 },
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::full_prepare_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.completions[0].queue_flags = vk::QueueFlagBits.COMPUTE_BIT;
     fixture.record.queue.roles = { .compute };
     fixture.record.state = gpu::internal::CommandState.RECORDING_RENDER_PASS;
     assert(@catch(vk::full_prepare_trace_rays_indirect(

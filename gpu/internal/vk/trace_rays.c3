@@ -214,6 +214,21 @@ fn PreparedTraceRaysState? lower_trace_rays_state(
     };
 }
 
+fn bool trace_rays_queue_supported(VkDeviceState* state, uint queue_id) {
+    if (state == null
+        || state.queue_completions.ptr == null
+        || queue_id >= state.queue_completions.len) {
+        return false;
+    }
+    QueueCompletionState* completion = &state.queue_completions[queue_id];
+    return completion.bound
+        && completion.timeline != null
+        && queue_flags_include(
+            completion.queue_flags,
+            vk::QueueFlagBits.COMPUTE_BIT,
+        );
+}
+
 fn PreparedTraceRaysState? full_prepare_trace_rays_state(
     CommandRecord* record,
     gpu::GpuAddress root,
@@ -228,7 +243,8 @@ fn PreparedTraceRaysState? full_prepare_trace_rays_state(
     if (state == null || !state.ray_tracing_pipelines_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    if (!record.queue.roles.graphics && !record.queue.roles.compute) {
+    if ((!record.queue.roles.graphics && !record.queue.roles.compute)
+        || !trace_rays_queue_supported(state, record.queue.id)) {
         return gpu::INVALID_ARGUMENT~;
     }
     BoundPipeline* pipeline = &record.logical_pipeline;
@@ -309,7 +325,8 @@ fn PreparedTraceRays? full_prepare_trace_rays(
     if (state == null || !state.ray_tracing_pipelines_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    if (!record.queue.roles.graphics && !record.queue.roles.compute) {
+    if ((!record.queue.roles.graphics && !record.queue.roles.compute)
+        || !trace_rays_queue_supported(state, record.queue.id)) {
         return gpu::INVALID_ARGUMENT~;
     }
     BoundPipeline* pipeline = &record.logical_pipeline;

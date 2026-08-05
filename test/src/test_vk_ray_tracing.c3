@@ -293,12 +293,10 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     assert(caps.ray_tracing_pipelines.enabled
             && caps.acceleration_structures.enabled,
         "the dedicated target requires actionable direct ray tracing");
-    gpu::QueueKind queue_kind = caps.queues.graphics
-        ? gpu::QueueKind.GRAPHICS
-        : gpu::QueueKind.COMPUTE;
-    gpu::QueueRoles access = caps.queues.graphics
-        ? (gpu::QueueRoles){ .graphics }
-        : (gpu::QueueRoles){ .compute };
+    assert(caps.queues.compute,
+        "ray-tracing pipelines require a selected compute queue");
+    gpu::QueueKind queue_kind = gpu::QueueKind.COMPUTE;
+    gpu::QueueRoles access = { .compute };
     gpu::Queue queue = gpu::get_queue(&device, queue_kind)!!;
 
     OwnedSpan aabbs = allocate_trace_span(

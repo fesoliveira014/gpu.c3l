@@ -847,6 +847,21 @@ fn gpu::Device? create_vk_device_from_runtime(
             request:                queue_request,
             require_sparse_binding: enable_sparse_textures,
         )!;
+    if (enable_ray_tracing_pipelines) {
+        vk::QueueFlags graphics_flags = (vk::QueueFlags)0;
+        if (families.selected.graphics) {
+            graphics_flags = query_queue_family_flags(
+                state.physical_device,
+                families.graphics,
+            )!;
+        }
+        if (!ray_tracing_queue_selection_compatible(
+            &families,
+            graphics_flags,
+        )) {
+            return gpu::UNSUPPORTED_FEATURE~;
+        }
+    }
 
     bool swapchain_maintenance_extension = state.presentation.enabled
         && device_supports_extension(

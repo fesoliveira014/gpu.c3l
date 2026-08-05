@@ -119,8 +119,12 @@ whose contents and lifetime are caller-owned.
 
 Bind a ray-tracing pipeline, then call `cmd_trace_rays` outside a render pass
 with one root `GpuAddress`, a caller-owned `RayTracingShaderBindingTable`, and
-nonzero `Vec3u` dimensions. The command is valid on a compatible selected
-graphics or compute queue. The invocation product must fit
+nonzero `Vec3u` dimensions. The command requires a selected graphics or compute
+queue whose native family supports compute operations. A selected compute queue
+always satisfies this contract; a selected graphics queue does only when its
+native family also supports compute. Full validation rejects an incompatible
+family, while trusted validation treats native queue compatibility as a caller
+precondition. The invocation product must fit
 `DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_invocation_count`. Each axis
 must also fit the corresponding component of
 `DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_dimensions`; full validation

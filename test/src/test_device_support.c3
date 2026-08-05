@@ -297,6 +297,13 @@ fn void ray_tracing_pipeline_support_reports_frontend_and_queue_failures() @test
     DeviceSupport wrong_queue = gpu::supports_device_desc(&adapter, &desc)!!;
     assert(!wrong_queue.supported
             && wrong_queue.unmet_requirement == "ray tracing queue topology");
+
+    desc.queues.required = { .graphics };
+    gpu::internal::vk::stub_set_ray_tracing_queue_support(false);
+    DeviceSupport wrong_family = gpu::supports_device_desc(&adapter, &desc)!!;
+    assert(!wrong_family.supported
+            && wrong_family.unmet_requirement == "ray tracing queue topology");
+    gpu::internal::vk::stub_set_ray_tracing_queue_support(true);
 }
 
 fn void unavailable_ray_queries_are_reported_semantically() @test {

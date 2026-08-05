@@ -104,6 +104,19 @@ fn bool ray_tracing_queue_request_compatible(gpu::QueueRequest* request) {
     return normalized.required.graphics || normalized.required.compute;
 }
 
+fn bool ray_tracing_queue_selection_compatible(
+    QueueFamilies* selection,
+    vk::QueueFlags graphics_flags,
+) {
+    if (selection == null) return false;
+    if (selection.selected.compute) return true;
+    return selection.selected.graphics
+        && queue_flags_include(
+            graphics_flags,
+            vk::QueueFlagBits.COMPUTE_BIT,
+        );
+}
+
 fn vk::Result real_queue_submit2(
     vk::Queue queue,
     uint submit_count,
@@ -758,6 +771,7 @@ fn bool? vk_supports_queue_request(
     gpu::QueueRequest* request,
     void* backend_surface,
     bool require_sparse_binding = false,
+    bool require_ray_tracing = false,
 ) {
     if (state == null || request == null || adapter_index >= state.adapters.len) {
         return gpu::INVALID_HANDLE~;
@@ -780,6 +794,21 @@ fn bool? vk_supports_queue_request(
     if (catch selection_fault = selection) {
         if (selection_fault == gpu::UNSUPPORTED_FEATURE) return false;
         return selection_fault~;
+    }
+    if (require_ray_tracing) {
+        vk::QueueFlags graphics_flags = (vk::QueueFlags)0;
+        if (selection.selected.graphics) {
+            graphics_flags = query_queue_family_flags(
+                physical_device,
+                selection.graphics,
+            )!;
+        }
+        if (!ray_tracing_queue_selection_compatible(
+            &selection,
+            graphics_flags,
+        )) {
+            return false;
+        }
     }
     return true;
 }
