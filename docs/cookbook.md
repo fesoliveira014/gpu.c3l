@@ -260,9 +260,9 @@ gpu::cmd_trace_rays(
 This is an example for a deliberately simple graph, not a universal formula.
 Account for the pipeline recursion depth, all reachable hit/miss paths, and
 callable nesting in the application’s actual graph. The setter takes `ulong`
-for arithmetic convenience, but the recorded value must be nonzero and fit
-`uint`. Bind first and set again after a static ray-pipeline bind invalidates
-the dynamic state.
+for arithmetic convenience, but the recorded value must fit `uint`. It may be
+zero when no shader group reports a stack requirement. Bind first and set
+again after a static ray-pipeline bind invalidates the dynamic state.
 
 ## Trace with GPU-written ray work
 
