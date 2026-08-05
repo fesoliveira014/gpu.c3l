@@ -2240,6 +2240,18 @@ fn void? cmd_trace_rays_indirect(
     );
 }
 
+<* Record one Indirect2 ray dispatch. The root stays direct; GPU-authored SBT
+   regions and dimensions are caller-owned through completion. *>
+fn void? cmd_trace_rays_indirect2(
+    CommandList* commands,
+    GpuAddress root,
+    GpuSpan args,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    return record.ops.trace_rays_indirect2(record, root, args);
+}
+
 <* Set a caller-derived byte size after binding a dynamic-stack ray pipeline.
    The value must fit uint and cover every shader execution in later traces.
 

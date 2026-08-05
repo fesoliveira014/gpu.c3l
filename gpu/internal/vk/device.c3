@@ -618,6 +618,7 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .dispatch                    = &trusted_dispatch,
     .trace_rays                  = &trusted_trace_rays,
     .trace_rays_indirect         = &trusted_trace_rays_indirect,
+    .trace_rays_indirect2        = &trusted_trace_rays_indirect2,
     .set_ray_tracing_pipeline_stack_size =
         &trusted_set_ray_tracing_pipeline_stack_size,
     .begin_render_pass           = &trusted_begin_render_pass,
@@ -655,6 +656,7 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .dispatch                    = &full_dispatch,
     .trace_rays                  = &full_trace_rays,
     .trace_rays_indirect         = &full_trace_rays_indirect,
+    .trace_rays_indirect2        = &full_trace_rays_indirect2,
     .set_ray_tracing_pipeline_stack_size =
         &full_set_ray_tracing_pipeline_stack_size,
     .begin_render_pass           = &full_begin_render_pass,

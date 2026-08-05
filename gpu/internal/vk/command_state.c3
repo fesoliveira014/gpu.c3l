@@ -27,6 +27,11 @@ alias CmdTraceRaysIndirectFn @private = fn void? (
     gpu::RayTracingShaderBindingTable*,
     gpu::GpuSpan,
 );
+alias CmdTraceRaysIndirect2Fn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::GpuSpan,
+);
 alias CmdSetRayTracingPipelineStackSizeFn @private = fn void? (
     CommandRecord*,
     ulong,
@@ -217,6 +222,7 @@ struct CommandOps @public {
     CmdDispatchFn                 dispatch;
     CmdTraceRaysFn                trace_rays;
     CmdTraceRaysIndirectFn        trace_rays_indirect;
+    CmdTraceRaysIndirect2Fn       trace_rays_indirect2;
     CmdSetRayTracingPipelineStackSizeFn set_ray_tracing_pipeline_stack_size;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;
