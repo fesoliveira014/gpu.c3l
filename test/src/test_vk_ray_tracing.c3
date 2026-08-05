@@ -24,6 +24,12 @@ const char[*] TRACE_FUNCTIONAL_CALLABLE_SPIRV =
 const uint TRACE_FUNCTIONAL_RAY_COUNT = 5;
 const uint TRACE_FUNCTIONAL_INDIRECT2_RAY_COUNT = 4;
 const uint TRACE_FUNCTIONAL_GROUP_COUNT = 6;
+const uint TRACE_FUNCTIONAL_RESULT_CAPACITY = 5;
+const uint TRACE_FUNCTIONAL_LAUNCH_WIDTH_INDEX = 5;
+const uint TRACE_FUNCTIONAL_LAUNCH_HEIGHT_INDEX = 6;
+const uint TRACE_FUNCTIONAL_LAUNCH_DEPTH_INDEX = 7;
+const uint TRACE_FUNCTIONAL_INVOCATION_COUNT_INDEX = 8;
+const uint TRACE_FUNCTIONAL_OUTPUT_WORD_COUNT = 9;
 
 struct TraceFunctionalRoot {
     gpu::AccelerationStructureIndex acceleration_structure_index;
@@ -396,6 +402,34 @@ fn void assert_trace_fifth_miss_result(
         dispatch);
 }
 
+fn void assert_trace_launch(
+    gpu::Device* device,
+    OwnedSpan*   output,
+    gpu::Vec3u   expected,
+    String       dispatch,
+) {
+    gpu::invalidate_mapped_span(device, output.span)!!;
+    uint* results = (uint*)test_span_mapping(device, output.span).ptr;
+    assert(results[TRACE_FUNCTIONAL_LAUNCH_WIDTH_INDEX] == expected.x,
+        "the launch width is exact under %s",
+        dispatch);
+    assert(results[TRACE_FUNCTIONAL_LAUNCH_HEIGHT_INDEX] == expected.y,
+        "the launch height is exact under %s",
+        dispatch);
+    assert(results[TRACE_FUNCTIONAL_LAUNCH_DEPTH_INDEX] == expected.z,
+        "the launch depth is exact under %s",
+        dispatch);
+    assert(results[TRACE_FUNCTIONAL_INVOCATION_COUNT_INDEX]
+            == expected.x * expected.y * expected.z,
+        "the invocation count matches the launch volume under %s",
+        dispatch);
+    if (expected.x < TRACE_FUNCTIONAL_RESULT_CAPACITY) {
+        assert(results[expected.x] == 0,
+            "the first result beyond the launch width remains clear under %s",
+            dispatch);
+    }
+}
+
 fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     gpu::Runtime runtime;
     TraceValidationCapture validation;
@@ -572,7 +606,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
 
     OwnedSpan output = allocate_trace_span(
         device:       &device,
-        size:         TRACE_FUNCTIONAL_RAY_COUNT * uint::size,
+        size:         TRACE_FUNCTIONAL_OUTPUT_WORD_COUNT * uint::size,
         alignment:    16,
         memory_class: gpu::MemoryClass.CPU_READ,
         access:       access,
@@ -639,7 +673,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
 
     OwnedSpan indirect_output = allocate_trace_span(
         device:       &device,
-        size:         TRACE_FUNCTIONAL_RAY_COUNT * uint::size,
+        size:         TRACE_FUNCTIONAL_OUTPUT_WORD_COUNT * uint::size,
         alignment:    16,
         memory_class: gpu::MemoryClass.CPU_READ,
         access:       access,
@@ -669,7 +703,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
 
     OwnedSpan indirect2_output = allocate_trace_span(
         device:       &device,
-        size:         TRACE_FUNCTIONAL_INDIRECT2_RAY_COUNT * uint::size,
+        size:         TRACE_FUNCTIONAL_OUTPUT_WORD_COUNT * uint::size,
         alignment:    16,
         memory_class: gpu::MemoryClass.CPU_READ,
         access:       access,
@@ -870,6 +904,14 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         .after  = { .ray_tracing },
     };
     gpu::cmd_barrier(&trace_commands, &build_to_trace)!!;
+    gpu::cmd_fill_buffer(&trace_commands, output.span, 0)!!;
+    gpu::cmd_fill_buffer(&trace_commands, indirect_output.span, 0)!!;
+    gpu::cmd_fill_buffer(&trace_commands, indirect2_output.span, 0)!!;
+    gpu::Barrier output_clear_to_trace = {
+        .before = { .transfer },
+        .after  = { .ray_tracing },
+    };
+    gpu::cmd_barrier(&trace_commands, &output_clear_to_trace)!!;
     if (caps.ray_tracing_pipelines.indirect_dispatch
         || caps.ray_tracing_pipelines.indirect2_dispatch) {
         gpu::cmd_bind_pipeline(
@@ -954,6 +996,12 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
 
     assert_trace_functional_results(&device, &output, "a direct dispatch");
     assert_trace_fifth_miss_result(&device, &output, "a direct dispatch");
+    assert_trace_launch(
+        device:   &device,
+        output:   &output,
+        expected: { TRACE_FUNCTIONAL_RAY_COUNT, 1, 1 },
+        dispatch: "a direct dispatch",
+    );
     if (caps.ray_tracing_pipelines.indirect_dispatch) {
         assert_trace_functional_results(
             &device,
@@ -965,12 +1013,24 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
             &indirect_output,
             "an indirect dispatch",
         );
+        assert_trace_launch(
+            device:   &device,
+            output:   &indirect_output,
+            expected: { TRACE_FUNCTIONAL_RAY_COUNT, 1, 1 },
+            dispatch: "an indirect dispatch",
+        );
     }
     if (caps.ray_tracing_pipelines.indirect2_dispatch) {
         assert_trace_functional_results(
             &device,
             &indirect2_output,
             "an indirect2 dispatch",
+        );
+        assert_trace_launch(
+            device:   &device,
+            output:   &indirect2_output,
+            expected: { TRACE_FUNCTIONAL_INDIRECT2_RAY_COUNT, 1, 1 },
+            dispatch: "an indirect2 dispatch",
         );
     }
     assert(validation.errors == 0,
