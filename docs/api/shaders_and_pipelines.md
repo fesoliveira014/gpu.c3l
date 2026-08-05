@@ -67,9 +67,10 @@ hit, and callable `RayTracingShaderGroupRange` values in that order.
 `get_ray_tracing_shader_group_handles` copies one exact contiguous range into
 caller storage whose length is `group_count * shader_group_handle_size`.
 
-The direct slice deliberately excludes pipeline libraries/linking, capture
-replay, deferred creation, dynamic stack sizing, and indirect trace commands.
-SBT allocation and packing remain application responsibilities.
+Ray-tracing pipelines do not support pipeline libraries/linking, capture
+replay, deferred creation, dynamic stack sizing, Indirect2, or batched trace
+commands. Basic indirect tracing changes only where dimensions are read; SBT
+allocation and packing remain application responsibilities.
 
 ## Ownership and destruction
 

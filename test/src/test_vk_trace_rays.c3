@@ -8,8 +8,10 @@ import std::atomic::types;
 
 struct TraceRaysCapture {
     gpu::GpuAddress expected_root;
+    vk::DeviceAddress expected_args;
     uint            pushes;
     uint            traces;
+    uint            indirect_traces;
     bool            matched;
 }
 
@@ -79,6 +81,34 @@ fn void capture_trace_rays(
         && depth == 4;
 }
 
+fn void capture_trace_rays_indirect(
+    void* raw_capture,
+    vk::CommandBuffer command_buffer,
+    vk::StridedDeviceAddressRegionKHR* ray_generation,
+    vk::StridedDeviceAddressRegionKHR* miss,
+    vk::StridedDeviceAddressRegionKHR* hit,
+    vk::StridedDeviceAddressRegionKHR* callable,
+    vk::DeviceAddress indirect_address,
+) {
+    (void)command_buffer;
+    TraceRaysCapture* capture = (TraceRaysCapture*)raw_capture;
+    capture.indirect_traces++;
+    capture.matched = capture.matched
+        && ray_generation.device_address == 0x1000
+        && ray_generation.stride == 32
+        && ray_generation.size == 32
+        && miss.device_address == 0x1000
+        && miss.stride == 32
+        && miss.size == 64
+        && hit.device_address == 0
+        && hit.stride == 0
+        && hit.size == 0
+        && callable.device_address == 0
+        && callable.stride == 0
+        && callable.size == 0
+        && indirect_address == capture.expected_args;
+}
+
 struct TraceRaysFixture {
     SpanResolverFixture    spans;
     vk::CommandRecord      record;
@@ -96,6 +126,7 @@ fn void init_trace_rays_fixture(TraceRaysFixture* fixture) {
     fixture.spans.state.ray_tracing_pipelines_enabled = true;
     fixture.spans.state.caps.ray_tracing_pipelines = {
         .enabled                           = true,
+        .indirect_dispatch                 = true,
         .max_ray_dispatch_invocation_count = 128,
         .max_ray_dispatch_dimensions       = { 7, 6, 5 },
         .shader_group_handle_size          = 32,
@@ -155,6 +186,21 @@ fn void init_trace_rays_fixture(TraceRaysFixture* fixture) {
             .stride = 32,
         },
     };
+    fixture.spans.allocation_cells[0].value.backing.usage.indirect = true;
+}
+
+fn gpu::GpuSpan fixture_trace_args(
+    TraceRaysFixture* fixture,
+    usz offset = 0,
+    usz size = gpu::TraceRaysIndirectCommand::size,
+) {
+    return {
+        .owner      = fixture.spans.state.allocations.owner,
+        .index      = 0,
+        .generation = 7,
+        .offset     = offset,
+        .size       = size,
+    };
 }
 
 fn void trusted_trace_lowers_exact_regions_root_and_dimensions() @test {
@@ -201,6 +247,56 @@ fn void trusted_trace_rejects_a_device_without_ray_tracing_enabled() @test {
         ops:        &ops,
     )) == gpu::UNSUPPORTED_FEATURE);
     assert(capture.pushes == 0 && capture.traces == 0);
+}
+
+fn void trusted_indirect_trace_lowers_exact_regions_root_and_address() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    gpu::GpuSpan args = fixture_trace_args(&fixture);
+    gpu::GpuAddress root = (gpu::GpuAddress)0x5678;
+    TraceRaysCapture capture = {
+        .expected_root = root,
+        .expected_args = 0x2000,
+        .matched       = true,
+    };
+    vk::TraceRaysOps ops = {
+        .user_data      = &capture,
+        .push_root      = &capture_trace_root,
+        .trace_indirect = &capture_trace_rays_indirect,
+    };
+
+    vk::trusted_trace_rays_indirect_with_ops(
+        record: &fixture.record,
+        root:   root,
+        table:  &fixture.table,
+        args:   args,
+        ops:    &ops,
+    )!!;
+    assert(capture.matched
+        && capture.pushes == 1
+        && capture.indirect_traces == 1);
+    assert(fixture.scratch.reference_count == 0);
+}
+
+fn void indirect_trace_capability_rejects_before_argument_resolution() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    fixture.spans.state.caps.ray_tracing_pipelines.indirect_dispatch = false;
+    TraceRaysCapture capture = { .matched = true };
+    vk::TraceRaysOps ops = {
+        .user_data      = &capture,
+        .push_root      = &capture_trace_root,
+        .trace_indirect = &capture_trace_rays_indirect,
+    };
+
+    assert(@catch(vk::trusted_trace_rays_indirect_with_ops(
+        record: &fixture.record,
+        root:   {},
+        table:  null,
+        args:   {},
+        ops:    &ops,
+    )) == gpu::UNSUPPORTED_FEATURE);
+    assert(capture.pushes == 0 && capture.indirect_traces == 0);
 }
 
 fn void ray_tracing_bind_uses_distinct_native_bind_point_and_cache() @test {
@@ -255,6 +351,185 @@ fn void full_trace_tracks_pipeline_and_unique_sbt_backing() @test {
     assert(fixture.scratch.reference_count == 0);
 }
 
+fn void full_indirect_trace_tracks_pipeline_sbt_and_arguments() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    fixture.spans.state.resource_mutex.init()!!;
+    defer (void)fixture.spans.state.resource_mutex.destroy();
+    gpu::GpuSpan args = fixture_trace_args(&fixture);
+    TraceRaysCapture capture = {
+        .expected_root = (gpu::GpuAddress)9,
+        .expected_args = 0x2000,
+        .matched       = true,
+    };
+    vk::TraceRaysOps ops = {
+        .user_data      = &capture,
+        .push_root      = &capture_trace_root,
+        .trace_indirect = &capture_trace_rays_indirect,
+    };
+
+    vk::full_trace_rays_indirect_with_ops(
+        record: &fixture.record,
+        root:   capture.expected_root,
+        table:  &fixture.table,
+        args:   args,
+        ops:    &ops,
+    )!!;
+    assert(capture.matched && capture.indirect_traces == 1);
+    assert(fixture.scratch.reference_count == 3,
+        "pipeline, SBT buffer, and indirect allocation are retained");
+    assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
+        AtomicOrdering.RELAXED,
+    ) == 1);
+    assert(fixture.spans.buffer_cells[0].value.tracked_command_references.load(
+        AtomicOrdering.RELAXED,
+    ) == 1);
+    assert(fixture.spans.allocation_cells[0].value
+        .tracked_command_references.load(AtomicOrdering.RELAXED) == 1);
+    vk::rollback_command_references(&fixture.record, 0);
+}
+
+fn void indirect_trace_validates_range_alignment_usage_and_queue() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    gpu::GpuSpan args = fixture_trace_args(&fixture);
+
+    args.size = gpu::TraceRaysIndirectCommand::size - 1;
+    assert(@catch(vk::lower_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::INVALID_ARGUMENT);
+    assert(@catch(vk::full_prepare_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::INVALID_ARGUMENT);
+
+    args = fixture_trace_args(&fixture, 2);
+    assert(@catch(vk::lower_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::INVALID_ARGUMENT);
+
+    args = fixture_trace_args(&fixture);
+    fixture.spans.allocation_cells[0].value.backing.usage.indirect = false;
+    assert(@catch(vk::full_prepare_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.spans.allocation_cells[0].value.backing.usage.indirect = true;
+    fixture.spans.allocation_cells[0].value.backing.access = { .transfer };
+    assert(@catch(vk::full_prepare_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::INVALID_ARGUMENT);
+}
+
+fn void indirect_trace_reuses_pipeline_queue_and_render_scope_validation() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    gpu::GpuSpan args = fixture_trace_args(&fixture);
+
+    fixture.record.logical_pipeline.kind = vk::PipelineKind.COMPUTE;
+    assert(@catch(vk::full_prepare_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::COMMAND_RECORDING_ERROR);
+    fixture.record.logical_pipeline.kind = vk::PipelineKind.RAY_TRACING;
+    fixture.record.queue.roles = { .transfer };
+    assert(@catch(vk::full_prepare_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::INVALID_ARGUMENT);
+    fixture.record.queue.roles = { .compute };
+    fixture.record.state = gpu::internal::CommandState.RECORDING_RENDER_PASS;
+    assert(@catch(vk::full_prepare_trace_rays_indirect(
+        &fixture.record,
+        {},
+        &fixture.table,
+        args,
+    )) == gpu::COMMAND_RECORDING_ERROR);
+}
+
+fn void trusted_indirect_trace_repeats_without_reference_work() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    gpu::GpuSpan args = fixture_trace_args(&fixture);
+    TraceRaysCapture capture = {
+        .expected_args = 0x2000,
+        .matched       = true,
+    };
+    vk::TraceRaysOps ops = {
+        .user_data      = &capture,
+        .push_root      = &capture_trace_root,
+        .trace_indirect = &capture_trace_rays_indirect,
+    };
+
+    for (uint i = 0; i < 64; i++) {
+        vk::trusted_trace_rays_indirect_with_ops(
+            record: &fixture.record,
+            root:   {},
+            table:  &fixture.table,
+            args:   args,
+            ops:    &ops,
+        )!!;
+    }
+    assert(capture.matched
+        && capture.pushes == 64
+        && capture.indirect_traces == 64);
+    assert(fixture.scratch.reference_count == 0,
+        "trusted repeated recording performs no reference allocation");
+}
+
+fn void indirect_trace_reference_exhaustion_rolls_back_every_retain() @test {
+    TraceRaysFixture fixture;
+    init_trace_rays_fixture(&fixture);
+    fixture.spans.state.resource_mutex.init()!!;
+    defer (void)fixture.spans.state.resource_mutex.destroy();
+    fixture.scratch.references = fixture.references[:2];
+    gpu::GpuSpan args = fixture_trace_args(&fixture);
+    TraceRaysCapture capture = {
+        .expected_args = 0x2000,
+        .matched       = true,
+    };
+    vk::TraceRaysOps ops = {
+        .user_data      = &capture,
+        .push_root      = &capture_trace_root,
+        .trace_indirect = &capture_trace_rays_indirect,
+    };
+
+    assert(@catch(vk::full_trace_rays_indirect_with_ops(
+        record: &fixture.record,
+        root:   {},
+        table:  &fixture.table,
+        args:   args,
+        ops:    &ops,
+    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
+    assert(fixture.scratch.reference_count == 0);
+    assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
+        AtomicOrdering.RELAXED,
+    ) == 0);
+    assert(fixture.spans.buffer_cells[0].value.tracked_command_references.load(
+        AtomicOrdering.RELAXED,
+    ) == 0);
+    assert(fixture.spans.allocation_cells[0].value
+        .tracked_command_references.load(AtomicOrdering.RELAXED) == 0);
+    assert(capture.pushes == 0 && capture.indirect_traces == 0);
+}
+
 fn void full_trace_validation_rejects_shape_usage_and_dimensions() @test {
     TraceRaysFixture fixture;
     init_trace_rays_fixture(&fixture);
@@ -264,8 +539,8 @@ fn void full_trace_validation_rejects_shape_usage_and_dimensions() @test {
         &fixture.table,
         { 2, 3, 4 },
     )!!;
-    assert(trace.ray_generation.device_address == 0x1000);
-    assert(trace.miss.device_address == 0x1000);
+    assert(trace.state.ray_generation.device_address == 0x1000);
+    assert(trace.state.miss.device_address == 0x1000);
 
     fixture.table.ray_generation.stride = 16;
     assert(@catch(vk::full_prepare_trace_rays(

@@ -33,6 +33,20 @@ requiring the out-of-scope ray-tracing-maintenance extension. Sampled and
 storage texture states accept `.ray_tracing` on an opted-in device and a
 compatible graphics or compute queue.
 
+`StageMask.indirect` names indirect-command argument reads, including basic
+indirect ray dimensions. Order a compute-produced
+`TraceRaysIndirectCommand` with a compute-to-indirect barrier; this is separate
+from `.ray_tracing`, which describes the later shader execution and resource
+access. The library inserts neither dependency automatically.
+
+```c3
+gpu::Barrier args_ready = {
+    .before = { .compute },
+    .after  = { .indirect },
+};
+gpu::cmd_barrier(&commands, &args_ready)!;
+```
+
 Order consecutive builds, updates, or clones explicitly:
 
 ```c3
@@ -100,6 +114,9 @@ will build, update, or clone a structure, and use the receiving shader stage
 when it will query or trace one. `.ray_tracing` is a valid wait destination
 only on an enabled compatible graphics/compute queue. Transfer-only queues
 reject both ray execution stages.
+Use `CompletionWait.before.indirect` when a prior submission produces indirect
+ray dimensions. It is valid on graphics and compute queues and invalid on a
+transfer-only destination.
 
 Submission is externally synchronized on the target native queue. It:
 

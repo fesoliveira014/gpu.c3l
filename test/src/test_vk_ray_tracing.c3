@@ -1,6 +1,10 @@
 module gpu_test;
 
 import gpu;
+import std::io;
+
+const char[*] TRACE_INDIRECT_BUILD_SPIRV =
+    $embed("shaders/ray_trace_indirect.comp.spv");
 
 const char[*] TRACE_FUNCTIONAL_RAYGEN_SPIRV =
     $embed("shaders/ray_trace_functional.rgen.spv");
@@ -26,6 +30,10 @@ struct TraceFunctionalRoot {
     gpu::GpuAddress                 output_gpu;
 }
 $assert TraceFunctionalRoot::size == 16;
+
+struct TraceIndirectBuildRoot {
+    gpu::GpuAddress arguments_gpu;
+}
 
 struct TraceValidationCapture {
     uint errors;
@@ -170,6 +178,21 @@ fn gpu::PipelineHandle? create_functional_ray_tracing_pipeline(
     return gpu::create_ray_tracing_pipeline(device, &desc);
 }
 
+fn gpu::PipelineHandle? create_trace_indirect_build_pipeline(
+    gpu::Device* device,
+) {
+    gpu::ShaderDesc shader = {
+        .spirv       = TRACE_INDIRECT_BUILD_SPIRV[..],
+        .entry_point = "main",
+        .debug_name  = "trace_indirect_build",
+    };
+    gpu::ComputePipelineDesc desc = {
+        .shader     = shader,
+        .debug_name = "trace_indirect_build_pipeline",
+    };
+    return gpu::create_compute_pipeline(device, &desc);
+}
+
 fn OwnedSpan? create_functional_sbt(
     gpu::Device*                       device,
     gpu::PipelineHandle                pipeline,
@@ -255,7 +278,7 @@ fn OwnedSpan? create_functional_sbt(
     return sbt;
 }
 
-fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
+fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     gpu::Runtime runtime;
     TraceValidationCapture validation;
     gpu::Device device = create_ray_tracing_test_device(
@@ -452,9 +475,41 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     root.output_gpu = test_span_address(&device, output.span);
     gpu::flush_mapped_span(&device, root_owned.span)!!;
 
+    OwnedSpan indirect_args = allocate_trace_span(
+        device:       &device,
+        size:         gpu::TraceRaysIndirectCommand::size,
+        alignment:    4,
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       access,
+        debug_name:   "trace_functional_indirect_args",
+    )!!;
+    defer free_owned_span(&device, &indirect_args)!!;
+    OwnedSpan indirect_root = allocate_trace_span(
+        device:       &device,
+        size:         TraceIndirectBuildRoot::size,
+        alignment:    8,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       access,
+        debug_name:   "trace_functional_indirect_root",
+    )!!;
+    defer free_owned_span(&device, &indirect_root)!!;
+    TraceIndirectBuildRoot* indirect_root_data =
+        (TraceIndirectBuildRoot*)test_span_mapping(
+            &device,
+            indirect_root.span,
+        ).ptr;
+    indirect_root_data.arguments_gpu = test_span_address(
+        &device,
+        indirect_args.span,
+    );
+    gpu::flush_mapped_span(&device, indirect_root.span)!!;
+
     gpu::PipelineHandle pipeline =
         create_functional_ray_tracing_pipeline(&device)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::PipelineHandle indirect_build_pipeline =
+        create_trace_indirect_build_pipeline(&device)!!;
+    defer gpu::destroy_pipeline(&device, indirect_build_pipeline)!!;
     gpu::RayTracingPipelineInfo pipeline_info =
         gpu::get_ray_tracing_pipeline_info(&device, pipeline)!!;
     assert(pipeline_info.ray_generation.group_count == 1
@@ -590,13 +645,40 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         .after  = { .ray_tracing },
     };
     gpu::cmd_barrier(&trace_commands, &build_to_trace)!!;
-    gpu::cmd_bind_pipeline(&trace_commands, pipeline)!!;
-    gpu::cmd_trace_rays(
-        commands:   &trace_commands,
-        root:       test_span_address(&device, root_owned.span),
-        shader_binding_table: &table,
-        dimensions: { TRACE_FUNCTIONAL_RAY_COUNT, 1, 1 },
-    )!!;
+    if (caps.ray_tracing_pipelines.indirect_dispatch) {
+        gpu::cmd_bind_pipeline(
+            &trace_commands,
+            indirect_build_pipeline,
+        )!!;
+        gpu::cmd_dispatch(
+            commands: &trace_commands,
+            root:     test_span_address(&device, indirect_root.span),
+            groups:   { 1, 1, 1 },
+        )!!;
+        gpu::Barrier args_ready = {
+            .before = { .compute },
+            .after  = { .indirect },
+        };
+        gpu::cmd_barrier(&trace_commands, &args_ready)!!;
+        gpu::cmd_bind_pipeline(&trace_commands, pipeline)!!;
+        gpu::cmd_trace_rays_indirect(
+            commands:             &trace_commands,
+            root:                 test_span_address(&device, root_owned.span),
+            shader_binding_table: &table,
+            args:                 indirect_args.span,
+        )!!;
+    } else {
+        io::printfn(
+            "basic indirect ray tracing unavailable; running direct proof",
+        );
+        gpu::cmd_bind_pipeline(&trace_commands, pipeline)!!;
+        gpu::cmd_trace_rays(
+            commands:             &trace_commands,
+            root:                 test_span_address(&device, root_owned.span),
+            shader_binding_table: &table,
+            dimensions:           { TRACE_FUNCTIONAL_RAY_COUNT, 1, 1 },
+        )!!;
+    }
     gpu::TextureBarrier texture_to_sampled = gpu::texture_transition(
         texture: texture,
         before:  texture_to_storage.after,
@@ -627,5 +709,5 @@ fn void direct_ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     assert(results[3] == 0x14,
         "the secondary miss group and callable stage both execute");
     assert(validation.errors == 0,
-        "the direct ray-tracing path emits no Vulkan validation errors");
+        "the ray-tracing dispatch emits no Vulkan validation errors");
 }

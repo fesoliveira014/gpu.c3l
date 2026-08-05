@@ -2189,6 +2189,32 @@ fn void? cmd_trace_rays(
     );
 }
 
+<* Record one basic indirect ray dispatch through the active ray-tracing
+   pipeline. The root and caller-owned SBT remain direct; only dimensions come
+   from the GPU span. The command inserts no hidden synchronization or work.
+
+   @param commands : "Live recording token outside a render pass."
+   @param root : "Root GPU address pushed unchanged; zero is valid."
+   @param shader_binding_table : "Borrowed caller-owned direct shader binding table regions."
+   @param args : "Span beginning with one GPU-written TraceRaysIndirectCommand; FULL retains it through completion and TRUSTED requires caller-managed lifetime."
+   @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
+fn void? cmd_trace_rays_indirect(
+    CommandList* commands,
+    GpuAddress root,
+    RayTracingShaderBindingTable* shader_binding_table,
+    GpuSpan args,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    if (shader_binding_table == null) return INVALID_ARGUMENT~;
+    return record.ops.trace_rays_indirect(
+        record,
+        root,
+        shader_binding_table,
+        args,
+    );
+}
+
 <* Set one dynamic viewport before or during a pass.
    Preconditions: values are finite, representable, within device bounds, and height is nonzero.
    Always checked: token phase and required pointer.

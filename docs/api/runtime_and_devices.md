@@ -78,7 +78,10 @@ Query capabilities instead of hardcoding selected-device limits.
 heap capacity, maximum geometry, primitive, and instance counts, and scratch
 alignment. These are creation and allocator bounds, not suggestions.
 `RayQueryCaps` reports its independent enabled bit.
-`RayTracingPipelineCaps` reports the total direct-dispatch invocation limit,
+`RayTracingPipelineCaps.indirect_dispatch` reports independently negotiated
+basic indirect tracing under the existing pipeline opt-in. Direct tracing
+remains available when this field is false. The record also reports the total
+ray-dispatch invocation limit,
 `max_ray_dispatch_dimensions` for the selected device's per-axis launch limits,
 recursion depth, shader-group handle/alignment/stride requirements, and the
 hit-attribute limit. Disabled capability records are fully zero/false.

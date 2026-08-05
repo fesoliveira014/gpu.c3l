@@ -48,6 +48,7 @@ fn void pin_runtime_adapter_device() {
         .ray_queries                  = { .enabled = true },
         .ray_tracing_pipelines        = {
             .enabled                           = true,
+            .indirect_dispatch                 = true,
             .max_recursion_depth               = 2,
             .max_ray_dispatch_invocation_count = 1024,
             .max_ray_dispatch_dimensions       = { 64, 32, 16 },
@@ -103,6 +104,7 @@ fn void pin_runtime_adapter_device() {
     (void)caps.acceleration_structures;
     (void)caps.ray_queries;
     (void)caps.ray_tracing_pipelines;
+    (void)caps.ray_tracing_pipelines.indirect_dispatch;
     (void)caps.sparse_textures;
     (void)caps.sparse_textures.image_2d;
     (void)caps.sparse_textures.image_3d;
@@ -595,11 +597,23 @@ fn void pin_commands_and_completion() {
         groups:   { 1, 1, 1 },
     );
     gpu::RayTracingShaderBindingTable shader_binding_table;
+    gpu::TraceRaysIndirectCommand ray_args = {
+        .width  = 1,
+        .height = 1,
+        .depth  = 1,
+    };
+    (void)ray_args;
     (void)gpu::cmd_trace_rays(
         commands:             &commands,
         root:                 {},
         shader_binding_table: &shader_binding_table,
         dimensions:           { 1, 1, 1 },
+    );
+    (void)gpu::cmd_trace_rays_indirect(
+        commands: &commands,
+        root:     {},
+        shader_binding_table: &shader_binding_table,
+        args:     span,
     );
     (void)gpu::cmd_dispatch_indirect(&commands, {}, span);
     (void)gpu::cmd_dispatch_generated(

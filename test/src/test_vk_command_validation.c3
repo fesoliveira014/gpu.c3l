@@ -163,6 +163,8 @@ fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     bool previous_acceleration_structures = record.device_state.acceleration_structures_enabled;
     defer record.device_state.acceleration_structures_enabled = previous_acceleration_structures;
+    bool previous_ray_queries = record.device_state.ray_queries_enabled;
+    defer record.device_state.ray_queries_enabled = previous_ray_queries;
 
     BarrierEmitCapture capture;
     vk::BarrierEmitOps ops = {
@@ -184,6 +186,7 @@ fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
         "an unavailable acceleration-structure stage emits no dependency");
 
     record.device_state.acceleration_structures_enabled = true;
+    record.device_state.ray_queries_enabled = true;
     vk::barrier_with_injected_ops(record, &dependency, &ops)!!;
 
     ulong source_access =
@@ -207,6 +210,82 @@ fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
             && (ulong)capture.memory_barrier.dst_access_mask
                 == destination_access,
         "build-to-query records one exact caller-requested native barrier");
+}
+
+fn void pipeline_only_compute_to_indirect_barrier_omits_ray_query_access() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    record.device_state.acceleration_structures_enabled = true;
+    record.device_state.ray_tracing_pipelines_enabled = true;
+    record.device_state.ray_queries_enabled = false;
+
+    BarrierEmitCapture capture = {};
+    vk::BarrierEmitOps ops = {
+        .user_data = &capture,
+        .emit      = &capture_barrier_emit,
+    };
+    gpu::Barrier dependency = {
+        .before = { .compute },
+        .after  = { .indirect },
+    };
+    vk::barrier_with_injected_ops(record, &dependency, &ops)!!;
+
+    ulong acceleration_read = (ulong)vk::AccessFlagBits2
+        .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    assert(capture.calls == 1,
+        "pipeline-only compute production emits one barrier");
+    assert(((ulong)capture.memory_barrier.src_access_mask
+            & acceleration_read) == 0,
+        "pipeline-only compute production omits ray-query access");
+    assert(((ulong)capture.memory_barrier.dst_access_mask
+            & (ulong)vk::AccessFlagBits2
+                .ACCESS_2_INDIRECT_COMMAND_READ_BIT) != 0,
+        "indirect consumption includes indirect-command read access");
+}
+
+fn void pipeline_only_build_to_trace_barrier_keeps_acceleration_read() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    record.device_state.acceleration_structures_enabled = true;
+    record.device_state.ray_tracing_pipelines_enabled = true;
+    record.device_state.ray_queries_enabled = false;
+
+    BarrierEmitCapture capture = {};
+    vk::BarrierEmitOps ops = {
+        .user_data = &capture,
+        .emit      = &capture_barrier_emit,
+    };
+    gpu::Barrier dependency = {
+        .before = { .acceleration_structure_build },
+        .after  = { .ray_tracing },
+    };
+    vk::barrier_with_injected_ops(record, &dependency, &ops)!!;
+
+    ulong acceleration_read = (ulong)vk::AccessFlagBits2
+        .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+    assert(capture.calls == 1,
+        "pipeline-only build-to-trace emits one barrier");
+    assert(((ulong)capture.memory_barrier.dst_access_mask
+            & acceleration_read) != 0,
+        "pipeline-only ray tracing retains acceleration-structure read access");
 }
 
 fn void reference_capacity_preflight_counts_unique_identities() @test {

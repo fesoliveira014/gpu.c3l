@@ -47,6 +47,12 @@ alias CmdTraceRaysFn @private = fn void? (
     gpu::RayTracingShaderBindingTable*,
     gpu::Vec3u,
 );
+alias CmdTraceRaysIndirectFn @private = fn void? (
+    CommandRecord*,
+    gpu::GpuAddress,
+    gpu::RayTracingShaderBindingTable*,
+    gpu::GpuSpan,
+);
 alias CmdBeginRenderPassFn @private = fn void? (
     CommandRecord*,
     gpu::RenderPassDesc*,
@@ -191,6 +197,7 @@ struct CommandOps @public {
     CmdSetGraphicsStateFn         set_graphics_state;
     CmdDispatchFn                 dispatch;
     CmdTraceRaysFn                trace_rays;
+    CmdTraceRaysIndirectFn        trace_rays_indirect;
     CmdBeginRenderPassFn          begin_render_pass;
     CmdSetViewportFn              set_viewport;
     CmdSetScissorFn               set_scissor;

@@ -216,6 +216,36 @@ Keep the SBT allocation, TLAS view, root data, and every raw-address target live
 until the trace completion point retires. The library inserts no hidden upload,
 barrier, bind, wait, or SBT allocation.
 
+## Trace with GPU-written dimensions
+
+After requesting ray-tracing pipelines, query
+`caps.ray_tracing_pipelines.indirect_dispatch`. If true, let compute write one
+generated `TraceRaysIndirectCommand` into indirect-capable addressable storage,
+then order and consume it:
+
+```c3
+gpu::Barrier args_ready = {
+    .before = { .compute },
+    .after  = { .indirect },
+};
+gpu::cmd_barrier(&commands, &args_ready)!;
+gpu::cmd_bind_pipeline(&commands, ray_pipeline)!;
+gpu::cmd_trace_rays_indirect(
+    commands:             &commands,
+    root:                 root_gpu,
+    shader_binding_table: &sbt,
+    args:                 indirect_args,
+)!;
+```
+
+The span begins with one 12-byte command and may contain trailing bytes. Its
+resolved address is four-byte aligned. The GPU-written axes and their product
+must fit the published ray-dispatch limits; the library does not read back or
+repair them. Full validation retains the named pipeline, SBT, and argument
+resources, while trusted validation leaves all lifetime management to the
+caller. Use direct tracing as an application-selected fallback when the
+capability is false.
+
 ## Blocking readback
 
 Record the producer-to-copy barrier, copy into `CPU_READ` storage, submit, wait

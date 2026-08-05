@@ -55,6 +55,10 @@ fn void indirect_command_layouts() @test {
     assert($reflect(DrawIndexedIndirectCommand.vertex_offset).offset == 12);
     assert(DispatchIndirectCommand::size == 12);
     assert($reflect(DispatchIndirectCommand.z).offset == 8);
+    assert(TraceRaysIndirectCommand::size == 12);
+    assert($reflect(TraceRaysIndirectCommand.width).offset == 0);
+    assert($reflect(TraceRaysIndirectCommand.height).offset == 4);
+    assert($reflect(TraceRaysIndirectCommand.depth).offset == 8);
 }
 
 fn void generated_work_record_layouts() @test {

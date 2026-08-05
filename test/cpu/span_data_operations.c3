@@ -109,6 +109,13 @@ fn void check_span_data_operations(
         root:     root,
         args:     src,
     );
+    gpu::RayTracingShaderBindingTable table;
+    (void)gpu::cmd_trace_rays_indirect(
+        commands: commands,
+        root:     root,
+        shader_binding_table: &table,
+        args:     src,
+    );
     (void)gpu::cmd_draw_generated(
         commands:       commands,
         records:        src,

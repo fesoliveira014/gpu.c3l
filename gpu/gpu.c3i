@@ -244,6 +244,11 @@ $assert $reflect(DispatchIndirectCommand.x).offset == 0;
 $assert $reflect(DispatchIndirectCommand.y).offset == 4;
 $assert $reflect(DispatchIndirectCommand.z).offset == 8;
 
+$assert TraceRaysIndirectCommand::size == 12;
+$assert $reflect(TraceRaysIndirectCommand.width).offset == 0;
+$assert $reflect(TraceRaysIndirectCommand.height).offset == 4;
+$assert $reflect(TraceRaysIndirectCommand.depth).offset == 8;
+
 struct GeneratedDrawRecord {
     GpuAddress          vertex_root_gpu;
     GpuAddress          fragment_root_gpu;
@@ -403,10 +408,11 @@ struct RayQueryCaps {
     bool enabled;
 }
 
-<* Direct ray-tracing pipeline support, launch limits, and caller-owned SBT
-   packing requirements. The zero value means the feature was not enabled. *>
+<* Ray-tracing pipeline support, launch limits, and caller-owned SBT packing
+   requirements. The zero value means the feature was not enabled. *>
 struct RayTracingPipelineCaps {
     bool enabled;
+    bool indirect_dispatch;
     uint max_recursion_depth;
     uint max_ray_dispatch_invocation_count;
     Vec3u max_ray_dispatch_dimensions;
@@ -1274,6 +1280,14 @@ struct DispatchIndirectCommand {
     uint z;
 }
 $assert DispatchIndirectCommand::size == 12;
+
+<* Shader-writable dimensions for cmd_trace_rays_indirect. *>
+struct TraceRaysIndirectCommand {
+    uint width;
+    uint height;
+    uint depth;
+}
+$assert TraceRaysIndirectCommand::size == 12;
 
 <* A fixed-capacity command recording owner bound to one exact queue. One
    allocator is confined to one recording thread while recordings are live. *>
