@@ -136,10 +136,11 @@ must satisfy device base/handle alignment, stride, range, ownership, and usage
 requirements. Record a ray-tracing pipeline bind before tracing.
 
 For a pipeline created with `dynamic_stack_size = true`, bind the pipeline and
-then call `cmd_set_ray_tracing_pipeline_stack_size` with a nonzero,
-caller-derived byte count before each direct or indirect trace that needs the
-state. The value must fit `uint` and be sufficient for every possible shader
-execution in the dispatch. The library exposes per-group role requirements but
+then call `cmd_set_ray_tracing_pipeline_stack_size` with a caller-derived
+byte count before each direct or indirect trace that needs the state. The
+value must fit `uint` and be sufficient for every possible shader execution
+in the dispatch; it may be zero when no group reports a stack requirement.
+The library exposes per-group role requirements but
 does not derive a whole-pipeline value. Binding another dynamic-stack ray
 pipeline preserves the recorded value. A successful logical bind of any
 static-stack ray pipeline invalidates it, including when the native bind is

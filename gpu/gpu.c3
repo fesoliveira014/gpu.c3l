@@ -2244,7 +2244,7 @@ fn void? cmd_trace_rays_indirect(
    The value must fit uint and cover every shader execution in later traces.
 
    @param commands : "Live recording token outside a render pass on a compute-capable graphics or compute family."
-   @param pipeline_stack_size : "Nonzero sufficient byte count; FULL checks uint representability."
+   @param pipeline_stack_size : "Sufficient byte count, which may be zero; FULL checks uint representability."
    @return "Success, or a recoverable command, pipeline, queue, scope, range, support, or device fault." *>
 fn void? cmd_set_ray_tracing_pipeline_stack_size(
     CommandList* commands,

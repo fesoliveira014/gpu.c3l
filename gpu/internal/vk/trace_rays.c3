@@ -648,7 +648,7 @@ fn void? full_set_ray_tracing_pipeline_stack_size_with_ops(
             backend_text:        null,
         )~;
     }
-    if (pipeline_stack_size == 0 || pipeline_stack_size > uint::max) {
+    if (pipeline_stack_size > uint::max) {
         return report_contract_failure(
             state:               state,
             operation:           "cmd_set_ray_tracing_pipeline_stack_size",
@@ -659,7 +659,7 @@ fn void? full_set_ray_tracing_pipeline_stack_size_with_ops(
             generation:          0,
             debug_name:          null,
             rejected_field:      "pipeline_stack_size",
-            invariant:           "stack size must be nonzero and representable by uint",
+            invariant:           "stack size must be representable by uint",
             backend_text:        null,
         )~;
     }

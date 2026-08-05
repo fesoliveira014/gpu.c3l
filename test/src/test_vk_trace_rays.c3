@@ -364,16 +364,27 @@ fn void dynamic_stack_size_sets_only_after_full_validation() @test {
     assert(fixture.record.ray_tracing_stack_size_set);
 
     fixture.record.ray_tracing_stack_size_set = false;
+    capture.expected_size = 0;
+    vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
+        &fixture.record,
+        0,
+        &ops,
+    )!!;
+    assert(capture.matched && capture.calls == 2,
+        "a pipeline whose groups report no stack accepts a zero size");
+    assert(fixture.record.ray_tracing_stack_size_set);
+
+    fixture.record.ray_tracing_stack_size_set = false;
     SyncDiagnosticCapture diagnostic = {
         .expected_operation      = "cmd_set_ray_tracing_pipeline_stack_size",
         .expected_rejected_field = "pipeline_stack_size",
-        .expected_invariant      = "stack size must be nonzero and representable by uint",
+        .expected_invariant      = "stack size must be representable by uint",
     };
     fixture.spans.state.debug_callback = &capture_sync_diagnostic;
     fixture.spans.state.debug_user_data = &diagnostic;
     assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
         &fixture.record,
-        0,
+        (ulong)uint::max + 1,
         &ops,
     )) == gpu::INVALID_ARGUMENT);
     assert(diagnostic.calls == 1
@@ -385,11 +396,6 @@ fn void dynamic_stack_size_sets_only_after_full_validation() @test {
         "FULL stack-size misuse emits one structured diagnostic");
     fixture.spans.state.debug_callback = null;
     fixture.spans.state.debug_user_data = null;
-    assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
-        &fixture.record,
-        (ulong)uint::max + 1,
-        &ops,
-    )) == gpu::INVALID_ARGUMENT);
     fixture.record.logical_pipeline.dynamic_ray_tracing_stack_size = false;
     assert(@catch(vk::full_set_ray_tracing_pipeline_stack_size_with_ops(
         &fixture.record,
@@ -441,7 +447,7 @@ fn void dynamic_stack_size_sets_only_after_full_validation() @test {
         37,
         &ops,
     )) == gpu::INVALID_ARGUMENT);
-    assert(capture.calls == 1);
+    assert(capture.calls == 2);
     assert(!fixture.record.ray_tracing_stack_size_set);
 }
 

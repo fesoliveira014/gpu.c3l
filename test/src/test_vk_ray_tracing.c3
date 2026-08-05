@@ -241,7 +241,7 @@ fn ulong? functional_pipeline_stack_size(
     ulong trace = miss > closest_hit ? miss : closest_hit;
     if (intersection > trace) trace = intersection;
     ulong stack_size = ray_generation + trace + 2 * callable;
-    if (stack_size == 0 || stack_size > uint::max) {
+    if (stack_size > uint::max) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     return stack_size;
