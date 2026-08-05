@@ -40,6 +40,14 @@ struct AccelerationStructureBuildCapture {
     vk::AccelerationStructureBuildRangeInfoKHR range;
 }
 
+struct AccelerationStructureIndirectBuildCapture {
+    uint calls;
+    vk::AccelerationStructureBuildGeometryInfoKHR info;
+    vk::DeviceAddress range_address;
+    uint range_stride;
+    uint max_primitive_count;
+}
+
 struct AccelerationStructureCloneCapture {
     uint calls;
     vk::CopyAccelerationStructureInfoKHR info;
@@ -65,6 +73,26 @@ fn void capture_acceleration_structure_build(
     assert(info_count == 1);
     capture.info = build_infos[0];
     capture.range = build_ranges[0][0];
+}
+
+fn void capture_acceleration_structure_indirect_build(
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    uint info_count,
+    vk::AccelerationStructureBuildGeometryInfoKHR* build_infos,
+    vk::DeviceAddress* range_addresses,
+    uint* range_strides,
+    uint** max_primitive_counts,
+) {
+    (void)command_buffer;
+    AccelerationStructureIndirectBuildCapture* capture =
+        (AccelerationStructureIndirectBuildCapture*)user_data;
+    capture.calls++;
+    assert(info_count == 1);
+    capture.info = build_infos[0];
+    capture.range_address = range_addresses[0];
+    capture.range_stride = range_strides[0];
+    capture.max_primitive_count = max_primitive_counts[0][0];
 }
 
 fn void capture_acceleration_structure_clone(
@@ -790,6 +818,9 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
     VkDeviceState state = {
         .acceleration_structures_enabled = true,
         .buffers = { .slots = buffer_cells, .owner = 0xE1 },
+        .ray_tracing_support = {
+            .acceleration_structure_indirect_build = true,
+        },
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
             .owner = 0xE2,
@@ -859,9 +890,11 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         })!!;
     vk::AccelerationStructureGeometryKHR[2] native_geometries;
     vk::AccelerationStructureBuildRangeInfoKHR[2] native_ranges;
+    uint[2] maximum_counts;
     CommandScratch command_scratch = {
         .acceleration_structure_geometries = native_geometries[..],
         .acceleration_structure_ranges = native_ranges[..],
+        .acceleration_structure_max_primitive_counts = maximum_counts[..],
     };
     CommandRecord record = {
         .device_state = &state,
@@ -932,6 +965,24 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
             && native_geometries[1].geometry.triangles.vertex_stride == 12
             && native_ranges[1].primitive_count == 3,
         "each ordered triangle input lowers independently");
+
+    prepared = prepare_acceleration_structure_build_mode(
+        record:   &record,
+        desc:     &build,
+        update:   false,
+        validate: true,
+        indirect: true,
+    )!!;
+    fill_acceleration_structure_max_primitive_counts(
+        &record,
+        &build,
+        &prepared,
+    );
+    assert(native_geometries[0].geometry.triangles.max_vertex == 11
+            && native_geometries[1].geometry.triangles.max_vertex == 8
+            && maximum_counts[0] == 4
+            && maximum_counts[1] == 3,
+        "indirect triangles keep exact vertex bounds and dense CPU maxima");
 
     inputs[0].triangles.transform = acceleration_structure_test_span(
         transform_buffer,
@@ -1069,6 +1120,21 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
             && (uint)native_geometries[0].flags
                 == (uint)vk::GeometryFlagBitsKHR.OPAQUE_BIT_KHR,
         "AABB dynamic input lowers its exact stride and geometry flags");
+    PreparedAccelerationStructureBuild aabb_prepared =
+        prepare_acceleration_structure_build_mode(
+            record:   &record,
+            desc:     &build,
+            update:   false,
+            validate: true,
+            indirect: true,
+        )!!;
+    fill_acceleration_structure_max_primitive_counts(
+        &record,
+        &build,
+        &aabb_prepared,
+    );
+    assert(maximum_counts[0] == 1,
+        "indirect AABB lowering publishes its descriptor maximum");
     aabb_inputs[0].aabbs.stride = 8;
     assert(@catch(prepare_acceleration_structure_build(
         &record,
@@ -1150,6 +1216,276 @@ fn void acceleration_structure_dynamic_tlas_uses_exact_instance_abi() @test {
                 == 0x5000
             && native_ranges[0].primitive_count == 4,
         "TLAS lowering consumes exact 64-byte instance records");
+}
+
+fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test {
+    BufferCell[] buffer_cells = mem::new_array(BufferCell, 3);
+    defer mem::free(buffer_cells.ptr);
+    AccelerationStructureCell[] acceleration_structure_cells =
+        mem::new_array(AccelerationStructureCell, 1);
+    defer mem::free(acceleration_structure_cells.ptr);
+    VkDeviceState state = {
+        .acceleration_structures_enabled = true,
+        .ray_tracing_support = {
+            .acceleration_structure_indirect_build = true,
+        },
+        .buffers = { .slots = buffer_cells, .owner = 0xF21 },
+        .acceleration_structures = {
+            .slots = acceleration_structure_cells,
+            .owner = 0xF22,
+        },
+    };
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
+    BufferHandle instances = state.buffers.alloc({
+        .size = gpu::AccelerationStructureInstance::size * 4,
+        .gpu_base = (gpu::GpuAddress)0x5000,
+        .usage = { .addressable, .acceleration_structure_build_input },
+        .access = { .compute },
+    })!!;
+    BufferHandle scratch_buffer = state.buffers.alloc({
+        .size = 512,
+        .gpu_base = (gpu::GpuAddress)0x6000,
+        .usage = { .addressable, .storage },
+        .access = { .compute },
+    })!!;
+    BufferHandle ranges_buffer = state.buffers.alloc({
+        .size = 32,
+        .gpu_base = (gpu::GpuAddress)0x7000,
+        .usage = { .addressable, .indirect },
+        .access = { .compute },
+    })!!;
+    gpu::AccelerationStructureHandle destination =
+        state.acceleration_structures.alloc({
+            .native = (vk::AccelerationStructureKHR)(uptr)0xF513,
+            .desc = {
+                .kind = gpu::AccelerationStructureKind.TOP_LEVEL,
+                .max_instance_count = 4,
+                .flags = { .allow_update = true },
+                .requirements = {
+                    .build_scratch_size = 512,
+                    .update_scratch_size = 256,
+                    .scratch_alignment = 256,
+                },
+            },
+            .build_eligibility =
+                gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
+            .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
+        })!!;
+    vk::AccelerationStructureGeometryKHR[1] native_geometries;
+    vk::AccelerationStructureBuildRangeInfoKHR[1] native_ranges;
+    uint[1] maximum_counts;
+    CommandResourceReference[4] references;
+    CommandScratch command_scratch = {
+        .references = references[..],
+        .acceleration_structure_geometries = native_geometries[..],
+        .acceleration_structure_ranges = native_ranges[..],
+        .acceleration_structure_max_primitive_counts = maximum_counts[..],
+    };
+    CommandRecord record = {
+        .device_state = &state,
+        .state = gpu::internal::CommandState.RECORDING,
+        .queue.roles = { .compute },
+        .scratch = &command_scratch,
+        .pending_acceleration_structure_head =
+            ACCELERATION_STRUCTURE_PENDING_NONE,
+    };
+    gpu::AccelerationStructureBuildDesc build = {
+        .destination = destination,
+        .instances = acceleration_structure_test_span(
+            instances,
+            gpu::AccelerationStructureInstance::size * 4,
+        ),
+        .instance_count = 4,
+        .scratch = acceleration_structure_test_span(scratch_buffer, 512),
+    };
+    gpu::GpuSpan ranges = acceleration_structure_test_span(
+        ranges_buffer,
+        gpu::AccelerationStructureIndirectBuildRange::size,
+    );
+    AccelerationStructureIndirectBuildCapture capture;
+    AccelerationStructureIndirectBuildCommandOps ops = {
+        .user_data = &capture,
+        .build_indirect = &capture_acceleration_structure_indirect_build,
+    };
+
+    state.ray_tracing_support.acceleration_structure_indirect_build = false;
+    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           false,
+        validate:         true,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::UNSUPPORTED_FEATURE);
+    state.ray_tracing_support.acceleration_structure_indirect_build = true;
+
+    ranges.size = gpu::AccelerationStructureIndirectBuildRange::size - 1;
+    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           false,
+        validate:         true,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    ranges = acceleration_structure_test_span(
+        ranges_buffer,
+        gpu::AccelerationStructureIndirectBuildRange::size,
+    );
+    ranges.owner++;
+    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           false,
+        validate:         true,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::INVALID_HANDLE);
+    ranges = acceleration_structure_test_span(ranges_buffer, 32);
+    ranges.offset = usz::max - 7;
+    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           false,
+        validate:         true,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    ranges = acceleration_structure_test_span(ranges_buffer, 32);
+    ranges.offset = 1;
+    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           false,
+        validate:         true,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    ranges = acceleration_structure_test_span(
+        ranges_buffer,
+        gpu::AccelerationStructureIndirectBuildRange::size,
+    );
+    state.buffers.get(ranges_buffer)!!.usage.indirect = false;
+    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           false,
+        validate:         true,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    state.buffers.get(ranges_buffer)!!.usage.indirect = true;
+    assert(capture.calls == 0 && command_scratch.reference_count == 0);
+
+    command_scratch.references = references[:3];
+    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           false,
+        validate:         true,
+        track_references: true,
+        ops:              &ops,
+    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
+    AccelerationStructureSlot* destination_slot =
+        state.acceleration_structures.get(destination)!!;
+    assert(capture.calls == 0
+            && command_scratch.reference_count == 0
+            && destination_slot.build_eligibility
+                == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT
+            && !destination_slot.built_counts_are_maxima,
+        "reference failure rolls back before indirect emission and state");
+
+    command_scratch.references = references[..];
+    record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           false,
+        validate:         true,
+        track_references: true,
+        ops:              &ops,
+    )!!;
+    assert(capture.calls == 1
+            && capture.info.mode
+                == vk::BuildAccelerationStructureModeKHR.BUILD_KHR
+            && capture.range_address == 0x7000
+            && capture.range_stride
+                == gpu::AccelerationStructureIndirectBuildRange::size
+            && capture.max_primitive_count == 4,
+        "one indirect TLAS build emits one fixed packet and maximum count");
+    assert(command_scratch.reference_count == 4
+            && destination_slot.built_counts_are_maxima
+            && destination_slot.built_instance_count == 4
+            && destination_slot.build_eligibility
+                == gpu::internal::AccelerationStructureBuildEligibility.PENDING,
+        "full indirect build retains every explicit owner and records maxima");
+    complete_pending_acceleration_structure_builds(&record);
+    clear_command_scratch_references(&command_scratch);
+
+    assert(@catch(prepare_acceleration_structure_build(
+        &record,
+        &build,
+        true,
+        true,
+    )) == gpu::INVALID_ARGUMENT,
+        "direct update rejects an indirect build with unknown actual counts");
+
+    capture = {};
+    record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           true,
+        validate:         true,
+        track_references: true,
+        ops:              &ops,
+    )!!;
+    assert(capture.calls == 1
+            && capture.info.mode
+                == vk::BuildAccelerationStructureModeKHR.UPDATE_KHR
+            && destination_slot.built_counts_are_maxima,
+        "indirect update preserves maximum-count knowledge");
+    clear_command_scratch_references(&command_scratch);
+
+    destination_slot.built_counts_are_maxima = false;
+    capture = {};
+    record_acceleration_structure_indirect_build_with_ops(
+        record:           &record,
+        desc:             &build,
+        ranges:           ranges,
+        update:           true,
+        validate:         false,
+        track_references: false,
+        ops:              &ops,
+    )!!;
+    assert(capture.calls == 1 && !destination_slot.built_counts_are_maxima,
+        "an indirect update preserves prior exact-count knowledge");
+    destination_slot.built_counts_are_maxima = true;
+
+    capture = {};
+    mem::@scoped(&allocators::NULL_ALLOCATOR) {
+        for (uint i = 0; i < 64; i++) {
+            record_acceleration_structure_indirect_build_with_ops(
+                record:           &record,
+                desc:             &build,
+                ranges:           ranges,
+                update:           true,
+                validate:         false,
+                track_references: false,
+                ops:              &ops,
+            )!!;
+        }
+    };
+    assert(capture.calls == 64 && command_scratch.reference_count == 0,
+        "warmed trusted indirect updates allocate and retain nothing");
 }
 
 fn void acceleration_structure_scratch_rejects_destination_overlap() @test {
@@ -1286,6 +1622,7 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
             },
             .build_eligibility =
                 gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
+            .built_counts_are_maxima = true,
             .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
         })!!;
     vk::AccelerationStructureGeometryKHR[1] native_geometries;
@@ -1350,6 +1687,7 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
         "full validation retains destination, instances, and scratch");
     assert(destination_slot.build_eligibility
                 == gpu::internal::AccelerationStructureBuildEligibility.PENDING
+            && !destination_slot.built_counts_are_maxima
             && record.pending_acceleration_structure_head
                 == destination.index,
         "first build links its destination without allocation");
@@ -1596,6 +1934,7 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
                 .requirements       = requirements,
             },
             .built_instance_count = 7,
+            .built_counts_are_maxima = true,
             .build_eligibility =
                 gpu::internal::AccelerationStructureBuildEligibility.BUILT,
             .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
@@ -1781,6 +2120,15 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         true,
         true,
     )!!;
+    destination_slot.built_counts_are_maxima = true;
+    assert(@catch(prepare_acceleration_structure_build(
+        &record,
+        &update,
+        true,
+        true,
+    )) == gpu::INVALID_ARGUMENT,
+        "a direct update requires exact completed build counts");
+    destination_slot.built_counts_are_maxima = false;
     command_scratch.acceleration_structure_geometry_count = 0;
 
     record_acceleration_structure_clone_with_ops(
@@ -1793,6 +2141,7 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
     AccelerationStructureSlot* tlas_destination_slot =
         state.acceleration_structures.get(tlas_destination)!!;
     assert(tlas_destination_slot.built_instance_count == 7
+            && tlas_destination_slot.built_counts_are_maxima
             && tlas_destination_slot.build_eligibility
                 == gpu::internal::AccelerationStructureBuildEligibility.PENDING,
         "TLAS clone copies its completed instance shape");

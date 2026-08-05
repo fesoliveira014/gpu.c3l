@@ -133,6 +133,7 @@ struct CommandScratch {
         acceleration_structure_geometries;
     vk::AccelerationStructureBuildRangeInfoKHR[]
         acceleration_structure_ranges;
+    uint[] acceleration_structure_max_primitive_counts;
     uint acceleration_structure_geometry_count;
     bool                       in_use;
 }
@@ -148,6 +149,7 @@ struct CommandAllocatorSlot {
         acceleration_structure_geometry_storage;
     vk::AccelerationStructureBuildRangeInfoKHR[]
         acceleration_structure_range_storage;
+    uint[] acceleration_structure_max_primitive_count_storage;
     uint[]                       available;
     uint                         available_count;
     GeneratedPreprocessBuffer[]  reservations;
@@ -317,6 +319,12 @@ fn void destroy_command_allocator_slot_with_ops(
             slot.acceleration_structure_range_storage.ptr,
         );
     }
+    if (slot.acceleration_structure_max_primitive_count_storage.ptr != null) {
+        alloc::free(
+            state.host_allocator,
+            slot.acceleration_structure_max_primitive_count_storage.ptr,
+        );
+    }
     if (slot.available.ptr != null) alloc::free(state.host_allocator, slot.available.ptr);
     if (slot.mutex.is_initialized()) (void)slot.mutex.destroy();
     *slot = {};
@@ -431,6 +439,14 @@ fn void? initialize_command_allocator_slot_with_ops(
             );
         if (catch range_storage) return gpu::OUT_OF_HOST_MEMORY~;
         slot.acceleration_structure_range_storage = range_storage;
+        uint[]? maximum_count_storage = alloc::new_array_try(
+            state.host_allocator,
+            uint,
+            (sz)total_geometry_capacity,
+        );
+        if (catch maximum_count_storage) return gpu::OUT_OF_HOST_MEMORY~;
+        slot.acceleration_structure_max_primitive_count_storage =
+            maximum_count_storage;
     }
     for (uint i = 0; i < capacity; i++) {
         if (reference_capacity > 0) {
@@ -453,6 +469,10 @@ fn void? initialize_command_allocator_slot_with_ops(
                 ];
             slot.scratch[i].acceleration_structure_ranges =
                 slot.acceleration_structure_range_storage[
+                    start:acceleration_structure_geometry_capacity
+                ];
+            slot.scratch[i].acceleration_structure_max_primitive_counts =
+                slot.acceleration_structure_max_primitive_count_storage[
                     start:acceleration_structure_geometry_capacity
                 ];
         }

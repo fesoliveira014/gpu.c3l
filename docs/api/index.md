@@ -70,7 +70,8 @@ Types: `Vec2f`, `Vec4f`, `Vec4u`, `Device`, `Runtime`, `RuntimeDesc`,
 `DeviceCaps`, `TimestampCaps`, `SparseTextureCaps`,
 `AccelerationStructureCaps`, `RayQueryCaps`, and `RayTracingPipelineCaps`.
 
-Fields: `RayTracingPipelineCaps.indirect2_dispatch`.
+Fields: `AccelerationStructureCaps.indirect_build`,
+`RayTracingPipelineCaps.indirect2_dispatch`.
 
 Constants: `DEVICE_INVALID`, `RUNTIME_INVALID`, `ADAPTER_INVALID`,
 `SURFACE_INVALID`, and `QUEUE_INVALID`.
@@ -175,7 +176,8 @@ Types: `CommandAllocatorHandle`, `CommandAllocator`, `CommandAllocatorDesc`,
 `GeneratedScratchDesc`, `Vec3u`, `Viewport`, `ScissorRect`, `GraphicsState`,
 `DrawIndirectCommand`, `DrawIndexedIndirectCommand`,
 `DispatchIndirectCommand`, `TraceRaysIndirectCommand`,
-`TraceRaysIndirectCommand2`, `BufferCopyDesc`,
+`TraceRaysIndirectCommand2`, `AccelerationStructureIndirectBuildRange`,
+`BufferCopyDesc`,
 `BufferTextureCopyDesc`,
 `TextureBufferCopyDesc`, `AccelerationStructureTriangleBuildDesc`,
 `AccelerationStructureAabbBuildDesc`,
@@ -183,6 +185,11 @@ Types: `CommandAllocatorHandle`, `CommandAllocator`, `CommandAllocatorDesc`,
 `IndexType`, `AttachmentViewHandle`,
 `AttachmentViewDesc`, `LoadOp`, `StoreOp`, `ClearColor`, `ClearDepth`,
 `ColorTargetDesc`, `DepthTargetDesc`, and `RenderPassDesc`.
+
+Fields: `AccelerationStructureIndirectBuildRange.primitive_count`,
+`AccelerationStructureIndirectBuildRange.primitive_offset`,
+`AccelerationStructureIndirectBuildRange.first_vertex`, and
+`AccelerationStructureIndirectBuildRange.transform_offset`.
 
 Constants: `COMMAND_ALLOCATOR_HANDLE_INVALID`, `ATTACHMENT_VIEW_HANDLE_INVALID`,
 `DEFAULT_COMMAND_ALLOCATOR_CAPACITY`, `DEFAULT_COMMAND_REFERENCES_PER_LIST`,
@@ -200,7 +207,10 @@ Callables:
 `end_commands`, `discard_commands`, `discard_executable_commands`,
 `cmd_copy_buffer`, `cmd_fill_buffer`, `cmd_copy_buffer_to_texture`,
 `cmd_copy_texture_to_buffer`, `cmd_build_acceleration_structure`,
-`cmd_update_acceleration_structure`, `cmd_clone_acceleration_structure`,
+`cmd_update_acceleration_structure`,
+`cmd_build_acceleration_structure_indirect`,
+`cmd_update_acceleration_structure_indirect`,
+`cmd_clone_acceleration_structure`,
 `cmd_bind_pipeline`, `cmd_dispatch`,
 `cmd_dispatch_indirect`, `cmd_dispatch_generated`, `cmd_trace_rays`,
 `cmd_trace_rays_indirect`, `cmd_trace_rays_indirect2`,

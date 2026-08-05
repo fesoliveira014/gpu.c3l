@@ -266,6 +266,12 @@ $assert $reflect(TraceRaysIndirectCommand2.height).offset == 92;
 $assert $reflect(TraceRaysIndirectCommand2.depth).offset == 96;
 $assert $reflect(TraceRaysIndirectCommand2._pad0).offset == 100;
 
+$assert AccelerationStructureIndirectBuildRange::size == 16;
+$assert $reflect(AccelerationStructureIndirectBuildRange.primitive_count).offset == 0;
+$assert $reflect(AccelerationStructureIndirectBuildRange.primitive_offset).offset == 4;
+$assert $reflect(AccelerationStructureIndirectBuildRange.first_vertex).offset == 8;
+$assert $reflect(AccelerationStructureIndirectBuildRange.transform_offset).offset == 12;
+
 struct GeneratedDrawRecord {
     GpuAddress          vertex_root_gpu;
     GpuAddress          fragment_root_gpu;
@@ -409,10 +415,12 @@ struct SparseTextureCaps {
     QueueRoles binding_queues;
 }
 
-<* Shared acceleration-structure support and limits. The zero value means the
+<* Shared acceleration-structure support and limits. `indirect_build` requires
+   both the optional feature and command procedure. The zero value means the
    device did not enable acceleration structures. *>
 struct AccelerationStructureCaps {
     bool enabled;
+    bool indirect_build;
     uint heap_capacity;
     uint max_geometry_count;
     uint max_primitive_count;
@@ -708,6 +716,9 @@ struct AccelerationStructureGeometryBuildDesc {
     AccelerationStructureAabbBuildDesc     aabbs;
 }
 
+<* Dynamic inputs for one BLAS or TLAS construction. Counts are actual for
+   direct commands and CPU maxima for indirect commands; triangle
+   `vertex_count` always supplies the exact `maxVertex + 1` bound. *>
 struct AccelerationStructureBuildDesc {
     AccelerationStructureHandle              destination;
     AccelerationStructureGeometryBuildDesc[] geometries;
@@ -1336,6 +1347,23 @@ struct TraceRaysIndirectCommand2 {
     uint       _pad0;
 }
 $assert TraceRaysIndirectCommand2::size == 104;
+
+<* Shader-writable range for one indirect acceleration-structure geometry.
+   `primitive_count` is the actual GPU-selected count, including zero, and must
+   fit the CPU maximum in AccelerationStructureBuildDesc. `primitive_offset` is
+   a byte offset aligned to the index element for indexed triangles, the
+   smallest vertex-format component size for non-indexed triangles, 8 bytes for
+   AABBs, or 16 bytes for TLAS instances. `transform_offset` is 16-byte aligned.
+   `first_vertex` offsets triangle vertex addressing; every resulting vertex
+   index must remain below the descriptor's exact `vertex_count` bound. Pack
+   one record per BLAS geometry, or one for a TLAS, at 16-byte stride. *>
+struct AccelerationStructureIndirectBuildRange {
+    uint primitive_count;
+    uint primitive_offset;
+    uint first_vertex;
+    uint transform_offset;
+}
+$assert AccelerationStructureIndirectBuildRange::size == 16;
 
 <* A fixed-capacity command recording owner bound to one exact queue. One
    allocator is confined to one recording thread while recordings are live. *>

@@ -38,6 +38,7 @@ struct DeviceFeatureChainCapture {
     bool dynamic_color_features_enabled;
     bool found_acceleration_structure;
     bool acceleration_structure_enabled;
+    bool acceleration_structure_indirect_build_enabled;
     bool acceleration_structure_descriptor_update_after_bind;
     bool found_ray_query;
     bool ray_query_enabled;
@@ -174,6 +175,9 @@ fn vk::Result capture_device_feature_chain(
             capture.found_acceleration_structure = true;
             capture.acceleration_structure_enabled =
                 acceleration_structure.acceleration_structure == vk::TRUE;
+            capture.acceleration_structure_indirect_build_enabled =
+                acceleration_structure.acceleration_structure_indirect_build
+                    == vk::TRUE;
             capture.acceleration_structure_descriptor_update_after_bind =
                 acceleration_structure
                     .descriptor_binding_acceleration_structure_update_after_bind
@@ -310,6 +314,23 @@ load_device_dispatch_without_indirect2_trace(
             plan,
         );
     dispatch.ray_tracing_pipelines.cmd_trace_rays_indirect2 = null;
+    return dispatch;
+}
+
+fn gpu::internal::vk::VkDeviceDispatch
+load_device_dispatch_without_indirect_acceleration_structure_build(
+    void* user_data,
+    vk::Device device,
+    gpu::internal::vk::VkDeviceDispatchPlan plan,
+) @private {
+    (void)user_data;
+    gpu::internal::vk::VkDeviceDispatch dispatch =
+        gpu::internal::vk::load_vk_device_dispatch(
+            device,
+            &vk::get_device_proc_addr,
+            plan,
+        );
+    dispatch.acceleration_structures.cmd_build_indirect = null;
     return dispatch;
 }
 
@@ -753,6 +774,9 @@ fn void ray_query_device_creation_enables_the_complete_optional_family() @test {
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::internal::RuntimeData* runtime_data =
+        gpu::internal::resolve_runtime(&runtime);
+    gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
     gpu::DeviceDesc device_desc = { .enable_ray_queries = true };
 
     for (uint i = 0; i < adapters.count; i++) {
@@ -787,6 +811,10 @@ fn void ray_query_device_creation_enables_the_complete_optional_family() @test {
                 && capture.acceleration_structure_enabled
                 && capture.acceleration_structure_descriptor_update_after_bind,
             "opt-in enables the complete acceleration-structure feature node");
+        assert(capture.acceleration_structure_indirect_build_enabled
+                == runtime_state.adapters[adapter.adapter_index].ray_tracing
+                    .acceleration_structure_indirect_build,
+            "logical creation requests indirect builds exactly when supported");
         assert(capture.found_ray_query && capture.ray_query_enabled,
             "opt-in enables the ray-query feature node");
         assert(!capture.found_ray_tracing_pipeline
@@ -1023,6 +1051,62 @@ fn void missing_indirect2_trace_proc_downgrades_capability() @test {
         return;
     }
     io::printfn("Indirect2 ray tracing unavailable; dispatch downgrade skipped");
+}
+
+fn void missing_indirect_acceleration_structure_proc_downgrades_capability() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_vk_indirect_as_dispatch_downgrade_test",
+        .acceleration_structure_heap_capacity = 8,
+    };
+    gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::internal::RuntimeData* runtime_data =
+        gpu::internal::resolve_runtime(&runtime);
+    gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
+    gpu::DeviceDesc device_desc = { .enable_ray_queries = true };
+
+    for (uint i = 0; i < adapters.count; i++) {
+        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::internal::vk::RayTracingCandidateSupport* ray_tracing =
+            &runtime_state.adapters[adapter.adapter_index].ray_tracing;
+        if (!ray_tracing.acceleration_structure_indirect_build
+            || !gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
+            continue;
+        }
+        gpu::internal::vk::DeviceCreationProbe probe;
+        gpu::internal::vk::DeviceCreationOps creation_ops = {
+            .create        = &create_native_device_for_dispatch_test,
+            .load_dispatch =
+                &load_device_dispatch_without_indirect_acceleration_structure_build,
+        };
+        gpu::Runtime retained_runtime = runtime;
+        gpu::internal::runtime_retain_device(&retained_runtime)!!;
+        gpu::Device? creation_result =
+            gpu::internal::vk::create_vk_device_with_probe(
+                adapter:          &adapter,
+                device_desc:      &device_desc,
+                retained_runtime: &retained_runtime,
+                probe:            &probe,
+                creation_ops:     &creation_ops,
+            );
+        fault creation_fault = @catch(creation_result);
+        if (creation_fault) {
+            gpu::internal::runtime_release_device(&retained_runtime)!!;
+            assert(false,
+                "a missing optional indirect-build procedure must not reject creation");
+        }
+        gpu::Device device = creation_result!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        assert(caps.acceleration_structures.enabled
+                && !caps.acceleration_structures.indirect_build,
+            "a missing optional indirect-build procedure clears only its capability");
+        gpu::destroy_device(&device)!!;
+        return;
+    }
+    io::printfn(
+        "indirect acceleration-structure builds unavailable; dispatch downgrade skipped",
+    );
 }
 
 fn void missing_dynamic_stack_procs_roll_creation_back() @test {
@@ -1521,6 +1605,24 @@ fn void command_policy_selection_covers_both_contract_modes() @test {
         gpu::internal::vk::TRUSTED_COMMAND_OPS.end_label
             == gpu::internal::vk::FULL_COMMAND_OPS.end_label,
         "both command policies share the label-end entry"
+    );
+    assert(
+        gpu::internal::vk::TRUSTED_COMMAND_OPS
+                .build_acceleration_structure_indirect
+            == &gpu::internal::vk::trusted_build_acceleration_structure_indirect
+        && gpu::internal::vk::TRUSTED_COMMAND_OPS
+                .update_acceleration_structure_indirect
+            == &gpu::internal::vk::trusted_update_acceleration_structure_indirect,
+        "trusted indirect construction selects trusted recording entries"
+    );
+    assert(
+        gpu::internal::vk::FULL_COMMAND_OPS
+                .build_acceleration_structure_indirect
+            == &gpu::internal::vk::full_build_acceleration_structure_indirect
+        && gpu::internal::vk::FULL_COMMAND_OPS
+                .update_acceleration_structure_indirect
+            == &gpu::internal::vk::full_update_acceleration_structure_indirect,
+        "full indirect construction selects full recording entries"
     );
 }
 

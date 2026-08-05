@@ -202,6 +202,7 @@ struct RayTracingCandidateSupport {
     bool  ray_tracing_maintenance1_extension;
     bool  deferred_host_operations_extension;
     bool  acceleration_structure;
+    bool  acceleration_structure_indirect_build;
     bool  ray_query;
     bool  ray_tracing_pipeline;
     bool  ray_tracing_pipeline_trace_rays_indirect;
@@ -329,6 +330,7 @@ fn gpu::AccelerationStructureCaps normalize_acceleration_structure_caps(
     )) return {};
     return {
         .enabled = true,
+        .indirect_build = support.acceleration_structure_indirect_build,
         .heap_capacity = heap_capacity,
         .max_geometry_count = narrow_ray_query_limit(
             support.max_geometry_count,
@@ -446,6 +448,8 @@ fn RayTracingCandidateSupport query_ray_tracing_candidate_support(
         .deferred_host_operations_extension = deferred_host_extension,
         .acceleration_structure = acceleration_features.acceleration_structure
             != 0,
+        .acceleration_structure_indirect_build = acceleration_features
+            .acceleration_structure_indirect_build != 0,
         .ray_query = ray_query_features.ray_query != 0,
         .ray_tracing_pipeline = ray_pipeline_features.ray_tracing_pipeline != 0,
         .ray_tracing_pipeline_trace_rays_indirect = ray_pipeline_features
@@ -641,6 +645,10 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .resolve_timestamps          = &trusted_resolve_timestamps,
     .build_acceleration_structure  = &trusted_build_acceleration_structure,
     .update_acceleration_structure = &trusted_update_acceleration_structure,
+    .build_acceleration_structure_indirect =
+        &trusted_build_acceleration_structure_indirect,
+    .update_acceleration_structure_indirect =
+        &trusted_update_acceleration_structure_indirect,
     .clone_acceleration_structure  = &trusted_clone_acceleration_structure,
 };
 
@@ -679,6 +687,10 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .resolve_timestamps          = &full_resolve_timestamps,
     .build_acceleration_structure  = &full_build_acceleration_structure,
     .update_acceleration_structure = &full_update_acceleration_structure,
+    .build_acceleration_structure_indirect =
+        &full_build_acceleration_structure_indirect,
+    .update_acceleration_structure_indirect =
+        &full_update_acceleration_structure_indirect,
     .clone_acceleration_structure  = &full_clone_acceleration_structure,
 };
 
@@ -1051,6 +1063,10 @@ fn gpu::Device? create_vk_device_from_runtime(
         .presentation            = state.presentation.enabled,
         .generated_work          = state.generated_work.enabled,
         .acceleration_structures = state.acceleration_structures_enabled,
+        .acceleration_structure_indirect_build =
+            state.acceleration_structures_enabled
+            && state.ray_tracing_support
+                .acceleration_structure_indirect_build,
         .ray_tracing_pipelines   = state.ray_tracing_pipelines_enabled,
         .ray_tracing_indirect2   = state.ray_tracing_pipelines_enabled
             && ray_tracing_indirect2_candidate_supported(
@@ -1091,6 +1107,11 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.ray_tracing_support.ray_tracing_pipeline_trace_rays_indirect2 =
         dispatch_plan.ray_tracing_indirect2
         && device_dispatch_supports_indirect2_ray_tracing(
+            &state.device_dispatch,
+        );
+    state.ray_tracing_support.acceleration_structure_indirect_build =
+        dispatch_plan.acceleration_structure_indirect_build
+        && device_dispatch_supports_indirect_acceleration_structure_builds(
             &state.device_dispatch,
         );
     if (state.ray_tracing_pipelines_enabled
@@ -1864,7 +1885,14 @@ fn void? create_logical_device_with_queue_infos(
     }
     if (state.acceleration_structures_enabled) {
         acceleration_structure_features =
-            acceleration_structure_features.set_next(features13.p_next);
+            acceleration_structure_features
+                .set_acceleration_structure_indirect_build(
+                    state.ray_tracing_support
+                            .acceleration_structure_indirect_build
+                        ? vk::TRUE
+                        : vk::FALSE,
+                )
+                .set_next(features13.p_next);
         features13 = features13.set_next(&acceleration_structure_features);
     }
     if (state.ray_queries_enabled) {

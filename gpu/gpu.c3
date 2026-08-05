@@ -2134,6 +2134,70 @@ fn void? cmd_update_acceleration_structure(
     return record.ops.update_acceleration_structure(record, desc);
 }
 
+<* Record one GPU-ranged BLAS or TLAS build. The descriptor counts are CPU
+   maxima; each triangle `vertex_count` is the exact `maxVertex + 1` bound.
+   `ranges` begins with one packed AccelerationStructureIndirectBuildRange per
+   BLAS geometry, or one for a TLAS, at fixed 16-byte stride. Its address must
+   be four-byte aligned and its allocation must support indirect use.
+
+   Preconditions: acceleration-structure indirect builds are enabled; every
+   GPU primitive count is no greater than its descriptor maximum; zero is
+   valid. Each GPU count plus offset fits the corresponding explicit input
+   span. The command is recorded outside a render pass on a graphics or compute
+   queue and inserts no barrier. Order a GPU producer with a barrier whose
+   destination contains both `indirect` and `acceleration_structure_build`.
+   FULL retains the destination, every explicit input, scratch, and range span
+   through completion. TRUSTED makes those lifetimes caller preconditions.
+
+   @param commands : "Live recording token outside a render pass."
+   @param desc : "Borrowed destination, maximum-count inputs, and build scratch."
+   @param ranges : "GPU-authored fixed-stride range records retained under FULL."
+   @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
+fn void? cmd_build_acceleration_structure_indirect(
+    CommandList* commands,
+    AccelerationStructureBuildDesc* desc,
+    GpuSpan ranges,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
+    return record.ops.build_acceleration_structure_indirect(
+        record,
+        desc,
+        ranges,
+    );
+}
+
+<* Record one in-place GPU-ranged acceleration-structure update. Descriptor
+   counts remain CPU maxima and triangle `vertex_count` remains the exact
+   `maxVertex + 1` bound. The fixed 16-byte packet, capability, alignment,
+   ownership, queue, render-scope, barrier, and lifetime rules are identical to
+   cmd_build_acceleration_structure_indirect.
+
+   Preconditions: the destination was built with update support and every
+   GPU-authored actual count equals the corresponding actual count from its
+   prior build or update, while remaining within the supplied CPU maximum and
+   explicit input span. The library does not inspect or read back the packet.
+
+   @param commands : "Live recording token outside a render pass."
+   @param desc : "Borrowed destination, maximum-count inputs, and update scratch."
+   @param ranges : "GPU-authored fixed-stride range records retained under FULL."
+   @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
+fn void? cmd_update_acceleration_structure_indirect(
+    CommandList* commands,
+    AccelerationStructureBuildDesc* desc,
+    GpuSpan ranges,
+) {
+    gpu::internal::vk::CommandRecord* record =
+        gpu::internal::recording_command(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
+    return record.ops.update_acceleration_structure_indirect(
+        record,
+        desc,
+        ranges,
+    );
+}
+
 <* Record one device clone from a completed acceleration structure into a
    distinct, matching unbuilt destination. The command inserts no barrier.
 

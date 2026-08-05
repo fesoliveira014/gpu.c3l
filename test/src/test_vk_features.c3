@@ -29,6 +29,7 @@ ray_query_candidate_with_required() {
         .ray_query_extension = true,
         .deferred_host_operations_extension = true,
         .acceleration_structure = true,
+        .acceleration_structure_indirect_build = true,
         .ray_query = true,
         .descriptor_update_after_bind = true,
         .buffer_device_address = true,
@@ -136,12 +137,24 @@ fn void acceleration_structure_caps_are_exact_saturating_and_opt_in_only() @test
     gpu::AccelerationStructureCaps enabled =
         gpu::internal::vk::normalize_acceleration_structure_caps(true, 7, 0, 0, &support);
     assert(enabled.enabled
+            && enabled.indirect_build
             && enabled.heap_capacity == 7
             && enabled.max_geometry_count == uint::max
             && enabled.max_primitive_count == 29
             && enabled.max_instance_count == uint::max
             && enabled.scratch_alignment == 512,
         "enabled public caps preserve exact limits and saturate wide values");
+
+    support.acceleration_structure_indirect_build = false;
+    enabled = gpu::internal::vk::normalize_acceleration_structure_caps(
+        enabled:          true,
+        heap_capacity:    7,
+        texture_capacity: 0,
+        sampler_capacity: 0,
+        support:          &support,
+    );
+    assert(enabled.enabled && !enabled.indirect_build,
+        "indirect builds are optional within enabled acceleration structures");
 
     assert(!gpu::internal::vk::normalize_acceleration_structure_caps(
             true,

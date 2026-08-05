@@ -67,6 +67,13 @@ struct TraceRaysIndirectCommand2 {
     uint _pad0;
 };
 
+struct AccelerationStructureIndirectBuildRange {
+    uint primitive_count;
+    uint primitive_offset;
+    uint first_vertex;
+    uint transform_offset;
+};
+
 struct GeneratedDrawRecord {
     uint64_t vertex_root_gpu;
     uint64_t fragment_root_gpu;

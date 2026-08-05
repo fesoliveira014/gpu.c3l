@@ -39,6 +39,7 @@ fn void pin_runtime_adapter_device() {
         },
         .acceleration_structures       = {
             .enabled             = true,
+            .indirect_build      = true,
             .heap_capacity       = 16,
             .max_geometry_count  = 8,
             .max_primitive_count = 1024,
@@ -103,6 +104,7 @@ fn void pin_runtime_adapter_device() {
     (void)caps.line_polygon_mode;
     (void)caps.timestamps;
     (void)caps.acceleration_structures;
+    (void)caps.acceleration_structures.indirect_build;
     (void)caps.ray_queries;
     (void)caps.ray_tracing_pipelines;
     (void)caps.ray_tracing_pipelines.indirect_dispatch;
@@ -202,6 +204,13 @@ fn void pin_acceleration_structures() {
     gpu::AccelerationStructureAabbGeometryDesc aabb_geometry = {};
     gpu::AccelerationStructureTriangleBuildDesc triangle_build = {};
     gpu::AccelerationStructureAabbBuildDesc aabb_build = {};
+    gpu::AccelerationStructureIndirectBuildRange indirect_range = {
+        .primitive_count  = 1,
+        .primitive_offset = 0,
+        .first_vertex     = 0,
+        .transform_offset = 0,
+    };
+    gpu::GpuSpan indirect_ranges = {};
     gpu::AccelerationStructureBuildFlags build_flags = {
         .prefer_fast_build = true,
         .minimize_memory = true,
@@ -214,6 +223,10 @@ fn void pin_acceleration_structures() {
     (void)aabb_geometry.max_primitive_count;
     (void)triangle_build.transform;
     (void)aabb_build.stride;
+    (void)indirect_range.primitive_count;
+    (void)indirect_range.primitive_offset;
+    (void)indirect_range.first_vertex;
+    (void)indirect_range.transform_offset;
     (void)build_flags.prefer_fast_build;
     (void)build_flags.minimize_memory;
     (void)geometry_flags.opaque;
@@ -243,6 +256,16 @@ fn void pin_acceleration_structures() {
     (void)gpu::destroy_acceleration_structure_view(&device, view);
     (void)gpu::cmd_build_acceleration_structure(&commands, &build_desc);
     (void)gpu::cmd_update_acceleration_structure(&commands, &build_desc);
+    (void)gpu::cmd_build_acceleration_structure_indirect(
+        &commands,
+        &build_desc,
+        indirect_ranges,
+    );
+    (void)gpu::cmd_update_acceleration_structure_indirect(
+        &commands,
+        &build_desc,
+        indirect_ranges,
+    );
     (void)gpu::cmd_clone_acceleration_structure(&commands, acceleration_structure, acceleration_structure);
 }
 

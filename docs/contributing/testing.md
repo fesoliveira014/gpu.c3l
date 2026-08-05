@@ -150,7 +150,11 @@ c3c test vk_ray_tracing --path test --test-show-output
   Vulkan validation, builds triangle and AABB BLASes, waits, clones the triangle
   BLAS, waits again, builds a TLAS from the clone's address, packs a caller-owned
   SBT, lets compute write a `TraceRaysIndirectCommand`, records an explicit
-  compute-to-indirect barrier, queries the stack requirements of its known
+  compute-to-indirect barrier, and, when supported, also writes a below-maximum
+  TLAS range with a nonzero instance offset and records a composed
+  compute-to-indirect/build barrier. Traversal proves that the later instance
+  was selected; otherwise the existing direct TLAS build remains the explicit
+  fallback. The target queries the stack requirements of its known
   shader graph, records an explicit dynamic stack size, and checks indirect
   hit/miss/callable output when basic indirect tracing is available. A
   direct-only device reports that capability boundary and runs the direct

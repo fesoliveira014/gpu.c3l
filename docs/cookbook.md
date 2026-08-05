@@ -114,6 +114,33 @@ on the build completion at `.compute`. Teardown order is: wait for the last
 query, destroy the view, destroy the TLAS, destroy BLAS values, then release
 their separately owned allocations and scratch.
 
+## Build an acceleration structure from GPU-authored ranges
+
+Query `caps.acceleration_structures.indirect_build`. When true, have a compute
+producer write one 16-byte `AccelerationStructureIndirectBuildRange` per BLAS
+geometry, or one for a TLAS. Descriptor primitive or instance counts are CPU
+maxima; triangle `vertex_count` remains the exact highest accessible vertex
+plus one. Then compose the packet-read and build stages:
+
+```c3
+gpu::Barrier ranges_ready = {
+    .before = { .compute },
+    .after  = { .indirect, .acceleration_structure_build },
+};
+gpu::cmd_barrier(&commands, &ranges_ready)!;
+gpu::cmd_build_acceleration_structure_indirect(
+    &commands,
+    &build_desc,
+    indirect_ranges,
+)!;
+```
+
+Each GPU primitive count may be zero, is no greater than its CPU maximum, and
+its count plus offsets stays within the explicit input spans. Indirect updates
+use the matching update command and preserve the preceding actual counts. The
+library does not read back the packet; use a direct build as the explicit
+fallback when the capability is false.
+
 ## Clone a completed acceleration structure
 
 Create the destination from the same semantic capacity descriptor as the

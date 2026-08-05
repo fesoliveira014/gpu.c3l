@@ -125,7 +125,14 @@ The generated ABI includes byte-identical twins for:
 - `TraceRaysIndirectCommand` (12 bytes: `width`, `height`, `depth`); and
 - `TraceRaysIndirectCommand2` (104 bytes: ray-generation address/size; miss,
   hit, and callable address/size/stride triples; `width`, `height`, `depth`,
-  and `_pad0`).
+  and `_pad0`); and
+- `AccelerationStructureIndirectBuildRange` (16 bytes: `primitive_count`,
+  `primitive_offset`, `first_vertex`, and `transform_offset`).
+
+A compute shader may write one fixed-stride acceleration-structure range per
+BLAS geometry, or one for a TLAS. The C3 and GLSL layouts use offsets 0, 4, 8,
+and 12. The packet carries raw counts and offsets only; the descriptor,
+resource owners, and synchronization remain CPU-side contracts.
 
 A compute shader may write `TraceRaysIndirectCommand` through the generated
 GLSL declaration. `cmd_trace_rays_indirect` consumes those exact bytes without

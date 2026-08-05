@@ -76,7 +76,9 @@ Query capabilities instead of hardcoding selected-device limits.
 
 `AccelerationStructureCaps` reports the shared enabled state, selected TLAS
 heap capacity, maximum geometry, primitive, and instance counts, and scratch
-alignment. These are creation and allocator bounds, not suggestions.
+alignment. `indirect_build` independently reports GPU-authored build-range
+support. Direct builds remain available when it is false. These are creation
+and allocator bounds, not suggestions.
 `RayQueryCaps` reports its independent enabled bit.
 `RayTracingPipelineCaps.indirect_dispatch` reports independently negotiated
 basic indirect tracing, while `indirect2_dispatch` reports independently

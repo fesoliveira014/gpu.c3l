@@ -468,15 +468,21 @@ fn void command_allocator_preallocates_fixed_acceleration_structure_arrays() @te
     );
 
     assert(slot.acceleration_structure_geometry_storage.len == 6
-            && slot.acceleration_structure_range_storage.len == 6,
+            && slot.acceleration_structure_range_storage.len == 6
+            && slot.acceleration_structure_max_primitive_count_storage.len
+                == 6,
         "allocator storage is command capacity times geometry capacity");
     assert(slot.scratch[0].acceleration_structure_geometries.len == 3
             && slot.scratch[1].acceleration_structure_geometries.len == 3
             && slot.scratch[0].acceleration_structure_geometries.ptr
                 != slot.scratch[1].acceleration_structure_geometries.ptr
             && slot.scratch[0].acceleration_structure_ranges.ptr
-                != slot.scratch[1].acceleration_structure_ranges.ptr,
-        "each command unit owns disjoint fixed geometry and range slices");
+                != slot.scratch[1].acceleration_structure_ranges.ptr
+            && slot.scratch[0]
+                .acceleration_structure_max_primitive_counts.ptr
+                != slot.scratch[1]
+                    .acceleration_structure_max_primitive_counts.ptr,
+        "each command unit owns disjoint fixed geometry, range, and count slices");
 
     slot.available_count = 0;
     slot.scratch[0].in_use = true;
@@ -497,10 +503,11 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         .command_buffer_capacity = 2,
         .max_resource_references_per_list = 1,
         .max_generated_preprocess_buffers_per_list = 1,
+        .max_acceleration_structure_geometries_per_build = 3,
     };
     gpu::Queue queue = { .id = 0 };
 
-    for (uint fail_on = 1; fail_on <= 6; fail_on++) {
+    for (uint fail_on = 1; fail_on <= 9; fail_on++) {
         FailOnNAllocator fail_allocator = { .fail_on = fail_on };
         gpu::internal::vk::VkDeviceState state = {
             .host_allocator = &fail_allocator,
@@ -538,13 +545,15 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
             && slot.scratch.ptr == null
             && slot.reference_storage.ptr == null
             && slot.preprocess_index_storage.ptr == null
+            && slot.acceleration_structure_max_primitive_count_storage.ptr
+                == null
             && slot.available.ptr == null
             && slot.reservations.ptr == null
             && !slot.mutex.is_initialized(),
             "host rollback leaves no owned allocator state");
     }
 
-    FailOnNAllocator success_allocator = { .fail_on = 7 };
+    FailOnNAllocator success_allocator = { .fail_on = 10 };
     gpu::internal::vk::VkDeviceState state = {
         .host_allocator = &success_allocator,
         .queue_completions = completions[..],
@@ -567,13 +576,13 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         slot:  &slot,
         ops:   &ops,
     )!!;
-    assert(success_allocator.attempts == 6
-        && success_allocator.acquires == 6
+    assert(success_allocator.attempts == 9
+        && success_allocator.acquires == 9
         && success_allocator.releases == 0
-        && success_allocator.outstanding == 6,
+        && success_allocator.outstanding == 9,
         "successful creation performs the exact fixed host allocation set");
     gpu::internal::vk::destroy_command_allocator_slot_with_ops(&state, &slot, &ops);
-    assert(success_allocator.releases == 6
+    assert(success_allocator.releases == 9
         && success_allocator.outstanding == 0
         && probe.pool_creates == 1 && probe.pool_destroys == 1
         && probe.buffer_allocations == 1,

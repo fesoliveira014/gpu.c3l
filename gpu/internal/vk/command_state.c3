@@ -140,6 +140,11 @@ alias CmdUpdateAccelerationStructureFn @private = fn void? (
     CommandRecord*,
     gpu::AccelerationStructureBuildDesc*,
 );
+alias CmdAccelerationStructureIndirectFn @private = fn void? (
+    CommandRecord*,
+    gpu::AccelerationStructureBuildDesc*,
+    gpu::GpuSpan,
+);
 alias CmdCloneAccelerationStructureFn @private = fn void? (
     CommandRecord*,
     gpu::AccelerationStructureHandle,
@@ -244,6 +249,8 @@ struct CommandOps @public {
     CmdResolveTimestampsFn        resolve_timestamps;
     CmdBuildAccelerationStructureFn  build_acceleration_structure;
     CmdUpdateAccelerationStructureFn update_acceleration_structure;
+    CmdAccelerationStructureIndirectFn build_acceleration_structure_indirect;
+    CmdAccelerationStructureIndirectFn update_acceleration_structure_indirect;
     CmdCloneAccelerationStructureFn  clone_acceleration_structure;
 }
 
