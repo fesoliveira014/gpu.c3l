@@ -1146,7 +1146,6 @@ fn void acquire_semaphores_retire_before_reuse() @test {
 }
 
 fn void swapchain_release_is_immediate_and_retryable() @test {
-
     WsiDiagnosticCapture capture;
     gpu::internal::vk::VkDeviceState state = {
         .validation_policy = { .contract = gpu::ContractValidation.FULL },
