@@ -301,14 +301,6 @@ fn vk::Result real_swapchain_fence_wait(
     );
 }
 
-fn void? swapchain_release_guard(
-    bool acquire_pending,
-    bool images_referenced,
-) {
-    if (acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
-    if (images_referenced) return gpu::RESOURCE_IN_USE~;
-}
-
 fn bool? poll_present_fences_with(
     VkDeviceState* state,
     SwapchainSlot* slot,
@@ -385,11 +377,11 @@ fn void? wait_present_fences(
     ulong timeout_ns,
 ) @private {
     return wait_present_fences_with(
-        state:     state,
-        slot:      slot,
+        state:      state,
+        slot:       slot,
         timeout_ns: timeout_ns,
-        wait_fn:   &real_swapchain_fence_wait,
-        reset_fn:  &real_swapchain_fence_reset,
+        wait_fn:    &real_swapchain_fence_wait,
+        reset_fn:   &real_swapchain_fence_reset,
     );
 }
 
@@ -967,20 +959,20 @@ fn void? release_swapchain_images_for_lifecycle_with(
         state,
         slot,
     )!;
-    if (catch guard_fault = swapchain_release_guard(false, images_referenced)) {
-        return report_wsi_contract(
-            context:        context,
-            public_fault:   guard_fault,
-            rejected_field: "swapchain image references",
-            invariant:      "all command and texture-view references must be released first",
-        )~;
-    }
     if (presentations_pending) {
         return report_wsi_contract(
             context:        context,
             public_fault:   gpu::RESOURCE_IN_USE,
             rejected_field: "presentation resource retirement",
             invariant:      "all prior presentations must complete before release is retried",
+        )~;
+    }
+    if (images_referenced) {
+        return report_wsi_contract(
+            context:        context,
+            public_fault:   gpu::RESOURCE_IN_USE,
+            rejected_field: "swapchain image references",
+            invariant:      "all command and texture-view references must be released first",
         )~;
     }
     release_swapchain_images_locked(state, slot);
@@ -1120,8 +1112,8 @@ fn void? vk_wait_swapchain_presentations(
         handle,
     )!;
     return wait_present_fences(
-        state:     state,
-        slot:      slot,
+        state:      state,
+        slot:       slot,
         timeout_ns: timeout_ns,
     );
 }

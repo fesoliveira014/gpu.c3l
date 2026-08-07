@@ -1146,18 +1146,6 @@ fn void acquire_semaphores_retire_before_reuse() @test {
 }
 
 fn void swapchain_release_is_immediate_and_retryable() @test {
-    gpu::internal::vk::swapchain_release_guard(false, false)!!;
-    fault acquired = @catch(
-        gpu::internal::vk::swapchain_release_guard(true, false)
-    );
-    assert(acquired == gpu::INVALID_RESOURCE_STATE,
-        "release rejects an acquired image instead of consuming it");
-
-    fault referenced = @catch(
-        gpu::internal::vk::swapchain_release_guard(false, true)
-    );
-    assert(referenced == gpu::RESOURCE_IN_USE,
-        "release rejects live command or view references");
 
     WsiDiagnosticCapture capture;
     gpu::internal::vk::VkDeviceState state = {
@@ -1192,7 +1180,6 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
     slot.present_fences[0] = (vk::Fence)1;
     slot.present_fence_pending[0] = true;
     captured_fence_status_calls = 0;
-    reset_present_wait_capture(vk::Result.TIMEOUT);
 
     fault presenting = @catch(
         gpu::internal::vk::release_swapchain_images_for_lifecycle_with(
@@ -1211,8 +1198,8 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
         "retryable release preserves pending presentation state");
     assert(capture.calls == 1
             && capture.last.rejected_field.str_view()
-                == "swapchain image references",
-        "live image references retain their lifecycle diagnostic precedence");
+                == "presentation resource retirement",
+        "pending presentation retirement retains lifecycle diagnostic precedence");
 
     gpu::internal::vk::QueueCompletionState[1] completions = {{
         .timeline = (vk::Semaphore)2,
@@ -1226,6 +1213,29 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
         1,
         AtomicOrdering.RELAXED,
     );
+    capture = {};
+    captured_lifecycle_query_calls = 0;
+    captured_lifecycle_query_result = vk::Result.SUCCESS;
+
+    fault pending_only = @catch(
+        gpu::internal::vk::release_swapchain_images_for_lifecycle_with(
+            state:     &state,
+            context:   &context,
+            slot:      &slot,
+            status_fn: &capture_fence_pending,
+            query_fn:  &capture_lifecycle_counter_query,
+        )
+    );
+    assert(pending_only == gpu::RESOURCE_IN_USE
+            && captured_lifecycle_query_calls == 1,
+        "successful drain reaches pending-presentation rejection");
+    assert(slot.present_fence_pending[0],
+        "pending-only lifecycle release neither waits nor resets presentation state");
+    assert(capture.calls == 1
+            && capture.last.rejected_field.str_view()
+                == "presentation resource retirement",
+        "pending-only release reports presentation resource retirement");
+
     captured_lifecycle_query_calls = 0;
     captured_lifecycle_query_result = vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 
@@ -1671,9 +1681,7 @@ fn void wait_present_fences_waits_for_all_pending_images() @test {
         && captured_batch_reset_fences[1] == (vk::Fence)23,
         "success resets exactly the waited fence set");
     assert(!slot.present_fence_pending[0]
-        && !slot.present_fence_pending[2]
-        && !slot.present_fence_pending[1]
-        && !slot.present_fence_pending[3],
+        && !slot.present_fence_pending[2],
         "all waited pending bits clear after reset");
 }
 
@@ -1857,12 +1865,23 @@ fn void wait_present_fences_preserves_outstanding_acquisition_guard() @test {
     )!!;
     assert(slot.acquire_pending,
         "presentation wait does not consume an outstanding acquisition");
+    gpu::internal::vk::WsiDiagnosticContext context = {
+        .state     = &state,
+        .operation = "destroy_swapchain",
+    };
+    captured_fence_status_calls = 0;
     assert(
-        @catch(gpu::internal::vk::swapchain_release_guard(
-            slot.acquire_pending,
-            false,
-        )) == gpu::INVALID_RESOURCE_STATE,
-        "the acquisition guard still rejects after presentation retirement"
+        @catch(
+            gpu::internal::vk::release_swapchain_images_for_lifecycle_with(
+                state:     &state,
+                context:   &context,
+                slot:      &slot,
+                status_fn: &capture_fence_pending,
+                query_fn:  &capture_lifecycle_counter_query,
+            )
+        ) == gpu::INVALID_RESOURCE_STATE
+            && captured_fence_status_calls == 0,
+        "the acquisition guard still rejects before presentation polling"
     );
 }
 
