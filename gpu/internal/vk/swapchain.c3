@@ -284,6 +284,7 @@ fn vk::Result real_swapchain_fence_reset(
 ) @private {
     return vk::reset_fences(device, fence_count, fences);
 }
+
 fn vk::Result real_swapchain_fence_wait(
     vk::Device device,
     uint fence_count,
@@ -303,12 +304,9 @@ fn vk::Result real_swapchain_fence_wait(
 fn void? swapchain_release_guard(
     bool acquire_pending,
     bool images_referenced,
-    bool presentations_pending,
 ) {
     if (acquire_pending) return gpu::INVALID_RESOURCE_STATE~;
-    if (images_referenced || presentations_pending) {
-        return gpu::RESOURCE_IN_USE~;
-    }
+    if (images_referenced) return gpu::RESOURCE_IN_USE~;
 }
 
 fn bool? poll_present_fences_with(
@@ -337,6 +335,7 @@ fn bool? poll_present_fences_with(
     }
     return ready;
 }
+
 fn void? wait_present_fences_with(
     VkDeviceState* state,
     SwapchainSlot* slot,
@@ -362,7 +361,7 @@ fn void? wait_present_fences_with(
             state.device,
             fence_count,
             &fences[0],
-            (vk::Bool32)1,
+            vk::TRUE,
             timeout_ns,
         ),
     )!;
@@ -944,11 +943,8 @@ fn void? release_swapchain_images_for_lifecycle_with(
     WsiDiagnosticContext* context,
     SwapchainSlot* slot,
     SwapchainFenceStatusFn status_fn,
-    SwapchainFenceWaitFn wait_fn,
-    SwapchainFenceResetFn reset_fn,
+    SemaphoreCounterQueryFn query_fn,
 ) {
-    (void)wait_fn;
-    (void)reset_fn;
     if (slot.acquire_pending) {
         return report_wsi_contract(
             context:        context,
@@ -963,32 +959,28 @@ fn void? release_swapchain_images_for_lifecycle_with(
         slot,
         status_fn,
     )!;
+
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    drain_completed_submitted_commands_with_query(state, query_fn)!;
+    bool images_referenced = swapchain_images_referenced_locked(
+        state,
+        slot,
+    )!;
+    if (catch guard_fault = swapchain_release_guard(false, images_referenced)) {
+        return report_wsi_contract(
+            context:        context,
+            public_fault:   guard_fault,
+            rejected_field: "swapchain image references",
+            invariant:      "all command and texture-view references must be released first",
+        )~;
+    }
     if (presentations_pending) {
         return report_wsi_contract(
             context:        context,
             public_fault:   gpu::RESOURCE_IN_USE,
             rejected_field: "presentation resource retirement",
             invariant:      "all prior presentations must complete before release is retried",
-        )~;
-    }
-
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    drain_completed_submitted_commands(state)!;
-    bool images_referenced = swapchain_images_referenced_locked(
-        state,
-        slot,
-    )!;
-    if (catch guard_fault = swapchain_release_guard(
-        acquire_pending:       false,
-        images_referenced:     images_referenced,
-        presentations_pending: false,
-    )) {
-        return report_wsi_contract(
-            context:        context,
-            public_fault:   guard_fault,
-            rejected_field: "swapchain image references",
-            invariant:      "all command and texture-view references must be released first",
         )~;
     }
     release_swapchain_images_locked(state, slot);
@@ -1004,8 +996,7 @@ fn void? release_swapchain_images_for_lifecycle(
         context:   context,
         slot:      slot,
         status_fn: &real_swapchain_fence_status,
-        wait_fn:   &real_swapchain_fence_wait,
-        reset_fn:  &real_swapchain_fence_reset,
+        query_fn:  &real_semaphore_counter_query,
     );
 }
 

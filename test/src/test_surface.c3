@@ -637,3 +637,63 @@ fn void swapchain_wait_backend_failure_preserves_handle() @test {
     gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
+
+fn void swapchain_wait_success_is_idempotent() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
+    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
+    SwapchainHandle swapchain = gpu::create_swapchain(
+        &device,
+        &surface,
+        &swapchain_desc,
+    )!!;
+    gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
+    gpu::internal::vk::stub_set_present_wait_pending_count(state, 1);
+    gpu::internal::vk::stub_reset_present_wait_counts(state);
+
+    gpu::wait_swapchain_presentations(&device, swapchain, 1)!!;
+    gpu::wait_swapchain_presentations(&device, swapchain, 0)!!;
+    assert(
+        gpu::internal::vk::stub_present_wait_call_count(state) == 1
+            && gpu::internal::vk::stub_present_reset_call_count(state) == 1
+            && gpu::internal::vk::stub_present_wait_pending_count(state) == 0,
+        "a repeated successful wait performs no additional native work"
+    );
+
+    gpu::destroy_swapchain(&device, swapchain)!!;
+    gpu::destroy_device(&device)!!;
+    gpu::destroy_surface(&surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void swapchain_wait_rejects_destroyed_device() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
+    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
+    SwapchainHandle swapchain = gpu::create_swapchain(
+        &device,
+        &surface,
+        &swapchain_desc,
+    )!!;
+
+    gpu::destroy_swapchain(&device, swapchain)!!;
+    gpu::destroy_device(&device)!!;
+    assert(
+        @catch(gpu::wait_swapchain_presentations(&device, swapchain, 0))
+            == gpu::INVALID_HANDLE,
+        "a destroyed device rejects before backend swapchain access"
+    );
+
+    gpu::destroy_surface(&surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}

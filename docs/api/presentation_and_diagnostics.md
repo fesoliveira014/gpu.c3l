@@ -31,9 +31,9 @@ related runtime state. `get_present_mode_support` reports supported
 `PresentMode` values through `PresentModeSupport`.
 
 `resize_swapchain` recreates device-side presentation resources for a new
-extent. It never waits for outstanding image use. Quiesce covering completion
-points and release acquired images first; retry `RESOURCE_IN_USE` or
-`DEVICE_BUSY` after progress.
+extent and never waits for outstanding use. Follow the lifecycle order below.
+If it still returns `RESOURCE_IN_USE` or `DEVICE_BUSY`, resolve an outstanding
+acquisition or image reference before retrying.
 
 `destroy_swapchain` releases its surface retain only when no image is acquired
 or pending. It inserts no hidden wait.

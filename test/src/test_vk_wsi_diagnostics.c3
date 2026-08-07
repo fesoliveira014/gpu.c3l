@@ -473,6 +473,8 @@ fn void wait_timeout_is_diagnostic_clean_and_retryable() @test {
         wait_fn:    &capture_diagnostic_wait,
         reset_fn:   &capture_diagnostic_reset,
     )!!;
-    assert(capture.calls == 0 && !slot.present_fence_pending[0],
-        "later success remains diagnostic-clean and clears the fence");
+    assert(
+        capture.calls == 0 && !slot.present_fence_pending[0],
+        "later success remains diagnostic-clean and clears the fence"
+    );
 }
