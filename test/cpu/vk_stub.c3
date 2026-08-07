@@ -374,6 +374,12 @@ struct VkDeviceState @public {
     ulong                completion_last_sequence;
     ulong                completion_last_timeout_ns;
     ulong                completion_sequence;
+    uint                 present_wait_pending_count;
+    uint                 present_wait_calls;
+    uint                 present_reset_calls;
+    ulong                present_wait_last_timeout_ns;
+    fault                present_wait_fault;
+    fault                present_reset_fault;
     uint                 allocation_attempts;
     uint                 allocation_free_calls;
     uint                 allocation_flush_calls;
@@ -1231,6 +1237,43 @@ fn void stub_set_presentation_support(bool supported) {
     presentation_supported = supported;
 }
 
+fn void stub_reset_present_wait_counts(VkDeviceState* state) {
+    if (state == null) return;
+    state.present_wait_calls = 0;
+    state.present_reset_calls = 0;
+    state.present_wait_last_timeout_ns = 0;
+}
+
+fn uint stub_present_wait_call_count(VkDeviceState* state) =>
+    state == null ? 0 : state.present_wait_calls;
+
+fn uint stub_present_reset_call_count(VkDeviceState* state) =>
+    state == null ? 0 : state.present_reset_calls;
+
+fn ulong stub_present_wait_last_timeout(VkDeviceState* state) =>
+    state == null ? 0 : state.present_wait_last_timeout_ns;
+
+fn uint stub_present_wait_pending_count(VkDeviceState* state) =>
+    state == null ? 0 : state.present_wait_pending_count;
+
+fn void stub_set_present_wait_pending_count(
+    VkDeviceState* state,
+    uint pending_count,
+) {
+    if (state == null) return;
+    state.present_wait_pending_count = pending_count;
+}
+
+fn void stub_set_present_wait_fault(VkDeviceState* state, fault failure) {
+    if (state == null) return;
+    state.present_wait_fault = failure;
+}
+
+fn void stub_set_present_reset_fault(VkDeviceState* state, fault failure) {
+    if (state == null) return;
+    state.present_reset_fault = failure;
+}
+
 fn void? vk_check_device_destroy(VkDeviceState* state) {
     (void)state.check_calls.add(1, AtomicOrdering.RELEASE);
     state.check_entered.store(true, AtomicOrdering.RELEASE);
@@ -1642,8 +1685,29 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
         .image_count  = desc.image_count,
         .present_mode = desc.present_mode,
     };
+    state.present_wait_pending_count = 0;
+    state.present_wait_fault = {};
+    state.present_reset_fault = {};
     state.swapchain_live = true;
     return state.swapchain;
+}
+
+fn void? vk_wait_swapchain_presentations(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+    ulong timeout_ns,
+) {
+    if (state == null || !state.swapchain_live || state.swapchain != handle) {
+        return gpu::INVALID_HANDLE~;
+    }
+    if (state.present_wait_pending_count == 0) return;
+    state.present_wait_calls++;
+    state.present_wait_last_timeout_ns = timeout_ns;
+    if (state.present_wait_fault) return state.present_wait_fault~;
+    if (timeout_ns == 0) return gpu::WAIT_TIMEOUT~;
+    state.present_reset_calls++;
+    if (state.present_reset_fault) return state.present_reset_fault~;
+    state.present_wait_pending_count = 0;
 }
 
 fn void? vk_destroy_swapchain(
@@ -1657,6 +1721,9 @@ fn void? vk_destroy_swapchain(
     state.surface = {};
     state.swapchain = {};
     state.swapchain_info = {};
+    state.present_wait_pending_count = 0;
+    state.present_wait_fault = {};
+    state.present_reset_fault = {};
     state.swapchain_live = false;
 }
 

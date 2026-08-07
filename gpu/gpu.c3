@@ -3012,6 +3012,38 @@ fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     gpu::internal::release_device_children(&operation);
 }
 
+<* Wait for every presentation pending when the call begins.
+   Preconditions: the device and swapchain are live, the surface and native
+   display or window remain alive, platform progress is pumped, and the caller
+   externally synchronizes acquire, present, resize, and destroy on the
+   swapchain. Establish command completion with wait_completion first, then
+   call this before resize_swapchain or destroy_swapchain.
+   Always checked: live identity, ownership, and device state.
+   WAIT_TIMEOUT is nonblocking when timeout_ns is zero, preserves the handle
+   and all pending presentations, and emits no diagnostic. Other runtime
+   failures (DEVICE_BUSY, out-of-host/device memory, device loss, or backend
+   failure) also preserve the handle and pending state. This call consumes
+   neither the swapchain handle nor an acquired image, waits no completion
+   point, and retires no command references.
+
+   @param device : "Live device that owns the swapchain."
+   @param swapchain : "Borrowed swapchain handle whose presentations are waited."
+   @param timeout_ns : "Maximum host wait in nanoseconds; TIMEOUT_INFINITE waits without a deadline and zero is nonblocking."
+   @return "Success, or a recoverable timeout, ownership, invalid-handle, busy, allocation, device-loss, or backend fault." *>
+fn void? wait_swapchain_presentations(
+    Device* device,
+    SwapchainHandle swapchain,
+    ulong timeout_ns = TIMEOUT_INFINITE,
+) {
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    return gpu::internal::vk::vk_wait_swapchain_presentations(
+        state:      operation.state,
+        handle:     swapchain,
+        timeout_ns: timeout_ns,
+    );
+}
+
 <* Recreate a quiescent swapchain under the same handle at a new extent.
    Preconditions: no pending acquisition, presentation, command, or view use.
    Always checked: live identity, ownership, lifecycle state, and extent safety.

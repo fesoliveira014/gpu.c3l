@@ -15,6 +15,10 @@ fn Surface create_test_surface(Runtime* runtime) {
     )!!;
 }
 
+fn gpu::internal::vk::VkDeviceState* present_wait_state(Device* device) {
+    return gpu::internal::device_slots[device.index].data.state;
+}
+
 fn void assert_device_ownership(
     Device* device,
     Adapter expected_adapter,
@@ -421,5 +425,276 @@ fn void presentation_devices_accept_only_the_requested_surface() @test {
     gpu::destroy_swapchain(&second, second_swapchain)!!;
     gpu::destroy_device(&second)!!;
     gpu::destroy_surface(&second_surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void swapchain_wait_rejects_foreign_and_stale_handles_before_native_work() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
+    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
+    SwapchainHandle swapchain = gpu::create_swapchain(
+        &device,
+        &surface,
+        &swapchain_desc,
+    )!!;
+    gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
+    gpu::internal::vk::stub_set_present_wait_pending_count(state, 1);
+    gpu::internal::vk::stub_reset_present_wait_counts(state);
+
+    SwapchainHandle foreign = swapchain;
+    foreign.owner++;
+    assert(
+        @catch(gpu::wait_swapchain_presentations(&device, foreign, 0))
+            == gpu::INVALID_HANDLE
+    );
+    assert(
+        gpu::internal::vk::stub_present_wait_call_count(state) == 0
+            && gpu::internal::vk::stub_present_reset_call_count(state) == 0,
+        "foreign handles are rejected before the native wait"
+    );
+
+    SwapchainHandle stale = swapchain;
+    stale.generation--;
+    assert(
+        @catch(gpu::wait_swapchain_presentations(&device, stale, 0))
+            == gpu::INVALID_HANDLE
+    );
+    assert(
+        gpu::internal::vk::stub_present_wait_call_count(state) == 0
+            && gpu::internal::vk::stub_present_reset_call_count(state) == 0,
+        "stale handles are rejected before the native wait"
+    );
+
+    gpu::destroy_swapchain(&device, swapchain)!!;
+    gpu::destroy_device(&device)!!;
+    gpu::destroy_surface(&surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void swapchain_wait_returns_immediately_without_pending_presentations() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
+    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
+    SwapchainHandle swapchain = gpu::create_swapchain(
+        &device,
+        &surface,
+        &swapchain_desc,
+    )!!;
+    gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
+    gpu::internal::vk::stub_set_present_wait_pending_count(state, 0);
+    gpu::internal::vk::stub_reset_present_wait_counts(state);
+
+    gpu::wait_swapchain_presentations(&device, swapchain, 37)!!;
+    assert(
+        gpu::internal::vk::stub_present_wait_call_count(state) == 0
+            && gpu::internal::vk::stub_present_reset_call_count(state) == 0,
+        "no pending presentations bypass native wait and reset"
+    );
+
+    gpu::destroy_swapchain(&device, swapchain)!!;
+    gpu::destroy_device(&device)!!;
+    gpu::destroy_surface(&surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void swapchain_wait_timeout_preserves_pending_state_and_supports_retry() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
+    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
+    SwapchainHandle swapchain = gpu::create_swapchain(
+        &device,
+        &surface,
+        &swapchain_desc,
+    )!!;
+    gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
+    gpu::internal::vk::stub_set_present_wait_pending_count(state, 2);
+    gpu::internal::vk::stub_reset_present_wait_counts(state);
+
+    fault timeout = @catch(
+        gpu::wait_swapchain_presentations(&device, swapchain, 0)
+    );
+    assert(timeout == gpu::WAIT_TIMEOUT, "zero timeout reports WAIT_TIMEOUT");
+    assert(
+        gpu::internal::vk::stub_present_wait_call_count(state) == 1
+            && gpu::internal::vk::stub_present_reset_call_count(state) == 0
+            && gpu::internal::vk::stub_present_wait_last_timeout(state) == 0
+            && gpu::internal::vk::stub_present_wait_pending_count(state) == 2,
+        "timeout preserves every pending presentation"
+    );
+
+    gpu::wait_swapchain_presentations(&device, swapchain, 1)!!;
+    assert(
+        gpu::internal::vk::stub_present_wait_call_count(state) == 2
+            && gpu::internal::vk::stub_present_reset_call_count(state) == 1
+            && gpu::internal::vk::stub_present_wait_pending_count(state) == 0,
+        "a retry clears pending state only after success"
+    );
+
+    gpu::destroy_swapchain(&device, swapchain)!!;
+    gpu::destroy_device(&device)!!;
+    gpu::destroy_surface(&surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void swapchain_wait_default_uses_infinite_timeout() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
+    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
+    SwapchainHandle swapchain = gpu::create_swapchain(
+        &device,
+        &surface,
+        &swapchain_desc,
+    )!!;
+    gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
+    gpu::internal::vk::stub_set_present_wait_pending_count(state, 1);
+    gpu::internal::vk::stub_reset_present_wait_counts(state);
+
+    gpu::wait_swapchain_presentations(&device, swapchain)!!;
+    assert(
+        gpu::internal::vk::stub_present_wait_last_timeout(state)
+            == gpu::TIMEOUT_INFINITE,
+        "the omitted timeout forwards TIMEOUT_INFINITE"
+    );
+    assert(
+        gpu::internal::vk::stub_present_wait_pending_count(state) == 0,
+        "the default wait retires pending presentations"
+    );
+
+    gpu::destroy_swapchain(&device, swapchain)!!;
+    gpu::destroy_device(&device)!!;
+    gpu::destroy_surface(&surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void swapchain_wait_backend_failure_preserves_handle() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
+    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
+    SwapchainHandle swapchain = gpu::create_swapchain(
+        &device,
+        &surface,
+        &swapchain_desc,
+    )!!;
+    gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
+    gpu::internal::vk::stub_set_present_wait_pending_count(state, 1);
+    gpu::internal::vk::stub_set_present_wait_fault(state, gpu::DEVICE_LOST);
+    gpu::internal::vk::stub_reset_present_wait_counts(state);
+
+    fault failure = @catch(
+        gpu::wait_swapchain_presentations(&device, swapchain, 99)
+    );
+    assert(failure == gpu::DEVICE_LOST, "backend failure propagates unchanged");
+    assert(
+        gpu::internal::vk::stub_present_wait_call_count(state) == 1
+            && gpu::internal::vk::stub_present_reset_call_count(state) == 0
+            && gpu::internal::vk::stub_present_wait_pending_count(state) == 1,
+        "backend failure leaves pending state and handle intact"
+    );
+
+    gpu::internal::vk::stub_set_present_wait_fault(state, {});
+    gpu::internal::vk::stub_set_present_reset_fault(state, gpu::DEVICE_LOST);
+    fault reset_failure = @catch(
+        gpu::wait_swapchain_presentations(&device, swapchain, 99)
+    );
+    assert(reset_failure == gpu::DEVICE_LOST,
+        "reset failure propagates without consuming the handle");
+    assert(
+        gpu::internal::vk::stub_present_reset_call_count(state) == 1
+            && gpu::internal::vk::stub_present_wait_pending_count(state) == 1,
+        "reset failure preserves pending fake-backend state"
+    );
+
+    gpu::internal::vk::stub_set_present_reset_fault(state, {});
+    gpu::wait_swapchain_presentations(&device, swapchain, 99)!!;
+    assert(gpu::internal::vk::stub_present_wait_pending_count(state) == 0,
+        "a later successful call can retire the preserved state");
+    gpu::destroy_swapchain(&device, swapchain)!!;
+    gpu::destroy_device(&device)!!;
+    gpu::destroy_surface(&surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void swapchain_wait_success_is_idempotent() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
+    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
+    SwapchainHandle swapchain = gpu::create_swapchain(
+        &device,
+        &surface,
+        &swapchain_desc,
+    )!!;
+    gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
+    gpu::internal::vk::stub_set_present_wait_pending_count(state, 1);
+    gpu::internal::vk::stub_reset_present_wait_counts(state);
+
+    gpu::wait_swapchain_presentations(&device, swapchain, 1)!!;
+    gpu::wait_swapchain_presentations(&device, swapchain, 0)!!;
+    assert(
+        gpu::internal::vk::stub_present_wait_call_count(state) == 1
+            && gpu::internal::vk::stub_present_reset_call_count(state) == 1
+            && gpu::internal::vk::stub_present_wait_pending_count(state) == 0,
+        "a repeated successful wait performs no additional native work"
+    );
+
+    gpu::destroy_swapchain(&device, swapchain)!!;
+    gpu::destroy_device(&device)!!;
+    gpu::destroy_surface(&surface)!!;
+    gpu::destroy_runtime(&runtime)!!;
+}
+
+fn void swapchain_wait_rejects_destroyed_device() @test {
+    gpu::internal::vk::stub_set_presentation_support(true);
+    RuntimeDesc desc = runtime_desc();
+    Runtime runtime = gpu::create_runtime(&desc)!!;
+    Surface surface = create_test_surface(&runtime);
+    Adapter adapter = gpu::enumerate_adapters(&runtime)!!.get(0)!!;
+    DeviceDesc device_desc = { .surface = surface };
+    Device device = gpu::create_device(&adapter, &device_desc)!!;
+    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
+    SwapchainHandle swapchain = gpu::create_swapchain(
+        &device,
+        &surface,
+        &swapchain_desc,
+    )!!;
+
+    gpu::destroy_swapchain(&device, swapchain)!!;
+    gpu::destroy_device(&device)!!;
+    assert(
+        @catch(gpu::wait_swapchain_presentations(&device, swapchain, 0))
+            == gpu::INVALID_HANDLE,
+        "a destroyed device rejects before backend swapchain access"
+    );
+
+    gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
