@@ -454,12 +454,29 @@ On the next run, provide the bytes as `RuntimeDesc.pipeline_cache_data`.
 Treat rejection or a tiny driver blob as a cache miss, not a correctness
 failure.
 
-## Handle swapchain resize
+## Handle swapchain resize and teardown
 
-On `SWAPCHAIN_OUT_OF_DATE`, stop acquiring, wait for covering completion
-points, then call `resize_swapchain` with the current drawable extent.
-Retry `RESOURCE_IN_USE`/`DEVICE_BUSY` only after making progress. Rebuild
-format- or extent-dependent application state from `get_swapchain_info`.
+On `SWAPCHAIN_OUT_OF_DATE`, and before any resize or destroy, stop acquiring
+and follow one order:
+
+1. `wait_completion` on the last completion point covering swapchain work;
+2. `wait_swapchain_presentations` until it reports success; then
+3. `resize_swapchain` with the current drawable extent, or
+   `destroy_swapchain`.
+
+Neither lifecycle call waits, so step 2 is what retires pending presentations.
+Give it a finite `timeout_ns` and pump the platform event queue between
+attempts: `WAIT_TIMEOUT` preserves the swapchain handle and every pending
+presentation, so repeating the call is safe. `TIMEOUT_INFINITE` suits only a
+caller whose thread is not responsible for that progress. Keep the surface and
+its native display or window alive for the whole sequence, and externally
+synchronize acquire, present, resize, and destroy on the swapchain.
+
+`RESOURCE_IN_USE` or `DEVICE_BUSY` after step 2 means something other than
+presentation is outstanding, usually an image acquired but never presented, or
+another live child. Release it and repeat the order instead of retrying on a
+timer. Rebuild format- or extent-dependent application state from
+`get_swapchain_info`.
 
 Acquisition defaults to nonblocking. Use a finite timeout in an event loop and
 handle `WAIT_TIMEOUT` without discarding the swapchain.

@@ -223,6 +223,16 @@ The application is intentionally one file. The surface helper converts SDL3's
 active video-driver properties to the distinct Wayland, X11, or Win32 public
 handle types.
 
+Resize and teardown follow one order: establish command completion with
+`wait_completion`, retire pending presentations with
+`wait_swapchain_presentations`, then call `resize_swapchain` or
+`destroy_swapchain`. Neither lifecycle call waits, so the presentation wait is
+what makes the swapchain quiescent. `retire_presentations` runs it with a
+finite timeout: `WAIT_TIMEOUT` leaves the swapchain handle and its pending
+presentations intact, so the attempt simply repeats, and pumping the platform
+queue between attempts keeps presentation progressing while the surface and
+window stay alive.
+
 ```c3
 module hello_triangle;
 
@@ -238,6 +248,7 @@ faultdef WINDOW_INIT_FAILED, UNSUPPORTED_VIDEO_DRIVER;
 const char[*] VERTEX_SPIRV = $embed("../shaders/triangle.vert.spv");
 const char[*] FRAGMENT_SPIRV = $embed("../shaders/triangle.frag.spv");
 const ulong ACQUIRE_TIMEOUT_NS = 2_000_000;
+const ulong RETIRE_TIMEOUT_NS = 2_000_000;
 
 struct WindowEvents {
     bool quit;
@@ -316,13 +327,15 @@ fn void? run() {
     gpu::CompletionPoint last_graphics;
     bool running = true;
     while (running) {
-        WindowEvents events = pump_events();
+        WindowEvents events = poll_window_events();
         if (events.quit) break;
         if (events.resized) {
-            if (last_graphics.is_valid()) {
-                gpu::wait_completion(last_graphics, gpu::TIMEOUT_INFINITE)!;
-            }
-            swapchain_info = recover_swapchain(&device, swapchain, window)!;
+            swapchain_info = recover_swapchain(
+                device: &device,
+                swapchain: swapchain,
+                window: window,
+                last_graphics: last_graphics,
+            )!;
         }
         if (swapchain_info.dormant) {
             sdl::delay(16);
@@ -347,8 +360,12 @@ fn void? run() {
         if (catch err = acquired) {
             if (err == gpu::WAIT_TIMEOUT) continue;
             if (err == gpu::SWAPCHAIN_OUT_OF_DATE) {
-                swapchain_info =
-                    recover_swapchain(&device, swapchain, window)!;
+                swapchain_info = recover_swapchain(
+                    device: &device,
+                    swapchain: swapchain,
+                    window: window,
+                    last_graphics: last_graphics,
+                )!;
                 continue;
             }
             return err~;
@@ -426,7 +443,12 @@ fn void? run() {
             last_graphics,
         )) {
             if (err != gpu::SWAPCHAIN_OUT_OF_DATE) return err~;
-            swapchain_info = recover_swapchain(&device, swapchain, window)!;
+            swapchain_info = recover_swapchain(
+                device: &device,
+                swapchain: swapchain,
+                window: window,
+                last_graphics: last_graphics,
+            )!;
         }
     }
 
@@ -516,23 +538,40 @@ fn void get_pixel_size(
     *height = h > 0 ? (uint)h : 0;
 }
 
+fn void? retire_presentations(
+    gpu::Device* device,
+    gpu::SwapchainHandle swapchain,
+) {
+    while (catch err = gpu::wait_swapchain_presentations(
+        device,
+        swapchain,
+        RETIRE_TIMEOUT_NS,
+    )) {
+        if (err != gpu::WAIT_TIMEOUT) return err~;
+        sdl::pump_events();
+    }
+}
+
 fn gpu::SwapchainInfo? recover_swapchain(
     gpu::Device* device,
     gpu::SwapchainHandle swapchain,
     sdl::Window* window,
+    gpu::CompletionPoint last_graphics,
 ) {
+    if (last_graphics.is_valid()) {
+        gpu::wait_completion(last_graphics, gpu::TIMEOUT_INFINITE)!;
+    }
+    retire_presentations(device, swapchain)!;
+
     uint width;
     uint height;
     get_pixel_size(window, &width, &height);
-    while (catch err = gpu::resize_swapchain(
-        device,
-        swapchain,
-        width,
-        height,
-    )) {
-        if (err != gpu::RESOURCE_IN_USE) return err~;
-        sdl::delay(1);
-    }
+    gpu::resize_swapchain(
+        device: device,
+        swapchain: swapchain,
+        width: width,
+        height: height,
+    )!;
     return gpu::get_swapchain_info(device, swapchain);
 }
 
@@ -551,13 +590,11 @@ fn void? destroy_swapchain_when_ready(
     gpu::Device* device,
     gpu::SwapchainHandle swapchain,
 ) {
-    while (catch err = gpu::destroy_swapchain(device, swapchain)) {
-        if (err != gpu::RESOURCE_IN_USE) return err~;
-        sdl::delay(1);
-    }
+    retire_presentations(device, swapchain)!;
+    return gpu::destroy_swapchain(device, swapchain);
 }
 
-fn WindowEvents pump_events() {
+fn WindowEvents poll_window_events() {
     WindowEvents events;
     sdl::Event event;
     while (sdl::poll_event(&event)) {

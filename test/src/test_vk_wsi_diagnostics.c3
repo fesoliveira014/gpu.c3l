@@ -15,6 +15,34 @@ fn void capture_wsi_diagnostic(gpu::DebugMessage* message, void* user_data) {
     capture.last = *message;
 }
 
+vk::Result diagnostic_wait_result;
+
+fn vk::Result capture_diagnostic_wait(
+    vk::Device device,
+    uint fence_count,
+    vk::Fence* fences,
+    vk::Bool32 wait_all,
+    ulong timeout_ns,
+) {
+    (void)device;
+    (void)fence_count;
+    (void)fences;
+    (void)wait_all;
+    (void)timeout_ns;
+    return diagnostic_wait_result;
+}
+
+fn vk::Result capture_diagnostic_reset(
+    vk::Device device,
+    uint fence_count,
+    vk::Fence* fences,
+) {
+    (void)device;
+    (void)fence_count;
+    (void)fences;
+    return vk::Result.SUCCESS;
+}
+
 fn void wsi_presentation_gate_diagnostic() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
@@ -409,4 +437,42 @@ fn void capability_failures_are_backend_only_and_success_is_silent() @test {
         result:  vk::Result.SUBOPTIMAL_KHR,
     )!!;
     assert(capture.calls == 0, "successful and suboptimal WSI results emit nothing");
+}
+
+fn void wait_timeout_is_diagnostic_clean_and_retryable() @test {
+    WsiDiagnosticCapture capture = {};
+    gpu::internal::vk::VkDeviceState state = {
+        .device            = (vk::Device)1,
+        .validation_policy = { .contract = gpu::ContractValidation.FULL },
+        .debug_callback    = &capture_wsi_diagnostic,
+        .debug_user_data   = &capture,
+    };
+    gpu::internal::vk::SwapchainSlot slot = { .image_count = 1 };
+    slot.present_fences[0] = (vk::Fence)71;
+    slot.present_fence_pending[0] = true;
+    diagnostic_wait_result = vk::Result.TIMEOUT;
+
+    fault timeout = @catch(gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 0,
+        wait_fn:    &capture_diagnostic_wait,
+        reset_fn:   &capture_diagnostic_reset,
+    ));
+    assert(timeout == gpu::WAIT_TIMEOUT, "timeout remains the retryable public fault");
+    assert(capture.calls == 0 && capture.last.rejected_field == null,
+        "WAIT_TIMEOUT emits no FULL-validation error diagnostic");
+    assert(slot.present_fence_pending[0],
+        "diagnostic-clean timeout preserves the pending presentation");
+
+    diagnostic_wait_result = vk::Result.SUCCESS;
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 1,
+        wait_fn:    &capture_diagnostic_wait,
+        reset_fn:   &capture_diagnostic_reset,
+    )!!;
+    assert(capture.calls == 0 && !slot.present_fence_pending[0],
+        "later success remains diagnostic-clean and clears the fence");
 }

@@ -261,10 +261,10 @@ Methods: `SwapchainHandle.is_valid`, `SwapchainHandle.equals`,
 `SwapchainReadiness.is_valid`, and `SwapchainReadiness.equals`.
 
 Callables: each platform
-`create_surface`, `destroy_surface`, `create_swapchain`, `destroy_swapchain`,
-`resize_swapchain`, `get_swapchain_info`, `get_present_mode_support`,
-`acquire_next_image`, `present`, `get_memory_stats`, `build_memory_report`,
-`cmd_begin_label`, and `cmd_end_label`.
+`create_surface`, `destroy_surface`, `create_swapchain`, `wait_swapchain_presentations`,
+`destroy_swapchain`, `resize_swapchain`, `get_swapchain_info`,
+`get_present_mode_support`, `acquire_next_image`, `present`, `get_memory_stats`,
+`build_memory_report`, `cmd_begin_label`, and `cmd_end_label`.
 
 The internal constants `RESOURCE_OWNER_KIND_COUNT` and
 `MAX_DEVICE_RESOURCE_OWNER` are present in the imported interface for handle

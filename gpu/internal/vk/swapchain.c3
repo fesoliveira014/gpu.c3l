@@ -21,6 +21,13 @@ alias SwapchainFenceResetFn = fn vk::Result (
     uint,
     vk::Fence*,
 );
+alias SwapchainFenceWaitFn = fn vk::Result (
+    vk::Device,
+    uint,
+    vk::Fence*,
+    vk::Bool32,
+    ulong,
+);
 
 // Concrete (non-generic) slot table for swapchains. Monomorphized twin of
 // gpu::slots to sidestep the c3c 0.8.0 generic-instantiation codegen crash.
@@ -277,6 +284,21 @@ fn vk::Result real_swapchain_fence_reset(
 ) @private {
     return vk::reset_fences(device, fence_count, fences);
 }
+fn vk::Result real_swapchain_fence_wait(
+    vk::Device device,
+    uint fence_count,
+    vk::Fence* fences,
+    vk::Bool32 wait_all,
+    ulong timeout_ns,
+) @private {
+    return vk::wait_for_fences(
+        device,
+        fence_count,
+        fences,
+        wait_all,
+        timeout_ns,
+    );
+}
 
 fn void? swapchain_release_guard(
     bool acquire_pending,
@@ -314,6 +336,62 @@ fn bool? poll_present_fences_with(
         }
     }
     return ready;
+}
+fn void? wait_present_fences_with(
+    VkDeviceState* state,
+    SwapchainSlot* slot,
+    ulong timeout_ns,
+    SwapchainFenceWaitFn wait_fn,
+    SwapchainFenceResetFn reset_fn,
+) {
+    vk::Fence[MAX_SWAPCHAIN_IMAGES] fences;
+    uint[MAX_SWAPCHAIN_IMAGES] indices;
+    uint fence_count = 0;
+    for (uint i = 0; i < slot.image_count; i++) {
+        if (!slot.present_fence_pending[i]) continue;
+        fences[fence_count] = slot.present_fences[i];
+        indices[fence_count] = i;
+        fence_count++;
+    }
+    if (fence_count == 0) return;
+
+    check_wait_backend_result(
+        state:     state,
+        operation: "wait_swapchain_presentations",
+        result:    wait_fn(
+            state.device,
+            fence_count,
+            &fences[0],
+            (vk::Bool32)1,
+            timeout_ns,
+        ),
+    )!;
+    check_backend_result(
+        state:     state,
+        operation: "reset_swapchain_presentations",
+        result:    reset_fn(
+            state.device,
+            fence_count,
+            &fences[0],
+        ),
+    )!;
+    for (uint i = 0; i < fence_count; i++) {
+        slot.present_fence_pending[indices[i]] = false;
+    }
+}
+
+fn void? wait_present_fences(
+    VkDeviceState* state,
+    SwapchainSlot* slot,
+    ulong timeout_ns,
+) @private {
+    return wait_present_fences_with(
+        state:     state,
+        slot:      slot,
+        timeout_ns: timeout_ns,
+        wait_fn:   &real_swapchain_fence_wait,
+        reset_fn:  &real_swapchain_fence_reset,
+    );
 }
 
 fn void? prepare_present_fence_with(
@@ -861,11 +939,16 @@ fn bool? swapchain_images_referenced_locked(
     return false;
 }
 
-fn void? release_swapchain_images_for_lifecycle(
+fn void? release_swapchain_images_for_lifecycle_with(
     VkDeviceState* state,
     WsiDiagnosticContext* context,
     SwapchainSlot* slot,
-) @private {
+    SwapchainFenceStatusFn status_fn,
+    SwapchainFenceWaitFn wait_fn,
+    SwapchainFenceResetFn reset_fn,
+) {
+    (void)wait_fn;
+    (void)reset_fn;
     if (slot.acquire_pending) {
         return report_wsi_contract(
             context:        context,
@@ -878,8 +961,17 @@ fn void? release_swapchain_images_for_lifecycle(
     bool presentations_pending = !poll_present_fences_with(
         state,
         slot,
-        &real_swapchain_fence_status,
+        status_fn,
     )!;
+    if (presentations_pending) {
+        return report_wsi_contract(
+            context:        context,
+            public_fault:   gpu::RESOURCE_IN_USE,
+            rejected_field: "presentation resource retirement",
+            invariant:      "all prior presentations must complete before release is retried",
+        )~;
+    }
+
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     drain_completed_submitted_commands(state)!;
@@ -890,20 +982,31 @@ fn void? release_swapchain_images_for_lifecycle(
     if (catch guard_fault = swapchain_release_guard(
         acquire_pending:       false,
         images_referenced:     images_referenced,
-        presentations_pending: presentations_pending,
+        presentations_pending: false,
     )) {
         return report_wsi_contract(
             context:        context,
             public_fault:   guard_fault,
-            rejected_field: presentations_pending
-                ? "presentation resource retirement"
-                : "swapchain image references",
-            invariant:      presentations_pending
-                ? "all prior presentations must complete before release is retried"
-                : "all command and texture-view references must be released first",
+            rejected_field: "swapchain image references",
+            invariant:      "all command and texture-view references must be released first",
         )~;
     }
     release_swapchain_images_locked(state, slot);
+}
+
+fn void? release_swapchain_images_for_lifecycle(
+    VkDeviceState* state,
+    WsiDiagnosticContext* context,
+    SwapchainSlot* slot,
+) @private {
+    return release_swapchain_images_for_lifecycle_with(
+        state:     state,
+        context:   context,
+        slot:      slot,
+        status_fn: &real_swapchain_fence_status,
+        wait_fn:   &real_swapchain_fence_wait,
+        reset_fn:  &real_swapchain_fence_reset,
+    );
 }
 
 fn gpu::SwapchainHandle? vk_create_swapchain(
@@ -1010,6 +1113,26 @@ fn void destroy_swapchain_slot(VkDeviceState* state, SwapchainSlot* slot) @priva
         gpu::internal::surface_release_swapchain(&slot.surface_owner)!!;
         slot.surface_owner = {};
     }
+}
+
+fn void? vk_wait_swapchain_presentations(
+    VkDeviceState* state,
+    gpu::SwapchainHandle handle,
+    ulong timeout_ns,
+) {
+    WsiDiagnosticContext context = {
+        .state     = state,
+        .operation = "wait_swapchain_presentations",
+    };
+    SwapchainSlot* slot = resolve_swapchain_for_operation(
+        &context,
+        handle,
+    )!;
+    return wait_present_fences(
+        state:     state,
+        slot:      slot,
+        timeout_ns: timeout_ns,
+    );
 }
 
 fn void? vk_destroy_swapchain(

@@ -38,6 +38,30 @@ points and release acquired images first; retry `RESOURCE_IN_USE` or
 `destroy_swapchain` releases its surface retain only when no image is acquired
 or pending. It inserts no hidden wait.
 
+`wait_swapchain_presentations` explicitly waits for every presentation pending
+when the call begins. The device must own the live swapchain, and the caller
+must externally synchronize acquire, present, resize, destroy, and other work
+on that swapchain. Keep the surface and its native display or window alive and
+pump platform progress while using a blocking timeout.
+
+Use this order before a lifecycle change:
+
+1. establish render completion with `wait_completion`;
+2. call `wait_swapchain_presentations`;
+3. call `resize_swapchain` or `destroy_swapchain`.
+
+`timeout_ns == 0` performs a nonblocking query. `TIMEOUT_INFINITE` waits
+without a deadline. With presentations still pending, `WAIT_TIMEOUT` preserves
+the handle and pending state, emits no diagnostic, and is safe to retry.
+Out-of-host/device memory, `DEVICE_BUSY`, `DEVICE_LOST`, and `BACKEND_ERROR`
+also preserve the handle. The wait consumes neither the swapchain handle nor
+an acquired image, waits no completion point, and retires no command or view
+references. With no pending presentations it returns immediately without a
+native wait or reset.
+
+`resize_swapchain` and `destroy_swapchain` still insert no hidden wait and
+continue to reject outstanding acquisitions, presentations, and image use.
+
 ## Acquire, submit, and present
 
 `acquire_next_image` waits up to a caller-selected timeout and returns

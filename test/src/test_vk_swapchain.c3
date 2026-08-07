@@ -7,6 +7,8 @@ import std::core::mem;
 import vma;
 import vk;
 
+const uint PRESENT_WAIT_CAPTURE_CAPACITY = 8;
+
 const ulong ACQUIRE_FINITE_TIMEOUT_NS = 2_000_000;
 const ulong ACQUIRE_FIXTURE_OWNER = 101;
 
@@ -45,6 +47,19 @@ vk::Image borrowed_view_backing_image;
 uint borrowed_view_swapchain_creates;
 uint borrowed_view_swapchain_destroys;
 uint borrowed_view_acquires;
+
+uint captured_fence_wait_calls;
+uint captured_fence_wait_count;
+vk::Fence[PRESENT_WAIT_CAPTURE_CAPACITY] captured_fence_wait_fences;
+vk::Bool32 captured_fence_wait_all;
+ulong captured_fence_wait_timeout;
+vk::Result captured_fence_wait_result;
+uint captured_batch_reset_calls;
+uint captured_batch_reset_count;
+vk::Fence[PRESENT_WAIT_CAPTURE_CAPACITY] captured_batch_reset_fences;
+vk::Result captured_batch_reset_result;
+gpu::internal::vk::SwapchainSlot* captured_reset_slot;
+bool[PRESENT_WAIT_CAPTURE_CAPACITY] captured_reset_pending_bits;
 
 fn vk::Result capture_acquire(
     vk::Device device,
@@ -356,6 +371,66 @@ fn vk::Result capture_fence_reset(
         "present resets exactly one valid fence");
     captured_fence_reset_calls++;
     return vk::Result.SUCCESS;
+}
+
+fn void reset_present_wait_capture(
+    vk::Result wait_result = vk::Result.SUCCESS,
+    vk::Result reset_result = vk::Result.SUCCESS,
+) {
+    captured_fence_wait_calls = 0;
+    captured_fence_wait_count = 0;
+    captured_fence_wait_fences = {};
+    captured_fence_wait_all = (vk::Bool32)0;
+    captured_fence_wait_timeout = 0;
+    captured_fence_wait_result = wait_result;
+    captured_batch_reset_calls = 0;
+    captured_batch_reset_count = 0;
+    captured_batch_reset_fences = {};
+    captured_batch_reset_result = reset_result;
+    captured_reset_slot = null;
+    captured_reset_pending_bits = {};
+}
+
+fn vk::Result capture_fence_wait(
+    vk::Device device,
+    uint fence_count,
+    vk::Fence* fences,
+    vk::Bool32 wait_all,
+    ulong timeout_ns,
+) {
+    (void)device;
+    assert(fence_count <= PRESENT_WAIT_CAPTURE_CAPACITY,
+        "the wait seam receives a bounded fence set");
+    captured_fence_wait_calls++;
+    captured_fence_wait_count = fence_count;
+    captured_fence_wait_all = wait_all;
+    captured_fence_wait_timeout = timeout_ns;
+    for (uint i = 0; i < fence_count; i++) {
+        captured_fence_wait_fences[i] = fences[i];
+    }
+    return captured_fence_wait_result;
+}
+
+fn vk::Result capture_fence_reset_all(
+    vk::Device device,
+    uint fence_count,
+    vk::Fence* fences,
+) {
+    (void)device;
+    assert(fence_count <= PRESENT_WAIT_CAPTURE_CAPACITY,
+        "the reset seam receives a bounded fence set");
+    captured_batch_reset_calls++;
+    captured_batch_reset_count = fence_count;
+    for (uint i = 0; i < fence_count; i++) {
+        captured_batch_reset_fences[i] = fences[i];
+    }
+    if (captured_reset_slot != null) {
+        for (uint i = 0; i < PRESENT_WAIT_CAPTURE_CAPACITY; i++) {
+            captured_reset_pending_bits[i] =
+                captured_reset_slot.present_fence_pending[i];
+        }
+    }
+    return captured_batch_reset_result;
 }
 
 // Pure swapchain selection logic over synthetic capability lists, plus the
@@ -1078,13 +1153,37 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
     assert(referenced == gpu::RESOURCE_IN_USE,
         "release rejects live command or view references");
 
-    fault presenting = @catch(gpu::internal::vk::swapchain_release_guard(
-        acquire_pending:       false,
-        images_referenced:     false,
-        presentations_pending: true,
-    ));
+    gpu::internal::vk::VkDeviceState state = {};
+    gpu::internal::vk::WsiDiagnosticContext context = {
+        .state     = &state,
+        .operation = "resize_swapchain",
+    };
+    gpu::internal::vk::SwapchainSlot slot = { .image_count = 1 };
+    slot.present_fences[0] = (vk::Fence)1;
+    slot.present_fence_pending[0] = true;
+    captured_fence_status_calls = 0;
+    reset_present_wait_capture(vk::Result.TIMEOUT);
+
+    fault presenting = @catch(
+        gpu::internal::vk::release_swapchain_images_for_lifecycle_with(
+            state:     &state,
+            context:   &context,
+            slot:      &slot,
+            status_fn: &capture_fence_pending,
+            wait_fn:   &capture_fence_wait,
+            reset_fn:  &capture_fence_reset_all,
+        )
+    );
+    assert(captured_fence_wait_calls == 0,
+        "release never waits for pending presentation retirement");
+    assert(captured_batch_reset_calls == 0,
+        "release never resets a still-pending presentation fence");
     assert(presenting == gpu::RESOURCE_IN_USE,
         "release rejects unfinished presentation without waiting");
+    assert(captured_fence_status_calls == 1,
+        "release polls the pending presentation exactly once");
+    assert(slot.present_fence_pending[0],
+        "retryable release preserves pending presentation state");
 }
 
 fn void swapchain_release_detects_shared_resource_references() @test {
@@ -1478,6 +1577,279 @@ fn void present_fence_reuse_is_nonblocking() @test {
         "a signaled fence becomes available for the next present");
     assert(captured_fence_reset_calls == 1,
         "reuse resets the retired fence exactly once");
+}
+
+fn void wait_present_fences_waits_for_all_pending_images() @test {
+    gpu::internal::vk::VkDeviceState state = { .device = (vk::Device)1 };
+    gpu::internal::vk::SwapchainSlot slot = { .image_count = 4 };
+    slot.present_fences[0] = (vk::Fence)17;
+    slot.present_fences[1] = (vk::Fence)19;
+    slot.present_fences[2] = (vk::Fence)23;
+    slot.present_fences[3] = (vk::Fence)29;
+    slot.present_fence_pending[0] = true;
+    slot.present_fence_pending[2] = true;
+    reset_present_wait_capture();
+
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 37_000,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    )!!;
+
+    assert(captured_fence_wait_calls == 1
+        && captured_fence_wait_count == 2
+        && (uint)captured_fence_wait_all != 0
+        && captured_fence_wait_timeout == 37_000,
+        "one wait-all carries the caller timeout and every pending fence");
+    assert(captured_fence_wait_fences[0] == (vk::Fence)17
+        && captured_fence_wait_fences[1] == (vk::Fence)23,
+        "non-pending images are excluded from the wait");
+    assert(captured_batch_reset_calls == 1
+        && captured_batch_reset_count == 2
+        && captured_batch_reset_fences[0] == (vk::Fence)17
+        && captured_batch_reset_fences[1] == (vk::Fence)23,
+        "success resets exactly the waited fence set");
+    assert(!slot.present_fence_pending[0]
+        && !slot.present_fence_pending[2]
+        && !slot.present_fence_pending[1]
+        && !slot.present_fence_pending[3],
+        "all waited pending bits clear after reset");
+}
+
+fn void wait_present_fences_timeout_preserves_every_pending_image() @test {
+    gpu::internal::vk::VkDeviceState state = { .device = (vk::Device)1 };
+    gpu::internal::vk::SwapchainSlot slot = { .image_count = 4 };
+    slot.present_fences[0] = (vk::Fence)31;
+    slot.present_fences[2] = (vk::Fence)37;
+    slot.present_fence_pending[0] = true;
+    slot.present_fence_pending[2] = true;
+    reset_present_wait_capture(vk::Result.TIMEOUT);
+
+    fault timeout = @catch(gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 0,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    ));
+    assert(timeout == gpu::WAIT_TIMEOUT, "native timeout maps to WAIT_TIMEOUT");
+    assert(captured_fence_wait_calls == 1
+        && captured_fence_wait_timeout == 0
+        && captured_batch_reset_calls == 0,
+        "timeout performs no reset");
+    assert(slot.present_fence_pending[0] && slot.present_fence_pending[2],
+        "timeout preserves every entry-time pending bit");
+}
+
+fn void wait_present_fences_empty_set_is_immediate() @test {
+    gpu::internal::vk::VkDeviceState state = { .device = (vk::Device)1 };
+    gpu::internal::vk::SwapchainSlot slot = { .image_count = 4 };
+    reset_present_wait_capture();
+
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 99,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    )!!;
+    assert(captured_fence_wait_calls == 0 && captured_batch_reset_calls == 0,
+        "an empty pending set bypasses both native seams");
+}
+
+fn void wait_present_fences_resets_before_clearing_pending_bits() @test {
+    gpu::internal::vk::VkDeviceState state = { .device = (vk::Device)1 };
+    gpu::internal::vk::SwapchainSlot slot = { .image_count = 3 };
+    slot.present_fences[0] = (vk::Fence)41;
+    slot.present_fences[2] = (vk::Fence)43;
+    slot.present_fence_pending[0] = true;
+    slot.present_fence_pending[2] = true;
+    reset_present_wait_capture();
+    captured_reset_slot = &slot;
+
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 1,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    )!!;
+    assert(captured_reset_pending_bits[0] && captured_reset_pending_bits[2],
+        "reset observes every pending bit before bookkeeping clears");
+    assert(!slot.present_fence_pending[0] && !slot.present_fence_pending[2],
+        "pending bits clear after a successful reset");
+}
+
+fn void wait_present_fences_reset_failure_preserves_pending_bits() @test {
+    gpu::internal::vk::VkDeviceState state = { .device = (vk::Device)1 };
+    gpu::internal::vk::SwapchainSlot slot = { .image_count = 3 };
+    slot.present_fences[0] = (vk::Fence)47;
+    slot.present_fences[1] = (vk::Fence)53;
+    slot.present_fence_pending[0] = true;
+    slot.present_fence_pending[1] = true;
+    reset_present_wait_capture(
+        vk::Result.SUCCESS,
+        vk::Result.ERROR_DEVICE_LOST,
+    );
+
+    fault reset_failure = @catch(gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 1,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    ));
+    assert(reset_failure == gpu::DEVICE_LOST,
+        "reset failure maps to DEVICE_LOST");
+    assert(slot.present_fence_pending[0] && slot.present_fence_pending[1],
+        "reset failure preserves all pending bits");
+
+    reset_present_wait_capture();
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 1,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    )!!;
+    assert(!slot.present_fence_pending[0] && !slot.present_fence_pending[1],
+        "a retry can reset the preserved pending fences");
+}
+
+fn void wait_present_fences_retires_a_reusable_fence() @test {
+    gpu::internal::vk::VkDeviceState state = { .device = (vk::Device)1 };
+    gpu::internal::vk::SwapchainSlot slot = { .image_count = 1 };
+    slot.present_fences[0] = (vk::Fence)59;
+    slot.present_fence_pending[0] = true;
+    reset_present_wait_capture();
+
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 1,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    )!!;
+    slot.present_fence_pending[0] = true;
+    captured_fence_reset_calls = 0;
+    gpu::internal::vk::prepare_present_fence_with(
+        state:       &state,
+        slot:        &slot,
+        image_index: 0,
+        status_fn:   &capture_fence_ready,
+        reset_fn:    &capture_fence_reset,
+    )!!;
+    assert(!slot.present_fence_pending[0] && captured_fence_reset_calls == 1,
+        "a fence retired by the wait is reusable by the next presentation");
+}
+
+fn void wait_present_fences_preserves_outstanding_acquisition_guard() @test {
+    gpu::internal::vk::VkDeviceState state = { .device = (vk::Device)1 };
+    gpu::internal::vk::SwapchainSlot slot = {
+        .image_count      = 1,
+        .acquire_pending  = true,
+    };
+    slot.present_fences[0] = (vk::Fence)61;
+    slot.present_fence_pending[0] = true;
+    reset_present_wait_capture();
+
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 1,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    )!!;
+    assert(slot.acquire_pending,
+        "presentation wait does not consume an outstanding acquisition");
+    assert(
+        @catch(gpu::internal::vk::swapchain_release_guard(
+            acquire_pending:       slot.acquire_pending,
+            images_referenced:     false,
+            presentations_pending: slot.present_fence_pending[0],
+        )) == gpu::INVALID_RESOURCE_STATE,
+        "the acquisition guard still rejects after presentation retirement"
+    );
+}
+
+fn void wait_present_fences_preserves_image_reference_guards() @test {
+    gpu::internal::vk::VkDeviceState state = { .device = (vk::Device)1 };
+    state.resource_mutex.init()!!;
+    defer (void)state.resource_mutex.destroy();
+    gpu::internal::vk::TextureCell[1] textures;
+    gpu::internal::vk::AttachmentViewCell[1] attachment_views;
+    state.textures.owner = 67;
+    state.textures.slots = textures[..];
+    state.attachment_views.owner = 71;
+    state.attachment_views.slots = attachment_views[..];
+    gpu::TextureHandle texture = state.textures.alloc({})!!;
+    gpu::AttachmentViewHandle attachment_view = state.attachment_views.alloc({
+        .texture         = texture,
+        .swapchain_owned = true,
+    })!!;
+    gpu::internal::vk::SwapchainSlot slot = { .image_count = 1 };
+    slot.textures[0] = texture;
+    slot.attachment_views[0] = attachment_view;
+    slot.present_fences[0] = (vk::Fence)73;
+    slot.present_fence_pending[0] = true;
+    state.textures.get(texture)!!.tracked_command_references.add(
+        1,
+        AtomicOrdering.RELAXED,
+    );
+    reset_present_wait_capture();
+
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 1,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    )!!;
+    assert(
+        state.textures.get(texture)!!.tracked_command_references.load(
+            AtomicOrdering.RELAXED,
+        ) == 1,
+        "presentation wait leaves image reference counts unchanged"
+    );
+    assert(
+        gpu::internal::vk::swapchain_images_referenced_locked(&state, &slot)!!,
+        "the image-reference guard still rejects after presentation retirement"
+    );
+    assert(
+        @catch(gpu::internal::vk::swapchain_release_guard(
+            acquire_pending:       false,
+            images_referenced:     true,
+            presentations_pending: false,
+        )) == gpu::RESOURCE_IN_USE,
+        "release remains blocked by the unchanged image reference"
+    );
+}
+
+fn void wait_present_fences_preserves_render_completion_point() @test {
+    gpu::internal::vk::VkDeviceState state = { .device = (vk::Device)1 };
+    gpu::internal::vk::SwapchainSlot slot = {
+        .image_count = 1,
+        .render_completion = {
+            .device  = { .index = 5, .generation = 9 },
+            .payload = 7ull << gpu::internal::COMPLETION_QUEUE_BITS,
+        },
+    };
+    slot.present_fences[0] = (vk::Fence)79;
+    slot.present_fence_pending[0] = true;
+    gpu::CompletionPoint expected = slot.render_completion;
+    reset_present_wait_capture();
+
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &state,
+        slot:       &slot,
+        timeout_ns: 1,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    )!!;
+    assert(slot.render_completion == expected,
+        "presentation wait neither waits nor consumes render completion");
 }
 
 fn void swapchain_readiness_identity_round_trips() @test {
