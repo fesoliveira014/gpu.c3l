@@ -1253,6 +1253,7 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
         "submission-drain faults precede pending-presentation rejection");
     assert(slot.present_fence_pending[0],
         "a drain fault preserves pending presentation state");
+    captured_lifecycle_query_result = vk::Result.SUCCESS;
 }
 
 fn void swapchain_release_detects_shared_resource_references() @test {
@@ -1825,6 +1826,7 @@ fn void wait_present_fences_retires_a_reusable_fence() @test {
     slot.present_fences[0] = (vk::Fence)59;
     slot.present_fence_pending[0] = true;
     reset_present_wait_capture();
+    captured_fence_reset_calls = 0;
 
     gpu::internal::vk::wait_present_fences_with(
         state:      &state,
@@ -1833,17 +1835,17 @@ fn void wait_present_fences_retires_a_reusable_fence() @test {
         wait_fn:    &capture_fence_wait,
         reset_fn:   &capture_fence_reset_all,
     )!!;
-    slot.present_fence_pending[0] = true;
-    captured_fence_reset_calls = 0;
+    assert(!slot.present_fence_pending[0] && captured_batch_reset_calls == 1,
+        "the wait retires and resets the reusable fence exactly once");
     gpu::internal::vk::prepare_present_fence_with(
         state:       &state,
         slot:        &slot,
         image_index: 0,
-        status_fn:   &capture_fence_ready,
+        status_fn:   &capture_fence_pending,
         reset_fn:    &capture_fence_reset,
     )!!;
-    assert(!slot.present_fence_pending[0] && captured_fence_reset_calls == 1,
-        "a fence retired by the wait is reusable by the next presentation");
+    assert(!slot.present_fence_pending[0] && captured_fence_reset_calls == 0,
+        "an already-retired fence needs no additional reset before reuse");
 }
 
 fn void wait_present_fences_preserves_outstanding_acquisition_guard() @test {

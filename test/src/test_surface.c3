@@ -443,6 +443,7 @@ fn void swapchain_wait_rejects_foreign_and_stale_handles_before_native_work() @t
         &swapchain_desc,
     )!!;
     gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
+    gpu::internal::vk::stub_set_present_wait_pending_count(state, 1);
     gpu::internal::vk::stub_reset_present_wait_counts(state);
 
     SwapchainHandle foreign = swapchain;
