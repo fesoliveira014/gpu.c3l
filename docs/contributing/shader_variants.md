@@ -48,7 +48,7 @@ counted line. Sizes are measured artifacts, not estimates.
 | --- | --- | --- | --- | --- | --- | --- |
 | `heap_sample.comp`, `heap_write.comp`, `overlap.comp`, `root_pointer.comp`; `main` | 1 each | Workgroup size is a shared scalar: `HEAP_TILE = 8u`, `OVERLAP_WORKGROUP = 64u`, `ROOT_POINTER_WORKGROUP = 64u` | Generated `const uint` in `test/shaders/generated/*_abi.glsl`, mirrored by `test/src/bindless_abi.c3`, `overlap_abi.c3`, `root_pointer_abi.c3` | 4 modules, 12,848 bytes; one pipeline per creation site | `local_size_x_id` and friends — the canonical use case | Not applicable: generation pins one value on both sides, and dispatch group counts already come from root data |
 | `heap_write.comp` vs `heap_volume_write.comp`; `heap_sample.comp` vs `heap_volume_sample.comp`; `main` | 1 each | 2D versus 3D texture access | Separate sources calling `store_storage_texture`/`sample_texture_2d` versus `store_storage_texture_3d`/`sample_texture_3d`, over distinct root structs | 2 additional modules, 13,496 bytes | None — the difference is descriptor type and image instruction, not a scalar value | Not applicable |
-| `ray_query_triangle.comp` vs `ray_query_aabb.comp`; `main` | 1 each | Triangle versus procedural AABB intersection | Separate sources; the AABB shader adds an intersection function and a candidate-confirmation loop around `rayQueryProceedEXT` | 2 modules, 10,172 bytes | None — the difference is an instruction set and control flow, not a scalar value | Root data could select a branch, but the shaders also differ in committed-intersection handling |
+| `ray_query_triangle.comp` vs `ray_query_aabb.comp`; `main` | 1 each | Triangle versus procedural AABB intersection | Separate sources; the AABB shader adds an intersection function and a candidate-confirmation loop around `rayQueryProceedEXT` | 2 modules, 10,172 bytes | None sufficient — ray flags and cull mask do differ, but an added intersection function and different committed-intersection handling remain | Root data could select a branch, but the shaders also differ in committed-intersection handling |
 | `graphics_size_8.vert`, `graphics_second_offset_4.vert`, `graphics_reversed_members.vert`; `main` | 1 each | Push-constant block layout: member count and `OpMemberDecorate ... Offset` | Three hand-authored `.spvasm` fixtures assembled one-to-one | 3 modules, 1,064 bytes | None — specialization cannot alter a push-constant ABI layout | Not applicable; these exist so reflection rejects them |
 | `multi_entry_root.comp`; `good`, `bad_push`, `bad_descriptor` | 1 module | Three distinct interfaces in one module | `ShaderDesc.entry_point` selects the entry at pipeline creation | 1 module, 852 bytes; one pipeline per selected entry | None | The separate-entry-point mechanism is already the alternative, and it is in use |
 | Remainder | 1 each | Each is a distinct shader, not a rebuild of another | One source, one module, one entry point | 52 modules, 82,412 bytes | None | Not applicable |
@@ -78,7 +78,7 @@ involved in producing them.
 | Largest artifact | `heap_volume_write.comp.spv`, 7,700 bytes |
 | Smallest artifact | `graphics_size_8.vert.spv`, 304 bytes |
 | Full shader build, wall clock | about 5 s |
-| Static pipeline-creation call sites | 107 (63 compute, 43 graphics, 1 ray tracing) |
+| Static pipeline-creation call sites | 107 (62 compute, 43 graphics, 2 ray tracing) |
 
 No module is a duplicate of another. Total shader payload is under 120 KiB and
 a full rebuild takes seconds, so duplicated binaries are not affecting build
