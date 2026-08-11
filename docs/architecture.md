@@ -26,17 +26,19 @@ parallel public profiles, legacy API variants, or compatibility-specific
 pipeline and descriptor models. Validation options change diagnostic cost, not
 API design.
 
-The Vulkan 1.3 baseline is what the public model already requires: buffer
-device addresses, synchronization2, dynamic rendering, timeline semaphores,
-descriptor indexing, and the dynamic graphics state behind `GraphicsState`.
-There is no compatibility path for older Vulkan versions. Adopting a later
+The baseline is Vulkan 1.3 plus the features the public model already uses,
+among them buffer device addresses, synchronization2, dynamic rendering,
+timeline semaphores, descriptor indexing, and the dynamic graphics state
+behind `GraphicsState`. There is no compatibility path for older Vulkan
+versions. Adopting a later
 baseline replaces the superseded 1.3 mechanisms rather than adding a second
 implementation beside them.
 
-Optional capabilities exist only where the GPU operation itself differs, such
-as sparse residency, generated commands, ray queries, and ray-tracing
+Optional capabilities are added only where the GPU operation itself differs,
+such as sparse residency, generated commands, ray queries, and ray-tracing
 pipelines. An alternate implementation of behavior the public API already
-provides is not a capability.
+provides is not a capability. Reported limits and queue properties are
+separate: they describe the selected device, not opt-in operations.
 
 The contributor rules that follow from this direction are in
 [AGENTS.md](../AGENTS.md).
