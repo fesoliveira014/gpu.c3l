@@ -105,10 +105,20 @@ The macros do not set `buffer_reference_align`, so a block keeps the
 extension's default 16-byte reference alignment, matching the 16 bytes
 `AllocationDesc` selects for an allocation that requests no alignment. An array
 element access uses the element's own alignment instead, so a `float` array
-loads at 4 and a `vec4` array at 16. Declare the block directly when a record
-sits at a less strictly aligned address, or when it needs a layout other than
-std430, unqualified read-write access, or more than one member — the macros are
-a convenience over the generated wire types, not a requirement. Because they fix
+loads at 4 and a `vec4` array at 16, and an explicit alignment on an array
+block does not change that.
+
+The record forms therefore carry a real constraint: `GPU_DECLARE_READONLY_REF`
+and `GPU_DECLARE_WRITEONLY_REF` load and store the whole record at 16-byte
+alignment, so the address must be 16-byte aligned. A whole allocation is, but a
+subspan is not — `checked_subspan` promises no alignment beyond a byte. For a
+record at a sub-16 offset, declare the block directly with an explicit
+`buffer_reference_align`, exactly as the generator does for root records. The
+array forms are unaffected, since element alignment governs there.
+
+Declare the block directly, too, when it needs a layout other than std430,
+unqualified read-write access, or more than one member — the macros are a
+convenience over the generated wire types, not a requirement. Because they fix
 the member name, adopting one in an existing shader renames that member at its
 use sites.
 
