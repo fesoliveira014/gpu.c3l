@@ -24,23 +24,31 @@ free stack when one exists, otherwise from a bump pointer:
   `create_texture_views` batch already returns contiguous **ascending** indices.
   Base-plus-offset works today for load-once asset sets, with no API change;
 - after churn: `recycle_texture_descriptor_slot` pushes freed slots
-  (`descriptor_heap.c3:649`) and commit pops them, so a recovered contiguous set
-  arrives in reverse push order — **descending**. Base-plus-offset requires
-  ascending, so contiguity alone is not sufficient; ordering is a second
-  requirement the heap does not provide.
+  (`descriptor_heap.c3:649`) and commit pops them, so a recovered set arrives in
+  **reverse free order**, which the application controls and the heap does not
+  constrain. Base-plus-offset requires ascending order, so contiguity alone is
+  not sufficient; ordering is a second requirement the heap does not provide.
 
 The capacity check is a total-count check, not a contiguity check: headroom is
 `texture_free_count + capacity - texture_next_new` and only `DESCRIPTOR_HEAP_FULL`
 (`gpu.c3i:177`) is raised (`descriptor_heap.c3:1030-1045`).
 
-## No application-local prototype is constructible
+## No application can request contiguity
 
-No public entry point lets an application choose, reserve, or observe descriptor
-slots. `DeviceCaps.texture_heap_capacity` is documented as "Configured semantic
-heap capacity, not the hardware maximum" (`gpu.c3i:468-469`), and `MemoryStats`
-(`gpu.c3i:776-781`) carries no descriptor occupancy. Any range feature is
-therefore necessarily a change to core descriptor allocation, not something an
-application can prototype on top of the existing batch API.
+An application can *observe* slots after the fact: `TextureView.index` is
+public, and live `TextureIndex` values are documented as the zero-based backend
+slot plus one (`gpu.c3i:28-30`). A detect-and-fall-back prototype is therefore
+constructible — publish a batch, check whether the returned indices happen to be
+contiguous and ascending, and store explicit indices when they are not.
+
+What no public entry point offers is a way to *reserve* or *request*
+contiguity, or to observe free-list state before publishing.
+`DeviceCaps.texture_heap_capacity` is documented as "Configured semantic heap
+capacity, not the hardware maximum" (`gpu.c3i:468-469`), and `MemoryStats`
+(`gpu.c3i:776-781`) carries no descriptor occupancy. A guaranteed range is
+therefore necessarily a change to core descriptor allocation, and the
+fragmentation half of the question cannot be prototyped on top of the existing
+batch API at all.
 
 ## Material record size
 
@@ -57,24 +65,29 @@ The library defines no material record; `TextureIndex` appears in neither
 
 Shared data is std430 (`docs/shader_abi.md:34-43`). Four bare `uint`s have
 4-byte alignment, so the raw saving is 12 B per material. Once the record
-carries any vector member its alignment is 16, and std430 rounds the struct — and
-its array stride — up to that alignment: both vector variants become 32 B. For a
-realistic material the saving is **zero**.
+carries a 16-byte-aligned member — a `vec4`, or a matrix — std430 rounds the
+struct and its array stride up to that alignment, and both variants above become
+32 B: the saving is **zero**. A less strictly aligned member keeps part of it;
+with a `vec2` factor the shapes are 24 B and 16 B, an 8 B saving. The issue's own
+four-texture material with a colour factor falls in the zero case.
 
 ## The case for ranges: descriptor-write batching
 
-`accumulate_texture_descriptor_write` (`descriptor_heap.c3:957-998`) emits one
-`VkWriteDescriptorSet` per binding per view — sampled and/or storage, so up to 2
-per view. Publishing `N` views costs `sampled_count + storage_count` writes, up
+`accumulate_texture_descriptor_write` (`descriptor_heap.c3:957-999`) emits one
+`vk::WriteDescriptorSet` per binding per view — sampled and/or storage, so up to
+2 per view. Publishing `N` views costs `sampled_count + storage_count` writes, up
 to `2N`. A contiguous range of uniform usage and binding collapses to one write
 per binding with `dst_array_element = base` and `descriptorCount = N`: at most 2
 writes regardless of `N`.
 
-That also bounds scratch. `max_writes = descs.len * 2` against
-`TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP = 64` (`descriptor_heap.c3:21`,
-`:1076-1084`) means batches above 32 views spill to `talloc`; a merged range
-write would stay on the stack. Whether either effect is measurable requires a
-device.
+The saving is the write array only. A merged write still needs one
+`vk::DescriptorImageInfo` per descriptor, so the image-info array keeps its
+`descs.len * 2` sizing (`descriptor_heap.c3:1082-1084`) and the point at which a
+batch spills past `TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP = 64`
+(`descriptor_heap.c3:21`) is unchanged. `create_texture_views` also allocates
+from `talloc` unconditionally inside `@pool()` (`descriptor_heap.c3:1048-1050`),
+so merging avoids no temporary allocation. Whether the reduced write count is
+measurable requires a device.
 
 ## Not collected
 
@@ -84,15 +97,16 @@ device.
 | GPU timing and output correctness of both representations | same |
 | Observed fragmentation rate under churn | needs a range allocator, which does not exist |
 | Failed-contiguous-allocation frequency | same |
-| Prototype allocator host cost | no allocator was built; none is constructible above the public API |
+| Prototype allocator host cost | no allocator was built; a guaranteed range is not constructible above the public API |
+| Shader data loads or instructions per material | needs the base-plus-offset representation and a device; this is where base-plus-offset plausibly wins, and it is untested |
 
 ## Recommendation
 
 Retain independent `TextureIndex` values. This rests on structural analysis, not
 measurement:
 
-1. no application-local prototype is constructible, so the feature is
-   unavoidably a core descriptor change;
+1. an application can detect contiguity but never request it, so a *guaranteed*
+   range is unavoidably a core descriptor change;
 2. post-churn contiguity **and** ascending order require an allocation policy
    the heap does not have, plus a distinct "free slots exist but none
    contiguous" fault alongside `DESCRIPTOR_HEAP_FULL`;
