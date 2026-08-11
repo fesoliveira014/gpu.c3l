@@ -1737,22 +1737,16 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
         &device,
         gpu::QueueKind.GRAPHICS,
     )!!;
-    gpu::GeneratedScratchDesc scratch = {
-        .pipeline                = pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-        .max_commands_per_list   = 1,
-        .preprocess_buffer_count = 1,
+    gpu::GeneratedWorkReservationDesc scratch = {
+        .pipeline              = pipeline,
+        .kind                  = gpu::GeneratedWorkKind.DISPATCH,
+        .max_commands_per_list = 1,
+        .concurrent_lists      = 1,
     };
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
-        state,
-        &scratch,
-    )!!;
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
-        .generated_preprocess_bytes = (usz)requirements.size,
     };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -1760,7 +1754,7 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
         &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::reserve_generated_scratch(&allocator, &scratch)!!;
+    gpu::reserve_generated_work(&allocator, &scratch)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, pipeline);
@@ -1809,7 +1803,7 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
     assert(args.prepared_layout == gate.captured,
         "prepared dispatch retains the layout captured before concurrent creation");
     gpu::discard_commands(&commands)!!;
-    gpu::release_generated_scratch(
+    gpu::release_generated_work(
         &allocator,
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,

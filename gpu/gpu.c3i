@@ -1239,12 +1239,10 @@ struct RayTracingShaderBindingTable {
 
 const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
 const uint DEFAULT_COMMAND_REFERENCES_PER_LIST = 64;
-const uint DEFAULT_COMMAND_PREPROCESS_PER_LIST = 4;
 const uint MAX_COMMAND_ALLOCATOR_CAPACITY = 4096;
 const uint MAX_COMMAND_REFERENCES_PER_LIST = 4096;
-const uint MAX_COMMAND_PREPROCESS_PER_LIST = 64;
 
-<* Generated-work record kind a scratch reservation serves. *>
+<* Generated-work record kind a reservation serves. *>
 enum GeneratedWorkKind : int {
     DRAW,
     DRAW_INDEXED,
@@ -1374,13 +1372,11 @@ struct CommandAllocator {
 }
 
 <* Zero capacities select the documented defaults except acceleration-structure
-   geometry capacity, where zero disables build recording. Generated preprocess
-   bytes bound exact descriptor-driven reservations; zero disables reservations. *>
+   geometry capacity, where zero disables build recording. Generated-work
+   storage is owned by the backend and sized by explicit reservations. *>
 struct CommandAllocatorDesc {
     uint    command_buffer_capacity;
     uint    max_resource_references_per_list;
-    uint    max_generated_preprocess_buffers_per_list;
-    usz     generated_preprocess_bytes;
     ZString debug_name;
     uint    max_acceleration_structure_geometries_per_build;
 }
@@ -1405,12 +1401,14 @@ struct ExecutableCommandList {
 $assert ExecutableCommandList::size == ulong::size * 2;
 
 <* Cold reservation for one generated-work pipeline and command kind on one
-   allocator. Count bounds each call; buffer count bounds concurrent use. *>
-struct GeneratedScratchDesc {
+   allocator. Command count bounds each generated call; concurrent lists bounds
+   how many command units may hold the reservation at once. The backend derives
+   and owns the private storage both imply. *>
+struct GeneratedWorkReservationDesc {
     PipelineHandle    pipeline;
     GeneratedWorkKind kind;
     uint              max_commands_per_list;
-    uint              preprocess_buffer_count;
+    uint              concurrent_lists;
 }
 
 <* Byte-range copy for cmd_copy_buffer; src and dst must have equal size and

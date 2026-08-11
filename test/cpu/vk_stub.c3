@@ -688,17 +688,17 @@ fn void? vk_destroy_command_allocator(
     if (state.reject_allocator_destroy) return gpu::RESOURCE_IN_USE~;
 }
 
-fn void? vk_reserve_generated_scratch(
+fn void? vk_reserve_generated_work(
     VkDeviceState* state,
     gpu::CommandAllocator* allocator,
-    gpu::GeneratedScratchDesc* desc,
+    gpu::GeneratedWorkReservationDesc* desc,
 ) {
     (void)state;
     (void)allocator;
     (void)desc;
 }
 
-fn void? vk_release_generated_scratch(
+fn void? vk_release_generated_work(
     VkDeviceState* state,
     gpu::CommandAllocator* allocator,
     gpu::PipelineHandle pipeline,

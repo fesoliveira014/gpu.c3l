@@ -401,8 +401,8 @@ then call the matching indirect draw.
 
 All draws in a shared-root indirect call receive the same vertex/fragment root
 pair. Put per-draw records behind the root and index them with `gl_DrawID`.
-Use generated work only after checking `DeviceCaps.generated_work` and
-reserving allocator preprocess storage.
+Use generated work only after checking `DeviceCaps.generated_work` and calling
+`reserve_generated_work` on the quiescent allocator that will record it.
 
 ## Configure graphics state
 

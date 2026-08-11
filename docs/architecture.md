@@ -195,8 +195,9 @@ application's fence for allocator reuse, transient-memory reuse, and resource
 destruction.
 
 Direct, indirect, and generated work share the same command lifecycle.
-Generated work is capability-gated. Each allocator reserves any required
-generated preprocess storage explicitly while quiescent.
+Generated work is capability-gated. Each allocator reserves generated work
+explicitly while quiescent, naming the pipeline, kind, maximum record count,
+and concurrency; the backend owns the private storage those imply.
 
 Acceleration-structure builds reserve fixed geometry/range lowering arrays in
 each command unit. Full builds and in-place updates use caller-owned scratch,
