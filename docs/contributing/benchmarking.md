@@ -85,3 +85,8 @@ allocator context.
 - Never promote a benchmark observation into a public guarantee. The stable
   contract is qualitative: bounded fixed scratch, independent allocators, and
   no hidden waits or per-call application policy.
+
+## Related measurements
+
+- [Shader variants](shader_variants.md) records the shader and SPIR-V artifact
+  inventory, build cost, and pipeline-creation counts.
