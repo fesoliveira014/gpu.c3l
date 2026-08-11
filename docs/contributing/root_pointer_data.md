@@ -75,21 +75,37 @@ follows `benchmarking.md:17-25`; do not restate it in the target.
 ### Bytes written and flushed
 
 A dynamic uniform offset must be a multiple of
-`minUniformBufferOffsetAlignment`. **Assumption: 256 bytes** — the largest
-value Vulkan permits for that limit, and the value common on desktop discrete
-hardware. The root-pointer path has no such constraint; its slot stride is the
-record rounded to its own alignment (8 bytes for both records above).
+`minUniformBufferOffsetAlignment`. The root-pointer path has no such
+constraint; its slot stride is the record rounded to its own alignment (8 bytes
+for both records above).
 
-| Record | Root-pointer stride | Uniform-ring stride | Amplification | Ring bytes at 20 000 commands (root → uniform) |
+That limit varies by an order of magnitude across implementations, so the
+effect is reported as a sensitivity rather than a single number. 256 bytes is
+the largest value Vulkan permits, not a typical one; 64 and 16 are commonly
+reported on desktop discrete parts, and the lavapipe adapter used for this
+repository's software runs reports 16.
+
+Uniform-ring stride, and amplification against the root-pointer stride:
+
+| Record | Root stride | at 16 B | at 64 B | at 256 B |
 | --- | --- | --- | --- | --- |
-| 24 B (`DoublerRoot`) | 24 B | 256 B | 10.67x | 480 000 → 5 120 000 |
-| 32 B (`ComputeRoot`) | 32 B | 256 B | 8.00x | 640 000 → 5 120 000 |
-| 64 B | 64 B | 256 B | 4.00x | 1 280 000 → 5 120 000 |
-| 256 B | 256 B | 256 B | 1.00x | 5 120 000 → 5 120 000 |
+| 24 B (`DoublerRoot`) | 24 B | 32 B (1.33x) | 64 B (2.67x) | 256 B (10.67x) |
+| 32 B (`ComputeRoot`) | 32 B | 32 B (1.00x) | 64 B (2.00x) | 256 B (8.00x) |
+| 64 B | 64 B | 64 B (1.00x) | 64 B (1.00x) | 256 B (4.00x) |
+| 256 B | 256 B | 256 B (1.00x) | 256 B (1.00x) | 256 B (1.00x) |
+
+At 20 000 commands the 24-byte record moves 480 000 bytes through the root
+path, against 640 000 at 16-byte alignment and 5 120 000 at 256.
+
+So this cost is real only where the limit is large, and it nearly vanishes at
+16 bytes. Read the actual value from `VkPhysicalDeviceLimits` on the primary
+development GPU before using this table as evidence.
 
 This is a bandwidth and footprint statement, not a latency one. It says nothing
-about which path executes faster. Flushed bytes follow the same stride on
-non-coherent memory.
+about which path executes faster. On non-coherent memory a per-record flush
+rounds both paths up to `nonCoherentAtomSize` (64 bytes on the same adapter),
+which erodes the root path's advantage for the small records; the strides above
+hold for one contiguous end-of-frame flush.
 
 ### Native commands and pipeline-layout state
 
@@ -99,13 +115,19 @@ buffer and carries no dynamic offsets (`bind_descriptor_heap`,
 
 | Per compute dispatch | Root pointer | Fixed dynamic uniform |
 | --- | --- | --- |
-| Push constants | 8 B (`push_compute_root`, `gpu/internal/vk/command.c3:2238-2252`) | droppable |
+| Push constants | 8 B (`push_compute_root`, `gpu/internal/vk/command.c3:2238-2252`) | droppable for compute only — see below |
 | Descriptor-set binds | once per command buffer | once per command, with one dynamic offset |
 | Dispatch calls | 1 | 1 |
 
 At 20 000 dispatches that is one set bind plus 20 000 8-byte pushes against
 20 000 set binds. Which is cheaper on real hardware is exactly the open
 question.
+
+Graphics does not fit the one-binding shape. A graphics command pushes two
+independent roots in a 16-byte block (`docs/shader_abi.md:17-26`,
+`gpu/internal/vk/pipeline_cache.c3:577-582`), so one uniform binding with one
+dynamic offset cannot express it: the uniform path would need two bindings, two
+dynamic offsets, or retained push constants for the graphics case alone.
 
 ## Implementation-complexity comparison
 
@@ -134,8 +156,10 @@ implementation is warranted only when the fixed uniform path shows a
 repeatable, material improvement, so absent that evidence the current model
 stands. This is not a finding that the uniform path is slower — it has not been
 measured. The recommendation rests on the absent evidence plus the complexity
-list above; the one static performance-adjacent fact, ring write amplification,
-favours the current path on footprint only.
+list above. The one static performance-adjacent fact, ring write amplification,
+favours the current path on footprint only, and only where
+`minUniformBufferOffsetAlignment` is large — at the 16-byte alignment this
+repository's software adapter reports, it is close to nothing.
 
 Revisit when a sibling of `command_path_baseline_bench` on the primary
 development GPU shows the uniform path reducing median end-to-end time for the
