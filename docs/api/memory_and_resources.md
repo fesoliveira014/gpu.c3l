@@ -212,6 +212,10 @@ batch on failure. `destroy_texture_view` releases its slot.
 no owner or generation. Destroying the view makes the index immediately
 recyclable, so wait for all shader uses before destruction.
 
+Indices from one batch are independent values and are neither contiguous nor
+ordered once descriptor slots have been recycled. Store the exact index each
+shader needs rather than deriving one index from another.
+
 `AccelerationStructureView.index` follows the same raw-value rule for TLAS
 descriptors, while the view itself blocks TLAS destruction until retired.
 
