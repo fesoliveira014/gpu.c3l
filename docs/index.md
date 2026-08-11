@@ -40,6 +40,7 @@ faults.
 - [Style](contributing/style.md)
 - [Testing](contributing/testing.md)
 - [Benchmarking](contributing/benchmarking.md)
+- [Texture index ranges](contributing/texture_index_ranges.md)
 
 Repository workflow and contributor setup live in
 [`AGENTS.md`](../AGENTS.md), outside the published consumer guide.
