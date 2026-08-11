@@ -40,6 +40,7 @@ faults.
 - [Style](contributing/style.md)
 - [Testing](contributing/testing.md)
 - [Benchmarking](contributing/benchmarking.md)
+- [Shader variants](contributing/shader_variants.md)
 
 Repository workflow and contributor setup live in
 [`AGENTS.md`](../AGENTS.md), outside the published consumer guide.
