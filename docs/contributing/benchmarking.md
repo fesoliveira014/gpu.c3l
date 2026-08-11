@@ -85,3 +85,6 @@ allocator context.
 - Never promote a benchmark observation into a public guarantee. The stable
   contract is qualitative: bounded fixed scratch, independent allocators, and
   no hidden waits or per-call application policy.
+- [Root-pointer data vs a fixed dynamic-uniform path](root_pointer_data.md)
+  records the per-command data-path comparison, its derived byte and native-work
+  costs, and the measurements that still need the primary development GPU.
