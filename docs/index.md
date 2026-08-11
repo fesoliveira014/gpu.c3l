@@ -40,6 +40,7 @@ faults.
 - [Style](contributing/style.md)
 - [Testing](contributing/testing.md)
 - [Benchmarking](contributing/benchmarking.md)
+- [Root-pointer data](contributing/root_pointer_data.md)
 
 Repository workflow and contributor setup live in
 [`AGENTS.md`](../AGENTS.md), outside the published consumer guide.
