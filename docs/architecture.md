@@ -4,7 +4,7 @@
 
 `gpu.c3l` exposes a small, explicit GPU API for C3. Its public model is shaped
 around devices, queues, allocations, resources, commands, and completion—not
-around Vulkan objects. The private backend currently targets Vulkan 1.3.
+around Vulkan objects. The private backend targets Vulkan 1.3.
 
 The design favors predictable ownership and low hidden work:
 
@@ -18,6 +18,28 @@ The design favors predictable ownership and low hidden work:
 The library is not an engine and does not provide a render graph, scene model,
 resource streamer, frame scheduler, compatibility descriptor API, or automatic
 hazard tracking.
+
+### One programming model, one backend path
+
+There is one public programming model and one backend path. There are no
+parallel public profiles, legacy API variants, or compatibility-specific
+pipeline and descriptor models. Validation options change diagnostic cost, not
+API design.
+
+The Vulkan 1.3 baseline is what the public model already requires: buffer
+device addresses, synchronization2, dynamic rendering, timeline semaphores,
+descriptor indexing, and the dynamic graphics state behind `GraphicsState`.
+There is no compatibility path for older Vulkan versions. Adopting a later
+baseline replaces the superseded 1.3 mechanisms rather than adding a second
+implementation beside them.
+
+Optional capabilities exist only where the GPU operation itself differs, such
+as sparse residency, generated commands, ray queries, and ray-tracing
+pipelines. An alternate implementation of behavior the public API already
+provides is not a capability.
+
+The contributor rules that follow from this direction are in
+[AGENTS.md](../AGENTS.md).
 
 ## Modules and backend boundary
 

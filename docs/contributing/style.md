@@ -39,7 +39,7 @@ Sample modules may use sample-specific namespaces. Do not put samples in `module
 | Variables, fields, parameters | `snake_case` | `queue_index`, `debug_name`, `memory_class` |
 | Functions | `snake_case` | `allocate_memory`, `cmd_dispatch`, `wait_completion` |
 | Structs, enums, typedefs, aliases | `PascalCase` | `RuntimeDesc`, `GpuSpan`, `TextureUsage` |
-| Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_SHADER_HEAP_CAPACITY`, `TRANSFER_DST`, `DEVICE_LOST` |
+| Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_SHADER_HEAP_CAPACITY`, `TRANSFER_DESTINATION`, `DEVICE_LOST` |
 | Modules | lowercase, dotted | `gpu`, `gpu::internal`, `gpu::internal::vk` |
 | Files | `snake_case.c3` | `descriptor_heap.c3`, `pipeline_graphics.c3` |
 

@@ -28,6 +28,15 @@ private Vulkan 1.3 backend is `gpu::internal::vk`. The project targets
   ownership tokens.
 - Respect the threading tiers and lock ordering documented in
   [architecture.md](docs/architecture.md).
+- Keep one public programming model and one Vulkan 1.3 backend path. Vulkan
+  1.2 fallback and side-by-side version-specific implementations are not
+  planned work; a later baseline replaces superseded 1.3 mechanisms.
+- Add an optional capability only for a genuinely different GPU operation, not
+  for a second implementation of existing public behavior.
+- Prefer one direct implementation, small semantic APIs, and application-owned
+  policy, driven by real consuming projects. Avoid speculative backend
+  interfaces, extension registries, profile matrices, and fallback state
+  machines.
 
 ## C3 style
 
