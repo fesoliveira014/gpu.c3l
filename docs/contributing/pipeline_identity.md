@@ -61,11 +61,18 @@ remaining hits are a deliberate preflight failure
 `sample_count`; the one occurrence, `volume_texture/main.c3:100`, is a
 `TextureDesc`.
 
-**Timing and reuse.** All sample pipelines are created during initialization.
-Eleven samples re-create the same descriptor on the swapchain-resize path (for
-example `hello_triangle_sdl/main.c3:318` and `:347`,
-`present_mode_explorer/main.c3:105`), each resolving to the existing cache
-entry. Two measurements show raster permutations already collapsing:
+**Timing and reuse.** Almost every sample pipeline is created during
+initialization; `present_mode_explorer/main.c3:105` is the exception, creating
+inside the frame loop. Samples that re-create on the swapchain path guard it on
+a format change, not on resize — `bool pipeline_changed = !pipeline_valid ||
+color_formats[0] != swapchain_info.format` (`textured_cube/main.c3:279`, same
+shape at `deferred_shading/main.c3:370`, `hello_triangle_sdl/main.c3:341`,
+`present_mode_explorer/main.c3:100`). A resize that keeps the format re-creates
+nothing, and when the branch does fire the sample destroys first and then
+creates against the new format, so it is a distinct key rather than a cache
+hit. Re-creation is therefore rare, bounded, and off the steady-state frame
+path, and neither field under review participates in it. Two measurements show
+raster permutations already collapsing:
 `test/src/pipeline_cache_bench.c3:129-145` creates
 `BENCH_RASTER_PERMUTATION_COUNT` (200, `:14`) handles from a single descriptor
 while varying `DynamicRasterState`, and
