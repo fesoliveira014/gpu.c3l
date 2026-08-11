@@ -65,6 +65,79 @@ The shader uses a buffer-reference block emitted by the generator and casts the
 pushed address to that reference. Application code obtains the root address
 with `get_span_address`.
 
+## Buffer-reference declarations
+
+The generator owns every root block. A shader casts the pushed address to the
+generated name directly and never wraps a root in a helper:
+
+```glsl
+SampleRoot root = SampleRoot(pc.root_gpu);
+```
+
+Data reached *through* a root address is declared by the shader.
+`include/shaders/buffer_reference.glsl` provides the four common shapes. The
+include requires `GL_EXT_buffer_reference` and `GL_EXT_buffer_reference2`, and
+each macro expands to one std430 block with a single member named `value` for a
+record or `values` for a runtime array:
+
+```glsl
+#include "buffer_reference.glsl"
+
+GPU_DECLARE_READONLY_REF(NAME, TYPE);         // { TYPE value; }
+GPU_DECLARE_WRITEONLY_REF(NAME, TYPE);        // { TYPE value; }
+GPU_DECLARE_READONLY_ARRAY_REF(NAME, TYPE);   // { TYPE values[]; }
+GPU_DECLARE_WRITEONLY_ARRAY_REF(NAME, TYPE);  // { TYPE values[]; }
+```
+
+The call site supplies the terminating semicolon. Casts stay ordinary GLSL:
+
+```glsl
+GPU_DECLARE_READONLY_REF(CameraData, Camera);
+GPU_DECLARE_READONLY_ARRAY_REF(MaterialTable, Material);
+GPU_DECLARE_WRITEONLY_ARRAY_REF(OutputTable, vec4);
+
+Camera camera = CameraData(root.camera_gpu).value;
+Material material = MaterialTable(root.materials_gpu).values[index];
+OutputTable(root.output_gpu).values[index] = shaded;
+```
+
+The macros do not set `buffer_reference_align`, so a block keeps the
+extension's default 16-byte reference alignment, matching the 16 bytes
+`AllocationDesc` selects for an allocation that requests no alignment. An array
+element access uses the element's own alignment instead, so a `float` array
+loads at 4 and a `vec4` array at 16. Declare the block directly when a record
+sits at a less strictly aligned address, or when it needs a layout other than
+std430, unqualified read-write access, or more than one member — the macros are
+a convenience over the generated wire types, not a requirement. Because they fix
+the member name, adopting one in an existing shader renames that member at its
+use sites.
+
+A reference carries an address and nothing else: no length, no ownership, no
+bounds checking, no robustness. Counts travel as ordinary root fields beside
+the address, and the shader performs its own bounds test:
+
+```text
+root MaterialRoot {
+    GpuAddress materials_gpu;
+    uint material_count;
+    uint _pad0;
+}
+```
+
+Application code publishes the address and the count together, and
+`mapped_gpu_span` returns the mapping and address of one allocation span:
+
+```c3
+gpu::MappedGpuSpan mapped = gpu::mapped_gpu_span(&device, material_span)!;
+root.materials_gpu = mapped.address;
+root.material_count = material_count;
+gpu::flush_mapped_span(&device, root_span)!;
+```
+
+The address inherits the allocation's lifetime. The application keeps that
+allocation live through GPU completion, keeps the span and the GLSL declaration
+on compatible alignment and layout, and flushes CPU writes when required.
+
 ## Texture and sampler values
 
 `TextureIndex` and `SamplerIndex` are 32-bit shader-visible heap values.
@@ -195,8 +268,11 @@ committed so consumers do not run the generator to build the library.
 The generator owns every mirrored data layout. Hand-written shader code owns
 only:
 
-- access-qualified array-view buffer-reference wrappers; and
+- access-qualified buffer-reference wrappers for record and array views; and
 - the push-constant binding block containing generated fields in schema order.
+
+`include/shaders/buffer_reference.glsl` supplies the common wrapper forms; see
+[Buffer-reference declarations](#buffer-reference-declarations).
 
 Do not hand-copy a shared struct into C3 and GLSL. Add it to a schema instead.
 GLSL names are emitted verbatim, so schema fields must avoid GLSL keywords.
