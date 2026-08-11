@@ -753,15 +753,13 @@ fn void? ensure_generated_reservation_storage_locked(
         (sz)total,
     );
     if (catch index_storage) return gpu::OUT_OF_HOST_MEMORY~;
+    defer catch alloc::free(state.host_allocator, index_storage.ptr);
     GeneratedPreprocessBuffer[]? reservations = alloc::new_array_try(
         state.host_allocator,
         GeneratedPreprocessBuffer,
         (sz)total,
     );
-    if (catch reservations) {
-        alloc::free(state.host_allocator, index_storage.ptr);
-        return gpu::OUT_OF_HOST_MEMORY~;
-    }
+    if (catch reservations) return gpu::OUT_OF_HOST_MEMORY~;
     slot.preprocess_index_storage = index_storage;
     slot.reservations = reservations;
     for (usz i = 0; i < capacity; i++) {

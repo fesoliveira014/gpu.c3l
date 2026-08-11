@@ -1401,9 +1401,11 @@ struct ExecutableCommandList {
 $assert ExecutableCommandList::size == ulong::size * 2;
 
 <* Cold reservation for one generated-work pipeline and command kind on one
-   allocator. Command count bounds each generated call; concurrent lists bounds
-   how many command units may hold the reservation at once. The backend derives
-   and owns the private storage both imply. *>
+   allocator. Command count bounds the records one generated call may request.
+   Every generated call still in flight holds one unit of the reservation, so
+   size concurrent lists as command units times generated calls per unit, not
+   as a count of command units. The backend derives and owns the private
+   storage both imply. *>
 struct GeneratedWorkReservationDesc {
     PipelineHandle    pipeline;
     GeneratedWorkKind kind;

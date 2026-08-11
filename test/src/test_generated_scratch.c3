@@ -157,7 +157,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         kind:         gpu::GeneratedWorkKind.DISPATCH,
         max_count:    1,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
-        "concurrent use beyond the reserved list count is deterministic");
+        "concurrent use beyond the reserved unit count is deterministic");
 
     gpu::discard_commands(&commands)!!;
     gpu::CommandList retry = gpu::begin_commands(&allocator)!!;

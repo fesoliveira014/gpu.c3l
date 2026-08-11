@@ -68,12 +68,24 @@ only:
 - `pipeline` and `kind` form the reservation key;
 - `max_commands_per_list` bounds the record count one generated call may
   request; and
-- `concurrent_lists` bounds how many command units may hold the reservation at
-  the same time.
+- `concurrent_lists` bounds how many generated calls may hold the reservation
+  at the same time.
+
+Every generated call in flight holds one unit until its command unit retires or
+is discarded, including two calls recorded into the same command list. Size
+`concurrent_lists` as command units times generated calls per unit; a value of
+one admits a single generated call, not a single list.
 
 The backend derives and owns the exact private storage those two limits imply
 for the selected device and pipeline. There are no public byte sizes,
 alignments, or storage handles.
+
+The allocator's reservation table is fixed at 64 units per command buffer and
+is allocated on the first successful reservation, so an allocator that never
+reserves generated work carries no generated-work storage. The table scales
+with `command_buffer_capacity`, so a large capacity combined with generated
+work costs proportionally more host memory; size the allocator to the recording
+work it actually performs.
 
 Reserving again for the same key replaces the reservation. Replacement is
 transactional: on failure the previous reservation stays published and usable.
@@ -82,9 +94,9 @@ Allocator destruction releases the allocator's generated-work storage.
 
 Recording only consumes an existing matching reservation. A generated call
 performs no requirements query, host allocation, or native object creation.
-Requesting more records than `max_commands_per_list`, or more simultaneous
-holders than `concurrent_lists`, returns `GENERATED_SCRATCH_EXHAUSTED` without
-recording a partial command. Exceeding the allocator's fixed reservation table
+Requesting more records than `max_commands_per_list`, or more generated calls
+in flight than `concurrent_lists`, returns `GENERATED_SCRATCH_EXHAUSTED`
+without recording a partial command. Exceeding the allocator's fixed reservation table
 returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` from the reservation call.
 
 ## Transfer and buffer commands
