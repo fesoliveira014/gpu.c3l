@@ -307,12 +307,12 @@ fn void reference_capacity_preflight_counts_unique_identities() @test {
         .generation = 3,
     };
     vk::CommandResourceReference[2] duplicates = { first, first };
-    vk::CommandResourceReference[2] distinct = { first, second };
+    vk::CommandResourceReference[2] distinct_refs = { first, second };
 
     vk::preflight_command_references(&record, duplicates[..])!!;
     assert(@catch(vk::preflight_command_references(
         &record,
-        distinct[..],
+        distinct_refs[..],
     ))
         == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
         "preflight counts identities independently of queue topology");

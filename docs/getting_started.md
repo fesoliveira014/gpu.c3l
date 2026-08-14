@@ -4,13 +4,13 @@ This guide has two steps. First, add `gpu.c3l` to a C3 application and run a
 minimal headless compute program. Then add SDL3 and render a triangle to a
 window.
 
-The examples target **C3 0.8.0**, `linux-x64` or `windows-x64`, and Vulkan 1.3.
+The examples target **C3 0.8.3**, `linux-x64` or `windows-x64`, and Vulkan 1.3.
 
 ## Prerequisites
 
 Install:
 
-- C3 0.8.0 (`c3c --version`);
+- C3 0.8.3 (`c3c --version`);
 - a Vulkan 1.3 loader and qualifying driver;
 - `glslangValidator` or `glslc`; and
 - Git with submodule support.
