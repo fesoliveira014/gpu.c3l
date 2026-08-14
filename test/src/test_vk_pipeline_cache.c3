@@ -799,7 +799,7 @@ fn void shader_store_collision_verification_is_exact() @test {
     distinct_desc.spirv = distinct_storage;
     vk::VkDeviceState* state = cache_test_state(&device);
     vk::ShaderIdentityInput first;
-    vk::ShaderIdentityInput distinct;
+    vk::ShaderIdentityInput distinct_input;
     vk::ShaderIdentityInput alternate_entry;
     vk::ShaderIdentityInput different_length;
     vk::normalize_shader_input(
@@ -816,9 +816,9 @@ fn void shader_store_collision_verification_is_exact() @test {
         role:           gpu::internal::ShaderRole.COMPUTE,
         operation:      "test_shader_store_collision",
         rejected_field: "ShaderDesc",
-        out_input:      &distinct,
+        out_input:      &distinct_input,
     )!!;
-    distinct.hash = first.hash;
+    distinct_input.hash = first.hash;
     gpu::ShaderDesc alternate_entry_desc = first_desc;
     alternate_entry_desc.entry_point = "alternate";
     vk::normalize_shader_input(
@@ -839,7 +839,7 @@ fn void shader_store_collision_verification_is_exact() @test {
     vk::ShaderId first_id = vk::retain_shader_identity_locked(state, &first)!!;
     vk::ShaderId distinct_id = vk::retain_shader_identity_locked(
         state,
-        &distinct,
+        &distinct_input,
     )!!;
     vk::ShaderId alternate_entry_id =
         vk::retain_shader_identity_locked(state, &alternate_entry)!!;
@@ -889,7 +889,7 @@ fn void shader_store_collision_verification_is_exact() @test {
     assert(mem::equals(vk::shader_entry_bytes(first_entry), first.spirv)
             && mem::equals(
                 vk::shader_entry_bytes(distinct_entry),
-                distinct.spirv,
+                distinct_input.spirv,
             )
             && mem::equals(
                 vk::shader_entry_bytes(alternate_entry_value),

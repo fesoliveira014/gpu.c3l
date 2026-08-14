@@ -2,7 +2,7 @@
 
 ## 1. Language target
 
-Target C3 0.8.0. C3 is pre-1.0, so code examples and implementation work must be verified against the target compiler rather than memory of earlier syntax.
+Target C3 0.8.3. C3 is pre-1.0, so code examples and implementation work must be verified against the target compiler rather than memory of earlier syntax.
 
 ## 2. Module names
 

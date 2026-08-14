@@ -97,7 +97,7 @@ The private Vulkan backend keeps the request policy through the same canonical
 selection used by support preflight and authoritative creation. Alias checks
 compare both family and queue index, because family-level presentation support
 does not make two different native queues equal. When `single_queue` is false,
-the existing required/distinct validation, default normalization, and
+the existing required/distinct_roles validation, default normalization, and
 preference order—including asynchronous-compute and transfer preferences—
 remain unchanged. The API reports semantic queue capabilities and requires the
 caller to express every cross-queue dependency.
@@ -310,7 +310,7 @@ validation policy, queue topology, and environment with every benchmark.
 
 ## Platform and dependency boundary
 
-The library supports `linux-x64` and `windows-x64`, targets C3 0.8.0, and
+The library supports `linux-x64` and `windows-x64`, targets C3 0.8.3, and
 requires a Vulkan 1.3 loader, VMA, and SPIR-V reflection support. Binding
 packages are vendored submodules and native VMA artifacts use the consuming
 target's CRT/link configuration. Shader compilation is an application build

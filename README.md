@@ -32,7 +32,7 @@ destruction.
 
 ## Requirements and status
 
-The current release targets **C3 0.8.0** and a Vulkan 1.3 implementation with
+The current release targets **C3 0.8.3** and a Vulkan 1.3 implementation with
 the required modern synchronization, dynamic-rendering, descriptor-indexing,
 buffer-device-address, and dynamic-state features. Supported library targets
 are `linux-x64` and `windows-x64`. SDL3 is used by the samples, not by the

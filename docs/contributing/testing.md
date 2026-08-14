@@ -17,7 +17,7 @@ configuration, assembly, or benchmark output as a correctness policy.
 
 ## Toolchain and dependencies
 
-Use C3 0.8.0 and initialize the binding submodules:
+Use C3 0.8.3 and initialize the binding submodules:
 
 ```sh
 c3c --version
