@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts import build_distribution
+from scripts import package_release
 
 
 COMMIT = "a" * 40
@@ -53,6 +54,47 @@ git submodule add https://github.com/fesoliveira014/gpu.c3l-dist lib/gpu.c3l
 
 
 class BuildDistributionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.source_directory = tempfile.TemporaryDirectory()
+        self.source_root = Path(self.source_directory.name)
+        source_files = {
+            "LICENSE": "license\n",
+            "README.md": "source release readme\n",
+            "manifest.json": "{}\n",
+            "gpu/gpu.c3": "module gpu;\n",
+            "gpu/gpu.c3i": "module gpu;\n",
+            "gpu/extra_gpu.c3": "module gpu;\n",
+            "docs/api/index.md": "# API\n",
+            "lib/vk.c3l/manifest.json": "{}\n",
+            "lib/vk.c3l/LICENSE": "license\n",
+            "lib/vk.c3l/vk.c3": "module vk;\n",
+            "lib/vk.c3l/vk.c3i": "module vk;\n",
+            "lib/vma.c3l/manifest.json": "{}\n",
+            "lib/vma.c3l/LICENSE": "license\n",
+            "lib/vma.c3l/vma.c3": "module vma;\n",
+            "lib/vma.c3l/vma.c3i": "module vma;\n",
+            "lib/spvreflect.c3l/manifest.json": "{}\n",
+            "lib/spvreflect.c3l/LICENSE": "license\n",
+            "lib/spvreflect.c3l/LICENSE.spirv-reflect.apache-2.0": "license\n",
+            "lib/spvreflect.c3l/NOTICE": "notice\n",
+            "lib/spvreflect.c3l/spvreflect.c3": "module spvreflect;\n",
+            "lib/spvreflect.c3l/spvreflect.c3i": "module spvreflect;\n",
+        }
+        source_files.update({path: "# document\n" for path in CONSUMER_DOCS})
+        source_files.update({path: "native\n" for path in (*LINUX_NATIVE_FILES, *WINDOWS_NATIVE_FILES)})
+        for relative, content in source_files.items():
+            destination = self.source_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(content)
+        self.source_root_patch = mock.patch.object(
+            build_distribution, "DEFAULT_SOURCE_ROOT", self.source_root
+        )
+        self.source_root_patch.start()
+
+    def tearDown(self) -> None:
+        self.source_root_patch.stop()
+        self.source_directory.cleanup()
+
     def bundle(self, target: str, *, version: str = "1.2.3", commit: str = COMMIT) -> bytes:
         return (json.dumps({
             "schema": 1,
@@ -75,27 +117,10 @@ class BuildDistributionTests(unittest.TestCase):
 
     def members(self, target: str, **overrides: bytes) -> dict[str, bytes]:
         members = {
-            "gpu.c3l/BUNDLE.json": self.bundle(target),
-            "gpu.c3l/README.md": b"source release readme\n",
-            "gpu.c3l/LICENSE": b"license\n",
-            "gpu.c3l/manifest.json": b"{}\n",
-            "gpu.c3l/gpu/gpu.c3": b"module gpu;\n",
-            "gpu.c3l/gpu/gpu.c3i": b"module gpu;\n",
-            "gpu.c3l/docs/api/index.md": b"# API\n",
-            "gpu.c3l/lib/vk.c3l/manifest.json": b"{}\n",
-            "gpu.c3l/lib/vk.c3l/LICENSE": b"license\n",
-            "gpu.c3l/lib/vma.c3l/manifest.json": b"{}\n",
-            "gpu.c3l/lib/vma.c3l/LICENSE": b"license\n",
-            "gpu.c3l/lib/spvreflect.c3l/manifest.json": b"{}\n",
-            "gpu.c3l/lib/spvreflect.c3l/LICENSE": b"license\n",
-            "gpu.c3l/lib/spvreflect.c3l/LICENSE.spirv-reflect.apache-2.0": b"license\n",
-            "gpu.c3l/lib/spvreflect.c3l/NOTICE": b"notice\n",
+            name: source.read_bytes()
+            for name, source in package_release.collect_release_files(self.source_root, target).items()
         }
-        members.update({f"gpu.c3l/{path}": b"# document\n" for path in CONSUMER_DOCS})
-        members.update({
-            f"gpu.c3l/{path}": f"{target}:{path}\n".encode()
-            for path in (LINUX_NATIVE_FILES if target == "linux-x64" else WINDOWS_NATIVE_FILES)
-        })
+        members["gpu.c3l/BUNDLE.json"] = self.bundle(target)
         members.update(overrides)
         return members
 
@@ -307,7 +332,7 @@ class BuildDistributionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "shared file contents differ"):
                 build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
 
-    def test_rejects_mismatched_shared_file_sets(self) -> None:
+    def test_rejects_unexpected_inventory_member(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             windows_members = self.members("windows-x64")
@@ -317,7 +342,7 @@ class BuildDistributionTests(unittest.TestCase):
             del windows_members["gpu.c3l/gpu/optional.c3"]
             linux, windows = self.fixture_members(directory, linux_members, windows_members)
 
-            with self.assertRaisesRegex(RuntimeError, "shared file sets differ"):
+            with self.assertRaisesRegex(RuntimeError, "archive inventory mismatch"):
                 build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
 
     def test_rejects_identical_omission_of_required_release_member(self) -> None:
@@ -331,6 +356,20 @@ class BuildDistributionTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "missing required release members"):
                 build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_identical_omission_of_non_sentinel_source_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux_members = self.members("linux-x64")
+            windows_members = self.members("windows-x64")
+            del linux_members["gpu.c3l/gpu/extra_gpu.c3"]
+            del windows_members["gpu.c3l/gpu/extra_gpu.c3"]
+            linux, windows = self.fixture_members(directory, linux_members, windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "archive inventory mismatch"):
+                build_distribution.build_distribution(
+                    "v1.2.3", linux, windows, directory / "combined", source_root=self.source_root
+                )
 
     def test_rejects_extra_native_library_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -448,7 +487,9 @@ class BuildDistributionTests(unittest.TestCase):
     def test_cli_runs_as_a_script(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            linux, windows = self.fixtures(directory)
+            archives = directory / "assets"
+            linux = package_release.create_release(ROOT, "1.2.3", "linux-x64", archives)
+            windows = package_release.create_release(ROOT, "1.2.3", "windows-x64", archives)
             output = directory / "combined"
 
             subprocess.run(

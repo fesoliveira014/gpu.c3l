@@ -47,6 +47,7 @@ REQUIRED_SHARED_MEMBERS = frozenset(
         *(f"gpu.c3l/{document}" for document in package_release.CONSUMER_DOCS),
     }
 )
+DEFAULT_SOURCE_ROOT = Path(__file__).resolve().parents[1]
 
 
 def validate_member_name(name: str) -> None:
@@ -154,6 +155,19 @@ def validate_required_members(members: dict[str, bytes]) -> None:
         raise RuntimeError(f"missing required release members: {sorted(missing)}")
 
 
+def validate_release_inventory(members: dict[str, bytes], source_root: Path, target: str) -> None:
+    expected = set(package_release.collect_release_files(source_root, target))
+    expected.add("gpu.c3l/BUNDLE.json")
+    actual = set(members)
+    missing = expected - actual
+    unexpected = actual - expected
+    if missing or unexpected:
+        raise RuntimeError(
+            f"archive inventory mismatch for {target}: "
+            f"missing={sorted(missing)}, unexpected={sorted(unexpected)}"
+        )
+
+
 def shared_members(members: dict[str, bytes]) -> set[str]:
     native_members = {
         f"gpu.c3l/{path}"
@@ -215,7 +229,13 @@ def write_distribution(
     )
 
 
-def build_distribution(tag: str, linux_archive: Path, windows_archive: Path, output_dir: Path) -> None:
+def build_distribution(
+    tag: str,
+    linux_archive: Path,
+    windows_archive: Path,
+    output_dir: Path,
+    source_root: Path | None = None,
+) -> None:
     if not tag.startswith("v"):
         raise ValueError(f"tag must be a v-prefixed semantic version: {tag}")
     package_release.validate_version(tag[1:])
@@ -227,6 +247,7 @@ def build_distribution(tag: str, linux_archive: Path, windows_archive: Path, out
         raise ValueError(f"unexpected windows archive name: {windows_archive.name}")
     if output_dir.exists():
         raise RuntimeError(f"output path already exists: {output_dir}")
+    source_root = (source_root or DEFAULT_SOURCE_ROOT).resolve()
     linux_members = archive_members(linux_archive)
     windows_members = archive_members(windows_archive)
     linux_bundle = json.loads(linux_members["gpu.c3l/BUNDLE.json"])
@@ -240,6 +261,8 @@ def build_distribution(tag: str, linux_archive: Path, windows_archive: Path, out
     validate_declared_native_files(windows_members, "windows-x64")
     validate_required_members(linux_members)
     validate_required_members(windows_members)
+    validate_release_inventory(linux_members, source_root, "linux-x64")
+    validate_release_inventory(windows_members, source_root, "windows-x64")
     validate_shared_files(linux_members, windows_members)
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging_root = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.staging-", dir=output_dir.parent))
