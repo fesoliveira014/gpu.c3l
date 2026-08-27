@@ -20,7 +20,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: sync-distribution-${{ inputs.tag }}
+  # Serialization avoids concurrent mutation, while the source latest-release
+  # check below decides whether a workflow may move distribution main.
+  group: sync-distribution
   cancel-in-progress: false
 
 jobs:
@@ -48,7 +50,31 @@ jobs:
             --pattern "gpu.c3l-${TAG}-windows-x64.zip" \
             --pattern SHA256SUMS
           cd "$RELEASE_DIR"
+          EXPECTED_NAMES="$RELEASE_DIR/expected-checksum-names"
+          UNSORTED_NAMES="$RELEASE_DIR/unsorted-checksum-names"
+          ACTUAL_NAMES="$RELEASE_DIR/actual-checksum-names"
+          printf '%s\n' \
+            "gpu.c3l-${TAG}-linux-x64.tar.gz" \
+            "gpu.c3l-${TAG}-windows-x64.zip" | LC_ALL=C sort > "$EXPECTED_NAMES"
+          awk '
+            /^[[:xdigit:]]{64} [ *][^[:space:]].*$/ { print substr($0, 67); next }
+            { exit 1 }
+          ' SHA256SUMS > "$UNSORTED_NAMES"
+          LC_ALL=C sort "$UNSORTED_NAMES" > "$ACTUAL_NAMES"
+          if ! cmp --silent "$EXPECTED_NAMES" "$ACTUAL_NAMES"; then
+            echo "SHA256SUMS must name each canonical release archive exactly once" >&2
+            exit 1
+          fi
           sha256sum --check --strict SHA256SUMS
+
+      - name: Determine source latest release
+        id: source_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST_TAG="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          test -n "$LATEST_TAG"
+          printf 'latest_tag=%s\n' "$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Build combined distribution
         env:
@@ -73,40 +99,75 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Compare existing distribution tag
-        id: existing_tag
+      - name: Determine distribution release state
+        id: distribution_state
+        env:
+          TAG: ${{ inputs.tag }}
+          LATEST_TAG: ${{ steps.source_release.outputs.latest_tag }}
+        run: |
+          GENERATED_INDEX="$RUNNER_TEMP/generated-distribution.index"
+          rm -f "$GENERATED_INDEX"
+          export GIT_INDEX_FILE="$GENERATED_INDEX"
+          git -C distribution read-tree --empty
+          git -C distribution --work-tree="$RUNNER_TEMP/generated-distribution" add --all
+          GENERATED_TREE="$(git -C distribution write-tree)"
+          rm -f "$GENERATED_INDEX"
+          unset GIT_INDEX_FILE
+
+          if git -C distribution rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            TAG_TREE="$(git -C distribution rev-parse "$TAG^{tree}")"
+            if [ "$GENERATED_TREE" != "$TAG_TREE" ]; then
+              echo "distribution tag $TAG differs from generated contents" >&2
+              exit 1
+            fi
+
+            if [ "$TAG" = "$LATEST_TAG" ]; then
+              echo "state=existing_latest" >> "$GITHUB_OUTPUT"
+            else
+              echo "state=existing_historical" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          if [ "$TAG" = "$LATEST_TAG" ]; then
+            echo "state=new_latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=new_historical" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore distribution main from latest tag
+        if: steps.distribution_state.outputs.state == 'existing_latest'
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          if git -C distribution rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
-            EXISTING_DIR="$RUNNER_TEMP/existing-distribution"
-            mkdir "$EXISTING_DIR"
-            git -C distribution archive --format=tar "$TAG" | tar -x -C "$EXISTING_DIR"
-            if diff -r --brief --no-dereference "$EXISTING_DIR" "$RUNNER_TEMP/generated-distribution"; then
-              echo "already_published=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "distribution tag $TAG differs from generated contents" >&2
-            exit 1
+          TAG_COMMIT="$(git -C distribution rev-parse "$TAG^{commit}")"
+          REMOTE_MAIN="$(git -C distribution ls-remote --refs origin refs/heads/main | awk '{print $1}')"
+          test -n "$REMOTE_MAIN"
+          if [ "$REMOTE_MAIN" != "$TAG_COMMIT" ]; then
+            git -C distribution push \
+              --force-with-lease=refs/heads/main:"$REMOTE_MAIN" \
+              origin "$TAG_COMMIT:refs/heads/main"
           fi
-          echo "already_published=false" >> "$GITHUB_OUTPUT"
 
       - name: Replace distribution contents
-        if: steps.existing_tag.outputs.already_published == 'false'
+        if: steps.distribution_state.outputs.state == 'new_latest' || steps.distribution_state.outputs.state == 'new_historical'
         run: |
           find distribution -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a "$RUNNER_TEMP/generated-distribution"/. distribution/
 
       - name: Commit and publish distribution tag
-        if: steps.existing_tag.outputs.already_published == 'false'
+        if: steps.distribution_state.outputs.state == 'new_latest' || steps.distribution_state.outputs.state == 'new_historical'
         env:
           TAG: ${{ inputs.tag }}
+          LATEST_TAG: ${{ steps.source_release.outputs.latest_tag }}
         run: |
           git -C distribution config user.name "github-actions[bot]"
           git -C distribution config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C distribution add --all
-          if ! git -C distribution diff --cached --quiet; then
-            git -C distribution commit -m "Release $TAG"
-          fi
+          git -C distribution commit --allow-empty -m "Release $TAG"
           git -C distribution tag -a "$TAG" -m "Release $TAG"
-          git -C distribution push --atomic origin main "refs/tags/$TAG"
+          if [ "$TAG" = "$LATEST_TAG" ]; then
+            git -C distribution push --atomic origin HEAD:refs/heads/main "refs/tags/$TAG"
+          else
+            git -C distribution push origin "refs/tags/$TAG"
+          fi
