@@ -68,7 +68,9 @@ python3 scripts/package_release.py \
 CI produces both target archives in each platform job, combines them into a
 disposable `lib/gpu.c3l` consumer layout, and builds and runs the maintained
 `project.release.json` getting-started program without resolving files from the
-repository checkout.
+repository checkout. Before publication, the release job combines the exact
+Linux and Windows artifacts uploaded by their respective jobs against the
+tagged source checkout.
 
 Run the CPU compile and test targets:
 

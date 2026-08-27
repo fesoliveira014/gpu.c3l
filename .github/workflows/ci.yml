@@ -170,6 +170,9 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Preserve canonical source line endings
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -384,11 +387,27 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out source release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          submodules: recursive
+
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
+
+      - name: Verify cross-job distribution
+        run: |
+          OUTPUT_DIR="$RUNNER_TEMP/release-distribution"
+          test ! -e "$OUTPUT_DIR"
+          python3 scripts/build_distribution.py \
+            --tag "$GITHUB_REF_NAME" \
+            --linux-archive "dist/gpu.c3l-${GITHUB_REF_NAME}-linux-x64.tar.gz" \
+            --windows-archive "dist/gpu.c3l-${GITHUB_REF_NAME}-windows-x64.zip" \
+            --output-dir "$OUTPUT_DIR"
 
       - name: Create checksums
         run: |

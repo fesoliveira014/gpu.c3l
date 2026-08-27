@@ -24,6 +24,7 @@ concurrency:
   # check below decides whether a workflow may move distribution main.
   group: sync-distribution
   cancel-in-progress: false
+  queue: max
 
 jobs:
   sync:
