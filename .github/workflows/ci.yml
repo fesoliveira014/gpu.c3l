@@ -387,6 +387,7 @@ jobs:
             dist/gpu.c3l-v*-linux-x64.tar.gz \
             dist/gpu.c3l-v*-windows-x64.zip \
             dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --generate-notes \
             --title "gpu.c3l $GITHUB_REF_NAME"
