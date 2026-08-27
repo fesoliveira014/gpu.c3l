@@ -56,6 +56,20 @@ NATIVE_FILES = {
     ),
 }
 
+FORBIDDEN_RELEASE_PATH_PARTS = frozenset(
+    {
+        ".git",
+        ".github",
+        "test",
+        "tests",
+        "examples",
+        "scripts",
+        "openspec",
+        "contributing",
+        "sdl3.c3l",
+    }
+)
+
 
 def run_git(root: Path, *args: str) -> str:
     result = subprocess.run(

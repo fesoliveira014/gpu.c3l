@@ -1,0 +1,347 @@
+import hashlib
+import io
+import json
+import subprocess
+import tarfile
+import tempfile
+import unittest
+import warnings
+import zipfile
+from pathlib import Path
+
+from scripts import build_distribution
+from scripts import package_release
+
+
+COMMIT = "a" * 40
+COMPONENT_COMMITS = ("b" * 40, "c" * 40, "d" * 40)
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class BuildDistributionTests(unittest.TestCase):
+    def bundle(self, target: str, *, version: str = "1.2.3", commit: str = COMMIT) -> bytes:
+        return (json.dumps({
+            "schema": 1,
+            "name": "gpu.c3l",
+            "version": version,
+            "target": target,
+            "source": {
+                "repository": package_release.REPOSITORY,
+                "commit": commit,
+            },
+            "components": [
+                {
+                    "name": component["name"],
+                    "repository": component["repository"],
+                    "commit": component_commit,
+                }
+                for component, component_commit in zip(package_release.COMPONENTS, COMPONENT_COMMITS)
+            ],
+        }, indent=2) + "\n").encode()
+
+    def members(self, target: str, **overrides: bytes) -> dict[str, bytes]:
+        members = {
+            "gpu.c3l/BUNDLE.json": self.bundle(target),
+            "gpu.c3l/README.md": b"source release readme\n",
+            "gpu.c3l/LICENSE": b"license\n",
+            "gpu.c3l/gpu/gpu.c3": b"module gpu;\n",
+        }
+        members.update({
+            f"gpu.c3l/{path}": f"{target}:{path}\n".encode()
+            for path in package_release.NATIVE_FILES[target]
+        })
+        members.update(overrides)
+        return members
+
+    def write_tar(self, path: Path, members: dict[str, bytes]) -> None:
+        with tarfile.open(path, "w:gz") as archive:
+            for name, content in members.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(content)
+                archive.addfile(info, fileobj=io.BytesIO(content))
+
+    def write_zip(self, path: Path, members: dict[str, bytes]) -> None:
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, content in members.items():
+                archive.writestr(name, content)
+
+    def fixtures(self, directory: Path) -> tuple[Path, Path]:
+        return self.fixture_members(directory, self.members("linux-x64"), self.members("windows-x64"))
+
+    def fixture_members(
+        self, directory: Path, linux_members: dict[str, bytes], windows_members: dict[str, bytes]
+    ) -> tuple[Path, Path]:
+        linux = directory / "gpu.c3l-v1.2.3-linux-x64.tar.gz"
+        windows = directory / "gpu.c3l-v1.2.3-windows-x64.zip"
+        self.write_tar(linux, linux_members)
+        self.write_zip(windows, windows_members)
+        return linux, windows
+
+    def test_builds_combined_tree_with_distribution_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+            output = directory / "combined"
+
+            build_distribution.build_distribution(
+                tag="v1.2.3",
+                linux_archive=linux,
+                windows_archive=windows,
+                output_dir=output,
+            )
+
+            self.assertEqual(
+                set(package_release.NATIVE_FILES["linux-x64"])
+                | set(package_release.NATIVE_FILES["windows-x64"]),
+                {
+                    path.relative_to(output).as_posix()
+                    for path in output.rglob("*")
+                    if path.is_file() and path.suffix in {".a", ".lib", ".dll"}
+                },
+            )
+            self.assertFalse((output / "BUNDLE.json").exists())
+            self.assertEqual(build_distribution.DISTRIBUTION_README, (output / "README.md").read_text())
+            metadata = json.loads((output / "DISTRIBUTION.json").read_text())
+            self.assertEqual(1, metadata["schema"])
+            self.assertEqual("1.2.3", metadata["version"])
+            self.assertEqual(["linux-x64", "windows-x64"], metadata["targets"])
+            self.assertEqual(package_release.REPOSITORY, metadata["source"]["repository"])
+            self.assertEqual("v1.2.3", metadata["source"]["tag"])
+            self.assertEqual(COMMIT, metadata["source"]["commit"])
+            self.assertEqual(
+                [linux.name, windows.name],
+                [archive["basename"] for archive in metadata["source_archives"]],
+            )
+            self.assertEqual(
+                [
+                    hashlib.sha256(linux.read_bytes()).hexdigest(),
+                    hashlib.sha256(windows.read_bytes()).hexdigest(),
+                ],
+                [archive["sha256"] for archive in metadata["source_archives"]],
+            )
+            self.assertEqual(
+                [COMPONENT_COMMITS[0], COMPONENT_COMMITS[1], COMPONENT_COMMITS[2]],
+                [component["commit"] for component in metadata["components"]],
+            )
+
+    def test_rejects_mismatched_bundle_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            windows_members = self.members("windows-x64")
+            bundle = json.loads(windows_members["gpu.c3l/BUNDLE.json"])
+            bundle["source"]["commit"] = "e" * 40
+            windows_members["gpu.c3l/BUNDLE.json"] = (json.dumps(bundle) + "\n").encode()
+            linux, windows = self.fixture_members(directory, self.members("linux-x64"), windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "source provenance mismatch"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_mismatched_bundle_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            windows_members = self.members("windows-x64")
+            bundle = json.loads(windows_members["gpu.c3l/BUNDLE.json"])
+            bundle["version"] = "1.2.4"
+            windows_members["gpu.c3l/BUNDLE.json"] = (json.dumps(bundle) + "\n").encode()
+            linux, windows = self.fixture_members(directory, self.members("linux-x64"), windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "bundle version mismatch"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_requires_v_tag_to_match_bundle_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+
+            with self.assertRaisesRegex(ValueError, "tag version does not match"):
+                build_distribution.build_distribution("v1.2.4", linux, windows, directory / "combined")
+
+    def test_rejects_mismatched_component_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            windows_members = self.members("windows-x64")
+            bundle = json.loads(windows_members["gpu.c3l/BUNDLE.json"])
+            bundle["components"][0]["commit"] = "e" * 40
+            windows_members["gpu.c3l/BUNDLE.json"] = (json.dumps(bundle) + "\n").encode()
+            linux, windows = self.fixture_members(directory, self.members("linux-x64"), windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "component provenance mismatch"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_missing_declared_native_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux_members = self.members("linux-x64")
+            missing = package_release.NATIVE_FILES["linux-x64"][0]
+            del linux_members[f"gpu.c3l/{missing}"]
+            linux, windows = self.fixture_members(directory, linux_members, self.members("windows-x64"))
+
+            with self.assertRaisesRegex(RuntimeError, "missing declared native files"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_duplicate_archive_members(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with zipfile.ZipFile(windows, "a") as archive:
+                    archive.writestr("gpu.c3l/README.md", b"duplicate\n")
+
+            with self.assertRaisesRegex(RuntimeError, "duplicate archive member"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_traversal_and_development_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for name in ("gpu.c3l/../escape", "gpu.c3l/scripts/unsafe.py"):
+                with self.subTest(name=name):
+                    linux_members = self.members("linux-x64", **{name: b"unsafe\n"})
+                    windows_members = self.members("windows-x64", **{name: b"unsafe\n"})
+                    linux, windows = self.fixture_members(directory, linux_members, windows_members)
+                    with self.assertRaisesRegex(RuntimeError, "unsafe archive member"):
+                        build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+                    for path in (linux, windows):
+                        path.unlink()
+
+    def test_requires_exact_bundle_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            windows_members = self.members("windows-x64")
+            bundle = json.loads(windows_members["gpu.c3l/BUNDLE.json"])
+            bundle["target"] = "linux-x64"
+            windows_members["gpu.c3l/BUNDLE.json"] = (json.dumps(bundle) + "\n").encode()
+            linux, windows = self.fixture_members(directory, self.members("linux-x64"), windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "unexpected bundle target"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_altered_shared_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            windows_members = self.members("windows-x64", **{"gpu.c3l/gpu/gpu.c3": b"different\n"})
+            linux, windows = self.fixture_members(directory, self.members("linux-x64"), windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "shared file contents differ"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_mismatched_shared_file_sets(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            windows_members = self.members("windows-x64")
+            del windows_members["gpu.c3l/LICENSE"]
+            linux, windows = self.fixture_members(directory, self.members("linux-x64"), windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "shared file sets differ"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_extra_native_library_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            extra = "gpu.c3l/lib/vma.c3l/linked-libs/linux-x64/extra.a"
+            linux_members = self.members("linux-x64", **{extra: b"extra\n"})
+            windows_members = self.members("windows-x64", **{extra: b"extra\n"})
+            linux, windows = self.fixture_members(directory, linux_members, windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "unexpected native file"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_native_library_in_wrong_target_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            wrong = package_release.NATIVE_FILES["windows-x64"][0]
+            linux_members = self.members("linux-x64", **{f"gpu.c3l/{wrong}": b"wrong\n"})
+            linux, windows = self.fixture_members(directory, linux_members, self.members("windows-x64"))
+
+            with self.assertRaisesRegex(RuntimeError, "unexpected native file"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_refuses_nonempty_output_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+            output = directory / "combined"
+            output.mkdir()
+            (output / "stale-file").write_text("stale\n")
+
+            with self.assertRaisesRegex(RuntimeError, "output directory is not empty"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, output)
+
+    def test_output_is_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+            first, second = directory / "first", directory / "second"
+            build_distribution.build_distribution("v1.2.3", linux, windows, first)
+            build_distribution.build_distribution("v1.2.3", linux, windows, second)
+
+            self.assertEqual(
+                {
+                    path.relative_to(first).as_posix(): hashlib.sha256(path.read_bytes()).digest()
+                    for path in first.rglob("*") if path.is_file()
+                },
+                {
+                    path.relative_to(second).as_posix(): hashlib.sha256(path.read_bytes()).digest()
+                    for path in second.rglob("*") if path.is_file()
+                },
+            )
+
+    def test_rejects_invalid_bundle_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux_members = self.members("linux-x64")
+            windows_members = self.members("windows-x64")
+            for members in (linux_members, windows_members):
+                bundle = json.loads(members["gpu.c3l/BUNDLE.json"])
+                bundle["source"]["commit"] = "not-a-commit"
+                members["gpu.c3l/BUNDLE.json"] = (json.dumps(bundle) + "\n").encode()
+            linux, windows = self.fixture_members(directory, linux_members, windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "invalid bundle manifest"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_non_file_archive_member(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux = directory / "gpu.c3l-v1.2.3-linux-x64.tar.gz"
+            with tarfile.open(linux, "w:gz") as archive:
+                for name, content in self.members("linux-x64").items():
+                    info = tarfile.TarInfo(name)
+                    info.size = len(content)
+                    archive.addfile(info, io.BytesIO(content))
+                link = tarfile.TarInfo("gpu.c3l/gpu/link")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "gpu.c3"
+                archive.addfile(link)
+            windows = directory / "gpu.c3l-v1.2.3-windows-x64.zip"
+            self.write_zip(windows, self.members("windows-x64"))
+
+            with self.assertRaisesRegex(RuntimeError, "unsafe archive member type"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_cli_runs_as_a_script(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+            output = directory / "combined"
+
+            subprocess.run(
+                [
+                    "python3",
+                    str(ROOT / "scripts/build_distribution.py"),
+                    "--tag", "v1.2.3",
+                    "--linux-archive", str(linux),
+                    "--windows-archive", str(windows),
+                    "--output-dir", str(output),
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertTrue((output / "DISTRIBUTION.json").is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()
