@@ -1,0 +1,112 @@
+name: Sync distribution
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      DIST_REPO_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Source release tag to synchronize
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-distribution-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Download and verify source release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          RELEASE_DIR="$RUNNER_TEMP/source-release"
+          mkdir -p "$RELEASE_DIR"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$RELEASE_DIR" \
+            --pattern "gpu.c3l-${TAG}-linux-x64.tar.gz" \
+            --pattern "gpu.c3l-${TAG}-windows-x64.zip" \
+            --pattern SHA256SUMS
+          cd "$RELEASE_DIR"
+          sha256sum --check --strict SHA256SUMS
+
+      - name: Build combined distribution
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          RELEASE_DIR="$RUNNER_TEMP/source-release"
+          OUTPUT_DIR="$RUNNER_TEMP/generated-distribution"
+          test ! -e "$OUTPUT_DIR"
+          python3 scripts/build_distribution.py \
+            --tag "$TAG" \
+            --linux-archive "$RELEASE_DIR/gpu.c3l-${TAG}-linux-x64.tar.gz" \
+            --windows-archive "$RELEASE_DIR/gpu.c3l-${TAG}-windows-x64.zip" \
+            --output-dir "$OUTPUT_DIR"
+
+      - name: Check out distribution repository
+        uses: actions/checkout@v4
+        with:
+          repository: fesoliveira014/gpu.c3l-dist
+          ref: main
+          path: distribution
+          token: ${{ secrets.DIST_REPO_TOKEN }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compare existing distribution tag
+        id: existing_tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if git -C distribution rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            EXISTING_DIR="$RUNNER_TEMP/existing-distribution"
+            mkdir "$EXISTING_DIR"
+            git -C distribution archive --format=tar "$TAG" | tar -x -C "$EXISTING_DIR"
+            if diff -r --brief --no-dereference "$EXISTING_DIR" "$RUNNER_TEMP/generated-distribution"; then
+              echo "already_published=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "distribution tag $TAG differs from generated contents" >&2
+            exit 1
+          fi
+          echo "already_published=false" >> "$GITHUB_OUTPUT"
+
+      - name: Replace distribution contents
+        if: steps.existing_tag.outputs.already_published == 'false'
+        run: |
+          find distribution -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$RUNNER_TEMP/generated-distribution"/. distribution/
+
+      - name: Commit and publish distribution tag
+        if: steps.existing_tag.outputs.already_published == 'false'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          git -C distribution config user.name "github-actions[bot]"
+          git -C distribution config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C distribution add --all
+          if ! git -C distribution diff --cached --quiet; then
+            git -C distribution commit -m "Release $TAG"
+          fi
+          git -C distribution tag -a "$TAG" -m "Release $TAG"
+          git -C distribution push --atomic origin main "refs/tags/$TAG"
