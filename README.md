@@ -46,13 +46,21 @@ it for a platform or workload.
 
 - [Getting started](docs/getting_started.md) — run a minimal compute program,
   then build an SDL3 triangle.
-- [Documentation](docs/index.md) — concepts, recipes, API reference, and
-  contributor guides.
+- [Documentation](docs/index.md) — concepts, recipes, and API reference.
 - [Public API](docs/api/index.md) — domain-oriented symbol reference.
 - [Sample applications](https://github.com/fesoliveira014/gpu.c3l-samples) —
   maintained end-to-end examples.
 
-Clone with submodules:
+## Install
+
+Download the matching archive from the
+[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest), then
+extract it as `lib/gpu.c3l` in your application. Release archives contain the
+library, its three runtime binding dependencies, native libraries for one
+target, licenses, and consumer documentation.
+
+To track the Git repository instead, clone recursively. The recursive checkout
+contains only the three runtime bindings (`vk`, `vma`, and `spvreflect`):
 
 ```sh
 git clone --recurse-submodules https://github.com/fesoliveira014/gpu.c3l.git

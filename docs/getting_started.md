@@ -29,7 +29,7 @@ Use this application layout:
 ```text
 hello_gpu/
 ├── lib/
-│   └── gpu.c3l/             cloned recursively
+│   └── gpu.c3l/             release bundle or recursive clone
 ├── shaders/
 │   └── doubler.comp.glsl
 ├── src/
@@ -37,11 +37,18 @@ hello_gpu/
 └── project.json
 ```
 
+Download the archive for your target from the
+[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest) and
+extract its `gpu.c3l/` directory under `hello_gpu/lib/`. To track Git instead:
+
 ```sh
 mkdir -p hello_gpu/lib
 git clone --recurse-submodules \
   https://github.com/fesoliveira014/gpu.c3l.git hello_gpu/lib/gpu.c3l
 ```
+
+The release bundle and recursive clone both provide only the `gpu`, `vk`,
+`vma`, and `spvreflect` packages required by the library.
 
 `project.json` resolves the library plus its binding submodules:
 
@@ -104,7 +111,7 @@ glslangValidator -V --target-env vulkan1.3 \
 ### Record and submit
 
 The complete maintained program is
-[`examples/getting_started/src/main.c3`](../examples/getting_started/src/main.c3).
+[`examples/getting_started/src/main.c3`](https://github.com/fesoliveira014/gpu.c3l/blob/main/examples/getting_started/src/main.c3).
 Copy it as the application's `src/main.c3`; it embeds
 `../shaders/doubler.comp.spv`.
 Its essential flow is:
