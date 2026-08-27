@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -8,14 +9,47 @@ import unittest
 import warnings
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from scripts import build_distribution
-from scripts import package_release
 
 
 COMMIT = "a" * 40
 COMPONENT_COMMITS = ("b" * 40, "c" * 40, "d" * 40)
 ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY = "https://github.com/fesoliveira014/gpu.c3l"
+COMPONENTS = (
+    ("vk.c3l", "https://github.com/fesoliveira014/vk.c3l"),
+    ("vma.c3l", "https://github.com/fesoliveira014/vma.c3l"),
+    ("spvreflect.c3l", "https://github.com/fesoliveira014/spvreflect.c3l"),
+)
+LINUX_NATIVE_FILES = (
+    "lib/vma.c3l/linked-libs/linux-x64/libVulkanMemoryAllocator.a",
+    "lib/spvreflect.c3l/linux/libspvreflect.a",
+)
+WINDOWS_NATIVE_FILES = (
+    "lib/vk.c3l/windows/vulkan-1.lib",
+    "lib/vma.c3l/linked-libs/windows-x64/VulkanMemoryAllocator.lib",
+    "lib/spvreflect.c3l/windows/spvreflect.lib",
+)
+CONSUMER_DOCS = (
+    "docs/index.md",
+    "docs/getting_started.md",
+    "docs/architecture.md",
+    "docs/features_and_limitations.md",
+    "docs/shader_abi.md",
+    "docs/cookbook.md",
+)
+CONSUMER_README = """# gpu.c3l distribution
+
+This directory is generated from the Linux and Windows release bundles and is read-only. Do not edit its contents.
+
+Add this distribution to a consumer checkout with:
+
+```sh
+git submodule add https://github.com/fesoliveira014/gpu.c3l-dist lib/gpu.c3l
+```
+"""
 
 
 class BuildDistributionTests(unittest.TestCase):
@@ -26,16 +60,16 @@ class BuildDistributionTests(unittest.TestCase):
             "version": version,
             "target": target,
             "source": {
-                "repository": package_release.REPOSITORY,
+                "repository": REPOSITORY,
                 "commit": commit,
             },
             "components": [
                 {
-                    "name": component["name"],
-                    "repository": component["repository"],
+                    "name": name,
+                    "repository": repository,
                     "commit": component_commit,
                 }
-                for component, component_commit in zip(package_release.COMPONENTS, COMPONENT_COMMITS)
+                for (name, repository), component_commit in zip(COMPONENTS, COMPONENT_COMMITS)
             ],
         }, indent=2) + "\n").encode()
 
@@ -44,11 +78,23 @@ class BuildDistributionTests(unittest.TestCase):
             "gpu.c3l/BUNDLE.json": self.bundle(target),
             "gpu.c3l/README.md": b"source release readme\n",
             "gpu.c3l/LICENSE": b"license\n",
+            "gpu.c3l/manifest.json": b"{}\n",
             "gpu.c3l/gpu/gpu.c3": b"module gpu;\n",
+            "gpu.c3l/gpu/gpu.c3i": b"module gpu;\n",
+            "gpu.c3l/docs/api/index.md": b"# API\n",
+            "gpu.c3l/lib/vk.c3l/manifest.json": b"{}\n",
+            "gpu.c3l/lib/vk.c3l/LICENSE": b"license\n",
+            "gpu.c3l/lib/vma.c3l/manifest.json": b"{}\n",
+            "gpu.c3l/lib/vma.c3l/LICENSE": b"license\n",
+            "gpu.c3l/lib/spvreflect.c3l/manifest.json": b"{}\n",
+            "gpu.c3l/lib/spvreflect.c3l/LICENSE": b"license\n",
+            "gpu.c3l/lib/spvreflect.c3l/LICENSE.spirv-reflect.apache-2.0": b"license\n",
+            "gpu.c3l/lib/spvreflect.c3l/NOTICE": b"notice\n",
         }
+        members.update({f"gpu.c3l/{path}": b"# document\n" for path in CONSUMER_DOCS})
         members.update({
             f"gpu.c3l/{path}": f"{target}:{path}\n".encode()
-            for path in package_release.NATIVE_FILES[target]
+            for path in (LINUX_NATIVE_FILES if target == "linux-x64" else WINDOWS_NATIVE_FILES)
         })
         members.update(overrides)
         return members
@@ -91,8 +137,7 @@ class BuildDistributionTests(unittest.TestCase):
             )
 
             self.assertEqual(
-                set(package_release.NATIVE_FILES["linux-x64"])
-                | set(package_release.NATIVE_FILES["windows-x64"]),
+                set(LINUX_NATIVE_FILES) | set(WINDOWS_NATIVE_FILES),
                 {
                     path.relative_to(output).as_posix()
                     for path in output.rglob("*")
@@ -100,17 +145,28 @@ class BuildDistributionTests(unittest.TestCase):
                 },
             )
             self.assertFalse((output / "BUNDLE.json").exists())
-            self.assertEqual(build_distribution.DISTRIBUTION_README, (output / "README.md").read_text())
+            self.assertEqual(CONSUMER_README, (output / "README.md").read_text())
             metadata = json.loads((output / "DISTRIBUTION.json").read_text())
+            self.assertEqual(
+                {"schema", "version", "targets", "source", "components", "source_archives"},
+                set(metadata),
+            )
             self.assertEqual(1, metadata["schema"])
             self.assertEqual("1.2.3", metadata["version"])
             self.assertEqual(["linux-x64", "windows-x64"], metadata["targets"])
-            self.assertEqual(package_release.REPOSITORY, metadata["source"]["repository"])
+            self.assertEqual(REPOSITORY, metadata["source"]["repository"])
             self.assertEqual("v1.2.3", metadata["source"]["tag"])
             self.assertEqual(COMMIT, metadata["source"]["commit"])
             self.assertEqual(
                 [linux.name, windows.name],
                 [archive["basename"] for archive in metadata["source_archives"]],
+            )
+            self.assertEqual(
+                ["linux-x64", "windows-x64"],
+                [archive["target"] for archive in metadata["source_archives"]],
+            )
+            self.assertTrue(
+                all({"target", "basename", "sha256"} == set(archive) for archive in metadata["source_archives"])
             )
             self.assertEqual(
                 [
@@ -152,9 +208,29 @@ class BuildDistributionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             linux, windows = self.fixtures(directory)
+            linux = linux.rename(directory / "gpu.c3l-v1.2.4-linux-x64.tar.gz")
+            windows = windows.rename(directory / "gpu.c3l-v1.2.4-windows-x64.zip")
 
             with self.assertRaisesRegex(ValueError, "tag version does not match"):
                 build_distribution.build_distribution("v1.2.4", linux, windows, directory / "combined")
+
+    def test_requires_canonical_tagged_input_asset_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+            renamed_linux = directory / "linux.tar.gz"
+            linux.rename(renamed_linux)
+
+            with self.assertRaisesRegex(ValueError, "unexpected linux archive name"):
+                build_distribution.build_distribution("v1.2.3", renamed_linux, windows, directory / "combined")
+
+    def test_rejects_swapped_input_asset_roles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+
+            with self.assertRaisesRegex(ValueError, "unexpected linux archive name"):
+                build_distribution.build_distribution("v1.2.3", windows, linux, directory / "combined")
 
     def test_rejects_mismatched_component_commits(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -172,7 +248,7 @@ class BuildDistributionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             linux_members = self.members("linux-x64")
-            missing = package_release.NATIVE_FILES["linux-x64"][0]
+            missing = LINUX_NATIVE_FILES[0]
             del linux_members[f"gpu.c3l/{missing}"]
             linux, windows = self.fixture_members(directory, linux_members, self.members("windows-x64"))
 
@@ -194,7 +270,13 @@ class BuildDistributionTests(unittest.TestCase):
     def test_rejects_traversal_and_development_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            for name in ("gpu.c3l/../escape", "gpu.c3l/scripts/unsafe.py"):
+            for name in (
+                "gpu.c3l/../escape",
+                "gpu.c3l/scripts/unsafe.py",
+                "gpu.c3l/.gitmodules",
+                "gpu.c3l//README.md",
+                "gpu.c3l/gpu/./gpu.c3",
+            ):
                 with self.subTest(name=name):
                     linux_members = self.members("linux-x64", **{name: b"unsafe\n"})
                     windows_members = self.members("windows-x64", **{name: b"unsafe\n"})
@@ -229,10 +311,25 @@ class BuildDistributionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             windows_members = self.members("windows-x64")
-            del windows_members["gpu.c3l/LICENSE"]
-            linux, windows = self.fixture_members(directory, self.members("linux-x64"), windows_members)
+            windows_members["gpu.c3l/gpu/optional.c3"] = b"optional\n"
+            linux_members = self.members("linux-x64")
+            linux_members["gpu.c3l/gpu/optional.c3"] = b"optional\n"
+            del windows_members["gpu.c3l/gpu/optional.c3"]
+            linux, windows = self.fixture_members(directory, linux_members, windows_members)
 
             with self.assertRaisesRegex(RuntimeError, "shared file sets differ"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_identical_omission_of_required_release_member(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux_members = self.members("linux-x64")
+            windows_members = self.members("windows-x64")
+            del linux_members["gpu.c3l/manifest.json"]
+            del windows_members["gpu.c3l/manifest.json"]
+            linux, windows = self.fixture_members(directory, linux_members, windows_members)
+
+            with self.assertRaisesRegex(RuntimeError, "missing required release members"):
                 build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
 
     def test_rejects_extra_native_library_paths(self) -> None:
@@ -249,23 +346,40 @@ class BuildDistributionTests(unittest.TestCase):
     def test_rejects_native_library_in_wrong_target_archive(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            wrong = package_release.NATIVE_FILES["windows-x64"][0]
+            wrong = WINDOWS_NATIVE_FILES[0]
             linux_members = self.members("linux-x64", **{f"gpu.c3l/{wrong}": b"wrong\n"})
             linux, windows = self.fixture_members(directory, linux_members, self.members("windows-x64"))
 
             with self.assertRaisesRegex(RuntimeError, "unexpected native file"):
                 build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
 
-    def test_refuses_nonempty_output_directory(self) -> None:
+    def test_refuses_any_existing_output_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+            for kind in ("directory", "file"):
+                with self.subTest(kind=kind):
+                    output = directory / f"combined-{kind}"
+                    if kind == "directory":
+                        output.mkdir()
+                    else:
+                        output.write_text("existing\n")
+
+                    with self.assertRaisesRegex(RuntimeError, "output path already exists"):
+                        build_distribution.build_distribution("v1.2.3", linux, windows, output)
+
+    def test_cleans_staging_when_publication_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             linux, windows = self.fixtures(directory)
             output = directory / "combined"
-            output.mkdir()
-            (output / "stale-file").write_text("stale\n")
 
-            with self.assertRaisesRegex(RuntimeError, "output directory is not empty"):
-                build_distribution.build_distribution("v1.2.3", linux, windows, output)
+            with mock.patch.object(Path, "replace", side_effect=OSError("publication failure")):
+                with self.assertRaisesRegex(OSError, "publication failure"):
+                    build_distribution.build_distribution("v1.2.3", linux, windows, output)
+
+            self.assertFalse(output.exists())
+            self.assertEqual([], list(directory.glob(".combined.staging-*")))
 
     def test_output_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -315,6 +429,18 @@ class BuildDistributionTests(unittest.TestCase):
                 archive.addfile(link)
             windows = directory / "gpu.c3l-v1.2.3-windows-x64.zip"
             self.write_zip(windows, self.members("windows-x64"))
+
+            with self.assertRaisesRegex(RuntimeError, "unsafe archive member type"):
+                build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")
+
+    def test_rejects_non_regular_zip_unix_member_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            linux, windows = self.fixtures(directory)
+            with zipfile.ZipFile(windows, "a") as archive:
+                info = zipfile.ZipInfo("gpu.c3l/gpu/fifo")
+                info.external_attr = (stat.S_IFIFO | 0o644) << 16
+                archive.writestr(info, b"")
 
             with self.assertRaisesRegex(RuntimeError, "unsafe archive member type"):
                 build_distribution.build_distribution("v1.2.3", linux, windows, directory / "combined")

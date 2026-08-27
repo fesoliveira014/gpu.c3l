@@ -115,11 +115,20 @@ class PackageReleaseTests(unittest.TestCase):
         }
         self.assertTrue(required <= members, required - members)
 
+        forbidden_parts = {
+            ".git",
+            ".github",
+            ".gitmodules",
+            "test",
+            "tests",
+            "examples",
+            "scripts",
+            "openspec",
+            "contributing",
+            "sdl3.c3l",
+        }
         for member in members:
-            self.assertTrue(
-                package_release.FORBIDDEN_RELEASE_PATH_PARTS.isdisjoint(Path(member).parts),
-                member,
-            )
+            self.assertTrue(forbidden_parts.isdisjoint(Path(member).parts), member)
 
     def assert_bundle_metadata(self, bundle: dict, target: str) -> None:
         self.assertEqual(1, bundle["schema"])

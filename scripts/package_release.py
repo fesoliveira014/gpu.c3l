@@ -60,6 +60,7 @@ FORBIDDEN_RELEASE_PATH_PARTS = frozenset(
     {
         ".git",
         ".github",
+        ".gitmodules",
         "test",
         "tests",
         "examples",

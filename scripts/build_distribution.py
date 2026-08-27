@@ -4,7 +4,10 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
+import stat
 import tarfile
+import tempfile
 import zipfile
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -19,21 +22,47 @@ DISTRIBUTION_README = """# gpu.c3l distribution
 
 This directory is generated from the Linux and Windows release bundles and is read-only. Do not edit its contents.
 
-To initialize this library's ordinary dependencies in a source checkout, use the non-recursive submodule command:
+Add this distribution to a consumer checkout with:
 
 ```sh
-git submodule update --init
+git submodule add https://github.com/fesoliveira014/gpu.c3l-dist lib/gpu.c3l
 ```
 """
 
+REQUIRED_SHARED_MEMBERS = frozenset(
+    {
+        "gpu.c3l/LICENSE",
+        "gpu.c3l/manifest.json",
+        "gpu.c3l/gpu/gpu.c3",
+        "gpu.c3l/gpu/gpu.c3i",
+        "gpu.c3l/docs/api/index.md",
+        "gpu.c3l/lib/vk.c3l/manifest.json",
+        "gpu.c3l/lib/vk.c3l/LICENSE",
+        "gpu.c3l/lib/vma.c3l/manifest.json",
+        "gpu.c3l/lib/vma.c3l/LICENSE",
+        "gpu.c3l/lib/spvreflect.c3l/manifest.json",
+        "gpu.c3l/lib/spvreflect.c3l/LICENSE",
+        "gpu.c3l/lib/spvreflect.c3l/LICENSE.spirv-reflect.apache-2.0",
+        "gpu.c3l/lib/spvreflect.c3l/NOTICE",
+        *(f"gpu.c3l/{document}" for document in package_release.CONSUMER_DOCS),
+    }
+)
+
 
 def validate_member_name(name: str) -> None:
+    if not name.startswith("gpu.c3l/") or "\\" in name:
+        raise RuntimeError(f"unsafe archive member: {name}")
+    relative = name[len("gpu.c3l/"):]
+    raw_parts = relative.split("/")
+    if (
+        not relative
+        or any(part in {"", ".", ".."} for part in raw_parts)
+        or package_release.FORBIDDEN_RELEASE_PATH_PARTS.intersection(raw_parts)
+    ):
+        raise RuntimeError(f"unsafe archive member: {name}")
     path = PurePosixPath(name)
     if (
-        not name.startswith("gpu.c3l/")
-        or "\\" in name
-        or path.is_absolute()
-        or any(part in {"", ".", ".."} for part in path.parts)
+        path.is_absolute()
         or package_release.FORBIDDEN_RELEASE_PATH_PARTS.intersection(path.parts)
     ):
         raise RuntimeError(f"unsafe archive member: {name}")
@@ -44,7 +73,8 @@ def archive_members(archive_path: Path) -> dict[str, bytes]:
     if archive_path.suffix == ".zip":
         with zipfile.ZipFile(archive_path) as archive:
             for info in archive.infolist():
-                if info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000:
+                member_type = stat.S_IFMT(info.external_attr >> 16)
+                if info.is_dir() or member_type not in {0, stat.S_IFREG}:
                     raise RuntimeError(f"unsafe archive member type: {info.filename}")
                 validate_member_name(info.filename)
                 if info.filename in members:
@@ -118,6 +148,12 @@ def validate_declared_native_files(members: dict[str, bytes], target: str) -> No
         raise RuntimeError(f"unexpected native file: {sorted(unexpected)}")
 
 
+def validate_required_members(members: dict[str, bytes]) -> None:
+    missing = REQUIRED_SHARED_MEMBERS - set(members)
+    if missing:
+        raise RuntimeError(f"missing required release members: {sorted(missing)}")
+
+
 def shared_members(members: dict[str, bytes]) -> set[str]:
     native_members = {
         f"gpu.c3l/{path}"
@@ -137,38 +173,28 @@ def validate_shared_files(linux_members: dict[str, bytes], windows_members: dict
             raise RuntimeError(f"shared file contents differ: {name}")
 
 
-def build_distribution(tag: str, linux_archive: Path, windows_archive: Path, output_dir: Path) -> None:
-    if not tag.startswith("v"):
-        raise ValueError(f"tag must be a v-prefixed semantic version: {tag}")
-    package_release.validate_version(tag[1:])
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise RuntimeError(f"output directory is not empty: {output_dir}")
-    linux_members = archive_members(linux_archive)
-    windows_members = archive_members(windows_archive)
-    linux_bundle = json.loads(linux_members["gpu.c3l/BUNDLE.json"])
-    windows_bundle = json.loads(windows_members["gpu.c3l/BUNDLE.json"])
-    validate_bundle(linux_bundle, "linux-x64")
-    validate_bundle(windows_bundle, "windows-x64")
-    validate_provenance(linux_bundle, windows_bundle)
-    if tag[1:] != linux_bundle["version"]:
-        raise ValueError(f"tag version does not match bundle version: {tag}")
-    validate_declared_native_files(linux_members, "linux-x64")
-    validate_declared_native_files(windows_members, "windows-x64")
-    validate_shared_files(linux_members, windows_members)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    shared = set(linux_members) & set(windows_members)
-    native_files = set(package_release.NATIVE_FILES["linux-x64"]) | set(package_release.NATIVE_FILES["windows-x64"])
-    for name in sorted(shared | {f"gpu.c3l/{path}" for path in native_files}):
+def write_distribution(
+    staging_root: Path,
+    tag: str,
+    linux_archive: Path,
+    windows_archive: Path,
+    linux_bundle: dict,
+    linux_members: dict[str, bytes],
+    windows_members: dict[str, bytes],
+) -> None:
+    native_files = {
+        f"gpu.c3l/{path}"
+        for paths in package_release.NATIVE_FILES.values()
+        for path in paths
+    }
+    for name in sorted(shared_members(linux_members) | native_files):
         relative = name.removeprefix("gpu.c3l/")
-        if relative == "BUNDLE.json":
-            continue
         content = linux_members.get(name, windows_members.get(name))
-        destination = output_dir / relative
+        destination = staging_root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
 
-    (output_dir / "README.md").write_text(DISTRIBUTION_README, encoding="utf-8")
+    (staging_root / "README.md").write_text(DISTRIBUTION_README, encoding="utf-8")
     metadata = {
         "schema": 1,
         "version": linux_bundle["version"],
@@ -184,9 +210,55 @@ def build_distribution(tag: str, linux_archive: Path, windows_archive: Path, out
             for target, archive in (("linux-x64", linux_archive), ("windows-x64", windows_archive))
         ],
     }
-    (output_dir / "DISTRIBUTION.json").write_text(
+    (staging_root / "DISTRIBUTION.json").write_text(
         json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
     )
+
+
+def build_distribution(tag: str, linux_archive: Path, windows_archive: Path, output_dir: Path) -> None:
+    if not tag.startswith("v"):
+        raise ValueError(f"tag must be a v-prefixed semantic version: {tag}")
+    package_release.validate_version(tag[1:])
+    expected_linux = f"gpu.c3l-{tag}-linux-x64.tar.gz"
+    expected_windows = f"gpu.c3l-{tag}-windows-x64.zip"
+    if linux_archive.name != expected_linux:
+        raise ValueError(f"unexpected linux archive name: {linux_archive.name}")
+    if windows_archive.name != expected_windows:
+        raise ValueError(f"unexpected windows archive name: {windows_archive.name}")
+    if output_dir.exists():
+        raise RuntimeError(f"output path already exists: {output_dir}")
+    linux_members = archive_members(linux_archive)
+    windows_members = archive_members(windows_archive)
+    linux_bundle = json.loads(linux_members["gpu.c3l/BUNDLE.json"])
+    windows_bundle = json.loads(windows_members["gpu.c3l/BUNDLE.json"])
+    validate_bundle(linux_bundle, "linux-x64")
+    validate_bundle(windows_bundle, "windows-x64")
+    validate_provenance(linux_bundle, windows_bundle)
+    if tag[1:] != linux_bundle["version"]:
+        raise ValueError(f"tag version does not match bundle version: {tag}")
+    validate_declared_native_files(linux_members, "linux-x64")
+    validate_declared_native_files(windows_members, "windows-x64")
+    validate_required_members(linux_members)
+    validate_required_members(windows_members)
+    validate_shared_files(linux_members, windows_members)
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.staging-", dir=output_dir.parent))
+    try:
+        write_distribution(
+            staging_root,
+            tag,
+            linux_archive,
+            windows_archive,
+            linux_bundle,
+            linux_members,
+            windows_members,
+        )
+        if output_dir.exists():
+            raise RuntimeError(f"output path already exists: {output_dir}")
+        staging_root.replace(output_dir)
+    except BaseException:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
 
 
 def main() -> None:
