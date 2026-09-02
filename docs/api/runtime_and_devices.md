@@ -101,17 +101,17 @@ On a retryable failure the handle remains live.
 
 `QueueKind` names `GRAPHICS`, `COMPUTE`, and `TRANSFER`. `QueueRequest`
 controls which semantic roles a device must provide: `required` marks roles
-that must be selected, and `distinct` marks required roles that must not alias
+that must be selected, and `distinct_roles` marks required roles that must not alias
 another required role.
 
 When `single_queue` is `false` (the zero/default value), existing
-`required`/`distinct` validation, default role normalization, and queue-family
+`required`/`distinct_roles` validation, default role normalization, and queue-family
 preference order are unchanged. A zero queue request still selects the
 documented default roles with the existing asynchronous-compute and transfer
 preferences.
 
 When `single_queue` is `true`, every role in `required` must resolve to one
-exact selected queue identity. A nonzero `distinct` conflicts with this policy,
+exact selected queue identity. A nonzero `distinct_roles` conflicts with this policy,
 and an empty `required` set is invalid rather than being normalized to
 defaults. `supports_device_desc` and `create_device` return
 `INVALID_ARGUMENT` for either invalid policy. If the policy is valid but no

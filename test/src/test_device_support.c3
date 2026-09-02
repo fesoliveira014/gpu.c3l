@@ -187,7 +187,7 @@ fn void invalid_desc_and_stale_adapter_fault_before_backend_work() @test {
     DeviceDesc invalid = {
         .queues = {
             .required = { .graphics },
-            .distinct = { .compute },
+            .distinct_roles = { .compute },
         },
     };
 
@@ -363,7 +363,7 @@ fn void single_queue_invalid_policy_faults_before_backend_work() @test {
     DeviceDesc distinct_role = {
         .queues = {
             .required = { .graphics, .compute, .transfer },
-            .distinct = { .transfer },
+            .distinct_roles = { .transfer },
             .single_queue = true,
         },
     };
@@ -393,7 +393,7 @@ fn void unavailable_queue_topology_is_reported_semantically() @test {
     DeviceDesc desc = {
         .queues = {
             .required = { .graphics, .compute },
-            .distinct = { .compute },
+            .distinct_roles = { .compute },
         },
     };
 

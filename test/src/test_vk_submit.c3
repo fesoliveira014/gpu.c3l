@@ -280,7 +280,7 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
-        .distinct = { .compute },
+        .distinct_roles = { .compute },
     };
     gpu::DeviceDesc device_desc = { .queues = request };
 
@@ -424,7 +424,7 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
-        .distinct = { .compute },
+        .distinct_roles = { .compute },
     };
     gpu::DeviceDesc device_desc = { .queues = request };
 
@@ -1491,7 +1491,7 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
-        .distinct = { .compute },
+        .distinct_roles = { .compute },
     };
     gpu::DeviceDesc device_desc = { .queues = request };
 

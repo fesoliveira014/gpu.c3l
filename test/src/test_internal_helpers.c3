@@ -326,7 +326,7 @@ fn void queue_selection_represents_three_distinct_queues() @test {
 fn void queue_selection_rejects_distinct_role_aliases() @test {
     QueueRequest request = {
         .required = { .graphics, .compute },
-        .distinct = { .compute },
+        .distinct_roles = { .compute },
     };
 
     assert(
