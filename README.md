@@ -32,7 +32,7 @@ destruction.
 
 ## Requirements and status
 
-The current release targets **C3 0.8.0** and a Vulkan 1.3 implementation with
+The current release targets **C3 0.8.3** and a Vulkan 1.3 implementation with
 the required modern synchronization, dynamic-rendering, descriptor-indexing,
 buffer-device-address, and dynamic-state features. Supported library targets
 are `linux-x64` and `windows-x64`. SDL3 is used by the samples, not by the
@@ -46,13 +46,21 @@ it for a platform or workload.
 
 - [Getting started](docs/getting_started.md) — run a minimal compute program,
   then build an SDL3 triangle.
-- [Documentation](docs/index.md) — concepts, recipes, API reference, and
-  contributor guides.
+- [Documentation](docs/index.md) — concepts, recipes, and API reference.
 - [Public API](docs/api/index.md) — domain-oriented symbol reference.
 - [Sample applications](https://github.com/fesoliveira014/gpu.c3l-samples) —
   maintained end-to-end examples.
 
-Clone with submodules:
+## Install
+
+Download the matching archive from the
+[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest), then
+extract it as `lib/gpu.c3l` in your application. Release archives contain the
+library, its three runtime binding dependencies, native libraries for one
+target, licenses, and consumer documentation.
+
+To track the Git repository instead, clone recursively. The recursive checkout
+contains only the three runtime bindings (`vk`, `vma`, and `spvreflect`):
 
 ```sh
 git clone --recurse-submodules https://github.com/fesoliveira014/gpu.c3l.git
