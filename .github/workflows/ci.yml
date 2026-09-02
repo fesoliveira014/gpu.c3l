@@ -55,9 +55,14 @@ jobs:
       - name: Build Linux release bundle
         run: |
           python3 -B -m unittest scripts.test_package_release -v
+          python3 -B -m unittest scripts.test_build_distribution -v
           python3 scripts/package_release.py \
             --version "$BUNDLE_VERSION" \
             --target linux-x64 \
+            --output-dir dist
+          python3 scripts/package_release.py \
+            --version "$BUNDLE_VERSION" \
+            --target windows-x64 \
             --output-dir dist
 
       - name: Upload Linux release bundle
@@ -114,11 +119,14 @@ jobs:
           c3c build hello_gpu --path examples/getting_started
           ./examples/getting_started/build/hello_gpu
 
-      - name: Run extracted release consumer
+      - name: Run combined distribution consumer
         run: |
-          CONSUMER="$RUNNER_TEMP/release-consumer"
-          mkdir -p "$CONSUMER/lib"
-          tar -xzf "dist/gpu.c3l-v${BUNDLE_VERSION}-linux-x64.tar.gz" -C "$CONSUMER/lib"
+          CONSUMER="$RUNNER_TEMP/distribution-consumer"
+          python3 scripts/build_distribution.py \
+            --tag "v${BUNDLE_VERSION}" \
+            --linux-archive "dist/gpu.c3l-v${BUNDLE_VERSION}-linux-x64.tar.gz" \
+            --windows-archive "dist/gpu.c3l-v${BUNDLE_VERSION}-windows-x64.zip" \
+            --output-dir "$CONSUMER/lib/gpu.c3l"
           cp -R examples/getting_started/src "$CONSUMER/src"
           cp -R examples/getting_started/shaders "$CONSUMER/shaders"
           cp examples/getting_started/project.release.json "$CONSUMER/project.json"
@@ -162,6 +170,9 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Preserve canonical source line endings
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -254,9 +265,14 @@ jobs:
       - name: Build Windows release bundle
         run: |
           python -B -m unittest scripts.test_package_release -v
+          python -B -m unittest scripts.test_build_distribution -v
           python scripts/package_release.py \
             --version "$BUNDLE_VERSION" \
             --target windows-x64 \
+            --output-dir dist
+          python scripts/package_release.py \
+            --version "$BUNDLE_VERSION" \
+            --target linux-x64 \
             --output-dir dist
 
       - name: Upload Windows release bundle
@@ -343,11 +359,14 @@ jobs:
           c3c build hello_gpu --path examples/getting_started
           ./examples/getting_started/build/hello_gpu.exe
 
-      - name: Run extracted release consumer
+      - name: Run combined distribution consumer
         run: |
-          CONSUMER="$RUNNER_TEMP/release-consumer"
-          mkdir -p "$CONSUMER/lib"
-          unzip -q "dist/gpu.c3l-v${BUNDLE_VERSION}-windows-x64.zip" -d "$CONSUMER/lib"
+          CONSUMER="$RUNNER_TEMP/distribution-consumer"
+          python scripts/build_distribution.py \
+            --tag "v${BUNDLE_VERSION}" \
+            --linux-archive "dist/gpu.c3l-v${BUNDLE_VERSION}-linux-x64.tar.gz" \
+            --windows-archive "dist/gpu.c3l-v${BUNDLE_VERSION}-windows-x64.zip" \
+            --output-dir "$CONSUMER/lib/gpu.c3l"
           cp -R examples/getting_started/src "$CONSUMER/src"
           cp -R examples/getting_started/shaders "$CONSUMER/shaders"
           cp examples/getting_started/project.release.json "$CONSUMER/project.json"
@@ -368,11 +387,27 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out source release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          submodules: recursive
+
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
+
+      - name: Verify cross-job distribution
+        run: |
+          OUTPUT_DIR="$RUNNER_TEMP/release-distribution"
+          test ! -e "$OUTPUT_DIR"
+          python3 scripts/build_distribution.py \
+            --tag "$GITHUB_REF_NAME" \
+            --linux-archive "dist/gpu.c3l-${GITHUB_REF_NAME}-linux-x64.tar.gz" \
+            --windows-archive "dist/gpu.c3l-${GITHUB_REF_NAME}-windows-x64.zip" \
+            --output-dir "$OUTPUT_DIR"
 
       - name: Create checksums
         run: |
@@ -391,3 +426,12 @@ jobs:
             --verify-tag \
             --generate-notes \
             --title "gpu.c3l $GITHUB_REF_NAME"
+
+  distribution:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    uses: ./.github/workflows/sync-distribution.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      DIST_REPO_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}

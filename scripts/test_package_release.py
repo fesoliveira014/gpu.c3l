@@ -118,6 +118,7 @@ class PackageReleaseTests(unittest.TestCase):
         forbidden_parts = {
             ".git",
             ".github",
+            ".gitmodules",
             "test",
             "tests",
             "examples",
