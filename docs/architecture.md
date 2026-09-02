@@ -40,8 +40,6 @@ pipelines. An alternate implementation of behavior the public API already
 provides is not a capability. Reported limits and queue properties are
 separate: they describe the selected device, not opt-in operations.
 
-The contributor rules that follow from this direction are in
-[AGENTS.md](../AGENTS.md).
 
 ## Modules and backend boundary
 
