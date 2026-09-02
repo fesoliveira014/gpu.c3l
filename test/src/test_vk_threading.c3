@@ -383,13 +383,13 @@ fn int generated_scratch_worker(void* raw_args) {
     ScratchWorkerArgs* args = (ScratchWorkerArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
         while (!args.start.load(AtomicOrdering.ACQUIRE)) thread::yield();
-        gpu::GeneratedScratchDesc reservation = {
-            .pipeline                = args.pipeline,
-            .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-            .max_commands_per_list   = 1,
-            .preprocess_buffer_count = 1,
+        gpu::GeneratedWorkReservationDesc reservation = {
+            .pipeline              = args.pipeline,
+            .kind                  = gpu::GeneratedWorkKind.DISPATCH,
+            .max_commands_per_list = 1,
+            .concurrent_lists      = 1,
         };
-        if (catch reserve_fault = gpu::reserve_generated_scratch(
+        if (catch reserve_fault = gpu::reserve_generated_work(
             args.allocator,
             &reservation,
         )) {
@@ -412,7 +412,7 @@ fn int generated_scratch_worker(void* raw_args) {
             args.failed = true;
         }
         gpu::discard_commands(&commands)!!;
-        gpu::release_generated_scratch(
+        gpu::release_generated_work(
             args.allocator,
             args.pipeline,
             gpu::GeneratedWorkKind.DISPATCH,
@@ -765,20 +765,10 @@ fn void generated_scratch_reservations_are_allocator_local() @test {
     )!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::GeneratedScratchDesc reservation = {
-        .pipeline                = pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-        .max_commands_per_list   = 1,
-        .preprocess_buffer_count = 1,
-    };
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    vk::MemoryRequirements requirements =
-        vk::generated_scratch_requirements(state, &reservation)!!;
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
-        .generated_preprocess_bytes = (usz)requirements.size,
     };
     gpu::CommandAllocator[2] allocators;
     for (uint i = 0; i < allocators.len; i++) {
