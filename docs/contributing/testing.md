@@ -17,7 +17,7 @@ configuration, assembly, or benchmark output as a correctness policy.
 
 ## Toolchain and dependencies
 
-Use C3 0.8.0 and initialize the binding submodules:
+Use C3 0.8.3 and initialize the binding submodules:
 
 ```sh
 c3c --version
@@ -54,6 +54,20 @@ c3c build hello_gpu --path examples/getting_started
 The consumer imports only `gpu` and resolves the shipped bundle plus its
 declared `vk`, `vma`, and `spvreflect` dependencies. The separate
 `gpu.c3l-samples` repository provides broader downstream consumer coverage.
+
+Check both release archive shapes and their runtime-only dependency boundary:
+
+```sh
+python3 -B -m unittest scripts.test_package_release -v
+python3 scripts/package_release.py \
+  --version 0.0.0-ci \
+  --target linux-x64 \
+  --output-dir dist
+```
+
+CI repeats this for `windows-x64`, extracts each archive into a disposable
+`lib/gpu.c3l` consumer layout, and builds and runs the maintained getting-started
+program without resolving files from the repository checkout.
 
 Run the CPU compile and test targets:
 

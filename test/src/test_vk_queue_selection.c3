@@ -243,7 +243,7 @@ fn void distinct_compute_uses_a_second_native_queue() @test {
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
-        .distinct = { .compute },
+        .distinct_roles = { .compute },
     };
 
     vk::QueueFamilies picked =
@@ -261,7 +261,7 @@ fn void distinct_compute_prefers_a_compute_only_family() @test {
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
-        .distinct = { .compute },
+        .distinct_roles = { .compute },
     };
 
     vk::QueueFamilies picked =
@@ -277,7 +277,7 @@ fn void distinct_graphics_leaves_other_roles_aliased() @test {
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute, .transfer },
-        .distinct = { .graphics },
+        .distinct_roles = { .graphics },
     };
 
     vk::QueueFamilies picked =
@@ -294,7 +294,7 @@ fn void distinct_transfer_prefers_a_transfer_only_family() @test {
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute, .transfer },
-        .distinct = { .transfer },
+        .distinct_roles = { .transfer },
     };
 
     vk::QueueFamilies picked =
@@ -314,7 +314,7 @@ fn void distinct_roles_use_split_capability_families() @test {
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute, .transfer },
-        .distinct = { .graphics, .compute, .transfer },
+        .distinct_roles = { .graphics, .compute, .transfer },
     };
 
     vk::QueueFamilies picked =
@@ -331,7 +331,7 @@ fn void unavailable_distinct_queue_faults() @test {
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
-        .distinct = { .compute },
+        .distinct_roles = { .compute },
     };
 
     fault result =
@@ -410,7 +410,7 @@ fn void sparse_selection_reports_only_capable_selected_roles() @test {
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute, .transfer },
-        .distinct = { .graphics, .compute, .transfer },
+        .distinct_roles = { .graphics, .compute, .transfer },
     };
 
     vk::QueueFamilies picked = vk::pick_queue_families_for_request(
@@ -429,7 +429,7 @@ fn void distinct_roles_must_also_be_required() @test {
         family(QF_G | QF_C | QF_T, 2),
     };
     gpu::QueueRequest request = {
-        .distinct = { .graphics },
+        .distinct_roles = { .graphics },
     };
 
     fault result =
@@ -617,7 +617,7 @@ fn void selected_device_families_are_unique() @test {
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute, .transfer },
-        .distinct = { .graphics, .compute, .transfer },
+        .distinct_roles = { .graphics, .compute, .transfer },
     };
     vk::QueueFamilies picked =
         vk::pick_queue_families_for_request(table[..], request)!!;
@@ -677,7 +677,7 @@ fn void requested_queue_count_covers_the_highest_selected_index() @test {
     };
     gpu::QueueRequest request = {
         .required = { .graphics, .compute, .transfer },
-        .distinct = { .transfer },
+        .distinct_roles = { .transfer },
     };
     vk::QueueFamilies picked =
         vk::pick_queue_families_for_request(table[..], request)!!;
@@ -964,7 +964,7 @@ fn void cross_queue_timeline_chain_validates() @test {
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
-        .distinct = { .compute },
+        .distinct_roles = { .compute },
     };
     gpu::DeviceDesc device_desc = {
         .queues = request,
@@ -1013,7 +1013,7 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
     gpu::QueueRequest request = {
         .required = { .graphics, .compute, .transfer },
-        .distinct = { .graphics, .compute, .transfer },
+        .distinct_roles = { .graphics, .compute, .transfer },
     };
     gpu::DeviceDesc device_desc = {
         .queues = request,

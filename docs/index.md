@@ -34,12 +34,3 @@ requirements, returned faults, fixed capacities, and known driver or
 environment symptoms. Use `ContractValidation.FULL` during development and
 attach the structured debug callback when diagnosing ownership or call-order
 faults.
-
-## Contribute
-
-- [Style](contributing/style.md)
-- [Testing](contributing/testing.md)
-- [Benchmarking](contributing/benchmarking.md)
-
-Repository workflow and contributor setup live in
-[`AGENTS.md`](../AGENTS.md), outside the published consumer guide.
