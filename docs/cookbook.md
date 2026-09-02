@@ -47,9 +47,9 @@ gpu::flush_mapped_span(&device, root_span)!;
 1. Query/support-check the `TextureDesc`.
 2. Create the texture and an upload allocation.
 3. Write and flush upload bytes.
-4. Transition `UNDEFINED` to `COPY_DEST`.
+4. Transition `UNDEFINED` to `TRANSFER_DESTINATION`.
 5. Record `cmd_copy_buffer_to_texture`.
-6. Transition `COPY_DEST` to `SHADER_SAMPLED`.
+6. Transition `TRANSFER_DESTINATION` to `SAMPLED`.
 7. Submit and wait/poll before releasing upload storage.
 
 Keep layout history in application state. A later use supplies the exact prior
