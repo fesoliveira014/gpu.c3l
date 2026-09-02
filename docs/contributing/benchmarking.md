@@ -87,5 +87,11 @@ allocator context.
   no hidden waits or per-call application policy.
 - [Graphics pipeline identity](pipeline_identity.md) records the workload
   pipeline inventory behind the current `GraphicsPipelineDesc` field set.
+- [Contiguous texture-index ranges](texture_index_ranges.md) records what the
+  descriptor heap's slot allocation costs and guarantees, and which parts of
+  that question still need device measurement.
+- [Root-pointer data vs a fixed dynamic-uniform path](root_pointer_data.md)
+  records the per-command data-path comparison, its derived byte and native-work
+  costs, and the measurements that still need the primary development GPU.
 - [Shader variants](shader_variants.md) records the shader and SPIR-V artifact
   inventory, build cost, and pipeline-creation counts.
