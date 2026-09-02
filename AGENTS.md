@@ -2,11 +2,11 @@
 
 `gpu.c3l` is a C3 GPU programming library. The public module is `gpu`; the
 private Vulkan 1.3 backend is `gpu::internal::vk`. The project targets
-**C3 0.8.0**.
+**C3 0.8.3**.
 
 ## Before changing code
 
-- Confirm `c3c --version` reports 0.8.0. C3 is pre-1.0; use the bundled
+- Confirm `c3c --version` reports 0.8.3. C3 is pre-1.0; use the bundled
   `c3-expert` skill and local compiler instead of remembered syntax.
 - Use `c3-style` when writing or reviewing `.c3`/`.c3i`.
 - Use `c3-bindings` when touching `vk`, `vma`, `spvreflect`, or SDL3 bindings.

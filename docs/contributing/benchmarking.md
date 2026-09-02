@@ -6,7 +6,7 @@ the result.
 
 ## Prerequisites
 
-Use C3 0.8.0, initialize submodules, build generated shader assets, and satisfy
+Use C3 0.8.3, initialize submodules, build generated shader assets, and satisfy
 the Vulkan/VMA setup in [Architecture](../architecture.md#platform-and-dependency-boundary).
 
 ```sh

@@ -1519,7 +1519,7 @@ fn void malformed_native_desc_preserves_runtime_state() @test {
     gpu::DeviceDesc invalid = {
         .queues = {
             .required = { .graphics },
-            .distinct = { .compute },
+            .distinct_roles = { .compute },
         },
     };
     assert(

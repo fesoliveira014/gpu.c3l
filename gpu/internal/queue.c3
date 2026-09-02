@@ -17,7 +17,7 @@ $assert(MAX_SELECTED_QUEUE_IDENTITIES <= 1 << COMPLETION_QUEUE_BITS);
 
 struct QueueSelection @private {
     QueueRoles selected;
-    QueueRoles distinct;
+    QueueRoles distinct_roles;
     bool single_queue;
     uint identity_count;
     ushort graphics_id;
@@ -71,15 +71,15 @@ fn bool queue_roles_equal(QueueRoles first, QueueRoles second) @private {
 
 fn bool queue_roles_violate_distinct(
     QueueRoles roles,
-    QueueRoles distinct,
+    QueueRoles distinct_roles,
 ) @private {
-    return (distinct.graphics
+    return (distinct_roles.graphics
             && roles.graphics
             && (roles.compute || roles.transfer))
-        || (distinct.compute
+        || (distinct_roles.compute
             && roles.compute
             && (roles.graphics || roles.transfer))
-        || (distinct.transfer
+        || (distinct_roles.transfer
             && roles.transfer
             && (roles.graphics || roles.compute));
 }
@@ -159,9 +159,9 @@ fn QueueSelection? queue_selection_from_native_ids(
     }
 
     QueueSelection selection = {
-        .selected     = request.required,
-        .distinct     = request.distinct,
-        .single_queue = request.single_queue,
+        .selected       = request.required,
+        .distinct_roles = request.distinct_roles,
+        .single_queue   = request.single_queue,
     };
     ulong[MAX_SELECTED_QUEUE_IDENTITIES] identity_keys;
     if (request.required.graphics) {
@@ -191,7 +191,7 @@ fn QueueSelection? queue_selection_from_native_ids(
 
     for (uint identity = 0; identity < selection.identity_count; identity++) {
         QueueRoles roles = selection.identity_roles[identity];
-        if (queue_roles_violate_distinct(roles, request.distinct)) {
+        if (queue_roles_violate_distinct(roles, request.distinct_roles)) {
             return gpu::UNSUPPORTED_FEATURE~;
         }
     }
@@ -267,9 +267,9 @@ fn QueueSelection default_queue_selection(DeviceCaps* caps = null) @private {
 fn bool queue_selection_is_well_formed(QueueSelection* selection) @private {
     if (selection == null) return false;
     QueueRequest request = {
-        .required     = selection.selected,
-        .distinct     = selection.distinct,
-        .single_queue = selection.single_queue,
+        .required       = selection.selected,
+        .distinct_roles = selection.distinct_roles,
+        .single_queue   = selection.single_queue,
     };
     if (!gpu::internal::queue_request_is_valid(request)
         || selection.identity_count == 0
@@ -299,7 +299,7 @@ fn bool queue_selection_is_well_formed(QueueSelection* selection) @private {
         QueueRoles roles = expected_roles[identity];
         if ((uint)roles == 0
             || !queue_roles_equal(roles, selection.identity_roles[identity])
-            || queue_roles_violate_distinct(roles, selection.distinct)) {
+            || queue_roles_violate_distinct(roles, selection.distinct_roles)) {
             return false;
         }
     }
