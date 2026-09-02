@@ -85,3 +85,5 @@ allocator context.
 - Never promote a benchmark observation into a public guarantee. The stable
   contract is qualitative: bounded fixed scratch, independent allocators, and
   no hidden waits or per-call application policy.
+- [Graphics pipeline identity](pipeline_identity.md) records the workload
+  pipeline inventory behind the current `GraphicsPipelineDesc` field set.
