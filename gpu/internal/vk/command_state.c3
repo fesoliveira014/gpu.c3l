@@ -343,7 +343,7 @@ fn void? CommandTable.cancel_claim(
 
 fn CommandRecord*? resolve_command(
     gpu::CommandList* token,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     CommandRecord* record =
         gpu::internal::recording_command(token)!;
     return record;

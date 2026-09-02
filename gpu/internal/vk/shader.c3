@@ -62,7 +62,7 @@ struct PipelineShaderModule {
 struct ShaderModuleCreateOps @private {
     void*                   user_data;
     ShaderModuleCreateFn    create;
-    bool allow_alternate_root_abi @if(env::TESTING);
+    bool allow_alternate_root_abi @feat(TESTING);
 }
 
 <* Borrow the bytes of a live shader store entry.

@@ -32,7 +32,7 @@ alias EndCommandBufferFn @private = fn vk::Result (
     void*,
     vk::CommandBuffer,
 );
-alias GeneratedDispatchLayoutReadFn @private @if(env::TESTING) =
+alias GeneratedDispatchLayoutReadFn @private @feat(TESTING) =
     fn vk::IndirectCommandsLayoutEXT (
         void*,
         BoundPipeline*,
@@ -110,7 +110,7 @@ struct PreparedGeneratedDispatch {
     uint                           max_count;
 }
 
-struct GeneratedDispatchLayoutReadOps @private @if(env::TESTING) {
+struct GeneratedDispatchLayoutReadOps @private @feat(TESTING) {
     void*                         user_data;
     GeneratedDispatchLayoutReadFn read;
 }
@@ -1121,7 +1121,7 @@ fn CommandRecord*? begin_commands_with_injected_ops(
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
     CommandRecordingOps* ops,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     vk_begin_commands_with_ops(
         state:        state,
         allocator:    allocator,
@@ -1137,7 +1137,7 @@ fn void? end_commands_with_injected_ops(
     VkDeviceState* state,
     CommandRecord* record,
     CommandRecordingOps* ops,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     if (record == null
         || record.device_state != state) {
         return gpu::INVALID_HANDLE~;
@@ -2216,7 +2216,7 @@ fn void? bind_pipeline_with_injected_ops(
     CommandRecord* commands,
     gpu::PipelineHandle pipeline,
     PipelineBindOps* ops,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     if (commands.device_state.validation_policy.contract
             == gpu::ContractValidation.FULL) {
         return full_bind_pipeline_with_ops(commands, pipeline, ops);
@@ -2607,7 +2607,7 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_with_layout_read_ops(
     gpu::GpuSpan count_span,
     uint max_dispatch_count,
     GeneratedDispatchLayoutReadOps* layout_read,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     PreparedGeneratedDispatch dispatch = lower_generated_dispatch_inputs(
         commands:           commands,
         records:            records,
@@ -2720,7 +2720,7 @@ fn void? trusted_dispatch_generated_with_layout_read_ops(
     uint max_dispatch_count,
     GeneratedDispatchLayoutReadOps* layout_read,
     vk::IndirectCommandsLayoutEXT* prepared_layout,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     PreparedGeneratedDispatch dispatch =
         lower_generated_dispatch_with_layout_read_ops(
             commands:           commands,

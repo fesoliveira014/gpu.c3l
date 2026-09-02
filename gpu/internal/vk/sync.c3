@@ -919,7 +919,7 @@ fn void? barrier_with_injected_ops(
     CommandRecord* commands,
     gpu::Barrier* barrier,
     BarrierEmitOps* ops,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     if (commands.device_state.validation_policy.contract
             == gpu::ContractValidation.FULL) {
         return vk_cmd_barrier_with_ops(commands, barrier, ops);
@@ -931,7 +931,7 @@ fn void? texture_barrier_with_injected_ops(
     CommandRecord* commands,
     gpu::TextureBarrier* barrier,
     BarrierEmitOps* ops,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     if (commands.device_state.validation_policy.contract
             == gpu::ContractValidation.FULL) {
         return full_texture_barrier_with_ops(commands, barrier, ops);

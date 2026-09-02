@@ -2125,7 +2125,7 @@ fn void? validate_color_execution_state_for_test(
     VkDeviceState* state,
     CommandRecord* record,
     bool generated,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     if (generated) {
         (void)validate_generated_graphics_execution_state(
             state,
