@@ -73,11 +73,11 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         &device,
         gpu::QueueKind.COMPUTE,
     )!!;
-    gpu::GeneratedScratchDesc reservation = {
-        .pipeline                = pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-        .max_commands_per_list   = 8,
-        .preprocess_buffer_count = 1,
+    gpu::GeneratedWorkReservationDesc reservation = {
+        .pipeline              = pipeline,
+        .kind                  = gpu::GeneratedWorkKind.DISPATCH,
+        .max_commands_per_list = 8,
+        .concurrent_lists      = 1,
     };
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
@@ -86,8 +86,6 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     )!!;
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
-        .generated_preprocess_bytes = (usz)requirements.size,
     };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -95,14 +93,20 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::reserve_generated_scratch(&allocator, &reservation)!!;
+    vk::CommandAllocatorSlot* cold_slot = state.command_allocators.get(
+        allocator.handle,
+    )!!;
+    assert(cold_slot.reservations.len == 0
+            && cold_slot.preprocess_index_storage.len == 0,
+        "an allocator without a reservation owns no generated-work storage");
+    gpu::reserve_generated_work(&allocator, &reservation)!!;
     assert(@catch(gpu::destroy_pipeline(&device, pipeline))
         == gpu::RESOURCE_IN_USE,
         "a live reservation retains its exact pipeline key");
 
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    assert(@catch(gpu::reserve_generated_scratch(&allocator, &reservation))
+    assert(@catch(gpu::reserve_generated_work(&allocator, &reservation))
         == gpu::RESOURCE_IN_USE,
         "reservation replacement requires a quiescent allocator");
 
@@ -110,8 +114,12 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         record.allocator,
     )!!;
-    assert(slot.reservations.len == 1,
-        "one fixed reservation slot is retained");
+    assert(slot.reservations.len
+            == (usz)vk::GENERATED_PREPROCESS_PER_LIST
+        && slot.reservations.len == slot.preprocess_index_storage.len
+        && record.scratch.generated_preprocess_indices.len
+            == (usz)vk::GENERATED_PREPROCESS_PER_LIST,
+        "the first reservation publishes the fixed backend-owned tables");
     vk::GeneratedPreprocessBuffer* reserved =
         &slot.reservations[0];
     assert(reserved.reservation_pipeline == pipeline
@@ -148,8 +156,8 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         pipeline:     pipeline,
         kind:         gpu::GeneratedWorkKind.DISPATCH,
         max_count:    1,
-    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
-        "one list cannot exceed its configured preprocess index capacity");
+    )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
+        "concurrent use beyond the reserved unit count is deterministic");
 
     gpu::discard_commands(&commands)!!;
     gpu::CommandList retry = gpu::begin_commands(&allocator)!!;
@@ -165,7 +173,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     assert(reacquired.address == reserved.address,
         "discard returns reserved preprocess storage for retry");
     gpu::discard_commands(&retry)!!;
-    gpu::release_generated_scratch(
+    gpu::release_generated_work(
         &allocator,
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
@@ -209,13 +217,13 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
         &device,
         gpu::QueueKind.COMPUTE,
     )!!;
-    gpu::GeneratedScratchDesc reservation = {
-        .pipeline                = pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-        .max_commands_per_list   = 8,
-        .preprocess_buffer_count = 1,
+    gpu::GeneratedWorkReservationDesc reservation = {
+        .pipeline              = pipeline,
+        .kind                  = gpu::GeneratedWorkKind.DISPATCH,
+        .max_commands_per_list = 8,
+        .concurrent_lists      = 1,
     };
-    gpu::GeneratedScratchDesc alias_reservation = reservation;
+    gpu::GeneratedWorkReservationDesc alias_reservation = reservation;
     alias_reservation.pipeline = alias_pipeline;
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::MemoryRequirements requirements = vk::generated_scratch_requirements(
@@ -232,8 +240,6 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
 
     gpu::CommandAllocatorDesc replacement_desc = {
         .command_buffer_capacity = 1,
-        .max_generated_preprocess_buffers_per_list = 2,
-        .generated_preprocess_bytes = (usz)requirements.size,
     };
     gpu::CommandAllocator reserved_allocator = gpu::create_command_allocator(
         &device,
@@ -253,52 +259,50 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     assert(stale_pipeline.index == recycled_pipeline.index
             && stale_pipeline.generation != recycled_pipeline.generation,
         "pipeline slots recycle with a new generation");
-    assert(@catch(gpu::release_generated_scratch(
+    assert(@catch(gpu::release_generated_work(
         &reserved_allocator,
         stale_pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
     )) == gpu::INVALID_HANDLE,
         "release rejects a stale recycled pipeline before reservation lookup");
-    gpu::reserve_generated_scratch(&reserved_allocator, &reservation)!!;
+    gpu::reserve_generated_work(&reserved_allocator, &reservation)!!;
     vk::CommandAllocatorSlot* reserved_slot = state.command_allocators.get(
         reserved_allocator.handle,
     )!!;
     vk::GeneratedPreprocessBuffer original = reserved_slot.reservations[0];
-    usz original_committed = reserved_slot.generated_preprocess_committed;
 
-    reservation.preprocess_buffer_count = 2;
-    assert(@catch(gpu::reserve_generated_scratch(
+    reservation.concurrent_lists = vk::GENERATED_PREPROCESS_PER_LIST + 1;
+    assert(@catch(gpu::reserve_generated_work(
         &reserved_allocator,
         &reservation,
     )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
-        "replacement above the byte budget returns the capacity fault");
-    assert(reserved_slot.generated_preprocess_committed == original_committed
-            && reserved_slot.reservations[0].buffer == original.buffer
+        "concurrency above the fixed table returns the capacity fault");
+    assert(reserved_slot.reservations[0].buffer == original.buffer
             && reserved_slot.reservations[0].allocation == original.allocation
             && reserved_slot.reservations[0].reservation_max_commands == 8,
         "failed replacement preserves the published reservation exactly");
 
-    reservation.preprocess_buffer_count = 1;
+    reservation.concurrent_lists      = 1;
     reservation.max_commands_per_list = 7;
-    gpu::reserve_generated_scratch(&reserved_allocator, &reservation)!!;
-    assert(reserved_slot.generated_preprocess_committed <= original_committed
-            && reserved_slot.reservations[0].reservation_pipeline == pipeline
+    gpu::reserve_generated_work(&reserved_allocator, &reservation)!!;
+    assert(reserved_slot.reservations[0].reservation_pipeline == pipeline
             && reserved_slot.reservations[0].reservation_kind
                 == gpu::GeneratedWorkKind.DISPATCH
             && reserved_slot.reservations[0].reservation_max_commands == 7,
         "successful replacement publishes the new exact reservation");
     reservation.max_commands_per_list = 8;
-    gpu::reserve_generated_scratch(&reserved_allocator, &reservation)!!;
-    assert(@catch(gpu::reserve_generated_scratch(
+    gpu::reserve_generated_work(&reserved_allocator, &reservation)!!;
+    alias_reservation.concurrent_lists = vk::GENERATED_PREPROCESS_PER_LIST;
+    assert(@catch(gpu::reserve_generated_work(
         &reserved_allocator,
         &alias_reservation,
     )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
-        "a distinct key cannot exceed the allocator byte budget");
+        "a distinct key cannot exceed the reservation slot ceiling");
 
     gpu::CommandList reserved_commands = gpu::begin_commands(
         &reserved_allocator,
     )!!;
-    assert(@catch(gpu::release_generated_scratch(
+    assert(@catch(gpu::release_generated_work(
         &reserved_allocator,
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
@@ -310,8 +314,6 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
 
     gpu::CommandAllocatorDesc unreserved_desc = {
         .command_buffer_capacity = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
-        .generated_preprocess_bytes = (usz)requirements.size,
     };
     gpu::CommandAllocator unreserved_allocator = gpu::create_command_allocator(
         &device,
@@ -344,42 +346,18 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     gpu::discard_commands(&unreserved_commands)!!;
     gpu::destroy_command_allocator(&unreserved_allocator)!!;
 
-    gpu::release_generated_scratch(
+    gpu::release_generated_work(
         &reserved_allocator,
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
     )!!;
-    assert(@catch(gpu::release_generated_scratch(
+    assert(@catch(gpu::release_generated_work(
         &reserved_allocator,
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
     )) == gpu::INVALID_RESOURCE_STATE,
         "releasing an absent exact key returns INVALID_RESOURCE_STATE");
     gpu::destroy_command_allocator(&reserved_allocator)!!;
-
-    gpu::CommandAllocatorDesc slot_desc = {
-        .command_buffer_capacity = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
-        .generated_preprocess_bytes = (usz)requirements.size
-            + (usz)alias_requirements.size,
-    };
-    gpu::CommandAllocator slot_allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-        &slot_desc,
-    )!!;
-    gpu::reserve_generated_scratch(&slot_allocator, &reservation)!!;
-    assert(@catch(gpu::reserve_generated_scratch(
-        &slot_allocator,
-        &alias_reservation,
-    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
-        "a distinct key cannot exceed the reservation slot ceiling");
-    gpu::release_generated_scratch(
-        &slot_allocator,
-        pipeline,
-        gpu::GeneratedWorkKind.DISPATCH,
-    )!!;
-    gpu::destroy_command_allocator(&slot_allocator)!!;
     io::printfn("generated-scratch-ownership: EXERCISED");
 }
 
@@ -409,7 +387,6 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
     )!!;
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
     };
     gpu::CommandAllocator reserved_allocator = gpu::create_command_allocator(
         &device,
@@ -417,11 +394,11 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&reserved_allocator)!!;
-    gpu::GeneratedScratchDesc reservation = {
-        .pipeline                = pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-        .max_commands_per_list   = 8,
-        .preprocess_buffer_count = 1,
+    gpu::GeneratedWorkReservationDesc reservation = {
+        .pipeline              = pipeline,
+        .kind                  = gpu::GeneratedWorkKind.DISPATCH,
+        .max_commands_per_list = 8,
+        .concurrent_lists      = 1,
     };
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::PFN_vkGetGeneratedCommandsMemoryRequirementsEXT original =
@@ -432,7 +409,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
             &zero_generated_requirements;
         defer state.device_dispatch.generated_work.get_memory_requirements =
             original;
-        gpu::reserve_generated_scratch(&reserved_allocator, &reservation)!!;
+        gpu::reserve_generated_work(&reserved_allocator, &reservation)!!;
     }
     assert(zero_generated_requirement_calls == 1,
         "zero-size reservation performs one native requirements query");
@@ -520,7 +497,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         "unreserved zero-size recording faults before native execution");
     gpu::discard_commands(&unreserved_commands)!!;
     gpu::destroy_command_allocator(&unreserved_allocator)!!;
-    gpu::release_generated_scratch(
+    gpu::release_generated_work(
         &reserved_allocator,
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,

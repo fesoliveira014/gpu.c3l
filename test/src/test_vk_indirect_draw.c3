@@ -887,41 +887,28 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             gpu::QueueKind.COMPUTE,
         )!!;
     }
-    gpu::GeneratedScratchDesc dispatch_scratch = {
-        .pipeline                = dispatch_pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-        .max_commands_per_list   = 2,
-        .preprocess_buffer_count = 2,
+    gpu::GeneratedWorkReservationDesc dispatch_scratch = {
+        .pipeline              = dispatch_pipeline,
+        .kind                  = gpu::GeneratedWorkKind.DISPATCH,
+        .max_commands_per_list = 2,
+        .concurrent_lists      = 2,
     };
-    gpu::GeneratedScratchDesc draw_scratch = {
-        .pipeline                = draw.pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DRAW,
-        .max_commands_per_list   = 2,
-        .preprocess_buffer_count = 2,
+    gpu::GeneratedWorkReservationDesc draw_scratch = {
+        .pipeline              = draw.pipeline,
+        .kind                  = gpu::GeneratedWorkKind.DRAW,
+        .max_commands_per_list = 2,
+        .concurrent_lists      = 2,
     };
-    gpu::GeneratedScratchDesc indexed_scratch = {
-        .pipeline                = draw.pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DRAW_INDEXED,
-        .max_commands_per_list   = 2,
-        .preprocess_buffer_count = 2,
+    gpu::GeneratedWorkReservationDesc indexed_scratch = {
+        .pipeline              = draw.pipeline,
+        .kind                  = gpu::GeneratedWorkKind.DRAW_INDEXED,
+        .max_commands_per_list = 2,
+        .concurrent_lists      = 2,
     };
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    vk::MemoryRequirements dispatch_requirements =
-        vk::generated_scratch_requirements(state, &dispatch_scratch)!!;
-    vk::MemoryRequirements draw_requirements =
-        vk::generated_scratch_requirements(state, &draw_scratch)!!;
-    vk::MemoryRequirements indexed_requirements =
-        vk::generated_scratch_requirements(state, &indexed_scratch)!!;
-    gpu::CommandAllocatorDesc allocator_desc = {
-        .max_generated_preprocess_buffers_per_list = 7,
-        .generated_preprocess_bytes = (usz)dispatch_requirements.size * 2
-            + (usz)draw_requirements.size * 2
-            + (usz)indexed_requirements.size * 2,
-    };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
-        &allocator_desc,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     GeneratedRequirementsCapture requirements_capture = {
@@ -935,9 +922,9 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             requirements_capture.original;
         generated_requirements_capture = null;
     }
-    gpu::reserve_generated_scratch(&allocator, &dispatch_scratch)!!;
-    gpu::reserve_generated_scratch(&allocator, &draw_scratch)!!;
-    gpu::reserve_generated_scratch(&allocator, &indexed_scratch)!!;
+    gpu::reserve_generated_work(&allocator, &dispatch_scratch)!!;
+    gpu::reserve_generated_work(&allocator, &draw_scratch)!!;
+    gpu::reserve_generated_work(&allocator, &indexed_scratch)!!;
     assert(requirements_capture.calls == 3
             && requirements_capture.max_sequence_counts[0] == 2
             && requirements_capture.max_sequence_counts[1] == 2
@@ -1192,17 +1179,17 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         &submit,
     )!!;
     gpu::wait_completion(completion)!!;
-    gpu::release_generated_scratch(
+    gpu::release_generated_work(
         &allocator,
         dispatch_pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
     )!!;
-    gpu::release_generated_scratch(
+    gpu::release_generated_work(
         &allocator,
         draw.pipeline,
         gpu::GeneratedWorkKind.DRAW,
     )!!;
-    gpu::release_generated_scratch(
+    gpu::release_generated_work(
         &allocator,
         draw.pipeline,
         gpu::GeneratedWorkKind.DRAW_INDEXED,

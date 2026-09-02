@@ -6,19 +6,18 @@
 selected `Queue`. `CommandAllocatorDesc` sizes:
 
 - reusable command-buffer units;
-- retained resource references per list under full validation;
-- generated-work reservations per list;
-- allocator-owned preprocess bytes; and
+- retained resource references per list under full validation; and
 - `max_acceleration_structure_geometries_per_build`, the fixed geometry/range
   scratch reserved for every command unit.
+
+Generated-work storage is not described here. It is sized by
+`reserve_generated_work` and owned by the backend.
 
 Defaults and maxima are exposed as
 `DEFAULT_COMMAND_ALLOCATOR_CAPACITY`,
 `DEFAULT_COMMAND_REFERENCES_PER_LIST`,
-`DEFAULT_COMMAND_PREPROCESS_PER_LIST`,
-`MAX_COMMAND_ALLOCATOR_CAPACITY`,
-`MAX_COMMAND_REFERENCES_PER_LIST`, and
-`MAX_COMMAND_PREPROCESS_PER_LIST`.
+`MAX_COMMAND_ALLOCATOR_CAPACITY`, and
+`MAX_COMMAND_REFERENCES_PER_LIST`.
 
 Creation preallocates native buffers and fixed per-list scratch before
 returning. `destroy_command_allocator` never waits and succeeds only when all
@@ -56,9 +55,50 @@ thread-confined and become unusable when another alias consumes or retires the
 record. `is_valid` checks token shape/phase metadata but does not extend
 lifetime.
 
-`reserve_generated_scratch` and `release_generated_scratch` mutate one
-quiescent allocator's reservation for a pipeline and `GeneratedWorkKind`.
-They are allocator-confined cold operations. Capacity faults are explicit.
+## Generated-work reservations
+
+`reserve_generated_work` and `release_generated_work` mutate one quiescent
+allocator's reservation for a pipeline and `GeneratedWorkKind`. They are
+allocator-confined cold operations; reservation is never implicit and never
+happens during recording.
+
+`GeneratedWorkReservationDesc` describes the reservation in application terms
+only:
+
+- `pipeline` and `kind` form the reservation key;
+- `max_commands_per_list` bounds the record count one generated call may
+  request; and
+- `concurrent_lists` bounds how many generated calls may hold the reservation
+  at the same time.
+
+Every generated call in flight holds one unit until its command unit retires or
+is discarded, including two calls recorded into the same command list. Size
+`concurrent_lists` as command units times generated calls per unit; a value of
+one admits a single generated call, not a single list.
+
+The backend derives and owns the exact private storage those two limits imply
+for the selected device and pipeline. There are no public byte sizes,
+alignments, or storage handles.
+
+The allocator's reservation table is fixed at 64 units per command buffer and
+is allocated on the first reservation call, so an allocator that never reserves
+generated work carries no generated-work storage. The table scales with
+`command_buffer_capacity`, and it also sets the ceiling on `concurrent_lists`:
+one allocator admits `command_buffer_capacity * 64` reserved units in total,
+each backed by private device storage. Size the allocator to the recording work
+it actually performs.
+
+Reserving again for the same key replaces the reservation. Replacement is
+transactional: on failure the previous reservation stays published and usable.
+Release requires the same quiescent allocator and never waits for GPU work.
+Allocator destruction releases the allocator's generated-work storage.
+
+Recording only consumes an existing matching reservation. A generated call
+performs no requirements query, host allocation, or native object creation.
+Requesting more records than `max_commands_per_list`, or more generated calls
+in flight than `concurrent_lists`, returns `GENERATED_SCRATCH_EXHAUSTED`
+without recording a partial command. Exceeding the allocator's fixed reservation table
+returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` from the reservation call.
 
 ## Transfer and buffer commands
 
@@ -314,6 +354,6 @@ Malformed state, unsupported queue operations, incompatible pipelines/passes,
 and one-shot phase misuse return `COMMAND_RECORDING_ERROR`,
 `INVALID_RESOURCE_STATE`, `INVALID_ARGUMENT`, `INVALID_HANDLE`, or
 `UNSUPPORTED_FEATURE` as documented by the operation.
-Fixed reference or generated-preprocess limits return
+Fixed reference limits and exhausted generated-work reservations return
 `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` or
 `GENERATED_SCRATCH_EXHAUSTED` without emitting a partial compound command.
