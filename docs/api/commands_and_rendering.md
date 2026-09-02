@@ -81,11 +81,12 @@ for the selected device and pipeline. There are no public byte sizes,
 alignments, or storage handles.
 
 The allocator's reservation table is fixed at 64 units per command buffer and
-is allocated on the first successful reservation, so an allocator that never
-reserves generated work carries no generated-work storage. The table scales
-with `command_buffer_capacity`, so a large capacity combined with generated
-work costs proportionally more host memory; size the allocator to the recording
-work it actually performs.
+is allocated on the first reservation call, so an allocator that never reserves
+generated work carries no generated-work storage. The table scales with
+`command_buffer_capacity`, and it also sets the ceiling on `concurrent_lists`:
+one allocator admits `command_buffer_capacity * 64` reserved units in total,
+each backed by private device storage. Size the allocator to the recording work
+it actually performs.
 
 Reserving again for the same key replaces the reservation. Replacement is
 transactional: on failure the previous reservation stays published and usable.

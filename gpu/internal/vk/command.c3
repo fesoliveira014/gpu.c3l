@@ -48,8 +48,9 @@ const uint MAX_COMMAND_ALLOCATORS = 256;
 const uint COMMAND_ALLOCATOR_FREE_NONE = 0;
 const uint COMMAND_ALLOCATOR_DESTROY_CLAIM = uint::max;
 // Fixed per-command-unit generated-work reservation depth. The reservation and
-// index tables are allocated lazily on the first successful reserve and never
-// grow, so an allocator that never reserves generated work pays nothing.
+// index tables are allocated lazily on the first reservation call that reaches
+// a quiescent allocator and never grow, so an allocator that never reserves
+// generated work pays nothing.
 const uint GENERATED_PREPROCESS_PER_LIST = 64;
 
 struct PipelineBindOps {
