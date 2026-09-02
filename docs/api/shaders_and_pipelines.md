@@ -23,19 +23,16 @@ documented handle lifetime.
 ## Graphics pipelines
 
 `GraphicsPipelineDesc` supplies vertex and fragment shaders, ordered color
-formats, depth format, sample count, and polygon mode. State that can change
-without a new pipeline belongs to `DynamicRasterState` and `GraphicsState`, not
-to a native pipeline variant.
+formats, depth format, sample count, and polygon mode. Color and depth formats
+are render-compatibility inputs. State that can change without a new pipeline
+belongs to `DynamicRasterState` and `GraphicsState`, not to a native pipeline
+variant: primitive topology, viewport, scissor, cull mode, front face, depth
+bias, depth state, blending, and color write masks are all command-time state.
 
-`sample_count` and `polygon_mode` remain part of pipeline identity while
-topology, culling, front face, depth bias, depth test/write/compare, blending,
-and color write masks are command-time. Raster, depth, and blend state varies
-per pass and would multiply pipelines, so it is selected during recording;
-sample count and polygon mode do not vary that way in practice, and keeping
-them static leaves the attachment-sample agreement and the optional line-fill
-capability checked once at creation instead of on every pass. The reasoning and
-the workload inventory behind it are in
-[Graphics pipeline identity](../contributing/pipeline_identity.md).
+Raster, depth, and blend state varies per pass and would multiply pipelines, so
+it is selected during recording. Sample count and polygon mode stay in pipeline
+identity, which keeps the attachment-sample agreement and the optional
+line-fill capability checked once at creation instead of on every pass.
 
 Relevant types are:
 

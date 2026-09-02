@@ -277,9 +277,9 @@ fn bool selection_satisfies_request(
     bool transfer_alias = request.required.transfer
         && ((request.required.graphics && graphics_transfer_alias(selection))
             || (request.required.compute && compute_transfer_alias(selection)));
-    return !(request.distinct.graphics && graphics_alias)
-        && !(request.distinct.compute && compute_alias)
-        && !(request.distinct.transfer && transfer_alias)
+    return !(request.distinct_roles.graphics && graphics_alias)
+        && !(request.distinct_roles.compute && compute_alias)
+        && !(request.distinct_roles.transfer && transfer_alias)
         && (!request.single_queue
             || selected_native_identity_count(selection) == 1);
 }
@@ -394,11 +394,11 @@ fn uint distinct_selection_tier(
     gpu::QueueRequest request,
 ) @private {
     uint tier;
-    if (request.distinct.compute) {
+    if (request.distinct_roles.compute) {
         uint flags = (uint)families[selection.compute].queue_flags;
         if ((flags & (uint)vk::QueueFlagBits.GRAPHICS_BIT) != 0) tier++;
     }
-    if (request.distinct.transfer
+    if (request.distinct_roles.transfer
         && !queue_family_is_transfer_only(families[selection.transfer])) {
         tier++;
     }

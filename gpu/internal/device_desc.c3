@@ -5,18 +5,18 @@ import gpu::internal::vk @public;
 
 fn bool queue_request_is_zero(QueueRequest request) @private {
     return (uint)request.required == 0
-        && (uint)request.distinct == 0
+        && (uint)request.distinct_roles == 0
         && !request.single_queue;
 }
 
 fn bool queue_request_is_valid(QueueRequest request) @private {
     uint required = (uint)request.required;
-    uint distinct = (uint)request.distinct;
+    uint distinct_roles = (uint)request.distinct_roles;
     return required != 0
         && (required & ~gpu::internal::QUEUE_ROLE_MASK) == 0
-        && (distinct & ~gpu::internal::QUEUE_ROLE_MASK) == 0
-        && (distinct & ~required) == 0
-        && (!request.single_queue || distinct == 0);
+        && (distinct_roles & ~gpu::internal::QUEUE_ROLE_MASK) == 0
+        && (distinct_roles & ~required) == 0
+        && (!request.single_queue || distinct_roles == 0);
 }
 
 fn QueueRequest default_queue_request() @private {
