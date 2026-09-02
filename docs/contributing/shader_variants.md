@@ -66,7 +66,9 @@ Toolchain: `glslc` from shaderc 2023.8 (glslang 14.0.0, SPIRV-Tools 2023.6),
 `spirv-as` from SPIRV-Tools v2025.1, both targeting `vulkan1.3` with
 `-I include/shaders`, no defines and no optimization flags. Compiler versions
 and flags are the only settings that affect the artifacts; no device is
-involved in producing them.
+involved in producing them. The byte sizes below are therefore a snapshot of
+that toolchain and will differ under another `glslc`; the counts, the absence
+of variants, and the conclusion do not depend on it.
 
 | Measurement | Value |
 | --- | --- |
