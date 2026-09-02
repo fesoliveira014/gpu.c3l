@@ -22,10 +22,12 @@ documented handle lifetime.
 
 ## Graphics pipelines
 
-`GraphicsPipelineDesc` supplies vertex and fragment shaders, primitive
-topology, ordered color formats, depth format, and sample count. State that can
-change without a new pipeline belongs to `DynamicRasterState` and
-`GraphicsState`, not to a native pipeline variant.
+`GraphicsPipelineDesc` supplies vertex and fragment shaders, ordered color
+formats, depth format, sample count, and polygon mode. Color and depth formats
+are render-compatibility inputs. State that can change without a new pipeline
+belongs to `DynamicRasterState` and `GraphicsState`, not to a native pipeline
+variant: primitive topology, viewport, scissor, cull mode, front face, depth
+bias, depth state, blending, and color write masks are all command-time state.
 
 Relevant types are:
 
