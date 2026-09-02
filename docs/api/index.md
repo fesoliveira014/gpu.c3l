@@ -173,8 +173,8 @@ Callables: `color_blend_disabled`,
 
 Types: `CommandAllocatorHandle`, `CommandAllocator`, `CommandAllocatorDesc`,
 `CommandList`, `ExecutableCommandList`, `GeneratedWorkKind`,
-`GeneratedScratchDesc`, `Vec3u`, `Viewport`, `ScissorRect`, `GraphicsState`,
-`DrawIndirectCommand`, `DrawIndexedIndirectCommand`,
+`GeneratedWorkReservationDesc`, `Vec3u`, `Viewport`, `ScissorRect`,
+`GraphicsState`, `DrawIndirectCommand`, `DrawIndexedIndirectCommand`,
 `DispatchIndirectCommand`, `TraceRaysIndirectCommand`,
 `TraceRaysIndirectCommand2`, `AccelerationStructureIndirectBuildRange`,
 `BufferCopyDesc`,
@@ -193,8 +193,7 @@ Fields: `AccelerationStructureIndirectBuildRange.primitive_count`,
 
 Constants: `COMMAND_ALLOCATOR_HANDLE_INVALID`, `ATTACHMENT_VIEW_HANDLE_INVALID`,
 `DEFAULT_COMMAND_ALLOCATOR_CAPACITY`, `DEFAULT_COMMAND_REFERENCES_PER_LIST`,
-`DEFAULT_COMMAND_PREPROCESS_PER_LIST`, `MAX_COMMAND_ALLOCATOR_CAPACITY`,
-`MAX_COMMAND_REFERENCES_PER_LIST`, `MAX_COMMAND_PREPROCESS_PER_LIST`, and
+`MAX_COMMAND_ALLOCATOR_CAPACITY`, `MAX_COMMAND_REFERENCES_PER_LIST`, and
 `DEFAULT_ATTACHMENT_VIEW_CAPACITY`.
 
 Methods: `CommandAllocatorHandle.is_valid`, `CommandAllocatorHandle.equals`,
@@ -203,7 +202,7 @@ Methods: `CommandAllocatorHandle.is_valid`, `CommandAllocatorHandle.equals`,
 
 Callables:
 `create_command_allocator`, `destroy_command_allocator`,
-`reserve_generated_scratch`, `release_generated_scratch`, `begin_commands`,
+`reserve_generated_work`, `release_generated_work`, `begin_commands`,
 `end_commands`, `discard_commands`, `discard_executable_commands`,
 `cmd_copy_buffer`, `cmd_fill_buffer`, `cmd_copy_buffer_to_texture`,
 `cmd_copy_texture_to_buffer`, `cmd_build_acceleration_structure`,

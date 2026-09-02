@@ -1747,9 +1747,10 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
 }
 
 <* Create one fixed-capacity command allocator for an exact selected queue.
-   Zero capacities default to 8 command buffers, 64 tracked references per list,
-   and 4 generated-preprocess buffers per list; acceleration-structure geometry
-   capacity instead stays disabled at zero. Storage scales with their products.
+   Zero capacities default to 8 command buffers and 64 tracked references per
+   list; acceleration-structure geometry capacity instead stays disabled at
+   zero. Storage scales with their products. Generated-work storage is not
+   configured here and is instead sized by reserve_generated_work.
    Creation may fault for invalid limits, host/device allocation failure, a full
    allocator table, device loss, or a busy/closing device.
 
@@ -1774,15 +1775,9 @@ fn CommandAllocator? create_command_allocator(
         normalized.max_resource_references_per_list =
             DEFAULT_COMMAND_REFERENCES_PER_LIST;
     }
-    if (normalized.max_generated_preprocess_buffers_per_list == 0) {
-        normalized.max_generated_preprocess_buffers_per_list =
-            DEFAULT_COMMAND_PREPROCESS_PER_LIST;
-    }
     if (normalized.command_buffer_capacity > MAX_COMMAND_ALLOCATOR_CAPACITY
         || normalized.max_resource_references_per_list
-            > MAX_COMMAND_REFERENCES_PER_LIST
-        || normalized.max_generated_preprocess_buffers_per_list
-            > MAX_COMMAND_PREPROCESS_PER_LIST) {
+            > MAX_COMMAND_REFERENCES_PER_LIST) {
         return INVALID_ARGUMENT~;
     }
     if (normalized.max_acceleration_structure_geometries_per_build > 0) {
@@ -1793,11 +1788,6 @@ fn CommandAllocator? create_command_allocator(
             > operation.data.caps.acceleration_structures.max_geometry_count) {
             return INVALID_ARGUMENT~;
         }
-    }
-    if (normalized.command_buffer_capacity
-        > uint::max
-            / normalized.max_generated_preprocess_buffers_per_list) {
-        return INVALID_ARGUMENT~;
     }
     if (normalized.max_acceleration_structure_geometries_per_build > 0
         && normalized.command_buffer_capacity
@@ -1854,16 +1844,19 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
     gpu::internal::release_device_children(&operation);
 }
 
-<* Reserve compatible generated-command preprocess storage on a quiescent
-   allocator. The allocator's fixed slot and byte ceilings bound replacement.
+<* Reserve generated-work storage for one pipeline and command kind on a
+   quiescent allocator. The backend derives the exact private storage the
+   requested command count and concurrency imply; the allocator's fixed
+   reservation table bounds replacement. Reservation is transactional: on
+   failure the previous matching reservation stays published and usable.
    The caller externally synchronizes the allocator.
 
    @param allocator : "Live quiescent allocator that owns the reservation."
-   @param desc : "Borrowed pipeline, work-kind, command-count, and buffer-count description."
+   @param desc : "Borrowed pipeline, work-kind, command-count, and concurrency description."
    @return "Success, or a recoverable validation, ownership, capacity, allocation, busy, or device fault." *>
-fn void? reserve_generated_scratch(
+fn void? reserve_generated_work(
     CommandAllocator* allocator,
-    GeneratedScratchDesc* desc,
+    GeneratedWorkReservationDesc* desc,
 ) {
     if (allocator == null) return INVALID_HANDLE~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
@@ -1877,12 +1870,12 @@ fn void? reserve_generated_scratch(
     )!;
     if (!gpu::internal::generated_work_kind_valid(desc.kind)
         || desc.max_commands_per_list == 0
-        || desc.preprocess_buffer_count == 0
+        || desc.concurrent_lists == 0
         || desc.max_commands_per_list
             > operation.data.caps.max_generated_work_count) {
         return INVALID_ARGUMENT~;
     }
-    return gpu::internal::vk::vk_reserve_generated_scratch(
+    return gpu::internal::vk::vk_reserve_generated_work(
         operation.state,
         allocator,
         desc,
@@ -1890,13 +1883,14 @@ fn void? reserve_generated_scratch(
 }
 
 <* Release one generated-work reservation from a quiescent allocator.
+   Release never waits for GPU work.
    The caller externally synchronizes the allocator.
 
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param pipeline : "Exact pipeline named by the reservation."
    @param kind : "Generated-work record kind named by the reservation."
    @return "Success, or a recoverable validation, ownership, invalid-handle, busy, or device fault." *>
-fn void? release_generated_scratch(
+fn void? release_generated_work(
     CommandAllocator* allocator,
     PipelineHandle pipeline,
     GeneratedWorkKind kind,
@@ -1911,7 +1905,7 @@ fn void? release_generated_scratch(
         gpu::internal::ResourceOwnerKind.PIPELINE,
     )!;
     if (!gpu::internal::generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
-    return gpu::internal::vk::vk_release_generated_scratch(
+    return gpu::internal::vk::vk_release_generated_work(
         state:     operation.state,
         allocator: allocator,
         pipeline:  pipeline,
