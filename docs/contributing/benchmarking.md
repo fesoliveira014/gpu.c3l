@@ -93,3 +93,5 @@ allocator context.
 - [Root-pointer data vs a fixed dynamic-uniform path](root_pointer_data.md)
   records the per-command data-path comparison, its derived byte and native-work
   costs, and the measurements that still need the primary development GPU.
+- [Shader variants](shader_variants.md) records the shader and SPIR-V artifact
+  inventory, build cost, and pipeline-creation counts.
