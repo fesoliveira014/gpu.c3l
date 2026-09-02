@@ -204,6 +204,8 @@ def write_distribution(
     for name in sorted(shared_members(linux_members) | native_files):
         relative = name.removeprefix("gpu.c3l/")
         content = linux_members.get(name, windows_members.get(name))
+        if content is None:
+            raise RuntimeError(f"missing distribution member: {name}")
         destination = staging_root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
