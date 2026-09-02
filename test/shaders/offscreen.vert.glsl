@@ -1,6 +1,6 @@
 #version 460
-#include "generated/shader_abi.glsl"
 #include "buffer_reference.glsl"
+#include "generated/shader_abi.glsl"
 
 layout(location = 0) out vec2 out_uv;
 

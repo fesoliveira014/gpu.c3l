@@ -1,7 +1,7 @@
 #version 460
+#include "buffer_reference.glsl"
 #include "generated/shader_abi.glsl"
 #include "generated/root_pointer_abi.glsl"
-#include "buffer_reference.glsl"
 
 layout(local_size_x = ROOT_POINTER_WORKGROUP) in;
 
