@@ -1,0 +1,13 @@
+{
+  "langrev": "1",
+  "dependency-search-paths": [ "lib", "lib/gpu.c3l/lib" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
+  "output": "build",
+  "wincrt": "dynamic",
+  "targets": {
+    "hello_gpu": {
+      "type": "executable",
+      "sources": [ "src/main.c3" ]
+    }
+  }
+}
