@@ -16,14 +16,14 @@ alias QueueSubmit2Fn @private = fn vk::Result (
     vk::SubmitInfo2*,
     vk::Fence,
 );
-alias SubmissionCheckpointFn @private @if(env::TESTING) = fn void (
+alias SubmissionCheckpointFn @private @feat(TESTING) = fn void (
     void*,
     SubmissionCheckpoint,
 );
 
 const uint MAX_QUEUE_FAMILIES = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES + 4;
 
-enum SubmissionCheckpoint : uint @if(env::TESTING) {
+enum SubmissionCheckpoint : uint @feat(TESTING) {
     NATIVE_ACCEPTED,
     BATCHES_PUBLISHED,
     TOKEN_PUBLISHED,
@@ -32,8 +32,8 @@ enum SubmissionCheckpoint : uint @if(env::TESTING) {
 struct QueueSubmitOps @private {
     QueueSubmit2Fn              submit;
     SemaphoreCounterQueryFn     counter_query;
-    void*                       checkpoint_user_data @if(env::TESTING);
-    SubmissionCheckpointFn      checkpoint @if(env::TESTING);
+    void*                       checkpoint_user_data @feat(TESTING);
+    SubmissionCheckpointFn      checkpoint @feat(TESTING);
 }
 
 struct QueueFamilies {
@@ -1378,7 +1378,7 @@ fn usz append_completion_wait_infos(
 fn void reach_submission_checkpoint(
     QueueSubmitOps* ops,
     SubmissionCheckpoint checkpoint,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     if (ops.checkpoint == null) return;
     ops.checkpoint(ops.checkpoint_user_data, checkpoint);
 }
@@ -1582,7 +1582,7 @@ fn gpu::CompletionPoint? vk_submit_with_checkpoint(
     QueueSubmit2Fn submit_fn,
     SubmissionCheckpointFn checkpoint,
     void* user_data,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     QueueSubmitOps ops = {
         .submit               = submit_fn,
         .counter_query        = &real_semaphore_counter_query,

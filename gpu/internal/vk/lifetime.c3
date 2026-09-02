@@ -7,7 +7,7 @@ import std::core::env;
 import std::core::mem::alloc;
 import std::atomic::types;
 
-alias BeforeCompletionRetirementFn @if(env::TESTING) = fn void (void*);
+alias BeforeCompletionRetirementFn @feat(TESTING) = fn void (void*);
 
 const uint SUBMITTED_COMMAND_DRAIN_THRESHOLD = 64;
 
@@ -25,9 +25,9 @@ struct SparseBindReference {
 }
 
 struct CompletionRetirementOps {
-    void* user_data @if(env::TESTING);
+    void* user_data @feat(TESTING);
     SemaphoreCounterQueryFn query;
-    BeforeCompletionRetirementFn before_retirement @if(env::TESTING);
+    BeforeCompletionRetirementFn before_retirement @feat(TESTING);
 }
 
 fn bool same_resource_reference(

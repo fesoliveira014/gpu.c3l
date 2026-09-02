@@ -317,7 +317,7 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(
 fn gpu::PipelineHandle? create_compute_pipeline_with_root_abi_evidence(
     gpu::Device* device,
     gpu::ComputePipelineDesc* desc,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);

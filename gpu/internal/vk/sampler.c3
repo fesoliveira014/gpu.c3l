@@ -67,7 +67,7 @@ fn uint find_sampler_cell(
 
 fn bool sampler_table_index_consistent(
     SamplerTable* table,
-) @if(env::TESTING) {
+) @feat(TESTING) {
     @pool() {
         bool[] visited = mem::talloc_array(bool, (sz)table.count);
         for (uint index = 0; index < table.count; index++) {

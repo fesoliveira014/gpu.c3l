@@ -1,4 +1,4 @@
-module gpu::internal::vk @private @if(env::WIN32);
+module gpu::internal::vk @private @feat(WIN32);
 
 import std::os::win32;
 
