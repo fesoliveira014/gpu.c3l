@@ -339,7 +339,6 @@ fn void command_allocator_host_allocation_failure_is_transactional() @test {
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 1,
         .max_resource_references_per_list = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
     };
     gpu::internal::vk::CommandAllocatorSlot slot;
     assert(@catch(gpu::internal::vk::initialize_command_allocator_slot(
@@ -372,7 +371,6 @@ fn void command_allocator_native_creation_is_transactional() @test {
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 2,
         .max_resource_references_per_list = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
     };
     gpu::Queue queue = { .id = 0 };
     gpu::internal::vk::CommandAllocatorSlot slot;
@@ -442,7 +440,6 @@ fn void command_allocator_preallocates_fixed_acceleration_structure_arrays() @te
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 2,
         .max_resource_references_per_list = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
         .max_acceleration_structure_geometries_per_build = 3,
     };
     gpu::Queue queue = { .id = 0 };
@@ -502,12 +499,11 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 2,
         .max_resource_references_per_list = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
         .max_acceleration_structure_geometries_per_build = 3,
     };
     gpu::Queue queue = { .id = 0 };
 
-    for (uint fail_on = 1; fail_on <= 9; fail_on++) {
+    for (uint fail_on = 1; fail_on <= 7; fail_on++) {
         FailOnNAllocator fail_allocator = { .fail_on = fail_on };
         gpu::internal::vk::VkDeviceState state = {
             .host_allocator = &fail_allocator,
@@ -553,7 +549,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
             "host rollback leaves no owned allocator state");
     }
 
-    FailOnNAllocator success_allocator = { .fail_on = 10 };
+    FailOnNAllocator success_allocator = { .fail_on = 8 };
     gpu::internal::vk::VkDeviceState state = {
         .host_allocator = &success_allocator,
         .queue_completions = completions[..],
@@ -576,17 +572,102 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         slot:  &slot,
         ops:   &ops,
     )!!;
-    assert(success_allocator.attempts == 9
-        && success_allocator.acquires == 9
+    assert(success_allocator.attempts == 7
+        && success_allocator.acquires == 7
         && success_allocator.releases == 0
-        && success_allocator.outstanding == 9,
+        && success_allocator.outstanding == 7,
         "successful creation performs the exact fixed host allocation set");
     gpu::internal::vk::destroy_command_allocator_slot_with_ops(&state, &slot, &ops);
-    assert(success_allocator.releases == 9
+    assert(success_allocator.releases == 7
         && success_allocator.outstanding == 0
         && probe.pool_creates == 1 && probe.pool_destroys == 1
         && probe.buffer_allocations == 1,
         "successful cleanup releases every host allocation and native pool");
+}
+
+fn void generated_reservation_storage_allocation_is_transactional() @test {
+    gpu::internal::vk::QueueCompletionState[1] completions = {{
+        .native_id = 11ull << 32,
+        .timeline  = (vk::Semaphore)(uptr)0x30,
+        .bound     = true,
+    }};
+    gpu::CommandAllocatorDesc desc = {
+        .command_buffer_capacity = 2,
+        .max_resource_references_per_list = 1,
+    };
+    gpu::Queue queue = { .id = 0 };
+
+    for (uint fail_on = 1; fail_on <= 3; fail_on++) {
+        FailOnNAllocator host = { .fail_on = uint::max };
+        gpu::internal::vk::VkDeviceState state = {
+            .host_allocator = &host,
+            .queue_completions = completions[..],
+            .validation_policy = {
+                .contract = gpu::ContractValidation.FULL,
+            },
+        };
+        gpu::internal::vk::CommandAllocatorSlot slot;
+        CommandAllocatorCreateProbe probe;
+        gpu::internal::vk::CommandPoolOps ops = {
+            .user_data = &probe,
+            .create    = &probe_create_command_pool,
+            .destroy   = &probe_destroy_command_pool,
+            .allocate  = &probe_allocate_command_buffers,
+        };
+        gpu::internal::vk::initialize_command_allocator_slot_with_ops(
+            state: &state,
+            queue: queue,
+            desc:  &desc,
+            slot:  &slot,
+            ops:   &ops,
+        )!!;
+        uint created = host.outstanding;
+        host.fail_on = host.attempts + fail_on;
+
+        if (fail_on <= 2) {
+            assert(@catch(
+                gpu::internal::vk::ensure_generated_reservation_storage_locked(
+                    &state,
+                    &slot,
+                )) == gpu::OUT_OF_HOST_MEMORY,
+                "each generated-table host allocation propagates exact exhaustion");
+            assert(slot.reservations.ptr == null
+                && slot.preprocess_index_storage.ptr == null
+                && slot.scratch[0].generated_preprocess_indices.len == 0
+                && host.outstanding == created,
+                "a failed generated-table allocation publishes and retains nothing");
+        } else {
+            gpu::internal::vk::ensure_generated_reservation_storage_locked(
+                &state,
+                &slot,
+            )!!;
+            assert(slot.reservations.len
+                    == (usz)desc.command_buffer_capacity
+                        * (usz)gpu::internal::vk::GENERATED_PREPROCESS_PER_LIST
+                && slot.reservations.len
+                    == slot.preprocess_index_storage.len
+                && slot.scratch[0].generated_preprocess_indices.len
+                    == (usz)gpu::internal::vk::GENERATED_PREPROCESS_PER_LIST
+                && slot.scratch[1].generated_preprocess_indices.len
+                    == (usz)gpu::internal::vk::GENERATED_PREPROCESS_PER_LIST
+                && host.outstanding == created + 2,
+                "the first reservation publishes both tables with exactly two allocations");
+            gpu::internal::vk::ensure_generated_reservation_storage_locked(
+                &state,
+                &slot,
+            )!!;
+            assert(host.outstanding == created + 2,
+                "a later reservation reuses the published tables");
+        }
+
+        gpu::internal::vk::destroy_command_allocator_slot_with_ops(
+            &state,
+            &slot,
+            &ops,
+        );
+        assert(host.outstanding == 0,
+            "allocator destruction releases the generated-work tables");
+    }
 }
 
 fn void command_allocator_defaults_preallocate_exact_storage() @test {
@@ -624,11 +705,10 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
     assert(slot.reference_storage.len == 0
         && slot.scratch[0].references.len == 0,
         "TRUSTED allocators retain no resource-reference storage");
-    assert(slot.preprocess_index_storage.len
-            == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
-                * gpu::DEFAULT_COMMAND_PREPROCESS_PER_LIST
-        && slot.reservations.len == slot.preprocess_index_storage.len,
-        "generated index and reservation tables use fixed default scaling");
+    assert(slot.preprocess_index_storage.len == 0
+        && slot.reservations.len == 0
+        && slot.scratch[0].generated_preprocess_indices.len == 0,
+        "generated index and reservation tables await the first reservation");
     assert(gpu::internal::vk::slot_name(&slot.debug_name[0]).str_view()
         == "graphics_allocator",
         "allocator debug names are copied into stable backend storage");
@@ -741,7 +821,6 @@ fn void command_table_exhaustion_restores_allocator_claim() @test {
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 1,
         .max_resource_references_per_list = 1,
-        .max_generated_preprocess_buffers_per_list = 1,
     };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,

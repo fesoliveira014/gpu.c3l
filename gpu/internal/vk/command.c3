@@ -47,6 +47,11 @@ alias PipelineBindFn @private = fn void (
 const uint MAX_COMMAND_ALLOCATORS = 256;
 const uint COMMAND_ALLOCATOR_FREE_NONE = 0;
 const uint COMMAND_ALLOCATOR_DESTROY_CLAIM = uint::max;
+// Fixed per-command-unit generated-work reservation depth. The reservation and
+// index tables are allocated lazily on the first reservation call that reaches
+// a quiescent allocator and never grow, so an allocator that never reserves
+// generated work pays nothing.
+const uint GENERATED_PREPROCESS_PER_LIST = 64;
 
 struct PipelineBindOps {
     void*          user_data;
@@ -153,8 +158,6 @@ struct CommandAllocatorSlot {
     uint[]                       available;
     uint                         available_count;
     GeneratedPreprocessBuffer[]  reservations;
-    usz                          generated_preprocess_budget;
-    usz                          generated_preprocess_committed;
     uint                         generated_reservations_in_use;
     uint                         live_recordings;
     uint                         live_executables;
@@ -338,11 +341,6 @@ fn void destroy_command_allocator_slot(
     destroy_command_allocator_slot_with_ops(state, slot, &ops);
 }
 
-fn uint allocator_reservation_capacity(gpu::CommandAllocatorDesc* desc) {
-    return desc.command_buffer_capacity
-        * desc.max_generated_preprocess_buffers_per_list;
-}
-
 fn void? initialize_command_allocator_slot_with_ops(
     VkDeviceState* state,
     gpu::Queue queue,
@@ -353,7 +351,6 @@ fn void? initialize_command_allocator_slot_with_ops(
     *slot = {};
     defer catch destroy_command_allocator_slot_with_ops(state, slot, ops);
     slot.queue = queue;
-    slot.generated_preprocess_budget = desc.generated_preprocess_bytes;
     copy_debug_name(&slot.debug_name[0], desc.debug_name);
 
     uint capacity = desc.command_buffer_capacity;
@@ -396,28 +393,6 @@ fn void? initialize_command_allocator_slot_with_ops(
         }
         slot.reference_storage = reference_storage;
     }
-    uint preprocess_capacity =
-        desc.max_generated_preprocess_buffers_per_list;
-    if (preprocess_capacity > 0) {
-        uint[]? preprocess_index_storage = alloc::new_array_try(
-            state.host_allocator,
-            uint,
-            (usz)capacity * (usz)preprocess_capacity,
-        );
-        if (catch preprocess_index_storage) {
-            return gpu::OUT_OF_HOST_MEMORY~;
-        }
-        slot.preprocess_index_storage = preprocess_index_storage;
-        GeneratedPreprocessBuffer[]? reservations = alloc::new_array_try(
-            state.host_allocator,
-            GeneratedPreprocessBuffer,
-            allocator_reservation_capacity(desc),
-        );
-        if (catch reservations) {
-            return gpu::OUT_OF_HOST_MEMORY~;
-        }
-        slot.reservations = reservations;
-    }
     uint acceleration_structure_geometry_capacity =
         desc.max_acceleration_structure_geometries_per_build;
     if (acceleration_structure_geometry_capacity > 0) {
@@ -454,11 +429,6 @@ fn void? initialize_command_allocator_slot_with_ops(
             slot.scratch[i].references = slot.reference_storage[
                 start:reference_capacity
             ];
-        }
-        if (preprocess_capacity > 0) {
-            usz start = (usz)i * (usz)preprocess_capacity;
-            slot.scratch[i].generated_preprocess_indices =
-                slot.preprocess_index_storage[start:preprocess_capacity];
         }
         if (acceleration_structure_geometry_capacity > 0) {
             usz start = (usz)i
@@ -688,7 +658,7 @@ fn CommandAllocatorSlot*? lock_command_allocator_for_pipeline(
 
 fn vk::MemoryRequirements? generated_scratch_requirements(
     VkDeviceState* state,
-    gpu::GeneratedScratchDesc* desc,
+    gpu::GeneratedWorkReservationDesc* desc,
 ) {
     PipelineSlot* slot = state.pipelines.get(desc.pipeline)!;
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
@@ -754,29 +724,49 @@ fn void? preflight_generated_reservation(
     uint count,
     vk::DeviceSize size,
 ) {
-    usz previous_bytes;
     uint previous_count;
     uint owned_count;
     foreach (&buffer : slot.reservations) {
         if (buffer.reservation_owned) owned_count++;
         if (!generated_reservation_matches(buffer, pipeline, kind)) continue;
         previous_count++;
-        previous_bytes += (usz)buffer.size;
     }
     usz available_slots = slot.reservations.len - owned_count + previous_count;
     if ((usz)count > available_slots
         || size > 0 && (usz)count > usz::max / (usz)size) {
         return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
     }
-    if (previous_bytes > slot.generated_preprocess_committed) {
-        return gpu::BACKEND_ERROR~;
-    }
-    usz retained_bytes = slot.generated_preprocess_committed - previous_bytes;
-    usz requested_bytes = (usz)size * (usz)count;
-    if (retained_bytes > slot.generated_preprocess_budget
-        || requested_bytes
-            > slot.generated_preprocess_budget - retained_bytes) {
-        return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
+}
+
+<* Allocate the allocator's fixed generated-work tables on first use. The
+   allocator is quiescent and locked, so re-slicing the per-unit index storage
+   observes no live recording. *>
+fn void? ensure_generated_reservation_storage_locked(
+    VkDeviceState* state,
+    CommandAllocatorSlot* slot,
+) {
+    if (slot.reservations.ptr != null) return;
+    usz capacity = slot.command_buffers.len;
+    usz total = capacity * (usz)GENERATED_PREPROCESS_PER_LIST;
+    uint[]? index_storage = alloc::new_array_try(
+        state.host_allocator,
+        uint,
+        (sz)total,
+    );
+    if (catch index_storage) return gpu::OUT_OF_HOST_MEMORY~;
+    defer catch alloc::free(state.host_allocator, index_storage.ptr);
+    GeneratedPreprocessBuffer[]? reservations = alloc::new_array_try(
+        state.host_allocator,
+        GeneratedPreprocessBuffer,
+        (sz)total,
+    );
+    if (catch reservations) return gpu::OUT_OF_HOST_MEMORY~;
+    slot.preprocess_index_storage = index_storage;
+    slot.reservations = reservations;
+    for (usz i = 0; i < capacity; i++) {
+        usz start = i * (usz)GENERATED_PREPROCESS_PER_LIST;
+        slot.scratch[i].generated_preprocess_indices =
+            slot.preprocess_index_storage[start:GENERATED_PREPROCESS_PER_LIST];
     }
 }
 
@@ -804,10 +794,10 @@ fn bool generated_scratch_references_pipeline(
     return false;
 }
 
-fn void? vk_reserve_generated_scratch(
+fn void? vk_reserve_generated_work(
     VkDeviceState* state,
     gpu::CommandAllocator* allocator,
-    gpu::GeneratedScratchDesc* desc,
+    gpu::GeneratedWorkReservationDesc* desc,
 ) {
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
     vk::MemoryRequirements requirements;
@@ -829,21 +819,22 @@ fn void? vk_reserve_generated_scratch(
         if (!command_allocator_quiescent_locked(slot)) {
             return gpu::RESOURCE_IN_USE~;
         }
+        ensure_generated_reservation_storage_locked(state, slot)!;
         preflight_generated_reservation(
             slot,
             desc.pipeline,
             desc.kind,
-            desc.preprocess_buffer_count,
+            desc.concurrent_lists,
             requirements.size,
         )!;
     }
 
     GeneratedPreprocessBuffer[] reserved;
-    if (desc.preprocess_buffer_count > 0) {
+    if (desc.concurrent_lists > 0) {
         GeneratedPreprocessBuffer[]? reserved_result = alloc::new_array_try(
             state.host_allocator,
             GeneratedPreprocessBuffer,
-            desc.preprocess_buffer_count,
+            desc.concurrent_lists,
         );
         if (catch reserved_result) {
             return gpu::OUT_OF_HOST_MEMORY~;
@@ -851,7 +842,7 @@ fn void? vk_reserve_generated_scratch(
         reserved = reserved_result;
     }
     defer catch free_reserved_generated_preprocess_buffers(state, reserved);
-    for (uint i = 0; i < desc.preprocess_buffer_count; i++) {
+    for (uint i = 0; i < desc.concurrent_lists; i++) {
         if (requirements.size > 0) {
             reserved[i] = allocate_generated_preprocess_buffer(
                 state:            state,
@@ -877,11 +868,12 @@ fn void? vk_reserve_generated_scratch(
         if (!command_allocator_quiescent_locked(slot)) {
             return gpu::RESOURCE_IN_USE~;
         }
+        ensure_generated_reservation_storage_locked(state, slot)!;
         preflight_generated_reservation(
             slot,
             desc.pipeline,
             desc.kind,
-            desc.preprocess_buffer_count,
+            desc.concurrent_lists,
             requirements.size,
         )!;
         foreach (&buffer : slot.reservations) {
@@ -896,7 +888,6 @@ fn void? vk_reserve_generated_scratch(
                         buffer.allocation,
                     );
                 }
-                slot.generated_preprocess_committed -= (usz)buffer.size;
                 *buffer = {};
             }
         }
@@ -907,7 +898,6 @@ fn void? vk_reserve_generated_scratch(
             }
             buffer.reservation_allocator = allocator.handle;
             buffer.reservation_index = (uint)next_reserved;
-            slot.generated_preprocess_committed += (usz)buffer.size;
             slot.reservations[next_reserved++] = *buffer;
             *buffer = {};
         }
@@ -915,7 +905,7 @@ fn void? vk_reserve_generated_scratch(
     free_reserved_generated_preprocess_buffers(state, reserved);
 }
 
-fn void? vk_release_generated_scratch(
+fn void? vk_release_generated_work(
     VkDeviceState* state,
     gpu::CommandAllocator* allocator,
     gpu::PipelineHandle pipeline,
@@ -938,7 +928,6 @@ fn void? vk_release_generated_scratch(
         if (buffer.buffer != null) {
             state.allocator.destroy_buffer(buffer.buffer, buffer.allocation);
         }
-        slot.generated_preprocess_committed -= (usz)buffer.size;
         *buffer = {};
     }
     if (!found) return gpu::INVALID_RESOURCE_STATE~;
@@ -2881,14 +2870,14 @@ fn GeneratedPreprocessBuffer*? acquire_generated_preprocess_buffer(
         record.allocator,
     )!;
     defer unlock_command_allocator(slot);
-    if (record.scratch.generated_preprocess_count
-            >= record.scratch.generated_preprocess_indices.len) {
-        return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
-    }
     foreach (index, &reserved : slot.reservations) {
         if (!generated_reservation_matches(reserved, pipeline, kind)
             || max_count > reserved.reservation_max_commands
             || reserved.reservation_in_use) continue;
+        if (record.scratch.generated_preprocess_count
+                >= record.scratch.generated_preprocess_indices.len) {
+            return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
+        }
         reserved.reservation_in_use = true;
         slot.generated_reservations_in_use++;
         record.scratch.generated_preprocess_indices[

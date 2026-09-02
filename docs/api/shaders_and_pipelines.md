@@ -29,6 +29,11 @@ belongs to `DynamicRasterState` and `GraphicsState`, not to a native pipeline
 variant: primitive topology, viewport, scissor, cull mode, front face, depth
 bias, depth state, blending, and color write masks are all command-time state.
 
+Raster, depth, and blend state varies per pass and would multiply pipelines, so
+it is selected during recording. Sample count and polygon mode stay in pipeline
+identity, which keeps the attachment-sample agreement and the optional
+line-fill capability checked once at creation instead of on every pass.
+
 Relevant types are:
 
 - `PrimitiveTopology`, `CullMode`, `FrontFace`, and `PolygonMode`;

@@ -589,11 +589,11 @@ fn void pin_commands_and_completion() {
     graphics_state.color = color_state;
     gpu::SubmitDesc submit = {};
     gpu::CompletionPoint completion = {};
-    gpu::GeneratedScratchDesc generated_scratch = {
-        .pipeline                = pipeline,
-        .kind                    = gpu::GeneratedWorkKind.DISPATCH,
-        .max_commands_per_list   = 1,
-        .preprocess_buffer_count = 1,
+    gpu::GeneratedWorkReservationDesc generated_work = {
+        .pipeline              = pipeline,
+        .kind                  = gpu::GeneratedWorkKind.DISPATCH,
+        .max_commands_per_list = 1,
+        .concurrent_lists      = 1,
     };
 
     (void)gpu::create_command_allocator(
@@ -602,8 +602,8 @@ fn void pin_commands_and_completion() {
         &command_allocator_desc,
     );
     (void)gpu::destroy_command_allocator(&allocator);
-    (void)gpu::reserve_generated_scratch(&allocator, &generated_scratch);
-    (void)gpu::release_generated_scratch(
+    (void)gpu::reserve_generated_work(&allocator, &generated_work);
+    (void)gpu::release_generated_work(
         &allocator,
         pipeline,
         gpu::GeneratedWorkKind.DISPATCH,
