@@ -155,7 +155,8 @@ fallback.
 | command allocators per device | — | 256 |
 | command buffers per allocator | 8 | 4,096 |
 | retained references per command list | 64 | 4,096 |
-| generated reservations per list | 4 | 64 |
+| generated-work reservations per command list | — | 64 |
+| generated-work reservations per allocator | — | 64 x `command_buffer_capacity` |
 
 Heap exhaustion and fixed table exhaustion return explicit faults such as
 `DESCRIPTOR_HEAP_FULL`, `SLOT_TABLE_FULL`, or
