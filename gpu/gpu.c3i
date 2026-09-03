@@ -10,8 +10,10 @@ import gpu::internal @public;
 // std430 vector alignment comes from explicit padding validated by the ABI
 // generator, not from these types).
 alias Vec2f = float[<2>];
+
 // Same shared-ABI rules as Vec2f.
 alias Vec4f = float[<4>];
+
 // Same shared-ABI rules as Vec2f.
 alias Vec4u = uint[<4>];
 $assert Vec2f::size == 8;
@@ -131,6 +133,7 @@ struct CommandList {
     uint                              generation;
     uint                              device_identity;
 }
+
 // gpu.c3l supports linux-x64 and windows-x64; this is an exact 16-byte ABI.
 $assert CommandList::size == ulong::size * 2;
 
@@ -144,19 +147,31 @@ struct ExecutableCommandList {
 $assert ExecutableCommandList::size == ulong::size * 2;
 
 const Device                 DEVICE_INVALID                   = {};
+
 const GpuAllocation          GPU_ALLOCATION_INVALID           = {};
+
 const TextureHandle          TEXTURE_HANDLE_INVALID           = {};
+
 const AccelerationStructureHandle ACCELERATION_STRUCTURE_HANDLE_INVALID = {};
+
 const AttachmentViewHandle   ATTACHMENT_VIEW_HANDLE_INVALID   = {};
+
 const TextureView            TEXTURE_VIEW_INVALID             = {};
+
 const AccelerationStructureView ACCELERATION_STRUCTURE_VIEW_INVALID = {};
+
 const PipelineHandle         PIPELINE_HANDLE_INVALID          = {};
+
 const SwapchainHandle        SWAPCHAIN_HANDLE_INVALID         = {};
+
 const CommandAllocatorHandle COMMAND_ALLOCATOR_HANDLE_INVALID = {};
+
 const TimestampPoolHandle    TIMESTAMP_POOL_HANDLE_INVALID    = {};
 
 const TextureIndex TEXTURE_INDEX_INVALID = {};
+
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
+
 const AccelerationStructureIndex ACCELERATION_STRUCTURE_INDEX_INVALID = {};
 
 const Runtime RUNTIME_INVALID = {};
@@ -983,7 +998,9 @@ struct SamplerDesc {
 }
 
 const uint DEFAULT_TEXTURE_HEAP_CAPACITY = 4096;
+
 const uint DEFAULT_SAMPLER_HEAP_CAPACITY = 256;
+
 const uint MAX_SHADER_HEAP_CAPACITY = 65_536;
 
 <* One create_texture_views input. A zero-initialized view description selects
@@ -997,6 +1014,7 @@ struct TextureViewCreateDesc {
 
 // Default pipeline slot capacity when RuntimeDesc.pipeline_capacity is zero.
 const uint MAX_PIPELINES                  = 256;
+
 const uint MAX_COLOR_ATTACHMENTS          = 8;
 
 <* How draws assemble vertices into primitives. *>
@@ -1251,8 +1269,11 @@ enum IndexType : int {
 }
 
 const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
+
 const uint DEFAULT_COMMAND_REFERENCES_PER_LIST = 64;
+
 const uint MAX_COMMAND_ALLOCATOR_CAPACITY = 4096;
+
 const uint MAX_COMMAND_REFERENCES_PER_LIST = 4096;
 
 <* Generated-work record kind a reservation serves. *>
@@ -1518,6 +1539,7 @@ struct TimestampPoolDesc {
 }
 
 const ulong TIMEOUT_INFINITE = ulong::max;
+
 const CompletionPoint COMPLETION_POINT_INVALID = {};
 
 <* Execution scopes. `all` and `present` are exclusive. *>
@@ -1666,12 +1688,13 @@ struct DebugMessage {
 }
 
 const ulong RESOURCE_OWNER_KIND_COUNT = 13;
+
 const ulong MAX_DEVICE_RESOURCE_OWNER =
     ulong::max / RESOURCE_OWNER_KIND_COUNT;
 
 const uint MAX_SWAPCHAINS = 8;
-const SwapchainReadiness SWAPCHAIN_READINESS_INVALID = {};
 
+const SwapchainReadiness SWAPCHAIN_READINESS_INVALID = {};
 
 <* Pacing of presentation; unsupported requested modes fall back to FIFO. *>
 enum PresentMode : int {
@@ -1689,7 +1712,6 @@ bitstruct PresentModeSupport : uint {
     bool immediate;
     bool mailbox;
 }
-
 
 <* Creation parameters for create_swapchain. *>
 struct SwapchainDesc {

@@ -10,69 +10,81 @@ import std::atomic::types;
 <* Test whether the device handle differs from the invalid zero sentinel.
 
    @return "True for a nonzero handle; this does not prove live provenance." *>
-fn bool Device.is_valid(self)          => (ulong)self != 0;
+fn bool Device.is_valid(self) => (ulong)self != 0;
+
 // Owner-bearing handles require both fields to be nonzero.
 <* Test whether the allocation token has nonzero owner and generation fields.
 
    @return "True for a structurally valid token; this does not prove live provenance." *>
 fn bool GpuAllocation.is_valid(self) => self.owner != 0 && self.generation != 0;
+
 <* Compare complete allocation identities.
+
    @return "True when owner, index, and generation are equal." *>
 fn bool GpuAllocation.equals(self, GpuAllocation other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
 }
+
 <* Test whether the texture handle has nonzero owner and generation fields.
 
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool TextureHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+
 <* Compare complete texture identities.
+
    @return "True when owner, index, and generation are equal." *>
 fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
 }
+
 <* Test whether an acceleration-structure handle has nonzero owner and generation fields.
 
    @return "True for a structurally valid handle; this does not prove live provenance." *>
-fn bool AccelerationStructureHandle.is_valid(self) =>
-    self.owner != 0 && self.generation != 0;
+fn bool AccelerationStructureHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+
 <* Compare complete acceleration-structure identities.
+
    @return "True when owner, index, and generation are equal." *>
-fn bool AccelerationStructureHandle.equals(
-    self,
-    AccelerationStructureHandle other,
-) @operator(==) {
+fn bool AccelerationStructureHandle.equals(self, AccelerationStructureHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
 }
+
 <* Test whether the attachment-view handle has nonzero owner and generation fields.
 
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool AttachmentViewHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+
 <* Compare complete attachment-view identities.
+
    @return "True when owner, index, and generation are equal." *>
 fn bool AttachmentViewHandle.equals(self, AttachmentViewHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
 }
+
 <* Test whether the texture view has a nonzero owner, index, and generation.
 
    @return "True for a structurally valid view; this does not prove live provenance." *>
 fn bool TextureView.is_valid(self) {
     return self.owner != 0 && self.index.is_valid() && self.generation != 0;
 }
+
 <* Compare complete texture-view identities.
+
    @return "True when owner, index, and generation are equal." *>
 fn bool TextureView.equals(self, TextureView other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
 }
+
 <* Test whether an acceleration-structure view has nonzero ownership, index,
    and generation fields.
 
@@ -80,64 +92,67 @@ fn bool TextureView.equals(self, TextureView other) @operator(==) {
 fn bool AccelerationStructureView.is_valid(self) {
     return self.owner != 0 && self.index.is_valid() && self.generation != 0;
 }
+
 <* Compare complete acceleration-structure-view identities.
+
    @return "True when owner, index, and generation are equal." *>
-fn bool AccelerationStructureView.equals(
-    self,
-    AccelerationStructureView other,
-) @operator(==) {
+fn bool AccelerationStructureView.equals(self, AccelerationStructureView other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
 }
+
 <* Test whether the pipeline handle has nonzero owner and generation fields.
 
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool PipelineHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+
 <* Compare complete pipeline identities.
+
    @return "True when owner, index, and generation are equal." *>
 fn bool PipelineHandle.equals(self, PipelineHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
 }
+
 <* Test whether the swapchain handle has nonzero owner and generation fields.
 
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool SwapchainHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+
 <* Compare complete swapchain identities.
+
    @return "True when owner, index, and generation are equal." *>
 fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
 }
+
 <* Test whether the command-allocator handle has nonzero owner and generation fields.
 
    @return "True for a structurally valid handle; this does not prove live provenance." *>
-fn bool CommandAllocatorHandle.is_valid(self) =>
-    self.owner != 0 && self.generation != 0;
+fn bool CommandAllocatorHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+
 <* Compare complete command-allocator identities.
+
    @return "True when owner, index, and generation are equal." *>
-fn bool CommandAllocatorHandle.equals(
-    self,
-    CommandAllocatorHandle other,
-) @operator(==) {
+fn bool CommandAllocatorHandle.equals(self, CommandAllocatorHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
 }
+
 <* Test whether the timestamp-pool handle has nonzero owner and generation fields.
 
    @return "True for a structurally valid handle; this does not prove live provenance." *>
-fn bool TimestampPoolHandle.is_valid(self) =>
-    self.owner != 0 && self.generation != 0;
+fn bool TimestampPoolHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
+
 <* Compare complete timestamp-pool identities.
+
    @return "True when owner, index, and generation are equal." *>
-fn bool TimestampPoolHandle.equals(
-    self,
-    TimestampPoolHandle other,
-) @operator(==) {
+fn bool TimestampPoolHandle.equals(self, TimestampPoolHandle other) @operator(==) {
     return self.owner == other.owner
         && self.index == other.index
         && self.generation == other.generation;
@@ -147,10 +162,8 @@ fn bool TimestampPoolHandle.equals(
    This does not validate live provenance or recording phase.
 
    @return "True for a structurally valid recording token." *>
-fn bool CommandList.is_valid(&self) =>
-    self.record != null
-        && self.generation != 0
-        && self.device_identity != 0;
+fn bool CommandList.is_valid(&self) => self.record != null && self.generation != 0 && self.device_identity != 0;
+
 <* Test only whether this value differs from the invalid token sentinel.
    This does not validate live provenance or executable phase.
 
@@ -164,10 +177,12 @@ fn bool ExecutableCommandList.is_valid(&self) =>
 
    @return "True for a nonzero index; this does not prove live provenance." *>
 fn bool TextureIndex.is_valid(self) => (uint)self != 0;
+
 <* Test whether a sampler heap index differs from the invalid zero sentinel.
 
    @return "True for a nonzero index; this does not prove live provenance." *>
 fn bool SamplerIndex.is_valid(self) => (uint)self != 0;
+
 <* Test whether an acceleration-structure heap index differs from zero.
 
    @return "True for a nonzero index; this does not prove live provenance." *>
@@ -211,7 +226,9 @@ fn bool Surface.is_valid(self) => (ulong)self != 0;
 
    @return "True for a structurally valid queue; this does not prove live provenance." *>
 fn bool Queue.is_valid(self) => self.device.is_valid();
+
 <* Compare complete selected-queue identities.
+
    @return "True when device, identity, and roles are equal." *>
 fn bool Queue.equals(self, Queue other) @operator(==) {
     return self.device == other.device
@@ -228,7 +245,6 @@ fn RuntimeDesc full_validation_runtime_desc() => {
 };
 
 <* Initialize backend discovery. Importing gpu performs no initialization.
-
    The descriptor is borrowed only for the call; callback user data must remain
    valid for every callback until runtime destruction.
 
@@ -252,7 +268,6 @@ fn void? destroy_runtime(Runtime* runtime) {
     if (data.live_surface_count > 0 || data.live_device_count.load(AtomicOrdering.ACQUIRE) > 0) {
         return RESOURCE_IN_USE~;
     }
-
     gpu::internal::vk::VkRuntimeState* state = data.state;
     data.state = null;
     data.adapter_count = 0;
@@ -275,7 +290,6 @@ fn AdapterList? enumerate_adapters(Runtime* runtime) {
 }
 
 <* Query backend-neutral information for a borrowed adapter.
-
    Returned strings are read-only and remain valid until runtime destruction.
 
    @param adapter : "Borrowed adapter token."
@@ -290,7 +304,6 @@ fn AdapterInfo? get_adapter_info(Adapter* adapter) {
 }
 
 <* Query backend and driver identity for diagnostics and logging.
-
    Returned strings are read-only and remain valid until runtime destruction.
 
    @param adapter : "Borrowed adapter token."
@@ -310,10 +323,7 @@ fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
    @param adapter : "Borrowed adapter to evaluate."
    @param desc : "Borrowed requirements; null selects the zero-value defaults."
    @return "The support result, or a recoverable invalid-argument or invalid-handle fault." *>
-fn DeviceSupport? supports_device_desc(
-    Adapter* adapter,
-    DeviceDesc* desc = null,
-) {
+fn DeviceSupport? supports_device_desc(Adapter* adapter, DeviceDesc* desc = null) {
     DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
     gpu::internal::RuntimeData* data = gpu::internal::resolve_adapter(adapter);
     if (data == null) return INVALID_HANDLE~;
@@ -325,7 +335,6 @@ fn DeviceSupport? supports_device_desc(
 }
 
 <* Return whether an adapter can present to a surface from the same runtime.
-
    The adapter and surface are borrowed for the call and must share a runtime.
 
    @param adapter : "Borrowed adapter to query."
@@ -335,7 +344,6 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
     gpu::internal::RuntimeData* adapter_runtime = gpu::internal::resolve_adapter(adapter);
     gpu::internal::SurfaceData* surface_data = gpu::internal::resolve_surface(surface);
     if (adapter_runtime == null || surface_data == null) return INVALID_HANDLE~;
-
     gpu::internal::RuntimeData* surface_runtime = gpu::internal::resolve_runtime(&surface_data.runtime);
     if (surface_runtime != adapter_runtime) return INVALID_HANDLE~;
     return gpu::internal::vk::vk_supports_presentation(
@@ -366,7 +374,6 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
     DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
     gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(adapter);
     if (runtime_data == null) return INVALID_HANDLE~;
-
     DeviceSupport support = gpu::internal::evaluate_device_desc_support(
         data:                 runtime_data,
         adapter:              adapter,
@@ -379,13 +386,11 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
         adapter.adapter_index,
     )!;
     if (!gpu::internal::device_slot_available()) return SLOT_TABLE_FULL~;
-
     Runtime runtime = {
         .index      = adapter.runtime_index,
         .generation = adapter.runtime_generation,
     };
     gpu::internal::runtime_retain_device(&runtime)!;
-
     Device device;
     bool retain_transferred = false;
     defer catch {
@@ -396,7 +401,6 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
             (void)gpu::internal::runtime_release_device(&runtime);
         }
     }
-
     device = gpu::internal::vk::create_vk_device(adapter, &normalized, &runtime)!;
     retain_transferred = true;
     return device;
@@ -412,7 +416,6 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
 fn void? destroy_device(Device* device) {
     if (device == null || !device.is_valid()) return INVALID_HANDLE~;
     if (device.reserved != 0 || device.index >= gpu::internal::MAX_DEVICES) return INVALID_HANDLE~;
-
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::internal::DeviceSlotControl closing;
     gpu::internal::DeviceData data;
@@ -427,12 +430,10 @@ fn void? destroy_device(Device* device) {
         if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
             return RESOURCE_IN_USE~;
         }
-
         gpu::internal::DeviceSlotControl state_step = { .state = 1 };
         ulong previous = slot.control.add((ulong)state_step, AtomicOrdering.ACQUIRE_RELEASE);
         closing = (gpu::internal::DeviceSlotControl)previous;
         closing.state = gpu::internal::DEVICE_SLOT_CLOSING;
-
         if (closing.pins > 0) {
             (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
             return DEVICE_BUSY~;
@@ -453,12 +454,9 @@ fn void? destroy_device(Device* device) {
                 return RESOURCE_IN_USE~;
             }
         }
-
         data = slot.data;
     }
-
     gpu::internal::vk::vk_destroy_device(data.state);
-
     {
         gpu::internal::lock_device_registry();
         defer gpu::internal::unlock_device_registry();
@@ -475,7 +473,6 @@ fn void? destroy_device(Device* device) {
         closing.reserved = 0;
         slot.control.store((ulong)closing, AtomicOrdering.RELEASE);
     }
-
     *device = DEVICE_INVALID;
     if (data.runtime_retained) gpu::internal::runtime_release_device(&data.runtime)!;
 }
@@ -555,11 +552,7 @@ fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
    @param offset : "Byte offset relative to this mapped span."
    @param size : "Nonzero byte size of the derived mapped span."
    @return "A consistent non-owning mapped subspan, or a recoverable invalid-argument range, representation, or address-overflow fault." *>
-fn MappedGpuSpan? MappedGpuSpan.checked_subspan(
-    self,
-    usz offset,
-    usz size,
-) {
+fn MappedGpuSpan? MappedGpuSpan.checked_subspan(self, usz offset, usz size) {
     if (self.bytes.len != self.span.size) return INVALID_ARGUMENT~;
     GpuSpan child = self.span.checked_subspan(offset, size)!;
     if ((ulong)offset > ulong::max - (ulong)self.address) {
@@ -596,7 +589,6 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     if (desc == null || desc.size == 0) return INVALID_ARGUMENT~;
     if (!gpu::internal::memory_class_is_known(desc.memory_class)) return INVALID_ARGUMENT~;
     gpu::internal::validate_queue_access(&operation, desc.access)!;
-
     AllocationDesc normalized = *desc;
     normalized.alignment = gpu::internal::normalized_allocation_alignment(desc.alignment)!;
     gpu::internal::validate_texture_allocation(&operation, desc, &normalized.alignment)!;
@@ -633,10 +625,7 @@ fn void? free_allocation(Device* device, GpuAllocation* allocation) {
    @param device : "Live device that owns the allocation."
    @param allocation : "Allocation token to query."
    @return "Immutable allocation properties, or a recoverable ownership, invalid-handle, or device fault." *>
-fn AllocationInfo? get_allocation_info(
-    Device* device,
-    GpuAllocation allocation,
-) {
+fn AllocationInfo? get_allocation_info(Device* device, GpuAllocation allocation) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
@@ -696,10 +685,7 @@ fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
    @param device : "Live device that owns the span."
    @param span : "Non-owning host-visible allocation range."
    @return "Consistent borrowed views, or a recoverable fault from the public mapping or address query." *>
-fn MappedGpuSpan? mapped_gpu_span(
-    Device* device,
-    GpuSpan span,
-) {
+fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
     char[] bytes = get_span_mapping(device, span)!;
     if (bytes.len != span.size) return BACKEND_ERROR~;
     GpuAddress address = get_span_address(device, span)!;
@@ -867,11 +853,7 @@ fn TextureHandle? create_placed_texture(
    @param desc : "Borrowed texture description."
    @param allocation_desc : "Borrowed compatible dedicated-allocation description."
    @return "The owning texture and allocation pair, or a recoverable validation, support, capacity, allocation, or device fault." *>
-fn DedicatedTexture? create_dedicated_texture(
-    Device* device,
-    TextureDesc* desc,
-    AllocationDesc* allocation_desc,
-) {
+fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc, AllocationDesc* allocation_desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null || allocation_desc == null
@@ -884,7 +866,6 @@ fn DedicatedTexture? create_dedicated_texture(
     if (!gpu::internal::queue_roles_are_subset(desc.access, allocation_desc.access)) {
         return INVALID_ARGUMENT~;
     }
-
     AllocationDesc normalized = *allocation_desc;
     normalized.alignment = gpu::internal::normalized_allocation_alignment(
         allocation_desc.alignment,
@@ -927,11 +908,7 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
    @param texture : "Texture whose subresources are exposed."
    @param desc : "Borrowed view description; null selects the full default view."
    @return "An owning view token, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
-fn TextureView? create_texture_view(
-    Device* device,
-    TextureHandle texture,
-    TextureViewDesc* desc,
-) {
+fn TextureView? create_texture_view(Device* device, TextureHandle texture, TextureViewDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
@@ -949,11 +926,7 @@ fn TextureView? create_texture_view(
    @param descs : "Borrowed batch of texture and view descriptions."
    @param out_views : "Caller-owned output slice with exactly the input length."
    @return "Success, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
-fn void? create_texture_views(
-    Device* device,
-    TextureViewCreateDesc[] descs,
-    TextureView[] out_views,
-) {
+fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, TextureView[] out_views) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (out_views.len != descs.len) {
@@ -996,10 +969,7 @@ fn void? destroy_texture_view(Device* device, TextureView view) {
    @param device : "Live sparse-enabled device that will own the texture."
    @param desc : "Borrowed sparse texture description."
    @return "An owning texture handle, or a recoverable validation, support, capacity, allocation, or device fault." *>
-fn TextureHandle? create_sparse_texture(
-    Device* device,
-    TextureDesc* desc,
-) {
+fn TextureHandle? create_sparse_texture(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1016,10 +986,7 @@ fn TextureHandle? create_sparse_texture(
    @param device : "Live device that owns the texture."
    @param texture : "Live sparse texture handle."
    @return "The cached requirements, or a recoverable argument, handle, or device fault." *>
-fn SparseTextureRequirements? get_sparse_texture_requirements(
-    Device* device,
-    TextureHandle texture,
-) {
+fn SparseTextureRequirements? get_sparse_texture_requirements(Device* device, TextureHandle texture) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1041,10 +1008,7 @@ fn SparseTextureRequirements? get_sparse_texture_requirements(
    live through completion and keeps resident bytes exclusive until an ordered
    unbind or replacement and every prior GPU user complete. The library retains
    no residency map. *>
-fn CompletionPoint? bind_sparse_texture_memory(
-    Queue queue,
-    SparseTextureBindDesc* desc,
-) {
+fn CompletionPoint? bind_sparse_texture_memory(Queue queue, SparseTextureBindDesc* desc) {
     Device device = queue.device;
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(&device)!;
@@ -1099,10 +1063,7 @@ fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
    @param device : "Live ray-query-enabled device that will own the structure."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
    @return "An owning handle, or a recoverable validation, support, capacity, allocation, or device fault." *>
-fn AccelerationStructureHandle? create_acceleration_structure(
-    Device* device,
-    AccelerationStructureDesc* desc,
-) {
+fn AccelerationStructureHandle? create_acceleration_structure(Device* device, AccelerationStructureDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1179,10 +1140,7 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
    @param device : "Live device that owns the structure."
    @param acceleration_structure : "Owning structure handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
-fn void? destroy_acceleration_structure(
-    Device* device,
-    AccelerationStructureHandle acceleration_structure,
-) {
+fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHandle acceleration_structure) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1204,10 +1162,7 @@ fn void? destroy_acceleration_structure(
    @param device : "Live device that owns the BLAS."
    @param acceleration_structure : "Live bottom-level structure handle."
    @return "A nonzero BLAS address, or a recoverable argument, ownership, handle, or device fault." *>
-fn GpuAddress? get_acceleration_structure_address(
-    Device* device,
-    AccelerationStructureHandle acceleration_structure,
-) {
+fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationStructureHandle acceleration_structure) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1282,10 +1237,7 @@ fn AccelerationStructureView? create_acceleration_structure_view(
    @param device : "Live device that owns the view."
    @param view : "Owning acceleration-structure view to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
-fn void? destroy_acceleration_structure_view(
-    Device* device,
-    AccelerationStructureView view,
-) {
+fn void? destroy_acceleration_structure_view(Device* device, AccelerationStructureView view) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1307,9 +1259,7 @@ fn void? destroy_acceleration_structure_view(
 
    @param write_mask : "Color channels written by the target."
    @return "A caller-owned color-target state with blending disabled." *>
-fn ColorTargetState color_blend_disabled(
-    ColorWriteMask write_mask = COLOR_WRITE_ALL,
-) {
+fn ColorTargetState color_blend_disabled(ColorWriteMask write_mask = COLOR_WRITE_ALL) {
     return { .write_mask = write_mask };
 }
 
@@ -1373,10 +1323,7 @@ fn ColorTargetState additive_blend() {
    @param targets : "Caller-owned target storage to fill."
    @param state : "State copied into every target."
    @return "A non-owning color-state packet over targets." *>
-fn ColorState uniform_color_state(
-    ColorTargetState[] targets,
-    ColorTargetState state,
-) {
+fn ColorState uniform_color_state(ColorTargetState[] targets, ColorTargetState state) {
     foreach (&target : targets) *target = state;
     return { .targets = targets };
 }
@@ -1429,10 +1376,7 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
    @param device : "Live device created with enable_ray_tracing_pipelines."
    @param desc : "Borrowed structured ray-tracing pipeline description."
    @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, compilation, or device fault." *>
-fn PipelineHandle? create_ray_tracing_pipeline(
-    Device* device,
-    RayTracingPipelineDesc* desc,
-) {
+fn PipelineHandle? create_ray_tracing_pipeline(Device* device, RayTracingPipelineDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1452,10 +1396,7 @@ fn PipelineHandle? create_ray_tracing_pipeline(
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
    @return "The pipeline group ranges, or a recoverable ownership, kind, or device fault." *>
-fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(
-    Device* device,
-    PipelineHandle pipeline,
-) {
+fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(Device* device, PipelineHandle pipeline) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1576,15 +1517,10 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
    @param queue : "Exact selected queue the allocator records for."
    @param desc : "Borrowed capacity description; null or zero fields select defaults."
    @return "An owning allocator, or a recoverable validation, unsupported-feature, capacity, allocation, busy, or device fault." *>
-fn CommandAllocator? create_command_allocator(
-    Device* device,
-    Queue queue,
-    CommandAllocatorDesc* desc = null,
-) {
+fn CommandAllocator? create_command_allocator(Device* device, Queue queue, CommandAllocatorDesc* desc = null) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_queue(&operation, device, queue)!;
-
     CommandAllocatorDesc normalized = desc == null ? {} : *desc;
     if (normalized.command_buffer_capacity == 0) {
         normalized.command_buffer_capacity = DEFAULT_COMMAND_ALLOCATOR_CAPACITY;
@@ -1614,7 +1550,6 @@ fn CommandAllocator? create_command_allocator(
                     .max_acceleration_structure_geometries_per_build) {
         return INVALID_ARGUMENT~;
     }
-
     CommandAllocator allocator = {
         .device = *device,
         .queue  = queue,
@@ -1672,10 +1607,7 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param desc : "Borrowed pipeline, work-kind, command-count, and concurrency description."
    @return "Success, or a recoverable validation, ownership, capacity, allocation, busy, or device fault." *>
-fn void? reserve_generated_work(
-    CommandAllocator* allocator,
-    GeneratedWorkReservationDesc* desc,
-) {
+fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReservationDesc* desc) {
     if (allocator == null) return INVALID_HANDLE~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1708,11 +1640,7 @@ fn void? reserve_generated_work(
    @param pipeline : "Exact pipeline named by the reservation."
    @param kind : "Generated-work record kind named by the reservation."
    @return "Success, or a recoverable validation, ownership, invalid-handle, busy, or device fault." *>
-fn void? release_generated_work(
-    CommandAllocator* allocator,
-    PipelineHandle pipeline,
-    GeneratedWorkKind kind,
-) {
+fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipeline, GeneratedWorkKind kind) {
     if (allocator == null) return INVALID_HANDLE~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1916,10 +1844,7 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, dynamic inputs, and build scratch."
    @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
-fn void? cmd_build_acceleration_structure(
-    CommandList* commands,
-    AccelerationStructureBuildDesc* desc,
-) {
+fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
@@ -1933,10 +1858,7 @@ fn void? cmd_build_acceleration_structure(
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, matching dynamic inputs, and update scratch."
    @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
-fn void? cmd_update_acceleration_structure(
-    CommandList* commands,
-    AccelerationStructureBuildDesc* desc,
-) {
+fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
@@ -1948,7 +1870,6 @@ fn void? cmd_update_acceleration_structure(
    `ranges` begins with one packed AccelerationStructureIndirectBuildRange per
    BLAS geometry, or one for a TLAS, at fixed 16-byte stride. Its address must
    be four-byte aligned and its allocation must support indirect use.
-
    Preconditions: acceleration-structure indirect builds are enabled; every
    GPU primitive count is no greater than its descriptor maximum; zero is
    valid. Each GPU count plus offset fits the corresponding explicit input
@@ -1982,7 +1903,6 @@ fn void? cmd_build_acceleration_structure_indirect(
    `maxVertex + 1` bound. The fixed 16-byte packet, capability, alignment,
    ownership, queue, render-scope, barrier, and lifetime rules are identical to
    cmd_build_acceleration_structure_indirect.
-
    Preconditions: the destination was built with update support and every
    GPU-authored actual count equals the corresponding actual count from its
    prior build or update, while remaining within the supplied CPU maximum and
@@ -2163,11 +2083,7 @@ fn void? cmd_trace_rays_indirect(
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param args : "Span beginning with one GPU-written TraceRaysIndirectCommand2; FULL retains the span but never the raw addresses inside it, and TRUSTED retains neither, so every referenced shader binding table allocation stays caller-owned through completion."
    @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
-fn void? cmd_trace_rays_indirect2(
-    CommandList* commands,
-    GpuAddress root,
-    GpuSpan args,
-) {
+fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     return record.ops.trace_rays_indirect2(record, root, args);
@@ -2179,10 +2095,7 @@ fn void? cmd_trace_rays_indirect2(
    @param commands : "Live recording token outside a render pass on a compute-capable graphics or compute family."
    @param pipeline_stack_size : "Sufficient byte count, which may be zero; FULL checks uint representability."
    @return "Success, or a recoverable command, pipeline, queue, scope, range, support, or device fault." *>
-fn void? cmd_set_ray_tracing_pipeline_stack_size(
-    CommandList* commands,
-    ulong pipeline_stack_size,
-) {
+fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pipeline_stack_size) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     return record.ops.set_ray_tracing_pipeline_stack_size(
@@ -2197,10 +2110,7 @@ fn void? cmd_set_ray_tracing_pipeline_stack_size(
    @param device : "Live device that owns the texture."
    @param desc : "Borrowed texture subresource description."
    @return "An owning attachment-view handle, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
-fn AttachmentViewHandle? create_attachment_view(
-    Device* device,
-    AttachmentViewDesc* desc,
-) {
+fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
@@ -2225,10 +2135,7 @@ fn AttachmentViewHandle? create_attachment_view(
    @param device : "Live device that owns the attachment view."
    @param view : "Owning attachment-view handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
-fn void? destroy_attachment_view(
-    Device* device,
-    AttachmentViewHandle view,
-) {
+fn void? destroy_attachment_view(Device* device, AttachmentViewHandle view) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
@@ -2290,10 +2197,7 @@ fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
    @param commands : "Live recording token."
    @param state : "Borrowed complete graphics state copied into the command stream."
    @return "Success, or a recoverable command, validation, pipeline, support, or device fault." *>
-fn void? cmd_set_graphics_state(
-    CommandList* commands,
-    GraphicsState* state,
-) {
+fn void? cmd_set_graphics_state(CommandList* commands, GraphicsState* state) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
     return record.ops.set_graphics_state(record, state);
@@ -2532,9 +2436,10 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
 <* Test whether a completion point has a device and nonzero sequence.
 
    @return "True for a structurally valid point; this does not prove live provenance." *>
-fn bool CompletionPoint.is_valid(self) => self.device.is_valid()
-    && gpu::internal::completion_point_sequence(self) != 0;
+fn bool CompletionPoint.is_valid(self) => self.device.is_valid() && gpu::internal::completion_point_sequence(self) != 0;
+
 <* Compare complete completion-point identities.
+
    @return "True when device and packed queue sequence are equal." *>
 fn bool CompletionPoint.equals(self, CompletionPoint other) @operator(==) {
     return self.device == other.device && self.payload == other.payload;
@@ -2601,11 +2506,7 @@ fn TextureBarrier? texture_view_transition(
    @param before : "Prior semantic state."
    @param after : "Next semantic state."
    @return "A caller-owned full-range transition, or a recoverable invalid-layout fault." *>
-fn TextureBarrier? texture_transition(
-    TextureHandle texture,
-    TextureState before,
-    TextureState after,
-) {
+fn TextureBarrier? texture_transition(TextureHandle texture, TextureState before, TextureState after) {
     return texture_view_transition(
         texture: texture,
         view:    {},
@@ -2648,10 +2549,7 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
    @param device : "Live device that will own the pool."
    @param desc : "Borrowed pool capacity and debug-name description."
    @return "An owning pool handle, or a recoverable invalid-argument, unsupported-feature, capacity, allocation, or device fault." *>
-fn TimestampPoolHandle? create_timestamp_pool(
-    Device* device,
-    TimestampPoolDesc* desc,
-) {
+fn TimestampPoolHandle? create_timestamp_pool(Device* device, TimestampPoolDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -2670,10 +2568,7 @@ fn TimestampPoolHandle? create_timestamp_pool(
    @param device : "Live device that owns the pool."
    @param pool : "Owning pool handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, or device fault." *>
-fn void? destroy_timestamp_pool(
-    Device* device,
-    TimestampPoolHandle pool,
-) {
+fn void? destroy_timestamp_pool(Device* device, TimestampPoolHandle pool) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -2907,10 +2802,7 @@ fn bool? poll_completion(CompletionPoint point) {
    @param point : "Reusable queue completion point."
    @param timeout_ns : "Maximum host wait in nanoseconds; TIMEOUT_INFINITE waits without a deadline."
    @return "Success, or a recoverable timeout, ownership, invalid-handle, device-loss, or backend fault." *>
-fn void? wait_completion(
-    CompletionPoint point,
-    ulong timeout_ns = TIMEOUT_INFINITE,
-) {
+fn void? wait_completion(CompletionPoint point, ulong timeout_ns = TIMEOUT_INFINITE) {
     Device device = point.device;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -2928,14 +2820,12 @@ fn void? wait_completion(
 <* Test whether swapchain readiness has a device and nonzero payload.
 
    @return "True for a structurally valid one-shot value; this does not prove live provenance." *>
-fn bool SwapchainReadiness.is_valid(self) => self.device.is_valid()
-    && self.payload != 0;
+fn bool SwapchainReadiness.is_valid(self) => self.device.is_valid() && self.payload != 0;
+
 <* Compare complete swapchain-readiness identities.
+
    @return "True when device and one-shot payload are equal." *>
-fn bool SwapchainReadiness.equals(
-    self,
-    SwapchainReadiness other,
-) @operator(==) {
+fn bool SwapchainReadiness.equals(self, SwapchainReadiness other) @operator(==) {
     return self.device == other.device && self.payload == other.payload;
 }
 
@@ -2950,18 +2840,15 @@ fn void? destroy_surface(Surface* surface) {
     gpu::internal::SurfaceData* data = gpu::internal::resolve_surface(surface);
     if (data == null) return INVALID_HANDLE~;
     if (data.live_swapchain_count > 0) return RESOURCE_IN_USE~;
-
     Runtime runtime = data.runtime;
     gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(&runtime);
     if (runtime_data == null) return INVALID_HANDLE~;
     void* backend_surface = data.backend_surface;
-
     data.runtime = RUNTIME_INVALID;
     data.backend_surface = null;
     data.live_swapchain_count = 0;
     data.used = false;
     *surface = SURFACE_INVALID;
-
     gpu::internal::vk::vk_destroy_surface(
         runtime_data.state,
         backend_surface,
@@ -2989,7 +2876,6 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
     if ((ulong)*surface != (ulong)device_data.presentation_surface) {
         return INVALID_HANDLE~;
     }
-
     gpu::internal::RuntimeData* device_runtime = gpu::internal::resolve_runtime(&device_data.runtime);
     gpu::internal::RuntimeData* surface_runtime = gpu::internal::resolve_runtime(&surface_data.runtime);
     if (device_runtime == null || surface_runtime != device_runtime) {
@@ -3067,11 +2953,7 @@ fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width,
    @param swapchain : "Externally synchronized swapchain to acquire from."
    @param timeout_ns : "Maximum host wait in nanoseconds; zero is nonblocking."
    @return "A one-shot acquired image, or a recoverable timeout, ownership, lifecycle, surface, or device fault." *>
-fn AcquiredImage? acquire_next_image(
-    Device* device,
-    SwapchainHandle swapchain,
-    ulong timeout_ns = 0,
-) {
+fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, ulong timeout_ns = 0) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_acquire_next_image(
@@ -3091,11 +2973,7 @@ fn AcquiredImage? acquire_next_image(
    @param image : "Externally synchronized acquired image; consumed results replace it with the zero value."
    @param render_completion : "Completion point returned by the readiness-consuming render submission."
    @return "Success, or a recoverable timeout, ownership, lifecycle, surface, device-loss, or backend fault." *>
-fn void? present(
-    Device* device,
-    AcquiredImage* image,
-    CompletionPoint render_completion,
-) {
+fn void? present(Device* device, AcquiredImage* image, CompletionPoint render_completion) {
     if (image == null) return INVALID_ARGUMENT~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -3126,11 +3004,7 @@ fn void? present(
    @param swapchain : "Borrowed swapchain handle whose presentations are waited."
    @param timeout_ns : "Maximum host wait in nanoseconds; TIMEOUT_INFINITE waits without a deadline and zero is nonblocking."
    @return "Success, or a recoverable timeout, ownership, invalid-handle, busy, allocation, device-loss, or backend fault." *>
-fn void? wait_swapchain_presentations(
-    Device* device,
-    SwapchainHandle swapchain,
-    ulong timeout_ns = TIMEOUT_INFINITE,
-) {
+fn void? wait_swapchain_presentations(Device* device, SwapchainHandle swapchain, ulong timeout_ns = TIMEOUT_INFINITE) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_wait_swapchain_presentations(
