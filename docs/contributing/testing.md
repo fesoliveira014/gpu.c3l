@@ -42,7 +42,9 @@ c3c build hello_gpu --path examples/getting_started
 ./examples/getting_started/build/hello_gpu
 ```
 
-Release archive shape and its runtime-only dependency boundary:
+Release archive shape, its runtime-only dependency boundary, and relative
+links in the bundled consumer docs (a link to a file outside the bundle, such
+as `examples/`, fails; use a GitHub URL instead):
 
 ```sh
 python3 -B -m unittest scripts.test_package_release -v

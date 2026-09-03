@@ -62,9 +62,9 @@ against the release CRT.
 ## Step 1: double an array on the GPU
 
 Complete source:
-[`examples/getting_started/src/main.c3`](../examples/getting_started/src/main.c3).
+[`examples/getting_started/src/main.c3`](https://github.com/fesoliveira014/gpu.c3l/blob/main/examples/getting_started/src/main.c3).
 Shader:
-[`examples/getting_started/shaders/doubler.comp.glsl`](../examples/getting_started/shaders/doubler.comp.glsl).
+[`examples/getting_started/shaders/doubler.comp.glsl`](https://github.com/fesoliveira014/gpu.c3l/blob/main/examples/getting_started/shaders/doubler.comp.glsl).
 
 ### The shader
 
