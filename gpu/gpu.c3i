@@ -116,6 +116,31 @@ struct TimestampPoolHandle {
 }
 $assert TimestampPoolHandle::size <= ulong::size * 2;
 
+bitstruct Runtime : ulong {
+    uint index      : 0..31;
+    uint generation : 32..55;
+    uint reserved   : 56..63;
+}
+
+<* A recording token whose fields are library-owned. Never construct, mutate,
+   persist, or serialize it. Successful end consumes it and every alias. *>
+struct CommandList {
+    gpu::internal::vk::CommandRecord* record;
+    uint                              generation;
+    uint                              device_identity;
+}
+// gpu.c3l supports linux-x64 and windows-x64; this is an exact 16-byte ABI.
+$assert CommandList::size == ulong::size * 2;
+
+<* An executable token whose fields are library-owned. Never construct,
+   mutate, persist, or serialize it. Submit or discard consumes every alias. *>
+struct ExecutableCommandList {
+    gpu::internal::vk::CommandRecord* record;
+    uint                              generation;
+    uint                              device_identity;
+}
+$assert ExecutableCommandList::size == ulong::size * 2;
+
 const Device                 DEVICE_INVALID                   = {};
 const GpuAllocation          GPU_ALLOCATION_INVALID           = {};
 const TextureHandle          TEXTURE_HANDLE_INVALID           = {};
@@ -131,6 +156,8 @@ const TimestampPoolHandle    TIMESTAMP_POOL_HANDLE_INVALID    = {};
 const TextureIndex TEXTURE_INDEX_INVALID = {};
 const SamplerIndex SAMPLER_INDEX_INVALID = {};
 const AccelerationStructureIndex ACCELERATION_STRUCTURE_INDEX_INVALID = {};
+
+const Runtime RUNTIME_INVALID = {};
 
 // Public fault set. Categories describe causes, not whole fault values: one
 // value can report an always-checked cause, a FULL diagnostic, or a runtime
@@ -314,89 +341,6 @@ enum QueueKind : int {
     TRANSFER,
 }
 
-enum AccelerationStructureKind : int {
-    BOTTOM_LEVEL,
-    TOP_LEVEL,
-}
-
-enum AccelerationStructureGeometryKind : int {
-    TRIANGLES,
-    AABBS,
-}
-
-enum AccelerationStructureIndexType : int {
-    NONE,
-    U16,
-    U32,
-}
-
-bitstruct AccelerationStructureBuildFlags : uint {
-    bool allow_update      : 0;
-    bool prefer_fast_trace : 1;
-    bool prefer_fast_build : 2;
-    bool minimize_memory   : 3;
-}
-
-bitstruct AccelerationStructureGeometryFlags : uint {
-    bool opaque : 0;
-}
-
-bitstruct AccelerationStructureInstanceFlags : uint {
-    bool triangle_cull_disable : 0;
-    bool triangle_facing_flip  : 1;
-    bool force_opaque          : 2;
-    bool force_non_opaque      : 3;
-}
-
-struct AccelerationStructureTriangleGeometryDesc {
-    uint                           max_vertex_count;
-    uint                           max_primitive_count;
-    AccelerationStructureIndexType index_type;
-    bool                           has_transform;
-}
-
-struct AccelerationStructureAabbGeometryDesc {
-    uint max_primitive_count;
-}
-
-struct AccelerationStructureGeometryDesc {
-    AccelerationStructureGeometryKind         kind;
-    AccelerationStructureGeometryFlags        flags;
-    AccelerationStructureTriangleGeometryDesc triangles;
-    AccelerationStructureAabbGeometryDesc     aabbs;
-}
-
-struct AccelerationStructureDesc {
-    AccelerationStructureKind          kind;
-    AccelerationStructureGeometryDesc[] geometries;
-    uint                                max_instance_count;
-    AccelerationStructureBuildFlags     flags;
-    ZString                             debug_name;
-}
-
-struct AccelerationStructureRequirements {
-    usz storage_size;
-    usz storage_alignment;
-    usz build_scratch_size;
-    usz update_scratch_size;
-    usz scratch_alignment;
-}
-
-struct AccelerationStructureInstanceDesc {
-    Vec4f                              transform_row_0;
-    Vec4f                              transform_row_1;
-    Vec4f                              transform_row_2;
-    AccelerationStructureHandle        bottom_level;
-    uint                               custom_index;
-    uint                               mask;
-    AccelerationStructureInstanceFlags flags;
-}
-
-struct TimestampPoolDesc {
-    uint    capacity;
-    ZString debug_name;
-}
-
 struct TimestampCaps {
     QueueRoles queues;
     uint       graphics_valid_bits;
@@ -489,69 +433,6 @@ struct DeviceCaps {
     SparseTextureCaps sparse_textures;
 }
 
-alias DebugMessageCallback = fn void (DebugMessage*, void*);
-
-enum DebugMessageSeverity : int {
-    VERBOSE,
-    INFO,
-    WARNING,
-    ERROR,
-}
-
-enum DebugResourceKind : int {
-    NONE,
-    DEVICE,
-    GPU_SPAN,
-    TEXTURE,
-    PIPELINE,
-    SWAPCHAIN,
-    SHADER,
-    COMMAND_ALLOCATOR,
-    COMMAND_LIST,
-    TEXTURE_DESCRIPTOR,
-    SAMPLER,
-    ALLOCATION,
-    ATTACHMENT_VIEW,
-    TIMESTAMP_POOL,
-    ACCELERATION_STRUCTURE,
-    ACCELERATION_STRUCTURE_VIEW,
-}
-
-bitstruct DebugMessageCategory : uint {
-    bool public_contract   : 0;
-    bool backend           : 1;
-    bool validation        : 2;
-    bool performance       : 3;
-    bool resource_lifetime : 4;
-    bool general           : 5;
-}
-
-<* Public resource identity when a diagnostic originates from a tracked slot.
-   Strings remain valid only for the duration of the callback. *>
-struct DebugResourceRef {
-    DebugResourceKind kind;
-    bool              has_public_identity;
-    uint              index;
-    uint              generation;
-    ZString           debug_name;
-}
-
-<* Structured diagnostic delivered synchronously to the configured callback.
-   All strings remain valid only for the duration of the callback. *>
-struct DebugMessage {
-    DebugMessageSeverity severity;
-    DebugMessageCategory category;
-    ZString              operation;
-    bool                 has_fault;
-    fault                public_fault;
-    DebugResourceRef     resource;
-    ZString              rejected_field;
-    ZString              invariant;
-    ZString              backend_text;
-    ZString              validation_id_name;
-    int                  validation_id_number;
-}
-
 <* Selects library contract behavior; this is independent of Vulkan validation
    layers.
    Preconditions: valid callers satisfy operation contracts under every policy.
@@ -567,14 +448,6 @@ enum ContractValidation : int {
     // FULL command tables with semantic diagnostics and lifetime tracking.
     FULL,
 }
-
-bitstruct Runtime : ulong {
-    uint index      : 0..31;
-    uint generation : 32..55;
-    uint reserved   : 56..63;
-}
-
-const Runtime RUNTIME_INVALID = {};
 
 <* Runtime discovery configuration. A zero-initialized value selects TRUSTED,
    which keeps lifetime tracking and Vulkan validation layers off. *>
@@ -671,9 +544,137 @@ bitstruct Surface : ulong {
 
 const Surface SURFACE_INVALID = {};
 
-const ulong RESOURCE_OWNER_KIND_COUNT = 13;
-const ulong MAX_DEVICE_RESOURCE_OWNER =
-    ulong::max / RESOURCE_OWNER_KIND_COUNT;
+const Queue QUEUE_INVALID = {};
+
+$assert(CompletionPoint::size <= ulong::size * 2);
+
+<* Semantic roles supported by one selected queue. *>
+bitstruct QueueRoles : uint {
+    bool graphics : 0;
+    bool compute  : 1;
+    bool transfer : 2;
+}
+
+<* Device-owned selected queue token. Copy or compare it as a whole; use
+   get_queue_info to inspect its identity and supported roles. *>
+struct Queue {
+    Device     device;
+    uint       id;
+    QueueRoles roles;
+}
+
+<* Stable device-local identity and supported roles for a live queue. *>
+struct QueueInfo {
+    uint       id;
+    QueueRoles roles;
+}
+
+<* Semantic queues required at device creation. A marked distinct role must be
+   required and may not alias another required role. When `single_queue` is
+   true, every required role and presentation must use one exact native queue
+   identity; `distinct_roles` must be empty. *>
+struct QueueRequest {
+    QueueRoles required;
+    QueueRoles distinct_roles;
+    bool       single_queue;
+}
+
+<* Plain semantic requirements for device creation. A zero value selects the
+   documented default queues, no presentation surface, and no sparse textures.
+   Sparse textures require core 2D or 3D residency and a selected semantic
+   queue capable of sparse binding. *>
+struct DeviceDesc {
+    Surface      surface;
+    QueueRequest queues;
+    bool         enable_sparse_textures;
+    bool         enable_ray_queries;
+    bool         enable_ray_tracing_pipelines;
+}
+
+<* Result of a read-only semantic support query. unmet_requirement is a
+   borrowed static label when supported is false. *>
+struct DeviceSupport {
+    bool   supported;
+    String unmet_requirement;
+}
+
+enum AccelerationStructureKind : int {
+    BOTTOM_LEVEL,
+    TOP_LEVEL,
+}
+
+enum AccelerationStructureGeometryKind : int {
+    TRIANGLES,
+    AABBS,
+}
+
+enum AccelerationStructureIndexType : int {
+    NONE,
+    U16,
+    U32,
+}
+
+bitstruct AccelerationStructureBuildFlags : uint {
+    bool allow_update      : 0;
+    bool prefer_fast_trace : 1;
+    bool prefer_fast_build : 2;
+    bool minimize_memory   : 3;
+}
+
+bitstruct AccelerationStructureGeometryFlags : uint {
+    bool opaque : 0;
+}
+
+bitstruct AccelerationStructureInstanceFlags : uint {
+    bool triangle_cull_disable : 0;
+    bool triangle_facing_flip  : 1;
+    bool force_opaque          : 2;
+    bool force_non_opaque      : 3;
+}
+
+struct AccelerationStructureTriangleGeometryDesc {
+    uint                           max_vertex_count;
+    uint                           max_primitive_count;
+    AccelerationStructureIndexType index_type;
+    bool                           has_transform;
+}
+
+struct AccelerationStructureAabbGeometryDesc {
+    uint max_primitive_count;
+}
+
+struct AccelerationStructureGeometryDesc {
+    AccelerationStructureGeometryKind         kind;
+    AccelerationStructureGeometryFlags        flags;
+    AccelerationStructureTriangleGeometryDesc triangles;
+    AccelerationStructureAabbGeometryDesc     aabbs;
+}
+
+struct AccelerationStructureDesc {
+    AccelerationStructureKind          kind;
+    AccelerationStructureGeometryDesc[] geometries;
+    uint                                max_instance_count;
+    AccelerationStructureBuildFlags     flags;
+    ZString                             debug_name;
+}
+
+struct AccelerationStructureRequirements {
+    usz storage_size;
+    usz storage_alignment;
+    usz build_scratch_size;
+    usz update_scratch_size;
+    usz scratch_alignment;
+}
+
+struct AccelerationStructureInstanceDesc {
+    Vec4f                              transform_row_0;
+    Vec4f                              transform_row_1;
+    Vec4f                              transform_row_2;
+    AccelerationStructureHandle        bottom_level;
+    uint                               custom_index;
+    uint                               mask;
+    AccelerationStructureInstanceFlags flags;
+}
 
 // A shader-visible 64-bit GPU address. Distinct from a plain ulong so it can't
 // be confused with sizes, offsets, or handles.
@@ -693,38 +694,6 @@ struct GpuSpan {
     uint  generation;
     usz   offset;
     usz   size;
-}
-
-struct AccelerationStructureTriangleBuildDesc {
-    GpuSpan vertices;
-    usz     vertex_stride;
-    uint    vertex_count;
-    GpuSpan indices;
-    uint    primitive_count;
-    GpuSpan transform;
-}
-
-struct AccelerationStructureAabbBuildDesc {
-    GpuSpan aabbs;
-    usz     stride;
-    uint    primitive_count;
-}
-
-struct AccelerationStructureGeometryBuildDesc {
-    AccelerationStructureGeometryKind      kind;
-    AccelerationStructureTriangleBuildDesc triangles;
-    AccelerationStructureAabbBuildDesc     aabbs;
-}
-
-<* Dynamic inputs for one BLAS or TLAS construction. Counts are actual for
-   direct commands and CPU maxima for indirect commands; triangle
-   `vertex_count` always supplies the exact `maxVertex + 1` bound. *>
-struct AccelerationStructureBuildDesc {
-    AccelerationStructureHandle              destination;
-    AccelerationStructureGeometryBuildDesc[] geometries;
-    GpuSpan                                  instances;
-    uint                                     instance_count;
-    GpuSpan                                  scratch;
 }
 
 struct DedicatedAccelerationStructure {
@@ -1080,12 +1049,6 @@ enum BlendOp : int {
     MAX,
 }
 
-<* Element width of an index buffer; indexed draws default to U32. *>
-enum IndexType : int {
-    U32,
-    U16,
-}
-
 <* Native ray-tracing hit-group topology. Procedural groups require an
    intersection shader; triangle groups prohibit one. *>
 enum RayTracingHitGroupKind : int {
@@ -1237,6 +1200,44 @@ struct RayTracingShaderBindingTable {
     RayTracingShaderBindingTableRegion callable;
 }
 
+struct AccelerationStructureTriangleBuildDesc {
+    GpuSpan vertices;
+    usz     vertex_stride;
+    uint    vertex_count;
+    GpuSpan indices;
+    uint    primitive_count;
+    GpuSpan transform;
+}
+
+struct AccelerationStructureAabbBuildDesc {
+    GpuSpan aabbs;
+    usz     stride;
+    uint    primitive_count;
+}
+
+struct AccelerationStructureGeometryBuildDesc {
+    AccelerationStructureGeometryKind      kind;
+    AccelerationStructureTriangleBuildDesc triangles;
+    AccelerationStructureAabbBuildDesc     aabbs;
+}
+
+<* Dynamic inputs for one BLAS or TLAS construction. Counts are actual for
+   direct commands and CPU maxima for indirect commands; triangle
+   `vertex_count` always supplies the exact `maxVertex + 1` bound. *>
+struct AccelerationStructureBuildDesc {
+    AccelerationStructureHandle              destination;
+    AccelerationStructureGeometryBuildDesc[] geometries;
+    GpuSpan                                  instances;
+    uint                                     instance_count;
+    GpuSpan                                  scratch;
+}
+
+<* Element width of an index buffer; indexed draws default to U32. *>
+enum IndexType : int {
+    U32,
+    U16,
+}
+
 const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
 const uint DEFAULT_COMMAND_REFERENCES_PER_LIST = 64;
 const uint MAX_COMMAND_ALLOCATOR_CAPACITY = 4096;
@@ -1381,25 +1382,6 @@ struct CommandAllocatorDesc {
     uint    max_acceleration_structure_geometries_per_build;
 }
 
-<* A recording token whose fields are library-owned. Never construct, mutate,
-   persist, or serialize it. Successful end consumes it and every alias. *>
-struct CommandList {
-    gpu::internal::vk::CommandRecord* record;
-    uint                              generation;
-    uint                              device_identity;
-}
-// gpu.c3l supports linux-x64 and windows-x64; this is an exact 16-byte ABI.
-$assert CommandList::size == ulong::size * 2;
-
-<* An executable token whose fields are library-owned. Never construct,
-   mutate, persist, or serialize it. Submit or discard consumes every alias. *>
-struct ExecutableCommandList {
-    gpu::internal::vk::CommandRecord* record;
-    uint                              generation;
-    uint                              device_identity;
-}
-$assert ExecutableCommandList::size == ulong::size * 2;
-
 <* Cold reservation for one generated-work pipeline and command kind on one
    allocator. Command count bounds the records one generated call may request.
    Every generated call still in flight holds one unit of the reservation, so
@@ -1516,6 +1498,11 @@ struct RenderPassDesc {
     uint              height;
 }
 
+struct TimestampPoolDesc {
+    uint    capacity;
+    ZString debug_name;
+}
+
 const ulong TIMEOUT_INFINITE = ulong::max;
 const CompletionPoint COMPLETION_POINT_INVALID = {};
 
@@ -1589,60 +1576,6 @@ struct TextureBarrier {
     TextureState    after;
 }
 
-const Queue QUEUE_INVALID = {};
-
-$assert(CompletionPoint::size <= ulong::size * 2);
-
-<* Semantic roles supported by one selected queue. *>
-bitstruct QueueRoles : uint {
-    bool graphics : 0;
-    bool compute  : 1;
-    bool transfer : 2;
-}
-
-<* Device-owned selected queue token. Copy or compare it as a whole; use
-   get_queue_info to inspect its identity and supported roles. *>
-struct Queue {
-    Device     device;
-    uint       id;
-    QueueRoles roles;
-}
-
-<* Stable device-local identity and supported roles for a live queue. *>
-struct QueueInfo {
-    uint       id;
-    QueueRoles roles;
-}
-
-<* Semantic queues required at device creation. A marked distinct role must be
-   required and may not alias another required role. When `single_queue` is
-   true, every required role and presentation must use one exact native queue
-   identity; `distinct_roles` must be empty. *>
-struct QueueRequest {
-    QueueRoles required;
-    QueueRoles distinct_roles;
-    bool       single_queue;
-}
-
-<* Plain semantic requirements for device creation. A zero value selects the
-   documented default queues, no presentation surface, and no sparse textures.
-   Sparse textures require core 2D or 3D residency and a selected semantic
-   queue capable of sparse binding. *>
-struct DeviceDesc {
-    Surface      surface;
-    QueueRequest queues;
-    bool         enable_sparse_textures;
-    bool         enable_ray_queries;
-    bool         enable_ray_tracing_pipelines;
-}
-
-<* Result of a read-only semantic support query. unmet_requirement is a
-   borrowed static label when supported is false. *>
-struct DeviceSupport {
-    bool   supported;
-    String unmet_requirement;
-}
-
 <* Work submitted to an explicit queue. Every wait names its first destination
    stages. Non-zero readiness requires a graphics-capable queue and an explicit
    supported destination stage, and is consumed only by successful submission. *>
@@ -1652,6 +1585,73 @@ struct SubmitDesc {
     SwapchainReadiness      readiness;
     StageMask               readiness_before;
 }
+
+alias DebugMessageCallback = fn void (DebugMessage*, void*);
+
+enum DebugMessageSeverity : int {
+    VERBOSE,
+    INFO,
+    WARNING,
+    ERROR,
+}
+
+enum DebugResourceKind : int {
+    NONE,
+    DEVICE,
+    GPU_SPAN,
+    TEXTURE,
+    PIPELINE,
+    SWAPCHAIN,
+    SHADER,
+    COMMAND_ALLOCATOR,
+    COMMAND_LIST,
+    TEXTURE_DESCRIPTOR,
+    SAMPLER,
+    ALLOCATION,
+    ATTACHMENT_VIEW,
+    TIMESTAMP_POOL,
+    ACCELERATION_STRUCTURE,
+    ACCELERATION_STRUCTURE_VIEW,
+}
+
+bitstruct DebugMessageCategory : uint {
+    bool public_contract   : 0;
+    bool backend           : 1;
+    bool validation        : 2;
+    bool performance       : 3;
+    bool resource_lifetime : 4;
+    bool general           : 5;
+}
+
+<* Public resource identity when a diagnostic originates from a tracked slot.
+   Strings remain valid only for the duration of the callback. *>
+struct DebugResourceRef {
+    DebugResourceKind kind;
+    bool              has_public_identity;
+    uint              index;
+    uint              generation;
+    ZString           debug_name;
+}
+
+<* Structured diagnostic delivered synchronously to the configured callback.
+   All strings remain valid only for the duration of the callback. *>
+struct DebugMessage {
+    DebugMessageSeverity severity;
+    DebugMessageCategory category;
+    ZString              operation;
+    bool                 has_fault;
+    fault                public_fault;
+    DebugResourceRef     resource;
+    ZString              rejected_field;
+    ZString              invariant;
+    ZString              backend_text;
+    ZString              validation_id_name;
+    int                  validation_id_number;
+}
+
+const ulong RESOURCE_OWNER_KIND_COUNT = 13;
+const ulong MAX_DEVICE_RESOURCE_OWNER =
+    ulong::max / RESOURCE_OWNER_KIND_COUNT;
 
 const uint MAX_SWAPCHAINS = 8;
 const SwapchainReadiness SWAPCHAIN_READINESS_INVALID = {};
