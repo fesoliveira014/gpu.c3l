@@ -6,7 +6,7 @@ material data.
 
 ## Addressing model
 
-`TextureIndex` is a `bitstruct ... : uint` (`gpu/gpu.c3i:31-33`), so it is a
+`TextureIndex` is a `bitstruct ... : uint` (`gpu/gpu.c3i`), so it is a
 4-byte shader value. Zero is the invalid sentinel; a live value is the backend
 slot plus one. `texture_index_from_slot` returns `slot + 1`
 (`gpu/internal/vk/descriptor_heap.c3:412-414`) and the shader side undoes it

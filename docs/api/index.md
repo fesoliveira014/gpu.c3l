@@ -129,7 +129,8 @@ Methods: `GpuAllocation.is_valid`, `GpuAllocation.equals`,
 Callables: `allocate_memory`,
 `free_allocation`, `get_allocation_info`, `get_allocation_span`,
 `get_span_mapping`, `get_span_address`, `flush_mapped_span`,
-`invalidate_mapped_span`, `mapped_gpu_span`,
+`invalidate_mapped_span`, `mapped_gpu_span`, `get_memory_stats`,
+`build_memory_report`,
 `get_texture_format_support`, `supports_texture_desc`,
 `get_texture_requirements`, `create_texture`, `create_placed_texture`,
 `create_dedicated_texture`, `create_sparse_texture`,
@@ -204,6 +205,7 @@ Callables:
 `create_command_allocator`, `destroy_command_allocator`,
 `reserve_generated_work`, `release_generated_work`, `begin_commands`,
 `end_commands`, `discard_commands`, `discard_executable_commands`,
+`cmd_begin_label`, `cmd_end_label`,
 `cmd_copy_buffer`, `cmd_fill_buffer`, `cmd_copy_buffer_to_texture`,
 `cmd_copy_texture_to_buffer`, `cmd_build_acceleration_structure`,
 `cmd_update_acceleration_structure`,
@@ -260,10 +262,10 @@ Methods: `SwapchainHandle.is_valid`, `SwapchainHandle.equals`,
 `SwapchainReadiness.is_valid`, and `SwapchainReadiness.equals`.
 
 Callables: each platform
-`create_surface`, `destroy_surface`, `create_swapchain`, `wait_swapchain_presentations`,
+`create_surface`, `destroy_surface`, `create_swapchain`,
+`wait_swapchain_presentations`,
 `destroy_swapchain`, `resize_swapchain`, `get_swapchain_info`,
-`get_present_mode_support`, `acquire_next_image`, `present`, `get_memory_stats`,
-`build_memory_report`, `cmd_begin_label`, and `cmd_end_label`.
+`get_present_mode_support`, `acquire_next_image`, and `present`.
 
 The internal constants `RESOURCE_OWNER_KIND_COUNT` and
 `MAX_DEVICE_RESOURCE_OWNER` are present in the imported interface for handle

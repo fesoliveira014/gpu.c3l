@@ -8,13 +8,11 @@ statically, and what still needs a device measurement.
 ## Current path
 
 - Allocate `CPU_WRITE` storage and take a mapped span
-  (`mapped_gpu_span`, `gpu/gpu.c3:932`; `MappedGpuSpan`, `gpu/gpu.c3i:738`).
-- Write the record, then `flush_mapped_span` (`gpu/gpu.c3:840`) when the range
-  is not coherent; `invalidate_mapped_span` (`gpu/gpu.c3:857`) covers the read
+  (`mapped_gpu_span`; `MappedGpuSpan` in `gpu/gpu.c3i`).
+- Write the record, then `flush_mapped_span` when the range
+  is not coherent; `invalidate_mapped_span` covers the read
   direction.
-- Pass the span address as the `root` argument of `cmd_dispatch`
-  (`gpu/gpu.c3:2249`) or the two root arguments of `cmd_draw`
-  (`gpu/gpu.c3:2385`).
+- Pass the span address as the `root` argument of `cmd_dispatch` or the two root arguments of `cmd_draw`.
 - The backend pushes 8 bytes for compute (`ROOT_PUSH_ABI.block_size == 8`,
   `gpu/internal/shader_abi.c3:20`) and 16 bytes for graphics
   (`docs/shader_abi.md:17-26`).
@@ -69,7 +67,7 @@ follows `benchmarking.md:17-25`; do not restate it in the target.
 | CPU record preparation time | not collected — requires the primary development GPU |
 | Command-recording time | not collected — requires the primary development GPU |
 | Descriptor/pipeline binding time | not collected — requires the primary development GPU |
-| GPU execution time (`cmd_write_timestamp`, `gpu/gpu.c3:633`) | not collected — requires the primary development GPU |
+| GPU execution time (`cmd_write_timestamp`) | not collected — requires the primary development GPU |
 | End-to-end time | not collected — requires the primary development GPU |
 
 ### Bytes written and flushed
