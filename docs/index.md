@@ -1,24 +1,25 @@
 # Documentation
 
-Use this documentation as a consumer guide to the shipped `gpu.c3l` API.
-Source docstrings remain the authority for exact signatures.
+Consumer guide to `gpu.c3l`. Docstrings in `gpu/gpu.c3` and `gpu/gpu.c3i`
+are the authority for exact signatures.
 
-## Start and learn
+## Learn
 
-- [Getting started](getting_started.md) — vendor the library, run a minimal
-  compute program, and build a small SDL3 triangle.
-- [Architecture](architecture.md) — goals, ownership, memory, commands,
-  synchronization, threading, presentation, and platform boundaries.
-- [Features and limitations](features_and_limitations.md) — supported
-  workloads, required capabilities, fixed limits, and known environment
-  behavior.
-- [Shader ABI](shader_abi.md) — root pointers, generated std430 layouts, and
-  bindless heap values.
-- [Cookbook](cookbook.md) — focused recipes for common operations.
+1. [Getting started](getting_started.md): install, a compute program, a
+   windowed triangle. Read this first.
+2. [Architecture](architecture.md): objects, ownership, memory, commands,
+   synchronization, threading. Read this before designing around the API.
+3. [Shader ABI](shader_abi.md): root pointers, std430 records, heap indices,
+   the schema generator. Read this before writing shaders.
+4. [Cookbook](cookbook.md): recipes for uploads, readback, depth, indirect
+   draws, multiple queues, threads, timestamps, resize, ray tracing.
+5. [Features and limitations](features_and_limitations.md): what is and is
+   not provided, required device profile, fixed limits.
 
-## Look up an API
+## Reference
 
-Start at the [public API index](api/index.md), then choose a domain:
+The [API index](api/index.md) lists every public symbol by domain and
+explains the shared conventions and fault set. Domain pages:
 
 - [Runtime and devices](api/runtime_and_devices.md)
 - [Memory and resources](api/memory_and_resources.md)
@@ -29,8 +30,8 @@ Start at the [public API index](api/index.md), then choose a domain:
 
 ## Troubleshoot
 
-Check [features and limitations](features_and_limitations.md) for capability
-requirements, returned faults, fixed capacities, and known driver or
-environment symptoms. Use `ContractValidation.FULL` during development and
-attach the structured debug callback when diagnosing ownership or call-order
-faults.
+Develop with `full_validation_runtime_desc()` and a
+[debug callback](cookbook.md#receive-diagnostics). Ownership and call-order
+faults are reported with the operation, the offending field, and the
+violated invariant. Environment-specific symptoms are listed in
+[features and limitations](features_and_limitations.md#known-environment-behavior).

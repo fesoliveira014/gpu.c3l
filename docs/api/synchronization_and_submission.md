@@ -1,203 +1,179 @@
 # Synchronization and submission
 
-## Stages, access, and barriers
+Barriers order work inside one command list. Completion points order work
+across submissions, queues, and the host. Timestamps measure it.
 
-`StageMask` describes semantic execution scopes. `Barrier` orders global
-execution and memory visibility between a `before` and `after` stage/access
-domain. `cmd_barrier` records it on a compatible queue.
+```mermaid
+flowchart LR
+    E[ExecutableCommandList] --> SD[SubmitDesc]
+    W[CompletionWait] --> SD
+    R[SwapchainReadiness] --> SD
+    SD -->|submit queue| CP[CompletionPoint]
+    CP -->|poll_completion| B[bool]
+    CP -->|wait_completion| H[host]
+    CP -->|CompletionWait| SD2[next SubmitDesc]
+```
 
-Texture transitions use `TextureState`, which combines `TextureLayout`,
-`StageMask`, and `TextureAccess`. `sampled_at` and `storage_at` build common
-states. `TextureBarrier` additionally identifies a texture and subresource
-range.
+## Stages
 
-`texture_transition` builds a barrier for an explicit texture range.
-`texture_view_transition` builds one from a view's range.
-`cmd_texture_barrier` records the result.
+`StageMask` bits: `all`, `host`, `transfer`, `compute`, `vertex_shader`,
+`fragment_shader`, `color_output`, `depth_output`, `present`, `indirect`,
+`acceleration_structure_build`, `ray_tracing`. `all` and `present` cannot
+be combined with others.
 
-The caller owns texture history. `before` asserts the state established by
-earlier ordered work; the library does not look up or repair it. A global
-barrier cannot establish a texture layout.
-
-`StageMask.acceleration_structure_build` names BLAS/TLAS build, update, and
-device-clone execution. On either side of a global barrier it carries
-acceleration-structure read/write access, including clone source reads and
-destination writes. On a ray-query-enabled device, compute, vertex, and
-fragment stages also include acceleration-structure read access for shader
-queries.
-`StageMask.ray_tracing` names all direct ray-tracing shader stages. As a source
-it carries shader-write and acceleration-structure-read access; as a
-destination it carries shader read/write and acceleration-structure read
-access. The generic shader-read scope covers caller-owned SBT contents without
-requiring the out-of-scope ray-tracing-maintenance extension. Sampled and
-storage texture states accept `.ray_tracing` on an opted-in device and a
-compatible graphics or compute queue.
-
-`StageMask.indirect` names indirect-command argument reads, including basic
-indirect ray dimensions, the complete `TraceRaysIndirectCommand2` packet, and
-`AccelerationStructureIndirectBuildRange` records.
-Order a compute-produced packet with a compute-to-indirect barrier; this is
-separate from `.ray_tracing`, which describes the later shader execution and
-resource access. The same explicit dependency makes GPU-authored SBT addresses
-and dimensions visible to `cmd_trace_rays_indirect2`; it does not make the SBT
-allocations or other raw-address targets into retained owners. The library
-inserts neither dependency automatically.
+## Global barriers
 
 ```c3
-gpu::Barrier args_ready = {
+gpu::Barrier compute_to_draw = {
     .before = { .compute },
-    .after  = { .indirect },
+    .after  = { .vertex_shader, .indirect },
 };
-gpu::cmd_barrier(&commands, &args_ready)!;
+gpu::cmd_barrier(&commands, &compute_to_draw)!;
 ```
 
-An indirect acceleration-structure build reads its packet with indirect-command
-access while executing at the acceleration-structure-build stage. Compose both
-destinations after a compute producer:
+A `Barrier` orders execution and memory between two stage sets. It names
+no resource. Common pairs:
+
+| Before | After | When |
+|---|---|---|
+| `.transfer` | `.compute` or `.vertex_shader` | after an upload copy |
+| `.compute` | `.indirect` | compute wrote indirect arguments |
+| `.compute` | `.host` | before host readback of compute output |
+| `.transfer` | `.host` | before host readback of a copy |
+| `.acceleration_structure_build` | `.compute`, `.ray_tracing` | before a query or trace |
+| `.compute` | `.indirect, .acceleration_structure_build` | GPU-written build ranges |
+
+A global barrier cannot change a texture layout.
+
+## Texture barriers
+
+A `TextureState` is a layout, a stage set, and read/write intent:
 
 ```c3
-gpu::Barrier ranges_ready = {
-    .before = { .compute },
-    .after  = { .indirect, .acceleration_structure_build },
+gpu::TextureState attachment = {
+    .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+    .stages = { .color_output },
+    .access = { .read, .write },
 };
-gpu::cmd_barrier(&commands, &ranges_ready)!;
+gpu::TextureState sampled = gpu::sampled_at({ .fragment_shader });
+gpu::TextureState storage = gpu::storage_at({ .compute }, { .write });
+gpu::TextureState undefined = { .layout = gpu::TextureLayout.UNDEFINED };
+gpu::TextureState present   = { .layout = gpu::TextureLayout.PRESENT };
 ```
 
-Order consecutive builds, updates, or clones explicitly:
+Layouts: `UNDEFINED` (source only), `TRANSFER_SOURCE`,
+`TRANSFER_DESTINATION`, `SAMPLED`, `STORAGE`, `COLOR_ATTACHMENT`,
+`DEPTH_ATTACHMENT`, `PRESENT`. Zero access is valid only for `UNDEFINED`
+and `PRESENT`.
+
+Build a transition and record it:
 
 ```c3
-gpu::Barrier build_to_build = {
-    .before = { .acceleration_structure_build },
-    .after  = { .acceleration_structure_build },
-};
-gpu::cmd_barrier(&commands, &build_to_build)!;
+gpu::TextureBarrier barrier = gpu::texture_transition(texture, undefined, attachment)!;
+gpu::cmd_texture_barrier(&commands, &barrier)!;
+
+gpu::TextureViewDesc mip0 = { .base_mip = 0, .mip_count = 1 };
+gpu::TextureBarrier one_mip = gpu::texture_view_transition(texture, mip0, attachment, sampled)!;
 ```
 
-Before a compute query, use build-to-compute; before a graphics query, use the
-calling shader stage or stages:
+`before` must be the state established by the last ordered use. The
+library keeps no history and does not repair a wrong `before`. A
+`TextureBarrier` value can be built inline as well; the helper functions
+only check layouts.
 
-```c3
-gpu::Barrier build_to_query = {
-    .before = { .acceleration_structure_build },
-    .after  = { .compute },
-};
-gpu::cmd_barrier(&commands, &build_to_query)!;
-```
-
-The same rule applies before or after a clone. Construction commands insert no
-implicit dependency.
-
-Before `cmd_trace_rays`, use construction-to-ray-tracing for a newly built,
-updated, or cloned TLAS and use upload-to-ray-tracing for GPU-produced root/SBT
-data:
-
-```c3
-gpu::Barrier build_to_trace = {
-    .before = { .acceleration_structure_build },
-    .after  = { .ray_tracing },
-};
-gpu::cmd_barrier(&commands, &build_to_trace)!;
-```
-
-Ray-tracing stages are valid only when the device opt-in is enabled and on
-selected graphics or compute queues. They are rejected on transfer-only queues.
+On a ray-enabled device, shader stages also cover acceleration-structure
+reads, and `.ray_tracing` covers all ray stages.
 
 ## Completion points
 
-`CompletionPoint` identifies an ordered timeline value on one selected queue.
-`COMPLETION_POINT_INVALID` is the zero sentinel. Points are reusable,
-copyable ordering values, not resource owners.
+```c3
+gpu::CompletionPoint point = gpu::submit(queue, &desc)!;
+bool done = gpu::poll_completion(point)!;
+gpu::wait_completion(point)!;                       // TIMEOUT_INFINITE
+gpu::wait_completion(point, 1_000_000)!;            // 1 ms, or WAIT_TIMEOUT
+```
 
-`poll_completion` performs a nonblocking query.
-`wait_completion` waits up to the supplied timeout; `TIMEOUT_INFINITE` requests
-an unbounded host wait. Timeout returns `WAIT_TIMEOUT` without consuming or
-changing the point.
+A point identifies ordered completion on one queue. It is a plain copyable
+value that stays valid until the device is destroyed; polling and waiting
+never consume it. It is the only fence in the API: memory reuse, allocator
+reuse, resource destruction, and presentation all wait on it. It does not
+keep anything alive.
 
-Polling and waiting are thread-safe. They may retire completed command units
-and retained references. Keep the device live throughout the call.
+Both calls are thread-safe and may retire command units and retained
+references as a side effect.
 
 ## Submission
 
-`SubmitDesc` supplies executable command lists, `CompletionWait` dependencies,
-and optional swapchain readiness. `submit` targets the exact `Queue` with which
-every command allocator was created.
+```c3
+gpu::ExecutableCommandList[2] lists = { first, second };
+gpu::CompletionWait[1] waits = {{ .point = compute_done, .before = { .vertex_shader } }};
+gpu::SubmitDesc desc = {
+    .command_lists    = lists[..],
+    .completion_waits = waits[..],
+    .readiness        = acquired.readiness,        // first submit that writes a swapchain image
+    .readiness_before = { .color_output },
+};
+gpu::CompletionPoint point = gpu::submit(queue, &desc)!;
+```
 
-Each `CompletionWait` pairs a prior point with destination stages supported by
-the destination queue. Cross-queue dependencies must name at least one valid
-device stage; host and presentation stages are not wait destinations.
-Use `.acceleration_structure_build` when the receiving compute/graphics queue
-will build, update, or clone a structure, and use the receiving shader stage
-when it will query or trace one. `.ray_tracing` is a valid wait destination
-only on an enabled compatible graphics/compute queue. Transfer-only queues
-reject both ray execution stages.
-Use `CompletionWait.before.indirect` when a prior submission produces indirect
-ray dimensions. It is valid on graphics and compute queues and invalid on a
-transfer-only destination.
+`submit` targets the queue every list's allocator was created for. Lists
+in one submit behave like one long list: a barrier in a later list orders
+against commands in earlier ones. Each `CompletionWait` names a prior
+point and the first stages on this queue that must wait for it. Host and
+present are not valid wait destinations, and a transfer-only queue rejects
+ray stages.
 
-Submission is externally synchronized on the target native queue. It:
+On success every list token and the readiness are consumed. On any
+failure the lists stay executable and readiness stays unconsumed.
+Submission is externally synchronized on the native queue.
 
-1. validates the complete batch and waits;
-2. atomically claims every executable token;
-3. reserves the next completion value;
-4. makes the native queue call;
-5. publishes retirement records and the returned point; and
-6. consumes command tokens and any supplied one-shot swapchain readiness.
+Cross-queue rule: the wait orders execution and visibility but transfers
+no ownership. Allocations touched by both queues need both roles in
+`AllocationDesc.access`.
 
-Validation, preparation, or native rejection before acceptance restores the
-batch to executable state. Successful submission keeps each allocator unit,
-native command buffer, fixed scratch, device pin, and retained reference alive
-until ordered retirement.
+## Host visibility
 
-The application retains the returned point whenever it guards memory reuse,
-resource destruction, allocator reuse, presentation, or later queue work.
+A `Barrier` to `.host` makes GPU writes visible to the CPU after the
+completion point completes. `flush_mapped_span` and
+`invalidate_mapped_span` handle the cache side; neither waits. The order
+is: write, flush, submit; then wait, invalidate, read.
 
-## Timestamp queries
+## Timestamps
 
-`create_timestamp_pool` allocates `TimestampPoolDesc.capacity` query slots.
-Pools are device-owned generational handles. Destruction is thread-safe but
-must happen after every recorded use and host read.
+```c3
+gpu::TimestampPoolDesc pool_desc = { .capacity = 64 };
+gpu::TimestampPoolHandle pool = gpu::create_timestamp_pool(&device, &pool_desc)!;
+defer (void)gpu::destroy_timestamp_pool(&device, pool);
 
-The command sequence is explicit:
+gpu::cmd_reset_timestamps(&commands, pool, 0, 2)!;
+gpu::cmd_write_timestamp(&commands, pool, 0, { .all })!;
+gpu::cmd_write_timestamp(&commands, pool, 1, { .all })!;
 
-1. `cmd_reset_timestamps`;
-2. `cmd_write_timestamp` at selected stages;
-3. execute and order completion;
-4. either `cmd_resolve_timestamps` to GPU storage or `read_timestamps` on the
-   host; and
-5. use `timestamp_delta_ns` with the queue role's valid-bit width and period.
+// either resolve on the GPU...
+gpu::cmd_resolve_timestamps(&commands, pool, 0, 2, dst_span)!;
+// ...or read on the host after completion
+ulong[2] raw;
+gpu::read_timestamps(&device, pool, 0, 2, raw[..])!;
+double ns = gpu::timestamp_delta_ns(&caps.timestamps, gpu::QueueKind.GRAPHICS, raw[0], raw[1])!;
+```
 
-The library does not track which slots were reset or written and does not
-insert implicit resets. `read_timestamps` does not establish GPU completion.
-Values are comparable only when written on the same native queue; distinct
-queues are not calibrated.
+`cmd_write_timestamp` takes exactly one stage bit. Slots must be reset
+before each write; the library tracks no slot history. `read_timestamps`
+never waits and returns `DEVICE_BUSY` with unspecified output when values
+are not ready. `timestamp_delta_ns` applies the role's valid-bit width and
+tick period from `TimestampCaps`; values from different native queues are
+not comparable. `TimestampCaps.queues` lists the roles that support
+timestamps.
 
-`TimestampCaps` in `DeviceCaps` reports supported roles, valid widths, and the
-device period. A semantic transfer role may have no timestamp capability.
+## Faults
 
-## Concurrency and lifetime
+| Cause | Fault |
+|---|---|
+| invalid stage, access, layout, or range | `INVALID_ARGUMENT` |
+| contradictory or unestablished state | `INVALID_RESOURCE_STATE` |
+| stale, foreign, or consumed token | `INVALID_HANDLE`, `COMMAND_RECORDING_ERROR` |
+| wait elapsed | `WAIT_TIMEOUT` |
+| values not ready | `DEVICE_BUSY` |
+| device loss | `DEVICE_LOST` |
 
-Submission and sparse binding are externally synchronized per native queue.
-Distinct native queues may submit independently. Completion poll/wait is
-thread-safe and uses a separate retirement boundary.
-
-Command recording itself is thread-confined and may occur concurrently through
-distinct allocators. Barriers recorded in different lists do not synchronize
-host threads; execution order comes only from queue submission order and
-completion waits.
-
-Under full validation, submitted lists retain explicitly recorded owners until
-retirement. GPU-address targets, texture indices, sampler indices, timestamp
-history, and sparse backing remain caller-owned under every policy.
-
-## Fault behavior
-
-- invalid stages, access, layouts, or ranges: `INVALID_ARGUMENT`;
-- contradictory or unestablished command state: `INVALID_RESOURCE_STATE`;
-- stale/foreign/consumed tokens: `INVALID_HANDLE` or
-  `COMMAND_RECORDING_ERROR`;
-- elapsed host wait: `WAIT_TIMEOUT`;
-- device loss: `DEVICE_LOST`; and
-- transient queue/device contention: `DEVICE_BUSY`.
-
-No synchronization call performs hidden resource destruction or device-wide
-idle waits.
+No call here destroys a resource or idles the device.

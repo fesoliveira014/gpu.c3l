@@ -25,7 +25,7 @@ git submodule update --init --recursive
 ```
 
 Vulkan tests require a Vulkan 1.3 loader, the VMA static library described in
-[Architecture](../architecture.md#platform-and-dependency-boundary), SPIRV-Reflect,
+[Architecture](../architecture.md#platform), SPIRV-Reflect,
 and a driver satisfying the baseline in
 [Architecture](../architecture.md). Install `glslc` and `spirv-as` before
 building shader fixtures.

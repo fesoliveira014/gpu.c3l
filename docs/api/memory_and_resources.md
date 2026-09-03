@@ -1,261 +1,298 @@
 # Memory and resources
 
-## Allocations, spans, and addresses
+Allocations, spans, addresses, textures, views, samplers, and acceleration
+structures.
 
-`GpuAllocation` owns one device-scoped storage allocation.
-`allocate_memory` consumes an `AllocationDesc` containing size, alignment,
-`MemoryClass`, semantic access, and an optional debug name.
-`free_allocation` invalidates the owner only on success and never waits for GPU
-use.
+```mermaid
+flowchart LR
+    AD[AllocationDesc] -->|allocate_memory| A[GpuAllocation]
+    A -->|get_allocation_span| S[GpuSpan]
+    S -->|checked_subspan| S2[GpuSpan]
+    S -->|get_span_mapping| M["char[]"]
+    S -->|get_span_address| G[GpuAddress]
+    TD[TextureDesc] -->|create_texture| T[TextureHandle]
+    A -->|create_placed_texture| T
+    T -->|create_texture_view| V[TextureView]
+    V -->|.index| TI[TextureIndex]
+    SD[SamplerDesc] -->|intern_sampler| SI[SamplerIndex]
+```
 
-`get_allocation_info` reports the actual class, size, alignment, mapping state,
-and related properties. `get_allocation_span` returns a non-owning `GpuSpan`
-covering the allocation.
+## Allocations
 
-`GpuSpan.checked_subspan` and `MappedGpuSpan.checked_subspan` validate range
-arithmetic; `unchecked_subspan` is for already-proved bounds.
-`mapped_gpu_span` combines a checked span, mapping, and address for mapped
-addressable storage.
+```c3
+gpu::AllocationDesc desc = {
+    .size         = 64 * 1024,
+    .alignment    = 16,                       // 0 selects 16
+    .memory_class = gpu::MemoryClass.CPU_WRITE,
+    .access       = { .graphics, .compute },  // queue roles that may touch it
+    .debug_name   = "frame_data",
+};
+gpu::GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!;
+defer (void)gpu::free_allocation(&device, &allocation);
+gpu::AllocationInfo info = gpu::get_allocation_info(&device, allocation)!;
+```
 
-`get_span_mapping` returns a borrowed byte slice for a host-visible span.
-`get_span_address` returns a `GpuAddress` for addressable storage. Both values
-inherit the allocation lifetime. Flush CPU-written ranges before submission
-and invalidate completed GPU-written ranges before reading. Coherent memory
-may make these calls no-ops.
+| `MemoryClass` | Mapped | Addressable | Use |
+|---|---|---|---|
+| `CPU_WRITE` | yes | yes | uploads, root data, per-frame data |
+| `CPU_READ` | yes | yes | readback |
+| `GPU_PRIVATE` | no | yes | device-local buffers |
+| `TEXTURE` | no | no | backing for placed and sparse textures |
 
-Allocation and mapping operations are thread-safe, but applications synchronize
-writes to overlapping mapped bytes. Freeing storage happens after its last GPU
-and host use.
+`AllocationInfo` reports the actual `mapped`, `coherent`, and
+`addressable` properties. `free_allocation` never waits; free only after
+the last completion point that reads the memory. A live placed texture or
+acceleration structure makes it return `RESOURCE_IN_USE`.
 
-## Memory classes
+Allocation calls are thread-safe. Concurrent writes to overlapping mapped
+bytes are the application's problem.
 
-| Class | Intended use |
+## Spans, mappings, addresses
+
+A `GpuSpan` is a non-owning byte range inside an allocation.
+
+```c3
+gpu::GpuSpan whole = gpu::get_allocation_span(&device, allocation)!;
+gpu::GpuSpan part  = whole.checked_subspan(256, 1024)!;   // bounds-checked
+gpu::GpuSpan fast  = whole.unchecked_subspan(256, 1024);  // caller proved bounds
+
+char[] bytes = gpu::get_span_mapping(&device, part)!;      // CPU_WRITE / CPU_READ only
+gpu::GpuAddress address = gpu::get_span_address(&device, part)!;
+
+gpu::MappedGpuSpan mapped = gpu::mapped_gpu_span(&device, part)!;  // span + bytes + address
+```
+
+After writing through a mapping:
+
+```c3
+gpu::flush_mapped_span(&device, part)!;
+```
+
+After the GPU wrote and its completion point completed:
+
+```c3
+gpu::invalidate_mapped_span(&device, part)!;
+```
+
+Both are no-ops on coherent memory and required regardless. Neither waits
+for the GPU. A `GpuAddress` is a raw `ulong` valid until the allocation is
+freed.
+
+## Memory statistics
+
+```c3
+gpu::MemoryStats stats = gpu::get_memory_stats(&device)!;
+String report = gpu::build_memory_report(&device, true)!;
+defer report.free(mem);
+```
+
+`MemoryStats` holds up to `MAX_MEMORY_HEAPS` `MemoryHeapBudget` records,
+the live allocation count, and the texture count. Numbers are advisory
+under concurrent allocation.
+
+## Textures
+
+```c3
+gpu::TextureDesc desc = {
+    .width        = 1024,
+    .height       = 1024,
+    .depth        = 0,            // 0 = 2D, >0 = 3D
+    .mip_levels   = 0,            // 0 = 1
+    .array_layers = 0,            // 0 = 1
+    .format       = gpu::Format.RGBA8_SRGB,
+    .usage        = { .sampled, .transfer_dst },
+    .access       = { .graphics },
+    .sample_count = gpu::SampleCount.ONE,
+    .debug_name   = "albedo",
+};
+if (!gpu::supports_texture_desc(&device, &desc)!) return gpu::UNSUPPORTED_FEATURE~;
+gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!;
+defer (void)gpu::destroy_texture(&device, texture);
+```
+
+`TextureUsage` flags: `sampled`, `storage`, `color_attach`,
+`depth_attach`, `transfer_src`, `transfer_dst`. `get_texture_format_support`
+reports which usages, filters, and sample counts one `Format` supports.
+
+Four creation forms:
+
+| Function | Storage |
 |---|---|
-| `CPU_WRITE` | persistently mapped upload and root data |
-| `GPU_PRIVATE` | device-local addressable data |
-| `CPU_READ` | persistently mapped readback |
-| `TEXTURE` | placed texture backing; not a generic GPU-address source |
+| `create_texture` | hidden dedicated allocation |
+| `create_dedicated_texture` | returns `DedicatedTexture` with the texture and its allocation |
+| `create_placed_texture` | a range of a caller-owned `TEXTURE` allocation |
+| `create_sparse_texture` | no storage until `bind_sparse_texture_memory` |
 
-`MemoryStats` contains up to `MAX_MEMORY_HEAPS` advisory
-`MemoryHeapBudget` records. `get_memory_stats` returns advisory heap
-usage/budget snapshots. `build_memory_report` returns an owned C3 `String`
-report for application logging; the caller releases it according to normal C3
-string ownership. Quiesce allocation mutation when an exact diagnostic snapshot
-matters.
+For placement, `get_texture_requirements` returns size, alignment, a
+`TextureCompatibility` value, and `dedicated_only`. The allocation's
+`texture_requirements` list must include every texture placed in it. See
+[the cookbook](../cookbook.md#place-several-textures-in-one-allocation).
 
-## Texture capability and creation
+`destroy_texture` releases the image only, never a separate or placed
+allocation. It fails with `RESOURCE_IN_USE` while a view or attachment view
+is live.
 
-`get_texture_format_support` reports independently supported usages,
-filterability, and sample counts for one `Format`.
-`supports_texture_desc` preflights a complete `TextureDesc`.
-`get_texture_requirements` returns size, alignment, and a
-`TextureCompatibility` value for placed storage.
+Limits: 2D and 3D only; multisample textures are single-mip attachments;
+depth is `D32_FLOAT`; no stencil.
 
-Texture creation forms are:
+## Texture views and indices
 
-- `create_texture`: transactional dedicated storage hidden behind a handle;
-- `create_dedicated_texture`: returns `DedicatedTexture`, exposing both the
-  texture and its owner allocation;
-- `create_placed_texture`: borrows a compatible texture allocation range; and
-- `create_sparse_texture`: creates an image with no committed residency.
+A `TextureView` publishes a subresource range to the bindless heap and owns
+the slot. Its `index` is the value shaders use.
 
-`destroy_texture` releases the texture object, not a separately returned or
-placed allocation. Keep backing allocations alive until every texture use and
-the texture itself have ended.
+```c3
+gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!;  // full view
+gpu::TextureViewDesc mip1 = { .base_mip = 1, .mip_count = 1 };
+gpu::TextureView view_mip1 = gpu::create_texture_view(&device, texture, &mip1)!;
+root.albedo = view.index;
+...
+gpu::destroy_texture_view(&device, view)!;   // slot is reused immediately
+```
 
-`TextureDesc` defines dimensions, mips, format, sample count, usage, and
-debug name. Zero depth selects 2D; positive depth selects ordinary 3D.
-Capabilities and exclusions are summarized in
-[Features and limitations](../features_and_limitations.md).
+Batch creation publishes all or nothing:
 
-## Sparse textures
+```c3
+gpu::TextureViewCreateDesc[2] descs = {
+    { .texture = a },
+    { .texture = b, .view = { .base_mip = 2, .mip_count = 1 } },
+};
+gpu::TextureView[2] views;
+gpu::create_texture_views(&device, descs[..], views[..])!;
+```
 
-`get_sparse_texture_requirements` returns the cached color and optional
-metadata aspect shapes described by `SparseTextureRequirements`.
-`SparseTextureBindDesc` supplies tile and opaque-tail binds plus completion
-waits. `bind_sparse_texture_memory` targets one selected queue and returns a
-`CompletionPoint`.
-
-Binding is externally synchronized on that queue. It does not allocate memory,
-track a residency map, or retain arbitrary backing bytes. The caller prevents
-overlap, retains bound storage, and orders unbind/replacement after all prior
-users. Invalid geometry or incompatible allocations fail before a native bind
-is accepted.
-
-## Acceleration structures
-
-Devices opted into ray queries or ray-tracing pipelines expose bottom-level
-acceleration structures (BLAS) and top-level acceleration structures (TLAS)
-through one strongly typed `AccelerationStructureHandle`. A BLAS descriptor
-contains one or more ordered
-triangle geometries or one or more ordered AABB geometries; one BLAS cannot mix
-the two kinds. A TLAS descriptor instead supplies `max_instance_count`.
-Descriptors are immutable capacity schemas: every later build/update uses the
-same order, kind, index type, declared transform presence, and counts no larger
-than the declared maxima. A clone destination uses the same semantic capacity
-descriptor as its source, though its debug name and storage form may differ.
-
-Triangle inputs are float32 XYZ vertices with a stride of at least 12 bytes and
-a 4-byte-aligned address and stride, plus either no indices or U16/U32 indices
-aligned to 2 or 4 bytes respectively. Non-indexed inputs need three vertices
-per primitive. Set `has_transform` in the capacity schema before querying
-requirements when builds will supply the optional row-major 3-by-4 float
-matrix; its address must be 16-byte aligned. AABB inputs are records of six
-floats—`min_xyz` then `max_xyz`—with an 8-byte-aligned address and a stride of
-at least 24 bytes divisible by 8. TLAS instance input addresses are 16-byte
-aligned. Procedural intersection and candidate confirmation happen in the
-shader.
-
-Call `get_acceleration_structure_requirements` before allocating storage. It
-reports persistent storage size/alignment, full-build scratch, update scratch,
-and scratch alignment. Update scratch is zero unless `allow_update` was set.
-Creation forms are:
-
-- `create_acceleration_structure`, with hidden GPU-private storage;
-- `create_placed_acceleration_structure`, in a nonoverlapping compatible range
-  of a caller-owned generic allocation; and
-- `create_dedicated_acceleration_structure`, returning the structure and its
-  explicit `GpuAllocation` owner.
-
-Placed and dedicated allocations remain explicit owners. Destroy the
-structure before freeing its allocation. A live placement makes
-`free_allocation` return `RESOURCE_IN_USE`; destruction releases the placement
-but never frees caller-owned storage or waits.
-
-Build inputs and scratch are caller-owned `GpuSpan` values. Build scratch and
-update scratch are different queried contracts. Keep every input, transform,
-instance record, scratch range, and structure live until the covering
-submission completes. The library allocates no hidden scratch and inserts no
-barrier.
-
-Direct build descriptors carry actual primitive or instance counts. Indirect
-build descriptors instead carry CPU maxima used for input bounds and native
-safety; triangle `vertex_count` remains the exact highest accessible vertex
-plus one. The GPU packet supplies the actual primitive count and input offsets.
-Keep its allocation live alongside every explicit input and scratch span.
-Under full validation all of these named owners are retained; trusted
-validation leaves their lifetime to the caller.
-
-`cmd_clone_acceleration_structure` copies one completed BLAS or TLAS into a
-distinct unbuilt destination created through any existing creation form with
-the same capacity schema. Clone consumes no scratch and does not allocate,
-submit, wait, or insert a barrier. Keep both handles and any separately owned
-storage live until clone completion. Under full validation the command retains
-exactly those two handles; trusted validation leaves their lifetime entirely
-to the caller. The destination becomes built only when the accepted submission
-retires, and recording or executable discard restores it to unbuilt.
-
-`make_acceleration_structure_instance` validates a live BLAS and returns the
-exact 64-byte `AccelerationStructureInstance` ABI. Its address field is an
-ordinary `GpuAddress`; its transform is three row-major `Vec4f` rows. Custom
-index is 24 bits, mask is 8 bits, and the shader-binding-table record offset is
-currently fixed at zero. A ray-generation shader may still select an SBT hit
-record through the trace instruction's record offset. Store packed records in
-addressable instance input memory before building a TLAS.
-
-A cloned BLAS has its own `GpuAddress`. Instance bytes packed before the clone
-continue to reference the source address; rebuild or update a TLAS explicitly
-when it should reference the clone. A cloned TLAS does not inherit a view or
-raw index. After clone completion, create a separate
-`AccelerationStructureView` for the destination.
-
-`create_acceleration_structure_view` publishes a TLAS in the independently
-sized shader heap. The owner-bearing `AccelerationStructureView` contains a raw
-`AccelerationStructureIndex`. As with texture indices, the raw index has no
-owner/generation and may be recycled immediately after view destruction. Wait
-for all shader use, destroy the view, then destroy the TLAS. Destroy BLAS values
-only after all TLAS build/update work that reads their packed addresses has
-completed.
-
-Updates are in-place only. The structure must have been created with
-`allow_update`, completed one full build or clone, retain the identical schema,
-and use the completed structure's per-geometry primitive counts, triangle
-vertex counts and transform presence, or TLAS instance count. Use the queried
-update scratch. There is no distinct update destination or implicit rebuild.
-
-After an indirect build, actual counts are not known to the CPU. An indirect
-update may follow when its GPU counts equal the preceding actual counts. A
-direct update cannot prove that condition and is rejected; perform another
-indirect update or a new direct full build. Cloning preserves whether counts
-are exact or maximum-only.
-
-Teardown remains explicit. Wait for clone and every later use, destroy any
-destination TLAS view, destroy destination and source structures in either
-order once independent uses allow it, then free each caller-owned allocation.
-Destruction never waits.
-
-## Shader binding table storage
-
-An SBT is ordinary caller-owned addressable allocation storage described by
-four `RayTracingShaderBindingTableRegion` values. Allocate it only on a device
-created with `enable_ray_tracing_pipelines`; such generic allocations carry the
-required shader-binding-table usage in addition to their normal addressable
-buffer usage.
-
-Use `RayTracingPipelineCaps.shader_group_handle_size`,
-`shader_group_handle_alignment`, `shader_group_base_alignment`, and
-`max_shader_group_stride` when packing records. Fetch exact handle bytes with
-`get_ray_tracing_shader_group_handles`, copy each handle at the start of its
-record, and flush CPU-written SBT storage before submission. The ray-generation
-region contains exactly one record. Miss, hit, and callable regions may be
-canonical empty regions or whole-record spans.
-
-The library neither allocates nor populates the SBT. Every nonempty region is a
-borrowed `GpuSpan`; keep its allocation alive through completion. Under full
-validation, recorded spans are retained as explicit command references.
-
-## Views and bindless indices
-
-`create_texture_view` validates a `TextureViewDesc`, publishes the descriptor,
-and returns an owner-bearing `TextureView`. `create_texture_views` performs a
-batch described by `TextureViewCreateDesc` values and publishes no partial
-batch on failure. `destroy_texture_view` releases its slot.
-
-`TextureView.index` is the raw `TextureIndex` stored in shader data. It carries
-no owner or generation. Destroying the view makes the index immediately
-recyclable, so wait for all shader uses before destruction.
-
-Indices from one batch are independent values and are neither contiguous nor
-ordered once descriptor slots have been recycled. Store the exact index each
-shader needs rather than deriving one index from another.
-
-`AccelerationStructureView.index` follows the same raw-value rule for TLAS
-descriptors, while the view itself blocks TLAS destruction until retired.
-
-Attachment views are a rendering-domain resource documented in
-[Commands and rendering](commands_and_rendering.md#attachments-and-render-passes).
+Indices are independent values. Do not compute one from another. The
+texture must have `sampled` or `storage` usage. `DESCRIPTOR_HEAP_FULL`
+means the runtime's `texture_heap_capacity` is exhausted.
 
 ## Samplers
 
-`intern_sampler` validates `SamplerDesc` and returns the stable device-wide
-`SamplerIndex` for equivalent state. Equal concurrent requests converge.
-There is no individual sampler destroy call; indices remain live until device
-destruction.
+```c3
+gpu::SamplerDesc desc = {
+    .min_filter        = gpu::Filter.LINEAR,
+    .mag_filter        = gpu::Filter.LINEAR,
+    .mip_filter        = gpu::Filter.LINEAR,
+    .address_u         = gpu::AddressMode.REPEAT,
+    .address_v         = gpu::AddressMode.REPEAT,
+    .address_w         = gpu::AddressMode.REPEAT,
+    .max_lod           = 16.0f,
+    .anisotropy_enable = caps.max_sampler_anisotropy > 0,
+    .max_anisotropy    = caps.max_sampler_anisotropy,
+};
+gpu::SamplerIndex sampler = gpu::intern_sampler(&device, &desc)!;
+```
 
-Sampler state covers filters, address modes, LOD range and bias, compare
-operation, and optional anisotropy. Requested values are checked against
-`DeviceCaps`; they are never silently clamped.
+Equal descriptions return the same index. There is no destroy; indices
+live until the device does. `compare_enable` plus `compare` makes a shadow
+sampler. Anisotropy above `caps.max_sampler_anisotropy` and LOD bias above
+`caps.max_sampler_lod_bias` return `INVALID_ARGUMENT`, never clamp.
 
-## Formats and support values
+## Sparse textures
 
-`Format`, `SampleCount`, `TextureUsage`, `TextureFormatFeatures`,
-`TextureSampleCountSupport`, and `TextureFormatSupport` describe public
-texture behavior. `Filter` and `AddressMode` describe sampler behavior.
-`TextureRequirements` and `TextureCompatibility` are only for matching placed
-textures to allocation ranges; compatibility is not a general format identity.
+`create_sparse_texture` makes an image with no committed memory.
+`get_sparse_texture_requirements` reports tile extents, mip-tail layout,
+and the compatible page allocation shape. `bind_sparse_texture_memory`
+applies one transactional `SparseTextureBindDesc` of tile and opaque binds
+on a queue and returns a `CompletionPoint`.
 
-## Fault and lifetime summary
+```c3
+gpu::SparseTextureTileBind[1] tiles = {{
+    .aspect     = gpu::SparseTextureAspect.COLOR,
+    .mip_level  = 0,
+    .offset     = { 0, 0, 0 },
+    .extent     = reqs.aspects[0].tile_extent,
+    .allocation = page_allocation,   // GPU_ALLOCATION_INVALID unbinds
+}};
+gpu::SparseTextureBindDesc bind = { .texture = sparse, .tiles = tiles[..] };
+gpu::CompletionPoint bound = gpu::bind_sparse_texture_memory(queue, &bind)!;
+```
 
-| Cause | Typical fault |
+The library keeps no residency map. The application prevents overlap,
+keeps bound allocations alive, and orders unbinds after the last user.
+Binding is externally synchronized on the queue. Sparse images are
+single-layer, single-sample color 2D or 3D.
+
+## Acceleration structures
+
+Available on devices created with `enable_ray_queries` or
+`enable_ray_tracing_pipelines`. One `AccelerationStructureHandle` type
+covers BLAS and TLAS.
+
+```mermaid
+flowchart LR
+    D[AccelerationStructureDesc] -->|get_acceleration_structure_requirements| R[sizes]
+    D -->|create_acceleration_structure| H[AccelerationStructureHandle]
+    H -->|cmd_build_acceleration_structure| H
+    H -->|make_acceleration_structure_instance| I[AccelerationStructureInstance]
+    H -->|create_acceleration_structure_view| V[AccelerationStructureView]
+    V -->|.index| AI[AccelerationStructureIndex]
+```
+
+A descriptor is an immutable capacity schema: geometry kinds and maxima
+for a BLAS, `max_instance_count` for a TLAS, and build flags. Every later
+build or update must match it. `get_acceleration_structure_requirements`
+returns storage size and alignment, build scratch, and update scratch
+(nonzero only with `allow_update`).
+
+Creation forms mirror textures: `create_acceleration_structure` (hidden
+storage), `create_placed_acceleration_structure` (range of a caller
+allocation), `create_dedicated_acceleration_structure` (returns the handle
+and its allocation).
+
+Input formats:
+
+| Geometry | Layout | Alignment |
+|---|---|---|
+| triangles | float32 xyz, stride ≥ 12 | address and stride 4-byte |
+| indices | `U16` or `U32` | 2 or 4 bytes |
+| transform | row-major 3×4 floats | 16 bytes |
+| AABBs | six floats min xyz, max xyz, stride ≥ 24 | 8 bytes |
+| TLAS instances | 64-byte `AccelerationStructureInstance` | 16 bytes |
+
+`make_acceleration_structure_instance` packs a live BLAS, a transform,
+custom index (24 bits), mask (8 bits), and flags into the 64-byte record.
+`get_acceleration_structure_address` returns a BLAS address for GPU-authored
+instances.
+
+`create_acceleration_structure_view` publishes a TLAS to the heap. The
+view owns the slot, blocks TLAS destruction while live, and exposes
+`index`. Destroying it recycles the slot immediately.
+
+Rules:
+
+- Build inputs and scratch are caller-owned spans kept alive through the
+  build's completion point. No hidden scratch, no hidden barrier.
+- Updates are in place, need `allow_update`, and must follow a completed
+  build or clone with the same counts.
+- A clone copies a completed structure into an unbuilt destination made
+  from the same descriptor. A cloned BLAS has a new address; a cloned TLAS
+  needs its own view.
+- After an indirect build the CPU does not know actual counts; only
+  indirect updates or a new direct build may follow.
+- Teardown: wait, destroy views, destroy the TLAS, destroy BLASes that its
+  instances reference, then free caller-owned storage.
+
+Recipes: [cookbook](../cookbook.md#ray-tracing).
+
+## Shader binding tables
+
+On a device with ray-tracing pipelines, any addressable allocation may hold
+SBT records. `RayTracingShaderBindingTable` names four
+`RayTracingShaderBindingTableRegion` values (span plus stride). The
+ray-generation region holds exactly one record; the others may be zero.
+Pack with `RayTracingPipelineCaps` alignments and
+`get_ray_tracing_shader_group_handles`. The library never allocates or
+fills an SBT.
+
+## Faults
+
+| Cause | Fault |
 |---|---|
-| invalid range, alignment, descriptor, or requested limit | `INVALID_ARGUMENT` |
-| stale, foreign, or zero owner | `INVALID_HANDLE` |
-| unsupported usage/format/capability | `UNSUPPORTED_FEATURE` |
-| no host/device memory | `OUT_OF_HOST_MEMORY` / `OUT_OF_DEVICE_MEMORY` |
-| fixed resource table exhausted | `SLOT_TABLE_FULL` |
-| bindless heap exhausted | `DESCRIPTOR_HEAP_FULL` |
-| live retained use blocks destruction | `RESOURCE_IN_USE` |
+| bad range, alignment, descriptor, or limit | `INVALID_ARGUMENT` |
+| zero, stale, or foreign handle | `INVALID_HANDLE` |
+| unsupported usage, format, or feature | `UNSUPPORTED_FEATURE` |
+| out of memory | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` |
+| fixed table full | `SLOT_TABLE_FULL` |
+| heap full | `DESCRIPTOR_HEAP_FULL` |
+| live child or reference | `RESOURCE_IN_USE` |
 
-Resource creation is internally synchronized and transactional. Query values
-are snapshots; memory budget reports may be advisory under concurrent
-allocation mutation.
+All creation here is thread-safe and transactional.

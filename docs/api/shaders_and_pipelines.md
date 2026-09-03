@@ -1,131 +1,166 @@
 # Shaders and pipelines
 
+Pipelines are created from SPIR-V. Their layout is fixed by the
+[shader ABI](../shader_abi.md): one global heap set plus a root push block.
+There is nothing to declare on the C3 side except the shader bytes.
+
+```mermaid
+flowchart LR
+    SV["SPIR-V bytes"] --> SD[ShaderDesc]
+    SD --> CP[ComputePipelineDesc]
+    SD --> GP[GraphicsPipelineDesc]
+    SD --> RP[RayTracingPipelineDesc]
+    CP -->|create_compute_pipeline| P[PipelineHandle]
+    GP -->|create_graphics_pipeline| P
+    RP -->|create_ray_tracing_pipeline| P
+    P -->|cmd_bind_pipeline| CL[CommandList]
+```
+
 ## Shader input
 
-`ShaderDesc` borrows SPIR-V bytes and an entry-point name for one pipeline
-creation call. The bytes and string need not remain live after the call.
-Pipeline creation validates the selected entry point's stage, interfaces,
-root-push layout, and bindless heap declarations.
+```c3
+const char[*] SPIRV = $embed("../shaders/main.comp.spv");
+gpu::ShaderDesc shader = {
+    .spirv       = SPIRV[..],
+    .entry_point = "main",   // null selects "main"
+    .debug_name  = "doubler",
+};
+```
 
-Root records and the exact push contract are documented in
-[Shader ABI](../shader_abi.md). `RootPush`, `GraphicsRootPush`,
-`GeneratedDrawRecord`, `GeneratedDrawIndexedRecord`, and
-`GeneratedDispatchRecord` are generated public wire types.
+The bytes and strings are borrowed for the create call only. Creation
+reflects the entry point and validates the push block, heap bindings, and
+stage interface. Mismatches return `SHADER_INVALID`.
 
 ## Compute pipelines
 
-`ComputePipelineDesc` supplies one compute shader and the state that contributes
-to deterministic pipeline identity. `create_compute_pipeline` returns a
-device-owned `PipelineHandle`. Equivalent descriptions may converge on one
-private cached pipeline identity while each successful public owner follows the
-documented handle lifetime.
+```c3
+gpu::ComputePipelineDesc desc = { .shader = shader, .debug_name = "doubler" };
+gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &desc)!;
+defer (void)gpu::destroy_pipeline(&device, pipeline);
+```
 
 ## Graphics pipelines
 
-`GraphicsPipelineDesc` supplies vertex and fragment shaders, ordered color
-formats, depth format, sample count, and polygon mode. Color and depth formats
-are render-compatibility inputs. State that can change without a new pipeline
-belongs to `DynamicRasterState` and `GraphicsState`, not to a native pipeline
-variant: primitive topology, viewport, scissor, cull mode, front face, depth
-bias, depth state, blending, and color write masks are all command-time state.
+```c3
+gpu::Format[2] color_formats = { gpu::Format.RGBA16_FLOAT, gpu::Format.RGBA8_UNORM };
+gpu::GraphicsPipelineDesc desc = {
+    .vertex_shader   = { .spirv = VERT_SPIRV[..] },
+    .fragment_shader = { .spirv = FRAG_SPIRV[..] },
+    .color_formats   = color_formats[..],
+    .depth_format    = gpu::Format.D32_FLOAT,     // UNDEFINED for no depth
+    .sample_count    = gpu::SampleCount.ONE,
+    .polygon_mode    = gpu::PolygonMode.FILL,     // LINE needs caps.line_polygon_mode
+    .debug_name      = "scene",
+};
+gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &desc)!;
+```
 
-Raster, depth, and blend state varies per pass and would multiply pipelines, so
-it is selected during recording. Sample count and polygon mode stay in pipeline
-identity, which keeps the attachment-sample agreement and the optional
-line-fill capability checked once at creation instead of on every pass.
+Pipeline identity is: shaders, color formats, depth format, sample count,
+polygon mode. Everything else is command-time state in `GraphicsState`:
 
-Relevant types are:
+| `GraphicsState` field | Type | Contents |
+|---|---|---|
+| `viewport` | `Viewport` | x, y, width, height, depth range |
+| `scissor` | `ScissorRect` | x, y, width, height |
+| `raster` | `DynamicRasterState` | topology, cull mode, front face, depth bias |
+| `depth` | `DepthState` | test, write, compare |
+| `color` | `ColorState` | one `ColorTargetState` per color format |
 
-- `PrimitiveTopology`, `CullMode`, `FrontFace`, and `PolygonMode`;
-- `CompareOp` and `DepthState`;
-- `BlendFactor`, `BlendOp`, `BlendState`, `ColorWriteMask`,
-  `ColorTargetState`, and `ColorState`; and
-- `DynamicRasterState`.
+`render_geometry_state(width, height)` returns a full-area viewport and
+scissor with triangles, no culling, no depth, and an empty color packet.
+Fill `color.targets` before drawing:
 
-`MAX_COLOR_ATTACHMENTS` is the library ceiling; use the lower
-`DeviceCaps.max_color_attachments` on the selected device.
+```c3
+gpu::GraphicsState state = gpu::render_geometry_state(width, height)!;
+gpu::ColorTargetState[2] targets = {
+    gpu::color_blend_disabled(),
+    gpu::alpha_blend(),
+};
+state.color.targets = targets[..];
+state.raster.cull_mode = gpu::CullMode.BACK;
+state.depth = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
+```
 
-`color_blend_disabled`, `alpha_blend`,
-`premultiplied_alpha_blend`, and `additive_blend` build common
-`ColorTargetState` values. `uniform_color_state` repeats one target state over
-an exact color-format count. `COLOR_WRITE_ALL` enables all channels.
+Blend presets return a `ColorTargetState`: `color_blend_disabled(mask)`,
+`alpha_blend()`, `premultiplied_alpha_blend()`, `additive_blend()`.
+`uniform_color_state(slice, state)` fills a slice with one state and
+returns the `ColorState`. `COLOR_WRITE_ALL` is the default mask.
+
+`MAX_COLOR_ATTACHMENTS` is 8; use `DeviceCaps.max_color_attachments` for
+the selected device.
 
 ## Ray-tracing pipelines
 
-`RayTracingPipelineDesc` supplies ordered ray-generation shaders, miss
-shaders, structured hit groups, callable shaders, and a recursion depth. The
-supported roles are ray generation, miss, closest hit, any hit, intersection,
-and callable. Every shader uses the same eight-byte `RootPush` contract and the
-global heap layout; include `ray_tracing.glsl` for binding 5 without enabling
-the separate ray-query shader extension.
+Require `DeviceDesc.enable_ray_tracing_pipelines`.
 
-`RayTracingHitGroupDesc` selects `TRIANGLES` or `PROCEDURAL`. A triangle group
-may contain closest-hit and any-hit shaders and must not contain an
-intersection shader. A procedural group requires an intersection shader and
-may also contain closest-hit and any-hit shaders. Empty optional shader
-pointers mean that role is absent.
+```c3
+gpu::ShaderDesc closest_hit = { .spirv = CHIT_SPIRV[..] };
+gpu::ShaderDesc[1] raygen = {{ .spirv = RGEN_SPIRV[..] }};
+gpu::ShaderDesc[1] miss   = {{ .spirv = MISS_SPIRV[..] }};
+gpu::RayTracingHitGroupDesc[1] hit_groups = {{
+    .kind               = gpu::RayTracingHitGroupKind.TRIANGLES,
+    .closest_hit_shader = &closest_hit,
+}};
+gpu::RayTracingPipelineDesc desc = {
+    .ray_generation_shaders = raygen[..],
+    .miss_shaders           = miss[..],
+    .hit_groups             = hit_groups[..],
+    .max_recursion_depth    = 1,          // 0 normalizes to 1
+    .dynamic_stack_size     = false,
+};
+gpu::PipelineHandle pipeline = gpu::create_ray_tracing_pipeline(&device, &desc)!;
+```
 
-`create_ray_tracing_pipeline` requires
-`DeviceDesc.enable_ray_tracing_pipelines`. Zero recursion depth normalizes to
-one; higher values must fit
-`DeviceCaps.ray_tracing_pipelines.max_recursion_depth`.
-The zero-value `dynamic_stack_size` field creates a static-stack pipeline.
-Set it to `true` only when the application will derive and record an explicit
-stack size before tracing. Static and dynamic descriptors are distinct cache
-identities.
-`get_ray_tracing_pipeline_info` returns deterministic ray-generation, miss,
-hit, and callable `RayTracingShaderGroupRange` values in that order, together
-with the normalized recursion depth and dynamic-stack mode.
-`get_ray_tracing_shader_group_handles` copies one exact contiguous range into
-caller storage whose length is `group_count * shader_group_handle_size`.
-`get_ray_tracing_shader_group_stack_size` returns the native byte requirement
-for one shader role that is present in one group. `GENERAL` is valid only for
-ray-generation, miss, and callable groups; `CLOSEST_HIT`, `ANY_HIT`, and
-`INTERSECTION` are valid only when that role is present in the selected hit
-group.
+Hit groups: `TRIANGLES` may have closest-hit and any-hit shaders and no
+intersection shader; `PROCEDURAL` requires an intersection shader. A null
+shader pointer means the role is absent.
 
-Ray-tracing pipelines do not support pipeline libraries/linking, capture
-replay, deferred creation, automatic stack-size derivation, or batched trace
-commands. Basic indirect tracing changes only where dimensions are read.
-Capability-gated Indirect2 additionally reads GPU-authored SBT regions and
-dimensions, but its root remains direct. In both paths, SBT allocation, packing,
-lifetime, and sufficient stack-size calculation remain application
-responsibilities.
+`get_ray_tracing_pipeline_info` returns the deterministic group order
+(ray generation, miss, hit, callable ranges) and the normalized recursion
+depth. `get_ray_tracing_shader_group_handles` copies handle bytes for a
+group range into caller memory of `group_count * shader_group_handle_size`
+bytes. `get_ray_tracing_shader_group_stack_size` reports the stack
+requirement of one role in one group; with `dynamic_stack_size = true` the
+application sums them and records
+`cmd_set_ray_tracing_pipeline_stack_size`. See the
+[cookbook](../cookbook.md#pack-an-sbt-and-trace).
 
-## Ownership and destruction
+Not supported: pipeline libraries, capture replay, deferred creation,
+automatic stack sizing.
 
-`destroy_pipeline` releases one pipeline owner only after all recording,
-executable, and submitted references have retired. It does not wait.
-Under full validation, a retained command reference returns
-`RESOURCE_IN_USE`; under trusted validation the application must still keep the
-pipeline live through use.
+## Lifetime
 
-Pipeline functions are thread-safe. Creation is serialized only around the
-device's internal pipeline/cache domain. The descriptor and shader data are
-borrowed for the call; the returned handle owns the published result.
+```c3
+gpu::destroy_pipeline(&device, pipeline)!;
+```
+
+Destruction never waits. Under `FULL` validation a pipeline named by a
+recorded or submitted list returns `RESOURCE_IN_USE` until the list
+retires. Under `TRUSTED` the application must still keep it alive through
+use.
+
+Equal descriptions on one device share a private cached pipeline; each
+`PipelineHandle` is still a separate owner with its own lifetime. Pipeline
+calls are thread-safe.
 
 ## Pipeline cache
 
-`RuntimeDesc.pipeline_cache_data` is a borrowed opaque driver blob copied at
-runtime creation and applied to later device creation.
-`get_pipeline_cache_size` returns the current byte count.
-`get_pipeline_cache_data` copies into caller storage and reports the required
-size through the function's normal result contract.
+```c3
+usz size = gpu::get_pipeline_cache_size(&device)!;
+char[] blob = mem::new_array(char, (sz)size);
+usz written = gpu::get_pipeline_cache_data(&device, blob)!;
+// persist blob[:written]; next run: RuntimeDesc.pipeline_cache_data = blob
+```
 
-The blob is private to the driver/device compatibility domain. Treat import
-failure as a cache miss according to the returned fault and keep application
-metadata such as device/driver identity alongside persisted data. Cache size
-and usefulness vary by driver.
+The blob is opaque, driver-specific data. Store it with the adapter's
+vendor, device, and driver identifiers. A rejected blob is a cache miss.
 
-## Fault behavior
+## Faults
 
-- malformed SPIR-V, missing/wrong entry points, or ABI mismatches return
-  `SHADER_INVALID`;
-- unsupported formats, sample counts, raster features, or selected-device
-  requirements return `UNSUPPORTED_FEATURE`;
-- inconsistent descriptors return `INVALID_ARGUMENT`;
-- driver pipeline failure returns `PIPELINE_CREATE_FAILED`; and
-- fixed capacity exhaustion returns `SLOT_TABLE_FULL`.
-
-Creation is transactional: no output handle or cache entry is published after
-a failed validation or native create.
+| Cause | Fault |
+|---|---|
+| bad SPIR-V, missing entry point, ABI mismatch | `SHADER_INVALID` |
+| unsupported format, sample count, polygon mode, or ray feature | `UNSUPPORTED_FEATURE` |
+| inconsistent descriptor | `INVALID_ARGUMENT` |
+| driver rejected the pipeline | `PIPELINE_CREATE_FAILED` |
+| pipeline table full | `SLOT_TABLE_FULL` |

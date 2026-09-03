@@ -1,12 +1,21 @@
 # Shader ABI
 
-The shader ABI is the wire contract shared by C3 data, SPIR-V entry points, and
-the backend. `gpu.c3l` uses root pointers for generic data and one device-wide
-bindless heap for textures and samplers.
+The shader ABI is the byte contract between C3 code, SPIR-V, and the
+backend. It has three parts:
 
-## Root push contract
+1. A **root pointer** pushed to every dispatch, draw, or trace.
+2. **std430 records** reached through that pointer.
+3. **Heap indices** for textures, samplers, and acceleration structures.
 
-A compute command pushes one unsigned 64-bit value:
+There are no descriptor sets to build. The backend binds one global heap;
+shaders index into it with values stored in root data.
+
+## Root push
+
+Every pipeline kind has a fixed push-constant block. Shaders that read push
+constants declare the whole block, in this order, and nothing else in it.
+
+Compute and ray tracing, 8 bytes:
 
 ```glsl
 layout(push_constant) uniform Push {
@@ -14,7 +23,7 @@ layout(push_constant) uniform Push {
 } pc;
 ```
 
-A graphics command pushes two values in this exact order:
+Graphics, 16 bytes:
 
 ```glsl
 layout(push_constant) uniform Push {
@@ -23,290 +32,289 @@ layout(push_constant) uniform Push {
 } pc;
 ```
 
-The graphics block is 16 bytes, with members at offsets 0 and 8. Every selected
-vertex or fragment entry point that declares push constants declares the
-complete block, even if it reads only one member.
+The C3 side passes the addresses directly:
 
-Zero is a valid command root. The library does not dereference it; a shader
-must avoid dereferencing zero unless the application deliberately relies on
-device robustness behavior.
+```c3
+gpu::cmd_dispatch(&commands, root_address, { 64, 1, 1 })!;
+gpu::cmd_draw(
+    commands:       &commands,
+    vertex_root:    vertex_root,
+    fragment_root:  fragment_root,
+    vertex_count:   3,
+    instance_count: 1,
+)!;
+```
 
-## Addressable std430 data
+Zero is a valid root. The library never dereferences it. A shader that
+receives zero must branch before reading through it.
 
-`GpuAddress` is an unsigned 64-bit address into a live addressable allocation.
-Root structs and all data reached through them use std430-compatible layout.
+## Root records
 
-Use these layout rules:
+A root is a std430 struct at a `GpuAddress`. The shader casts the pushed
+address to a buffer-reference block:
 
-- 4-byte alignment for `uint`, `int`, and `float`;
-- 8-byte alignment for `u64` and `GpuAddress`;
-- explicit padding where C3's packed member layout differs from std430;
-- `vec2` and `vec4` for shared vectors; avoid `vec3`;
-- identical field order and array stride on both sides; and
-- compile-time C3 size and offset assertions for shared records.
-
-Represent matrices as vector columns. The schema language intentionally has no
-matrix or fixed-array type.
-
-A typical schema root is:
-
-```text
-root DoublerRoot {
-    GpuAddress input_gpu;
-    GpuAddress output_gpu;
+```glsl
+layout(buffer_reference, std430, buffer_reference_align = 8) buffer ComputeRoot {
+    uint64_t input_gpu;
+    uint64_t output_gpu;
     uint count;
     uint _pad0;
     uint _pad1;
     uint _pad2;
+};
+
+void main() {
+    ComputeRoot root = ComputeRoot(pc.root_gpu);
+    ...
 }
 ```
 
-The shader uses a buffer-reference block emitted by the generator and casts the
-pushed address to that reference. Application code obtains the root address
-with `get_span_address`.
+The matching C3 struct must have identical offsets:
 
-## Buffer-reference declarations
-
-The generator owns every root block. A shader casts the pushed address to the
-generated name directly and never wraps a root in a helper:
-
-```glsl
-SampleRoot root = SampleRoot(pc.root_gpu);
+```c3
+struct ComputeRoot {
+    gpu::GpuAddress input_gpu;   // offset 0
+    gpu::GpuAddress output_gpu;  // offset 8
+    uint            count;       // offset 16
+    uint            _pad0;
+    uint            _pad1;
+    uint            _pad2;       // size 32
+}
 ```
 
-Data reached *through* a root address is declared by the shader.
-`include/shaders/buffer_reference.glsl` provides the four common shapes. The
-include requires `GL_EXT_buffer_reference` and `GL_EXT_buffer_reference2`, and
-each macro expands to one std430 block with a single member named `value` for a
-record or `values` for a runtime array:
+Layout rules:
+
+| Type | Size | Alignment |
+|---|---:|---:|
+| `uint`, `int`, `float`, `TextureIndex`, `SamplerIndex` | 4 | 4 |
+| `u64`, `GpuAddress` | 8 | 8 |
+| `vec2` | 8 | 8 |
+| `vec4` | 16 | 16 |
+
+Avoid `vec3`. Represent a matrix as `vec4` columns. Pad explicitly where C3
+packing and std430 differ. Do not hand-write both sides; use the
+[generator](#schema-generator).
+
+## Data behind the root
+
+A root usually holds addresses of larger arrays. Declare those blocks in the
+shader. `include/shaders/buffer_reference.glsl` supplies four macros, each
+expanding to one std430 block with a single member (`value` for a record,
+`values[]` for an array):
 
 ```glsl
 #include "buffer_reference.glsl"
 
-GPU_DECLARE_READONLY_REF(NAME, TYPE);         // { TYPE value; }
-GPU_DECLARE_WRITEONLY_REF(NAME, TYPE);        // { TYPE value; }
-GPU_DECLARE_READONLY_ARRAY_REF(NAME, TYPE);   // { TYPE values[]; }
-GPU_DECLARE_WRITEONLY_ARRAY_REF(NAME, TYPE);  // { TYPE values[]; }
-```
-
-The call site supplies the terminating semicolon. Casts stay ordinary GLSL:
-
-```glsl
-GPU_DECLARE_READONLY_REF(CameraData, Camera);
-GPU_DECLARE_READONLY_ARRAY_REF(MaterialTable, Material);
+GPU_DECLARE_READONLY_REF(CameraRef, Camera);          // { Camera value; }
+GPU_DECLARE_READONLY_ARRAY_REF(MaterialTable, Material); // { Material values[]; }
 GPU_DECLARE_WRITEONLY_ARRAY_REF(OutputTable, vec4);
 
-Camera camera = CameraData(root.camera_gpu).value;
+Camera camera     = CameraRef(root.camera_gpu).value;
 Material material = MaterialTable(root.materials_gpu).values[index];
 OutputTable(root.output_gpu).values[index] = shaded;
 ```
 
-The macros do not set `buffer_reference_align`, so a block keeps the
-extension's default 16-byte reference alignment, matching the 16 bytes
-`AllocationDesc` selects for an allocation that requests no alignment. An array
-element access uses the element's own alignment instead, so a `float` array
-loads at 4 and a `vec4` array at 16, and an explicit alignment on an array
-block does not change that.
-
-The record forms therefore carry a real constraint: `GPU_DECLARE_READONLY_REF`
-and `GPU_DECLARE_WRITEONLY_REF` load and store the whole record at 16-byte
-alignment, so the address must be 16-byte aligned. A whole allocation is, but a
-subspan is not — `checked_subspan` promises no alignment beyond a byte. For a
-record at a sub-16 offset, declare the block directly with an explicit
-`buffer_reference_align`, exactly as the generator does for root records. The
-array forms are unaffected, since element alignment governs there.
-
-Declare the block directly, too, when it needs a layout other than std430,
-unqualified read-write access, or more than one member — the macros are a
-convenience over the generated wire types, not a requirement. Because they fix
-the member name, adopting one in an existing shader renames that member at its
-use sites.
-
-A reference carries an address and nothing else: no length, no ownership, no
-bounds checking, no robustness. Counts travel as ordinary root fields beside
-the address, and the shader performs its own bounds test:
+A reference is an address and nothing more. It has no length, no bounds
+check, no ownership. Pass counts as ordinary root fields and test them in
+the shader:
 
 ```text
 root MaterialRoot {
     GpuAddress materials_gpu;
-    uint material_count;
-    uint _pad0;
+    uint       material_count;
+    uint       _pad0;
 }
 ```
 
-Application code publishes the address and the count together, and
-`mapped_gpu_span` returns the mapping and address of one allocation span:
-
 ```c3
 gpu::MappedGpuSpan mapped = gpu::mapped_gpu_span(&device, material_span)!;
-root.materials_gpu = mapped.address;
+root.materials_gpu  = mapped.address;
 root.material_count = material_count;
 gpu::flush_mapped_span(&device, root_span)!;
 ```
 
-The address inherits the allocation's lifetime. The application keeps that
-allocation live through GPU completion, keeps the span and the GLSL declaration
-on compatible alignment and layout, and flushes CPU writes when required.
+Alignment: the macros use the extension default of 16-byte reference
+alignment. A whole allocation is 16-aligned, but a `checked_subspan` is not.
+For a single record at a smaller offset, declare the block yourself with
+`buffer_reference_align`. Array accesses use the element's own alignment and
+are unaffected.
 
-## Texture and sampler values
+## Textures and samplers
 
-`TextureIndex` and `SamplerIndex` are 32-bit shader-visible heap values.
-Generated GLSL exposes the heap convention and helper accessors.
+`include/shaders/descriptor_heap.glsl` declares the global heap and helper
+functions:
 
-`TextureView` is the owner-bearing CPU value. Its index is valid until the view
-is destroyed, after which the slot may be reused immediately. An interned
-sampler index remains valid until device destruction. Neither raw value stores
-a device owner or generation; do not persist it past its owner or move it
-between devices.
+| Binding (set 0) | Contents |
+|---:|---|
+| 0 | sampled 2D textures |
+| 1 | storage 2D images |
+| 2 | samplers (also viewed as shadow samplers) |
+| 3 | sampled 3D textures |
+| 4 | storage 3D images |
+| 5 | acceleration structures (opt-in) |
 
-The backend owns the descriptor set/layout implementation. Shaders consume the
-published helper contract; applications do not create or bind descriptor sets.
+Store a `TextureIndex` and `SamplerIndex` in root data and sample with the
+helpers:
 
-## Ray-query values and binding 5
+```glsl
+#include "descriptor_heap.glsl"
 
-`AccelerationStructureIndex` is a 32-bit shader-visible TLAS heap value. Its
-owner-bearing CPU twin is `AccelerationStructureView`; destroying that view
-makes the index recyclable. The index contains slot plus one, so zero is
-invalid. Keep the view and TLAS alive through every query.
+// fragment stage: implicit LOD
+vec4 color = sample_texture_2d_implicit(root.albedo, root.sampler, uv);
 
-Ray-query shaders explicitly include `include/shaders/ray_query.glsl`. The
-include requires `GL_EXT_ray_query`, declares the unbounded set-0 binding-5
-acceleration-structure array, and provides
-`GPU_ACCELERATION_STRUCTURE(index)` and `GPU_RAY_QUERY_INITIALIZE(...)`.
-Ordinary shaders and generated ABI includes do not enable the extension or
-declare binding 5.
+// compute stage: explicit LOD 0
+vec4 color = sample_texture_2d(root.albedo, root.sampler, uv);
 
-The generated `AccelerationStructureInstance` is exactly 64 bytes: three
-row-major transform rows at offsets 0, 16, and 32; packed custom-index/mask and
-record-offset/flags words at offsets 48 and 52; and an ordinary 64-bit
-`GpuAddress` at offset 56. CPU code normally uses
-`make_acceleration_structure_instance`; GPU-authored records may use
-`gpu_make_acceleration_structure_instance` after keeping fields within their
-24-bit/8-bit contracts. The record offset is always zero because this API has
-no shader binding tables.
+// storage image
+vec4 v = load_storage_texture(root.image, coord);
+store_storage_texture(root.image, coord, v * 2.0);
 
-Triangle candidates may commit through normal ray-query traversal. An AABB is
-only a broad-phase candidate: compute the true procedural intersection inside
-the `rayQueryProceedEXT` loop and call
-`GPU_RAY_QUERY_CONFIRM_AABB(query, t)` only when accepted. Leaving a candidate
-unconfirmed rejects it.
+// depth compare; sampler must have compare_enable
+float lit = sample_shadow_2d(root.shadow_map, root.shadow_sampler, vec3(uv, depth));
+```
 
-## Graphics and indirect work
+3D variants are `sample_texture_3d`, `sample_texture_3d_implicit`,
+`load_storage_texture_3d`, and `store_storage_texture_3d`. To index the heap
+arrays directly use `GPU_HEAP_SLOT(index)`: a live index is the slot plus
+one, and zero is invalid.
 
-Direct graphics commands provide independent vertex and fragment roots. Do not
-pass a raw pointer through stage outputs; give each stage its root directly.
+On the C3 side:
 
-Shared-root indirect multi-draw uses the same root pair for every draw.
-Per-draw data is commonly indexed with `gl_DrawID` from a table referenced by
-the root.
+```c3
+gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!;
+root.albedo  = view.index;                              // TextureIndex
+root.sampler = gpu::intern_sampler(&device, &sampler_desc)!; // SamplerIndex
+```
 
-The generated ABI includes byte-identical twins for:
+The indices carry no ownership. Keep the `TextureView` alive while any
+shader can read its index; a destroyed view's slot is reused at once. A
+sampler index lives until the device is destroyed.
 
-- `DrawIndirectCommand` (16 bytes);
-- `DrawIndexedIndirectCommand` (20 bytes); and
-- `DispatchIndirectCommand` (12 bytes); and
-- `TraceRaysIndirectCommand` (12 bytes: `width`, `height`, `depth`); and
-- `TraceRaysIndirectCommand2` (104 bytes: ray-generation address/size; miss,
-  hit, and callable address/size/stride triples; `width`, `height`, `depth`,
-  and `_pad0`); and
-- `AccelerationStructureIndirectBuildRange` (16 bytes: `primitive_count`,
-  `primitive_offset`, `first_vertex`, and `transform_offset`).
+## Acceleration structures
 
-A compute shader may write one fixed-stride acceleration-structure range per
-BLAS geometry, or one for a TLAS. The C3 and GLSL layouts use offsets 0, 4, 8,
-and 12. The packet carries raw counts and offsets only; the descriptor,
-resource owners, and synchronization remain CPU-side contracts.
+Ray-query shaders include `ray_query.glsl`; ray-tracing pipeline shaders
+include `ray_tracing.glsl`. Both declare binding 5 and the helpers below.
+Ordinary shaders do not enable the extensions.
 
-A compute shader may write `TraceRaysIndirectCommand` through the generated
-GLSL declaration. `cmd_trace_rays_indirect` consumes those exact bytes without
-translation or host inspection; its direct root and SBT are not part of the
-record.
+```glsl
+#include "ray_query.glsl"
 
-A compute shader may also write the generated `TraceRaysIndirectCommand2`
-declaration. `cmd_trace_rays_indirect2` consumes its complete 104-byte packet
-without translation or host inspection: the root is still pushed directly, but
-the packet supplies all SBT regions and dimensions. The producer must write
-valid addresses, SBT layout, nonzero in-limit dimensions, and zero-valued empty
-regions, then make the packet visible with an explicit compute-to-indirect
-barrier. Keep the owners of every raw SBT address and root-reachable target live
-through completion; no command records or creates those owners implicitly.
+rayQueryEXT query;
+GPU_RAY_QUERY_INITIALIZE(
+    query, root.tlas_index, gl_RayFlagsNoneEXT, 0xffu,
+    origin, 0.0, direction, 1000.0);
+while (rayQueryProceedEXT(query)) {
+    if (GPU_RAY_QUERY_CANDIDATE_IS_AABB(query)) {
+        float t;
+        if (intersect_procedural(origin, direction, t)) {
+            GPU_RAY_QUERY_CONFIRM_AABB(query, t);
+        }
+    }
+}
+```
 
-Capability-gated generated work stores roots and arguments together in
-`GeneratedDrawRecord`, `GeneratedDrawIndexedRecord`, or
-`GeneratedDispatchRecord`. The shared-root indirect path remains available
-when generated work is unsupported.
+`GPU_ACCELERATION_STRUCTURE(index)` yields the `accelerationStructureEXT`
+for `traceRayEXT`. An `AccelerationStructureIndex` comes from
+`AccelerationStructureView.index`; zero is invalid.
+
+`AccelerationStructureInstance` is the 64-byte TLAS instance record: three
+row-major `vec4` transform rows, packed custom index and mask, packed record
+offset and flags, and a BLAS `GpuAddress`. CPU code packs it with
+`make_acceleration_structure_instance`; shaders use
+`gpu_make_acceleration_structure_instance`.
+
+## Indirect records
+
+The generated ABI contains C3 and GLSL twins of every GPU-written argument
+record:
+
+| Record | Bytes | Consumed by |
+|---|---:|---|
+| `DrawIndirectCommand` | 16 | `cmd_draw_indirect` |
+| `DrawIndexedIndirectCommand` | 20 | `cmd_draw_indexed_indirect`, `..._count` |
+| `DispatchIndirectCommand` | 12 | `cmd_dispatch_indirect` |
+| `TraceRaysIndirectCommand` | 12 | `cmd_trace_rays_indirect` |
+| `TraceRaysIndirectCommand2` | 104 | `cmd_trace_rays_indirect2` |
+| `AccelerationStructureIndirectBuildRange` | 16 | `cmd_build_acceleration_structure_indirect` |
+| `GeneratedDrawRecord` | 32 | `cmd_draw_generated` |
+| `GeneratedDrawIndexedRecord` | 40 | `cmd_draw_indexed_generated` |
+| `GeneratedDispatchRecord` | 24 | `cmd_dispatch_generated` |
+
+Shared-root indirect draws pass one vertex and fragment root to every draw;
+index per-draw data with `gl_DrawID`. Generated records carry their own
+roots.
 
 ## Schema generator
 
-Shared layouts are defined under `abi/` and generated by
-`tools/gen_shader_abi`. The schema supports:
+Write shared layouts once in a `.abi` file and generate both sides:
 
 ```text
-const TYPE name = value;
-type Name : scalar;
-struct Name { fields }
-root Name { fields }
-push Name { fields }
-extern struct Name { fields }
+abi my_app;
+
+const uint TILE = 64;
+
+root ComputeRoot {
+    GpuAddress input_gpu;
+    GpuAddress output_gpu;
+    uint       count;
+    uint       _pad0;
+    uint       _pad1;
+    uint       _pad2;
+}
+
+struct Material {
+    vec4 base_color;
+    TextureIndex albedo;
+    SamplerIndex sampler;
+    uint _pad0;
+    uint _pad1;
+}
 ```
 
-Field types are `uint`, `int`, `float`, `u64`, `vec2`, `vec4`, a semantic type
-such as `GpuAddress`, `TextureIndex`, or `SamplerIndex`, or a previously
-declared struct. `extern struct` declares a GLSL twin for a public C3 record
-that already exists.
+Declarations: `const`, `type Name : scalar`, `struct`, `root`, `push`, and
+`extern struct` (GLSL twin of an existing C3 record). Field types: `uint`,
+`int`, `float`, `u64`, `vec2`, `vec4`, `GpuAddress`, `TextureIndex`,
+`SamplerIndex`, `AccelerationStructureIndex`, or an earlier struct. No
+matrices, no fixed arrays.
 
-Generate or check all committed outputs with:
+Build and run the generator:
 
 ```sh
-python3 scripts/gen_abi.py
-python3 scripts/gen_abi.py --check
+c3c build gen_shader_abi --path lib/gpu.c3l/tools/gen_shader_abi
+lib/gpu.c3l/tools/gen_shader_abi/build/gen_shader_abi \
+  --module my_app \
+  --c3-out src/shader_abi.c3 \
+  --glsl-out shaders/generated/my_app_abi.glsl \
+  abi/my_app.abi
 ```
 
-Library generation updates:
+Add `--check` in CI to fail on drift. The generator rejects implicit padding
+and names the `_padN` fields to add. Generated C3 carries size and offset
+assertions; generated GLSL emits `root` types as
+`buffer_reference` blocks and `struct` types as plain structs.
 
-- the marked public ABI block in `gpu/gpu.c3i`;
-- private reflection metadata used by pipeline validation; and
-- `include/shaders/generated/shader_abi.glsl`.
+Shaders include the library ABI and then the application ABI:
 
-The generator rejects implicit layout drift and reports the explicit `_padN`
-fields needed to make C3 packing match std430. Generated C3 declarations
-include compile-time size and member-offset assertions. Generated files are
-committed so consumers do not run the generator to build the library.
+```glsl
+#include "generated/shader_abi.glsl"
+#include "generated/my_app_abi.glsl"
+```
 
-## Source and shader ownership
+GLSL names are emitted verbatim. Do not use GLSL keywords as field names.
 
-The generator owns every mirrored data layout. Hand-written shader code owns
-only:
+## Pipeline validation
 
-- access-qualified buffer-reference wrappers for record and array views; and
-- the push-constant binding block containing generated fields in schema order.
+Pipeline creation reflects the selected entry point and rejects with
+`SHADER_INVALID` when:
 
-`include/shaders/buffer_reference.glsl` supplies the common wrapper forms; see
-[Buffer-reference declarations](#buffer-reference-declarations).
+- the push block is present but does not exactly match the compute or
+  graphics contract (size, member count, offsets, 64-bit unsigned scalars);
+- a descriptor set other than set 0 is declared, or set 0 does not match the
+  heap convention;
+- the entry point or execution model is missing.
 
-Do not hand-copy a shared struct into C3 and GLSL. Add it to a schema instead.
-GLSL names are emitted verbatim, so schema fields must avoid GLSL keywords.
+Binding 5 on a device without ray features returns `UNSUPPORTED_FEATURE`.
 
-## Pipeline reflection validation
-
-Pipeline creation validates only the selected SPIR-V entry point. A selected
-entry may declare no push block, or one block beginning at offset zero that
-exactly matches the compute or graphics root-push contract.
-
-Validation checks:
-
-- entry-point existence and execution model;
-- push-block count, size, members, order, offsets, scalar width, signedness,
-  and integer shape;
-- the device-wide texture/sampler heap convention;
-- the opted-in acceleration-structure heap at set 0 binding 5;
-- explicit stage interface locations; and
-- absence of unexpected descriptor sets.
-
-Nested structs, vectors, matrices, arrays, booleans, and physical-reference
-members are not accepted in the root push block even if their total byte size
-matches. Put only the generated flat unsigned address fields in that block and
-place structured data behind the root address.
-
-Failures return `SHADER_INVALID` before a native pipeline is published.
-Reflection names are diagnostic only and are not part of the ABI.
+Only flat unsigned 64-bit address members are accepted in the push block.
+Structs, vectors, arrays, and physical-pointer members are rejected even
+when the byte size matches. Put structured data behind the root address.

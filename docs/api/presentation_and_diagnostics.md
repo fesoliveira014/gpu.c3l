@@ -1,128 +1,179 @@
 # Presentation and diagnostics
 
-## Platform surfaces
+Surfaces, swapchains, the acquire-render-present loop, and the debug
+callback.
 
-Create a `Surface` through the module matching the active native window:
+```mermaid
+sequenceDiagram
+    participant App
+    participant SC as Swapchain
+    participant Q as Queue
+    loop each frame
+        App->>SC: acquire_next_image
+        SC-->>App: AcquiredImage
+        App->>App: record (prior_state → COLOR_ATTACHMENT → PRESENT)
+        App->>Q: submit(readiness)
+        Q-->>App: CompletionPoint
+        App->>SC: present(image, point)
+    end
+```
 
-- `gpu::surface::wayland::create_surface(Runtime*, DisplayHandle,
-  SurfaceHandle)`;
-- `gpu::surface::x11::create_surface(Runtime*, DisplayHandle, WindowHandle)`;
-  or
-- `gpu::surface::win32::create_surface(Runtime*, InstanceHandle,
-  WindowHandle)`.
+## Surfaces
 
-Wayland handles are opaque pointers, X11 uses an opaque display pointer and an
-unsigned window ID, and Win32 uses opaque instance/window pointers. These
-aliases describe borrowed native values and do not transfer ownership.
+One `create_surface` per platform module. Native handles are borrowed;
+keep the window alive until `destroy_surface`.
 
-Surface creation retains the runtime. Keep the native instance, display, and
-window alive through `destroy_surface`. Surface registry mutation and support
-checks are externally synchronized process-wide. `destroy_surface` returns
-`RESOURCE_IN_USE` while a swapchain retains it.
+```c3
+gpu::Surface surface = gpu::surface::x11::create_surface(
+    &runtime,
+    (gpu::surface::x11::DisplayHandle)display,
+    (gpu::surface::x11::WindowHandle)window,
+)!;
+defer (void)gpu::destroy_surface(&surface);
+```
 
-## Swapchain lifecycle
+| Module | Parameters after the runtime |
+|---|---|
+| `gpu::surface::x11` | `DisplayHandle` (`void*`), `WindowHandle` (`ulong`) |
+| `gpu::surface::wayland` | `DisplayHandle` (`void*`), `SurfaceHandle` (`void*`) |
+| `gpu::surface::win32` | `InstanceHandle` (`void*`), `WindowHandle` (`void*`) |
 
-`create_swapchain` uses one presentation-enabled `Device`, its exact `Surface`,
-and a `SwapchainDesc` containing extent, format preference, image count,
-presentation mode, and usage. It returns a `SwapchainHandle`.
+The handle types are distinct typedefs, so native pointers need an
+explicit cast.
 
-`get_swapchain_info` reports the selected extent, format, image count, and
-related runtime state. `get_present_mode_support` reports supported
-`PresentMode` values through `PresentModeSupport`.
+Surface creation is externally synchronized process-wide.
+`destroy_surface` returns `RESOURCE_IN_USE` while a swapchain uses it.
+Getting the handles from SDL3 is shown in
+[getting started](../getting_started.md#window-and-surface).
 
-`resize_swapchain` recreates device-side presentation resources for a new
-extent and never waits for outstanding use. Follow the lifecycle order below.
-If it still returns `RESOURCE_IN_USE` or `DEVICE_BUSY`, resolve an outstanding
-acquisition or image reference before retrying.
+## Swapchains
 
-`destroy_swapchain` releases its surface retain only when no image is acquired
-or pending. It inserts no hidden wait.
+```c3
+gpu::SwapchainDesc desc = {
+    .width            = width,
+    .height           = height,
+    .preferred_format = gpu::Format.BGRA8_UNORM,
+    .present_mode     = gpu::PresentMode.FIFO,   // unsupported modes fall back to FIFO
+    .image_count      = 0,                       // backend default
+    .srgb             = false,
+    .debug_name       = "main_swapchain",
+};
+gpu::SwapchainHandle swapchain = gpu::create_swapchain(&device, &surface, &desc)!;
+gpu::SwapchainInfo info = gpu::get_swapchain_info(&device, swapchain)!;
+gpu::PresentModeSupport modes = gpu::get_present_mode_support(&device, swapchain)!;
+```
 
-`wait_swapchain_presentations` explicitly waits for every presentation pending
-when the call begins. The device must own the live swapchain, and the caller
-must externally synchronize acquire, present, resize, destroy, and other work
-on that swapchain. Keep the surface and its native display or window alive and
-pump platform progress while using a blocking timeout.
+The device must have been created with this exact surface. `SwapchainInfo`
+reports the actual format, extent, image count, mode, and `dormant`.
+Build pipelines against `info.format`. A dormant swapchain (zero-sized
+window) has `UNDEFINED` format and zero extent; skip frames until a resize.
 
-Use this order before a lifecycle change:
+`PresentMode`: `FIFO` (vsync, always available), `IMMEDIATE` (no vsync),
+`MAILBOX` (low-latency vsync).
 
-1. establish render completion with `wait_completion`;
-2. call `wait_swapchain_presentations`;
-3. call `resize_swapchain` or `destroy_swapchain`.
+## Acquire
 
-`timeout_ns == 0` performs a nonblocking query. `TIMEOUT_INFINITE` waits
-without a deadline. With presentations still pending, `WAIT_TIMEOUT` preserves
-the handle and pending state, emits no diagnostic, and is safe to retry.
-Out-of-host/device memory, `DEVICE_BUSY`, `DEVICE_LOST`, and `BACKEND_ERROR`
-also preserve the handle. The wait consumes neither the swapchain handle nor
-an acquired image, waits no completion point, and retires no command or view
-references. With no pending presentations it returns immediately without a
-native wait or reset.
+```c3
+gpu::AcquiredImage? acquired = gpu::acquire_next_image(&device, swapchain, timeout_ns);
+if (catch err = acquired) {
+    if (err == gpu::WAIT_TIMEOUT) return;             // skip frame
+    if (err == gpu::SWAPCHAIN_OUT_OF_DATE) return resize();
+    return err~;
+}
+```
 
-`resize_swapchain` and `destroy_swapchain` still insert no hidden wait and
-continue to reject outstanding acquisitions, presentations, and image use.
+`timeout_ns` defaults to zero (nonblocking). `AcquiredImage` holds the
+`texture`, its `attachment_view`, the one-shot `readiness`, `prior_state`,
+and `suboptimal`. Transition from `prior_state`; never assume a layout.
 
-## Acquire, submit, and present
+## Submit and present
 
-`acquire_next_image` waits up to a caller-selected timeout and returns
-`AcquiredImage`:
+```c3
+gpu::SubmitDesc submit = {
+    .command_lists    = lists[..],
+    .readiness        = acquired.readiness,
+    .readiness_before = { .color_output },
+};
+gpu::CompletionPoint point = gpu::submit(graphics_queue, &submit)!;
 
-- the swapchain texture handle;
-- its `prior_state`; and
-- one-shot `SwapchainReadiness`.
+if (catch err = gpu::present(&device, &acquired, point)) {
+    if (err == gpu::SWAPCHAIN_OUT_OF_DATE) return resize();
+    if (err == gpu::WAIT_TIMEOUT) return;   // image intact; present again later
+    return err~;
+}
+```
 
-The default timeout is zero. `WAIT_TIMEOUT` leaves the swapchain usable.
-`SWAPCHAIN_OUT_OF_DATE` requests resize/recreation. Transition
-`prior_state` to an attachment state before rendering, then transition the
-image to `TextureLayout.PRESENT`.
+`readiness` goes into the first submit that writes the image and is
+consumed by it. `present` takes that submit's completion point and consumes
+the image on success. `WAIT_TIMEOUT` from `present` leaves the image
+intact.
 
-Pass readiness in `SubmitDesc` for the first submission that consumes the
-image. Successful submit consumes it. `present` consumes the acquired image
-after the rendering completion point is ordered on the presentation queue.
-Presentation may temporarily return `WAIT_TIMEOUT`; pump events and retry.
+## Resize and destroy
 
-Acquire, resize, queries, and present are externally synchronized per
-swapchain/native queue as specified. They do not access the process-wide
-surface registry after creation.
+```c3
+gpu::wait_completion(last_point)!;
+gpu::wait_swapchain_presentations(&device, swapchain, timeout_ns)!;
+gpu::resize_swapchain(&device, swapchain, width, height)!;
+// or
+gpu::destroy_swapchain(&device, swapchain)!;
+```
 
-## Structured diagnostics
+Always in that order. `resize_swapchain` and `destroy_swapchain` never
+wait; `wait_swapchain_presentations` is what retires pending presents.
+Its `WAIT_TIMEOUT` (zero timeout is a nonblocking query) leaves everything
+intact; pump the platform event loop and retry. `RESOURCE_IN_USE` or
+`DEVICE_BUSY` from resize or destroy after a successful wait means an
+image was acquired and never presented, or a command list still references
+the swapchain.
 
-`RuntimeDesc.debug_callback` installs a `DebugMessageCallback` with borrowed
-userdata. `DebugMessage` includes severity, category, operation, optional
-public fault, optional `DebugResourceRef`, rejected field, invariant, backend
-text, and native validation identifiers.
+Resize invalidates every `AcquiredImage`. Re-read `get_swapchain_info`
+and rebuild anything that depends on format or extent.
 
-`DebugMessageSeverity`, `DebugMessageCategory`, and `DebugResourceKind` allow
-filtering without parsing message text.
+Acquire, present, resize, and the presentation wait are externally
+synchronized on the swapchain. At most `MAX_SWAPCHAINS` (8) per device.
 
-Delivery is synchronous and may occur concurrently on arbitrary backend
-threads. All pointers and strings are valid only during the callback. The
-callback must:
+## Diagnostics
 
-- synchronize its own userdata;
-- return promptly;
-- avoid blocking backend progress; and
-- never call back into `gpu.c3l`.
+```c3
+fn void on_message(gpu::DebugMessage* m, void* user_data) {
+    io::printfn("[%s] %s: %s (%s)", m.severity, m.operation, m.invariant, m.rejected_field);
+    if (m.has_fault) io::printfn("  fault %s", m.public_fault);
+    if (m.resource.kind != gpu::DebugResourceKind.NONE) {
+        io::printfn("  %s #%d %s", m.resource.kind, m.resource.index, m.resource.debug_name);
+    }
+}
 
-Callback presence controls delivery only. It does not enable contract checks,
-Vulkan validation, debug names, leak tracking, or alter returned faults.
+gpu::RuntimeDesc desc = gpu::full_validation_runtime_desc();
+desc.debug_callback     = &on_message;
+desc.debug_user_data    = null;
+desc.enable_debug_names = true;
+```
 
-## Debug reporting
+`DebugMessage` fields: `severity`, `category` (`public_contract`,
+`backend`, `validation`, `performance`, `resource_lifetime`, `general`),
+`operation`, `has_fault` and `public_fault`, `resource`
+(`DebugResourceRef`), `rejected_field`, `invariant`, `backend_text`, and
+the Vulkan validation id name and number.
 
-Debug names are copied or retained according to each create descriptor's
-source contract and are exposed only for diagnostics. Full-validation device
-teardown reports leaks and partial/device-loss state but still rejects live
-public children rather than destroying them silently.
+The callback runs synchronously on the thread that hit the condition,
+possibly concurrently. Strings are valid only during the call. It must
+return promptly and must not call the library. Installing a callback
+changes delivery only; it does not enable checks or change returned
+faults.
 
-## Fault behavior
+With `FULL` validation, `destroy_device` reports leaked children by name
+and still refuses to destroy them.
 
-- unavailable platform/presentation capability: `UNSUPPORTED_FEATURE`;
-- invalid or lost native surface: `SURFACE_LOST`;
-- changed surface extent or compatibility: `SWAPCHAIN_OUT_OF_DATE`;
-- finite acquire/present progress timeout: `WAIT_TIMEOUT`;
-- live acquisition, child, or queued use: `RESOURCE_IN_USE` or `DEVICE_BUSY`;
-- fixed swapchain table exhausted: `SLOT_TABLE_FULL`; and
-- lost device: `DEVICE_LOST`.
+## Faults
 
-On retryable faults, public handles and unconsumed readiness remain valid as
-documented by the failing operation.
+| Cause | Fault |
+|---|---|
+| platform or presentation unsupported | `UNSUPPORTED_FEATURE` |
+| native surface lost | `SURFACE_LOST` |
+| surface changed | `SWAPCHAIN_OUT_OF_DATE` |
+| acquire or present timed out | `WAIT_TIMEOUT` |
+| live acquisition or reference | `RESOURCE_IN_USE`, `DEVICE_BUSY` |
+| swapchain table full | `SLOT_TABLE_FULL` |
+| device loss | `DEVICE_LOST` |
+
+On a retryable fault, handles and unconsumed readiness stay valid.
