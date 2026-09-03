@@ -4,7 +4,8 @@ import gpu::internal @public;
 import gpu::internal::vk @public;
 import std::atomic;
 import std::atomic::types;
-import std::core::mem;
+
+// ---- Handle predicates ----
 
 <* Test whether the device handle differs from the invalid zero sentinel.
 
@@ -176,6 +177,8 @@ fn bool AccelerationStructureIndex.is_valid(self) => (uint)self != 0;
 
    @return "True for a nonzero token; this does not prove live provenance." *>
 fn bool Runtime.is_valid(self) => (ulong)self != 0;
+
+// ---- Runtime and devices ----
 
 <* Test whether the adapter token differs from the invalid zero value.
 
@@ -540,6 +543,8 @@ fn QueueInfo? get_queue_info(Device* device, Queue queue) {
         .roles = queue.roles,
     };
 }
+
+// ---- Memory and resources ----
 
 <* Derive a sub-range without bounds or overflow checks. Use only when the
    caller has already proved the range, or deliberately needs an invalid span
@@ -1326,6 +1331,8 @@ fn void? destroy_acceleration_structure_view(
     gpu::internal::release_device_children(&operation);
 }
 
+// ---- Shaders and pipelines ----
+
 <* Construct disabled blending with the selected write mask.
 
    @param write_mask : "Color channels written by the target."
@@ -1584,6 +1591,8 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_pipeline_cache_data(operation.state, out);
 }
+
+// ---- Commands and rendering ----
 
 <* Create one fixed-capacity command allocator for an exact selected queue.
    Zero capacities default to 8 command buffers and 64 tracked references per
@@ -2548,6 +2557,8 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
     );
 }
 
+// ---- Synchronization and submission ----
+
 <* Test whether a completion point has a device and nonzero sequence.
 
    @return "True for a structurally valid point; this does not prove live provenance." *>
@@ -2941,6 +2952,8 @@ fn void? wait_completion(
         timeout_ns: timeout_ns,
     );
 }
+
+// ---- Presentation and diagnostics ----
 
 <* Test whether swapchain readiness has a device and nonzero payload.
 

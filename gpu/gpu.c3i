@@ -4,6 +4,8 @@ import gpu::internal @public;
 
 // Public interface for consumers of gpu.c3l.
 
+// ---- Handles, shared values, and faults ----
+
 // Shared-ABI vector aliases: plain SIMD vectors (element-aligned in structs;
 // std430 vector alignment comes from explicit padding validated by the ABI
 // generator, not from these types).
@@ -222,6 +224,8 @@ faultdef
     // This does not imply device loss.
     BACKEND_ERROR;
 
+// ---- Generated shader ABI ----
+
 // BEGIN GENERATED SHADER ABI - do not edit.
 struct RootPush {
     GpuAddress root_gpu;
@@ -331,6 +335,8 @@ $assert $reflect(GeneratedDispatchRecord.root_gpu).offset == 0;
 $assert $reflect(GeneratedDispatchRecord.arguments).offset == 8;
 $assert $reflect(GeneratedDispatchRecord._pad0).offset == 20;
 // END GENERATED SHADER ABI
+
+// ---- Runtime and devices ----
 
 <* Queue a command list records for and submits on. *>
 enum QueueKind : int {
@@ -597,6 +603,8 @@ struct DeviceSupport {
     bool   supported;
     String unmet_requirement;
 }
+
+// ---- Memory and resources ----
 
 enum AccelerationStructureKind : int {
     BOTTOM_LEVEL,
@@ -985,6 +993,8 @@ struct TextureViewCreateDesc {
     TextureViewDesc view;
 }
 
+// ---- Shaders and pipelines ----
+
 // Default pipeline slot capacity when RuntimeDesc.pipeline_capacity is zero.
 const uint MAX_PIPELINES                  = 256;
 const uint MAX_COLOR_ATTACHMENTS          = 8;
@@ -1199,6 +1209,8 @@ struct RayTracingShaderBindingTable {
     RayTracingShaderBindingTableRegion hit;
     RayTracingShaderBindingTableRegion callable;
 }
+
+// ---- Commands and rendering ----
 
 struct AccelerationStructureTriangleBuildDesc {
     GpuSpan vertices;
@@ -1498,6 +1510,8 @@ struct RenderPassDesc {
     uint              height;
 }
 
+// ---- Synchronization and submission ----
+
 struct TimestampPoolDesc {
     uint    capacity;
     ZString debug_name;
@@ -1585,6 +1599,8 @@ struct SubmitDesc {
     SwapchainReadiness      readiness;
     StageMask               readiness_before;
 }
+
+// ---- Presentation and diagnostics ----
 
 alias DebugMessageCallback = fn void (DebugMessage*, void*);
 
