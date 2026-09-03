@@ -1,173 +1,187 @@
 # Runtime and devices
 
-## Runtime lifecycle
+Everything an application does starts with a `Runtime`, picks an `Adapter`,
+creates a `Device`, and fetches `Queue` values from it.
 
-`RuntimeDesc` configures contract validation, optional Vulkan validation
-layers, debug names and callback delivery, public table capacities, an optional
-borrowed pipeline-cache blob, and an application name.
-`acceleration_structure_heap_capacity` independently sizes the optional
-shader-visible TLAS heap. It must be nonzero when a device requests ray
-queries or ray-tracing pipelines and is otherwise unused.
-`full_validation_runtime_desc()` returns a useful development baseline.
-A zero descriptor selects `ContractValidation.TRUSTED` with layers and debug
-names disabled.
+```mermaid
+flowchart LR
+    RD[RuntimeDesc] -->|create_runtime| R[Runtime]
+    R -->|enumerate_adapters| AL[AdapterList]
+    AL -->|get i| A[Adapter]
+    A -->|supports_device_desc| S[DeviceSupport]
+    A -->|create_device| D[Device]
+    D -->|get_queue| Q[Queue]
+    D -->|get_device_caps| C[DeviceCaps]
+```
 
-`create_runtime` copies all configuration it needs after the call.
-`create_runtime` and `destroy_runtime` are externally synchronized with all
-runtime and surface registry mutation. `destroy_runtime` succeeds only after
-its devices, surfaces, and borrowed adapter uses have ended.
+## Runtime
 
-Imports are inert: no runtime or backend object exists before
-`create_runtime`.
+```c3
+gpu::RuntimeDesc desc = gpu::full_validation_runtime_desc();
+desc.application_name = "my_app";
+gpu::Runtime runtime = gpu::create_runtime(&desc)!;
+defer (void)gpu::destroy_runtime(&runtime);
+```
+
+`RuntimeDesc` fields:
+
+| Field | Zero means | Purpose |
+|---|---|---|
+| `contract_validation` | `TRUSTED` | `FULL` adds semantic checks and lifetime tracking |
+| `enable_vulkan_validation` | off | Loads the Khronos validation layer |
+| `enable_debug_names` | off | Passes `debug_name` strings to the driver |
+| `texture_heap_capacity` | 4,096 | Bindless texture slots |
+| `sampler_heap_capacity` | 256 | Bindless sampler slots |
+| `texture_capacity` | 1,024 | Live texture table |
+| `pipeline_capacity` | 256 | Live pipeline table |
+| `acceleration_structure_heap_capacity` | 0 | Required nonzero for ray features |
+| `pipeline_cache_data` | none | Opaque driver blob, copied at creation |
+| `application_name` | none | Reported to the driver |
+| `debug_callback`, `debug_user_data` | none | Structured diagnostics |
+
+`full_validation_runtime_desc()` sets `FULL` and Vulkan validation. The
+descriptor is borrowed for the call; `debug_user_data` must stay valid until
+the runtime is destroyed.
+
+`destroy_runtime` fails with `RESOURCE_IN_USE` while a device or surface is
+live. Runtime and surface creation and destruction are externally
+synchronized process-wide.
 
 ## Adapters
 
-`enumerate_adapters` returns an allocation-free `AdapterList` borrowed from the
-runtime. `AdapterList.get` returns a borrowed `Adapter`; `AdapterInfo` and
-`AdapterDiagnostics` contain borrowed strings valid until runtime destruction.
-Enumeration and immutable queries are thread-safe after runtime publication.
+```c3
+gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+for (uint i = 0; i < adapters.count; i++) {
+    gpu::Adapter adapter = adapters.get(i)!;
+    gpu::AdapterInfo info = gpu::get_adapter_info(&adapter)!;
+    gpu::AdapterDiagnostics diag = gpu::get_adapter_diagnostics(&adapter)!;
+    io::printfn("%s (%s) driver %s", info.name, info.device_class, diag.driver_name);
+}
+```
 
-`AdapterInfo` reports semantic class, memory totals, queue roles, and limits.
-`AdapterDiagnostics` reports backend and driver identity for logging and
-support. Applications should select through `DeviceDesc` rather than branching
-on backend versions.
+`AdapterList` and `Adapter` are borrowed from the runtime and cost nothing
+to copy. Strings in `AdapterInfo` and `AdapterDiagnostics` are valid until
+the runtime is destroyed. `AdapterInfo` reports class, memory totals,
+available queue roles, and limits. `AdapterDiagnostics` reports backend and
+driver identity for logs.
 
-`supports_presentation` tests one adapter/surface pair.
-`supports_device_desc` preflights the complete semantic request and returns
-`DeviceSupport`; `create_device` remains authoritative because system state can
-change.
+Preflight a description before creating:
 
-## Device creation
+```c3
+gpu::DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!;
+if (!support.supported) io::printn(support.unmet_requirement);
+bool can_present = gpu::supports_presentation(&adapter, &surface)!;
+```
 
-`DeviceDesc` requests queue roles and optional presentation against one exact
-surface. The runtime description supplies heap and resource capacities.
-`create_device` verifies the adapter's required feature profile and exact
-capacities before publishing a `Device`.
+`supports_device_desc` with `null` tests the default description.
+`create_device` is still authoritative; system state can change between the
+two calls.
 
-Ray queries and direct ray-tracing pipelines have independent explicit opt-ins:
-`DeviceDesc.enable_ray_queries` and
-`DeviceDesc.enable_ray_tracing_pipelines`. Either request enables their shared
-acceleration-structure foundation; enabling one does not enable the other's
-shader execution model.
-`supports_device_desc` reports an unsupported request before creation when the
-adapter lacks any required ray, acceleration-structure, descriptor, address,
-command, queue, or vertex-format capability. A zero-initialized device
-description keeps both optional feature families disabled.
+## Device
 
-Creation is transactional and externally synchronized per runtime. On failure,
-no device or child is live. Common faults are `UNSUPPORTED_FEATURE`,
-`INVALID_ARGUMENT`, `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY`, and
-`BACKEND_ERROR`.
+```c3
+gpu::DeviceDesc desc = {
+    .surface = surface,                 // optional; enables presentation
+    .queues = {
+        .required       = { .graphics, .compute, .transfer },
+        .distinct_roles = { .compute },  // demand a separate compute queue
+    },
+    .enable_sparse_textures       = false,
+    .enable_ray_queries           = false,
+    .enable_ray_tracing_pipelines = false,
+};
+gpu::Device device = gpu::create_device(&adapter, &desc)!;
+defer (void)gpu::destroy_device(&device);
+```
 
-`get_device_caps` returns the selected semantic profile, including:
+A `null` or zero descriptor selects the default queue set, no surface, and
+no optional features. Heap and table capacities come from the runtime.
 
-- selected queue roles and asynchronous-compute availability;
-- configured texture/sampler heap capacities;
-- alignment and workload limits;
-- indirect-count, generated-work, wireframe, sparse, and timestamp support;
-- actionable `AccelerationStructureCaps` when either ray feature was enabled;
-- `RayQueryCaps.enabled` only when ray queries were enabled;
-- actionable `RayTracingPipelineCaps` only when ray-tracing pipelines were
-  enabled;
-- sampler limits; and
-- the effective maximum color attachment count.
+Queue request rules:
 
-Query capabilities instead of hardcoding selected-device limits.
+- `required` names the roles the device must provide. Empty selects the
+  defaults.
+- `distinct_roles` names required roles that must not alias another
+  required role.
+- `single_queue = true` demands one native queue for every required role
+  and for presentation. `distinct_roles` must be empty and `required` must
+  be nonempty, or the request is `INVALID_ARGUMENT`. A valid request with no
+  matching topology reports `supported = false` and `UNSUPPORTED_FEATURE`
+  on creation.
 
-`AccelerationStructureCaps` reports the shared enabled state, selected TLAS
-heap capacity, maximum geometry, primitive, and instance counts, and scratch
-alignment. `indirect_build` independently reports GPU-authored build-range
-support. Direct builds remain available when it is false. These are creation
-and allocator bounds, not suggestions.
-`RayQueryCaps` reports its independent enabled bit.
-`RayTracingPipelineCaps.indirect_dispatch` reports independently negotiated
-basic indirect tracing, while `indirect2_dispatch` reports independently
-negotiated GPU-authored SBT and dimension tracing, under the existing pipeline
-opt-in. The two capabilities are independent; direct tracing remains available
-when either field is false. The record also reports the total ray-dispatch
-invocation limit, `max_ray_dispatch_dimensions` for the selected device's
-per-axis launch limits, recursion depth, shader-group handle/alignment/stride
-requirements, and the
-hit-attribute limit. Disabled capability records are fully zero/false.
-Exceeding an enabled bound returns `UNSUPPORTED_FEATURE` or `INVALID_ARGUMENT`
-as documented by the operation.
+Ray queries and ray-tracing pipelines are separate opt-ins. Either enables
+acceleration structures; neither enables the other's shader model.
 
-`destroy_device` is thread-safe against ordinary device operations but does not
-wait. It returns `RESOURCE_IN_USE` while public children remain and
-`DEVICE_BUSY` while operations, queued work, or closing state prevent teardown.
-On a retryable failure the handle remains live.
+Creation is transactional and externally synchronized per runtime. Faults:
+`UNSUPPORTED_FEATURE`, `INVALID_ARGUMENT`, `OUT_OF_HOST_MEMORY`,
+`OUT_OF_DEVICE_MEMORY`, `SLOT_TABLE_FULL`, `BACKEND_ERROR`.
+
+`destroy_device` never waits. It returns `RESOURCE_IN_USE` while any child
+is live and `DEVICE_BUSY` while work is running. Destroy children first,
+wait on the last completion point, then retry.
+
+## Capabilities
+
+```c3
+gpu::DeviceCaps caps = gpu::get_device_caps(&device)!;
+if (caps.async_compute) { /* compute is its own queue */ }
+if (caps.draw_indirect_count) { /* cmd_draw_indexed_indirect_count works */ }
+uint max_targets = caps.max_color_attachments;
+```
+
+`DeviceCaps` reports:
+
+- selected queue roles, `async_compute`, and `presentation_enabled`;
+- `draw_indirect_count`, `generated_work`, `line_polygon_mode`;
+- `texture_heap_capacity`, `sampler_heap_capacity`, `max_color_attachments`,
+  `max_push_constant_size`, `max_compute_work_group_count`,
+  `max_draw_indirect_count`, `max_generated_work_count`;
+- `min_uniform_alignment`, `min_storage_alignment`,
+  `min_texel_buffer_alignment`;
+- `max_sampler_lod_bias`, `max_sampler_anisotropy` (0 means unsupported);
+- `timestamps` (`TimestampCaps`), `sparse_textures` (`SparseTextureCaps`);
+- `acceleration_structures`, `ray_queries`, `ray_tracing_pipelines`. Each
+  is all-zero when its feature was not enabled.
+
+`AccelerationStructureCaps` carries `indirect_build`, heap capacity, and
+maximum geometry, primitive, and instance counts.
+`RayTracingPipelineCaps` carries `indirect_dispatch`, `indirect2_dispatch`,
+recursion depth, dispatch limits, and SBT alignment and stride
+requirements. Query these rather than hardcoding values. Exceeding a limit
+returns `INVALID_ARGUMENT` or `UNSUPPORTED_FEATURE`.
 
 ## Queues
 
-`QueueKind` names `GRAPHICS`, `COMPUTE`, and `TRANSFER`. `QueueRequest`
-controls which semantic roles a device must provide: `required` marks roles
-that must be selected, and `distinct_roles` marks required roles that must not alias
-another required role.
+```c3
+gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
+gpu::Queue compute  = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!;
+if (graphics == compute) { /* roles alias one native queue */ }
+gpu::QueueInfo info = gpu::get_queue_info(&device, compute)!;
+```
 
-When `single_queue` is `false` (the zero/default value), existing
-`required`/`distinct_roles` validation, default role normalization, and queue-family
-preference order are unchanged. A zero queue request still selects the
-documented default roles with the existing asynchronous-compute and transfer
-preferences.
+`Queue` is a borrowed value: copy it freely, compare it with `==`. A
+`QueueKind` that was not selected returns `UNSUPPORTED_FEATURE`. Compute may
+alias graphics; transfer may alias either.
 
-When `single_queue` is `true`, every role in `required` must resolve to one
-exact selected queue identity. A nonzero `distinct_roles` conflicts with this policy,
-and an empty `required` set is invalid rather than being normalized to
-defaults. `supports_device_desc` and `create_device` return
-`INVALID_ARGUMENT` for either invalid policy. If the policy is valid but no
-single identity can satisfy all required roles, support evaluation returns
-`DeviceSupport.supported == false` and authoritative device creation returns
-`UNSUPPORTED_FEATURE`.
-
-With a presentation surface, single-queue selection also requires the
-presentation queue to equal the same exact selected graphics identity. A
-separate private presentation queue is not used for this policy; it remains a
-fallback only when `single_queue` is `false`.
-
-Appending `single_queue` changes the public C3 `QueueRequest` layout, so
-consumers must rebuild against the updated package. Existing named and
-zero-value initializers remain source-compatible. `QueueRequest` is not a C
-ABI or host/shader ABI record, so generated shader records and C3/GLSL offsets
-are unchanged.
-
-`get_queue` returns the exact selected queue or `UNSUPPORTED_FEATURE`;
-`QueueInfo` reports its semantic roles. A compute role may alias graphics, and
-transfer may alias another selected queue.
-
-Queues are borrowed from the device. `Queue.is_valid` and `Queue.equals` are
-value operations. Queue-targeting `submit`, sparse bind, and presentation are
-externally synchronized on the underlying native queue, so aliased roles share
-one synchronization boundary.
+Submission, presentation, and sparse binding are externally synchronized on
+the native queue. Two aliased roles share that boundary.
 
 ## Surfaces
 
-`Surface` is runtime-owned and is created by a platform module; details are in
-[Presentation and diagnostics](presentation_and_diagnostics.md). A
-`DeviceDesc` borrows its surface during support checks and device creation.
-The created device accepts only that exact surface for swapchain creation.
+A `Surface` is created by a platform module and owned by the runtime. Pass
+it in `DeviceDesc.surface`; the device then accepts only that surface for
+swapchain creation. See
+[presentation](presentation_and_diagnostics.md#surfaces).
 
-## Handle and value helpers
+## Summary
 
-`Runtime`, `Adapter`, `Device`, `Surface`, and `Queue` provide `is_valid`;
-device and queue identities also support equality where declared.
-`*_INVALID` constants are zero sentinels. These checks do not extend owner
-lifetime or prove that a registry generation remains live.
-
-`Vec2f`, `Vec4f`, and `Vec4u` are shared ABI vector aliases.
-`SparseTextureCaps`, `TimestampCaps`, `AccelerationStructureCaps`,
-`RayQueryCaps`, and `RayTracingPipelineCaps` are nested capability records
-exposed through `DeviceCaps`.
-
-## Fault and concurrency summary
-
-| Operation | Concurrency | Ownership/call order |
+| Operation | Concurrency | Notes |
 |---|---|---|
-| runtime create/destroy | externally synchronized process-wide | destroy after all children and borrowed calls |
-| adapter enumeration/query | thread-safe | values and strings borrow the runtime |
-| presentation/support preflight | externally synchronized when a surface is involved | surface and runtime must be live |
-| device create | externally synchronized per runtime | descriptor is borrowed for the call |
-| device caps/queue query | thread-safe | device must be live |
-| device destroy | thread-safe operation on one target | wait work, destroy children, retry busy faults |
+| `create_runtime`, `destroy_runtime` | externally synchronized, process-wide | destroy after all devices and surfaces |
+| adapter enumeration and queries | thread-safe | borrows the runtime |
+| `supports_device_desc`, `supports_presentation` | externally synchronized when a surface is involved | |
+| `create_device` | externally synchronized per runtime | descriptor borrowed for the call |
+| `get_device_caps`, `get_queue`, `get_queue_info` | thread-safe | |
+| `destroy_device` | thread-safe | never waits; retry on busy |
 
-Device loss returns `DEVICE_LOST` from affected operations; peer devices remain
-independent.
+`DEVICE_LOST` from any operation marks that device; other devices continue.

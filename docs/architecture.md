@@ -1,342 +1,305 @@
 # Architecture
 
-## Purpose
+`gpu.c3l` is a thin, explicit GPU API for C3. The public model has six kinds
+of thing: devices, queues, memory, resources, commands, and completion. The
+backend is Vulkan 1.3 and is private.
 
-`gpu.c3l` exposes a small, explicit GPU API for C3. Its public model is shaped
-around devices, queues, allocations, resources, commands, and completion—not
-around Vulkan objects. The private backend targets Vulkan 1.3.
+The library does not track texture state, insert barriers, defer destruction,
+relocate memory, or schedule frames. The application does those things
+explicitly. In exchange, every call has a fixed cost and no hidden work.
 
-The design favors predictable ownership and low hidden work:
+## Modules
 
-- imports are runtime-inert;
-- creation is transactional;
-- state transitions and synchronization are explicit;
-- destruction never inserts an unrequested device wait; and
-- applications own policies such as pooling, streaming, frame graphs, and
-  transient-data reuse.
+| Module | Purpose |
+|---|---|
+| `gpu` | The complete public API. |
+| `gpu::surface::wayland`, `gpu::surface::x11`, `gpu::surface::win32` | One `create_surface` per platform. |
+| `gpu::internal`, `gpu::internal::vk` | Private. No `vk::` or `vma::` type appears in a public signature. |
 
-The library is not an engine and does not provide a render graph, scene model,
-resource streamer, frame scheduler, compatibility descriptor API, or automatic
-hazard tracking.
+Importing a module creates nothing. The first runtime object is the one
+returned by `create_runtime`.
 
-### One programming model, one backend path
+SDL3 is not a dependency. Applications that use it pass its native window
+properties to a surface module. See
+[getting started](getting_started.md#step-2-a-triangle-in-an-sdl3-window).
 
-There is one public programming model and one backend path. There are no
-parallel public profiles, legacy API variants, or compatibility-specific
-pipeline and descriptor models. Validation options change diagnostic cost, not
-API design.
+## Object model
 
-The baseline is Vulkan 1.3 plus the features the public model already uses,
-among them buffer device addresses, synchronization2, dynamic rendering,
-timeline semaphores, descriptor indexing, and the dynamic graphics state
-behind `GraphicsState`. There is no compatibility path for older Vulkan
-versions. Adopting a later
-baseline replaces the superseded 1.3 mechanisms rather than adding a second
-implementation beside them.
-
-Optional capabilities are added only where the GPU operation itself differs,
-such as sparse residency, generated commands, ray queries, and ray-tracing
-pipelines. An alternate implementation of behavior the public API already
-provides is not a capability. Reported limits and queue properties are
-separate: they describe the selected device, not opt-in operations.
-
-
-## Modules and backend boundary
-
-The public API is `gpu`. Native-window integration is split into
-`gpu::surface::wayland`, `gpu::surface::x11`, and
-`gpu::surface::win32`. Importing any of these modules creates no runtime,
-device, thread, or native object.
-
-Shared implementation lives in private `gpu::internal` modules. Vulkan and VMA
-types are confined to `gpu::internal::vk`; no `vk::` or `vma::` type appears in
-a public signature. Capability fields describe semantic behavior rather than
-the native API version or extension that implements it.
-
-SDL3 is not a library dependency. Applications may use it to create a window
-and pass the active platform's native display/window properties to a public
-surface module.
-
-## Object and ownership model
-
-Public resources use strongly typed, device-scoped generational handles.
-Handles are copyable identifiers, not owning C3 pointers. A handle is accepted
-only by the device that created it, and stale generations are rejected when
-contract validation can observe them.
-
-The normal lifetime hierarchy is:
-
-```text
-Runtime
-  Adapter (borrowed immutable view)
-  Surface
-  Device
-    Queue (borrowed immutable value)
-    GpuAllocation
-    TextureHandle
-      TextureView / AttachmentView
-    AccelerationStructureHandle
-      AccelerationStructureView (TLAS descriptor owner)
-    PipelineHandle
-    TimestampPool
-    CommandAllocator
-      RecordingCommands -> ExecutableCommands -> submitted work
-    Swapchain
+```mermaid
+flowchart TD
+    Runtime --> Adapter
+    Runtime --> Surface
+    Adapter --> Device
+    Device --> Queue
+    Device --> GpuAllocation
+    Device --> TextureHandle
+    TextureHandle --> TextureView
+    TextureHandle --> AttachmentViewHandle
+    Device --> SamplerIndex
+    Device --> PipelineHandle
+    Device --> AccelerationStructureHandle
+    AccelerationStructureHandle --> AccelerationStructureView
+    Device --> TimestampPoolHandle
+    Device --> CommandAllocator
+    CommandAllocator --> CommandList
+    CommandList --> ExecutableCommandList
+    ExecutableCommandList --> CompletionPoint
+    Device --> SwapchainHandle
+    Surface --> SwapchainHandle
 ```
 
-Creation calls either publish a complete public object or return a fault with
-no live result. Destruction invalidates the supplied owner only on success.
-Live children return `RESOURCE_IN_USE`; active operations or incomplete work
-may return retryable `DEVICE_BUSY`. Applications quiesce work explicitly with
-completion points before teardown.
+An arrow means "owns or must outlive". A parent refuses to be destroyed while
+a child is live.
 
-`ContractValidation.FULL` retains explicitly named resources referenced by a
-command list. It does not retain arbitrary memory reached through a GPU
-pointer, nor resources named only by shader-visible indices. In
-`ContractValidation.TRUSTED`, all such lifetime tracking is caller-owned.
+Handles are strongly typed values that carry a device identity and a
+generation. They are copyable identifiers, not pointers. A stale handle is
+rejected when validation can observe it. Every handle type has a zero
+`*_INVALID` constant and an `is_valid` method that checks shape only.
 
-## Runtime, adapters, devices, and surfaces
+Three values are not handles: `GpuAddress`, `TextureIndex`, and
+`SamplerIndex` (plus `AccelerationStructureIndex`). They are raw numbers that
+shaders read. They carry no owner or generation. The application keeps the
+owning allocation, view, or device alive for as long as a shader can read the
+value.
 
-A `Runtime` owns adapter discovery and optional Vulkan-layer configuration.
-`AdapterList` and adapter strings are borrowed from the runtime. A semantic
-`DeviceDesc` requests queue roles, presentation, capacities, and validation;
-`supports_device_desc` can preflight it, while `create_device` remains the
-authoritative operation.
+## Lifetime rules
 
-Surfaces retain their runtime but borrow native instance/display/window
-objects. A presentation device and swapchain use the exact surface supplied in
-the device description. Keep native windowing objects alive until the surface
-is destroyed.
+- **Creation is transactional.** A create call returns a complete object or a
+  fault with nothing left behind.
+- **Destruction never waits.** A destroy call returns `RESOURCE_IN_USE` while
+  a child is live and `DEVICE_BUSY` while work is incomplete. The handle stays
+  valid on either fault. Wait on a completion point, destroy the child, retry.
+- **Completion is the only fence.** `submit` returns a `CompletionPoint`.
+  Reusing memory, reusing a command allocator, destroying a resource, and
+  freeing an allocation all wait on the point that covers the last use.
+- **Validation is optional.** `ContractValidation.FULL` adds ownership,
+  generation, state, and lifetime checks, and retains resources named by a
+  command list until it retires. `TRUSTED` checks only what is needed for host
+  safety. Neither policy tracks memory reached through a `GpuAddress` or a
+  shader index.
 
-Queue roles may alias one native queue. `QueueRequest.single_queue` opts into
-one exact native family-and-queue-index identity for every required role. With
-a presentation surface, that identity must also be the selected graphics
-queue's presentation identity; the private presentation fallback remains
-available only when `single_queue` is `false`. A valid policy with no matching
-topology is unsupported, while a contradictory policy is invalid.
+## Runtime, adapters, devices
 
-The private Vulkan backend keeps the request policy through the same canonical
-selection used by support preflight and authoritative creation. Alias checks
-compare both family and queue index, because family-level presentation support
-does not make two different native queues equal. When `single_queue` is false,
-the existing required/distinct_roles validation, default normalization, and
-preference order—including asynchronous-compute and transfer preferences—
-remain unchanged. The API reports semantic queue capabilities and requires the
-caller to express every cross-queue dependency.
+```mermaid
+sequenceDiagram
+    participant App
+    participant Runtime
+    participant Adapter
+    participant Device
+    App->>Runtime: create_runtime(&desc)
+    App->>Runtime: enumerate_adapters
+    Runtime-->>App: AdapterList (borrowed)
+    App->>Adapter: supports_device_desc(&adapter, &desc)
+    Adapter-->>App: DeviceSupport
+    App->>Device: create_device(&adapter, &desc)
+    App->>Device: get_queue(QueueKind)
+    Device-->>App: Queue (borrowed value)
+```
 
-## Memory and resources
+A `Runtime` owns adapter discovery, the optional Vulkan validation layer, the
+debug callback, and table capacities. `RuntimeDesc` also sizes the texture,
+sampler, and acceleration-structure heaps.
 
-`GpuAllocation` owns storage. `GpuSpan` is a checked, non-owning byte range
-inside an allocation. Subspans preserve the allocation identity and bounds.
-The public memory classes describe intended behavior:
+A `DeviceDesc` requests queue roles, an optional presentation surface, and
+optional features (sparse textures, ray queries, ray-tracing pipelines).
+`supports_device_desc` is a preflight. `create_device` is authoritative.
 
-- `CPU_WRITE`: persistently mapped host-write storage;
-- `CPU_READ`: persistently mapped host-read storage;
-- `GPU_PRIVATE`: addressable device-local data; and
-- `TEXTURE`: storage suitable for placed textures.
+Queues are semantic: `GRAPHICS`, `COMPUTE`, `TRANSFER`. Two roles may alias
+one native queue. `DeviceCaps.async_compute` says whether compute is separate.
+`QueueRequest.distinct_roles` demands separation; `single_queue` demands that
+every role share one native queue.
 
-Mapped spans expose borrowed mappings. Flush CPU writes before GPU reads and
-invalidate before host reads where required. Coherent memory makes those
-operations no-ops, but callers use the same API.
+## Memory
 
-`GpuAddress` is the numeric address of an addressable span. Allocations are not
-relocated, so the value is stable for the allocation's lifetime. It carries no
-owner or generation and becomes invalid as soon as the allocation is freed.
-Completion points order use but do not own data reached through an address.
+```mermaid
+flowchart LR
+    A[GpuAllocation<br/>owner] --> S[GpuSpan<br/>checked byte range]
+    S --> M["char[] mapping<br/>(CPU_WRITE / CPU_READ)"]
+    S --> G[GpuAddress<br/>raw shader value]
+```
 
-Textures may use dedicated storage or a validated range of a texture-class
-allocation. Placed texture creation does not transfer ownership of the
-allocation. Sparse texture binding similarly does not create a residency map
-or retain arbitrary backing bytes; the application owns residency, overlap,
-and retirement policy.
+`allocate_memory` returns a `GpuAllocation`. `get_allocation_span` returns a
+`GpuSpan` covering it. `checked_subspan` carves ranges. A span is non-owning.
 
-`TextureView` owns a descriptor-heap slot and exposes a raw `TextureIndex`.
-Destroying the view recycles that slot immediately. `SamplerIndex` is returned
-by device-wide sampler interning and remains stable until device destruction.
-Neither index is an ownership token.
+| Memory class | Mapped | Use |
+|---|---|---|
+| `CPU_WRITE` | yes | uploads, root data, per-frame data |
+| `CPU_READ` | yes | readback |
+| `GPU_PRIVATE` | no | device-local buffers |
+| `TEXTURE` | no | backing for placed and sparse textures |
 
-Acceleration structures use the same explicit storage model. A BLAS owns
-triangle or AABB capacity metadata; a TLAS owns instance capacity. Hidden
-creation owns its backing internally, while placed and dedicated forms expose
-allocation ownership. Build inputs and scratch are caller-owned spans. Device
-clone copies a completed structure into a distinct caller-created matching
-destination without hidden storage or scratch.
-Capability-gated indirect construction reuses the same descriptors, resource
-tables, geometry lowering, and command-unit scratch. Each command unit owns a
-fixed dense maximum-count slice, so warm recording allocates nothing. Private
-construction state records whether completed counts are exact or only CPU
-maxima; direct builds establish exact counts, indirect builds establish
-maximum-only knowledge, and clones preserve that distinction.
-`AccelerationStructureView` owns a recyclable descriptor slot and exposes a
-raw `AccelerationStructureIndex`; packed TLAS instances contain an ordinary
-BLAS `GpuAddress`. Neither raw value retains its owner. A cloned BLAS has a new
-address, while existing instance bytes keep the source address; a cloned TLAS
-needs its own view.
+Allocations are not relocated, so a `GpuAddress` is stable until the
+allocation is freed. Host writes need `flush_mapped_span` before submission;
+host reads need `invalidate_mapped_span` after completion. On coherent memory
+both are no-ops, but the calls are always required.
+
+## Textures and shader indices
+
+A `TextureHandle` owns an image. Shaders do not see the handle. They see a
+`TextureIndex` published by `create_texture_view` into the device-wide
+bindless heap, and a `SamplerIndex` returned by `intern_sampler`.
+
+```mermaid
+flowchart LR
+    T[TextureHandle] -->|create_texture_view| V[TextureView<br/>owns a heap slot]
+    V -->|.index| I[TextureIndex<br/>stored in root data]
+    D[SamplerDesc] -->|intern_sampler| SI[SamplerIndex<br/>stable for device lifetime]
+    T -->|create_attachment_view| AV[AttachmentViewHandle<br/>render-pass target]
+```
+
+Destroying a `TextureView` frees its slot immediately. A sampler index is
+never freed before the device.
+
+Texture layout is application state. Every transition names the exact
+`before` state and the `after` state. The library does not remember the last
+one.
 
 ## Shaders and pipelines
 
-Pipeline creation borrows SPIR-V bytes and entry-point strings only for the
-call. The backend validates the selected entry, root-push ABI, descriptor-heap
-convention, formats, and device capabilities before publishing a private
-pipeline identity. Equivalent pipeline descriptions converge through a
-device-wide deduplication cache.
+Pipelines take SPIR-V and an entry point. Creation validates the root push
+block, the heap bindings, formats, and device limits, then deduplicates
+against equal pipelines on the same device.
 
-Generic shader data is reached through root pointers. Compute commands push
-one `GpuAddress`; graphics commands push separate vertex and fragment root
-addresses; ray-tracing commands push one address to all six ray stages.
-Textures and samplers are selected by raw heap indices stored in root data.
-See [Shader ABI](shader_abi.md).
+All generic shader data travels through root pointers:
 
-Ray-query shaders explicitly opt in through `ray_query.glsl` and select a TLAS
-through binding 5. The ordinary shader path remains extension-free. Procedural
-AABB candidates require shader-side intersection and explicit confirmation.
-Ray-tracing shaders independently opt in through `ray_tracing.glsl`.
-Their pipeline identity encodes the ordered stage and hit-group structure plus
-recursion depth. The application owns SBT allocation, packing, synchronization,
-and lifetime; command recording emits no hidden allocation or barrier. Direct
-tracing supplies dimensions on the host. Capability-gated basic indirect
-tracing reads only dimensions from one caller-owned span; the root and SBT
-stay direct and use the same ownership model.
+```mermaid
+flowchart LR
+    C[cmd_dispatch / cmd_draw] -->|push constant| R["GpuAddress root"]
+    R --> RS["Root struct (std430)"]
+    RS --> A1["GpuAddress → buffer"]
+    RS --> A2["TextureIndex → heap[set 0]"]
+    RS --> A3["SamplerIndex → heap[set 0]"]
+```
 
-Pipeline cache import/export deals with opaque driver data. A cache blob may be
-empty or minimally useful on a particular driver; it is an optimization, not
-an application compatibility format.
+Compute pushes one address. Graphics pushes a vertex address and a fragment
+address. Ray tracing pushes one address to all stages. There is no
+descriptor-set API. See [Shader ABI](shader_abi.md).
 
-## Commands, queues, and completion
+## Commands
 
-A `CommandAllocator` is bound to one exact selected queue and owns a fixed
-number of reusable command units. `begin_commands` returns a one-shot recording
-token. `end_commands` consumes it and returns an executable token. Submission
-consumes accepted executable tokens; rejection preserves them for retry or
-discard.
+```mermaid
+stateDiagram-v2
+    [*] --> Recording: begin_commands(&allocator)
+    Recording --> Executable: end_commands
+    Recording --> [*]: discard_commands
+    Executable --> Submitted: submit(queue, &desc)
+    Executable --> [*]: discard_executable_commands
+    Submitted --> Retired: CompletionPoint completes
+    Retired --> [*]: unit returns to allocator
+```
 
-Successful submission returns a reusable `CompletionPoint`. Polling or waiting
-does not consume the point. The point identifies ordered completion on one
-queue and can be used as a wait dependency for another queue. It is the
-application's fence for allocator reuse, transient-memory reuse, and resource
-destruction.
+A `CommandAllocator` is bound to one queue and owns a fixed number of
+command units. `begin_commands` takes a unit and returns a one-shot
+`CommandList`. `end_commands` consumes it and returns an
+`ExecutableCommandList`. `submit` consumes accepted lists and returns one
+`CompletionPoint`. A rejected submit leaves the lists executable.
 
-Direct, indirect, and generated work share the same command lifecycle.
-Generated work is capability-gated. Each allocator reserves generated work
-explicitly while quiescent, naming the pipeline, kind, maximum record count,
-and concurrency; the backend owns the private storage those imply.
+The unit returns to the allocator when its completion point retires. An
+allocator with `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` (8) units can therefore
+have 8 lists in flight.
 
-Acceleration-structure builds reserve fixed geometry/range lowering arrays in
-each command unit. Full builds and in-place updates use caller-owned scratch,
-while clone uses no scratch. All record no hidden barriers and complete through
-the ordinary submission and retirement lifecycle. A completed full build or
-clone establishes update eligibility from its completed shape. Full validation
-retains exactly the clone source and destination; trusted recording performs no
-reference work.
+Direct, indirect, and generated work share this lifecycle. Generated work
+(GPU-written roots plus arguments) is capability-gated and needs a
+reservation on the allocator before recording.
 
-## Synchronization and texture state
+## Synchronization
 
-Global `Barrier` values express execution and memory dependencies. Texture
-layout changes use `TextureBarrier`, which includes subresources and explicit
-before/after semantic states. The library does not maintain a hidden layout
-history or repair a mismatched transition.
+Two barrier kinds exist:
 
-Cross-queue ordering is expressed with completion waits and destination
-stages. Queue submission itself is externally synchronized per selected native
-queue; aliased semantic roles therefore share that boundary.
+- `Barrier` orders execution and memory between two `StageMask` sets. It has
+  no resource identity.
+- `TextureBarrier` changes a texture subresource from one `TextureState` to
+  another. This is the only way to change a layout.
 
-The acceleration-structure-build stage orders BLAS/TLAS build, update, and
-clone reads/writes. Shader query access belongs to the calling compute, vertex,
-fragment, or ray-tracing stage. Applications insert construction-to-
-construction, construction-to-query, and cross-submit dependencies explicitly.
+Within one queue, order comes from command order plus barriers. Across
+queues, a `SubmitDesc.completion_waits` entry names a prior `CompletionPoint`
+and the stages that must wait for it.
 
-Host mapping operations do not imply GPU completion. The application orders a
-flush before submission, waits for completion before invalidation/readback,
-and keeps all backing allocations alive through the interval.
+```mermaid
+sequenceDiagram
+    participant C as Compute queue
+    participant G as Graphics queue
+    C->>C: submit(compute work)
+    C-->>G: CompletionPoint p
+    G->>G: submit(draw work, completion_waits = [{p, .vertex_shader}])
+```
 
-## Rendering and presentation
+Host mapping operations do not imply GPU completion. Flush before submit,
+wait before invalidate.
 
-Rendering uses dynamic render passes. `RenderPassDesc` supplies attachment
-views, load/store behavior, and clear values. A compatible graphics pipeline
-and a complete `GraphicsState` must be set before drawing. Viewport and scissor
-overrides mutate command-buffer state; pass begin does not create hidden
-defaults or replay previous state.
+## Presentation
 
-Swapchain acquisition returns an image, the image's prior semantic state, and
-one-shot readiness. The application transitions the acquired texture to an
-attachment state, renders, transitions it to `PRESENT`, submits while consuming
-readiness, and then presents. Acquisition uses a caller-selected timeout and
-defaults to nonblocking. Resize and out-of-date recovery are explicit and do
-not wait for work behind the application's back.
+```mermaid
+sequenceDiagram
+    participant App
+    participant SC as Swapchain
+    participant Q as Graphics queue
+    App->>SC: acquire_next_image(timeout)
+    SC-->>App: AcquiredImage {texture, prior_state, readiness}
+    App->>App: record: prior_state → COLOR_ATTACHMENT, draw, → PRESENT
+    App->>Q: submit(lists, readiness)
+    Q-->>App: CompletionPoint p
+    App->>SC: present(&image, p)
+```
 
-## Threading model
+Acquisition is nonblocking by default and returns `WAIT_TIMEOUT` when no
+image is ready. `SWAPCHAIN_OUT_OF_DATE` from acquire or present means resize.
+Before `resize_swapchain` or `destroy_swapchain`: wait the last completion
+point, then `wait_swapchain_presentations`. Neither lifecycle call waits on
+its own.
 
-Public operations fall into three categories:
+## Threading
 
-- **Externally synchronized:** runtime/surface registry mutation, operations on
-  one swapchain, and submit/present/sparse bind on one native queue.
-- **Thread-safe:** immutable adapter queries, allocation and most resource
-  operations, acceleration-structure/view lifecycle operations, pipeline
-  creation, completion polling/waiting, and operations on distinct independent
-  objects.
-- **Thread-confined:** a recording token and all aliases, plus the allocator
-  while it has live recordings. Distinct allocators may record concurrently.
+| Category | Operations |
+|---|---|
+| Externally synchronized | runtime and surface registry mutation; one swapchain; submit, present, and sparse bind on one native queue |
+| Thread-safe | adapter queries; allocation, texture, view, sampler, pipeline, and acceleration-structure operations; completion poll and wait; operations on distinct objects |
+| Thread-confined | a `CommandList` and all copies of it; the allocator while a recording is live |
 
-Passing an executable token or allocator to another thread requires an
-application happens-before edge. Token copies are aliases of one one-shot
-record; using aliases concurrently or after another alias consumes the record
-is invalid.
+Distinct allocators record in parallel. Moving an `ExecutableCommandList` to
+a submit thread needs an application happens-before edge. Aliased queue roles
+share one synchronization boundary.
 
-### Lock implementation snapshot (not API)
+### Backend lock order
 
-The following describes the current backend so contributors can reason about
-contention. Lock names and decomposition are not compatibility promises.
-
-- Device resource state protects creation/destruction and fixed resource
-  tables; texture-view heap publication has a subordinate cache domain. TLAS
-  view publication and destruction serialize with the target structure under
-  the resource domain.
-- Each selected queue has a submission domain and a shorter retirement domain.
-- Each command allocator has an independent domain; recording is normally
-  confined there instead of serialized through a device-wide recording lock.
-- A command-record domain protects lifecycle claims and reclamation.
-
-The forward acquisition order is:
+Not an API contract. Listed so contributors can reason about contention.
 
 ```text
 device operation pin
-  device/resource
-    texture-view cache or queue submission
-      queue retirement
-        allocator
-          command record
+  device / resource
+    texture-view cache  |  queue submission
+                            queue retirement
+                              allocator
+                                command record
 ```
 
-A path never reacquires the device/resource domain while holding a queue,
-retirement, allocator, or command-record domain. No path holds two queue
-retirement domains at once.
+No path reacquires the device domain while holding a queue, retirement,
+allocator, or command-record lock. No path holds two retirement locks. So:
+recording through distinct allocators runs in parallel, submits to distinct
+native queues are independent, and completion polling does not serialize a
+native submit.
 
-Consequently, recording through distinct allocators can proceed in parallel;
-resource operations on independent tables use short device/resource critical
-sections; submissions to distinct native queues are independent; and
-completion retirement uses the short queue boundary without serializing a
-native submit. Operations targeting the same native queue remain serialized.
+## Diagnostics and cost
 
-## Diagnostics and performance characteristics
+`ContractValidation.FULL` and the Vulkan validation layer are independent
+switches. `RuntimeDesc.debug_callback` receives structured `DebugMessage`
+values synchronously, possibly from any thread. The callback must not call
+back into the library.
 
-Full validation adds ownership, generation, state, limit, and retained-resource
-checks. Structured callbacks select message delivery; they do not enable or
-disable returned faults. Callbacks may run synchronously on arbitrary threads
-and must not reenter the library.
+Normal recording paths do no heap allocation. Command scratch is preallocated
+per allocator. Full validation adds a linear duplicate scan per retained
+reference. Vulkan validation layers and software drivers dominate timing;
+benchmark without them and record the driver.
 
-The architecture avoids per-call heap allocation on normal recording paths,
-preallocates command scratch, uses stable fixed tables, and keeps distinct
-allocator recording independent. Full retained-resource validation performs a
-linear duplicate scan up to the configured per-list limit. Vulkan validation
-layers and software drivers may dominate measurements; record the driver,
-validation policy, queue topology, and environment with every benchmark.
+## Platform
 
-## Platform and dependency boundary
+Targets are `linux-x64` and `windows-x64` on C3 0.8.3. Required at runtime: a
+Vulkan 1.3 loader and driver with synchronization2, dynamic rendering,
+timeline semaphores, buffer device address, descriptor indexing, and extended
+dynamic state. The library requires all of them; it does not emulate missing
+features. Unsupported adapters fail `create_device` with
+`UNSUPPORTED_FEATURE`.
 
-The library supports `linux-x64` and `windows-x64`, targets C3 0.8.3, and
-requires a Vulkan 1.3 loader, VMA, and SPIR-V reflection support. Binding
-packages are vendored submodules and native VMA artifacts use the consuming
-target's CRT/link configuration. Shader compilation is an application build
-step. See [Getting started](getting_started.md) for the consumer setup and
-[Features and limitations](features_and_limitations.md) for the exact
-capability profile.
+Vendored dependencies: `vk`, `vma`, and `spvreflect` binding packages plus a
+static VMA library per target. Shader compilation is an application build
+step.

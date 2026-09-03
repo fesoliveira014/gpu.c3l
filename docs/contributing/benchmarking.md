@@ -1,97 +1,80 @@
 # Benchmarking
 
-Benchmarks are manual evidence, not CI pass/fail gates. Run correctness tests
-first and record enough environment context for another contributor to explain
-the result.
+Benchmarks are manual evidence, not CI gates. Run the correctness tests
+first. Record enough environment detail that someone else can explain the
+number.
 
-## Prerequisites
+## Setup
 
-Use C3 0.8.3, initialize submodules, build generated shader assets, and satisfy
-the Vulkan/VMA setup in [Architecture](../architecture.md#platform-and-dependency-boundary).
+C3 0.8.3, submodules initialized, shader assets built, and the Vulkan and VMA
+setup from [testing](testing.md#toolchain).
 
 ```sh
 python3 scripts/gen_abi.py --check
 python3 scripts/build_shaders.py
 ```
 
-For native measurements, record:
+Record with every result:
 
-- operating system and CPU;
+- OS and CPU;
 - GPU, driver, and Vulkan loader;
-- C3 compiler version and build mode;
-- validation policy and whether Vulkan validation layers are enabled;
-- queue topology and whether semantic roles alias;
-- window/display environment for presentation tests; and
-- benchmark arguments, warm-up, sample count, and reported statistic.
+- C3 version and build mode;
+- contract validation policy and whether Vulkan validation layers are on;
+- queue topology, including which roles alias (report `QueueInfo`);
+- display environment for presentation targets;
+- arguments, warm-up, sample count, and the statistic reported.
 
 ## Targets
 
-List current benchmark targets from the repository configuration:
-
 ```sh
-c3c build --path test
-```
-
-The maintained manual targets cover command recording, allocator lifecycle,
-submission/retirement, pipeline cache behavior, sparse binding, presentation,
-and representative GPU workloads. Run a target by name:
-
-```sh
+c3c build --path test        # lists targets
 c3c run <target> --path test
 ```
 
-Some targets require a display; headless GPU targets can use a deterministic
-software Vulkan driver:
+Manual targets cover command recording, allocator lifecycle, submission and
+retirement, pipeline cache, sparse binding, presentation, and representative
+GPU workloads. Headless targets can run on lavapipe:
 
 ```sh
-VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
-  c3c run <target> --path test
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json c3c run <target> --path test
 ```
 
 ## Method
 
-1. Verify the target on the exact revision.
+1. Build the target on the exact revision under test.
 2. Warm caches and one-time driver initialization.
-3. Run enough repetitions to report a robust statistic, not one sample.
-4. Compare one changed variable at a time.
-5. Keep correctness validation results alongside performance results.
+3. Report a statistic over repetitions, not a single sample.
+4. Change one variable at a time.
+5. Keep the correctness result next to the performance result.
 
-For multithreaded recording, compare:
+Multithreaded recording: compare one worker with one allocator, several
+workers with one allocator each, and each case with validation layers off and
+on. Validation layers serialize command calls and software drivers dominate
+library CPU cost; those are environment results, not contract changes.
 
-- one worker/allocator;
-- multiple workers with one allocator each; and
-- the same cases with Vulkan validation layers disabled and enabled.
+Allocator lifecycle: hold per-allocator capacity fixed while varying
+create/destroy churn and concurrently live allocators. Report create,
+begin/end, discard/retirement, and destroy separately. Churn must not consume
+device-lifetime allocator state.
 
-Validation layers commonly serialize native command calls, and software
-drivers may dominate CPU-side library costs. Those are environment results,
-not evidence that the public concurrency contract changed.
+## Reading results
 
-For allocator lifecycle scaling, hold the per-allocator capacity constant while
-varying historical create/destroy churn and concurrently live allocators.
-Report create, begin/end, discard/retirement, and destroy separately where the
-target exposes them. Historical churn must not consume a device-lifetime
-allocator context.
+- A lavapipe pipeline-cache blob may be only a header. Use the blob size to
+  tell driver behavior from cache plumbing.
+- Xvfb has no vblank; FIFO timing there is structural only.
+- Compare `FULL` and `TRUSTED` validation separately.
+- Never promote a measurement into a public guarantee. The contract is
+  qualitative: bounded fixed scratch, independent allocators, no hidden waits.
 
-## Interpreting results
+## Decision records
 
-- A lavapipe pipeline-cache blob may contain only a header; use blob size to
-  distinguish driver behavior from cache plumbing.
-- Xvfb has no physical vblank, so FIFO presentation timing there is structural
-  only.
-- Full contract validation performs bounded retained-resource bookkeeping;
-  compare it separately from `TRUSTED`.
-- Queue-role labels do not imply distinct hardware queues; report actual
-  `QueueInfo`.
-- Never promote a benchmark observation into a public guarantee. The stable
-  contract is qualitative: bounded fixed scratch, independent allocators, and
-  no hidden waits or per-call application policy.
-- [Graphics pipeline identity](pipeline_identity.md) records the workload
-  pipeline inventory behind the current `GraphicsPipelineDesc` field set.
-- [Contiguous texture-index ranges](texture_index_ranges.md) records what the
-  descriptor heap's slot allocation costs and guarantees, and which parts of
-  that question still need device measurement.
-- [Root-pointer data vs a fixed dynamic-uniform path](root_pointer_data.md)
-  records the per-command data-path comparison, its derived byte and native-work
-  costs, and the measurements that still need the primary development GPU.
-- [Shader variants](shader_variants.md) records the shader and SPIR-V artifact
-  inventory, build cost, and pipeline-creation counts.
+Investigations that ended in "keep the current design", with the evidence and
+the condition that would reopen them:
+
+- [Graphics pipeline identity](pipeline_identity.md): `polygon_mode` and
+  `sample_count` stay in `GraphicsPipelineDesc`.
+- [Texture-index ranges](texture_index_ranges.md): no contiguous descriptor
+  range allocator.
+- [Root-pointer data](root_pointer_data.md): no library-owned dynamic-uniform
+  path.
+- [Shader variants](shader_variants.md): no specialization constants.

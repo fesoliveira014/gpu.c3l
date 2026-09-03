@@ -67,8 +67,9 @@ When the API changes:
 - update the owning page under `docs/api/` and the symbol map;
 - update getting-started/cookbook examples that use it;
 - preserve ownership, fault, concurrency, and call-order details; and
-- run the documentation link and symbol-coverage checks described in
-  [docs/contributing/testing.md](docs/contributing/testing.md).
+- compile every new C3 snippet against the library, and run
+  `python3 -B -m unittest scripts.test_package_release`, which rejects a
+  consumer page whose relative link points outside the release bundle.
 
 ## Build and verification
 

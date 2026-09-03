@@ -1,359 +1,321 @@
 # Commands and rendering
 
-## Command allocators
+Command allocators, the command-list lifecycle, and every `cmd_*` call.
 
-`create_command_allocator` creates a `CommandAllocator` bound to one exact
-selected `Queue`. `CommandAllocatorDesc` sizes:
-
-- reusable command-buffer units;
-- retained resource references per list under full validation; and
-- `max_acceleration_structure_geometries_per_build`, the fixed geometry/range
-  scratch reserved for every command unit.
-
-Generated-work storage is not described here. It is sized by
-`reserve_generated_work` and owned by the backend.
-
-Defaults and maxima are exposed as
-`DEFAULT_COMMAND_ALLOCATOR_CAPACITY`,
-`DEFAULT_COMMAND_REFERENCES_PER_LIST`,
-`MAX_COMMAND_ALLOCATOR_CAPACITY`, and
-`MAX_COMMAND_REFERENCES_PER_LIST`.
-
-Creation preallocates native buffers and fixed per-list scratch before
-returning. `destroy_command_allocator` never waits and succeeds only when all
-recordings are discarded/ended and all executable or submitted units have
-retired.
-
-Acceleration-structure geometry capacity has no nonzero default: set it on an
-opted-in device before recording builds. A build with more geometries returns
-`COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` before native emission or retained-state
-mutation. TLAS builds consume one native instances geometry and therefore need
-capacity at least one.
-
-One allocator has one recording owner while any recording is live. Different
-allocators may record concurrently. After the last recording ends, application
-synchronization may move the allocator to another worker.
-
-## Command lifecycle
-
-```text
-begin_commands
-  -> CommandList (recording)
-end_commands
-  -> ExecutableCommandList
-submit or discard_executable_commands
-  -> completion retirement returns the unit
+```mermaid
+stateDiagram-v2
+    [*] --> Recording: begin_commands
+    Recording --> Executable: end_commands
+    Recording --> [*]: discard_commands
+    Executable --> Submitted: submit
+    Executable --> [*]: discard_executable_commands
+    Submitted --> [*]: completion point retires the unit
 ```
 
-`discard_commands` consumes a recording without making it executable.
-`end_commands`, discard, and successful submission consume their one-shot
-input. A failed end/submit leaves the documented token state retryable unless
-an authoritative phase fault says otherwise.
+## Command allocators
 
-Token copies are aliases of one internal record. All aliases are
-thread-confined and become unusable when another alias consumes or retires the
-record. `is_valid` checks token shape/phase metadata but does not extend
-lifetime.
+```c3
+gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
+gpu::CommandAllocatorDesc desc = {
+    .command_buffer_capacity          = 8,    // 0 selects 8
+    .max_resource_references_per_list = 64,   // 0 selects 64; FULL validation only
+    .debug_name                       = "frame_allocator",
+    .max_acceleration_structure_geometries_per_build = 0,  // >0 enables AS builds
+};
+gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue, &desc)!;
+defer (void)gpu::destroy_command_allocator(&allocator);
+```
 
-## Generated-work reservations
+An allocator is bound to one queue and owns `command_buffer_capacity`
+reusable units. Each `begin_commands` takes a unit; the unit returns when
+its submission's completion point retires. A `null` descriptor selects the
+defaults. Maxima: `MAX_COMMAND_ALLOCATOR_CAPACITY` (4,096) units and
+`MAX_COMMAND_REFERENCES_PER_LIST` (4,096) references.
 
-`reserve_generated_work` and `release_generated_work` mutate one quiescent
-allocator's reservation for a pipeline and `GeneratedWorkKind`. They are
-allocator-confined cold operations; reservation is never implicit and never
-happens during recording.
+One allocator has one recording thread while any recording is live.
+Different allocators record in parallel. `destroy_command_allocator` never
+waits and fails while a unit is recording, executable, or submitted.
 
-`GeneratedWorkReservationDesc` describes the reservation in application terms
-only:
+## Command lists
 
-- `pipeline` and `kind` form the reservation key;
-- `max_commands_per_list` bounds the record count one generated call may
-  request; and
-- `concurrent_lists` bounds how many generated calls may hold the reservation
-  at the same time.
+```c3
+gpu::CommandList commands = gpu::begin_commands(&allocator)!;
+defer (void)gpu::discard_commands(&commands);
+// cmd_* calls ...
+gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
+defer (void)gpu::discard_executable_commands(&executable);
+```
 
-Every generated call in flight holds one unit until its command unit retires or
-is discarded, including two calls recorded into the same command list. Size
-`concurrent_lists` as command units times generated calls per unit; a value of
-one admits a single generated call, not a single list.
+`begin_commands` returns `DEVICE_BUSY` when no unit is free; wait on an
+older completion point and retry. `end_commands` consumes the recording
+token. `submit` consumes the executable token. The deferred discards are
+no-ops after a successful consume and free the unit on an early fault.
 
-The backend derives and owns the exact private storage those two limits imply
-for the selected device and pipeline. There are no public byte sizes,
-alignments, or storage handles.
+Copies of a token are aliases of one record. All aliases are confined to
+the recording thread and die together.
 
-The allocator's reservation table is fixed at 64 units per command buffer and
-is allocated on the first reservation call, so an allocator that never reserves
-generated work carries no generated-work storage. The table scales with
-`command_buffer_capacity`, and it also sets the ceiling on `concurrent_lists`:
-one allocator admits `command_buffer_capacity * 64` reserved units in total,
-each backed by private device storage. Size the allocator to the recording work
-it actually performs.
+## Transfers
 
-Reserving again for the same key replaces the reservation. Replacement is
-transactional: on failure the previous reservation stays published and usable.
-Release requires the same quiescent allocator and never waits for GPU work.
-Allocator destruction releases the allocator's generated-work storage.
+```c3
+gpu::BufferCopyDesc copy = { .src = staging_span, .dst = buffer_span };
+gpu::cmd_copy_buffer(&commands, &copy)!;
 
-Recording only consumes an existing matching reservation. A generated call
-performs no requirements query, host allocation, or native object creation.
-Requesting more records than `max_commands_per_list`, or more generated calls
-in flight than `concurrent_lists`, returns `GENERATED_SCRATCH_EXHAUSTED`
-without recording a partial command. Exceeding the allocator's fixed reservation table
-returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` from the reservation call.
+gpu::cmd_fill_buffer(&commands, buffer_span, 0)!;   // 32-bit pattern, 4-byte aligned span
 
-## Transfer and buffer commands
+gpu::BufferTextureCopyDesc upload = {
+    .src     = staging_span,
+    .texture = texture,
+    .mip     = 0,
+    // zero width/height/depth = whole mip; zero row_length_texels = tightly packed
+};
+gpu::cmd_copy_buffer_to_texture(&commands, &upload)!;
 
-- `cmd_copy_buffer` uses `BufferCopyDesc`.
-- `cmd_fill_buffer` fills an aligned span with a 32-bit pattern.
-- `cmd_copy_buffer_to_texture` uses `BufferTextureCopyDesc`.
-- `cmd_copy_texture_to_buffer` uses `TextureBufferCopyDesc`.
+gpu::TextureBufferCopyDesc readback = { .texture = texture, .dst = readback_span };
+gpu::cmd_copy_texture_to_buffer(&commands, &readback)!;
+```
 
-Descriptors identify exact ranges and texture regions. Recording validates
-queue support, bounds, usage, alignment, and state according to the contract
-policy. Transfers do not insert texture transitions or host visibility
-operations.
+Copies validate bounds, usage, and queue support. They do not transition
+textures or make results host-visible; record a barrier for each.
 
-## Acceleration-structure builds, updates, and clones
+## Compute
 
-`cmd_build_acceleration_structure` records one full BLAS or TLAS build outside
-a render pass. A BLAS supplies an ordered
-`AccelerationStructureGeometryBuildDesc` array matching its immutable creation
-schema. A TLAS instead supplies an instance span and count. Both supply
-caller-owned build scratch satisfying the queried size and alignment.
+```c3
+gpu::cmd_bind_pipeline(&commands, compute_pipeline)!;
+gpu::cmd_dispatch(&commands, root_address, { groups_x, 1, 1 })!;
+gpu::cmd_dispatch_indirect(&commands, root_address, args_span)!;   // one DispatchIndirectCommand
+gpu::cmd_dispatch_generated(&commands, records_span, count_span, max_count)!;
+```
 
-`cmd_update_acceleration_structure` updates the destination in place. It is
-valid only after a prior full build or clone has completed, when the structure
-was created with `allow_update`, and with the same per-geometry primitive
-counts, triangle vertex counts and transform presence, or TLAS instance count,
-as that completed structure. It uses the queried update scratch; there is no
-separate source handle.
+`root_address` is pushed unchanged; zero is allowed. Group counts must fit
+`DeviceCaps.max_compute_work_group_count`. Indirect argument memory is a
+caller-owned span made visible with a barrier to `.indirect`.
 
-When `DeviceCaps.acceleration_structures.indirect_build` is true,
-`cmd_build_acceleration_structure_indirect` and
-`cmd_update_acceleration_structure_indirect` use the same descriptor and
-scratch contracts but read build ranges from a caller-owned `GpuSpan`.
-Descriptor primitive and instance counts are CPU maxima for these commands;
-triangle `vertex_count` is the exact `maxVertex + 1` bound. The packet contains
-one `AccelerationStructureIndirectBuildRange` per ordered BLAS geometry, or one
-for a TLAS, at fixed 16-byte stride. Its address is four-byte aligned and its
-allocation supports indirect use. Trailing bytes are ignored.
+## Render passes
 
-`primitive_count` may be zero, is no greater than its descriptor maximum, and
-together with the remaining fields stays within the explicit input spans.
-`primitive_offset` is a byte offset aligned to the index element for indexed
-triangles, the smallest vertex-format component size for non-indexed triangles,
-8 bytes for AABBs, or 16 bytes for TLAS instances. `transform_offset` is 16-byte
-aligned. For triangles, `first_vertex` offsets vertex addressing; every
-resulting vertex index, including an indexed value plus `first_vertex`, is less
-than the descriptor's exact `vertex_count` bound. Indirect updates additionally
-require every actual count to equal the preceding build or update's actual
-count. The library does not inspect or read back the packet. A direct update is
-rejected after an indirect construction whose actual counts are unknown;
-continue with indirect updates or rebuild directly.
+```c3
+gpu::AttachmentViewDesc view_desc = { .texture = target, .mip_level = 0, .array_layer = 0 };
+gpu::AttachmentViewHandle view = gpu::create_attachment_view(&device, &view_desc)!;
+defer (void)gpu::destroy_attachment_view(&device, view);
 
-`cmd_clone_acceleration_structure` records one device clone from a completed
-source into a distinct, matching, caller-created unbuilt destination. It uses
-no input or scratch span. A successfully recorded destination is pending until
-submission retirement; discarding the command restores it to unbuilt. Clone
-does not create storage, submit, wait, or publish a TLAS view.
+gpu::ColorTargetDesc[1] colors = {{
+    .view     = view,
+    .load_op  = gpu::LoadOp.CLEAR,
+    .store_op = gpu::StoreOp.STORE,
+    .clear    = { .rgba = { 0, 0, 0, 1 } },
+}};
+gpu::DepthTargetDesc depth = {
+    .view     = depth_view,
+    .load_op  = gpu::LoadOp.CLEAR,
+    .store_op = gpu::StoreOp.DONT_CARE,
+    .clear    = { .depth = 1.0f },
+};
+gpu::RenderPassDesc pass = {
+    .colors = colors[..],
+    .depth  = &depth,          // null for no depth
+    .width  = width,
+    .height = height,
+};
 
-All construction commands are valid on selected compute or graphics queues and
-invalid during a render pass or on transfer-only queues. They insert no
-barrier. The caller explicitly orders host writes, construction commands,
-later ray queries, and cross-submit consumers. Under full validation builds
-and updates retain the destination and every explicit backing span, while a
-clone retains exactly its source and destination until retirement. Raw BLAS
-addresses already packed into TLAS instances remain caller-owned and are not
-rewritten by cloning.
+gpu::cmd_begin_render_pass(&commands, &pass)!;
+gpu::cmd_bind_pipeline(&commands, pipeline)!;
+gpu::cmd_set_graphics_state(&commands, &state)!;
+// draws ...
+gpu::cmd_end_render_pass(&commands)!;
+```
 
-FULL validation also retains the indirect range span. TRUSTED performs no
-reference tracking, but still checks the command token, destination identity,
-fixed packet range, address alignment, indirect usage, capability, and safe
-native lowering. Neither policy inserts a dependency; order a compute-written
-packet with a destination containing both `.indirect` and
-`.acceleration_structure_build`.
+The required order inside a pass: bind a compatible pipeline, set a
+complete `GraphicsState`, draw. Pass begin does not bind, set, or
+transition anything. Attachments must already be in `COLOR_ATTACHMENT` or
+`DEPTH_ATTACHMENT` layout. Pipeline compatibility is the ordered color
+formats, depth format, and sample count. `ColorTargetDesc.resolve_view`
+names a single-sample target for a multisample attachment.
 
-## Compute work
+`ClearColor` is a union: `rgba` for float and normalized formats,
+`uint_rgba` for integer formats.
 
-`cmd_bind_pipeline` selects a compatible compute, graphics, or ray-tracing
-pipeline in the command state.
+Swapchain images come with an `AttachmentViewHandle` in `AcquiredImage`.
+`create_attachment_view` is for application textures. Destroy attachment
+views after their last submitted use retires.
 
-- `cmd_dispatch` supplies one root and `Vec3u` group counts.
-- `cmd_dispatch_indirect` reads one `DispatchIndirectCommand`.
-- `cmd_dispatch_generated` reads generated root/argument records and a count.
+## Graphics state
 
-Direct counts must fit `DeviceCaps.max_compute_work_group_count`.
-Indirect argument storage and count storage are ordinary `GpuSpan` values
-whose contents and lifetime are caller-owned.
+```c3
+gpu::GraphicsState state = gpu::render_geometry_state(width, height)!;
+state.color.targets = targets[..];
+gpu::cmd_set_graphics_state(&commands, &state)!;
 
-## Ray tracing
+gpu::Viewport half = { .width = width / 2.0f, .height = (float)height, .max_depth = 1.0f };
+gpu::cmd_set_viewport(&commands, &half)!;
+gpu::ScissorRect clip = { .x = 10, .y = 10, .width = 100, .height = 100 };
+gpu::cmd_set_scissor(&commands, &clip)!;
+```
 
-Bind a ray-tracing pipeline, then call `cmd_trace_rays` outside a render pass
-with one root `GpuAddress`, a caller-owned `RayTracingShaderBindingTable`, and
-nonzero `Vec3u` dimensions. The command requires a selected graphics or compute
-queue whose native family supports compute operations. A selected compute queue
-always satisfies this contract; a selected graphics queue does only when its
-native family also supports compute. Full validation rejects an incompatible
-family, while trusted validation treats native queue compatibility as a caller
-precondition. The invocation product must fit
-`DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_invocation_count`. Each axis
-must also fit the corresponding component of
-`DeviceCaps.ray_tracing_pipelines.max_ray_dispatch_dimensions`; full validation
-rejects an oversized width, height, or depth before native recording.
+`cmd_set_graphics_state` applies the whole packet. `cmd_set_viewport` and
+`cmd_set_scissor` override one field each after a complete state exists.
+Binding a pipeline or beginning a pass does not reset state. Fields are
+described in [shaders and pipelines](shaders_and_pipelines.md#graphics-pipelines).
 
-The ray-generation SBT region contains exactly one record. Optional miss, hit,
-and callable regions use canonical empty values when absent; nonempty regions
-must satisfy device base/handle alignment, stride, range, ownership, and usage
-requirements. Record a ray-tracing pipeline bind before tracing.
+## Draws
 
-For a pipeline created with `dynamic_stack_size = true`, bind the pipeline and
-then call `cmd_set_ray_tracing_pipeline_stack_size` with a caller-derived
-byte count before each direct or indirect trace that needs the state. The
-value must fit `uint` and be sufficient for every possible shader execution
-in the dispatch; it may be zero when no group reports a stack requirement.
-The library exposes per-group role requirements but
-does not derive a whole-pipeline value. Binding another dynamic-stack ray
-pipeline preserves the recorded value. A successful logical bind of any
-static-stack ray pipeline invalidates it, including when the native bind is
-deduplicated; later dynamic tracing requires another setter call.
+All draws take a vertex root and a fragment root, pushed unchanged. Zero
+is allowed.
 
-`cmd_trace_rays` pushes the root to all six ray stages and emits one direct
-trace. It allocates nothing and inserts no pipeline bind, barrier, submission,
-or wait. Keep the bound pipeline, every nonempty SBT allocation, root data,
-TLAS view, and all raw-address/index targets live through completion.
+```c3
+gpu::cmd_draw(
+    commands:       &commands,
+    vertex_root:    vroot,
+    fragment_root:  froot,
+    vertex_count:   36,
+    instance_count: 1,
+)!;
 
-When `DeviceCaps.ray_tracing_pipelines.indirect_dispatch` is true,
-`cmd_trace_rays_indirect` reads only width, height, and depth from the first
-12 bytes of a caller-owned `GpuSpan`. The root and SBT remain direct. The span
-must begin with one `TraceRaysIndirectCommand`; trailing bytes are ignored.
-Its resolved device address must be four-byte aligned and its allocation must
-support indirect use. The command otherwise has the same pipeline, queue,
-render-scope, SBT, and root contract as `cmd_trace_rays`.
+gpu::cmd_draw_indexed(
+    commands:       &commands,
+    vertex_root:    vroot,
+    fragment_root:  froot,
+    index_span:     index_span,
+    index_count:    36,
+    instance_count: 1,
+    index_type:     gpu::IndexType.U16,   // default U32
+)!;
 
-The library does not inspect GPU-authored dimensions. At execution, every axis
-must fit `max_ray_dispatch_dimensions` and their product must fit
-`max_ray_dispatch_invocation_count`. Under full validation the command retains
-the bound pipeline, nonempty SBT allocations, and argument allocation through
-completion. Under trusted validation those lifetimes are caller preconditions.
-No path inserts a barrier, readback, bind, submission, wait, or allocation.
-If the capability is false, the command returns `UNSUPPORTED_FEATURE`; the
-application may choose direct tracing as its fallback.
+gpu::cmd_draw_indirect(
+    commands:      &commands,
+    vertex_root:   vroot,
+    fragment_root: froot,
+    args:          args_span,      // DrawIndirectCommand[draw_count]
+    draw_count:    draw_count,
+)!;
 
-When `DeviceCaps.ray_tracing_pipelines.indirect2_dispatch` is true,
-`cmd_trace_rays_indirect2` reads one `TraceRaysIndirectCommand2` from the
-first 104 bytes of an indirect-capable, four-byte-aligned `GpuSpan`; trailing
-bytes are ignored. It still pushes the caller's direct `root`, but reads the
-ray-generation record, optional miss/hit/callable SBT regions, and dimensions
-from the GPU-authored packet. The active pipeline, recording scope, queue, and
-dynamic-stack requirements are otherwise the same as direct tracing.
+gpu::cmd_draw_indexed_indirect_count(
+    commands:       &commands,
+    vertex_root:    vroot,
+    fragment_root:  froot,
+    args:           args_span,
+    count_span:     count_span,    // one uint written by the GPU
+    max_draw_count: max_draws,
+    index_span:     index_span,
+)!;
+```
 
-`TraceRaysIndirectCommand2` has this exact generated layout:
+`cmd_draw_indexed_indirect` is the counted form without the count span.
+Indirect draw counts must fit `DeviceCaps.max_draw_indirect_count`;
+`cmd_draw_indexed_indirect_count` needs `DeviceCaps.draw_indirect_count`.
 
-| Offset | Field |
-|---:|---|
-| 0 | `ray_generation_record_address` (`GpuAddress`) |
-| 8 | `ray_generation_record_size` (`ulong`) |
-| 16 | `miss_table_address` (`GpuAddress`) |
-| 24 | `miss_table_size` (`ulong`) |
-| 32 | `miss_table_stride` (`ulong`) |
-| 40 | `hit_table_address` (`GpuAddress`) |
-| 48 | `hit_table_size` (`ulong`) |
-| 56 | `hit_table_stride` (`ulong`) |
-| 64 | `callable_table_address` (`GpuAddress`) |
-| 72 | `callable_table_size` (`ulong`) |
-| 80 | `callable_table_stride` (`ulong`) |
-| 88 | `width` (`uint`) |
-| 92 | `height` (`uint`) |
-| 96 | `depth` (`uint`) |
-| 100 | `_pad0` (`uint`) |
+## Generated work
 
-The ray-generation region contains exactly one valid record. Empty optional
-regions use the canonical zero address, size, and stride; nonempty regions must
-meet the selected device's SBT alignment, stride, range, addressability, and
-usage requirements. GPU-authored dimensions must be nonzero, fit the published
-per-axis limits, and have a product within the invocation limit. The library
-does not inspect, repair, upload, or synchronize this packet or its raw SBT
-addresses. Record a compute-to-indirect barrier after a GPU producer.
+Generated records carry roots and arguments together
+(`GeneratedDrawRecord`, `GeneratedDrawIndexedRecord`,
+`GeneratedDispatchRecord`). They need `DeviceCaps.generated_work` and a
+reservation on the allocator, made while it is idle:
 
-Under `ContractValidation.FULL`, the command retains the named bound pipeline
-and packet span through completion. The SBT addresses carried inside the packet,
-root-reachable data, TLAS view, and every other raw-address target remain
-caller-owned under every validation policy; retain their owners through the
-completion point. Under `TRUSTED`, the packet span is caller-owned too. If
-`indirect2_dispatch` is false, choose basic indirect or direct tracing; the
-Indirect2 command returns `UNSUPPORTED_FEATURE`. It inserts no hidden barrier,
-readback, pipeline bind, upload, allocation, submission, or wait.
+```c3
+gpu::GeneratedWorkReservationDesc reservation = {
+    .pipeline              = pipeline,
+    .kind                  = gpu::GeneratedWorkKind.DRAW_INDEXED,
+    .max_commands_per_list = 4096,   // records one call may read
+    .concurrent_lists      = 3,      // generated calls in flight at once
+};
+gpu::reserve_generated_work(&allocator, &reservation)!;
+...
+gpu::cmd_draw_indexed_generated(
+    commands:       &commands,
+    records:        records_span,
+    count_span:     count_span,
+    max_draw_count: 4096,
+    index_span:     index_span,
+)!;
+...
+gpu::release_generated_work(&allocator, pipeline, gpu::GeneratedWorkKind.DRAW_INDEXED)!;
+```
 
-The stack-size command is valid only while recording outside a render pass on a
-selected graphics or compute queue whose native family supports compute. FULL
-validation reports phase, queue, scope, active-pipeline mode, and numeric misuse
-before native emission or state mutation. TRUSTED validation treats those
-semantic checks, representability, and sufficiency as caller preconditions.
+The backend derives and owns the private storage. Each generated call in
+flight holds one unit of `concurrent_lists` until its command unit
+retires, so two calls in one list use two units. Reserving the same key
+again replaces the reservation. The reservation table holds 64 units per
+command buffer; exceeding it returns `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`.
+A generated call that exceeds its reservation returns
+`GENERATED_SCRATCH_EXHAUSTED` and records nothing.
 
-## Graphics state and drawing
+## Acceleration-structure commands
 
-`GraphicsState` is a complete packet containing viewport, scissor, dynamic
-raster state, depth state, and ordered color state. It has no implicit
-default. `render_geometry_state(width, height)` supplies conventional geometry
-state and an empty color packet; color rendering must replace that packet with
-one matching the pipeline.
+Valid outside a render pass on graphics or compute queues. The allocator
+must have `max_acceleration_structure_geometries_per_build` at least the
+geometry count (one for a TLAS).
 
-`cmd_set_graphics_state` applies a complete packet.
-`cmd_set_viewport` and `cmd_set_scissor` update only those fields after complete
-state is established.
+```c3
+gpu::cmd_build_acceleration_structure(&commands, &build_desc)!;
+gpu::cmd_update_acceleration_structure(&commands, &build_desc)!;               // in place; allow_update
+gpu::cmd_build_acceleration_structure_indirect(&commands, &build_desc, ranges_span)!;
+gpu::cmd_update_acceleration_structure_indirect(&commands, &build_desc, ranges_span)!;
+gpu::cmd_clone_acceleration_structure(&commands, source, destination)!;
+```
 
-Draw commands are:
+`AccelerationStructureBuildDesc` names the destination, ordered geometry
+build inputs (or an instance span and count for a TLAS), and caller scratch.
+Direct builds carry actual counts; indirect builds carry CPU maxima and
+read one `AccelerationStructureIndirectBuildRange` per geometry from
+`ranges_span`. Clone uses no scratch.
 
-- `cmd_draw` and `cmd_draw_indexed`;
-- `cmd_draw_indirect` and `cmd_draw_indexed_indirect`;
-- `cmd_draw_indexed_indirect_count`; and
-- `cmd_draw_generated` and `cmd_draw_indexed_generated`.
+None of these insert barriers. Order them with
+`.acceleration_structure_build` on both sides of a `Barrier`. Under `FULL`
+validation the destination and every named span are retained until the
+list retires. Details: [memory and resources](memory_and_resources.md#acceleration-structures).
 
-`IndexType` selects `U16` or `U32` interpretation for the supplied index span.
-Direct and shared-root indirect draws supply one vertex and fragment
-`GpuAddress`. Generated commands read per-work roots from generated records.
-The ABI records `DrawIndirectCommand` and
-`DrawIndexedIndirectCommand` match their shader-side twins.
+## Ray tracing commands
 
-Draw-count and generated-work limits come from `DeviceCaps`. Generated calls
-also require a matching reservation on the originating allocator.
+Valid outside a render pass on a graphics or compute queue whose native
+family supports compute. A ray-tracing pipeline must be bound.
 
-## Attachments and render passes
+```c3
+gpu::cmd_bind_pipeline(&commands, ray_pipeline)!;
+gpu::cmd_set_ray_tracing_pipeline_stack_size(&commands, stack_bytes)!;   // dynamic_stack_size pipelines only
+gpu::cmd_trace_rays(
+    commands:             &commands,
+    root:                 root_address,
+    shader_binding_table: &sbt,
+    dimensions:           { width, height, 1 },
+)!;
+gpu::cmd_trace_rays_indirect(
+    commands:             &commands,
+    root:                 root_address,
+    shader_binding_table: &sbt,
+    args:                 dims_span,      // TraceRaysIndirectCommand
+)!;
+gpu::cmd_trace_rays_indirect2(&commands, root_address, packet_span);   // TraceRaysIndirectCommand2
+```
 
-`create_attachment_view` publishes an `AttachmentViewHandle` for one texture
-mip/layer selected by `AttachmentViewDesc`. Destroy it only after every
-recorded and submitted use retires.
+`cmd_trace_rays` pushes the root to all six stages. Dimensions must fit
+`RayTracingPipelineCaps.max_ray_dispatch_dimensions` and their product
+`max_ray_dispatch_invocation_count`. The indirect forms need
+`indirect_dispatch` and `indirect2_dispatch` respectively; the argument
+span is four-byte aligned and made visible with a barrier to `.indirect`.
+The library never reads the packet back.
 
-`RenderPassDesc` contains ordered `ColorTargetDesc` values, optional
-`DepthTargetDesc`, and the render area. `LoadOp` and `StoreOp` control content
-lifetime. `ClearColor` is a floating-point or unsigned-integer union;
-`ClearDepth` contains a normalized depth.
+The stack-size value persists across binds of other dynamic-stack ray
+pipelines and is invalidated by binding a static-stack ray pipeline.
 
-The render sequence is:
+## Labels
 
-1. transition every attachment to the required layout;
-2. `cmd_begin_render_pass`;
-3. bind a compatible graphics pipeline;
-4. `cmd_set_graphics_state` with a complete packet;
-5. issue draws;
-6. `cmd_end_render_pass`; and
-7. transition outputs for their next use.
+```c3
+gpu::cmd_begin_label(&commands, "shadow pass", { 1, 0.5f, 0, 1 })!;
+...
+gpu::cmd_end_label(&commands)!;
+```
 
-Pass begin is attachment-only. It does not bind a pipeline, create graphics
-defaults, replay state, or transition textures. Pipeline compatibility includes
-ordered color formats, depth format, and sample count.
+No-ops without debug-utils support. Nesting must balance.
 
-## Debug labels
+## Faults
 
-`cmd_begin_label` and `cmd_end_label` annotate recorded work when debug-utils
-support is active and otherwise lower to no-ops. Labels still follow command
-token confinement and balanced nesting.
+| Cause | Fault |
+|---|---|
+| wrong token phase, unbalanced pass, or no bound pipeline | `COMMAND_RECORDING_ERROR` |
+| state contradicts prior state | `INVALID_RESOURCE_STATE` |
+| bad range, count, or descriptor | `INVALID_ARGUMENT` |
+| stale or foreign handle | `INVALID_HANDLE` |
+| unsupported queue operation or capability | `UNSUPPORTED_FEATURE` |
+| reference or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
+| generated reservation exceeded | `GENERATED_SCRATCH_EXHAUSTED` |
+| no free unit | `DEVICE_BUSY` |
 
-## Recording faults
-
-Malformed state, unsupported queue operations, incompatible pipelines/passes,
-and one-shot phase misuse return `COMMAND_RECORDING_ERROR`,
-`INVALID_RESOURCE_STATE`, `INVALID_ARGUMENT`, `INVALID_HANDLE`, or
-`UNSUPPORTED_FEATURE` as documented by the operation.
-Fixed reference limits and exhausted generated-work reservations return
-`COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` or
-`GENERATED_SCRATCH_EXHAUSTED` without emitting a partial compound command.
+A failed `cmd_*` call records nothing.
