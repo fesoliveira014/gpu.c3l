@@ -1,149 +1,76 @@
-# Style and project conventions
+# Style
 
 ## 1. Language target
 
-Target C3 0.8.3. C3 is pre-1.0, so code examples and implementation work must be verified against the target compiler rather than memory of earlier syntax.
+C3 0.8.3. C3 is pre-1.0; check syntax against the installed compiler, not
+memory.
 
-## 2. Module names
+## 2. Modules and files
 
-Public module:
+| Module | Contents |
+|---|---|
+| `module gpu;` | Public API. Non-callables in `gpu/gpu.c3i`; callables, with docstrings and bodies, in `gpu/gpu.c3`. |
+| `module gpu::surface::<platform>;` | Native handle typedefs in `surface.c3i`; `create_surface` in `surface.c3`. |
+| `module gpu::internal @private;` | Backend-independent implementation, one file per area in `gpu/internal/*.c3`. |
+| `module gpu::internal::vk @private;` | Vulkan backend, mirroring those areas in `gpu/internal/vk/*.c3`. Translation helpers go in `helpers.c3`. |
 
-```c3
-module gpu;
-```
-
-Backend-independent implementation module:
-
-```c3
-module gpu::internal @private;
-```
-
-Vulkan backend module:
-
-```c3
-module gpu::internal::vk @private;
-```
-
-Public non-callables belong in `gpu/gpu.c3i`. Public callables, including their
-contracts, attributes, defaults, and bodies, belong in `gpu/gpu.c3`. A platform
-surface keeps only its public native typedefs in `surface.c3i` and its public
-callable in the adjacent `surface.c3`. Private implementation declarations go
-in `gpu/internal/*.c3`; Vulkan declarations go in `gpu/internal/vk/*.c3`.
-
-Sample modules may use sample-specific namespaces. Do not put samples in `module gpu;` unless they are shipped helpers.
+Samples use their own module names. Only shipped helpers go in `module gpu;`.
 
 ## 3. Naming
 
 | Kind | Case | Examples |
 |---|---|---|
-| Variables, fields, parameters | `snake_case` | `queue_index`, `debug_name`, `memory_class` |
-| Functions | `snake_case` | `allocate_memory`, `cmd_dispatch`, `wait_completion` |
-| Structs, enums, typedefs, aliases | `PascalCase` | `RuntimeDesc`, `GpuSpan`, `TextureUsage` |
-| Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_SHADER_HEAP_CAPACITY`, `TRANSFER_DESTINATION`, `DEVICE_LOST` |
-| Modules | lowercase, dotted | `gpu`, `gpu::internal`, `gpu::internal::vk` |
-| Files | `snake_case.c3` | `descriptor_heap.c3`, `pipeline_graphics.c3` |
+| Variables, fields, parameters | `snake_case` | `queue_index`, `debug_name` |
+| Functions | `snake_case` | `allocate_memory`, `cmd_dispatch` |
+| Structs, enums, typedefs, aliases | `PascalCase` | `RuntimeDesc`, `GpuSpan` |
+| Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_SHADER_HEAP_CAPACITY`, `DEVICE_LOST` |
+| Modules | lowercase, `::`-separated | `gpu::internal::vk` |
+| Files | `snake_case.c3` | `descriptor_heap.c3` |
 
 ## 4. Definition order
 
-Within each source file:
+Within a file, or within each banner section of a file grouped by domain:
 
 ```text
 1. Typedefs
 2. Aliases
 3. Constants
-4. Enums / constdefs / bitstructs
+4. Enums / bitstructs
 5. Structs
 6. Struct methods
 7. Free functions
 ```
 
-Keep type definitions before values and operations that use them.
+## 5. Lifecycle functions
 
-A file that groups its contents into domain sections applies this order within
-each section rather than across the whole file. `gpu/gpu.c3i` and `gpu/gpu.c3`
-are organized this way, with a banner per API domain.
+Project-owned resources use free functions: `create_x` / `destroy_x`,
+`allocate_memory` / `free_allocation`. Not `Device.create` or
+`GpuAllocation.free`.
 
-## 5. Construction and destruction
+Methods are for operations on an existing receiver that are not lifecycle
+operations. Bindings may use method syntax where it mirrors the C API.
 
-Project-owned lifecycle uses free functions:
+## 6. Errors
 
-```text
-create_device
-destroy_device
-allocate_memory
-free_allocation
-create_texture
-destroy_texture
+Fallible operations return `T?` or `void?` and fail with a named fault:
+
+```c3
+fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc);
+return INVALID_HANDLE~;
 ```
 
-Avoid:
-
-```text
-Device.create
-GpuAllocation.free
-Texture.create
-```
-
-Methods are appropriate when an operation naturally mutates or reads an existing receiver and is not a lifecycle constructor. External bindings may use method syntax when it maps C API structure; backend code may call `vma` wrapper methods because those are part of the binding.
-
-## 6. Error handling
-
-Use C3 optionals/faults for fallible operations.
-
-Good:
-
-```text
-allocate_memory(...) -> GpuAllocation?
-cmd_dispatch(...) -> void?
-return INVALID_HANDLE~
-```
-
-Avoid:
-
-```text
-bool success out-params
-null sentinel returns
--1 resource IDs
-global errno-style state
-```
-
-Faults should be specific:
-
-```text
-INVALID_HANDLE
-UNSUPPORTED_FEATURE
-RESOURCE_IN_USE
-DESCRIPTOR_HEAP_FULL
-PIPELINE_CREATE_FAILED
-```
-
-Avoid broad catch-all faults such as `FAILED` unless no better category exists.
+Do not use bool out-parameters, null returns, `-1` sentinels, or global
+error state. Use the most specific fault that fits; add a catch-all only
+when no category applies.
 
 ## 7. Handles
 
-Use typed handles. Do not pass raw `uint`, `int`, or `ulong` where a domain handle exists.
-
-Good:
-
-```text
-GpuAllocation allocation
-TextureHandle texture
-PipelineHandle pipeline
-```
-
-Bad:
-
-```text
-ulong allocation
-uint texture
-int pipeline
-```
+Use the typed handle: `TextureHandle texture`, not `uint texture`.
 
 ## 8. Call formatting
 
-Calls with four or more arguments, or calls that would exceed 120 characters, should use named arguments, one per line, with a trailing comma.
-
-Preferred:
+A call with four or more arguments, or wider than 120 columns, uses named
+arguments, one per line, trailing comma:
 
 ```c3
 gpu::cmd_draw(
@@ -155,11 +82,11 @@ gpu::cmd_draw(
 )!;
 ```
 
-Short calls with three or fewer arguments may stay positional if readable.
+Calls with three or fewer arguments may stay positional.
 
 ## 9. Braces
 
-Use K&R brace style:
+K&R:
 
 ```c3
 fn void? free_allocation(Device* device, GpuAllocation* allocation) {
@@ -169,38 +96,25 @@ fn void? free_allocation(Device* device, GpuAllocation* allocation) {
 }
 ```
 
-Do not use Allman braces.
+## 10. Docstrings and comments
 
-## 10. Comments and docstrings
-
-Every public callable in `gpu`, its platform surface modules, and any other
-shipped public module uses a native C3 docstring. Order the content as:
+Every public callable has a C3 docstring in this order:
 
 ```text
-concise summary and recoverable-fault behavior
+summary, including which recoverable faults it returns
 
 @param entries in declaration order
-
-@return entry for a value or fault-returning operation
-
-@require entries for stable local caller contracts only
+@return entry
+@require entries, only for stable local contracts
 ```
 
-Omit a method's receiver when its meaning is self-evident. State ownership,
-borrowing and lifetime, token consumption, blocking, and thread confinement
-when they affect correct use. Public descriptions stay backend-neutral; a
-platform surface may name its public native handle types.
+State ownership, borrowing, token consumption, blocking, and thread
+confinement when they matter. Keep the text backend-neutral; a surface module
+may name its native handle types.
 
-Avoid inline comments that restate the code. Comments should explain why, not
-what.
-
-C3 doc contracts are executable. Do not turn recoverable conditions such as
-invalid handles, unsupported capabilities, resource use, capacity exhaustion,
-timeouts, or device loss into `@require`. Describe those faults in prose and
-the `@return` text. Use `@require` only when the condition is a stable local
-programming contract and enforcing it preserves the intended API behavior.
-Non-owning public utility views must explicitly state that they inherit the
-lifetime of their public resources.
+`@require` is executable. Never put a recoverable condition in it: invalid
+handles, missing capabilities, resource in use, exhaustion, timeouts, device
+loss. Those go in prose and `@return`.
 
 Example:
 
@@ -214,125 +128,54 @@ Example:
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc);
 ```
 
-Keep docstrings short and precise. Ordinary compilation and `c3c docgen` are
-the validation path.
+Inline comments explain why, not what. A field that needs a comment to be
+understood should be renamed.
 
-API preconditions, side effects, and ownership rules belong in doc comments. If a field needs a comment to be understood, consider renaming it or restructuring the type.
+## 11. Current state only
 
-## 11. Current-state documentation
+Code and shipped documentation describe current behavior. No schedules,
+roadmap labels, ticket ids, milestone names, or history in identifiers,
+file names, test names, or `debug_name` values.
 
-Shipped code and documentation describe current behavior. Omit schedules,
-roadmap labels, ticket identifiers, and implementation history.
+## 12. Public signature hygiene
 
-Use behavior names such as `test_root_pointer_compute` and
-`create_upload_pool`.
-
-## 12. Public API dependency hygiene
-
-Public `gpu` signatures must not expose:
-
-```text
-vk:: types
-vma:: types
-sdl:: types
-platform window structs
-raw native OS handles unless wrapped in neutral descriptors
-```
-
+Public `gpu` signatures never contain `vk::`, `vma::`, or `sdl::` types,
+platform window structs, or raw OS handles outside the surface typedefs.
 Backend files may import `vk` and `vma`. Samples may import `sdl`.
 
-## 13. File organization
+## 13. Shaders
 
-The root public facade has one authoritative pair:
+Explicit `set`/`binding` and `location`. `std430` for root and table data.
+Shared structs come from the ABI generator or carry size and offset
+assertions on both sides. No `vec3` in shared structs.
 
-```text
-gpu/gpu.c3i
-gpu/gpu.c3
-gpu/surface/<platform>/surface.c3i
-gpu/surface/<platform>/surface.c3
-```
+## 14. Debug names
 
-Backend-independent implementation is grouped by area in `gpu/internal/*.c3`.
-The Vulkan implementation mirrors those areas below it:
+Every resource descriptor accepts `debug_name`. Use descriptive
+`snake_case`: `input_buffer`, `transient_upload_0`, `albedo_texture`,
+`pipeline_root_pointer_compute`.
 
-```text
-gpu/internal/vk/device.c3
-gpu/internal/vk/buffer.c3
-gpu/internal/vk/texture.c3
-gpu/internal/vk/pipeline_compute.c3
-gpu/internal/vk/pipeline_graphics.c3
-gpu/internal/vk/command.c3
-gpu/internal/vk/sync.c3
-```
+## 15. Tests
 
-Translation helpers belong in `gpu/internal/vk/helpers.c3` and should not be duplicated.
+`@test` functions with `snake_case` names that state the behavior:
+`test_invalid_buffer_handle_rejected`,
+`test_root_pointer_compute_writes_output`. Assert the specific fault. CPU
+tests are exhaustive; Vulkan tests run validation-clean.
 
-## 14. Shader style
+## 16. Formatting tools
 
-Shader source should use explicit layouts:
+No whole-tree auto-formatting. Hand-format to this guide. Avoid
+whitespace-only rewrites.
 
-```text
-explicit set/binding
-explicit location
-std430 for root/table data
-stable generated constants
-```
-
-Shared structs must be generated or manually mirrored with size checks. Avoid `vec3` in shared ABI structs.
-
-## 15. Resource naming
-
-All resources should accept a `debug_name` where practical.
-
-Debug name conventions:
-
-```text
-input_buffer
-output_buffer
-transient_upload_0
-persistent_materials
-albedo_texture
-swapchain_color_0
-pipeline_root_pointer_compute
-```
-
-Avoid names that encode schedules or temporary implementation plans.
-
-## 16. Testing style
-
-Tests:
-
-```text
-use @test
-use snake_case names
-assert specific faults
-keep pure CPU tests exhaustive
-keep Vulkan tests validation-clean
-```
-
-Test names describe behavior:
-
-```text
-test_invalid_buffer_handle_rejected
-test_allocation_extent_overflow_faults
-test_root_pointer_compute_writes_output
-```
-
-## 17. Formatting tool policy
-
-Do not run whole-tree auto-formatters unless the project explicitly adopts them. Hand-format to this guide. Large whitespace-only rewrites should be avoided.
-
-## 18. Acceptance criteria for style compliance
+## 17. Checklist
 
 A change is style-compliant when:
 
-```text
-names follow the table above
-public lifecycle uses free functions
-faults are specific
-public signatures do not leak backend bindings
-calls with 4+ args use named multiline style
-comments document why, ownership, or invariants
-no development labels appear in code or test identifiers
-pure CPU tests and relevant backend tests pass
-```
+- names follow the table in section 3;
+- public lifecycle uses free functions;
+- faults are specific;
+- public signatures leak no bindings;
+- calls with four or more arguments use the named multiline form;
+- comments explain why, ownership, or invariants;
+- no development labels appear in identifiers; and
+- CPU tests and the relevant backend tests pass.

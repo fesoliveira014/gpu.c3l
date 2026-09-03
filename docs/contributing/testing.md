@@ -1,49 +1,40 @@
 # Testing
 
-The test strategy is compiler- and behavior-first:
+Tests are ordinary C3 programs and `@test` targets. Nothing parses source
+text, generated docs, CI configuration, or benchmark output as a policy.
 
-- compile real consumers of the public `gpu` bundle and surface modules;
-- run CPU C3 tests for public contracts and shader ABI layout;
-- cover timestamp conversion and selected-role capability resolution with
-  injected CPU/whitebox cases;
-- regenerate and check shipped shader ABI artifacts;
-- compile every GLSL and SPIR-V assembly fixture;
-- run consolidated C3 tests against Vulkan with validation enabled;
-- exercise output/readback, ownership, rollback, synchronization, WSI, and
-  optional capabilities through the ordinary C3 test framework.
+Layers:
 
-The repository does not parse source text, generated documentation, CI
-configuration, assembly, or benchmark output as a correctness policy.
+1. compile real consumers of the public bundle and surface modules;
+2. CPU tests for public contracts and shader ABI layout;
+3. regenerate and check shipped ABI artifacts;
+4. compile every GLSL and SPIR-V assembly fixture;
+5. Vulkan tests with validation layers on.
 
-## Toolchain and dependencies
-
-Use C3 0.8.3 and initialize the binding submodules:
+## Toolchain
 
 ```sh
-c3c --version
+c3c --version                         # 0.8.3
 git submodule update --init --recursive
 ```
 
-Vulkan tests require a Vulkan 1.3 loader, the VMA static library described in
-[Architecture](../architecture.md#platform), SPIRV-Reflect,
-and a driver satisfying the baseline in
-[Architecture](../architecture.md). Install `glslc` and `spirv-as` before
-building shader fixtures.
+Vulkan targets need a Vulkan 1.3 loader, the VMA static library, SPIRV-Reflect,
+and a driver meeting the [required profile](../features_and_limitations.md#required-device-profile).
+Shader fixtures need `glslc` and `spirv-as`.
 
-On headless Linux, select lavapipe explicitly:
+Headless Linux: select lavapipe and keep the Khronos validation layer
+installed.
 
 ```sh
 export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 ```
 
-Keep the Khronos validation layer installed. A real hardware ICD may be used
-for additional local coverage.
+## Consumer and CPU checks
 
-## Public consumer and CPU checks
-
-The canonical getting-started consumer lives under
-[`examples/getting_started`](../../examples/getting_started/). Build its shader,
-then compile and run the project from a normal checkout named `gpu.c3l`:
+The getting-started program under `examples/getting_started` is the canonical
+consumer. It imports only `gpu` and resolves the shipped bundle plus its
+declared dependencies. Build its shader, then build and run it from a checkout
+named `gpu.c3l`:
 
 ```sh
 python3 scripts/build_shaders.py
@@ -51,28 +42,19 @@ c3c build hello_gpu --path examples/getting_started
 ./examples/getting_started/build/hello_gpu
 ```
 
-The consumer imports only `gpu` and resolves the shipped bundle plus its
-declared `vk`, `vma`, and `spvreflect` dependencies. The separate
-`gpu.c3l-samples` repository provides broader downstream consumer coverage.
-
-Check both release archive shapes and their runtime-only dependency boundary:
+Release archive shape and its runtime-only dependency boundary:
 
 ```sh
 python3 -B -m unittest scripts.test_package_release -v
-python3 scripts/package_release.py \
-  --version 0.0.0-ci \
-  --target linux-x64 \
-  --output-dir dist
+python3 scripts/package_release.py --version 0.0.0-ci --target linux-x64 --output-dir dist
 ```
 
-CI produces both target archives in each platform job, combines them into a
-disposable `lib/gpu.c3l` consumer layout, and builds and runs the maintained
-`project.release.json` getting-started program without resolving files from the
-repository checkout. Before publication, the release job combines the exact
-Linux and Windows artifacts uploaded by their respective jobs against the
-tagged source checkout.
+CI builds both target archives, assembles them into a throwaway `lib/gpu.c3l`
+consumer layout, and builds and runs the getting-started program from
+`project.release.json` without touching the repository checkout.
 
-Run the CPU compile and test targets:
+CPU targets under `test/cpu` compile the public module against a stub backend
+with no native libraries:
 
 ```sh
 c3c run import_gpu --path test/cpu
@@ -87,13 +69,10 @@ c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
 ```
 
-These are ordinary C3 consumers. Compiler visibility and type checking—not a
-symbol inventory—establish what the public modules expose.
+Compiler visibility and type checking define the public surface; there is no
+symbol inventory.
 
-## Generated shader ABI
-
-The ABI generator produces shipped C3 and GLSL artifacts from schemas. Check
-the generator and committed outputs with:
+## Shader ABI
 
 ```sh
 c3c test unit --path tools/gen_shader_abi
@@ -101,34 +80,27 @@ python3 -B -m unittest scripts.test_gen_abi
 python3 scripts/gen_abi.py --check
 ```
 
-After changing an ABI schema, regenerate the outputs and shader fixtures:
+After changing a schema:
 
 ```sh
 python3 scripts/gen_abi.py
 python3 scripts/build_shaders.py
 ```
 
-`scripts/build_shaders.py` compiles the test shaders, assembles deterministic
-SPIR-V fixtures, and builds the getting-started shader. Generated `.spv` files
-are ignored.
+`build_shaders.py` compiles test shaders, assembles SPIR-V fixtures, and
+builds the getting-started shader. `.spv` outputs are git-ignored.
 
 ## Link proof
 
-The whitebox test project directly compiles the library implementation and
-private backend so it can exercise narrow test seams. Confirm it links and
-runs:
+The whitebox project under `test` compiles the library and backend directly
+so tests can reach private seams:
 
 ```sh
 c3c build smoke --path test
 ./test/build/smoke
 ```
 
-This is separate from the real bundle-consuming getting-started project.
-
-## Consolidated Vulkan tests
-
-The Vulkan suite is grouped by runtime needs rather than by historical feature
-increments:
+## Vulkan tests
 
 ```sh
 c3c test vk_sparse_texture --path test --test-show-output
@@ -139,96 +111,49 @@ c3c test vk_optional_generated_work --path test --test-show-output
 c3c test vk_ray_tracing --path test --test-show-output
 ```
 
-- `vk_sparse_texture` is the fast deterministic target for sparse descriptor
-  validation, exact flags, requirement translation, transaction rollback,
-  cached queries, and capability-gated real image lifecycle.
-- `vk_sparse_bind` covers tile/tail geometry, exact-invalid unbind, allocation
-  compatibility and physical overlap, call-scoped allocation failure rollback,
-  ordinary/sparse timeline chaining, native result mapping, sparse-texture
-  retention, sparse-only retirement, portable cross-thread lock boundaries,
-  and capability-gated bind/use/unbind. The real 2D and 3D paths upload and
-  read back known bytes after an ordered bind; an unavailable dimension is
-  reported as a capability-gated skip.
-- `vk_core` covers device selection and creation, allocations, spans,
-  textures/views/samplers, reflection and root ABI, pipelines/cache, command
-  recording and lifecycle, graphics/compute/transfer output, depth,
-  threading, queues, submission/completion, diagnostics, rollback, and
-  validation policy. Timestamp coverage includes pool lifecycle, role-specific
-  valid-bit selection, aliased and transfer-only queues, exact reset/write/resolve
-  lowering, caller-owned history, packed resolve output, direct host reads, and
-  `DEVICE_BUSY` without host waiting.
-- `vk_wsi` covers swapchain configuration, acquisition, present, resize,
-  ownership, result mapping, and WSI diagnostics without requiring a native
-  window.
-- `vk_optional_generated_work` covers indirect and generated dispatch/draw
-  behavior, scratch reservation/exhaustion, caller-owned spans, and observable
-  output when the driver supports the capability.
-- `vk_ray_tracing` is an explicit capable-device acceptance target. It enables
-  Vulkan validation, builds triangle and AABB BLASes, waits, clones the triangle
-  BLAS, waits again, builds a TLAS from the clone's address, packs a caller-owned
-  SBT, lets compute write a `TraceRaysIndirectCommand`, records an explicit
-  compute-to-indirect barrier, and, when supported, also writes a below-maximum
-  TLAS range with a nonzero instance offset and records a composed
-  compute-to-indirect/build barrier. Traversal proves that the later instance
-  was selected; otherwise the existing direct TLAS build remains the explicit
-  fallback. The target queries the stack requirements of its known
-  shader graph, records an explicit dynamic stack size, and checks indirect
-  hit/miss/callable output when basic indirect tracing is available. A
-  direct-only device reports that capability boundary and runs the direct
-  proof. Running it on an adapter
-  without ray-tracing pipelines fails with `UNSUPPORTED_FEATURE`; it is not a
-  passing skip.
+| Target | Covers |
+|---|---|
+| `vk_sparse_texture` | sparse descriptor validation, flags, requirement translation, transaction rollback, cached queries, capability-gated image lifecycle |
+| `vk_sparse_bind` | tile and tail geometry, unbind, allocation compatibility and overlap, allocation-failure rollback, timeline chaining, result mapping, retention and retirement, cross-thread lock boundaries, capability-gated bind/use/unbind with readback |
+| `vk_core` | device selection, allocations, spans, textures, views, samplers, reflection and root ABI, pipelines and cache, command lifecycle, graphics/compute/transfer output, depth, threading, queues, submission and completion, timestamps, diagnostics, rollback, validation policy |
+| `vk_wsi` | swapchain configuration, acquire, present, resize, ownership, result mapping, WSI diagnostics; no native window needed |
+| `vk_optional_generated_work` | indirect and generated dispatch and draw, reservation and exhaustion, caller-owned spans, output when the driver supports it |
+| `vk_ray_tracing` | on a capable device: BLAS and TLAS builds, clone, SBT packing, direct and indirect trace, dynamic stack size, indirect build ranges. On an adapter without ray-tracing pipelines it fails with `UNSUPPORTED_FEATURE`; that is not a skip. |
 
-Capability-specific tests query support in C3 and handle an unavailable
-feature explicitly. CI does not parse `EXERCISED` text or require a particular
-message format.
+Capability-gated tests query support in C3 and report an unavailable feature
+explicitly. Some tests use private seams to observe transactional behavior;
+those seams are not public interfaces.
 
-Some tests use narrow private helpers or operation-local seams to observe
-otherwise hidden transactional behavior. Those are test implementation
-details, not public interfaces or output schemas.
+Timestamp tests keep two contracts distinct: `cmd_resolve_timestamps` records
+a device-side availability wait; `read_timestamps` requests no wait and
+returns `DEVICE_BUSY` with unspecified output when values are not ready.
+Neither validation policy tracks per-slot reset or write history, so tests do
+not assert diagnostics for it.
 
-Timestamp tests keep two distinct wait contracts observable: command resolve
-records a device-side availability wait, while `read_timestamps` requests no
-native wait and allocates no staging. The not-ready case must ignore output
-contents because the requested range is unspecified on `DEVICE_BUSY`.
-Validation tests cover deterministic bounds, phase, role, stage, usage, access,
-and lifetime behavior; they do not assert per-slot reset/write diagnostics,
-because neither `FULL` nor `TRUSTED` tracks that history.
+## Benchmarks
 
-## Manual benchmarks
-
-CI may build the manual benchmark executables to catch compiler drift, but
-does not execute or parse them. See [Benchmarking](benchmarking.md) for direct
-commands and interpretation. In particular, `pipeline_cache_bench` records
-complete cached `GraphicsState` packets across raster permutations; its timing
-is advisory and is not compared with raster-only measurements.
+CI may build benchmark executables to catch compiler drift; it does not run
+them. See [benchmarking](benchmarking.md).
 
 ## CI
 
-`.github/workflows/ci.yml` runs Linux and Windows jobs. Both retain their
-platform-specific C3, Vulkan, VMA, shader-tool, and lavapipe setup, then invoke
-the same direct categories:
+`.github/workflows/ci.yml` runs Linux and Windows jobs with platform-specific
+setup and then the same steps:
 
 ```text
 consumer and surface compilation
 CPU unit and shader ABI tests
 generator tests and ABI drift check
 shader build
-manual benchmark builds
-smoke link/run
-vk_core
-vk_wsi
-vk_optional_generated_work
-vk_ray_tracing
+benchmark builds
+smoke link and run
+vk_core, vk_wsi, vk_optional_generated_work, vk_ray_tracing
 ```
 
-Linux also uploads `c3c docgen` output as an unparsed whole-compile reference.
-The artifact is informational; no script treats its symbols or wording as a
-second API specification.
+Linux also uploads `c3c docgen` output from the whitebox project as an
+informational artifact.
 
 ## Full local sweep
-
-From the repository root:
 
 ```sh
 c3c run import_gpu --path test/cpu
