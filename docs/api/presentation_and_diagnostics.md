@@ -107,16 +107,7 @@ callback must:
 Callback presence controls delivery only. It does not enable contract checks,
 Vulkan validation, debug names, leak tracking, or alter returned faults.
 
-## Memory and debug reporting
-
-`get_memory_stats` returns advisory heap usage/budget snapshots.
-`build_memory_report` returns an owned C3 `String` report for application
-logging; the caller releases it according to normal C3 string ownership.
-Quiesce allocation mutation when an exact diagnostic snapshot matters.
-
-`cmd_begin_label` and `cmd_end_label` add nested GPU command labels when native
-debug-utils support is active. They are harmless no-ops otherwise and remain
-subject to command token confinement.
+## Debug reporting
 
 Debug names are copied or retained according to each create descriptor's
 source contract and are exposed only for diagnostics. Full-validation device

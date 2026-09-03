@@ -59,6 +59,10 @@ Within each source file:
 
 Keep type definitions before values and operations that use them.
 
+A file that groups its contents into domain sections applies this order within
+each section rather than across the whole file. `gpu/gpu.c3i` and `gpu/gpu.c3`
+are organized this way, with a banner per API domain.
+
 ## 5. Construction and destruction
 
 Project-owned lifecycle uses free functions:

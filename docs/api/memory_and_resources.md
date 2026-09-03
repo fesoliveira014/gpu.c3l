@@ -37,8 +37,11 @@ and host use.
 | `TEXTURE` | placed texture backing; not a generic GPU-address source |
 
 `MemoryStats` contains up to `MAX_MEMORY_HEAPS` advisory
-`MemoryHeapBudget` records. Exact reporting calls are described in
-[Presentation and diagnostics](presentation_and_diagnostics.md#memory-and-debug-reporting).
+`MemoryHeapBudget` records. `get_memory_stats` returns advisory heap
+usage/budget snapshots. `build_memory_report` returns an owned C3 `String`
+report for application logging; the caller releases it according to normal C3
+string ownership. Quiesce allocation mutation when an exact diagnostic snapshot
+matters.
 
 ## Texture capability and creation
 

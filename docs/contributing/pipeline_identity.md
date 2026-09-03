@@ -7,9 +7,9 @@ third-party consuming project was inventoried.
 
 ## What identity already excludes
 
-`GraphicsPipelineDesc` (`gpu/gpu.c3i:1176-1184`) holds shaders, color formats,
+`GraphicsPipelineDesc` (`gpu/gpu.c3i`) holds shaders, color formats,
 depth format, `sample_count`, `polygon_mode`, and a debug name. Everything else
-is command-time, owned transitively by `GraphicsState` (`gpu/gpu.c3i:1288-1294`)
+is command-time, owned transitively by `GraphicsState` (`gpu/gpu.c3i`)
 through `DynamicRasterState` (`:1158-1166`: topology, cull mode, front face,
 depth bias), `DepthState` (`:1128-1132`: test, write, compare), and `ColorState`
 (`:1152-1154`) over `ColorTargetState` (`:1146-1149`: blend equation, write

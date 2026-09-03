@@ -345,36 +345,6 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
     );
 }
 
-<* Destroy a surface.
-   Preconditions: every borrowing swapchain is destroyed.
-   Always checked: live identity, runtime ownership, and dependent count.
-   Runtime failures: RESOURCE_IN_USE preserves the surface for retry.
-
-   @param surface : "Owning token to destroy; success replaces it with the invalid value."
-   @return "Success, or a recoverable invalid-handle or resource-in-use fault." *>
-fn void? destroy_surface(Surface* surface) {
-    gpu::internal::SurfaceData* data = gpu::internal::resolve_surface(surface);
-    if (data == null) return INVALID_HANDLE~;
-    if (data.live_swapchain_count > 0) return RESOURCE_IN_USE~;
-
-    Runtime runtime = data.runtime;
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(&runtime);
-    if (runtime_data == null) return INVALID_HANDLE~;
-    void* backend_surface = data.backend_surface;
-
-    data.runtime = RUNTIME_INVALID;
-    data.backend_surface = null;
-    data.live_swapchain_count = 0;
-    data.used = false;
-    *surface = SURFACE_INVALID;
-
-    gpu::internal::vk::vk_destroy_surface(
-        runtime_data.state,
-        backend_surface,
-    );
-    gpu::internal::runtime_release_surface(&runtime)!!;
-}
-
 <* Snapshot the selected device's immutable capabilities.
 
    @param device : "Live device to query."
@@ -2967,6 +2937,36 @@ fn bool SwapchainReadiness.equals(
     SwapchainReadiness other,
 ) @operator(==) {
     return self.device == other.device && self.payload == other.payload;
+}
+
+<* Destroy a surface.
+   Preconditions: every borrowing swapchain is destroyed.
+   Always checked: live identity, runtime ownership, and dependent count.
+   Runtime failures: RESOURCE_IN_USE preserves the surface for retry.
+
+   @param surface : "Owning token to destroy; success replaces it with the invalid value."
+   @return "Success, or a recoverable invalid-handle or resource-in-use fault." *>
+fn void? destroy_surface(Surface* surface) {
+    gpu::internal::SurfaceData* data = gpu::internal::resolve_surface(surface);
+    if (data == null) return INVALID_HANDLE~;
+    if (data.live_swapchain_count > 0) return RESOURCE_IN_USE~;
+
+    Runtime runtime = data.runtime;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(&runtime);
+    if (runtime_data == null) return INVALID_HANDLE~;
+    void* backend_surface = data.backend_surface;
+
+    data.runtime = RUNTIME_INVALID;
+    data.backend_surface = null;
+    data.live_swapchain_count = 0;
+    data.used = false;
+    *surface = SURFACE_INVALID;
+
+    gpu::internal::vk::vk_destroy_surface(
+        runtime_data.state,
+        backend_surface,
+    );
+    gpu::internal::runtime_release_surface(&runtime)!!;
 }
 
 <* Create a swapchain for the exact surface selected at device creation.
