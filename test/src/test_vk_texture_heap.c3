@@ -13,6 +13,8 @@ const char[*] HEAP_VOLUME_WRITE_SPIRV =
     $embed("shaders/heap_volume_write.comp.spv");
 const char[*] HEAP_VOLUME_SAMPLE_SPIRV =
     $embed("shaders/heap_volume_sample.comp.spv");
+const char[*] HEAP_CUBE_SAMPLE_SPIRV =
+    $embed("shaders/heap_cube_sample.comp.spv");
 const char[*] HEAP_OFFSCREEN_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
 const char[*] HEAP_OFFSCREEN_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
 
@@ -29,6 +31,11 @@ const uint HEAP_VOLUME_AREA = HEAP_VOLUME_WIDTH * HEAP_VOLUME_HEIGHT;
 const uint HEAP_VOLUME_TEXELS = HEAP_VOLUME_AREA * HEAP_VOLUME_DEPTH;
 const uint HEAP_VOLUME_OUTPUT_TEXELS =
     HEAP_VOLUME_TEXELS + HEAP_VOLUME_AREA + 2;
+const uint HEAP_CUBE_SIZE = 4;
+const uint HEAP_CUBE_FACES = 6;
+const usz HEAP_CUBE_MIP0_BYTES = HEAP_CUBE_SIZE * HEAP_CUBE_SIZE * 4;
+const usz HEAP_CUBE_MIP1_BYTES = (HEAP_CUBE_SIZE / 2) * (HEAP_CUBE_SIZE / 2) * 4;
+const uint HEAP_CUBE_OUTPUT_TEXELS = 9;
 
 fn void bindless_texture_write_then_sample() @test {
     gpu::RuntimeDesc device_desc = {
@@ -443,6 +450,227 @@ fn void bindless_volume_write_load_and_sample() @test {
             && recycled.generation != image_view.generation,
         "2D and 3D views recycle one shared logical texture slot namespace");
     gpu::destroy_texture_view(&device, recycled)!!;
+}
+
+fn void bindless_cube_upload_and_sample() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_cube_heap_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureDesc cube_desc = {
+        .access          = { .compute },
+        .width           = HEAP_CUBE_SIZE,
+        .height          = HEAP_CUBE_SIZE,
+        .mip_levels      = 2,
+        .array_layers    = HEAP_CUBE_FACES,
+        .format          = gpu::Format.RGBA8_UNORM,
+        .usage           = { .sampled, .transfer_dst },
+        .cube_compatible = true,
+        .debug_name      = "heap_cube",
+    };
+    if (!gpu::supports_texture_desc(&device, &cube_desc)!!) return;
+    gpu::TextureHandle cube = gpu::create_texture(&device, &cube_desc)!!;
+    defer gpu::destroy_texture(&device, cube)!!;
+
+    gpu::TextureViewDesc cube_view_desc = { .cube = true };
+    gpu::TextureView cube_view =
+        gpu::create_texture_view(&device, cube, &cube_view_desc)!!;
+    defer gpu::destroy_texture_view(&device, cube_view)!!;
+    gpu::TextureViewDesc face_view_desc = { .base_layer = 3, .layer_count = 1 };
+    gpu::TextureView face_view =
+        gpu::create_texture_view(&device, cube, &face_view_desc)!!;
+    defer gpu::destroy_texture_view(&device, face_view)!!;
+
+    gpu::TextureDesc plain_desc = cube_desc;
+    plain_desc.cube_compatible = false;
+    plain_desc.debug_name = "heap_cube_plain_array";
+    gpu::TextureHandle plain = gpu::create_texture(&device, &plain_desc)!!;
+    defer gpu::destroy_texture(&device, plain)!!;
+    gpu::TextureView? rejected_plain =
+        gpu::create_texture_view(&device, plain, &cube_view_desc);
+    assert(@catch(rejected_plain) == gpu::INVALID_ARGUMENT,
+        "cube views require a cube-compatible texture");
+    gpu::TextureViewDesc short_cube = { .cube = true, .layer_count = 3 };
+    gpu::TextureView? rejected_short =
+        gpu::create_texture_view(&device, cube, &short_cube);
+    assert(@catch(rejected_short) == gpu::INVALID_ARGUMENT,
+        "cube views cover exactly six layers");
+
+    gpu::SamplerDesc nearest_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .mip_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .max_lod    = 1.0f,
+    };
+    gpu::SamplerIndex nearest_sampler =
+        gpu::intern_sampler(&device, &nearest_desc)!!;
+    gpu::SamplerDesc linear_desc = nearest_desc;
+    linear_desc.min_filter = gpu::Filter.LINEAR;
+    linear_desc.mag_filter = gpu::Filter.LINEAR;
+    gpu::SamplerIndex linear_sampler =
+        gpu::intern_sampler(&device, &linear_desc)!!;
+
+    usz staging_bytes = HEAP_CUBE_FACES * (HEAP_CUBE_MIP0_BYTES + HEAP_CUBE_MIP1_BYTES);
+    OwnedSpan staging = allocate_owned_span(
+        device:       &device,
+        size:         staging_bytes,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "heap_cube_staging",
+    )!!;
+    defer free_owned_span(&device, &staging)!!;
+    char* bytes = (char*)test_span_mapping(&device, staging.span).ptr;
+    for (uint face = 0; face < HEAP_CUBE_FACES; face++) {
+        char* mip0 = &bytes[(usz)face * HEAP_CUBE_MIP0_BYTES];
+        for (usz texel = 0; texel < HEAP_CUBE_SIZE * HEAP_CUBE_SIZE; texel++) {
+            mip0[texel * 4 + 0] = (char)(face == 0 ? 255 : 0);
+            mip0[texel * 4 + 1] = (char)(face == 2 ? 255 : 0);
+            mip0[texel * 4 + 2] = (char)(face * 40);
+            mip0[texel * 4 + 3] = (char)255;
+        }
+        char* mip1 = &bytes[HEAP_CUBE_FACES * HEAP_CUBE_MIP0_BYTES
+            + (usz)face * HEAP_CUBE_MIP1_BYTES];
+        for (usz texel = 0; texel < (HEAP_CUBE_SIZE / 2) * (HEAP_CUBE_SIZE / 2); texel++) {
+            mip1[texel * 4 + 0] = (char)9;
+            mip1[texel * 4 + 1] = (char)(face + 1);
+            mip1[texel * 4 + 2] = (char)0;
+            mip1[texel * 4 + 3] = (char)255;
+        }
+    }
+    gpu::flush_mapped_span(&device, staging.span)!!;
+
+    OwnedSpan output = allocate_owned_span(
+        device:       &device,
+        size:         HEAP_CUBE_OUTPUT_TEXELS * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .compute },
+        debug_name:   "heap_cube_output",
+    )!!;
+    defer free_owned_span(&device, &output)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         CubeHeapRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "heap_cube_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    CubeHeapRoot* root =
+        (CubeHeapRoot*)test_span_mapping(&device, root_owned.span).ptr;
+    root.output_gpu = test_span_address(&device, output.span);
+    root.cube_index = cube_view.index;
+    root.face_index = face_view.index;
+    root.nearest_sampler = nearest_sampler;
+    root.linear_sampler = linear_sampler;
+    gpu::flush_mapped_span(&device, root_owned.span)!!;
+
+    gpu::ShaderDesc sample_shader = {
+        .spirv       = HEAP_CUBE_SAMPLE_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc sample_desc = { .shader = sample_shader };
+    gpu::PipelineHandle sample_pipeline =
+        gpu::create_compute_pipeline(&device, &sample_desc)!!;
+    defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
+
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::TextureState transfer_write = {
+        .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+        .stages = { .transfer },
+        .access = { .write },
+    };
+    gpu::TextureBarrier to_dst = gpu::texture_transition(
+        texture: cube,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   transfer_write,
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &to_dst)!!;
+    gpu::BufferTextureCopyDesc mip0_copy = {
+        .src         = staging.span.checked_subspan(
+            0,
+            HEAP_CUBE_FACES * HEAP_CUBE_MIP0_BYTES,
+        )!!,
+        .texture     = cube,
+        .mip         = 0,
+        .layer_count = HEAP_CUBE_FACES,
+    };
+    gpu::cmd_copy_buffer_to_texture(&commands, &mip0_copy)!!;
+    gpu::BufferTextureCopyDesc mip1_copy = {
+        .src         = staging.span.checked_subspan(
+            HEAP_CUBE_FACES * HEAP_CUBE_MIP0_BYTES,
+            HEAP_CUBE_FACES * HEAP_CUBE_MIP1_BYTES,
+        )!!,
+        .texture     = cube,
+        .mip         = 1,
+        .layer_count = HEAP_CUBE_FACES,
+    };
+    gpu::cmd_copy_buffer_to_texture(&commands, &mip1_copy)!!;
+    gpu::TextureBarrier to_sample = gpu::texture_transition(
+        texture: cube,
+        before:  transfer_write,
+        after:   gpu::sampled_at({ .compute }),
+    )!!;
+    gpu::cmd_texture_barrier(&commands, &to_sample)!!;
+
+    bind_test_compute_pipeline(&commands, sample_pipeline);
+    gpu::cmd_dispatch(
+        commands: &commands,
+        root:     test_span_address(&device, root_owned.span),
+        groups:   { 1, 1, 1 },
+    )!!;
+    gpu::Barrier output_to_host = {
+        .before = { .compute },
+        .after  = { .host },
+    };
+    gpu::cmd_barrier(&commands, &output_to_host)!!;
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+    gpu::invalidate_mapped_span(&device, output.span)!!;
+
+    float* texels = (float*)test_span_mapping(&device, output.span).ptr;
+    for (uint face = 0; face < HEAP_CUBE_FACES; face++) {
+        float* sampled = &texels[face * 4];
+        assert(quantize_unorm8(sampled[0]) == (face == 0 ? 255 : 0)
+                && quantize_unorm8(sampled[1]) == (face == 2 ? 255 : 0)
+                && quantize_unorm8(sampled[2]) == face * 40
+                && quantize_unorm8(sampled[3]) == 255,
+            "each axis direction selects its own face in +X -X +Y -Y +Z -Z order");
+    }
+    float* mip1 = &texels[6 * 4];
+    assert(quantize_unorm8(mip1[0]) == 9 && quantize_unorm8(mip1[1]) == 1,
+        "explicit LOD 1 samples the uploaded second mip of the +X face");
+    float* edge = &texels[7 * 4];
+    uint edge_r = quantize_unorm8(edge[0]);
+    uint edge_g = quantize_unorm8(edge[1]);
+    assert(edge_r >= 64 && edge_r <= 192 && edge_g >= 64 && edge_g <= 192,
+        "linear filtering across the +X/+Y edge blends both faces");
+    float* face3 = &texels[8 * 4];
+    assert(quantize_unorm8(face3[0]) == 0
+            && quantize_unorm8(face3[1]) == 0
+            && quantize_unorm8(face3[2]) == 120,
+        "a 2D view of one face samples through the 2D heap");
 }
 
 fn void storage_write_then_fragment_sample() @test {

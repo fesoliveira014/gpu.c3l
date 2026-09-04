@@ -957,7 +957,9 @@ struct DedicatedTexture {
 
 <* Creation parameters for create_texture. Zero depth selects 2D; positive
    depth selects 3D. `access` must be a non-empty subset of the device's
-   selected queue roles. *>
+   selected queue roles. A cube-compatible texture is a single-sampled 2D
+   array with equal width and height and a layer count that is a multiple of
+   six; each group of six layers holds the faces +X, -X, +Y, -Y, +Z, -Z. *>
 struct TextureDesc {
     uint             width;
     uint             height;
@@ -971,10 +973,15 @@ struct TextureDesc {
     TextureUsage     usage;
     QueueRoles       access;
     SampleCount      sample_count;
+    // Allows sampled cube views. Requires width == height, depth 0,
+    // array_layers a multiple of 6, and SampleCount.ONE.
+    bool             cube_compatible;
     ZString          debug_name;
 }
 
-<* Subresource view of a texture; a zero-initialized desc is the full default view. *>
+<* Subresource view of a texture; a zero-initialized desc is the full default
+   view. A cube view needs a cube-compatible sampled texture and exactly six
+   layers. *>
 struct TextureViewDesc {
     uint   base_mip;
     // 0 means all mips from base_mip.
@@ -982,6 +989,8 @@ struct TextureViewDesc {
     uint   base_layer;
     // 0 means all layers from base_layer.
     uint   layer_count;
+    // Sampled cube of the six layers from base_layer.
+    bool   cube;
 }
 
 <* Semantic parameters for intern_sampler. *>

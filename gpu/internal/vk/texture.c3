@@ -104,6 +104,7 @@ struct TextureSlot {
     uint               depth;
     uint               mip_levels;
     uint               array_layers;
+    bool               cube_compatible;
     uint               live_descriptor_views;
     Atomic{bool}       presented;
     Atomic{uint}        tracked_command_references;
@@ -407,7 +408,7 @@ fn bool? texture_desc_supported(
         image_type,
         vk::ImageTiling.OPTIMAL,
         usage,
-        flags,
+        flags | texture_create_flags(desc),
         &properties,
     );
     switch (result) {
@@ -454,6 +455,12 @@ fn bool? vk_supports_texture_desc(
 ) {
     if (!gpu::internal::texture_desc_valid(desc)) return false;
     return texture_desc_supported(state, desc);
+}
+
+fn vk::ImageCreateFlags texture_create_flags(gpu::TextureDesc* desc) @private {
+    return desc.cube_compatible
+        ? (vk::ImageCreateFlags)vk::ImageCreateFlagBits.CUBE_COMPATIBLE_BIT
+        : (vk::ImageCreateFlags)0;
 }
 
 struct MipExtent {
@@ -548,15 +555,23 @@ fn vk::ImageView? resolve_texture_view_tracked(
     uint layer_count = view.layer_count == 0 ? slot.array_layers - view.base_layer : view.layer_count;
     if (mip_count > slot.mip_levels - view.base_mip)       return gpu::INVALID_ARGUMENT~;
     if (layer_count > slot.array_layers - view.base_layer) return gpu::INVALID_ARGUMENT~;
+    if (view.cube
+        && (!slot.cube_compatible
+            || !slot.usage.sampled
+            || layer_count != gpu::internal::CUBE_FACE_COUNT)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
 
-    vk::ImageViewType view_type = texture_slot_is_3d(slot)
-        ? vk::ImageViewType.TYPE_3D
-        : layer_count > 1
-            ? vk::ImageViewType.TYPE_2D_ARRAY
-            : vk::ImageViewType.TYPE_2D;
+    vk::ImageViewType view_type = view.cube
+        ? vk::ImageViewType.CUBE
+        : texture_slot_is_3d(slot)
+            ? vk::ImageViewType.TYPE_3D
+            : layer_count > 1
+                ? vk::ImageViewType.TYPE_2D_ARRAY
+                : vk::ImageViewType.TYPE_2D;
     bool full_range = view.base_mip == 0 && mip_count == slot.mip_levels
         && view.base_layer == 0 && layer_count == slot.array_layers;
-    if (full_range) return slot.default_view;
+    if (full_range && !view.cube) return slot.default_view;
 
     foreach (&cached : slot.views) {
         if (cached.used
@@ -688,7 +703,7 @@ fn vk::ImageCreateInfo make_texture_create_info(
         .set_tiling(vk::ImageTiling.OPTIMAL)
         .set_usage(texture_usage_to_vk(desc.usage))
         .set_initial_layout(vk::ImageLayout.UNDEFINED);
-    info.flags = flags;
+    info.flags = flags | texture_create_flags(desc);
     if (queue_families.len >= 2) {
         info = info
             .set_sharing_mode(vk::SharingMode.CONCURRENT)
@@ -842,6 +857,7 @@ fn gpu::TextureHandle? vk_create_texture(
         .depth                 = desc.depth,
         .mip_levels            = mip_levels,
         .array_layers          = array_layers,
+        .cube_compatible       = desc.cube_compatible,
         .live_descriptor_views = 0,
     };
     vma::AllocationInfo allocation_info;
@@ -1132,6 +1148,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
         .depth                 = desc.depth,
         .mip_levels            = mip_levels,
         .array_layers          = array_layers,
+        .cube_compatible       = desc.cube_compatible,
         .live_descriptor_views = 0,
         .placed                = true,
         .placement             = placement,
@@ -1269,6 +1286,7 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         .depth                 = desc.depth,
         .mip_levels            = mip_levels,
         .array_layers          = array_layers,
+        .cube_compatible       = desc.cube_compatible,
         .live_descriptor_views = 0,
         .placed                = true,
         .placement_offset      = 0,

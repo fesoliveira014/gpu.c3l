@@ -53,6 +53,8 @@ fn bool format_is_block_compressed(Format format) @private {
     return block.width > 1 || block.height > 1;
 }
 
+const uint CUBE_FACE_COUNT = 6;
+
 fn ulong texture_compatibility_owner(TextureCompatibility compatibility) @private {
     return (ulong)((uint128)compatibility >> 64);
 }
@@ -173,6 +175,14 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
     bool is_depth = desc.format == Format.D32_FLOAT;
     if (is_depth && (desc.usage.color_attach || desc.usage.storage)) return false;
     if (!is_depth && desc.usage.depth_attach) return false;
+
+    if (desc.cube_compatible
+        && (texture_desc_is_3d(desc)
+            || desc.width != desc.height
+            || texture_array_layers(desc) % CUBE_FACE_COUNT != 0
+            || desc.sample_count != SampleCount.ONE)) {
+        return false;
+    }
 
     if (format_is_block_compressed(desc.format)
         && (texture_desc_is_3d(desc)

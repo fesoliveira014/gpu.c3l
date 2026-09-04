@@ -7,6 +7,7 @@
 //   set 0, binding 3  sampled 3D images
 //   set 0, binding 4  storage 3D images
 //   set 0, binding 5  acceleration structures
+//   set 0, binding 6  sampled cube images
 //
 // TextureIndex/SamplerIndex values are generation-free uints. Zero is invalid;
 // live values encode the zero-based heap slot plus one.
@@ -26,6 +27,7 @@ layout(set = 0, binding = 1) uniform image2D gpu_storage_heap[];
 layout(set = 0, binding = 2) uniform sampler gpu_sampler_heap[];
 layout(set = 0, binding = 3) uniform texture3D gpu_texture_3d_heap[];
 layout(set = 0, binding = 4) uniform image3D gpu_storage_3d_heap[];
+layout(set = 0, binding = 6) uniform textureCube gpu_texture_cube_heap[];
 // Aliased view of the sampler binding for depth-compare (shadow) access;
 // SPIR-V samplers are untyped, so both views share binding 2.
 layout(set = 0, binding = 2) uniform samplerShadow gpu_shadow_sampler_heap[];
@@ -72,6 +74,34 @@ vec4 sample_texture_3d_implicit(
             gpu_texture_3d_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
             gpu_sampler_heap[nonuniformEXT(GPU_HEAP_SLOT(smp_index))]),
         uvw);
+}
+
+// Explicit-LOD cube sampling by direction: usable from compute.
+vec4 sample_texture_cube_lod(
+    uint tex_index,
+    uint smp_index,
+    vec3 dir,
+    float lod
+) {
+    return textureLod(
+        samplerCube(
+            gpu_texture_cube_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
+            gpu_sampler_heap[nonuniformEXT(GPU_HEAP_SLOT(smp_index))]),
+        dir,
+        lod);
+}
+
+vec4 sample_texture_cube(uint tex_index, uint smp_index, vec3 dir) {
+    return sample_texture_cube_lod(tex_index, smp_index, dir, 0.0);
+}
+
+// Implicit-LOD cube sampling: fragment-stage use.
+vec4 sample_texture_cube_implicit(uint tex_index, uint smp_index, vec3 dir) {
+    return texture(
+        samplerCube(
+            gpu_texture_cube_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))],
+            gpu_sampler_heap[nonuniformEXT(GPU_HEAP_SLOT(smp_index))]),
+        dir);
 }
 
 // Depth-compare fetch: coord.xy samples, coord.z is the reference depth.

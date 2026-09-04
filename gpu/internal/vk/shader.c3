@@ -346,6 +346,7 @@ fn void? check_heap_convention(
             switch (binding.binding_index()) {
                 case HEAP_BINDING_SAMPLED_2D:
                 case HEAP_BINDING_SAMPLED_3D:
+                case HEAP_BINDING_SAMPLED_CUBE:
                     if (descriptor_type != (int)vk::DescriptorType.SAMPLED_IMAGE) {
                         return gpu::SHADER_INVALID~;
                     }

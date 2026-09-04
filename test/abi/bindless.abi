@@ -26,3 +26,11 @@ root VolumeHeapRoot {
     uint         height;
     uint         depth;
 }
+
+root CubeHeapRoot {
+    GpuAddress   output_gpu;
+    TextureIndex cube_index;
+    TextureIndex face_index;
+    SamplerIndex nearest_sampler;
+    SamplerIndex linear_sampler;
+}

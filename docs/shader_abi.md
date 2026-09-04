@@ -152,6 +152,7 @@ functions:
 | 3 | sampled 3D textures |
 | 4 | storage 3D images |
 | 5 | acceleration structures (opt-in) |
+| 6 | sampled cube textures |
 
 Store a `TextureIndex` and `SamplerIndex` in root data and sample with the
 helpers:
@@ -174,9 +175,12 @@ float lit = sample_shadow_2d(root.shadow_map, root.shadow_sampler, vec3(uv, dept
 ```
 
 3D variants are `sample_texture_3d`, `sample_texture_3d_implicit`,
-`load_storage_texture_3d`, and `store_storage_texture_3d`. To index the heap
-arrays directly use `GPU_HEAP_SLOT(index)`: a live index is the slot plus
-one, and zero is invalid.
+`load_storage_texture_3d`, and `store_storage_texture_3d`. Cube views are
+sampled by direction with `sample_texture_cube` (LOD 0),
+`sample_texture_cube_lod` (explicit LOD), and `sample_texture_cube_implicit`;
+the hardware selects the face and filters across face edges. To index the
+heap arrays directly use `GPU_HEAP_SLOT(index)`: a live index is the slot
+plus one, and zero is invalid.
 
 On the C3 side:
 

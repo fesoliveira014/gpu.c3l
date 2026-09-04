@@ -98,6 +98,37 @@ fn void texture_desc_profile_rejects_unsupported_formats() @test {
     assert(!gpu::internal::texture_desc_valid(&desc), "undefined format is invalid");
 }
 
+fn void texture_desc_profile_validates_cube_compatible_shape() @test {
+    gpu::TextureDesc desc = valid_texture_desc();
+    desc.width = 8;
+    desc.height = 8;
+    desc.array_layers = 6;
+    desc.cube_compatible = true;
+    assert(gpu::internal::texture_desc_valid(&desc),
+        "six square layers form a valid cube-compatible texture");
+    desc.array_layers = 12;
+    assert(gpu::internal::texture_desc_valid(&desc),
+        "any multiple of six layers is cube compatible");
+
+    desc.array_layers = 5;
+    assert(!gpu::internal::texture_desc_valid(&desc),
+        "cube-compatible layer counts must be multiples of six");
+    desc.array_layers = 6;
+    desc.height = 4;
+    assert(!gpu::internal::texture_desc_valid(&desc),
+        "cube faces must be square");
+    desc.height = 8;
+    desc.depth = 8;
+    assert(!gpu::internal::texture_desc_valid(&desc),
+        "three-dimensional textures cannot be cube compatible");
+    desc.depth = 0;
+    desc.sample_count = gpu::SampleCount.FOUR;
+    desc.usage = { .color_attach };
+    desc.mip_levels = 1;
+    assert(!gpu::internal::texture_desc_valid(&desc),
+        "cube-compatible textures are single-sampled");
+}
+
 fn void format_blocks_are_texel_or_bc_sized() @test {
     gpu::internal::FormatBlock rgba8 = gpu::internal::format_block(gpu::Format.RGBA8_UNORM);
     assert(rgba8.width == 1 && rgba8.height == 1 && rgba8.bytes == 4,

@@ -14,8 +14,9 @@ const uint HEAP_BINDING_SAMPLERS = 2;
 const uint HEAP_BINDING_SAMPLED_3D = 3;
 const uint HEAP_BINDING_STORAGE_3D = 4;
 const uint HEAP_BINDING_ACCELERATION_STRUCTURES = 5;
-const uint HEAP_BASE_BINDING_COUNT = 5;
-const uint HEAP_BINDING_COUNT = 6;
+const uint HEAP_BINDING_SAMPLED_CUBE = 6;
+const uint HEAP_BASE_BINDING_COUNT = 6;
+const uint HEAP_BINDING_COUNT = 7;
 const uint HEAP_BASE_POOL_SIZE_COUNT = 3;
 const uint HEAP_POOL_SIZE_COUNT = 4;
 const uint TEXTURE_DESCRIPTOR_BATCH_WRITE_STACK_CAP = 64;
@@ -71,6 +72,7 @@ struct DescriptorHeapState {
 struct PendingTextureWrite {
     TextureSlot*  texture_slot;
     vk::ImageView view;
+    bool          cube;
 }
 
 struct DescriptorHeapLayoutPlan {
@@ -128,6 +130,12 @@ fn DescriptorHeapLayoutPlan descriptor_heap_layout_plan(
                 .stage_flags      = vk::ShaderStageFlagBits.ALL,
             },
             {
+                .binding          = HEAP_BINDING_SAMPLED_CUBE,
+                .descriptor_type  = vk::DescriptorType.SAMPLED_IMAGE,
+                .descriptor_count = tex_capacity,
+                .stage_flags      = vk::ShaderStageFlagBits.ALL,
+            },
+            {
                 .binding = HEAP_BINDING_ACCELERATION_STRUCTURES,
                 .descriptor_type =
                     vk::DescriptorType.ACCELERATION_STRUCTURE_KHR,
@@ -136,6 +144,7 @@ fn DescriptorHeapLayoutPlan descriptor_heap_layout_plan(
             },
         },
         .binding_flags = {
+            binding_flags,
             binding_flags,
             binding_flags,
             binding_flags,
@@ -159,7 +168,7 @@ fn DescriptorHeapPoolPlan descriptor_heap_pool_plan(
         .sizes = {
             {
                 .type             = vk::DescriptorType.SAMPLED_IMAGE,
-                .descriptor_count = tex_capacity * 2,
+                .descriptor_count = tex_capacity * 3,
             },
             {
                 .type             = vk::DescriptorType.STORAGE_IMAGE,
@@ -557,7 +566,8 @@ fn vk::ImageLayout texture_descriptor_layout(
     );
 }
 
-fn uint sampled_texture_binding(TextureSlot* texture) @private {
+fn uint sampled_texture_binding(TextureSlot* texture, bool cube) @private {
+    if (cube) return HEAP_BINDING_SAMPLED_CUBE;
     return texture_slot_is_3d(texture)
         ? HEAP_BINDING_SAMPLED_3D
         : HEAP_BINDING_SAMPLED_2D;
@@ -651,8 +661,15 @@ fn void recycle_texture_descriptor_slot(
 }
 
 <* Sampled and/or storage descriptor per the texture's usage, same slot in
-   both bindings, so one TextureIndex serves both access kinds. *>
-fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* texture, vk::ImageView view) @private {
+   both bindings, so one TextureIndex serves both access kinds. A cube view
+   writes only the sampled cube binding. *>
+fn void write_texture_descriptor(
+    VkDeviceState* state,
+    uint slot,
+    TextureSlot* texture,
+    vk::ImageView view,
+    bool cube,
+) @private {
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     vk::WriteDescriptorSet[2] writes;
     vk::DescriptorImageInfo[2] image_infos;
@@ -667,13 +684,13 @@ fn void write_texture_descriptor(VkDeviceState* state, uint slot, TextureSlot* t
         };
         writes[write_count] = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
-            .set_dst_binding(sampled_texture_binding(texture))
+            .set_dst_binding(sampled_texture_binding(texture, cube))
             .set_dst_array_element(slot)
             .set_descriptor_type(vk::DescriptorType.SAMPLED_IMAGE)
             .set_image_info((&image_infos[write_count])[:1]);
         write_count++;
     }
-    if (texture.usage.storage) {
+    if (texture.usage.storage && !cube) {
         image_infos[write_count] = {
             .image_view   = view,
             .image_layout = texture_descriptor_layout(
@@ -883,10 +900,11 @@ fn gpu::TextureView? vk_create_texture_view(
         out_view:     &result,
     );
     write_texture_descriptor(
-        state,
-        texture_index_slot(result.index),
-        texture_slot,
-        image_view,
+        state:   state,
+        slot:    texture_index_slot(result.index),
+        texture: texture_slot,
+        view:    image_view,
+        cube:    view != null && view.cube,
     );
     commit_texture_view_creations(state, (&creation)[:1]);
     return result;
@@ -923,7 +941,11 @@ fn void? prepare_texture_descriptor_item(
         view_field: "descs[].view",
         creation:   creation,
     )!;
-    *pending = { .texture_slot = texture_slot, .view = image_view };
+    *pending = {
+        .texture_slot = texture_slot,
+        .view         = image_view,
+        .cube         = desc.view.cube,
+    };
 }
 
 <*
@@ -959,6 +981,7 @@ fn uint accumulate_texture_descriptor_write(
     uint slot,
     TextureSlot* texture_slot,
     vk::ImageView view,
+    bool cube,
     vk::DescriptorImageInfo[] image_infos,
     vk::WriteDescriptorSet[] writes,
     uint write_count,
@@ -973,13 +996,13 @@ fn uint accumulate_texture_descriptor_write(
         };
         writes[write_count] = vk::write_descriptor_set()
             .set_dst_set(heap.descriptor_set)
-            .set_dst_binding(sampled_texture_binding(texture_slot))
+            .set_dst_binding(sampled_texture_binding(texture_slot, cube))
             .set_dst_array_element(slot)
             .set_descriptor_type(vk::DescriptorType.SAMPLED_IMAGE)
             .set_image_info((&image_infos[write_count])[:1]);
         write_count++;
     }
-    if (texture_slot.usage.storage) {
+    if (texture_slot.usage.storage && !cube) {
         image_infos[write_count] = {
             .image_view   = view,
             .image_layout = texture_descriptor_layout(
@@ -1090,6 +1113,7 @@ fn void? vk_create_texture_views(
                 slot:              texture_index_slot(out_views[i].index),
                 texture_slot:      item.texture_slot,
                 view:              item.view,
+                cube:              item.cube,
                 image_infos:       image_infos,
                 writes:            writes,
                 write_count:       write_count,
