@@ -1567,18 +1567,31 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
         return gpu::INVALID_ARGUMENT~;
     }
 
-    usz texel_size = format_texel_size(slot.format);
+    gpu::internal::FormatBlock block = gpu::internal::format_block(slot.format);
+    if (block.bytes == 0) return gpu::INVALID_ARGUMENT~;
+    if (x % block.width != 0 || y % block.height != 0) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (width % block.width != 0 && x + width != extent.width) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (height % block.height != 0 && y + height != extent.height) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (row_length_texels % block.width != 0) return gpu::INVALID_ARGUMENT~;
+
     usz row_texels = row_length_texels == 0 ? width : row_length_texels;
+    usz row_blocks = (row_texels + block.width - 1) / block.width;
+    usz block_rows = ((usz)height + block.height - 1) / block.height;
     usz slice_count = is_3d ? (usz)depth : (usz)layers;
-    if (texel_size == 0) return gpu::INVALID_ARGUMENT~;
-    if (row_texels > usz::max / texel_size) return gpu::INVALID_ARGUMENT~;
-    usz copy_bytes = row_texels * texel_size;
-    if ((usz)height > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
-    copy_bytes *= height;
+    if (row_blocks > usz::max / block.bytes) return gpu::INVALID_ARGUMENT~;
+    usz copy_bytes = row_blocks * block.bytes;
+    if (block_rows > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
+    copy_bytes *= block_rows;
     if (slice_count > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
     copy_bytes *= slice_count;
     if (copy_bytes > resolved.size) return gpu::INVALID_ARGUMENT~;
-    if (resolved.offset % texel_size != 0 || resolved.offset % 4 != 0) {
+    if (resolved.offset % block.bytes != 0 || resolved.offset % 4 != 0) {
         return gpu::INVALID_ARGUMENT~;
     }
 

@@ -77,6 +77,15 @@ gpu::cmd_copy_texture_to_buffer(&commands, &readback)!;
 Copies validate bounds, usage, and queue support. They do not transition
 textures or make results host-visible; record a barrier for each.
 
+Regions are in texels. The buffer side holds tightly packed rows unless
+`row_length_texels` sets a longer pitch, then slices (3D depth or array
+layers) back to back. For block-compressed formats the same rules apply in
+blocks: `x`, `y`, and `row_length_texels` are block multiples; `width` and
+`height` are block multiples or reach the mip edge; a row holds
+`ceil(row_texels / 4)` blocks and a slice `ceil(height / 4)` rows, so a 1x1
+tail mip still occupies one block. The span offset is a multiple of the
+texel or block byte size and of four.
+
 ## Compute
 
 ```c3
