@@ -15,8 +15,6 @@ const uint HEAP_BINDING_SAMPLED_3D = 3;
 const uint HEAP_BINDING_STORAGE_3D = 4;
 const uint HEAP_BINDING_ACCELERATION_STRUCTURES = 5;
 const uint HEAP_BINDING_SAMPLED_CUBE = 6;
-// Layout plan order: the six always-present bindings first, then the opt-in
-// acceleration-structure binding 5, so binding numbers stay stable.
 const uint HEAP_BASE_BINDING_COUNT = 6;
 const uint HEAP_BINDING_COUNT = 7;
 const uint HEAP_BASE_POOL_SIZE_COUNT = 3;

@@ -968,10 +968,8 @@ struct TextureDesc {
 }
 
 <* Subresource view of a texture; a zero-initialized desc is the full default
-   view. A cube view publishes six consecutive layers from base_layer as one
-   sampled cube; it requires a cube-compatible texture with sampled usage and
-   a layer_count that resolves to exactly six. Storage access always goes
-   through ordinary 2D views. *>
+   view. A cube view needs a cube-compatible sampled texture and exactly six
+   layers. *>
 struct TextureViewDesc {
     uint   base_mip;
     // 0 means all mips from base_mip.
@@ -979,7 +977,7 @@ struct TextureViewDesc {
     uint   base_layer;
     // 0 means all layers from base_layer.
     uint   layer_count;
-    // Publishes the six layers from base_layer as a sampled cube.
+    // Sampled cube of the six layers from base_layer.
     bool   cube;
 }
 
