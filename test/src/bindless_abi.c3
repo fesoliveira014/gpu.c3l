@@ -48,3 +48,17 @@ $assert $reflect(VolumeHeapRoot.sampler_index).offset == 16;
 $assert $reflect(VolumeHeapRoot.width).offset == 20;
 $assert $reflect(VolumeHeapRoot.height).offset == 24;
 $assert $reflect(VolumeHeapRoot.depth).offset == 28;
+
+struct CubeHeapRoot {
+    GpuAddress   output_gpu;
+    TextureIndex cube_index;
+    TextureIndex face_index;
+    SamplerIndex nearest_sampler;
+    SamplerIndex linear_sampler;
+}
+$assert CubeHeapRoot::size == 24;
+$assert $reflect(CubeHeapRoot.output_gpu).offset == 0;
+$assert $reflect(CubeHeapRoot.cube_index).offset == 8;
+$assert $reflect(CubeHeapRoot.face_index).offset == 12;
+$assert $reflect(CubeHeapRoot.nearest_sampler).offset == 16;
+$assert $reflect(CubeHeapRoot.linear_sampler).offset == 20;

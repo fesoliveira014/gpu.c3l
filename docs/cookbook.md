@@ -149,6 +149,62 @@ gpu::cmd_texture_barrier(commands, &to_sampled)!;
 The texture needs both `.storage` and `.sampled` usage. One texture cannot
 be in both layouts at once; split the uses with a transition.
 
+## Sample a cube map
+
+Create a cube-compatible texture, upload the six faces in one copy, and
+publish a cube view for sampling plus a 2D view per face for other work:
+
+```c3
+gpu::TextureDesc env_desc = {
+    .width           = FACE_SIZE,
+    .height          = FACE_SIZE,
+    .mip_levels      = MIP_COUNT,
+    .array_layers    = 6,
+    .format          = gpu::Format.RGBA16_FLOAT,
+    .usage           = { .sampled, .transfer_dst },
+    .access          = { .graphics },
+    .cube_compatible = true,
+};
+gpu::TextureHandle env = gpu::create_texture(device, &env_desc)!;
+
+// Faces are layers 0..6 in +X, -X, +Y, -Y, +Z, -Z order; `faces_span` holds
+// the six mip-0 faces back to back, tightly packed.
+gpu::BufferTextureCopyDesc faces = {
+    .src         = faces_span,
+    .texture     = env,
+    .mip         = 0,
+    .layer_count = 6,
+};
+gpu::cmd_copy_buffer_to_texture(commands, &faces)!;
+// ... one copy per remaining mip, then transition to sampled_at(...)
+
+gpu::TextureViewDesc cube_desc = { .cube = true };
+gpu::TextureView cube = gpu::create_texture_view(device, env, &cube_desc)!;
+gpu::TextureViewDesc face_desc = { .base_layer = 2, .layer_count = 1 };
+gpu::TextureView face_py = gpu::create_texture_view(device, env, &face_desc)!;
+
+root.environment = cube.index;
+root.env_sampler = gpu::intern_sampler(device, &trilinear_desc)!;
+```
+
+Shader side, sample by direction. Implicit LOD in fragment shaders; an
+explicit LOD in compute or when roughness selects the mip:
+
+```glsl
+#include "descriptor_heap.glsl"
+
+vec3 dir = normalize(vec3(cos(root.angle), 0.2, sin(root.angle)));
+vec4 sky = sample_texture_cube_implicit(root.environment, root.env_sampler, dir);
+float lod = root.roughness * float(MIP_COUNT - 1);
+vec4 spec = sample_texture_cube_lod(root.environment, root.env_sampler, dir, lod);
+```
+
+The cube view is sampled only. Render into one face with an attachment view
+(`AttachmentViewDesc { .texture = env, .mip_level = m, .array_layer = f }`)
+or write it from compute through a per-face 2D view of a `storage` texture.
+Barriers name the texture, so a transition covers every face unless the
+barrier's `view` narrows it.
+
 ## Render to an offscreen texture
 
 ```c3

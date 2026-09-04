@@ -135,6 +135,11 @@ is live.
 Limits: 2D and 3D only; multisample textures are single-mip attachments;
 depth is `D32_FLOAT`; no stencil.
 
+A cube map is a 2D texture with `cube_compatible` set: equal width and
+height, single-sampled, and a layer count that is a multiple of six. Layers
+hold the faces in the order +X, -X, +Y, -Y, +Z, -Z. Uploads, per-face
+attachment views, and per-face 2D views use the ordinary layer paths.
+
 ## Texture views and indices
 
 A `TextureView` publishes a subresource range to the bindless heap and owns
@@ -163,6 +168,19 @@ gpu::create_texture_views(&device, descs[..], views[..])!;
 Indices are independent values. Do not compute one from another. The
 texture must have `sampled` or `storage` usage. `DESCRIPTOR_HEAP_FULL`
 means the runtime's `texture_heap_capacity` is exhausted.
+
+A view with `cube` set publishes six consecutive layers from `base_layer`
+as one sampled cube. The texture must be `cube_compatible` with `sampled`
+usage, and `layer_count` must be 0 or 6. Cube views are sampled only; they
+never receive a storage descriptor. Storage or per-face access uses a
+separate 2D view of the same texture.
+
+```c3
+gpu::TextureViewDesc cube_desc = { .cube = true };
+gpu::TextureView cube = gpu::create_texture_view(&device, env, &cube_desc)!;
+gpu::TextureViewDesc face_desc = { .base_layer = 3, .layer_count = 1 };
+gpu::TextureView face = gpu::create_texture_view(&device, env, &face_desc)!;
+```
 
 ## Samplers
 

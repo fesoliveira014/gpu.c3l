@@ -30,14 +30,14 @@ fn IndexingHeapLimits exact_indexing_heap_limits(
     uint sampler_capacity,
 ) {
     return {
-        .max_sampled_images           = texture_capacity * 2,
+        .max_sampled_images           = texture_capacity * 3,
         .max_storage_images           = texture_capacity * 2,
         .max_samplers                 = sampler_capacity,
-        .max_per_stage_sampled_images = texture_capacity * 2,
+        .max_per_stage_sampled_images = texture_capacity * 3,
         .max_per_stage_storage_images = texture_capacity * 2,
         .max_per_stage_samplers       = sampler_capacity,
-        .max_per_stage_resources      = texture_capacity * 4,
-        .max_all_pools_descriptors    = texture_capacity * 4
+        .max_per_stage_resources      = texture_capacity * 5,
+        .max_all_pools_descriptors    = texture_capacity * 5
             + sampler_capacity,
     };
 }

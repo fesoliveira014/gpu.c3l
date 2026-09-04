@@ -33,4 +33,12 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer VolumeHeapRo
     uint depth;
 };
 
+layout(buffer_reference, std430, buffer_reference_align = 8) buffer CubeHeapRoot {
+    uint64_t output_gpu;
+    uint cube_index;
+    uint face_index;
+    uint nearest_sampler;
+    uint linear_sampler;
+};
+
 #endif

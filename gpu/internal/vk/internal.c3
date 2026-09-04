@@ -97,10 +97,10 @@ fn HeapDescriptorTotals descriptor_heap_totals(uint tex_capacity, uint smp_capac
     // Heap-local checks cannot reserve device-wide capacity used by other
     // update-after-bind pools or pipeline layouts.
     return {
-        .sampled_images        = (ulong)tex_capacity * 2,
+        .sampled_images        = (ulong)tex_capacity * 3,
         .storage_images        = (ulong)tex_capacity * 2,
-        .per_stage_resources   = (ulong)tex_capacity * 4,
-        .all_pools_descriptors = (ulong)tex_capacity * 4
+        .per_stage_resources   = (ulong)tex_capacity * 5,
+        .all_pools_descriptors = (ulong)tex_capacity * 5
             + (ulong)smp_capacity,
     };
 }

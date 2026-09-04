@@ -1015,6 +1015,7 @@ fn void combined_texture_batch_keeps_binding_layouts_distinct() @test {
         slot:              3,
         texture_slot:      &texture,
         view:              {},
+        cube:              false,
         image_infos:       image_infos[..],
         writes:            writes[..],
         write_count:       0,
@@ -1045,6 +1046,7 @@ fn void texture_descriptor_writes_route_by_dimension() @test {
         slot:         3,
         texture_slot: &two_dimensional,
         view:         {},
+        cube:         false,
         image_infos:  image_infos[..],
         writes:       writes[..],
         write_count:  0,
@@ -1064,6 +1066,7 @@ fn void texture_descriptor_writes_route_by_dimension() @test {
         slot:         7,
         texture_slot: &three_dimensional,
         view:         {},
+        cube:         false,
         image_infos:  image_infos[..],
         writes:       writes[..],
         write_count:  write_count,
@@ -1077,6 +1080,28 @@ fn void texture_descriptor_writes_route_by_dimension() @test {
     assert(writes[2].dst_array_element == 7
             && writes[3].dst_array_element == 7,
         "3D sampled and storage writes share one logical slot");
+
+    gpu::internal::vk::TextureSlot cube_compatible = {
+        .format          = gpu::Format.RGBA8_UNORM,
+        .usage           = { .sampled, .storage },
+        .array_layers    = 6,
+        .cube_compatible = true,
+    };
+    write_count = gpu::internal::vk::accumulate_texture_descriptor_write(
+        heap:         &heap,
+        slot:         9,
+        texture_slot: &cube_compatible,
+        view:         {},
+        cube:         true,
+        image_infos:  image_infos[..],
+        writes:       writes[..],
+        write_count:  0,
+    );
+    assert(write_count == 1
+            && writes[0].dst_binding
+                == gpu::internal::vk::HEAP_BINDING_SAMPLED_CUBE
+            && writes[0].dst_array_element == 9,
+        "a cube view writes only the sampled cube binding");
 }
 
 fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {

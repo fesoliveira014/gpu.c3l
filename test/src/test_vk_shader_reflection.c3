@@ -19,6 +19,8 @@ const char[*] REFLECT_BAD_SAMPLED_3D_SPIRV =
     $embed("shaders/bad_sampled_3d_binding.comp.spv");
 const char[*] REFLECT_BAD_STORAGE_3D_SPIRV =
     $embed("shaders/bad_storage_3d_binding.comp.spv");
+const char[*] REFLECT_BAD_SAMPLED_CUBE_SPIRV =
+    $embed("shaders/bad_sampled_cube_binding.comp.spv");
 const char[*] REFLECT_BAD_UNKNOWN_HEAP_SPIRV =
     $embed("shaders/bad_unknown_heap_binding.comp.spv");
 const char[*] REFLECT_RAY_QUERY_SPIRV =
@@ -411,6 +413,12 @@ fn void dimensional_heap_bindings_are_validated() @test {
         spirv:       REFLECT_BAD_STORAGE_3D_SPIRV[..],
         entry_point: "main",
         message:     "binding 4 rejects a sampled image",
+    );
+    assert_shader_interface_rejected(
+        device:      &device,
+        spirv:       REFLECT_BAD_SAMPLED_CUBE_SPIRV[..],
+        entry_point: "main",
+        message:     "binding 6 rejects a storage image",
     );
     assert_shader_interface_rejected(
         device:      &device,

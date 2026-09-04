@@ -643,6 +643,7 @@ fn gpu::TextureHandle? create_sparse_texture_for_state_with_ops(
         .depth                 = desc.depth,
         .mip_levels            = mip_levels,
         .array_layers          = array_layers,
+        .cube_compatible       = desc.cube_compatible,
         .live_descriptor_views = 0,
         .sparse                = true,
     };

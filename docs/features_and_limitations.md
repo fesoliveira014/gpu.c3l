@@ -11,7 +11,7 @@ limits an application must design around.
 - VMA-backed allocations, checked subspans, stable GPU addresses, host
   mapping with explicit flush and invalidate, and memory statistics.
 - 2D and 3D textures, multisample attachments, sparse color textures,
-  bindless texture views, and interned samplers.
+  bindless 2D, 3D, and sampled cube views, and interned samplers.
 - Compute and graphics pipelines from SPIR-V, with deduplication and
   driver pipeline-cache import and export.
 - Command allocators with fixed reusable units; transfer, compute, dynamic
@@ -85,8 +85,9 @@ by CPU tests but has not run on hardware that reports the capability.
 
 ## Resource limits
 
-- Textures are 2D or 3D. No 1D, cube, or array views, and no format
-  reinterpretation.
+- Textures are 2D or 3D. A cube view covers six layers of a
+  cube-compatible 2D texture and is sampled only. No 1D, array, or
+  cube-array views, and no format reinterpretation.
 - Multisample textures are 2D attachments with one mip. They are resolved,
   not sampled or copied.
 - Depth format is `D32_FLOAT`. There is no stencil.
