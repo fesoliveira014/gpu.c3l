@@ -126,9 +126,7 @@ gpu::TextureHandle albedo = gpu::create_texture(device, &bc_desc)!;
 // ... transition to TRANSFER_DESTINATION as in "Upload a texture"
 usz offset = 0;
 for (uint mip = 0; mip < MIP_COUNT; mip++) {
-    uint w = max(WIDTH >> mip, 1u);
-    uint h = max(HEIGHT >> mip, 1u);
-    usz mip_bytes = (usz)((w + 3) / 4) * (usz)((h + 3) / 4) * BC7_BLOCK_BYTES;
+    usz mip_bytes = gpu::texture_mip_bytes(&bc_desc, mip)!;
     gpu::BufferTextureCopyDesc upload = {
         .src     = staging_span.checked_subspan(offset, mip_bytes)!,
         .texture = albedo,
@@ -140,10 +138,13 @@ for (uint mip = 0; mip < MIP_COUNT; mip++) {
 // ... transition to sampled_at(...) and publish a view as usual
 ```
 
-Each mip's span offset must be a multiple of the block size (8 or 16
-bytes). Sampling, views, samplers, and barriers are the same as for
-uncompressed textures. BC textures cannot be storage images, attachments,
-or sparse, and the library never encodes, decodes, or generates mips.
+`texture_mip_bytes` counts whole 4x4 blocks per row and block rows per mip,
+so a 1x1 tail still costs one block; `texture_mip_dimension(size, mip)`
+gives a mip axis. Each mip's span offset must be a multiple of the block
+size (8 or 16 bytes). Sampling, views, samplers, and barriers are the same
+as for uncompressed textures. BC textures cannot be storage images,
+attachments, or sparse, and the library never encodes, decodes, or
+generates mips.
 
 ## Publish a texture and sampler to shaders
 

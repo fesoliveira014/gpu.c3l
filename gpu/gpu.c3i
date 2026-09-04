@@ -1447,16 +1447,11 @@ struct BufferCopyDesc {
     GpuSpan dst;
 }
 
-<* Buffer-to-texture copy region. Zero width/height selects the remaining mip
-   extent from x/y; zero 3D depth selects the remainder from z. Zero layer
-   count is one, and zero row length means tightly packed rows.
-
-   Coordinates and extents are texels. For block-compressed formats x, y, and
-   row_length_texels must be multiples of the block edge, and width/height
-   must be multiples of the block edge or reach the mip edge. The buffer holds
-   whole blocks: a row is ceil(row_texels / block) blocks, a slice is
-   ceil(height / block) rows, and a 1x1 mip still occupies one block. The
-   span offset must be a multiple of the block byte size and of four. *>
+<* Buffer-to-texture copy region in texels. Zero width/height selects the
+   remaining mip extent from x/y; zero 3D depth selects the remainder from z.
+   Zero layer count is one, and zero row length means tightly packed rows.
+   Block-compressed regions are block-aligned and sized in whole blocks;
+   texture_mip_bytes gives one mip's footprint. *>
 struct BufferTextureCopyDesc {
     GpuSpan       src;
     uint          row_length_texels;

@@ -141,8 +141,10 @@ sampled, single-sampled 2D textures. Support is per adapter: check
 `supports_texture_desc` or `get_texture_format_support` and expect
 `UNSUPPORTED_FEATURE` otherwise. Dimensions stay in texels and need not be
 block multiples. The caller supplies already compressed blocks for every
-mip; see [copies](commands_and_rendering.md#transfers) for the block
-footprint rules and [the cookbook](../cookbook.md#upload-a-compressed-texture).
+mip. `texture_mip_dimension(size, mip)` gives a mip axis and
+`texture_mip_bytes(&desc, mip)` the packed byte footprint of one layer of a
+mip, in whole blocks; see [copies](commands_and_rendering.md#transfers) for
+the region rules and [the cookbook](../cookbook.md#upload-a-compressed-texture).
 
 ## Texture views and indices
 
