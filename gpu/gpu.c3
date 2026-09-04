@@ -754,6 +754,41 @@ fn String? build_memory_report(Device* device, bool detailed) {
     return gpu::internal::vk::vk_build_memory_report(operation.state, detailed);
 }
 
+<* Size of one texture axis at a mip level: halved per level, never below one.
+
+   @param size : "Base extent of the axis."
+   @param mip : "Zero-based mip level."
+   @return "The mip extent along that axis." *>
+fn uint texture_mip_dimension(uint size, uint mip) {
+    if (mip >= 32) return 1;
+    uint extent = size >> mip;
+    return extent == 0 ? 1 : extent;
+}
+
+<* Tightly packed bytes of one array layer of a mip level, as
+   cmd_copy_buffer_to_texture and cmd_copy_texture_to_buffer consume it:
+   whole blocks per row, block rows per slice, 3D slices back to back.
+
+   @param desc : "Borrowed texture description."
+   @param mip : "Zero-based mip level below the description's mip count."
+   @return "The byte footprint, or INVALID_ARGUMENT for a null or undefined-format description or a missing mip." *>
+fn usz? texture_mip_bytes(TextureDesc* desc, uint mip) {
+    if (desc == null || mip >= gpu::internal::texture_mip_levels(desc)) {
+        return INVALID_ARGUMENT~;
+    }
+    gpu::internal::FormatBlock block = gpu::internal::format_block(desc.format);
+    if (block.bytes == 0) return INVALID_ARGUMENT~;
+    usz row_blocks = ((usz)texture_mip_dimension(desc.width, mip) + block.width - 1)
+        / block.width;
+    usz block_rows = ((usz)texture_mip_dimension(desc.height, mip) + block.height - 1)
+        / block.height;
+    usz slices = (usz)texture_mip_dimension(
+        gpu::internal::texture_desc_native_depth(desc),
+        mip,
+    );
+    return row_blocks * block_rows * slices * block.bytes;
+}
+
 <* Query library-creatable features for a format. Individual feature bits do
    not guarantee that a combination is supported.
 

@@ -140,6 +140,17 @@ height, single-sampled, and a layer count that is a multiple of six. Layers
 hold the faces in the order +X, -X, +Y, -Y, +Z, -Z. Uploads, per-face
 attachment views, and per-face 2D views use the ordinary layer paths.
 
+Block-compressed formats `BC1_RGBA_UNORM/SRGB`, `BC3_UNORM/SRGB`,
+`BC4_UNORM`, `BC5_UNORM`, `BC6H_UFLOAT`, and `BC7_UNORM/SRGB` create
+sampled, single-sampled 2D textures. Support is per adapter: check
+`supports_texture_desc` or `get_texture_format_support` and expect
+`UNSUPPORTED_FEATURE` otherwise. Dimensions stay in texels and need not be
+block multiples. The caller supplies already compressed blocks for every
+mip. `texture_mip_dimension(size, mip)` gives a mip axis and
+`texture_mip_bytes(&desc, mip)` the packed byte footprint of one layer of a
+mip, in whole blocks; see [copies](commands_and_rendering.md#transfers) for
+the region rules and [the cookbook](../cookbook.md#upload-a-compressed-texture).
+
 ## Texture views and indices
 
 A `TextureView` publishes a subresource range to the bindless heap and owns

@@ -18,6 +18,13 @@ const usz VOLUME_MIP_BYTES =
     VOLUME_MIP_SIZE * VOLUME_MIP_SIZE * VOLUME_MIP_SIZE * VOLUME_TEXEL_BYTES;
 const usz VOLUME_MIP_SLICE_BYTES =
     VOLUME_MIP_SIZE * VOLUME_MIP_SIZE * VOLUME_TEXEL_BYTES;
+const uint BC_SIZE = 8;
+const uint BC_MIPS = 4;
+const usz BC1_BLOCK_BYTES = 8;
+// Mip footprints in blocks: 2x2, 1x1, 1x1, 1x1.
+const usz BC_CHAIN_BYTES = BC1_BLOCK_BYTES * 7;
+const uint BC_EDGE_SIZE = 6;
+const usz BC_EDGE_BYTES = BC1_BLOCK_BYTES * 4;
 
 fn gpu::Device make_upload_test_device() {
     gpu::RuntimeDesc desc = {
@@ -489,6 +496,274 @@ fn void sampled_texture_upload_and_mip_readback() @test {
             assert(texel[1] == (char)(y + 100), "read-back mip 1 green matches upload");
             assert(texel[2] == (char)7, "read-back mip 1 blue matches upload");
         }
+    }
+}
+
+fn void write_bc1_solid_block(char* block, ushort color) {
+    block[0] = (char)(color & 0xFF);
+    block[1] = (char)(color >> 8);
+    block[2] = 0;
+    block[3] = 0;
+    block[4] = 0;
+    block[5] = 0;
+    block[6] = 0;
+    block[7] = 0;
+}
+
+fn usz bc_mip_offset(uint mip) {
+    return mip == 0 ? 0 : BC1_BLOCK_BYTES * (usz)(3 + mip);
+}
+
+fn void compressed_upload_mip_chain_sample_and_readback() @test {
+    gpu::Device device = make_upload_test_device();
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureDesc chain_desc = {
+        .access     = { .graphics, .compute, .transfer },
+        .width      = BC_SIZE,
+        .height     = BC_SIZE,
+        .mip_levels = BC_MIPS,
+        .format     = gpu::Format.BC1_RGBA_UNORM,
+        .usage      = { .sampled, .transfer_src, .transfer_dst },
+        .debug_name = "bc1_chain",
+    };
+    if (!gpu::supports_texture_desc(&device, &chain_desc)!!) return;
+    gpu::TextureHandle chain = gpu::create_texture(&device, &chain_desc)!!;
+    defer gpu::destroy_texture(&device, chain)!!;
+    gpu::TextureDesc edge_desc = chain_desc;
+    edge_desc.width = BC_EDGE_SIZE;
+    edge_desc.height = BC_EDGE_SIZE;
+    edge_desc.mip_levels = 1;
+    edge_desc.debug_name = "bc1_edge";
+    gpu::TextureHandle edge = gpu::create_texture(&device, &edge_desc)!!;
+    defer gpu::destroy_texture(&device, edge)!!;
+
+    gpu::TextureView chain_view = gpu::create_texture_view(&device, chain, null)!!;
+    defer gpu::destroy_texture_view(&device, chain_view)!!;
+    gpu::SamplerDesc sampler_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    gpu::SamplerIndex sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+
+    OwnedSpan staging = allocate_owned_span(
+        device:       &device,
+        size:         BC_CHAIN_BYTES + BC_EDGE_BYTES,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "bc1_staging",
+    )!!;
+    defer free_owned_span(&device, &staging)!!;
+    char* bytes = (char*)test_span_mapping(&device, staging.span).ptr;
+    const ushort[BC_MIPS] MIP_COLORS = { 0xF800, 0x07E0, 0x001F, 0xFFFF };
+    for (usz block = 0; block < 4; block++) {
+        write_bc1_solid_block(&bytes[block * BC1_BLOCK_BYTES], MIP_COLORS[0]);
+    }
+    for (uint mip = 1; mip < BC_MIPS; mip++) {
+        write_bc1_solid_block(&bytes[bc_mip_offset(mip)], MIP_COLORS[mip]);
+    }
+    for (usz block = 0; block < 4; block++) {
+        write_bc1_solid_block(
+            &bytes[BC_CHAIN_BYTES + block * BC1_BLOCK_BYTES],
+            (ushort)(0x8000 + (uint)block),
+        );
+    }
+    gpu::flush_mapped_span(&device, staging.span)!!;
+
+    OwnedSpan readback = allocate_owned_span(
+        device:       &device,
+        size:         BC_CHAIN_BYTES + BC_EDGE_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "bc1_readback",
+    )!!;
+    defer free_owned_span(&device, &readback)!!;
+    OwnedSpan sample_out = allocate_owned_span(
+        device:       &device,
+        size:         BC_SIZE * BC_SIZE * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "bc1_sample_output",
+    )!!;
+    defer free_owned_span(&device, &sample_out)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         SampleRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "bc1_sample_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    SampleRoot* root = (SampleRoot*)test_span_mapping(&device, root_owned.span).ptr;
+    root.output_gpu    = test_span_address(&device, sample_out.span);
+    root.texture_index = chain_view.index;
+    root.sampler_index = sampler;
+    root.width         = BC_SIZE;
+    root.height        = BC_SIZE;
+    gpu::flush_mapped_span(&device, root_owned.span)!!;
+
+    gpu::ShaderDesc sample_shader = {
+        .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc sample_pd = { .shader = sample_shader };
+    gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
+    defer gpu::destroy_pipeline(&device, sample_pipe)!!;
+
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
+        &device,
+        command_queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&command_allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
+    defer discard_test_commands(&cmd)!!;
+
+    gpu::TextureState transfer_write = {
+        .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
+        .stages = { .transfer },
+        .access = { .write },
+    };
+    gpu::TextureState transfer_read = {
+        .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+        .stages = { .transfer },
+        .access = { .read },
+    };
+    gpu::TextureBarrier chain_to_dst = gpu::texture_transition(
+        texture: chain,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   transfer_write,
+    )!!;
+    gpu::cmd_texture_barrier(&cmd, &chain_to_dst)!!;
+    gpu::TextureBarrier edge_to_dst = gpu::texture_transition(
+        texture: edge,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   transfer_write,
+    )!!;
+    gpu::cmd_texture_barrier(&cmd, &edge_to_dst)!!;
+
+    gpu::BufferTextureCopyDesc misaligned_origin = {
+        .src = staging.span, .texture = chain, .x = 2,
+    };
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&cmd, &misaligned_origin))
+            == gpu::INVALID_ARGUMENT,
+        "block-compressed copy origins must sit on block boundaries");
+    gpu::BufferTextureCopyDesc partial_block = {
+        .src = staging.span, .texture = chain, .width = 6,
+    };
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&cmd, &partial_block))
+            == gpu::INVALID_ARGUMENT,
+        "block-compressed extents are block multiples unless they reach the edge");
+    gpu::BufferTextureCopyDesc ragged_rows = {
+        .src = staging.span, .texture = chain, .row_length_texels = 6,
+    };
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&cmd, &ragged_rows))
+            == gpu::INVALID_ARGUMENT,
+        "row lengths of block-compressed copies are block multiples");
+    gpu::BufferTextureCopyDesc short_tail = {
+        .src     = staging.span.checked_subspan(bc_mip_offset(3), 4)!!,
+        .texture = chain,
+        .mip     = 3,
+    };
+    assert(@catch(gpu::cmd_copy_buffer_to_texture(&cmd, &short_tail))
+            == gpu::INVALID_ARGUMENT,
+        "a 1x1 tail mip still needs one whole block of source bytes");
+
+    for (uint mip = 0; mip < BC_MIPS; mip++) {
+        usz mip_bytes = mip == 0 ? BC1_BLOCK_BYTES * 4 : BC1_BLOCK_BYTES;
+        gpu::BufferTextureCopyDesc upload = {
+            .src     = staging.span.checked_subspan(bc_mip_offset(mip), mip_bytes)!!,
+            .texture = chain,
+            .mip     = mip,
+        };
+        gpu::cmd_copy_buffer_to_texture(&cmd, &upload)!!;
+    }
+    gpu::BufferTextureCopyDesc edge_upload = {
+        .src     = staging.span.checked_subspan(BC_CHAIN_BYTES, BC_EDGE_BYTES)!!,
+        .texture = edge,
+        .width   = BC_EDGE_SIZE,
+        .height  = BC_EDGE_SIZE,
+    };
+    gpu::cmd_copy_buffer_to_texture(&cmd, &edge_upload)!!;
+
+    gpu::TextureBarrier chain_to_sample = gpu::texture_transition(
+        texture: chain,
+        before:  transfer_write,
+        after:   gpu::sampled_at({ .compute }),
+    )!!;
+    gpu::cmd_texture_barrier(&cmd, &chain_to_sample)!!;
+    bind_test_compute_pipeline(&cmd, sample_pipe);
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        root:     test_span_address(&device, root_owned.span),
+        groups:   { 1, 1, 1 },
+    )!!;
+    gpu::Barrier sample_host_read = {
+        .before = { .compute },
+        .after  = { .host },
+    };
+    gpu::cmd_barrier(&cmd, &sample_host_read)!!;
+
+    gpu::TextureBarrier chain_to_src = gpu::texture_transition(
+        texture: chain,
+        before:  gpu::sampled_at({ .compute }),
+        after:   transfer_read,
+    )!!;
+    gpu::cmd_texture_barrier(&cmd, &chain_to_src)!!;
+    gpu::TextureBarrier edge_to_src = gpu::texture_transition(
+        texture: edge,
+        before:  transfer_write,
+        after:   transfer_read,
+    )!!;
+    gpu::cmd_texture_barrier(&cmd, &edge_to_src)!!;
+    for (uint mip = 0; mip < BC_MIPS; mip++) {
+        usz mip_bytes = mip == 0 ? BC1_BLOCK_BYTES * 4 : BC1_BLOCK_BYTES;
+        gpu::TextureBufferCopyDesc out = {
+            .texture = chain,
+            .dst     = readback.span.checked_subspan(bc_mip_offset(mip), mip_bytes)!!,
+            .mip     = mip,
+        };
+        gpu::cmd_copy_texture_to_buffer(&cmd, &out)!!;
+    }
+    gpu::TextureBufferCopyDesc edge_out = {
+        .texture = edge,
+        .dst     = readback.span.checked_subspan(BC_CHAIN_BYTES, BC_EDGE_BYTES)!!,
+    };
+    gpu::cmd_copy_texture_to_buffer(&cmd, &edge_out)!!;
+    gpu::Barrier host_read = {
+        .before = { .transfer },
+        .after  = { .host },
+    };
+    gpu::cmd_barrier(&cmd, &host_read)!!;
+
+    gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = submit_test_queue(
+        &device,
+        gpu::QueueKind.COMPUTE,
+        &submit,
+    )!!;
+    gpu::wait_completion(completion)!!;
+
+    gpu::invalidate_mapped_span(&device, sample_out.span)!!;
+    float* texels = (float*)test_span_mapping(&device, sample_out.span).ptr;
+    for (uint i = 0; i < BC_SIZE * BC_SIZE; i++) {
+        float* texel = &texels[i * 4];
+        assert(quantize_unorm8(texel[0]) == 255
+                && quantize_unorm8(texel[1]) == 0
+                && quantize_unorm8(texel[2]) == 0
+                && quantize_unorm8(texel[3]) == 255,
+            "sampling the uploaded BC1 mip 0 decodes the solid red block");
+    }
+    gpu::invalidate_mapped_span(&device, readback.span)!!;
+    char* read = (char*)test_span_mapping(&device, readback.span).ptr;
+    for (usz i = 0; i < BC_CHAIN_BYTES + BC_EDGE_BYTES; i++) {
+        assert(read[i] == bytes[i],
+            "readback returns every uploaded block byte unchanged, tail mips and ragged edges included");
     }
 }
 

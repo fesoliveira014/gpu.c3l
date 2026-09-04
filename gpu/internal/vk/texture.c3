@@ -253,6 +253,15 @@ fn vk::Format format_to_vk(gpu::Format format) {
         case gpu::Format.RG32_FLOAT:        return vk::Format.R32G32_SFLOAT;
         case gpu::Format.RGBA32_FLOAT:      return vk::Format.R32G32B32A32_SFLOAT;
         case gpu::Format.D32_FLOAT:         return vk::Format.D32_SFLOAT;
+        case gpu::Format.BC1_RGBA_UNORM:    return vk::Format.BC1_RGBA_UNORM_BLOCK;
+        case gpu::Format.BC1_RGBA_SRGB:     return vk::Format.BC1_RGBA_SRGB_BLOCK;
+        case gpu::Format.BC3_UNORM:         return vk::Format.BC3_UNORM_BLOCK;
+        case gpu::Format.BC3_SRGB:          return vk::Format.BC3_SRGB_BLOCK;
+        case gpu::Format.BC4_UNORM:         return vk::Format.BC4_UNORM_BLOCK;
+        case gpu::Format.BC5_UNORM:         return vk::Format.BC5_UNORM_BLOCK;
+        case gpu::Format.BC6H_UFLOAT:       return vk::Format.BC6H_UFLOAT_BLOCK;
+        case gpu::Format.BC7_UNORM:         return vk::Format.BC7_UNORM_BLOCK;
+        case gpu::Format.BC7_SRGB:          return vk::Format.BC7_SRGB_BLOCK;
         default:                            return vk::Format.UNDEFINED;
     }
 }
@@ -452,28 +461,6 @@ fn vk::ImageCreateFlags texture_create_flags(gpu::TextureDesc* desc) @private {
     return desc.cube_compatible
         ? (vk::ImageCreateFlags)vk::ImageCreateFlagBits.CUBE_COMPATIBLE_BIT
         : (vk::ImageCreateFlags)0;
-}
-
-fn usz format_texel_size(gpu::Format format) {
-    switch (format) {
-        case gpu::Format.R8_UNORM:          return 1;
-        case gpu::Format.R8_UINT:           return 1;
-        case gpu::Format.RG8_UNORM:         return 2;
-        case gpu::Format.RGBA8_UNORM:       return 4;
-        case gpu::Format.RGBA8_SRGB:        return 4;
-        case gpu::Format.BGRA8_UNORM:       return 4;
-        case gpu::Format.BGRA8_SRGB:        return 4;
-        case gpu::Format.R16_UINT:          return 2;
-        case gpu::Format.R16_FLOAT:         return 2;
-        case gpu::Format.RG16_FLOAT:        return 4;
-        case gpu::Format.RGBA16_FLOAT:      return 8;
-        case gpu::Format.R32_UINT:          return 4;
-        case gpu::Format.R32_FLOAT:         return 4;
-        case gpu::Format.RG32_FLOAT:        return 8;
-        case gpu::Format.RGBA32_FLOAT:      return 16;
-        case gpu::Format.D32_FLOAT:         return 4;
-        default:                            return 0;
-    }
 }
 
 struct MipExtent {

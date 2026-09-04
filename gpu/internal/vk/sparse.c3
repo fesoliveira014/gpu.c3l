@@ -586,6 +586,7 @@ fn bool sparse_texture_desc_valid(gpu::TextureDesc* desc) {
     }
     return gpu::internal::texture_array_layers(desc) == 1
         && !texture_format_is_depth_stencil(desc.format)
+        && !gpu::internal::format_is_block_compressed(desc.format)
         && !desc.usage.color_attach
         && !desc.usage.depth_attach;
 }

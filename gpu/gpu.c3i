@@ -777,7 +777,10 @@ typedef TextureCompatibility = uint128;
 
 const uint DEFAULT_TEXTURE_CAPACITY = 1024;
 
-<* Texel format for textures and swapchain images. *>
+<* Texel format for textures and swapchain images. BC formats are
+   block-compressed: 4x4 texel blocks of 8 bytes (BC1, BC4) or 16 bytes
+   (BC3, BC5, BC6H, BC7). They are sampled-only, single-sampled 2D formats
+   whose copies move precompressed blocks unchanged. *>
 enum Format : int {
     UNDEFINED,
     R8_UNORM,
@@ -796,6 +799,15 @@ enum Format : int {
     RG32_FLOAT,
     RGBA32_FLOAT,
     D32_FLOAT,
+    BC1_RGBA_UNORM,
+    BC1_RGBA_SRGB,
+    BC3_UNORM,
+    BC3_SRGB,
+    BC4_UNORM,
+    BC5_UNORM,
+    BC6H_UFLOAT,
+    BC7_UNORM,
+    BC7_SRGB,
 }
 
 <* Rasterization samples per texel. The zero value is single-sampled. *>
@@ -1444,9 +1456,11 @@ struct BufferCopyDesc {
     GpuSpan dst;
 }
 
-<* Buffer-to-texture copy region. Zero width/height selects the remaining mip
-   extent from x/y; zero 3D depth selects the remainder from z. Zero layer
-   count is one, and zero row length means tightly packed rows. *>
+<* Buffer-to-texture copy region in texels. Zero width/height selects the
+   remaining mip extent from x/y; zero 3D depth selects the remainder from z.
+   Zero layer count is one, and zero row length means tightly packed rows.
+   Block-compressed regions are block-aligned and sized in whole blocks;
+   texture_mip_bytes gives one mip's footprint. *>
 struct BufferTextureCopyDesc {
     GpuSpan       src;
     uint          row_length_texels;

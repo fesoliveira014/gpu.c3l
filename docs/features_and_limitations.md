@@ -11,7 +11,8 @@ limits an application must design around.
 - VMA-backed allocations, checked subspans, stable GPU addresses, host
   mapping with explicit flush and invalidate, and memory statistics.
 - 2D and 3D textures, multisample attachments, sparse color textures,
-  bindless 2D, 3D, and sampled cube views, and interned samplers.
+  bindless 2D, 3D, and sampled cube views, interned samplers, and
+  block-compressed BC1, BC3, BC4, BC5, BC6H, and BC7 sampled textures.
 - Compute and graphics pipelines from SPIR-V, with deduplication and
   driver pipeline-cache import and export.
 - Command allocators with fixed reusable units; transfer, compute, dynamic
@@ -91,6 +92,9 @@ by CPU tests but has not run on hardware that reports the capability.
 - Multisample textures are 2D attachments with one mip. They are resolved,
   not sampled or copied.
 - Depth format is `D32_FLOAT`. There is no stencil.
+- Block-compressed textures are sampled-only, single-sampled 2D images.
+  They are not storage images, attachments, or sparse textures, and the
+  library never encodes, decodes, or generates mips.
 - Sparse textures are single-layer, single-sample color 2D or 3D images.
 - A texture is either sampled or storage within one layout interval.
 - `GraphicsState` has no default. Set a complete state before drawing.

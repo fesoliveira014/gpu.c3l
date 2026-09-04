@@ -1890,7 +1890,7 @@ fn bool run_real_sparse_bind_dimension(
     usz upload_size = (usz)tiles[0].extent.x
         * (usz)tiles[0].extent.y
         * (usz)copy_depth
-        * vk::format_texel_size(texture_desc.format);
+        * gpu::internal::format_block(texture_desc.format).bytes;
     upload = allocate_owned_span(
         device:       device,
         size:         upload_size,
