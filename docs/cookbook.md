@@ -105,6 +105,46 @@ staging span holds tightly packed rows unless `row_length_texels` says
 otherwise. The texture's state is now "sampled at fragment"; the next
 transition must name that as `before`.
 
+## Upload a compressed texture
+
+BC formats take precompressed blocks straight from the asset: create the
+texture in texels, then copy each mip from its byte range. The staging
+layout is whole 4x4 blocks per row, rows per mip, mips back to back.
+
+```c3
+gpu::TextureDesc bc_desc = {
+    .width      = WIDTH,        // texels; need not be a multiple of 4
+    .height     = HEIGHT,
+    .mip_levels = MIP_COUNT,    // down to 1x1; every mip is caller-supplied
+    .format     = gpu::Format.BC7_SRGB,
+    .usage      = { .sampled, .transfer_dst },
+    .access     = { .graphics },
+};
+if (!gpu::supports_texture_desc(device, &bc_desc)!) return gpu::UNSUPPORTED_FEATURE~;
+gpu::TextureHandle albedo = gpu::create_texture(device, &bc_desc)!;
+
+// ... transition to TRANSFER_DESTINATION as in "Upload a texture"
+usz offset = 0;
+for (uint mip = 0; mip < MIP_COUNT; mip++) {
+    uint w = max(WIDTH >> mip, 1u);
+    uint h = max(HEIGHT >> mip, 1u);
+    usz mip_bytes = (usz)((w + 3) / 4) * (usz)((h + 3) / 4) * BC7_BLOCK_BYTES;
+    gpu::BufferTextureCopyDesc upload = {
+        .src     = staging_span.checked_subspan(offset, mip_bytes)!,
+        .texture = albedo,
+        .mip     = mip,
+    };
+    gpu::cmd_copy_buffer_to_texture(commands, &upload)!;
+    offset += mip_bytes;
+}
+// ... transition to sampled_at(...) and publish a view as usual
+```
+
+Each mip's span offset must be a multiple of the block size (8 or 16
+bytes). Sampling, views, samplers, and barriers are the same as for
+uncompressed textures. BC textures cannot be storage images, attachments,
+or sparse, and the library never encodes, decodes, or generates mips.
+
 ## Publish a texture and sampler to shaders
 
 ```c3

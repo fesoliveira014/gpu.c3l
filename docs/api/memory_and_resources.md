@@ -135,6 +135,15 @@ is live.
 Limits: 2D and 3D only; multisample textures are single-mip attachments;
 depth is `D32_FLOAT`; no stencil.
 
+Block-compressed formats `BC1_RGBA_UNORM/SRGB`, `BC3_UNORM/SRGB`,
+`BC4_UNORM`, `BC5_UNORM`, `BC6H_UFLOAT`, and `BC7_UNORM/SRGB` create
+sampled, single-sampled 2D textures. Support is per adapter: check
+`supports_texture_desc` or `get_texture_format_support` and expect
+`UNSUPPORTED_FEATURE` otherwise. Dimensions stay in texels and need not be
+block multiples. The caller supplies already compressed blocks for every
+mip; see [copies](commands_and_rendering.md#transfers) for the block
+footprint rules and [the cookbook](../cookbook.md#upload-a-compressed-texture).
+
 ## Texture views and indices
 
 A `TextureView` publishes a subresource range to the bindless heap and owns

@@ -2,6 +2,56 @@ module gpu::internal @private;
 
 import gpu;
 
+<* Texel block footprint of a format. Uncompressed formats are 1x1 blocks. *>
+struct FormatBlock {
+    uint width;
+    uint height;
+    usz  bytes;
+}
+
+fn FormatBlock format_block(Format format) @private {
+    switch (format) {
+        case Format.R8_UNORM:
+        case Format.R8_UINT:
+            return { 1, 1, 1 };
+        case Format.RG8_UNORM:
+        case Format.R16_UINT:
+        case Format.R16_FLOAT:
+            return { 1, 1, 2 };
+        case Format.RGBA8_UNORM:
+        case Format.RGBA8_SRGB:
+        case Format.BGRA8_UNORM:
+        case Format.BGRA8_SRGB:
+        case Format.RG16_FLOAT:
+        case Format.R32_UINT:
+        case Format.R32_FLOAT:
+        case Format.D32_FLOAT:
+            return { 1, 1, 4 };
+        case Format.RGBA16_FLOAT:
+        case Format.RG32_FLOAT:
+            return { 1, 1, 8 };
+        case Format.RGBA32_FLOAT:
+            return { 1, 1, 16 };
+        case Format.BC1_RGBA_UNORM:
+        case Format.BC1_RGBA_SRGB:
+        case Format.BC4_UNORM:
+            return { 4, 4, 8 };
+        case Format.BC3_UNORM:
+        case Format.BC3_SRGB:
+        case Format.BC5_UNORM:
+        case Format.BC6H_UFLOAT:
+        case Format.BC7_UNORM:
+        case Format.BC7_SRGB:
+            return { 4, 4, 16 };
+        default:
+            return { 0, 0, 0 };
+    }
+}
+
+fn bool format_is_block_compressed(Format format) @private {
+    FormatBlock block = format_block(format);
+    return block.width > 1 || block.height > 1;
+}
 
 fn ulong texture_compatibility_owner(TextureCompatibility compatibility) @private {
     return (ulong)((uint128)compatibility >> 64);
@@ -60,6 +110,15 @@ fn bool texture_format_in_backend_profile(Format format) @private {
         case Format.RG32_FLOAT:
         case Format.RGBA32_FLOAT:
         case Format.D32_FLOAT:
+        case Format.BC1_RGBA_UNORM:
+        case Format.BC1_RGBA_SRGB:
+        case Format.BC3_UNORM:
+        case Format.BC3_SRGB:
+        case Format.BC4_UNORM:
+        case Format.BC5_UNORM:
+        case Format.BC6H_UFLOAT:
+        case Format.BC7_UNORM:
+        case Format.BC7_SRGB:
             return true;
         default:
             return false;
@@ -114,6 +173,15 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
     bool is_depth = desc.format == Format.D32_FLOAT;
     if (is_depth && (desc.usage.color_attach || desc.usage.storage)) return false;
     if (!is_depth && desc.usage.depth_attach) return false;
+
+    if (format_is_block_compressed(desc.format)
+        && (texture_desc_is_3d(desc)
+            || desc.usage.storage
+            || desc.usage.color_attach
+            || desc.usage.depth_attach
+            || desc.sample_count != SampleCount.ONE)) {
+        return false;
+    }
 
     return true;
 }

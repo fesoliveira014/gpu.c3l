@@ -97,3 +97,46 @@ fn void texture_desc_profile_rejects_unsupported_formats() @test {
     desc.format = gpu::Format.UNDEFINED;
     assert(!gpu::internal::texture_desc_valid(&desc), "undefined format is invalid");
 }
+
+fn void format_blocks_are_texel_or_bc_sized() @test {
+    gpu::internal::FormatBlock rgba8 = gpu::internal::format_block(gpu::Format.RGBA8_UNORM);
+    assert(rgba8.width == 1 && rgba8.height == 1 && rgba8.bytes == 4,
+        "uncompressed formats are one-texel blocks");
+    gpu::internal::FormatBlock bc1 = gpu::internal::format_block(gpu::Format.BC1_RGBA_SRGB);
+    assert(bc1.width == 4 && bc1.height == 4 && bc1.bytes == 8,
+        "BC1 packs a 4x4 block in 8 bytes");
+    gpu::internal::FormatBlock bc7 = gpu::internal::format_block(gpu::Format.BC7_UNORM);
+    assert(bc7.width == 4 && bc7.height == 4 && bc7.bytes == 16,
+        "BC7 packs a 4x4 block in 16 bytes");
+    assert(gpu::internal::format_block(gpu::Format.UNDEFINED).bytes == 0,
+        "undefined formats have no block footprint");
+    assert(!gpu::internal::format_is_block_compressed(gpu::Format.D32_FLOAT)
+            && gpu::internal::format_is_block_compressed(gpu::Format.BC6H_UFLOAT),
+        "block compression is derived from the block extent");
+}
+
+fn void texture_desc_profile_validates_block_compressed_usage() @test {
+    gpu::TextureDesc desc = valid_texture_desc();
+    desc.width = 6;
+    desc.height = 6;
+    desc.format = gpu::Format.BC7_SRGB;
+    assert(gpu::internal::texture_desc_valid(&desc),
+        "sampled BC textures accept edges that are not block multiples");
+    desc.mip_levels = 3;
+    assert(gpu::internal::texture_desc_valid(&desc),
+        "BC mip chains extend down to the 1x1 tail");
+
+    desc.usage = { .sampled, .storage };
+    assert(!gpu::internal::texture_desc_valid(&desc),
+        "BC storage images are not exposed");
+    desc.usage = { .color_attach };
+    desc.mip_levels = 1;
+    assert(!gpu::internal::texture_desc_valid(&desc),
+        "BC color attachments are not exposed");
+    desc.usage = { .sampled, .transfer_dst };
+    desc.depth = 2;
+    desc.width = 8;
+    desc.height = 8;
+    assert(!gpu::internal::texture_desc_valid(&desc),
+        "BC textures are two-dimensional");
+}
