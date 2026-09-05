@@ -1697,7 +1697,6 @@ fn void discard_consumes_active_render_pass_recording() @test {
 fn void indirect_argument_validation() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
     defer destroy_ind_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_ind_target(&device);
@@ -1708,15 +1707,6 @@ fn void indirect_argument_validation() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &target_view)!!;
 
-    vk::BufferDesc plain_desc = {
-        .size        = 64,
-        .usage       = { .storage, .addressable },
-        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
-        .access      = { .graphics, .compute, .transfer },
-    };
-    vk::BufferHandle plain = vk::create_buffer_for_state(state, &plain_desc)!!;
-    defer vk::destroy_buffer_for_state(state, plain)!!;
-    gpu::GpuSpan plain_span = vk::get_buffer_span_for_state(state, plain)!!;
     OwnedSpan verts_owned = allocate_owned_span(
         device:       &device,
         size:         3 * 16,
@@ -1766,15 +1756,6 @@ fn void indirect_argument_validation() @test {
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     gpu::cmd_set_graphics_state(&cmd, &graphics)!!;
-    fault no_usage = @catch(gpu::cmd_draw_indirect(
-        commands:      &cmd,
-        vertex_root:   test_span_address(&device, verts_span),
-        fragment_root: test_span_address(&device, frag_span),
-        args:          plain_span,
-        draw_count:    1,
-    ));
-    assert(no_usage == gpu::INVALID_ARGUMENT, "args without indirect usage fault INVALID_ARGUMENT");
-
     gpu::GpuSpan misaligned = args_span.checked_subspan(2, 32)!!;
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     fault align_fault = @catch(gpu::cmd_draw_indirect(

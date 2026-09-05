@@ -143,7 +143,6 @@ struct VkDeviceState @public {
     VkAccelerationStructureDispatch* acceleration_structure_operations;
     VkRayTracingPipelineDispatch*    ray_tracing_pipeline_operations;
     float                      max_sampler_anisotropy;
-    BufferTable                buffers;
     AllocationTable            allocations;
     TimestampPoolTable         timestamp_pools;
     AccelerationStructureTable acceleration_structures;
@@ -1179,8 +1178,6 @@ fn gpu::Device? create_vk_device_from_runtime(
 
     create_vk_allocator(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.ALLOCATOR)!;
-    state.buffers.owner = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.BUFFER);
-    state.buffers.slots = mem::new_array(BufferCell, MAX_BUFFERS);
     state.allocations.owner = gpu::internal::resource_owner_tag(
         state.resource_owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
@@ -1412,16 +1409,6 @@ fn void destroy_state(VkDeviceState* state) @private {
             state.command_allocators.slots = {};
         }
         destroy_acceleration_structure_state(state);
-        // Internal buffers and device-loss leftovers remain backend-owned.
-        if (state.allocator != null && state.buffers.slots.ptr != null) {
-            foreach (&cell : state.buffers.slots[:state.buffers.next_new]) {
-                if (cell.used) state.allocator.destroy_buffer(cell.value.buffer, cell.value.allocation);
-            }
-        }
-        if (state.buffers.slots.ptr != null) {
-            mem::free(state.buffers.slots.ptr);
-            state.buffers.slots = {};
-        }
         // Swapchains before textures: their wrapped image slots free here.
         if (state.presentation.swapchains.slots.ptr != null) {
             foreach (&cell : state.presentation.swapchains.slots[:state.presentation.swapchains.next_new]) {

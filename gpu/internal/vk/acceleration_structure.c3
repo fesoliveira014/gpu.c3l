@@ -3,6 +3,7 @@ module gpu::internal::vk @private;
 import gpu @public;
 import gpu::internal @public;
 import vk;
+import vma;
 import std::core::mem;
 import std::core::mem::alloc;
 import std::atomic;
@@ -1067,7 +1068,8 @@ prepare_acceleration_structure_build(
 
 struct AccelerationStructureSlot {
     vk::AccelerationStructureKHR                    native;
-    BufferHandle                                    backing_buffer;
+    vk::Buffer                                      backing_buffer;
+    vma::Allocation                                 backing_allocation;
     gpu::GpuAllocation                              placement;
     usz                                             placement_offset;
     gpu::internal::NormalizedAccelerationStructureDesc desc;
@@ -1078,7 +1080,6 @@ struct AccelerationStructureSlot {
     gpu::internal::AccelerationStructureBuildEligibility build_eligibility;
     uint                                            pending_next;
     char[DEBUG_NAME_CAP]                            debug_name;
-    bool                                            owns_backing_buffer;
 }
 
 struct AccelerationStructureCell {
@@ -1193,6 +1194,11 @@ fn void destroy_acceleration_structure_state(VkDeviceState* state) {
                     null,
                 );
                 cell.value.native = (vk::AccelerationStructureKHR)null;
+            }
+            if (cell.used && cell.value.backing_allocation != null) {
+                state.allocator.destroy_buffer(cell.value.backing_buffer, cell.value.backing_allocation);
+                cell.value.backing_buffer = (vk::Buffer)null;
+                cell.value.backing_allocation = (vma::Allocation)null;
             }
             if (cell.value.desc.geometries.ptr != null) {
                 alloc::free(
@@ -1480,9 +1486,8 @@ create_acceleration_structure_on_buffer_with_ops(
     gpu::AccelerationStructureRequirements requirements,
     vk::Buffer buffer,
     usz offset,
-    BufferHandle backing_buffer,
+    vma::Allocation backing_allocation,
     gpu::GpuAllocation placement,
-    bool owns_backing_buffer,
     AccelerationStructureNativeOps* ops,
 ) {
     if (state == null || desc == null || buffer == null || ops == null
@@ -1538,13 +1543,13 @@ create_acceleration_structure_on_buffer_with_ops(
 
     AccelerationStructureSlot slot = {
         .native                = native,
-        .backing_buffer        = backing_buffer,
+        .backing_buffer        = backing_allocation != null ? buffer : (vk::Buffer)null,
+        .backing_allocation    = backing_allocation,
         .placement             = placement,
         .placement_offset      = offset,
         .desc                  = normalized,
         .build_eligibility     = gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
         .pending_next          = ACCELERATION_STRUCTURE_PENDING_NONE,
-        .owns_backing_buffer   = owns_backing_buffer,
     };
     copy_debug_name(&slot.debug_name[0], desc.debug_name);
     gpu::AccelerationStructureHandle handle =
@@ -1593,17 +1598,33 @@ fn gpu::AccelerationStructureHandle? vk_create_acceleration_structure(
             .addressable,
             .acceleration_structure_storage,
         },
-        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
-        .access       = state.selected_queue_roles,
-        .debug_name   = desc.debug_name,
     };
-    BufferHandle backing = create_buffer_for_state(state, &buffer_desc)!;
-    bool owns_backing = true;
-    defer catch {
-        if (owns_backing) (void)destroy_buffer_for_state(state, backing);
+    uint[MAX_QUEUE_FAMILIES] families;
+    uint family_count = resource_queue_families(state, state.selected_queue_roles, families[..]);
+    vk::BufferCreateInfo buffer_info = make_buffer_create_info(&buffer_desc, families[:family_count])!;
+    vma::AllocationCreateInfo allocation_info = memory_class_to_vma(gpu::MemoryClass.GPU_PRIVATE)!;
+    vk::Buffer backing_buffer;
+    vma::Allocation backing_allocation;
+    check_device_result(state, state.allocator.create_buffer(
+        buffer_info:    &buffer_info,
+        alloc_info:     &allocation_info,
+        out_buffer:     &backing_buffer,
+        out_allocation: &backing_allocation,
+        out_info:       null,
+    ))!;
+    // Ownership transfers only after the AS slot is published.
+    defer catch state.allocator.destroy_buffer(backing_buffer, backing_allocation);
+    vk::BufferDeviceAddressInfo address_info = vk::buffer_device_address_info().set_buffer(backing_buffer);
+    if (vk::get_buffer_device_address(state.device, &address_info) == 0) return gpu::BACKEND_ERROR~;
+    if (desc.debug_name != null) {
+        state.allocator.set_allocation_name(backing_allocation, desc.debug_name);
+        set_object_name(
+            state:         state,
+            object_type:   vk::ObjectType.BUFFER,
+            object_handle: (ulong)backing_buffer,
+            name:          desc.debug_name,
+        );
     }
-    BufferSlot* buffer = state.buffers.get(backing)!;
-    buffer.internal = true;
     AccelerationStructureNativeOps ops =
         acceleration_structure_native_ops(state);
     state.resource_mutex.lock()!!;
@@ -1612,17 +1633,14 @@ fn gpu::AccelerationStructureHandle? vk_create_acceleration_structure(
             state:               state,
             desc:                desc,
             requirements:        requirements,
-            buffer:              buffer.buffer,
+            buffer:              backing_buffer,
             offset:              0,
-            backing_buffer:      backing,
+            backing_allocation:  backing_allocation,
             placement:           {},
-            owns_backing_buffer: true,
             ops:                 &ops,
         );
     state.resource_mutex.unlock();
-    gpu::AccelerationStructureHandle result = created!;
-    owns_backing = false;
-    return result;
+    return created!;
 }
 
 fn gpu::AccelerationStructureHandle? vk_create_placed_acceleration_structure(
@@ -1671,9 +1689,8 @@ fn gpu::AccelerationStructureHandle? vk_create_placed_acceleration_structure(
             requirements:        requirements,
             buffer:              allocation_slot.backing.buffer,
             offset:              offset,
-            backing_buffer:      {},
+            backing_allocation:  {},
             placement:           allocation,
-            owns_backing_buffer: false,
             ops:                 &ops,
         )!;
     retained_placement = false;
@@ -1765,8 +1782,8 @@ fn void? vk_destroy_acceleration_structure(
     if (released.desc.geometries.ptr != null) {
         alloc::free(state.host_allocator, released.desc.geometries.ptr);
     }
-    if (released.owns_backing_buffer) {
-        destroy_buffer_for_state(state, released.backing_buffer)!;
+    if (released.backing_allocation != null) {
+        state.allocator.destroy_buffer(released.backing_buffer, released.backing_allocation);
     }
 }
 

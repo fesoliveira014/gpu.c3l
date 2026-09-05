@@ -1214,10 +1214,10 @@ fn void command_reference_rollback_releases_only_the_suffix() @test {
 
 fn void command_reference_retain_failure_rolls_back_prior_appends() @test {
     vk::VkDeviceState state;
-    vk::BufferCell[2] buffer_cells;
-    buffer_cells[0] = { .generation = 1, .used = true };
-    state.buffers = {
-        .slots    = buffer_cells[..],
+    vk::AllocationCell[2] allocation_cells;
+    allocation_cells[0] = { .generation = 1, .used = true };
+    state.allocations = {
+        .slots    = allocation_cells[..],
         .owner    = 71,
         .next_new = 1,
     };
@@ -1232,14 +1232,14 @@ fn void command_reference_retain_failure_rolls_back_prior_appends() @test {
     vk::track_command_reference(
         state:      &state,
         record:     &record,
-        owner:      state.buffers.owner,
+        owner:      state.allocations.owner,
         index:      0,
         generation: 1,
     )!!;
     fault retain_fault = @catch(vk::track_command_reference(
         state:      &state,
         record:     &record,
-        owner:      state.buffers.owner,
+        owner:      state.allocations.owner,
         index:      1,
         generation: 1,
     ));
@@ -1248,7 +1248,7 @@ fn void command_reference_retain_failure_rolls_back_prior_appends() @test {
     vk::rollback_command_references(&record, 0);
 
     assert(scratch.reference_count == 0
-        && buffer_cells[0].value.tracked_command_references.load(
+        && allocation_cells[0].value.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == 0,
         "a failed later retain rolls back every earlier append");

@@ -573,9 +573,8 @@ fn void acceleration_structure_native_creation_is_transactional() @test {
             requirements:        requirements,
             buffer:              buffer,
             offset:              256,
-            backing_buffer:      {},
+            backing_allocation:  {},
             placement:           {},
-            owns_backing_buffer: false,
             ops:                 &ops,
         )!!;
     AccelerationStructureSlot* slot =
@@ -616,9 +615,8 @@ fn void acceleration_structure_native_creation_is_transactional() @test {
             requirements:        requirements,
             buffer:              buffer,
             offset:              256,
-            backing_buffer:      {},
+            backing_allocation:  {},
             placement:           {},
-            owns_backing_buffer: false,
             ops:                 &ops,
         )!!;
     };
@@ -638,9 +636,8 @@ fn void acceleration_structure_native_creation_is_transactional() @test {
         requirements:        requirements,
         buffer:              buffer,
         offset:              256,
-        backing_buffer:      {},
+        backing_allocation:  {},
         placement:           {},
-        owns_backing_buffer: false,
         ops:                 &ops,
     )) == gpu::OUT_OF_HOST_MEMORY);
     assert(capture.create_count == 0 && capture.destroy_count == 0,
@@ -654,9 +651,8 @@ fn void acceleration_structure_native_creation_is_transactional() @test {
         requirements:        requirements,
         buffer:              buffer,
         offset:              0,
-        backing_buffer:      {},
+        backing_allocation:  {},
         placement:           {},
-        owns_backing_buffer: false,
         ops:                 &ops,
     )) == gpu::OUT_OF_DEVICE_MEMORY);
     assert(capture.create_count == 1 && capture.destroy_count == 0,
@@ -674,9 +670,8 @@ fn void acceleration_structure_native_creation_is_transactional() @test {
         requirements:        requirements,
         buffer:              buffer,
         offset:              0,
-        backing_buffer:      {},
+        backing_allocation:  {},
         placement:           {},
-        owns_backing_buffer: false,
         ops:                 &ops,
     )) == gpu::SLOT_TABLE_FULL);
     assert(capture.create_count == 1 && capture.destroy_count == 1,
@@ -798,7 +793,7 @@ fn void acceleration_structure_address_is_blas_only_and_generation_checked() @te
 }
 
 fn gpu::GpuSpan acceleration_structure_test_span(
-    BufferHandle handle,
+    gpu::GpuAllocation handle,
     usz size,
 ) {
     return {
@@ -810,14 +805,14 @@ fn gpu::GpuSpan acceleration_structure_test_span(
 }
 
 fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
-    BufferCell[] buffer_cells = mem::new_array(BufferCell, 5);
-    defer mem::free(buffer_cells.ptr);
+    AllocationCell[] input_cells = mem::new_array(AllocationCell, 5);
+    defer mem::free(input_cells.ptr);
     AccelerationStructureCell[] acceleration_structure_cells =
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(acceleration_structure_cells.ptr);
     VkDeviceState state = {
         .acceleration_structures_enabled = true,
-        .buffers = { .slots = buffer_cells, .owner = 0xE1 },
+        .allocations = { .slots = input_cells, .owner = 0xE1 },
         .ray_tracing_support = {
             .acceleration_structure_indirect_build = true,
         },
@@ -830,35 +825,45 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         .addressable,
         .acceleration_structure_build_input,
     };
-    BufferHandle vertices = state.buffers.alloc({
-        .size = 144,
-        .gpu_base = (gpu::GpuAddress)0x1000,
-        .usage = input_usage,
-        .access = { .compute },
+    gpu::GpuAllocation vertices = state.allocations.alloc({
+        .backing = {
+            .size = 144,
+            .gpu_base = (gpu::GpuAddress)0x1000,
+            .usage = input_usage,
+            .access = { .compute },
+        },
     })!!;
-    BufferHandle indices = state.buffers.alloc({
-        .size = 24,
-        .gpu_base = (gpu::GpuAddress)0x2000,
-        .usage = input_usage,
-        .access = { .compute },
+    gpu::GpuAllocation indices = state.allocations.alloc({
+        .backing = {
+            .size = 24,
+            .gpu_base = (gpu::GpuAddress)0x2000,
+            .usage = input_usage,
+            .access = { .compute },
+        },
     })!!;
-    BufferHandle second_vertices = state.buffers.alloc({
-        .size = 108,
-        .gpu_base = (gpu::GpuAddress)0x3000,
-        .usage = input_usage,
-        .access = { .compute },
+    gpu::GpuAllocation second_vertices = state.allocations.alloc({
+        .backing = {
+            .size = 108,
+            .gpu_base = (gpu::GpuAddress)0x3000,
+            .usage = input_usage,
+            .access = { .compute },
+        },
     })!!;
-    BufferHandle scratch_buffer = state.buffers.alloc({
-        .size = 2048,
-        .gpu_base = (gpu::GpuAddress)0x4000,
-        .usage = { .addressable, .storage },
-        .access = { .compute },
+    gpu::GpuAllocation scratch_buffer = state.allocations.alloc({
+        .backing = {
+            .size = 2048,
+            .gpu_base = (gpu::GpuAddress)0x4000,
+            .usage = { .addressable, .storage },
+            .access = { .compute },
+        },
     })!!;
-    BufferHandle transform_buffer = state.buffers.alloc({
-        .size = 12 * float::size,
-        .gpu_base = (gpu::GpuAddress)0x5000,
-        .usage = input_usage,
-        .access = { .compute },
+    gpu::GpuAllocation transform_buffer = state.allocations.alloc({
+        .backing = {
+            .size = 12 * float::size,
+            .gpu_base = (gpu::GpuAddress)0x5000,
+            .usage = input_usage,
+            .access = { .compute },
+        },
     })!!;
     gpu::internal::NormalizedAccelerationStructureGeometry[2] schema = {
         {
@@ -1146,30 +1151,34 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
 }
 
 fn void acceleration_structure_dynamic_tlas_uses_exact_instance_abi() @test {
-    BufferCell[] buffer_cells = mem::new_array(BufferCell, 2);
-    defer mem::free(buffer_cells.ptr);
+    AllocationCell[] input_cells = mem::new_array(AllocationCell, 2);
+    defer mem::free(input_cells.ptr);
     AccelerationStructureCell[] acceleration_structure_cells =
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(acceleration_structure_cells.ptr);
     VkDeviceState state = {
         .acceleration_structures_enabled = true,
-        .buffers = { .slots = buffer_cells, .owner = 0xF1 },
+        .allocations = { .slots = input_cells, .owner = 0xF1 },
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
             .owner = 0xF2,
         },
     };
-    BufferHandle instances = state.buffers.alloc({
-        .size = gpu::AccelerationStructureInstance::size * 4,
-        .gpu_base = (gpu::GpuAddress)0x5000,
-        .usage = { .addressable, .acceleration_structure_build_input },
-        .access = { .graphics },
+    gpu::GpuAllocation instances = state.allocations.alloc({
+        .backing = {
+            .size = gpu::AccelerationStructureInstance::size * 4,
+            .gpu_base = (gpu::GpuAddress)0x5000,
+            .usage = { .addressable, .acceleration_structure_build_input },
+            .access = { .graphics },
+        },
     })!!;
-    BufferHandle scratch_buffer = state.buffers.alloc({
-        .size = 512,
-        .gpu_base = (gpu::GpuAddress)0x6000,
-        .usage = { .addressable, .storage },
-        .access = { .graphics },
+    gpu::GpuAllocation scratch_buffer = state.allocations.alloc({
+        .backing = {
+            .size = 512,
+            .gpu_base = (gpu::GpuAddress)0x6000,
+            .usage = { .addressable, .storage },
+            .access = { .graphics },
+        },
     })!!;
     gpu::AccelerationStructureHandle destination =
         state.acceleration_structures.alloc({
@@ -1219,8 +1228,8 @@ fn void acceleration_structure_dynamic_tlas_uses_exact_instance_abi() @test {
 }
 
 fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test {
-    BufferCell[] buffer_cells = mem::new_array(BufferCell, 3);
-    defer mem::free(buffer_cells.ptr);
+    AllocationCell[] input_cells = mem::new_array(AllocationCell, 3);
+    defer mem::free(input_cells.ptr);
     AccelerationStructureCell[] acceleration_structure_cells =
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(acceleration_structure_cells.ptr);
@@ -1229,7 +1238,7 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         .ray_tracing_support = {
             .acceleration_structure_indirect_build = true,
         },
-        .buffers = { .slots = buffer_cells, .owner = 0xF21 },
+        .allocations = { .slots = input_cells, .owner = 0xF21 },
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
             .owner = 0xF22,
@@ -1237,23 +1246,29 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
     };
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
-    BufferHandle instances = state.buffers.alloc({
-        .size = gpu::AccelerationStructureInstance::size * 4,
-        .gpu_base = (gpu::GpuAddress)0x5000,
-        .usage = { .addressable, .acceleration_structure_build_input },
-        .access = { .compute },
+    gpu::GpuAllocation instances = state.allocations.alloc({
+        .backing = {
+            .size = gpu::AccelerationStructureInstance::size * 4,
+            .gpu_base = (gpu::GpuAddress)0x5000,
+            .usage = { .addressable, .acceleration_structure_build_input },
+            .access = { .compute },
+        },
     })!!;
-    BufferHandle scratch_buffer = state.buffers.alloc({
-        .size = 512,
-        .gpu_base = (gpu::GpuAddress)0x6000,
-        .usage = { .addressable, .storage },
-        .access = { .compute },
+    gpu::GpuAllocation scratch_buffer = state.allocations.alloc({
+        .backing = {
+            .size = 512,
+            .gpu_base = (gpu::GpuAddress)0x6000,
+            .usage = { .addressable, .storage },
+            .access = { .compute },
+        },
     })!!;
-    BufferHandle ranges_buffer = state.buffers.alloc({
-        .size = 32,
-        .gpu_base = (gpu::GpuAddress)0x7000,
-        .usage = { .addressable, .indirect },
-        .access = { .compute },
+    gpu::GpuAllocation ranges_buffer = state.allocations.alloc({
+        .backing = {
+            .size = 32,
+            .gpu_base = (gpu::GpuAddress)0x7000,
+            .usage = { .addressable, .indirect },
+            .access = { .compute },
+        },
     })!!;
     gpu::AccelerationStructureHandle destination =
         state.acceleration_structures.alloc({
@@ -1371,7 +1386,7 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         ranges_buffer,
         gpu::AccelerationStructureIndirectBuildRange::size,
     );
-    state.buffers.get(ranges_buffer)!!.usage.indirect = false;
+    state.allocations.get(ranges_buffer)!!.backing.usage.indirect = false;
     assert(@catch(record_acceleration_structure_indirect_build_with_ops(
         record:           &record,
         desc:             &build,
@@ -1381,7 +1396,7 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_ARGUMENT);
-    state.buffers.get(ranges_buffer)!!.usage.indirect = true;
+    state.allocations.get(ranges_buffer)!!.backing.usage.indirect = true;
     assert(capture.calls == 0 && command_scratch.reference_count == 0);
 
     command_scratch.references = references[:3];
@@ -1489,27 +1504,26 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
 }
 
 fn void acceleration_structure_scratch_rejects_destination_overlap() @test {
-    BufferCell[] buffer_cells = mem::new_array(BufferCell, 1);
-    defer mem::free(buffer_cells.ptr);
-    AllocationCell[] allocation_cells = mem::new_array(AllocationCell, 1);
+    AllocationCell[] allocation_cells = mem::new_array(AllocationCell, 2);
     defer mem::free(allocation_cells.ptr);
     AccelerationStructureCell[] acceleration_structure_cells =
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(acceleration_structure_cells.ptr);
     VkDeviceState state = {
         .acceleration_structures_enabled = true,
-        .buffers = { .slots = buffer_cells, .owner = 0xF31 },
         .allocations = { .slots = allocation_cells, .owner = 0xF32 },
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
             .owner = 0xF33,
         },
     };
-    BufferHandle instances = state.buffers.alloc({
-        .size = gpu::AccelerationStructureInstance::size,
-        .gpu_base = (gpu::GpuAddress)0x7000,
-        .usage = { .addressable, .acceleration_structure_build_input },
-        .access = { .compute },
+    gpu::GpuAllocation instances = state.allocations.alloc({
+        .backing = {
+            .size = gpu::AccelerationStructureInstance::size,
+            .gpu_base = (gpu::GpuAddress)0x7000,
+            .usage = { .addressable, .acceleration_structure_build_input },
+            .access = { .compute },
+        },
     })!!;
     gpu::GpuAllocation placement = state.allocations.alloc({
         .size = 1024,
@@ -1580,14 +1594,14 @@ fn void acceleration_structure_scratch_rejects_destination_overlap() @test {
 }
 
 fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @test {
-    BufferCell[] buffer_cells = mem::new_array(BufferCell, 2);
-    defer mem::free(buffer_cells.ptr);
+    AllocationCell[] input_cells = mem::new_array(AllocationCell, 2);
+    defer mem::free(input_cells.ptr);
     AccelerationStructureCell[] acceleration_structure_cells =
         mem::new_array(AccelerationStructureCell, 1);
     defer mem::free(acceleration_structure_cells.ptr);
     VkDeviceState state = {
         .acceleration_structures_enabled = true,
-        .buffers = { .slots = buffer_cells, .owner = 0xA11 },
+        .allocations = { .slots = input_cells, .owner = 0xA11 },
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
             .owner = 0xA12,
@@ -1595,17 +1609,21 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
     };
     state.resource_mutex.init()!!;
     defer (void)state.resource_mutex.destroy();
-    BufferHandle instances = state.buffers.alloc({
-        .size = gpu::AccelerationStructureInstance::size * 2,
-        .gpu_base = (gpu::GpuAddress)0x7000,
-        .usage = { .addressable, .acceleration_structure_build_input },
-        .access = { .compute },
+    gpu::GpuAllocation instances = state.allocations.alloc({
+        .backing = {
+            .size = gpu::AccelerationStructureInstance::size * 2,
+            .gpu_base = (gpu::GpuAddress)0x7000,
+            .usage = { .addressable, .acceleration_structure_build_input },
+            .access = { .compute },
+        },
     })!!;
-    BufferHandle scratch_buffer = state.buffers.alloc({
-        .size = 512,
-        .gpu_base = (gpu::GpuAddress)0x8000,
-        .usage = { .addressable, .storage },
-        .access = { .compute },
+    gpu::GpuAllocation scratch_buffer = state.allocations.alloc({
+        .backing = {
+            .size = 512,
+            .gpu_base = (gpu::GpuAddress)0x8000,
+            .usage = { .addressable, .storage },
+            .access = { .compute },
+        },
     })!!;
     gpu::AccelerationStructureHandle destination =
         state.acceleration_structures.alloc({
@@ -1679,10 +1697,10 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
             && destination_slot.tracked_command_references.load(
                 AtomicOrdering.RELAXED,
             ) == 1
-            && state.buffers.get(instances)!!.tracked_command_references.load(
+            && state.allocations.get(instances)!!.tracked_command_references.load(
                 AtomicOrdering.RELAXED,
             ) == 1
-            && state.buffers.get(scratch_buffer)!!
+            && state.allocations.get(scratch_buffer)!!
                 .tracked_command_references.load(AtomicOrdering.RELAXED) == 1,
         "full validation retains destination, instances, and scratch");
     assert(destination_slot.build_eligibility
@@ -1829,14 +1847,14 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
 }
 
 fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @test {
-    BufferCell[] buffer_cells = mem::new_array(BufferCell, 3);
-    defer mem::free(buffer_cells.ptr);
+    AllocationCell[] input_cells = mem::new_array(AllocationCell, 3);
+    defer mem::free(input_cells.ptr);
     AccelerationStructureCell[] acceleration_structure_cells =
         mem::new_array(AccelerationStructureCell, 5);
     defer mem::free(acceleration_structure_cells.ptr);
     VkDeviceState state = {
         .acceleration_structures_enabled = true,
-        .buffers = { .slots = buffer_cells, .owner = 0xC11 },
+        .allocations = { .slots = input_cells, .owner = 0xC11 },
         .acceleration_structures = {
             .slots = acceleration_structure_cells,
             .owner = 0xC12,
@@ -2076,23 +2094,29 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         .addressable,
         .acceleration_structure_build_input,
     };
-    BufferHandle vertices = state.buffers.alloc({
-        .size = 36,
-        .gpu_base = (gpu::GpuAddress)0x9000,
-        .usage = input_usage,
-        .access = { .compute },
+    gpu::GpuAllocation vertices = state.allocations.alloc({
+        .backing = {
+            .size = 36,
+            .gpu_base = (gpu::GpuAddress)0x9000,
+            .usage = input_usage,
+            .access = { .compute },
+        },
     })!!;
-    BufferHandle scratch_buffer = state.buffers.alloc({
-        .size = 256,
-        .gpu_base = (gpu::GpuAddress)0xA000,
-        .usage = { .addressable, .storage },
-        .access = { .compute },
+    gpu::GpuAllocation scratch_buffer = state.allocations.alloc({
+        .backing = {
+            .size = 256,
+            .gpu_base = (gpu::GpuAddress)0xA000,
+            .usage = { .addressable, .storage },
+            .access = { .compute },
+        },
     })!!;
-    BufferHandle transform_buffer = state.buffers.alloc({
-        .size = 12 * float::size,
-        .gpu_base = (gpu::GpuAddress)0xB000,
-        .usage = input_usage,
-        .access = { .compute },
+    gpu::GpuAllocation transform_buffer = state.allocations.alloc({
+        .backing = {
+            .size = 12 * float::size,
+            .gpu_base = (gpu::GpuAddress)0xB000,
+            .usage = input_usage,
+            .access = { .compute },
+        },
     })!!;
     gpu::AccelerationStructureGeometryBuildDesc[1] update_geometries = {
         {

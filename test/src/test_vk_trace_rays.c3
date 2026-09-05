@@ -152,12 +152,26 @@ struct TraceRaysFixture {
     vk::CommandScratch     scratch;
 }
 
+fn gpu::GpuSpan fixture_trace_sbt_span(
+    TraceRaysFixture* fixture,
+    usz offset,
+    usz size,
+) {
+    gpu::GpuSpan span = fixture_allocation_span(&fixture.spans, offset, size);
+    span.index = 1;
+    return span;
+}
+
 fn void init_trace_rays_fixture(TraceRaysFixture* fixture) {
     init_span_resolver_fixture(&fixture.spans);
-    fixture.spans.buffer_cells[0].value.size = 128;
+    fixture.spans.state.allocations.slots = fixture.spans.allocation_cells[..];
+    fixture.spans.state.allocations.next_new = 2;
+    fixture.spans.allocation_cells[1] = fixture.spans.allocation_cells[0];
+    fixture.spans.allocation_cells[1].value.backing.gpu_base = (gpu::GpuAddress)0x1000;
+    fixture.spans.allocation_cells[1].value.backing.size = 128;
     fixture.spans.allocation_cells[0].value.backing.size = 128;
     fixture.spans.allocation_cells[0].value.backing.cpu_base = null;
-    fixture.spans.buffer_cells[0].value.usage.shader_binding_table = true;
+    fixture.spans.allocation_cells[1].value.backing.usage.shader_binding_table = true;
     fixture.spans.state.ray_tracing_pipelines_enabled = true;
     fixture.spans.state.caps.ray_tracing_pipelines = {
         .enabled                           = true,
@@ -220,11 +234,11 @@ fn void init_trace_rays_fixture(TraceRaysFixture* fixture) {
     };
     fixture.table = {
         .ray_generation = {
-            .span   = fixture_buffer_span(&fixture.spans, 0, 32),
+            .span   = fixture_trace_sbt_span(fixture, 0, 32),
             .stride = 32,
         },
         .miss = {
-            .span   = fixture_buffer_span(&fixture.spans, 0, 64),
+            .span   = fixture_trace_sbt_span(fixture, 0, 64),
             .stride = 32,
         },
     };
@@ -535,7 +549,7 @@ fn void full_indirect2_retains_only_pipeline_and_packet_transactionally() @test 
         ) == 1);
     assert(fixture.spans.allocation_cells[0].value
         .tracked_command_references.load(AtomicOrdering.RELAXED) == 1);
-    assert(fixture.spans.buffer_cells[0].value.tracked_command_references.load(
+    assert(fixture.spans.allocation_cells[1].value.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == 0,
         "GPU-authored SBT addresses remain caller-owned");
@@ -818,7 +832,7 @@ fn void full_trace_tracks_pipeline_and_unique_sbt_backing() @test {
     assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == 1);
-    assert(fixture.spans.buffer_cells[0].value.tracked_command_references.load(
+    assert(fixture.spans.allocation_cells[1].value.tracked_command_references.load(
             AtomicOrdering.RELAXED,
         ) == 1);
     vk::rollback_command_references(&fixture.record, 0);
@@ -855,7 +869,7 @@ fn void full_indirect_trace_tracks_pipeline_sbt_and_arguments() @test {
     assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
         AtomicOrdering.RELAXED,
     ) == 1);
-    assert(fixture.spans.buffer_cells[0].value.tracked_command_references.load(
+    assert(fixture.spans.allocation_cells[1].value.tracked_command_references.load(
         AtomicOrdering.RELAXED,
     ) == 1);
     assert(fixture.spans.allocation_cells[0].value
@@ -929,7 +943,7 @@ fn void indirect_trace_reuses_pipeline_queue_and_render_scope_validation() @test
         args,
     )) == gpu::INVALID_ARGUMENT);
     fixture.record.queue.roles = { .graphics };
-    fixture.spans.buffer_cells[0].value.access = { .graphics };
+    fixture.spans.allocation_cells[1].value.backing.access = { .graphics };
     fixture.spans.allocation_cells[0].value.backing.access = { .graphics };
     fixture.completions[0].queue_flags = vk::QueueFlagBits.GRAPHICS_BIT;
     assert(@catch(vk::full_prepare_trace_rays(
@@ -1013,7 +1027,7 @@ fn void indirect_trace_reference_exhaustion_rolls_back_every_retain() @test {
     assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
         AtomicOrdering.RELAXED,
     ) == 0);
-    assert(fixture.spans.buffer_cells[0].value.tracked_command_references.load(
+    assert(fixture.spans.allocation_cells[1].value.tracked_command_references.load(
         AtomicOrdering.RELAXED,
     ) == 0);
     assert(fixture.spans.allocation_cells[0].value
@@ -1041,7 +1055,7 @@ fn void full_trace_validation_rejects_shape_usage_and_dimensions() @test {
         { 2, 3, 4 },
     )) == gpu::INVALID_ARGUMENT);
     fixture.table.ray_generation.stride = 32;
-    fixture.table.miss.span = fixture_buffer_span(&fixture.spans, 32, 64);
+    fixture.table.miss.span = fixture_trace_sbt_span(&fixture, 32, 64);
     assert(@catch(vk::full_prepare_trace_rays(
         &fixture.record,
         (gpu::GpuAddress)1,
@@ -1049,7 +1063,7 @@ fn void full_trace_validation_rejects_shape_usage_and_dimensions() @test {
         { 2, 3, 4 },
     )) == gpu::INVALID_ARGUMENT,
         "SBT bases use base alignment rather than handle alignment");
-    fixture.table.miss.span = fixture_buffer_span(&fixture.spans, 0, 64);
+    fixture.table.miss.span = fixture_trace_sbt_span(&fixture, 0, 64);
     fixture.table.ray_generation.span.size = 64;
     assert(@catch(vk::full_prepare_trace_rays(
         &fixture.record,
@@ -1059,14 +1073,14 @@ fn void full_trace_validation_rejects_shape_usage_and_dimensions() @test {
     )) == gpu::INVALID_ARGUMENT,
         "the ray-generation region contains exactly one record");
     fixture.table.ray_generation.span.size = 32;
-    fixture.spans.buffer_cells[0].value.usage.shader_binding_table = false;
+    fixture.spans.allocation_cells[1].value.backing.usage.shader_binding_table = false;
     assert(@catch(vk::full_prepare_trace_rays(
         &fixture.record,
         (gpu::GpuAddress)1,
         &fixture.table,
         { 2, 3, 4 },
     )) == gpu::INVALID_ARGUMENT);
-    fixture.spans.buffer_cells[0].value.usage.shader_binding_table = true;
+    fixture.spans.allocation_cells[1].value.backing.usage.shader_binding_table = true;
     assert(@catch(vk::full_prepare_trace_rays(
         &fixture.record,
         (gpu::GpuAddress)1,
