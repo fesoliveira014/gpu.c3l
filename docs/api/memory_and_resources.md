@@ -237,8 +237,9 @@ gpu::CompletionPoint bound = gpu::bind_sparse_texture_memory(queue, &bind)!;
 
 The library keeps no residency map. The application prevents overlap,
 keeps bound allocations alive, and orders unbinds after the last user.
-Binding is externally synchronized on the queue. Sparse images are
-single-layer, single-sample color 2D or 3D.
+Binding shares the [native-queue host synchronization boundary](../architecture.md#threading)
+with submit and present, including aliased roles. Sparse images are single-layer,
+single-sample color 2D or 3D.
 
 ## Acceleration structures
 

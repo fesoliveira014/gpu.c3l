@@ -131,6 +131,8 @@ and rebuild anything that depends on format or extent.
 
 Acquire, present, resize, and the presentation wait are externally
 synchronized on the swapchain. At most `MAX_SWAPCHAINS` (8) per device.
+Present also shares the [native-queue host synchronization boundary](../architecture.md#threading)
+with submit and sparse bind, including aliased roles.
 
 ## Diagnostics
 

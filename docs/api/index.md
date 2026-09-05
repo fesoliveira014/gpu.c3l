@@ -37,14 +37,11 @@ handle valid on `RESOURCE_IN_USE` or `DEVICE_BUSY`. One-shot tokens
 (`CommandList`, `ExecutableCommandList`, `SwapchainReadiness`,
 `AcquiredImage`) are consumed only by the documented successful call.
 
-**Concurrency.** Three categories. See
-[architecture](../architecture.md#threading).
-
-| Category | Applies to |
-|---|---|
-| externally synchronized | runtime and surface registry; one swapchain; submit, present, sparse bind on one native queue |
-| thread-safe | adapter queries; resource, pipeline, and view operations; completion poll and wait |
-| thread-confined | a recording token and its copies; the allocator while a recording is live |
+**Concurrency.** The [threading table](../architecture.md#threading) defines
+external synchronization, thread-safe operations, and recording confinement.
+Submit, present, and sparse bind share a host synchronization boundary on the
+same native queue, including aliased roles. Completion polling and waiting are
+thread-safe.
 
 **Validation.** `ContractValidation.FULL` adds diagnostics and retained
 references. It never changes the behavior of a valid program.

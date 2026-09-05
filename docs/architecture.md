@@ -262,8 +262,14 @@ its own.
 | Thread-confined | a `CommandList` and all copies of it; the allocator while a recording is live |
 
 Distinct allocators record in parallel. Moving an `ExecutableCommandList` to
-a submit thread needs an application happens-before edge. Aliased queue roles
-share one synchronization boundary.
+a submit thread needs an application happens-before edge. Submit, present,
+and sparse-bind host calls on the same native queue share one application
+synchronization boundary, including when semantic queue roles alias. Separate
+role names do not establish separate native queues.
+
+Host serialization does not replace GPU barriers or completion dependencies.
+Completion polling and waiting remain thread-safe and do not transfer resource
+ownership.
 
 ### Backend lock order
 

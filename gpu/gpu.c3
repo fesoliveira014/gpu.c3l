@@ -1042,7 +1042,8 @@ fn SparseTextureRequirements? get_sparse_texture_requirements(Device* device, Te
    and retains the texture through completion. The caller keeps allocations
    live through completion and keeps resident bytes exclusive until an ordered
    unbind or replacement and every prior GPU user complete. The library retains
-   no residency map. *>
+   no residency map. The caller externally synchronizes submit, present, and
+   sparse-bind host calls on the same native queue, including aliased roles. *>
 fn CompletionPoint? bind_sparse_texture_memory(Queue queue, SparseTextureBindDesc* desc) {
     Device device = queue.device;
     gpu::internal::DeviceOperation operation =
@@ -2761,7 +2762,8 @@ fn double? timestamp_delta_ns(
    authoritative executable phase, duplicates, and all-or-nothing claim/rollback.
    Runtime failures: capacity, busy, device-loss, and backend faults preserve inputs;
    success consumes every list and any valid swapchain readiness. The caller
-   externally synchronizes the queue.
+   externally synchronizes submit, present, and sparse-bind host calls on the
+   same native queue, including aliased roles.
 
    @param queue : "Exact selected queue that executes the submission."
    @param desc : "Borrowed waits and mutable executable-token batch; success clears command tokens and invalidates valid readiness."
@@ -3000,6 +3002,8 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, 
 
 <* Present an acquired image after its readiness-consuming submit.
    Preconditions: externally synchronize the image and pass that submit's point.
+   Externally synchronize submit, present, and sparse-bind host calls on the
+   same native queue, including aliased roles.
    Always checked: image/point identity, ownership, publication, and lifecycle.
    Runtime failures: host/device out-of-memory and pre-submit WAIT_TIMEOUT
    preserve the image. Success and every other submitted result consume it.
