@@ -2253,11 +2253,27 @@ fn void push_compute_root(
     );
 }
 
-fn void? vk_cmd_dispatch(
-    CommandRecord* commands,
+fn void record_dispatch(
+    CommandRecord* record,
+    BoundPipeline* pipeline,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
 ) @private {
+    push_compute_root(record, pipeline, root);
+    vk::cmd_dispatch(
+        command_buffer: record.command_buffer,
+        group_count_x:  groups.x,
+        group_count_y:  groups.y,
+        group_count_z:  groups.z,
+    );
+}
+
+fn void? full_dispatch(
+    CommandRecord* commands,
+    gpu::GpuAddress root,
+    gpu::Vec3u groups,
+) {
+    if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
     VkDeviceState* state = commands.device_state;
@@ -2282,12 +2298,11 @@ fn void? vk_cmd_dispatch(
             backend_text:        null,
         )~;
     }
-    push_compute_root(record, pipeline, root);
-    vk::cmd_dispatch(
-        command_buffer: record.command_buffer,
-        group_count_x:  groups.x,
-        group_count_y:  groups.y,
-        group_count_z:  groups.z,
+    record_dispatch(
+        record:   record,
+        pipeline: pipeline,
+        root:     root,
+        groups:   groups,
     );
 }
 
@@ -2301,22 +2316,12 @@ fn void? trusted_dispatch(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     BoundPipeline* pipeline = borrow_bound_pipeline(record)!;
-    push_compute_root(record, pipeline, root);
-    vk::cmd_dispatch(
-        command_buffer: record.command_buffer,
-        group_count_x:  groups.x,
-        group_count_y:  groups.y,
-        group_count_z:  groups.z,
+    record_dispatch(
+        record:   record,
+        pipeline: pipeline,
+        root:     root,
+        groups:   groups,
     );
-}
-
-fn void? full_dispatch(
-    CommandRecord* commands,
-    gpu::GpuAddress root,
-    gpu::Vec3u groups,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    return vk_cmd_dispatch(commands, root, groups);
 }
 
 fn PreparedDispatchIndirect? lower_dispatch_indirect(
@@ -2349,7 +2354,7 @@ fn PreparedDispatchIndirect? full_prepare_dispatch_indirect(
 ) {
     if (commands == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING) {
+    if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
