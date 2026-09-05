@@ -9,7 +9,6 @@ struct ResolvedSpan {
     BufferHandle      backing_buffer;
     usz               offset;
     usz               size;
-    gpu::QueueRoles   access;
     gpu::MemoryClass   memory_class;
     void*             mapping;
     gpu::GpuAddress   address;
@@ -21,7 +20,6 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     BufferSlot* slot;
     BufferHandle backing_buffer;
     usz offset;
-    gpu::QueueRoles access;
     gpu::MemoryClass memory_class;
     if (span.owner == state.buffers.owner) {
         backing_buffer = {
@@ -31,7 +29,6 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         };
         slot = state.buffers.get(backing_buffer)!;
         offset = span.offset;
-        access = slot.access;
         memory_class = slot.memory_class;
     } else if (span.owner == state.allocations.owner) {
         gpu::GpuAllocation allocation = {
@@ -44,7 +41,6 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         if (allocation_slot.texture_memory) return gpu::INVALID_ARGUMENT~;
         slot = &allocation_slot.backing;
         offset = span.offset;
-        access = slot.access;
         memory_class = slot.memory_class;
     } else {
         return gpu::INVALID_HANDLE~;
@@ -73,7 +69,6 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         .backing_buffer = backing_buffer,
         .offset         = offset,
         .size           = span.size,
-        .access         = access,
         .memory_class    = memory_class,
         .mapping        = mapping,
         .address        = address,
@@ -187,9 +182,8 @@ fn void? validate_span_queue_access(
     ZString operation,
 ) @private {
     gpu::DebugResourceKind resource_kind = span_resource_kind(state, span);
-    if ((uint)resolved.access == 0
-        || !gpu::internal::queue_roles_are_known(resolved.access)
-        || !gpu::internal::queue_roles_are_subset(resolved.access, resolved.slot.access)) {
+    if ((uint)resolved.slot.access == 0
+        || !gpu::internal::queue_roles_are_known(resolved.slot.access)) {
         return report_contract_failure(
             state:               state,
             operation:           operation,
@@ -200,14 +194,14 @@ fn void? validate_span_queue_access(
             generation:          span.generation,
             debug_name:          slot_name(&resolved.slot.debug_name[0]),
             rejected_field:      "GpuSpan",
-            invariant:           "span access must be a non-empty subset of its owner access",
+            invariant:           "backing resource access must contain valid queue roles",
             backend_text:        null,
         )~;
     }
     return validate_operation_queue_access(
         state:          state,
         queue_roles:    queue_roles,
-        access:         resolved.access,
+        access:         resolved.slot.access,
         resource_kind:  resource_kind,
         index:          span.index,
         generation:     span.generation,

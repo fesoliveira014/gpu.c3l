@@ -109,8 +109,6 @@ fn void buffer_span_resolves_private_metadata() @test {
         "buffer span resolves its backing handle");
     assert(resolved.offset == 8 && resolved.size == 16,
         "buffer span preserves its checked native range");
-    assert(resolved.access == fixture.buffer_cells[0].value.access,
-        "buffer span derives immutable access from the slot");
     assert(resolved.memory_class == gpu::MemoryClass.CPU_WRITE,
         "buffer span derives its memory class from the slot");
     assert(resolved.mapping == &fixture.mapping[8],
@@ -250,8 +248,7 @@ fn void independent_allocation_span_resolves() @test {
         "independent spans never forge a public buffer handle");
     assert(resolved.offset == 8 && resolved.size == 16,
         "independent spans preserve their checked range");
-    assert(resolved.access == fixture.allocation_cells[0].value.backing.access
-        && resolved.memory_class == gpu::MemoryClass.CPU_WRITE,
+    assert(resolved.memory_class == gpu::MemoryClass.CPU_WRITE,
         "independent spans derive immutable backing policy");
     assert(resolved.mapping == &fixture.mapping[8]
         && (ulong)resolved.address == 0x2008,

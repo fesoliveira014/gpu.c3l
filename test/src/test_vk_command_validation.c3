@@ -760,12 +760,12 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
     vk::ResolvedSpan compute_only_tail_span = vk::resolve_span(state, &compute_only_tail)!!;
     gpu::GpuSpan multi_access_head = multi_access.checked_subspan(0, 4)!!;
     vk::ResolvedSpan multi_access_span = vk::resolve_span(state, &multi_access_head)!!;
-    assert(buffer_span.access.compute && !buffer_span.access.graphics,
+    assert(buffer_span.slot.access.compute && !buffer_span.slot.access.graphics,
         "allocation span access comes from its live owner");
-    assert(compute_only_span.access.compute && !compute_only_span.access.graphics
-        && compute_only_tail_span.access.compute && !compute_only_tail_span.access.graphics,
+    assert(compute_only_span.slot.access.compute && !compute_only_span.slot.access.graphics
+        && compute_only_tail_span.slot.access.compute && !compute_only_tail_span.slot.access.graphics,
         "allocation subspans preserve immutable access");
-    assert(multi_access_span.access.graphics && multi_access_span.access.compute,
+    assert(multi_access_span.slot.access.graphics && multi_access_span.slot.access.compute,
         "allocation subspans preserve every immutable role");
     vk::CommandRecord* record = commands.record;
     gpu::Queue recorded_queue = record.queue;
