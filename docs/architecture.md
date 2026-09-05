@@ -4,9 +4,14 @@
 of thing: devices, queues, memory, resources, commands, and completion. The
 backend is Vulkan 1.3 and is private.
 
-The library does not track texture state, insert barriers, defer destruction,
-relocate memory, or schedule frames. The application does those things
-explicitly. In exchange, every call has a fixed cost and no hidden work.
+The library does not track application texture state, insert barriers, defer
+application-resource destruction, relocate memory, or schedule frames. The
+application controls those operations explicitly.
+
+Normal command recording uses preallocated scratch and inserts no implicit
+GPU work or waits. Validation and completion retirement perform bookkeeping
+whose cost depends on the references and submissions processed. Recycling
+completed command storage does not transfer ownership of application resources.
 
 ## Modules
 
@@ -286,10 +291,15 @@ switches. `RuntimeDesc.debug_callback` receives structured `DebugMessage`
 values synchronously, possibly from any thread. The callback must not call
 back into the library.
 
-Normal recording paths do no heap allocation. Command scratch is preallocated
-per allocator. Full validation adds a linear duplicate scan per retained
-reference. Vulkan validation layers and software drivers dominate timing;
-benchmark without them and record the driver.
+Library scratch for normal recording is preallocated per allocator. FULL
+validation adds a linear duplicate scan per retained reference. Completion
+observation and lifetime operations can retire completed submissions, release
+retained references, and recycle command units; this work is workload-dependent.
+
+Non-wait operations insert no implicit GPU wait. Explicit completion waits
+still block as requested. These guarantees imply neither fixed driver latency
+nor allocation-free Vulkan calls. See [benchmarking](https://github.com/fesoliveira014/gpu.c3l/blob/main/docs/contributing/benchmarking.md)
+for measurement guidance.
 
 ## Platform
 
