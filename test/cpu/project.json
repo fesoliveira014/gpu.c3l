@@ -43,12 +43,6 @@
         "import_surface_win32.c3"
       ]
     },
-    "canonical_gpu_surface": {
-      "type": "object-files",
-      "sources": [
-        "canonical_gpu_surface.c3"
-      ]
-    },
     "import_surface_wayland": {
       "type": "executable",
       "sources": [
