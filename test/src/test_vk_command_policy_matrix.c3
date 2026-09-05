@@ -12,6 +12,24 @@ const char[*] POLICY_MATRIX_VERT_SPIRV =
 const char[*] POLICY_MATRIX_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
+fn void direct_dispatch_rejects_render_pass_under_both_policies() @test {
+    vk::CommandRecord record = {
+        .state = gpu::internal::CommandState.RECORDING_RENDER_PASS,
+    };
+    gpu::ContractValidation[2] contracts = {
+        gpu::ContractValidation.TRUSTED,
+        gpu::ContractValidation.FULL,
+    };
+    foreach (contract : contracts) {
+        vk::DeviceValidationPolicy policy = { .contract = contract };
+        vk::CommandOps* ops = vk::select_command_ops(policy);
+        assert(@catch(ops.dispatch(&record, (gpu::GpuAddress)0, { 1, 1, 1 }))
+            == gpu::COMMAND_RECORDING_ERROR,
+            "compute dispatch rejects a render pass before pipeline lookup or native emission");
+        assert(record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS);
+    }
+}
+
 fn void trace_rays_uses_policy_specific_command_entries() @test {
     gpu::internal::vk::DeviceValidationPolicy policy;
     gpu::internal::vk::CommandOps* trusted =

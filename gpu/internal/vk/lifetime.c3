@@ -43,14 +43,6 @@ fn Atomic{uint}*? tracked_command_reference_counter(
     VkDeviceState* state,
     CommandResourceReference reference,
 ) {
-    if (reference.owner == state.buffers.owner) {
-        BufferHandle handle = {
-            .owner = reference.owner, .index = reference.index,
-            .generation = reference.generation,
-        };
-        BufferSlot* slot = state.buffers.get(handle)!;
-        return &slot.tracked_command_references;
-    }
     if (reference.owner == state.allocations.owner) {
         gpu::GpuAllocation allocation = {
             .owner = reference.owner, .index = reference.index,

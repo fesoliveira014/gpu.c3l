@@ -17,37 +17,17 @@ struct SpanDiagnosticCapture {
 
 struct SpanResolverFixture {
     vk::VkDeviceState               state;
-    vk::BufferCell[1]               buffer_cells;
-    vk::AllocationCell[1]           allocation_cells;
+    vk::AllocationCell[2]           allocation_cells;
     char[64]                        mapping;
 }
 
 fn void init_span_resolver_fixture(SpanResolverFixture* fixture) {
     fixture.state.resource_owner = SPAN_RESOLVER_DEVICE_OWNER;
-    fixture.state.buffers.owner = gpu::internal::resource_owner_tag(
-        SPAN_RESOLVER_DEVICE_OWNER,
-        gpu::internal::ResourceOwnerKind.BUFFER,
-    );
-    fixture.state.buffers.slots = fixture.buffer_cells[..];
-    fixture.state.buffers.next_new = 1;
-    fixture.buffer_cells[0] = {
-        .value = {
-            .buffer      = (vk::Buffer)(uptr)0x2222,
-            .gpu_base    = (gpu::GpuAddress)0x1000,
-            .cpu_base    = &fixture.mapping[0],
-            .size        = fixture.mapping.len,
-            .usage       = { .storage, .addressable },
-            .access      = { .compute, .transfer },
-            .memory_class = gpu::MemoryClass.CPU_WRITE,
-        },
-        .generation = 5,
-        .used       = true,
-    };
     fixture.state.allocations.owner = gpu::internal::resource_owner_tag(
         SPAN_RESOLVER_DEVICE_OWNER,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
-    fixture.state.allocations.slots = fixture.allocation_cells[..];
+    fixture.state.allocations.slots = fixture.allocation_cells[:1];
     fixture.state.allocations.next_new = 1;
     fixture.allocation_cells[0] = {
         .value = {
@@ -73,61 +53,15 @@ fn void init_span_resolver_fixture(SpanResolverFixture* fixture) {
     );
 }
 
-fn gpu::GpuSpan fixture_buffer_span(
-    SpanResolverFixture* fixture,
-    usz offset,
-    usz size,
-) {
-    return {
-        .owner      = fixture.state.buffers.owner,
-        .index      = 0,
-        .generation = 5,
-        .offset     = offset,
-        .size       = size,
-    };
-}
-
-fn void buffer_span_resolves_private_metadata() @test {
+fn void allocation_span_accepts_full_and_exact_end_ranges() @test {
     SpanResolverFixture fixture;
     init_span_resolver_fixture(&fixture);
-    gpu::GpuSpan span = fixture_buffer_span(
-        &fixture,
-        8,
-        16,
-    );
-
-    vk::ResolvedSpan resolved = vk::resolve_span(&fixture.state, &span)!!;
-    vk::BufferHandle expected = {
-        .owner      = fixture.state.buffers.owner,
-        .index      = 0,
-        .generation = 5,
-    };
-
-    assert(resolved.slot == &fixture.buffer_cells[0].value,
-        "buffer span resolves its native slot");
-    assert(resolved.backing_buffer == expected,
-        "buffer span resolves its backing handle");
-    assert(resolved.offset == 8 && resolved.size == 16,
-        "buffer span preserves its checked native range");
-    assert(resolved.access == fixture.buffer_cells[0].value.access,
-        "buffer span derives immutable access from the slot");
-    assert(resolved.memory_class == gpu::MemoryClass.CPU_WRITE,
-        "buffer span derives its memory class from the slot");
-    assert(resolved.mapping == &fixture.mapping[8],
-        "buffer span resolves its mapped address");
-    assert((ulong)resolved.address == 0x1008,
-        "buffer span resolves its GPU address");
-}
-
-fn void buffer_span_accepts_full_and_exact_end_ranges() @test {
-    SpanResolverFixture fixture;
-    init_span_resolver_fixture(&fixture);
-    gpu::GpuSpan full = fixture_buffer_span(&fixture, 0, fixture.mapping.len);
+    gpu::GpuSpan full = fixture_allocation_span(&fixture, 0, fixture.mapping.len);
     vk::ResolvedSpan full_resolved = vk::resolve_span(&fixture.state, &full)!!;
     assert(full_resolved.offset == 0 && full_resolved.size == fixture.mapping.len,
         "full buffer span resolves");
 
-    gpu::GpuSpan exact_end = fixture_buffer_span(&fixture, 48, 16);
+    gpu::GpuSpan exact_end = fixture_allocation_span(&fixture, 48, 16);
     vk::ResolvedSpan end_resolved = vk::resolve_span(&fixture.state, &exact_end)!!;
     assert(end_resolved.offset == 48 && end_resolved.size == 16,
         "span ending at the buffer extent resolves");
@@ -137,16 +71,16 @@ fn void span_resolver_rejects_wrong_owner_and_stale_generation() @test {
     SpanResolverFixture fixture;
     init_span_resolver_fixture(&fixture);
 
-    gpu::GpuSpan wrong_owner = fixture_buffer_span(&fixture, 0, 16);
+    gpu::GpuSpan wrong_owner = fixture_allocation_span(&fixture, 0, 16);
     wrong_owner.owner = gpu::internal::resource_owner_tag(
         SPAN_RESOLVER_DEVICE_OWNER + 1,
-        gpu::internal::ResourceOwnerKind.BUFFER,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
     fault wrong_owner_fault = @catch(vk::resolve_span(&fixture.state, &wrong_owner));
     assert(wrong_owner_fault == gpu::INVALID_HANDLE,
         "a span from another device faults INVALID_HANDLE");
 
-    gpu::GpuSpan stale = fixture_buffer_span(&fixture, 0, 16);
+    gpu::GpuSpan stale = fixture_allocation_span(&fixture, 0, 16);
     stale.generation++;
     fault stale_fault = @catch(vk::resolve_span(&fixture.state, &stale));
     assert(stale_fault == gpu::INVALID_HANDLE,
@@ -157,15 +91,15 @@ fn void span_resolver_rejects_empty_and_escaping_ranges() @test {
     SpanResolverFixture fixture;
     init_span_resolver_fixture(&fixture);
 
-    gpu::GpuSpan empty = fixture_buffer_span(&fixture, 0, 0);
+    gpu::GpuSpan empty = fixture_allocation_span(&fixture, 0, 0);
     assert(@catch(vk::resolve_span(&fixture.state, &empty)) == gpu::INVALID_ARGUMENT,
         "an empty span faults INVALID_ARGUMENT");
 
-    gpu::GpuSpan one_past = fixture_buffer_span(&fixture, 49, 16);
+    gpu::GpuSpan one_past = fixture_allocation_span(&fixture, 49, 16);
     assert(@catch(vk::resolve_span(&fixture.state, &one_past)) == gpu::INVALID_ARGUMENT,
         "a span past the buffer extent faults INVALID_ARGUMENT");
 
-    gpu::GpuSpan overflow = fixture_buffer_span(&fixture, usz::max, 2);
+    gpu::GpuSpan overflow = fixture_allocation_span(&fixture, usz::max, 2);
     assert(@catch(vk::resolve_span(&fixture.state, &overflow)) == gpu::INVALID_ARGUMENT,
         "an overflowing span range faults INVALID_ARGUMENT");
 }
@@ -173,8 +107,8 @@ fn void span_resolver_rejects_empty_and_escaping_ranges() @test {
 fn void span_resolver_rejects_gpu_address_overflow() @test {
     SpanResolverFixture fixture;
     init_span_resolver_fixture(&fixture);
-    fixture.buffer_cells[0].value.gpu_base = (gpu::GpuAddress)(ulong::max - 4);
-    gpu::GpuSpan span = fixture_buffer_span(&fixture, 8, 1);
+    fixture.allocation_cells[0].value.backing.gpu_base = (gpu::GpuAddress)(ulong::max - 4);
+    gpu::GpuSpan span = fixture_allocation_span(&fixture, 8, 1);
 
     fault address_fault = @catch(vk::resolve_span(&fixture.state, &span));
 
@@ -185,21 +119,21 @@ fn void span_resolver_rejects_gpu_address_overflow() @test {
 fn void resolved_span_mapping_and_address_require_backing_metadata() @test {
     SpanResolverFixture fixture;
     init_span_resolver_fixture(&fixture);
-    gpu::GpuSpan span = fixture_buffer_span(&fixture, 8, 16);
+    gpu::GpuSpan span = fixture_allocation_span(&fixture, 8, 16);
 
     vk::ResolvedSpan resolved = vk::resolve_span(&fixture.state, &span)!!;
     char[] mapping = vk::resolved_span_mapping(&resolved)!!;
     assert(mapping.ptr == &fixture.mapping[8] && mapping.len == 16,
         "mapping exposes the exact resolved range");
-    assert((ulong)vk::resolved_span_address(&resolved)!! == 0x1008,
+    assert((ulong)vk::resolved_span_address(&resolved)!! == 0x2008,
         "address exposes the exact resolved range start");
 
-    fixture.buffer_cells[0].value.cpu_base = null;
+    fixture.allocation_cells[0].value.backing.cpu_base = null;
     resolved = vk::resolve_span(&fixture.state, &span)!!;
     assert(@catch(vk::resolved_span_mapping(&resolved)) == gpu::INVALID_ARGUMENT,
         "an unmapped span faults INVALID_ARGUMENT");
 
-    fixture.buffer_cells[0].value.gpu_base = (gpu::GpuAddress)0;
+    fixture.allocation_cells[0].value.backing.gpu_base = (gpu::GpuAddress)0;
     resolved = vk::resolve_span(&fixture.state, &span)!!;
     assert(@catch(vk::resolved_span_address(&resolved)) == gpu::INVALID_ARGUMENT,
         "a non-addressable span faults INVALID_ARGUMENT");
@@ -246,12 +180,9 @@ fn void independent_allocation_span_resolves() @test {
 
     assert(resolved.slot == &fixture.allocation_cells[0].value.backing,
         "independent spans resolve their private backing slot");
-    assert(resolved.backing_buffer == vk::BUFFER_HANDLE_INVALID,
-        "independent spans never forge a public buffer handle");
     assert(resolved.offset == 8 && resolved.size == 16,
         "independent spans preserve their checked range");
-    assert(resolved.access == fixture.allocation_cells[0].value.backing.access
-        && resolved.memory_class == gpu::MemoryClass.CPU_WRITE,
+    assert(resolved.memory_class == gpu::MemoryClass.CPU_WRITE,
         "independent spans derive immutable backing policy");
     assert(resolved.mapping == &fixture.mapping[8]
         && (ulong)resolved.address == 0x2008,

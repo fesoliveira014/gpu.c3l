@@ -81,8 +81,11 @@ by CPU tests but has not run on hardware that reports the capability.
   exact prior state.
 - Timestamp slot reset, write, and read history is application state.
   Values from different native queues are not calibrated.
-- A `CommandList` is confined to its recording thread. Submission and
-  completion calls are thread-safe.
+- A recording `CommandList` and its aliases are confined to the recording
+  thread. Submit, present, and sparse-bind operations on the same native queue
+  require application synchronization, including when queue roles alias.
+  Completion polling and waiting are thread-safe. See
+  [Threading](architecture.md#threading) for the complete contract.
 
 ## Resource limits
 

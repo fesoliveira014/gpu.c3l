@@ -190,28 +190,6 @@ fn ZString slot_name(char* name) @private {
     return name[0] != 0 ? (ZString)name : (ZString)"(unnamed)";
 }
 
-fn uint report_buffer_leaks(VkDeviceState* state) {
-    uint count = 0;
-    if (state.buffers.slots.ptr == null) return 0;
-    foreach (i, &cell : state.buffers.slots[:state.buffers.next_new]) {
-        if (!cell.used || cell.value.internal) continue;
-        ZString name = slot_name(&cell.value.debug_name[0]);
-        if (!report_resource_lifetime(
-            state:               state,
-            resource_kind:       gpu::DebugResourceKind.GPU_SPAN,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          name,
-            backend_text:        "GPU span storage remains live",
-        )) {
-            io::eprintfn("gpu: leaked GPU span storage '%s'", name);
-        }
-        count++;
-    }
-    return count;
-}
-
 fn uint report_allocation_leaks(VkDeviceState* state) {
     uint count = 0;
     if (state.allocations.slots.ptr == null) return 0;
@@ -410,7 +388,6 @@ fn uint report_timestamp_pool_leaks(VkDeviceState* state) {
 
 fn uint report_resource_leaks(VkDeviceState* state) {
     uint count = report_allocation_leaks(state);
-    count += report_buffer_leaks(state);
     count += report_texture_leaks(state);
     count += report_attachment_view_leaks(state);
     count += report_pipeline_leaks(state);

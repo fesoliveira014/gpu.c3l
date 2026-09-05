@@ -31,7 +31,8 @@ enum CommandState @private {
 
 enum ResourceOwnerKind @private {
     ALLOCATION,
-    BUFFER,
+    // Reserved to keep resource-owner tags stable.
+    RESERVED,
     TEXTURE,
     ATTACHMENT_VIEW,
     TEXTURE_VIEW,

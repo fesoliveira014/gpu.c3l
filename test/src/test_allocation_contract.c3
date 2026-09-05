@@ -145,12 +145,12 @@ fn void mapped_span_visibility_validates_ownership_and_ranges() @test {
 
     assert(@catch(gpu::flush_mapped_span(&second, range))
         == gpu::INVALID_HANDLE);
-    GpuSpan buffer_owned = range;
-    buffer_owned.owner = gpu::internal::resource_owner_tag(
+    GpuSpan wrong_kind = range;
+    wrong_kind.owner = gpu::internal::resource_owner_tag(
         first_state.resource_owner,
-        gpu::internal::ResourceOwnerKind.BUFFER,
+        gpu::internal::ResourceOwnerKind.TEXTURE,
     );
-    assert(@catch(gpu::flush_mapped_span(&first, buffer_owned))
+    assert(@catch(gpu::flush_mapped_span(&first, wrong_kind))
         == gpu::INVALID_HANDLE);
     assert(first_state.allocation_visibility_entries == 2,
         "cross-kind spans stop before backend dispatch");

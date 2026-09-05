@@ -6,10 +6,8 @@ import vk;
 
 struct ResolvedSpan {
     BufferSlot*       slot;
-    BufferHandle      backing_buffer;
     usz               offset;
     usz               size;
-    gpu::QueueRoles   access;
     gpu::MemoryClass   memory_class;
     void*             mapping;
     gpu::GpuAddress   address;
@@ -18,37 +16,16 @@ struct ResolvedSpan {
 fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     if (state == null || span == null) return gpu::INVALID_HANDLE~;
 
-    BufferSlot* slot;
-    BufferHandle backing_buffer;
-    usz offset;
-    gpu::QueueRoles access;
-    gpu::MemoryClass memory_class;
-    if (span.owner == state.buffers.owner) {
-        backing_buffer = {
-            .owner      = span.owner,
-            .index      = span.index,
-            .generation = span.generation,
-        };
-        slot = state.buffers.get(backing_buffer)!;
-        offset = span.offset;
-        access = slot.access;
-        memory_class = slot.memory_class;
-    } else if (span.owner == state.allocations.owner) {
-        gpu::GpuAllocation allocation = {
-            .owner      = span.owner,
-            .index      = span.index,
-            .generation = span.generation,
-        };
-        AllocationSlot* allocation_slot = state.allocations.get(allocation)!;
-        backing_buffer = BUFFER_HANDLE_INVALID;
-        if (allocation_slot.texture_memory) return gpu::INVALID_ARGUMENT~;
-        slot = &allocation_slot.backing;
-        offset = span.offset;
-        access = slot.access;
-        memory_class = slot.memory_class;
-    } else {
-        return gpu::INVALID_HANDLE~;
-    }
+    if (span.owner != state.allocations.owner) return gpu::INVALID_HANDLE~;
+    gpu::GpuAllocation allocation = {
+        .owner      = span.owner,
+        .index      = span.index,
+        .generation = span.generation,
+    };
+    AllocationSlot* allocation_slot = state.allocations.get(allocation)!;
+    if (allocation_slot.texture_memory) return gpu::INVALID_ARGUMENT~;
+    BufferSlot* slot = &allocation_slot.backing;
+    usz offset = span.offset;
 
     if (span.size == 0) return gpu::INVALID_ARGUMENT~;
     if (!gpu::internal::range_fits(slot.size, offset, span.size)) {
@@ -70,11 +47,9 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     }
     return {
         .slot           = slot,
-        .backing_buffer = backing_buffer,
         .offset         = offset,
         .size           = span.size,
-        .access         = access,
-        .memory_class    = memory_class,
+        .memory_class   = slot.memory_class,
         .mapping        = mapping,
         .address        = address,
     };
@@ -187,9 +162,8 @@ fn void? validate_span_queue_access(
     ZString operation,
 ) @private {
     gpu::DebugResourceKind resource_kind = span_resource_kind(state, span);
-    if ((uint)resolved.access == 0
-        || !gpu::internal::queue_roles_are_known(resolved.access)
-        || !gpu::internal::queue_roles_are_subset(resolved.access, resolved.slot.access)) {
+    if ((uint)resolved.slot.access == 0
+        || !gpu::internal::queue_roles_are_known(resolved.slot.access)) {
         return report_contract_failure(
             state:               state,
             operation:           operation,
@@ -200,14 +174,14 @@ fn void? validate_span_queue_access(
             generation:          span.generation,
             debug_name:          slot_name(&resolved.slot.debug_name[0]),
             rejected_field:      "GpuSpan",
-            invariant:           "span access must be a non-empty subset of its owner access",
+            invariant:           "backing resource access must contain valid queue roles",
             backend_text:        null,
         )~;
     }
     return validate_operation_queue_access(
         state:          state,
         queue_roles:    queue_roles,
-        access:         resolved.access,
+        access:         resolved.slot.access,
         resource_kind:  resource_kind,
         index:          span.index,
         generation:     span.generation,
@@ -289,16 +263,7 @@ fn ResolvedSpan? resolve_span_slot(
             && span.owner == state.allocations.owner;
         bool has_identity = span_fault != gpu::INVALID_HANDLE;
         ZString debug_name;
-        if (has_identity && span.owner == state.buffers.owner) {
-            BufferHandle handle = {
-                .owner      = span.owner,
-                .index      = span.index,
-                .generation = span.generation,
-            };
-            if (try slot = state.buffers.get(handle)) {
-                debug_name = slot_name(&slot.debug_name[0]);
-            }
-        } else if (has_identity && allocation_owner) {
+        if (has_identity && allocation_owner) {
             gpu::GpuAllocation allocation = {
                 .owner      = span.owner,
                 .index      = span.index,

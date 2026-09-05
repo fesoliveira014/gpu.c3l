@@ -82,7 +82,6 @@
         "src/test_vk_vma_allocator.c3",
         "src/test_vk_buffer.c3",
         "src/test_vk_mapped_gpu_span.c3",
-        "src/test_vk_buffer_table.c3",
         "src/test_vk_span_resolver.c3",
         "src/test_vk_allocation.c3",
         "src/submitted_command_fixture.c3",

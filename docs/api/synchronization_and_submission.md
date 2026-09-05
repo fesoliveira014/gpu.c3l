@@ -125,7 +125,10 @@ ray stages.
 
 On success every list token and the readiness are consumed. On any
 failure the lists stay executable and readiness stays unconsumed.
-Submission is externally synchronized on the native queue.
+Submission is externally synchronized with other submit, present, and
+sparse-bind calls on the same native queue, including aliased semantic roles.
+See [Threading](../architecture.md#threading). This host synchronization does
+not replace GPU barriers or completion dependencies.
 
 Cross-queue rule: the wait orders execution and visibility but transfers
 no ownership. Allocations touched by both queues need both roles in

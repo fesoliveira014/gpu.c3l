@@ -327,8 +327,6 @@ fn vk::BufferCreateInfo? allocation_buffer_create_info(
             acceleration_structures_enabled,
             ray_tracing_pipelines_enabled,
         ),
-        .memory_class = desc.memory_class,
-        .access       = desc.access,
     };
     return make_buffer_create_info(&backing, queue_families);
 }
@@ -524,7 +522,6 @@ fn gpu::GpuAllocation? allocate_memory_for_state_with_ops(
             .access          = desc.access,
             .memory_class    = desc.memory_class,
             .debug_name      = debug_name,
-            .internal        = true,
         },
         .size            = desc.size,
         .access          = desc.access,

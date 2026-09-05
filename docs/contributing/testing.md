@@ -60,7 +60,6 @@ with no native libraries:
 
 ```sh
 c3c run import_gpu --path test/cpu
-c3c build canonical_gpu_surface --path test/cpu
 c3c build import_surface_win32 --path test/cpu
 c3c build import_surface_wayland --path test/cpu
 c3c build import_surface_x11 --path test/cpu
@@ -159,7 +158,6 @@ informational artifact.
 
 ```sh
 c3c run import_gpu --path test/cpu
-c3c build canonical_gpu_surface --path test/cpu
 c3c build import_surface_win32 --path test/cpu
 c3c build import_surface_wayland --path test/cpu
 c3c build import_surface_x11 --path test/cpu

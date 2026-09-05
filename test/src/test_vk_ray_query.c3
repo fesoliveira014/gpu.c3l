@@ -1,6 +1,8 @@
 module gpu_test;
 
 import gpu;
+import gpu::internal @public;
+import gpu::internal::vk @public;
 
 const char[*] RAY_QUERY_TRIANGLE_SPIRV =
     $embed("shaders/ray_query_triangle.comp.spv");
@@ -84,9 +86,34 @@ fn void lavapipe_acceleration_structure_storage_models_are_explicit() @test {
     gpu::AccelerationStructureRequirements requirements =
         gpu::get_acceleration_structure_requirements(&device, &desc)!!;
 
+    gpu::MemoryStats baseline = gpu::get_memory_stats(&device)!!;
     gpu::AccelerationStructureHandle hidden =
         gpu::create_acceleration_structure(&device, &desc)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    gpu::internal::vk::AccelerationStructureSlot* owned =
+        state.acceleration_structures.get(hidden)!!;
+    assert(owned.backing_buffer != null && owned.backing_allocation != null
+        && !owned.placement.is_valid(),
+        "an ordinary structure directly owns its native backing");
+    assert(gpu::get_memory_stats(&device)!!.live_allocation_count
+        == baseline.live_allocation_count + 1);
     gpu::destroy_acceleration_structure(&device, hidden)!!;
+    assert(gpu::get_memory_stats(&device)!!.live_allocation_count
+        == baseline.live_allocation_count,
+        "destroying an owned structure releases its backing exactly once");
+
+    {
+        gpu::internal::vk::AccelerationStructureTable available = state.acceleration_structures;
+        state.acceleration_structures = { .owner = available.owner };
+        defer state.acceleration_structures = available;
+        assert(@catch(gpu::create_acceleration_structure(&device, &desc))
+            == gpu::SLOT_TABLE_FULL,
+            "failed publication rejects the completed native structure");
+        assert(gpu::get_memory_stats(&device)!!.live_allocation_count
+            == baseline.live_allocation_count,
+            "failed publication releases unpublished backing without a registry");
+    }
 
     gpu::AllocationDesc allocation_desc = {
         .size = requirements.storage_size,

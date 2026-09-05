@@ -346,7 +346,7 @@ fn void mapped_visibility_rejects_invalid_spans_before_native_work() @test {
     gpu::GpuSpan foreign = span;
     foreign.owner = gpu::internal::resource_owner_tag(
         ALLOCATION_TEST_OWNER,
-        gpu::internal::ResourceOwnerKind.BUFFER,
+        gpu::internal::ResourceOwnerKind.TEXTURE,
     );
     assert(@catch(vk::invalidate_mapped_span_for_state_with_ops(
         &fixture.state,
@@ -982,11 +982,11 @@ fn void allocation_table_pins_capacity_and_owner_domain() @test {
         ALLOCATION_TEST_OWNER,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
-    ulong buffer_owner = gpu::internal::resource_owner_tag(
+    ulong texture_owner = gpu::internal::resource_owner_tag(
         ALLOCATION_TEST_OWNER,
-        gpu::internal::ResourceOwnerKind.BUFFER,
+        gpu::internal::ResourceOwnerKind.TEXTURE,
     );
-    assert(allocation_owner != buffer_owner,
+    assert(allocation_owner != texture_owner,
         "allocation identities occupy a distinct owner domain");
 
     vk::AllocationCell[] cells = mem::new_array(
