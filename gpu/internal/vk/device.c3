@@ -2117,9 +2117,6 @@ fn gpu::DeviceCaps build_caps(
         },
         .max_draw_indirect_count    = props.limits.max_draw_indirect_count,
         .max_generated_work_count   = inputs.generated_work.max_count,
-        .min_uniform_alignment      = (usz)props.limits.min_uniform_buffer_offset_alignment,
-        .min_storage_alignment      = (usz)props.limits.min_storage_buffer_offset_alignment,
-        .min_texel_buffer_alignment = (usz)props.limits.min_texel_buffer_offset_alignment,
         .max_sampler_lod_bias       = props.limits.max_sampler_lod_bias,
         .max_sampler_anisotropy     = base.sampler_anisotropy != 0 ? props.limits.max_sampler_anisotropy : 0.0f,
     };

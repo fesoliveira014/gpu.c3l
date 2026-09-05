@@ -136,8 +136,6 @@ uint max_targets = caps.max_color_attachments;
 - `texture_heap_capacity`, `sampler_heap_capacity`, `max_color_attachments`,
   `max_push_constant_size`, `max_compute_work_group_count`,
   `max_draw_indirect_count`, `max_generated_work_count`;
-- `min_uniform_alignment`, `min_storage_alignment`,
-  `min_texel_buffer_alignment`;
 - `max_sampler_lod_bias`, `max_sampler_anisotropy` (0 means unsupported);
 - `timestamps` (`TimestampCaps`), `sparse_textures` (`SparseTextureCaps`);
 - `acceleration_structures`, `ray_queries`, `ray_tracing_pipelines`. Each

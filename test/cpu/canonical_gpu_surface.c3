@@ -73,9 +73,6 @@ fn void pin_runtime_adapter_device() {
         .max_compute_work_group_count = { .x = 1, .y = 1, .z = 1 },
         .max_draw_indirect_count      = 1,
         .max_generated_work_count     = 1,
-        .min_uniform_alignment        = 1,
-        .min_storage_alignment        = 1,
-        .min_texel_buffer_alignment   = 1,
         .max_sampler_lod_bias         = 1.0f,
         .max_sampler_anisotropy       = 1.0f,
     };
@@ -121,9 +118,6 @@ fn void pin_runtime_adapter_device() {
     (void)caps.max_compute_work_group_count;
     (void)caps.max_draw_indirect_count;
     (void)caps.max_generated_work_count;
-    (void)caps.min_uniform_alignment;
-    (void)caps.min_storage_alignment;
-    (void)caps.min_texel_buffer_alignment;
     (void)caps.max_sampler_lod_bias;
     (void)caps.max_sampler_anisotropy;
 }
