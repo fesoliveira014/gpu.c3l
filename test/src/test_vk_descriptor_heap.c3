@@ -2284,3 +2284,47 @@ fn void reservation_release_reclaims_holes() @test {
     assert(@catch(gpu::release_texture_indices(&device, outside)) == gpu::INVALID_ARGUMENT,
         "a range outside the heap faults before indexing");
 }
+
+fn void reserved_slot_generation_exhaustion_stays_retired() @test {
+    gpu::Device device = make_heap_test_device(4, 1);
+    defer destroy_test_device(&device)!!;
+    gpu::TextureHandle texture = make_heap_texture(&device);
+    defer gpu::destroy_texture(&device, texture)!!;
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    vk::DescriptorHeapState* heap = &state.shader_heap.descriptors;
+
+    gpu::TextureIndexRange range = gpu::reserve_texture_indices(&device, 1)!!;
+    vk::TextureDescriptorCell* cell =
+        &heap.texture_cells[range.base.value - 1];
+    cell.generation = vk::HANDLE_GENERATION_MAX - 1;
+
+    gpu::TextureView view = gpu::create_texture_view_at(
+        device:  &device,
+        slot:    range.base,
+        texture: texture,
+        desc:    null,
+    )!!;
+    assert(cell.generation == vk::HANDLE_GENERATION_MAX,
+        "publishing the last available generation retires the cell at the sentinel");
+
+    gpu::destroy_texture_view(&device, view)!!;
+    assert(cell.generation == vk::HANDLE_GENERATION_MAX && cell.reserved,
+        "destruction leaves an exhausted reserved cell retired and reserved");
+
+    assert(@catch(gpu::create_texture_view_at(
+        device:  &device,
+        slot:    range.base,
+        texture: texture,
+        desc:    null,
+    )) == gpu::SLOT_TABLE_FULL,
+        "an exhausted reserved slot faults SLOT_TABLE_FULL instead of panicking");
+
+    gpu::release_texture_indices(&device, range)!!;
+    assert(cell.reserved, "releasing the range leaves the exhausted cell reserved");
+    assert(heap.texture_reserved_low == range.base.value - 1,
+        "the exhausted cell keeps the reservation boundary from advancing");
+
+    gpu::TextureView normal = gpu::create_texture_view(&device, texture, null)!!;
+    assert(normal.is_valid(), "a normal create_texture_view still succeeds afterward");
+    gpu::destroy_texture_view(&device, normal)!!;
+}

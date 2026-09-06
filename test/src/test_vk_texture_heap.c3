@@ -1226,3 +1226,173 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     gpu::destroy_texture_view(&device, slot)!!;
     gpu::release_texture_indices(&device, range)!!;
 }
+
+fn void fill_flat_color(char[] data, char[4] color) {
+    for (usz i = 0; i < data.len; i += 4) {
+        data[i]     = color[0];
+        data[i + 1] = color[1];
+        data[i + 2] = color[2];
+        data[i + 3] = color[3];
+    }
+}
+
+fn void assert_sampled_flat_color(
+    gpu::GpuSpan output,
+    gpu::Device* device,
+    usz texel_index,
+    char[4] expected,
+) {
+    gpu::invalidate_mapped_span(device, output)!!;
+    float* texels = (float*)test_span_mapping(device, output).ptr;
+    float* texel = &texels[texel_index * 4];
+    assert(quantize_unorm8(texel[0]) == (uint)(char)expected[0]
+        && quantize_unorm8(texel[1]) == (uint)(char)expected[1]
+        && quantize_unorm8(texel[2]) == (uint)(char)expected[2]
+        && quantize_unorm8(texel[3]) == (uint)(char)expected[3],
+        "the row-addressed slot samples the texture placed there");
+}
+
+fn void reserved_row_addressing_samples_correct_texture() @test {
+    const uint ROW_TEX_SIZE = 4;
+    const uint ROW_FRAMES = 2;
+    const uint ROW_ATTACHMENTS = 2;
+    const uint ROW_SLOT_COUNT = ROW_FRAMES * ROW_ATTACHMENTS;
+    char[4] color_0 = { 40, 80, 120, 255 };
+    char[4] color_1 = { 210, 30, 90, 255 };
+
+    gpu::RuntimeDesc device_desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name  = "gpu_row_addressing_test",
+    };
+    gpu::Device device = create_test_device(&device_desc)!!;
+    defer destroy_test_device(&device)!!;
+
+    gpu::TextureDesc tex_desc = {
+        .access     = { .graphics, .compute, .transfer },
+        .width      = ROW_TEX_SIZE,
+        .height     = ROW_TEX_SIZE,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .transfer_dst },
+        .debug_name = "row_texture",
+    };
+    gpu::TextureHandle[2] textures;
+    textures[0] = gpu::create_texture(&device, &tex_desc)!!;
+    defer gpu::destroy_texture(&device, textures[0])!!;
+    textures[1] = gpu::create_texture(&device, &tex_desc)!!;
+    defer gpu::destroy_texture(&device, textures[1])!!;
+
+    char[ROW_TEX_SIZE * ROW_TEX_SIZE * 4] pixels_0;
+    fill_flat_color(pixels_0[..], color_0);
+    upload_test_texture_data(
+        &device,
+        textures[0],
+        0,
+        pixels_0[..],
+        gpu::sampled_at({ .compute }),
+    )!!;
+    char[ROW_TEX_SIZE * ROW_TEX_SIZE * 4] pixels_1;
+    fill_flat_color(pixels_1[..], color_1);
+    upload_test_texture_data(
+        &device,
+        textures[1],
+        0,
+        pixels_1[..],
+        gpu::sampled_at({ .compute }),
+    )!!;
+
+    gpu::TextureIndexRange range = gpu::reserve_texture_indices(&device, ROW_SLOT_COUNT)!!;
+    gpu::TextureView[ROW_SLOT_COUNT] views;
+    for (uint f = 0; f < ROW_FRAMES; f++) {
+        for (uint a = 0; a < ROW_ATTACHMENTS; a++) {
+            uint offset = f * ROW_ATTACHMENTS + a;
+            gpu::TextureIndex slot = { .value = range.base.value + offset };
+            uint pick = (f + a) % 2;
+            views[offset] = gpu::create_texture_view_at(
+                device:  &device,
+                slot:    slot,
+                texture: textures[pick],
+                desc:    null,
+            )!!;
+        }
+    }
+
+    gpu::SamplerDesc sampler_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    gpu::SamplerIndex sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+
+    // (frame 1, attachment 0), (frame 0, attachment 1), (frame 0, attachment 0).
+    uint[3] check_offsets = { 1 * ROW_ATTACHMENTS + 0, 0 * ROW_ATTACHMENTS + 1, 0 * ROW_ATTACHMENTS + 0 };
+    char[4][3] expected_colors = { color_1, color_1, color_0 };
+
+    gpu::ShaderDesc sample_shader = { .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main" };
+    gpu::ComputePipelineDesc sample_pipe_desc = { .shader = sample_shader };
+    gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pipe_desc)!!;
+    defer gpu::destroy_pipeline(&device, sample_pipe)!!;
+
+    OwnedSpan roots = allocate_owned_span(
+        device:       &device,
+        size:         SampleRoot::size * 3,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "row_addressing_roots",
+    )!!;
+    defer free_owned_span(&device, &roots)!!;
+    OwnedSpan output = allocate_owned_span(
+        device:       &device,
+        size:         16 * 3,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .compute },
+        debug_name:   "row_addressing_output",
+    )!!;
+    defer free_owned_span(&device, &output)!!;
+
+    gpu::GpuAddress output_address = test_span_address(&device, output.span);
+    gpu::GpuSpan[3] root_spans;
+    for (uint i = 0; i < 3; i++) {
+        root_spans[i] = roots.span.checked_subspan(i * SampleRoot::size, SampleRoot::size)!!;
+        SampleRoot* root = (SampleRoot*)test_span_mapping(&device, root_spans[i]).ptr;
+        gpu::TextureIndex texture_index = { .value = range.base.value + check_offsets[i] };
+        *root = {
+            .output_gpu    = (gpu::GpuAddress)((ulong)output_address + (ulong)i * 16),
+            .texture_index = texture_index,
+            .sampler_index = sampler,
+            .width         = 1,
+            .height        = 1,
+        };
+    }
+    gpu::flush_mapped_span(&device, roots.span)!!;
+
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&cmd)!!;
+    bind_test_compute_pipeline(&cmd, sample_pipe);
+    for (uint i = 0; i < 3; i++) {
+        gpu::cmd_dispatch(
+            commands: &cmd,
+            root:     test_span_address(&device, root_spans[i]),
+            groups:   { 1, 1, 1 },
+        )!!;
+    }
+    gpu::Barrier to_host = { .before = { .compute = true }, .after = { .host = true } };
+    gpu::cmd_barrier(&cmd, &to_host)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::wait_completion(submit_test_queue(&device, gpu::QueueKind.COMPUTE, &submit)!!)!!;
+
+    for (uint i = 0; i < 3; i++) {
+        assert_sampled_flat_color(output.span, &device, i, expected_colors[i]);
+    }
+
+    foreach (view : views) gpu::destroy_texture_view(&device, view)!!;
+    gpu::release_texture_indices(&device, range)!!;
+}

@@ -205,7 +205,8 @@ gpu::release_texture_indices(&device, row)!;           // every slot must be emp
 
 `update_texture_view` rewrites the caller's token in place; copies taken
 before the call are stale. Releasing the lowest reservation returns it and any released
-reservations above it to the general region. The hazard rule is the same
+reservations above it to the general region. A slot whose generation is
+exhausted stays reserved and out of both regions. The hazard rule is the same
 as for creation and destruction: no executing command may read the slot.
 
 A view with `cube` set publishes six consecutive layers from `base_layer`

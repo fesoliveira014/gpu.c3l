@@ -1239,9 +1239,11 @@ fn void? vk_release_texture_indices(
         if (!cell.reserved) return gpu::INVALID_ARGUMENT~;
         if (cell.used) return gpu::RESOURCE_IN_USE~;
     }
-    foreach (&cell : heap.texture_cells[first:range.count]) cell.reserved = false;
+    foreach (&cell : heap.texture_cells[first:range.count]) {
+        if (can_allocate_handle_generation(cell.generation)) cell.reserved = false;
+    }
     if (first == heap.texture_reserved_low) {
-        heap.texture_reserved_low = first + range.count;
+        heap.texture_reserved_low = first;
         while (heap.texture_reserved_low < capacity
             && !heap.texture_cells[heap.texture_reserved_low].reserved) {
             heap.texture_reserved_low++;
@@ -1267,6 +1269,9 @@ fn gpu::TextureView? vk_create_texture_view_at(
         return gpu::INVALID_ARGUMENT~;
     }
     if (heap.texture_cells[cell_index].used) return gpu::RESOURCE_IN_USE~;
+    if (!can_allocate_handle_generation(heap.texture_cells[cell_index].generation)) {
+        return gpu::SLOT_TABLE_FULL~;
+    }
     TextureSlot* texture_slot = resolve_descriptor_texture(
         state:         state,
         texture:       texture,

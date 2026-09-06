@@ -1015,6 +1015,8 @@ fn TextureIndexRange? reserve_texture_indices(Device* device, uint count) {
 <* Release a whole reservation. Every slot must be empty. Releasing the lowest
    reservation returns it and any released reservations above it to the
    general region; releasing a higher one leaves a hole until those below go.
+   A slot whose generation is exhausted stays reserved and out of both
+   regions.
 
    @param device : "Live device that owns the heap."
    @param range : "A range returned by `reserve_texture_indices`."
