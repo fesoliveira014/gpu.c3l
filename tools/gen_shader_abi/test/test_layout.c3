@@ -213,6 +213,22 @@ fn void mat4_layouts_and_padding() @test {
     `, LAYOUT_ERROR);
 }
 
+fn void oversized_array_rejected() @test {
+    @expect_fault(`
+        abi t;
+        struct Huge {
+            uint[1073741824] values;
+        }
+    `, LAYOUT_ERROR);
+    @expect_fault(`
+        abi t;
+        struct Huge {
+            vec4[268435455] a;
+            vec4[2]         b;
+        }
+    `, LAYOUT_ERROR);
+}
+
 fn void array_strides_follow_element_alignment() @test {
     Schema schema;
     schema.init();

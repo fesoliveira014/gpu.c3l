@@ -139,6 +139,12 @@ fn TypeInfo? TypeTable.lookup(&self, String name, Loc loc) {
     return UNKNOWN_TYPE~;
 }
 
+fn bool TypeTable.is_scalar(&self, String name) {
+    TypeInfo? info = self.entries.get(name);
+    if (try info) return info.kind == SCALAR;
+    return false;
+}
+
 fn bool is_rejected_matrix(String name) {
     if (name.len < 4 || name[0:3] != "mat") return false;
     if (name.len == 4) return name[3] == '2' || name[3] == '3';
@@ -147,12 +153,9 @@ fn bool is_rejected_matrix(String name) {
 
 fn uint field_stride(TypeInfo* info) => align_up(info.size, info.alignment);
 
+<* Byte size of a field, or 0 when an array does not fit in 32 bits. *>
 fn uint field_size(Field* field, TypeInfo* info) {
-    return field.array_len == 0 ? info.size : field.array_len * field_stride(info);
-}
-
-fn bool TypeTable.is_scalar(&self, String name) {
-    TypeInfo? info = self.entries.get(name);
-    if (try info) return info.kind == SCALAR;
-    return false;
+    if (field.array_len == 0) return info.size;
+    ulong size = (ulong)field.array_len * (ulong)field_stride(info);
+    return size > uint::max ? 0 : (uint)size;
 }

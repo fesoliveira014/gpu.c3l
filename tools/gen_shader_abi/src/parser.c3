@@ -228,8 +228,8 @@ fn void? validate_const_literal(String type_name, String value, bool negative, L
 
 fn uint? parse_array_len(Token count) {
     ulong? value = count.text.to_ulong();
-    if (catch value) {
-        diagnostic(count.loc, "array length must be a positive integer, got '%s'", count.text);
+    if (catch err = value) {
+        diagnostic(count.loc, "array length must be a positive integer, got '%s' (%s)", count.text, err);
         return PARSE_ERROR~;
     }
     if (value == 0 || value > uint::max) {
