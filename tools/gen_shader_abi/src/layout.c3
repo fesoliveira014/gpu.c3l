@@ -39,8 +39,12 @@ fn void? compute_struct_layout(StructDecl* decl, TypeTable* types) {
             return LAYOUT_ERROR~;
         }
         field.offset = cursor;
-        uint size = field_size(field, &info);
-        if (size == 0 || size > uint::max - cursor) {
+        uint? size = field_size(field, &info);
+        if (catch err = size) {
+            diagnostic(field.loc, "field '%s' makes the struct larger than 4 GiB", field.name);
+            return LAYOUT_ERROR~;
+        }
+        if (size > uint::max - cursor) {
             diagnostic(field.loc, "field '%s' makes the struct larger than 4 GiB", field.name);
             return LAYOUT_ERROR~;
         }
