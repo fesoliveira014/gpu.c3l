@@ -529,8 +529,7 @@ The shader declares the graphics header and then the payload from offset
 16, or generates both from `push graphics SpriteRoot { ... }`. The bytes
 are copied during the call; the value need not outlive it. Larger or shared
 data stays behind a root address. This default is provisional until the
-hardware comparison in [root-pointer data](contributing/root_pointer_data.md)
-is run.
+hardware comparison recorded with the contributor benchmarks is run.
 
 ## Draw indirectly
 
