@@ -14,10 +14,13 @@ shaders index into it with values stored in root data.
 
 Every pipeline layout has one push-constant range of `ROOT_PUSH_CAPACITY`
 (128) bytes. The root-address header occupies the start; an optional inline
-payload starts at `INLINE_ROOT_OFFSET` (16) and holds at most
-`INLINE_ROOT_CAPACITY` (112) bytes. Shaders that read push constants declare
-the header for their pipeline kind first, exactly, and any payload members
-at or after offset 16.
+payload follows it. Shaders that read push constants declare the header for
+their pipeline kind first, exactly, and any payload members at or after the
+header end: `INLINE_ROOT_OFFSET_COMPUTE` (8) for compute and ray tracing,
+`INLINE_ROOT_OFFSET_GRAPHICS` (16) for graphics. The payload may start later
+when its first member needs a larger alignment (a `vec4` at 16). The library
+reads that start from the pipeline's shaders and writes the payload there;
+the capacity is 128 minus the start, at most `INLINE_ROOT_CAPACITY` (120).
 
 Compute and ray tracing header, 8 bytes:
 
@@ -58,10 +61,12 @@ A direct command may carry a payload in the same push. `cmd_dispatch`,
 `cmd_dispatch_indirect`, every `cmd_draw*`, and every `cmd_trace_rays*` take
 a trailing `char[] inline_root` (default empty). `@inline_root(&value)`
 borrows a value as bytes for the call; the command copies them immediately.
-The length must be a multiple of 4 and at most `INLINE_ROOT_CAPACITY`, else
+The length must be a multiple of 4, at most `INLINE_ROOT_CAPACITY`, and fit
+`ROOT_PUSH_CAPACITY` from the bound pipeline's payload start, else
 `INVALID_ARGUMENT`. Under `ContractValidation.FULL` a payload longer than the
 bound pipeline's reflected push block reports a `public_contract` diagnostic
-on `inline_root`.
+on `inline_root`. Stages of one pipeline that declare a payload must start it
+at the same offset.
 
 ```glsl
 layout(push_constant) uniform Push {
@@ -86,8 +91,10 @@ gpu::cmd_dispatch(
 )!;
 ```
 
-Payload offsets in the block are `INLINE_ROOT_OFFSET` plus the C3 struct
-offsets, so a std430 struct laid out from 0 mirrors the block from 16.
+Payload offsets in the block are the payload start plus the C3 struct
+offsets, so a std430 struct laid out from 0 mirrors the block from that
+start. A scalar compute payload starts at 8; one that begins with a `vec4`
+starts at 16.
 Generated work updates the header only; payload bytes are unspecified after
 `cmd_dispatch_generated` or `cmd_draw_generated`, and every direct command
 pushes its own payload again.
@@ -344,11 +351,13 @@ assertions; generated GLSL emits `root` types as
 
 `push compute Name { ... }` and `push graphics Name { ... }` declare an
 inline payload. The C3 side is the payload struct, laid out from 0 and
-asserted against `INLINE_ROOT_CAPACITY`. The GLSL side is the whole
+asserted against its capacity. The GLSL side is the whole
 `layout(push_constant)` block named `pc`: the header for the role, then the
-fields from `layout(offset = 16)`. Put a role-qualified `push` in a schema
-of its own, since every shader that includes the generated GLSL receives the
-block. A bare `push` keeps the library header meaning.
+fields from `layout(offset = N)` where N is the header end rounded up to the
+payload's alignment. Field names may not repeat the header names. Put a
+role-qualified `push` in a schema of its own, since every shader that
+includes the generated GLSL receives the block. A bare `push` keeps the
+library header meaning.
 
 Shaders include the library ABI and then the application ABI:
 
@@ -365,15 +374,14 @@ Pipeline creation reflects the selected entry point and rejects with
 `SHADER_INVALID` when:
 
 - the push block is present but does not start with the exact compute or
-  graphics header (offsets, 64-bit unsigned scalars), has a member between
-  the header and `INLINE_ROOT_OFFSET`, or is larger than
-  `ROOT_PUSH_CAPACITY`;
+  graphics header (offsets, 64-bit unsigned scalars), has a member inside
+  the header, or is larger than `ROOT_PUSH_CAPACITY`;
 - a descriptor set other than set 0 is declared, or set 0 does not match the
   heap convention;
 - the entry point or execution model is missing.
 
 Binding 5 on a device without ray features returns `UNSUPPORTED_FEATURE`.
 
-Header members must be flat unsigned 64-bit addresses. Payload members at
-or after `INLINE_ROOT_OFFSET` are not shape-checked; the application owns
-their layout through the schema generator or by hand.
+Header members must be flat unsigned 64-bit addresses. Payload members after
+the header are not shape-checked; the application owns their layout through
+the schema generator or by hand.

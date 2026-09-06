@@ -35,7 +35,7 @@ const char[*] REFLECT_OVERSIZED_PUSH_SPIRV = $embed("shaders/oversized_push.comp
 const char[*] REFLECT_INLINE_ROOT_SPIRV = $embed("shaders/root_inline.comp.spv");
 const char[*] REFLECT_TINT_FRAG_SPIRV = $embed("shaders/tint.frag.spv");
 const char[*] REFLECT_PUSH_OVER_CAPACITY_SPIRV = $embed("shaders/push_over_capacity.comp.spv");
-const char[*] REFLECT_PUSH_HEADER_OVERLAP_SPIRV = $embed("shaders/push_header_overlap.comp.spv");
+const char[*] REFLECT_PUSH_HEADER_OVERLAP_SPIRV = $embed("shaders/push_header_overlap.vert.spv");
 const char[*] REFLECT_VERTEX_SPIRV      = $embed("shaders/offscreen.vert.spv");
 const char[*] REFLECT_FRAGMENT_SPIRV    = $embed("shaders/offscreen.frag.spv");
 const char[*] REFLECT_NO_PUSH_SPIRV     = $embed("shaders/no_push.comp.spv");
@@ -1035,7 +1035,7 @@ fn void root_mismatch_diagnostics_identify_properties() @test {
         capture:   &capture,
         spirv:     REFLECT_REVERSED_GRAPHICS_SPIRV[..],
         role:      gpu::internal::ShaderRole.VERTEX,
-        invariant: "selected-entry push header members must match the root ABI and inline members must start at INLINE_ROOT_OFFSET",
+        invariant: "selected-entry push header members must match the root ABI and inline members must start at or after the root header",
     );
     assert_root_mismatch_reported(
         device:    &device,
@@ -1145,22 +1145,15 @@ fn void push_block_over_capacity_rejected() @test {
 }
 
 fn void push_member_inside_header_rejected() @test {
-    ShaderDiagnosticCapture capture;
-    gpu::Device device = make_diagnostic_reflection_test_device(&capture);
-    defer destroy_test_device(&device)!!;
-    gpu::ShaderDesc desc = {
-        .spirv = REFLECT_PUSH_HEADER_OVERLAP_SPIRV[..], .entry_point = "main",
-    };
-    uint before = capture.calls;
-    fault push_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
-    assert(push_fault == gpu::SHADER_INVALID, "an inline member inside the header faults SHADER_INVALID");
-    assert_shader_rejection(
-        capture:       &capture,
-        before:        before,
-        returned:      push_fault,
-        operation:     "create_compute_pipeline",
-        field:         "ComputePipelineDesc.shader",
-        invariant:     "selected-entry push header members must match the root ABI and inline members must start at INLINE_ROOT_OFFSET",
-        resource_kind: gpu::DebugResourceKind.SHADER,
-    );
+    fault overlap = @catch(check_fixture_root_abi(
+        REFLECT_PUSH_HEADER_OVERLAP_SPIRV[..],
+        gpu::internal::ShaderRole.VERTEX,
+        "main",
+    ));
+    assert(overlap == gpu::SHADER_INVALID, "a member between the two graphics roots faults SHADER_INVALID");
+    check_fixture_root_abi(
+        REFLECT_INLINE_ROOT_SPIRV[..],
+        gpu::internal::ShaderRole.COMPUTE,
+        "main",
+    )!!;
 }

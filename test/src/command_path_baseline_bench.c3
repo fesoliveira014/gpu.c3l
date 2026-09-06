@@ -43,19 +43,16 @@ $assert $reflect(ComputeRoot._pad0).offset == 20;
 $assert $reflect(ComputeRoot._pad1).offset == 24;
 $assert $reflect(ComputeRoot._pad2).offset == 28;
 
-struct InlineOutput {
+struct InlineRoot {
     gpu::GpuAddress output_gpu;
     uint            count;
+    uint            a;
+    uint            b;
+    uint            c;
+    uint            d;
+    uint            e;
+    uint            f;
     uint            _pad0;
-}
-
-struct InlineRoot {
-    uint a;
-    uint b;
-    uint c;
-    uint d;
-    uint e;
-    uint f;
 }
 
 struct OperationSamples {
@@ -615,27 +612,28 @@ fn InlineRootSamples measure_inline_execution(
     gpu::PipelineHandle inline_pipeline,
 ) {
     InlineRootSamples result;
+    const usz DATA_BYTES = INLINE_ROOT_COMMANDS * float::size;
     BenchSpan input = allocate_bench_span(
         device:       device,
-        size:         float::size,
+        size:         DATA_BYTES,
         memory_class: gpu::MemoryClass.CPU_WRITE,
         debug_name:   "inline_root_input",
     )!!;
     defer free_bench_span(device, &input)!!;
-    BenchSpan output = allocate_bench_span(
+    BenchSpan inline_output = allocate_bench_span(
         device:       device,
-        size:         float::size,
+        size:         DATA_BYTES,
         memory_class: gpu::MemoryClass.CPU_READ,
-        debug_name:   "inline_root_output",
+        debug_name:   "inline_root_inline_output",
     )!!;
-    defer free_bench_span(device, &output)!!;
-    BenchSpan inline_root = allocate_bench_span(
+    defer free_bench_span(device, &inline_output)!!;
+    BenchSpan record_output = allocate_bench_span(
         device:       device,
-        size:         InlineOutput::size,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        debug_name:   "inline_root_header",
+        size:         DATA_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        debug_name:   "inline_root_record_output",
     )!!;
-    defer free_bench_span(device, &inline_root)!!;
+    defer free_bench_span(device, &record_output)!!;
     BenchSpan records = allocate_bench_span(
         device:       device,
         size:         INLINE_ROOT_COMMANDS * ComputeRoot::size,
@@ -644,14 +642,12 @@ fn InlineRootSamples measure_inline_execution(
     )!!;
     defer free_bench_span(device, &records)!!;
 
-    *(float*)gpu::get_span_mapping(device, input.span)!!.ptr = 1.0f;
+    float* input_values = (float*)gpu::get_span_mapping(device, input.span)!!.ptr;
+    for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) input_values[i] = (float)(i + 1);
     gpu::flush_mapped_span(device, input.span)!!;
     gpu::GpuAddress input_gpu = gpu::get_span_address(device, input.span)!!;
-    gpu::GpuAddress output_gpu = gpu::get_span_address(device, output.span)!!;
-    InlineOutput* header = (InlineOutput*)gpu::get_span_mapping(device, inline_root.span)!!.ptr;
-    *header = { .output_gpu = output_gpu, .count = 1 };
-    gpu::flush_mapped_span(device, inline_root.span)!!;
-    gpu::GpuAddress header_gpu = gpu::get_span_address(device, inline_root.span)!!;
+    gpu::GpuAddress inline_output_gpu = gpu::get_span_address(device, inline_output.span)!!;
+    gpu::GpuAddress record_output_gpu = gpu::get_span_address(device, record_output.span)!!;
     ComputeRoot* record_base = (ComputeRoot*)gpu::get_span_mapping(device, records.span)!!.ptr;
     gpu::GpuAddress records_gpu = gpu::get_span_address(device, records.span)!!;
     gpu::Vec3u groups = { 1, 1, 1 };
@@ -665,10 +661,14 @@ fn InlineRootSamples measure_inline_execution(
         gpu::CommandList inline_list = gpu::begin_commands(allocator)!!;
         gpu::cmd_bind_pipeline(&inline_list, inline_pipeline)!!;
         for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) {
-            InlineRoot payload = { .a = i, .b = 1, .c = 2, .d = 3, .e = 4, .f = 5 };
+            InlineRoot payload = {
+                .output_gpu = (gpu::GpuAddress)((ulong)inline_output_gpu + (usz)i * float::size),
+                .count      = 1,
+                .a          = i + 1,
+            };
             gpu::cmd_dispatch(
                 commands:    &inline_list,
-                root:        header_gpu,
+                root:        (gpu::GpuAddress)0,
                 groups:      groups,
                 inline_root: gpu::@inline_root(&payload),
             )!!;
@@ -684,7 +684,11 @@ fn InlineRootSamples measure_inline_execution(
         gpu::CommandList ring_list = gpu::begin_commands(allocator)!!;
         gpu::cmd_bind_pipeline(&ring_list, record_pipeline)!!;
         for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) {
-            record_base[i] = { .input_gpu = input_gpu, .output_gpu = output_gpu, .count = 1 };
+            record_base[i] = {
+                .input_gpu  = (gpu::GpuAddress)((ulong)input_gpu + (usz)i * float::size),
+                .output_gpu = (gpu::GpuAddress)((ulong)record_output_gpu + (usz)i * float::size),
+                .count      = 1,
+            };
             gpu::cmd_dispatch(
                 commands: &ring_list,
                 root:     (gpu::GpuAddress)((ulong)records_gpu + (usz)i * ComputeRoot::size),
@@ -699,9 +703,15 @@ fn InlineRootSamples measure_inline_execution(
         gpu::wait_completion(submit_commands(queue, ring_lists[..]))!!;
         result.ring_execute[repetition] = (double)(long)start.to_now();
     }
-    gpu::invalidate_mapped_span(device, output.span)!!;
-    float written = *(float*)gpu::get_span_mapping(device, output.span)!!.ptr;
-    assert(written == 2.0f);
+    gpu::invalidate_mapped_span(device, inline_output.span)!!;
+    gpu::invalidate_mapped_span(device, record_output.span)!!;
+    float* inline_values = (float*)gpu::get_span_mapping(device, inline_output.span)!!.ptr;
+    float* record_values = (float*)gpu::get_span_mapping(device, record_output.span)!!.ptr;
+    for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) {
+        float expected = (float)(i + 1) * 2.0f;
+        assert(inline_values[i] == expected);
+        assert(record_values[i] == expected);
+    }
     return result;
 }
 

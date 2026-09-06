@@ -75,7 +75,8 @@ fn void append_guard(String abi_name, DString* out) {
 }
 
 <* Push block with the root header for the role first; the payload starts at
-   INLINE_ROOT_OFFSET so block offsets are that plus the C3 struct offsets. *>
+   the header end rounded up to the payload alignment, so block offsets are
+   that plus the C3 struct offsets. *>
 fn void emit_push_block(StructDecl* decl, TypeTable* types, DString* out) {
     out.appendf("layout(push_constant) uniform %s {\n", decl.name);
     if (decl.push_role == PushRole.COMPUTE) {
@@ -87,7 +88,7 @@ fn void emit_push_block(StructDecl* decl, TypeTable* types, DString* out) {
     foreach (i, &field : decl.fields) {
         TypeInfo info = types.entries.get(field.type_name)!!;
         if (i == 0) {
-            out.appendf("    layout(offset = %d) %s %s;\n", INLINE_ROOT_OFFSET, info.glsl_name, field.name);
+            out.appendf("    layout(offset = %d) %s %s;\n", decl.payload_offset, info.glsl_name, field.name);
             continue;
         }
         out.appendf("    %s %s;\n", info.glsl_name, field.name);

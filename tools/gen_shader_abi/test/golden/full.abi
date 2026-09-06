@@ -42,6 +42,11 @@ push graphics InlineOffset {
     vec4 offset;
 }
 
+push compute InlineScalars {
+    uint first;
+    uint second;
+}
+
 extern struct DrawIndexedIndirectCommand {
     uint index_count;
     uint instance_count;

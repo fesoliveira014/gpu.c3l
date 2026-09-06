@@ -53,7 +53,7 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
             out.appendf("$assert $reflect(%s.%s).offset == %d;\n", decl.name, field.name, field.offset);
         }
         if (decl.push_role != PushRole.NONE) {
-            out.appendf("$assert %s::size <= %sINLINE_ROOT_CAPACITY;\n", decl.name, module_name == "gpu" ? "" : "gpu::");
+            out.appendf("$assert %s::size <= %d;\n", decl.name, ROOT_PUSH_CAPACITY - decl.payload_offset);
         }
     }
 

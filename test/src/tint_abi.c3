@@ -8,4 +8,4 @@ struct TintRoot {
 }
 $assert TintRoot::size == 16;
 $assert $reflect(TintRoot.tint).offset == 0;
-$assert TintRoot::size <= gpu::INLINE_ROOT_CAPACITY;
+$assert TintRoot::size <= 112;

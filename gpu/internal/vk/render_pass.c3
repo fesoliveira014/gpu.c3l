@@ -1317,6 +1317,7 @@ fn void push_graphics_roots(
     push_root_block(
         command_buffer: record.command_buffer,
         inline_root:    record.inline_root,
+        inline_offset:  pipeline.inline_root_offset,
         layout:         pipeline.layout,
         stages:         (vk::ShaderStageFlags)push_stages,
         header:         &push,

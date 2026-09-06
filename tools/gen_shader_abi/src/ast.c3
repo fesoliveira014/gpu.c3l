@@ -69,6 +69,7 @@ struct StructDecl {
     FieldList fields;
     uint      size;
     uint      alignment;
+    uint      payload_offset;
 }
 
 struct Schema {

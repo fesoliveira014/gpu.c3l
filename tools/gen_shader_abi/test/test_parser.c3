@@ -262,3 +262,46 @@ fn void oversized_push_payload_rejected() @test {
         }
     `, LAYOUT_ERROR);
 }
+
+fn void push_payload_offset_follows_alignment() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        push compute Scalars {
+            uint a;
+            uint b;
+        }
+        push compute Vectors {
+            vec4 v;
+        }
+        push graphics Wide {
+            uint a;
+            uint b;
+            uint c;
+            uint d;
+        }
+    `, &schema, &types)!!;
+    assert(schema.structs.get_ref(0).payload_offset == 8);
+    assert(schema.structs.get_ref(1).payload_offset == 16);
+    assert(schema.structs.get_ref(2).payload_offset == 16);
+}
+
+fn void push_payload_rejects_header_names() @test {
+    @expect_fault(`
+        abi t;
+        push compute Bad {
+            u64 root_gpu;
+        }
+    `, PARSE_ERROR);
+    @expect_fault(`
+        abi t;
+        push graphics Bad {
+            u64 fragment_root_gpu;
+        }
+    `, PARSE_ERROR);
+}

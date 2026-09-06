@@ -58,6 +58,7 @@ struct PipelineShaderModule {
     vk::ShaderModule shader_module;
     char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
     uint push_block_size;
+    uint inline_root_offset;
 }
 
 struct ShaderModuleCreateOps @private {
@@ -559,7 +560,7 @@ fn ZString root_abi_mismatch_invariant(
         case RootAbiMismatch.MEMBER_MISSING:
             return "selected-entry push member must be present";
         case RootAbiMismatch.MEMBER_OFFSET:
-            return "selected-entry push header members must match the root ABI and inline members must start at INLINE_ROOT_OFFSET";
+            return "selected-entry push header members must match the root ABI and inline members must start at or after the root header";
         case RootAbiMismatch.MEMBER_SIZE:
             return "selected-entry push member size must match the root ABI";
         case RootAbiMismatch.MEMBER_WIDTH:
@@ -581,9 +582,11 @@ fn RootAbiMismatch root_push_abi_mismatch(
     gpu::internal::ShaderRole role,
     bool allow_alternate = false,
     uint* block_size_out = null,
+    uint* inline_offset_out = null,
 ) @private {
     gpu::internal::RootAbiSpec expected = root_abi_for_role(role);
     if (block_size_out != null) *block_size_out = 0;
+    if (inline_offset_out != null) *inline_offset_out = expected.block_size;
     uint count = 0;
     if (reflect_module.enumerate_entry_point_push_constant_blocks(
         entry_point,
@@ -624,14 +627,17 @@ fn RootAbiMismatch root_push_abi_mismatch(
             );
         if (mismatch != RootAbiMismatch.NONE) return mismatch;
     }
+    uint inline_offset = block.byte_size();
     for (uint i = expected.member_count; i < block.member_count(); i++) {
         spvreflect::BlockVariable* member = block.member(i);
         if (member == null) return RootAbiMismatch.MEMBER_MISSING;
-        if (member.byte_offset() < gpu::INLINE_ROOT_OFFSET) {
+        if (member.byte_offset() < expected.block_size) {
             return RootAbiMismatch.MEMBER_OFFSET;
         }
+        if (member.byte_offset() < inline_offset) inline_offset = member.byte_offset();
     }
     if (block_size_out != null) *block_size_out = block.byte_size();
+    if (inline_offset_out != null) *inline_offset_out = inline_offset;
     return RootAbiMismatch.NONE;
 }
 
@@ -865,6 +871,7 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
         role:            code.role,
         allow_alternate: allow_alternate_root_abi,
         block_size_out:  &shader.push_block_size,
+        inline_offset_out: &shader.inline_root_offset,
     );
     if (root_mismatch != RootAbiMismatch.NONE) {
         return report_shader_contract_failure(

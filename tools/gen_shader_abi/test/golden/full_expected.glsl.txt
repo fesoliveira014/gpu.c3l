@@ -49,6 +49,12 @@ layout(push_constant) uniform InlineOffset {
     layout(offset = 16) vec4 offset;
 } pc;
 
+layout(push_constant) uniform InlineScalars {
+    uint64_t root_gpu;
+    layout(offset = 8) uint first;
+    uint second;
+} pc;
+
 struct DrawIndexedIndirectCommand {
     uint index_count;
     uint instance_count;

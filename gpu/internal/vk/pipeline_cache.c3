@@ -70,6 +70,7 @@ struct PipelineCacheEntry {
     OwnedRayTracingPipelineKey     ray_tracing_key;
     ShaderId[]                     ray_tracing_shader_ids;
     uint                           push_block_size;
+    uint                           inline_root_offset;
     uint                           refcount;
     uint                           next_free;
     uint                           next_in_bucket;

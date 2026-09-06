@@ -276,19 +276,6 @@ fn void inline_root_payload_reaches_shader() @test {
         debug_name:   "inline_output",
     )!!;
     defer free_owned_span(&device, &output)!!;
-    OwnedSpan root_owned = allocate_owned_span(
-        device:       &device,
-        size:         InlineOutput::size,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .compute },
-        debug_name:   "inline_root",
-    )!!;
-    defer free_owned_span(&device, &root_owned)!!;
-    InlineOutput* root = (InlineOutput*)test_span_mapping(&device, root_owned.span).ptr;
-    root.output_gpu = test_span_address(&device, output.span);
-    root.count = COUNT;
-    gpu::flush_mapped_span(&device, root_owned.span)!!;
-
     gpu::ShaderDesc shader = { .spirv = ROOT_INLINE_SPIRV[..], .entry_point = "main" };
     gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
@@ -300,18 +287,23 @@ fn void inline_root_payload_reaches_shader() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     bind_test_compute_pipeline(&commands, pipeline);
-    InlineRoot payload = { .a = 1, .b = 2, .c = 3, .d = 4, .e = 5, .f = 6 };
-    gpu::cmd_dispatch(
-        commands:    &commands,
-        root:        test_span_address(&device, root_owned.span),
-        groups:      { (COUNT + INLINE_ROOT_WORKGROUP - 1) / INLINE_ROOT_WORKGROUP, 1, 1 },
-        inline_root: gpu::@inline_root(&payload),
-    )!!;
-    payload.a = 100;
+    InlineRoot payload = {
+        .output_gpu = test_span_address(&device, output.span),
+        .count      = COUNT / 2,
+        .a = 1, .b = 2, .c = 3, .d = 4, .e = 5, .f = 6,
+    };
     gpu::cmd_dispatch(
         commands:    &commands,
         root:        (gpu::GpuAddress)0,
-        groups:      { 1, 1, 1 },
+        groups:      { (COUNT + INLINE_ROOT_WORKGROUP - 1) / INLINE_ROOT_WORKGROUP, 1, 1 },
+        inline_root: gpu::@inline_root(&payload),
+    )!!;
+    payload.output_gpu = test_span_address(&device, output.span.checked_subspan(COUNT / 2 * float::size, COUNT / 2 * float::size)!!);
+    payload.a = 10;
+    gpu::cmd_dispatch(
+        commands:    &commands,
+        root:        test_span_address(&device, output.span),
+        groups:      { (COUNT + INLINE_ROOT_WORKGROUP - 1) / INLINE_ROOT_WORKGROUP, 1, 1 },
         inline_root: gpu::@inline_root(&payload),
     )!!;
     gpu::Barrier host_read = {
@@ -328,7 +320,10 @@ fn void inline_root_payload_reaches_shader() @test {
     gpu::invalidate_mapped_span(&device, output.span)!!;
 
     float* output_data = (float*)test_span_mapping(&device, output.span).ptr;
-    for (uint i = 0; i < COUNT; i++) {
-        assert(output_data[i] == 21.0f + (float)i, "output is the inline sum plus the index");
+    for (uint i = 0; i < COUNT / 2; i++) {
+        assert(output_data[i] == 42.0f, "a zero root dispatch reads its output address and data from the payload");
+    }
+    for (uint i = COUNT / 2; i < COUNT; i++) {
+        assert(output_data[i] == 60.0f, "a nonzero root is ignored by a payload-only shader");
     }
 }

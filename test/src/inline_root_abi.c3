@@ -5,29 +5,25 @@ import gpu;
 
 const uint INLINE_ROOT_WORKGROUP = 64;
 
-struct InlineOutput {
+struct InlineRoot {
     GpuAddress output_gpu;
     uint       count;
+    uint       a;
+    uint       b;
+    uint       c;
+    uint       d;
+    uint       e;
+    uint       f;
     uint       _pad0;
 }
-$assert InlineOutput::size == 16;
-$assert $reflect(InlineOutput.output_gpu).offset == 0;
-$assert $reflect(InlineOutput.count).offset == 8;
-$assert $reflect(InlineOutput._pad0).offset == 12;
-
-struct InlineRoot {
-    uint a;
-    uint b;
-    uint c;
-    uint d;
-    uint e;
-    uint f;
-}
-$assert InlineRoot::size == 24;
-$assert $reflect(InlineRoot.a).offset == 0;
-$assert $reflect(InlineRoot.b).offset == 4;
-$assert $reflect(InlineRoot.c).offset == 8;
-$assert $reflect(InlineRoot.d).offset == 12;
-$assert $reflect(InlineRoot.e).offset == 16;
-$assert $reflect(InlineRoot.f).offset == 20;
-$assert InlineRoot::size <= gpu::INLINE_ROOT_CAPACITY;
+$assert InlineRoot::size == 40;
+$assert $reflect(InlineRoot.output_gpu).offset == 0;
+$assert $reflect(InlineRoot.count).offset == 8;
+$assert $reflect(InlineRoot.a).offset == 12;
+$assert $reflect(InlineRoot.b).offset == 16;
+$assert $reflect(InlineRoot.c).offset == 20;
+$assert $reflect(InlineRoot.d).offset == 24;
+$assert $reflect(InlineRoot.e).offset == 28;
+$assert $reflect(InlineRoot.f).offset == 32;
+$assert $reflect(InlineRoot._pad0).offset == 36;
+$assert InlineRoot::size <= 120;

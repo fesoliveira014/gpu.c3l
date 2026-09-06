@@ -499,8 +499,9 @@ sparse backing, and command allocators.
 
 ## Push a small root inline
 
-Up to `INLINE_ROOT_CAPACITY` (112) bytes per command can travel in the push
-block instead of a mapped record. No allocation, flush, or ring:
+Up to 120 bytes per command (compute, payload aligned to 8) or 112 bytes
+(graphics, or a payload aligned to 16) can travel in the push block instead
+of a mapped record. No allocation, flush, or ring:
 
 ```c3
 struct SpriteRoot {
@@ -527,7 +528,9 @@ fn void? draw_sprite(gpu::CommandList* commands, SpriteRoot* sprite) {
 The shader declares the graphics header and then the payload from offset
 16, or generates both from `push graphics SpriteRoot { ... }`. The bytes
 are copied during the call; the value need not outlive it. Larger or shared
-data stays behind a root address.
+data stays behind a root address. This default is provisional until the
+hardware comparison in [root-pointer data](contributing/root_pointer_data.md)
+is run.
 
 ## Draw indirectly
 

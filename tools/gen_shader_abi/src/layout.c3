@@ -1,5 +1,9 @@
 module gen_shader_abi;
 
+const uint ROOT_PUSH_CAPACITY = 128;
+const uint COMPUTE_ROOT_HEADER = 8;
+const uint GRAPHICS_ROOT_HEADER = 16;
+
 fn uint align_up(uint value, uint alignment) => (value + alignment - 1) / alignment * alignment;
 
 <* Compute std430 layout for every struct in declaration order, filling field
@@ -42,15 +46,17 @@ fn void? compute_struct_layout(StructDecl* decl, TypeTable* types) {
     }
     decl.size = total;
     decl.alignment = struct_align;
-    if (decl.push_role != PushRole.NONE && total > INLINE_ROOT_CAPACITY) {
-        diagnostic(decl.loc, "push payload '%s' is %d bytes; inline roots hold at most %d",
-            decl.name, total, INLINE_ROOT_CAPACITY);
-        return LAYOUT_ERROR~;
+    if (decl.push_role != PushRole.NONE) {
+        uint header = decl.push_role == PushRole.COMPUTE ? COMPUTE_ROOT_HEADER : GRAPHICS_ROOT_HEADER;
+        decl.payload_offset = align_up(header, struct_align);
+        uint capacity = ROOT_PUSH_CAPACITY - decl.payload_offset;
+        if (total > capacity) {
+            diagnostic(decl.loc, "push payload '%s' is %d bytes; from offset %d the push block holds at most %d",
+                decl.name, total, decl.payload_offset, capacity);
+            return LAYOUT_ERROR~;
+        }
     }
 }
-
-const uint INLINE_ROOT_OFFSET = 16;
-const uint INLINE_ROOT_CAPACITY = 112;
 
 fn String pad_suggestion(uint gap_bytes) {
     switch (gap_bytes / 4) {

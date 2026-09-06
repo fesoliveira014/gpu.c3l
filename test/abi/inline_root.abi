@@ -2,17 +2,14 @@ abi inline_root;
 
 const uint INLINE_ROOT_WORKGROUP = 64;
 
-root InlineOutput {
+push compute InlineRoot {
     GpuAddress output_gpu;
     uint       count;
+    uint       a;
+    uint       b;
+    uint       c;
+    uint       d;
+    uint       e;
+    uint       f;
     uint       _pad0;
-}
-
-push compute InlineRoot {
-    uint a;
-    uint b;
-    uint c;
-    uint d;
-    uint e;
-    uint f;
 }

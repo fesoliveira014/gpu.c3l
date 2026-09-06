@@ -406,6 +406,10 @@ fn gpu::PipelineHandle? create_ray_tracing_pipeline_from_prepared(
         )!;
         module_count++;
     }
+    uint inline_root_offset = modules_inline_root_offset(
+        gpu::RootPush::size,
+        modules,
+    )!;
 
     vk::PipelineShaderStageCreateInfo[]? allocated_stages =
         alloc::new_array_try(
@@ -490,6 +494,7 @@ fn gpu::PipelineHandle? create_ray_tracing_pipeline_from_prepared(
             .ray_tracing_key        = key,
             .ray_tracing_shader_ids = shader_ids,
             .push_block_size        = max_push_block_size(modules),
+            .inline_root_offset     = inline_root_offset,
         },
     )) {
         foreach (&identity : prepared) transfer_prepared_shader(identity);
@@ -883,4 +888,37 @@ fn uint max_push_block_size(PipelineShaderModule[] modules) @private {
         if (shader.push_block_size > size) size = shader.push_block_size;
     }
     return size;
+}
+
+<* Every stage that declares a payload must start it at the same offset;
+   stages without one report the header size. *>
+fn uint? merged_inline_root_offset(
+    uint header_size,
+    PipelineShaderModule* first,
+    PipelineShaderModule* second,
+) {
+    bool first_payload = first.push_block_size > header_size;
+    bool second_payload = second.push_block_size > header_size;
+    if (first_payload && second_payload
+        && first.inline_root_offset != second.inline_root_offset) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (first_payload) return first.inline_root_offset;
+    if (second_payload) return second.inline_root_offset;
+    return header_size;
+}
+
+fn uint? modules_inline_root_offset(
+    uint header_size,
+    PipelineShaderModule[] modules,
+) @private {
+    uint offset = header_size;
+    bool found = false;
+    foreach (&shader : modules) {
+        if (shader.push_block_size <= header_size) continue;
+        if (found && shader.inline_root_offset != offset) return gpu::INVALID_ARGUMENT~;
+        offset = shader.inline_root_offset;
+        found = true;
+    }
+    return offset;
 }

@@ -176,6 +176,7 @@ struct BoundPipeline {
     RenderCompatibility               render;
     bool                              dynamic_ray_tracing_stack_size;
     uint                              push_block_size;
+    uint                              inline_root_offset;
 }
 
 struct NativePipelineBinding {

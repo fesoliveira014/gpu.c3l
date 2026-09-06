@@ -2063,6 +2063,7 @@ fn BoundPipeline? lower_bound_pipeline(
         .cache_entry               = slot.entry,
         .kind                      = (PipelineKind)entry.key.kind,
         .push_block_size           = entry.push_block_size,
+        .inline_root_offset        = entry.inline_root_offset,
         .render                    = pipeline_render_compatibility(&entry.key),
         .dynamic_ray_tracing_stack_size =
             slot.ray_tracing_info.dynamic_stack_size,
@@ -2248,14 +2249,13 @@ fn void? set_inline_root(
         return gpu::INVALID_ARGUMENT~;
     }
     record.inline_root = inline_root;
-    if (inline_root.len == 0
-        || !contract_uses_full_validation(record.device_state.validation_policy)) {
-        return;
-    }
+    if (inline_root.len == 0) return;
     BoundPipeline*? bound = borrow_bound_pipeline(record);
-    if (catch bound) return;
+    if (catch err = bound) return;
     BoundPipeline* pipeline = bound;
-    uint needed = gpu::INLINE_ROOT_OFFSET + (uint)inline_root.len;
+    uint needed = pipeline.inline_root_offset + (uint)inline_root.len;
+    if (needed > gpu::ROOT_PUSH_CAPACITY) return gpu::INVALID_ARGUMENT~;
+    if (!contract_uses_full_validation(record.device_state.validation_policy)) return;
     if (pipeline.push_block_size < needed) {
         report_public_contract_diagnostic(
             state:          record.device_state,
@@ -2266,10 +2266,12 @@ fn void? set_inline_root(
     }
 }
 
-<* One push of the header followed by the inline payload. *>
+<* One push of the header followed by the inline payload at the bound
+   pipeline's payload offset. *>
 fn void push_root_block(
     vk::CommandBuffer command_buffer,
     char[] inline_root,
+    uint inline_offset,
     vk::PipelineLayout layout,
     vk::ShaderStageFlags stages,
     void* header,
@@ -2279,8 +2281,8 @@ fn void push_root_block(
     mem::copy(&block[0], header, header_size);
     uint size = header_size;
     if (inline_root.len > 0) {
-        mem::copy(&block[gpu::INLINE_ROOT_OFFSET], inline_root.ptr, inline_root.len);
-        size = gpu::INLINE_ROOT_OFFSET + (uint)inline_root.len;
+        mem::copy(&block[inline_offset], inline_root.ptr, inline_root.len);
+        size = inline_offset + (uint)inline_root.len;
     }
     vk::cmd_push_constants(
         command_buffer: command_buffer,
@@ -2301,6 +2303,7 @@ fn void push_compute_root(
     push_root_block(
         command_buffer: record.command_buffer,
         inline_root:    record.inline_root,
+        inline_offset:  pipeline.inline_root_offset,
         layout:         pipeline.layout,
         stages:         (vk::ShaderStageFlags)vk::ShaderStageFlagBits.COMPUTE_BIT,
         header:         &push,

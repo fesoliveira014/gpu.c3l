@@ -127,7 +127,12 @@ fn void? Parser.parse_struct(&self, Schema* schema, TypeTable* types, DeclKind k
     self.advance();
     PushRole role = PushRole.NONE;
     if (kind == DeclKind.PUSH) role = self.parse_push_role();
-    return self.parse_struct_body(schema, types, kind, role);
+    return self.parse_struct_body(
+        schema: schema,
+        types:  types,
+        kind:   kind,
+        role:   role,
+    );
 }
 
 <* `push compute Name` / `push graphics Name`; a bare `push Name` keeps the
@@ -164,6 +169,11 @@ fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclK
         }
         Token field_name = self.expect_name("field name")!;
         validate_glsl_name(field_name.text, field_name.loc)!;
+        if (role != PushRole.NONE && is_push_header_name(role, field_name.text)) {
+            diagnostic(field_name.loc, "field '%s' collides with the %s push header", field_name.text,
+                role == PushRole.COMPUTE ? "compute" : "graphics");
+            return PARSE_ERROR~;
+        }
         if (self.peek().kind == TokenKind.LBRACKET) {
             diagnostic(self.peek().loc, "fixed-size array fields are not supported");
             return PARSE_ERROR~;
@@ -182,6 +192,11 @@ fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclK
         return PARSE_ERROR~;
     }
     schema.structs.push(decl);
+}
+
+fn bool is_push_header_name(PushRole role, String name) {
+    if (role == PushRole.COMPUTE) return name == "root_gpu";
+    return name == "vertex_root_gpu" || name == "fragment_root_gpu";
 }
 
 fn bool is_keyword(TokenKind kind) {

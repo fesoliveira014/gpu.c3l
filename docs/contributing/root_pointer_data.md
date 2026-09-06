@@ -4,8 +4,10 @@
 dynamic-uniform path (one fixed binding, one mapped ring, one dynamic offset
 per command) beside the root-pointer path?
 
-**Decision.** No. Root pointers, plus an inline payload of up to 112 bytes
-in the 128-byte push block for small per-command data.
+**Decision.** No. Root pointers, plus an inline payload of up to 120 bytes
+in the 128-byte push block for small per-command data. The cookbook's
+"inline for records that fit" default is provisional until the hardware
+run below exists.
 
 ## Current paths
 
@@ -13,7 +15,7 @@ Record: write a record into `CPU_WRITE` memory, flush, pass its
 `GpuAddress` as the root of `cmd_dispatch` or the two roots of `cmd_draw`.
 The shader reads the record through a `buffer_reference` block.
 
-Inline: pass up to 112 bytes as `inline_root`; the backend pushes them after
+Inline: pass up to 120 bytes as `inline_root`; the backend pushes them after
 the 8 or 16-byte header in the same `vkCmdPushConstants`. See
 [shader ABI](../shader_abi.md#root-push).
 
@@ -22,24 +24,27 @@ the 8 or 16-byte header in the same `vkCmdPushConstants`. See
 `command_path_baseline_bench` has inline-vs-record phases. Recording: 20,000
 dispatches, payload 32, 64, and 112 bytes, inline against a memcpy into a
 mapped ring plus a dispatch by address, median of 5. Execution: 1,000
-dispatches that each write one element, inline payload against a
-per-command 32-byte record, timed as record-plus-end and as submit-plus-wait.
+dispatches that each double one input element into a disjoint output
+element, inline payload (address, count, value) against a per-command
+32-byte record, both legs validated, timed as record-plus-end and as
+submit-plus-wait.
 
 lavapipe (Mesa 25.0.7, WSL2, validation off), 2026-09-06:
 
 | Phase | Inline | Record |
 |---|---:|---:|
-| Recording, 32 B payload | 74.6 ns/op | 79.4 ns/op |
-| Recording, 64 B payload | 77.8 ns/op | 74.9 ns/op |
-| Recording, 112 B payload | 76.2 ns/op | 77.8 ns/op |
-| 1,000 dispatches, record | 156.7 ns/op | 147.9 ns/op |
-| 1,000 dispatches, execute | 77.1 ms | 74.3 ms |
+| Recording, 32 B payload | 75.7 ns/op | 71.8 ns/op |
+| Recording, 64 B payload | 80.7 ns/op | 78.2 ns/op |
+| Recording, 112 B payload | 79.2 ns/op | 74.8 ns/op |
+| 1,000 dispatches, record | 139.5 ns/op | 133.8 ns/op |
+| 1,000 dispatches, execute | 68.2 ms | 68.9 ms |
 
 The two paths are within run-to-run noise on the software driver. The
-dependent load a record costs on hardware is not visible here; a hardware
-run belongs in this table before the cookbook default is changed on speed
-grounds. The current default (inline for records that fit) rests on the
-removed allocation, mapping, flush, and ring, not on measured time.
+dependent load a record costs on hardware is not visible here. The issue's
+required run (dispatch and draw, 32/64/112-byte payloads, 1k and 20k
+commands, preparation, recording, GPU, and end-to-end separated, both
+memory classes) is still owed on hardware; the cookbook default rests on the
+removed allocation, mapping, flush, and ring and is provisional until then.
 
 The dynamic-uniform alternative was not built. The numbers below are
 derived from the repository or stated arithmetic.
