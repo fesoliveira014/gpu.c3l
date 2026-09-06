@@ -138,20 +138,21 @@ fn MappedGpuSpan? pinned_allocation_view(
 }
 
 <* Free an allocation whose mapped view could not be built, inside the
-   caller's still-held device operation pin. A free fault is reported through
-   the debug callback and returned, since it leaves the allocation live with
-   no owner; the caller must propagate this fault instead of the mapping
-   fault that triggered the rollback.
-
-   @return "Success, or the free's own recoverable fault." *>
-fn void? discard_failed_mapped_allocation(
+   caller's still-held device operation pin. A free fault leaves the
+   allocation live with no owner: it is reported through the debug callback,
+   then treated as unrecoverable. *>
+fn void discard_failed_mapped_allocation(
     DeviceOperation* operation,
     GpuAllocation allocation,
     ZString debug_name,
 ) @private {
-    if (catch err = gpu::internal::vk::vk_free_allocation(operation.state, allocation)) {
+    if (catch gpu::internal::vk::vk_free_allocation(operation.state, allocation)) {
         gpu::internal::vk::vk_report_abandoned_allocation(operation.state, allocation, debug_name);
-        return err~;
+        unreachable(
+            "gpu: failed mapped allocation rollback could not free allocation %d (generation %d)",
+            allocation.index,
+            allocation.generation,
+        );
     }
 }
 
@@ -170,7 +171,7 @@ fn MappedGpuSpan? allocate_mapped_allocation(
         gpu::internal::vk::vk_allocate_memory(operation.state, &normalized)!;
     MappedGpuSpan? mapped = pinned_allocation_view(operation.state, allocation);
     if (catch err = mapped) {
-        discard_failed_mapped_allocation(&operation, allocation, desc.debug_name)!;
+        discard_failed_mapped_allocation(&operation, allocation, desc.debug_name);
         return err~;
     }
     retain_device_children(&operation);

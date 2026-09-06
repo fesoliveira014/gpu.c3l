@@ -176,7 +176,7 @@ fn bool report_resource_lifetime(
 }
 
 <* Report that rolling back a failed mapped allocation could not free it. The
-   allocation is abandoned; the caller still returns its original fault. *>
+   allocation is abandoned; the caller treats this as unrecoverable. *>
 fn void vk_report_abandoned_allocation(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,

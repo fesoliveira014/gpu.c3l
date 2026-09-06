@@ -141,30 +141,6 @@ fn void mapped_allocation_composes_views_and_frees_through_span() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void mapped_allocation_reports_abandoned_allocation_when_rollback_free_fails() @test {
-    gpu::internal::vk::VkDeviceState state;
-    Device device = create_allocation_stub_device(&state);
-    AllocationDesc desc = allocation_stub_desc();
-    desc.debug_name = "abandoned";
-
-    state.mapping_unavailable = true;
-    state.allocation_block_free = true;
-    assert(@catch(gpu::allocate_mapped_memory(&device, &desc)) == gpu::RESOURCE_IN_USE,
-        "a rollback free that also fails returns the cleanup fault, not the mapping fault");
-    assert(state.allocation_live, "a failed rollback free leaves the allocation live");
-    assert(state.allocation_free_calls == 1, "no second free is attempted after the rollback free fails");
-    assert(state.abandoned_allocation_reports == 1
-        && state.abandoned_allocation_index == 0
-        && state.abandoned_allocation_generation == 1,
-        "the failed rollback free is reported exactly once with the allocation's identity");
-    assert(state.abandoned_allocation_debug_name.str_view() == "abandoned",
-        "the report names the abandoned allocation");
-
-    state.allocation_block_free = false;
-    state.mapping_unavailable = false;
-    gpu::destroy_device(&device)!!;
-}
-
 fn void zero_sized_span_resolvers_are_rejected() @test {
     gpu::internal::vk::VkDeviceState state;
     Device device = create_allocation_stub_device(&state);

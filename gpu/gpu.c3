@@ -705,7 +705,7 @@ fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
 
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed allocation description with a mapped memory class."
-   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, allocation, or device fault. A failed view frees the allocation and returns the view fault; if that cleanup free also fails, the allocation is reported as abandoned and the cleanup fault is returned instead." *>
+   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, allocation, or device fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned." *>
 fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
     if (desc == null) return INVALID_ARGUMENT~;
     if (desc.memory_class == MemoryClass.GPU_PRIVATE
