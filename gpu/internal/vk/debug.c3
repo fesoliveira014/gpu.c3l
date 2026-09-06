@@ -145,6 +145,24 @@ fn fault report_contract_failure(
     return public_fault;
 }
 
+<* One WARNING in the given category that carries no fault. *>
+fn void report_state_diagnostic(
+    VkDeviceState* state,
+    gpu::DebugMessageCategory category,
+    ZString operation,
+    ZString rejected_field,
+    ZString invariant,
+) {
+    gpu::DebugMessage message = {
+        .severity       = gpu::DebugMessageSeverity.WARNING,
+        .category       = category,
+        .operation      = operation,
+        .rejected_field = rejected_field,
+        .invariant      = invariant,
+    };
+    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+}
+
 fn bool report_resource_lifetime(
     VkDeviceState* state,
     gpu::DebugResourceKind resource_kind,

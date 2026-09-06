@@ -2215,8 +2215,8 @@ fn StencilFaceState stencil_face(CompareOp compare, StencilOp pass, uint referen
         .fail         = StencilOp.KEEP,
         .pass         = pass,
         .depth_fail   = StencilOp.KEEP,
-        .compare_mask = 0xff,
-        .write_mask   = 0xff,
+        .compare_mask = STENCIL_MASK_ALL,
+        .write_mask   = STENCIL_MASK_ALL,
         .reference    = reference,
     };
 }

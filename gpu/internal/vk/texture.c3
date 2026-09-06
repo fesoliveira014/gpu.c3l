@@ -108,6 +108,7 @@ struct TextureSlot {
     bool               cube_compatible;
     uint               live_descriptor_views;
     Atomic{bool}       presented;
+    Atomic{bool}       stencil_discarded;
     Atomic{uint}        tracked_command_references;
     bool               swapchain_owned;
     bool               sparse;

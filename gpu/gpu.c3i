@@ -1168,6 +1168,8 @@ enum StencilOp : int {
     DECREMENT_WRAP,
 }
 
+const uint STENCIL_MASK_ALL = 0xff;
+
 <* Per-face stencil test. The zero value never passes; set `compare`
    explicitly. *>
 struct StencilFaceState {

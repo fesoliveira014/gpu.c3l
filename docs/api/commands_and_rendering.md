@@ -165,7 +165,12 @@ gpu::cmd_set_scissor(&commands, &clip)!;
 ```
 
 `cmd_set_graphics_state` applies the whole packet. `cmd_set_viewport` and
-`cmd_set_scissor` override one field each after a complete state exists.
+`cmd_set_scissor` override one field each after a complete state exists. An
+enabled stencil test with an undefined `CompareOp` or `StencilOp` faults
+`INVALID_ARGUMENT` under every policy. Under `FULL`, an enabled stencil
+test on a pipeline without a stencil aspect reports a `performance`
+diagnostic, and a stencil `LOAD` after a `DONT_CARE` stencil store on the
+same texture reports a `public_contract` diagnostic; neither faults.
 Binding a pipeline or beginning a pass does not reset state. Fields are
 described in [shaders and pipelines](shaders_and_pipelines.md#graphics-pipelines).
 

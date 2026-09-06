@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::math;
+import std::atomic;
 
 struct PreparedRenderPass {
     AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] color_slots;
@@ -385,6 +386,30 @@ fn void? validate_render_pass_desc_fields(
     }
 }
 
+<* FULL only: record-order tracking of a DONT_CARE stencil store followed by
+   a LOAD. The load is legal; its contents are undefined. *>
+fn void note_stencil_load_after_discard(
+    VkDeviceState* state,
+    TextureSlot* texture,
+    ZString operation,
+    gpu::DepthTargetDesc* depth,
+) @private {
+    if (depth.stencil_load_op == gpu::LoadOp.LOAD
+        && texture.stencil_discarded.load(AtomicOrdering.RELAXED)) {
+        report_state_diagnostic(
+            state:          state,
+            category:       { .public_contract },
+            operation:      operation,
+            rejected_field: "DepthTargetDesc.stencil_load_op",
+            invariant:      "a LOAD after a DONT_CARE stencil store reads undefined contents",
+        );
+    }
+    texture.stencil_discarded.store(
+        depth.stencil_store_op == gpu::StoreOp.DONT_CARE,
+        AtomicOrdering.RELAXED,
+    );
+}
+
 fn PreparedRenderPass? full_prepare_render_pass(
     CommandRecord* commands,
     gpu::RenderPassDesc* desc,
@@ -488,6 +513,14 @@ fn PreparedRenderPass? full_prepare_render_pass(
         if (pass.color_count > 0
             && depth.sample_count != pass.compatibility.sample_count) {
             return gpu::INVALID_ARGUMENT~;
+        }
+        if (pass.has_stencil_aspect) {
+            note_stencil_load_after_discard(
+                state:     state,
+                texture:   depth_texture,
+                operation: operation,
+                depth:     desc.depth,
+            );
         }
     }
     validate_active_pipeline_render_compatibility(
@@ -1008,16 +1041,25 @@ fn void? validate_depth_state(
     }
 }
 
+fn bool stencil_face_valid(gpu::StencilFaceState* face) @private {
+    return compare_op_valid(face.compare)
+        && stencil_op_valid(face.fail)
+        && stencil_op_valid(face.pass)
+        && stencil_op_valid(face.depth_fail);
+}
+
+fn bool stencil_state_valid(gpu::StencilState* stencil) @private {
+    return !stencil.test_enable
+        || (stencil_face_valid(&stencil.front) && stencil_face_valid(&stencil.back));
+}
+
 fn void? validate_stencil_face(
     VkDeviceState* state,
     ZString operation,
     gpu::StencilFaceState* face,
     ZString field,
 ) @private {
-    if (!compare_op_valid(face.compare)
-        || !stencil_op_valid(face.fail)
-        || !stencil_op_valid(face.pass)
-        || !stencil_op_valid(face.depth_fail)) {
+    if (!stencil_face_valid(face)) {
         return reject_dynamic_state(
             state:     state,
             operation: operation,
@@ -1033,14 +1075,46 @@ fn void? validate_stencil_state(
     gpu::StencilState* stencil,
 ) @private {
     if (!stencil.test_enable) return;
-    validate_stencil_face(state, operation, &stencil.front, "GraphicsState.stencil.front")!;
-    validate_stencil_face(state, operation, &stencil.back, "GraphicsState.stencil.back")!;
+    validate_stencil_face(
+        state:     state,
+        operation: operation,
+        face:      &stencil.front,
+        field:     "GraphicsState.stencil.front",
+    )!;
+    validate_stencil_face(
+        state:     state,
+        operation: operation,
+        face:      &stencil.back,
+        field:     "GraphicsState.stencil.back",
+    )!;
+}
+
+<* FULL only: an enabled stencil test on a pipeline without a stencil aspect
+   is legal and does nothing. *>
+fn void note_stencil_without_aspect(
+    VkDeviceState* state,
+    CommandRecord* record,
+    ZString operation,
+    gpu::StencilState* stencil,
+) @private {
+    if (!stencil.test_enable) return;
+    BoundPipeline*? bound = borrow_bound_pipeline(record);
+    if (catch bound) return;
+    BoundPipeline* pipeline = bound;
+    if (gpu::internal::format_has_stencil(pipeline.render.depth_format)) return;
+    report_state_diagnostic(
+        state:          state,
+        category:       { .performance },
+        operation:      operation,
+        rejected_field: "GraphicsState.stencil.test_enable",
+        invariant:      "stencil test has no effect without a stencil aspect in the bound pipeline",
+    );
 }
 
 fn LoweredGraphicsState? lower_graphics_state(
     gpu::GraphicsState* state,
 ) {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
+    if (state == null || !stencil_state_valid(&state.stencil)) return gpu::INVALID_ARGUMENT~;
     return {
         .viewport = lower_viewport(&state.viewport),
         .scissor  = lower_scissor(&state.scissor),
@@ -1073,6 +1147,12 @@ fn LoweredGraphicsState? full_prepare_graphics_state(
     validate_raster_state(device, operation, &state.raster)!;
     validate_depth_state(device, operation, &state.depth)!;
     validate_stencil_state(device, operation, &state.stencil)!;
+    note_stencil_without_aspect(
+        state:     device,
+        record:    record,
+        operation: operation,
+        stencil:   &state.stencil,
+    );
     LoweredColorState color = full_prepare_color_state(
         state:     device,
         record:    record,

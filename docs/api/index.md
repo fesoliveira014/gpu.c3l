@@ -169,7 +169,7 @@ Types: `RootPush`, `GraphicsRootPush`, `GeneratedDrawRecord`,
 `RayTracingShaderGroupRange`, `RayTracingPipelineInfo`,
 `RayTracingShaderBindingTableRegion`, `RayTracingShaderBindingTable`.
 
-Constants: `PIPELINE_HANDLE_INVALID`, `COLOR_WRITE_ALL`, `MAX_PIPELINES`,
+Constants: `PIPELINE_HANDLE_INVALID`, `COLOR_WRITE_ALL`, `STENCIL_MASK_ALL`, `MAX_PIPELINES`,
 `MAX_COLOR_ATTACHMENTS`.
 
 Methods: `PipelineHandle.is_valid`, `PipelineHandle.equals`.

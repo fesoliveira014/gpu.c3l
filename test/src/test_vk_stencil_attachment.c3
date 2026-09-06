@@ -7,6 +7,7 @@ import vk;
 import std::io;
 
 const char[*] FETCH_STENCIL_SPIRV = $embed("shaders/fetch_stencil.comp.spv");
+const char[*] FETCH_STENCIL_FRAG_SPIRV = $embed("shaders/fetch_stencil.frag.spv");
 const usz ST_STENCIL_BYTES = DP_RT * DP_RT;
 
 fn gpu::PipelineHandle make_stencil_pipeline(gpu::Device* device, DepthCtx* ctx, gpu::Format format, bool with_color = true) {
@@ -185,7 +186,12 @@ fn void stencil_mask_selects_fragments() @test {
     gpu::GpuSpan stencil_rb_span = stencil_rb.span;
     gpu::GpuSpan depth_rb_span = depth_rb.span;
     record_color_readback(&cmd, target, &color_rb_span);
-    record_aspect_readback(&cmd, ds, &stencil_rb_span, gpu::TextureAspect.STENCIL);
+    record_aspect_readback(
+        cmd:     &cmd,
+        texture: ds,
+        rb_span: &stencil_rb_span,
+        aspect:  gpu::TextureAspect.STENCIL,
+    );
     gpu::TextureBufferCopyDesc depth_copy = { .texture = ds, .dst = depth_rb_span, .aspect = gpu::TextureAspect.DEPTH };
     gpu::cmd_copy_texture_to_buffer(&cmd, &depth_copy)!!;
     gpu::TextureBufferCopyDesc ambiguous = { .texture = ds, .dst = stencil_rb_span };
@@ -221,7 +227,12 @@ fn void depth_only_pass_preserves_stencil() @test {
     defer destroy_test_device(&device)!!;
     gpu::Format format = gpu::get_device_caps(&device)!!.depth_stencil_format;
     DepthCtx ctx = make_depth_ctx();
-    gpu::PipelineHandle pipeline = make_stencil_pipeline(&device, &ctx, format, false);
+    gpu::PipelineHandle pipeline = make_stencil_pipeline(
+        device:     &device,
+        ctx:        &ctx,
+        format:     format,
+        with_color: false,
+    );
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
@@ -273,7 +284,12 @@ fn void depth_only_pass_preserves_stencil() @test {
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::GpuSpan stencil_rb_span = stencil_rb.span;
-    record_aspect_readback(&cmd, ds, &stencil_rb_span, gpu::TextureAspect.STENCIL);
+    record_aspect_readback(
+        cmd:     &cmd,
+        texture: ds,
+        rb_span: &stencil_rb_span,
+        aspect:  gpu::TextureAspect.STENCIL,
+    );
     submit_and_finish(&device, &cmd);
     gpu::invalidate_mapped_span(&device, stencil_rb.span)!!;
     char* stencil = (char*)test_span_mapping(&device, stencil_rb_span).ptr;
@@ -286,7 +302,12 @@ fn void stencil_aspect_samples_through_the_heap() @test {
     defer destroy_test_device(&device)!!;
     gpu::Format format = gpu::get_device_caps(&device)!!.depth_stencil_format;
     DepthCtx ctx = make_depth_ctx();
-    gpu::PipelineHandle pipeline = make_stencil_pipeline(&device, &ctx, format, false);
+    gpu::PipelineHandle pipeline = make_stencil_pipeline(
+        device:     &device,
+        ctx:        &ctx,
+        format:     format,
+        with_color: false,
+    );
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     gpu::ShaderDesc fetch_shader = { .spirv = FETCH_STENCIL_SPIRV[..], .entry_point = "main" };
     gpu::ComputePipelineDesc fetch_desc = { .shader = fetch_shader };
@@ -395,7 +416,12 @@ fn void stencil_only_format_when_supported() @test {
         return;
     }
     DepthCtx ctx = make_depth_ctx();
-    gpu::PipelineHandle pipeline = make_stencil_pipeline(&device, &ctx, gpu::Format.S8_UINT, false);
+    gpu::PipelineHandle pipeline = make_stencil_pipeline(
+        device:     &device,
+        ctx:        &ctx,
+        format:     gpu::Format.S8_UINT,
+        with_color: false,
+    );
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
@@ -440,7 +466,12 @@ fn void stencil_only_format_when_supported() @test {
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
     gpu::GpuSpan rb_span = rb.span;
-    record_aspect_readback(&cmd, stencil, &rb_span, gpu::TextureAspect.AUTO);
+    record_aspect_readback(
+        cmd:     &cmd,
+        texture: stencil,
+        rb_span: &rb_span,
+        aspect:  gpu::TextureAspect.AUTO,
+    );
     submit_and_finish(&device, &cmd);
     gpu::invalidate_mapped_span(&device, rb.span)!!;
     char* values = (char*)test_span_mapping(&device, rb_span).ptr;
@@ -449,7 +480,20 @@ fn void stencil_only_format_when_supported() @test {
 }
 
 fn void stencil_validation_faults() @test {
-    gpu::Device device = make_depth_device();
+    stencil_validation_faults_under(gpu::ContractValidation.FULL);
+}
+
+fn void stencil_validation_faults_under_trusted() @test {
+    stencil_validation_faults_under(gpu::ContractValidation.TRUSTED);
+}
+
+fn void stencil_validation_faults_under(gpu::ContractValidation policy) {
+    gpu::RuntimeDesc device_desc = {
+        .contract_validation      = policy,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_stencil_validation_test",
+    };
+    gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     DepthCtx ctx = make_depth_ctx();
     gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
@@ -504,10 +548,254 @@ fn void stencil_validation_faults() @test {
     state.color = { .targets = color_on[..] };
     *((int*)&state.stencil.front.pass) = 99;
     assert(@catch(gpu::cmd_set_graphics_state(&cmd, &state)) == gpu::INVALID_ARGUMENT,
-        "an undefined stencil operation faults under FULL");
+        "an undefined stencil operation faults under every policy");
     state.stencil.front.pass = gpu::StencilOp.KEEP;
     state.stencil.test_enable = false;
     *((int*)&state.stencil.back.compare) = 99;
     gpu::cmd_set_graphics_state(&cmd, &state)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
+}
+
+struct StencilDiagnosticCapture {
+    uint performance;
+    uint public_contract;
+    uint faults;
+    bool field_matches;
+}
+
+fn void capture_stencil_diagnostic(gpu::DebugMessage* message, void* user_data) {
+    if (message.operation == null) return;
+    StencilDiagnosticCapture* capture = (StencilDiagnosticCapture*)user_data;
+    if (message.has_fault) capture.faults++;
+    if (message.category.performance) capture.performance++;
+    if (message.category.public_contract) capture.public_contract++;
+    capture.field_matches = message.rejected_field != null
+        && (message.rejected_field.str_view() == "GraphicsState.stencil.test_enable"
+            || message.rejected_field.str_view() == "DepthTargetDesc.stencil_load_op");
+}
+
+fn void stencil_full_diagnostics_report_without_faulting() @test {
+    StencilDiagnosticCapture capture;
+    gpu::RuntimeDesc device_desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_stencil_diagnostic_test",
+        .debug_callback           = &capture_stencil_diagnostic,
+        .debug_user_data          = &capture,
+    };
+    gpu::Device device = create_test_device(&device_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Format format = gpu::get_device_caps(&device)!!.depth_stencil_format;
+    DepthCtx ctx = make_depth_ctx();
+    gpu::PipelineHandle no_stencil = make_stencil_pipeline(&device, &ctx, gpu::Format.D32_FLOAT);
+    defer gpu::destroy_pipeline(&device, no_stencil)!!;
+    gpu::PipelineHandle with_stencil = make_stencil_pipeline(
+        device:     &device,
+        ctx:        &ctx,
+        format:     format,
+        with_color: false,
+    );
+    defer gpu::destroy_pipeline(&device, with_stencil)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::TextureHandle depth = make_depth_texture(&device, true);
+    defer gpu::destroy_texture(&device, depth)!!;
+    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(&device, depth)!!;
+    defer destroy_test_attachment_view(&device, &depth_view)!!;
+    gpu::TextureHandle target = make_color_target(&device);
+    defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(&device, target)!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
+    gpu::TextureHandle ds = make_stencil_texture(&device, format);
+    defer gpu::destroy_texture(&device, ds)!!;
+    gpu::AttachmentViewHandle ds_view = create_test_attachment_view(&device, ds)!!;
+    defer destroy_test_attachment_view(&device, &ds_view)!!;
+
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&cmd)!!;
+    record_color_to_attach(&cmd, target);
+    record_depth_to_attach(&cmd, depth);
+    record_depth_to_attach(&cmd, ds);
+    gpu::ColorTargetDesc[1] colors = {{ .view = target_view }};
+    gpu::DepthTargetDesc depth_target = { .view = depth_view };
+    gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
+    gpu::cmd_bind_pipeline(&cmd, no_stencil)!!;
+    gpu::GraphicsState state = stencil_graphics_state(
+        gpu::stencil_face(gpu::CompareOp.ALWAYS, gpu::StencilOp.KEEP, 0),
+        true,
+    );
+    gpu::ColorTargetState[1] color_on = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
+    state.color = { .targets = color_on[..] };
+    gpu::cmd_set_graphics_state(&cmd, &state)!!;
+    assert(capture.performance == 1 && capture.faults == 0 && capture.field_matches,
+        "an enabled stencil test without a stencil aspect reports one performance diagnostic");
+    gpu::cmd_end_render_pass(&cmd)!!;
+    gpu::CommandList passes = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&passes)!!;
+
+    gpu::DepthTargetDesc discard = {
+        .view = ds_view,
+        .stencil_load_op = gpu::LoadOp.CLEAR, .stencil_store_op = gpu::StoreOp.DONT_CARE,
+    };
+    gpu::RenderPassDesc discard_pass = { .depth = &discard, .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&passes, &discard_pass)!!;
+    gpu::cmd_end_render_pass(&passes)!!;
+    assert(capture.public_contract == 0, "a DONT_CARE store reports nothing by itself");
+    gpu::DepthTargetDesc load = {
+        .view = ds_view,
+        .stencil_load_op = gpu::LoadOp.LOAD, .stencil_store_op = gpu::StoreOp.STORE,
+    };
+    gpu::RenderPassDesc load_pass = { .depth = &load, .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&passes, &load_pass)!!;
+    gpu::cmd_end_render_pass(&passes)!!;
+    assert(capture.public_contract == 1 && capture.faults == 0 && capture.field_matches,
+        "a stencil LOAD after a DONT_CARE store reports one public-contract diagnostic");
+    gpu::cmd_begin_render_pass(&passes, &load_pass)!!;
+    gpu::cmd_end_render_pass(&passes)!!;
+    assert(capture.public_contract == 1, "a LOAD after a STORE reports nothing");
+}
+
+fn void stencil_aspect_fetches_in_fragment_stage() @test {
+    gpu::Device device = make_depth_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Format format = gpu::get_device_caps(&device)!!.depth_stencil_format;
+    DepthCtx ctx = make_depth_ctx();
+    gpu::PipelineHandle pipeline = make_stencil_pipeline(
+        device:     &device,
+        ctx:        &ctx,
+        format:     format,
+        with_color: false,
+    );
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::ShaderDesc fetch_frag = { .spirv = FETCH_STENCIL_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::Format[1] uint_formats = { gpu::Format.R8_UINT };
+    gpu::GraphicsPipelineDesc fetch_desc = {
+        .vertex_shader   = ctx.vert,
+        .fragment_shader = fetch_frag,
+        .color_formats   = uint_formats[..],
+    };
+    gpu::PipelineHandle fetch = gpu::create_graphics_pipeline(&device, &fetch_desc)!!;
+    defer gpu::destroy_pipeline(&device, fetch)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::TextureHandle ds = make_stencil_texture(&device, format, true);
+    defer gpu::destroy_texture(&device, ds)!!;
+    gpu::AttachmentViewHandle ds_view = create_test_attachment_view(&device, ds)!!;
+    defer destroy_test_attachment_view(&device, &ds_view)!!;
+    gpu::TextureViewDesc stencil_desc = { .aspect = gpu::TextureAspect.STENCIL };
+    gpu::TextureView stencil_view = gpu::create_texture_view(&device, ds, &stencil_desc)!!;
+    defer gpu::destroy_texture_view(&device, stencil_view)!!;
+    gpu::TextureDesc target_desc = {
+        .access = { .graphics, .transfer },
+        .width  = DP_RT,
+        .height = DP_RT,
+        .format = gpu::Format.R8_UINT,
+        .usage  = { .color_attach, .transfer_src },
+    };
+    gpu::TextureHandle target = gpu::create_texture(&device, &target_desc)!!;
+    defer gpu::destroy_texture(&device, target)!!;
+    gpu::AttachmentViewHandle target_view = create_test_attachment_view(&device, target)!!;
+    defer destroy_test_attachment_view(&device, &target_view)!!;
+
+    OwnedSpan tri = write_tri(&device, NEAR_Z);
+    defer free_owned_span(&device, &tri)!!;
+    OwnedSpan color = write_color(&device, { 0.0f, 1.0f, 0.0f, 1.0f });
+    defer free_owned_span(&device, &color)!!;
+    OwnedSpan rb = make_readback(&device, DP_RT * DP_RT);
+    defer free_owned_span(&device, &rb)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         FetchStencilRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .graphics },
+        debug_name:   "fetch_stencil_fragment_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    FetchStencilRoot* root = (FetchStencilRoot*)test_span_mapping(&device, root_owned.span).ptr;
+    *root = { .texture_index = stencil_view.index };
+    gpu::flush_mapped_span(&device, root_owned.span)!!;
+
+    gpu::CommandList write = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&write)!!;
+    record_depth_to_attach(&write, ds);
+    gpu::DepthTargetDesc ds_target = {
+        .view = ds_view,
+        .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
+        .stencil_load_op = gpu::LoadOp.CLEAR, .stencil_store_op = gpu::StoreOp.STORE,
+        .clear = { .depth = 1.0f, .stencil = 0 },
+    };
+    gpu::RenderPassDesc write_pass = { .depth = &ds_target, .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&write, &write_pass)!!;
+    gpu::cmd_bind_pipeline(&write, pipeline)!!;
+    gpu::GraphicsState write_id = stencil_graphics_state(
+        gpu::stencil_face(gpu::CompareOp.ALWAYS, gpu::StencilOp.REPLACE, 5),
+        false,
+    );
+    gpu::cmd_set_graphics_state(&write, &write_id)!!;
+    gpu::cmd_draw(
+        commands:       &write,
+        vertex_root:    test_span_address(&device, tri.span),
+        fragment_root:  test_span_address(&device, color.span),
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&write)!!;
+    gpu::TextureBarrier to_sampled = gpu::texture_transition(
+        texture: ds,
+        before:  { .layout = gpu::TextureLayout.DEPTH_ATTACHMENT, .stages = { .depth_output }, .access = { .read, .write } },
+        after:   gpu::sampled_at({ .fragment_shader }),
+    )!!;
+    gpu::cmd_texture_barrier(&write, &to_sampled)!!;
+    submit_and_finish(&device, &write);
+
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&cmd)!!;
+    record_color_to_attach(&cmd, target);
+    gpu::ColorTargetDesc[1] colors = {{
+        .view     = target_view,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+        .clear    = { .uint_rgba = { 0, 0, 0, 0 } },
+    }};
+    gpu::RenderPassDesc fetch_pass = { .colors = colors[..], .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&cmd, &fetch_pass)!!;
+    gpu::cmd_bind_pipeline(&cmd, fetch)!!;
+    gpu::GraphicsState fetch_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::ColorTargetState[1] color_on = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
+    fetch_state.color = { .targets = color_on[..] };
+    gpu::cmd_set_graphics_state(&cmd, &fetch_state)!!;
+    gpu::cmd_draw(
+        commands:       &cmd,
+        vertex_root:    test_span_address(&device, tri.span),
+        fragment_root:  test_span_address(&device, root_owned.span),
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&cmd)!!;
+    gpu::TextureBarrier to_src = {
+        .texture = target,
+        .before  = {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        .after   = {
+            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
+            .stages = { .transfer },
+            .access = { .read },
+        },
+    };
+    gpu::cmd_texture_barrier(&cmd, &to_src)!!;
+    gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = rb.span };
+    gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
+    gpu::Barrier host_read = { .before = { .transfer }, .after = { .host } };
+    gpu::cmd_barrier(&cmd, &host_read)!!;
+    submit_and_finish(&device, &cmd);
+    gpu::invalidate_mapped_span(&device, rb.span)!!;
+    char* fetched = (char*)test_span_mapping(&device, rb.span).ptr;
+    assert(fetched[(DP_RT / 2) * DP_RT + DP_RT / 2] == (char)5, "the fragment stage fetches the stencil aspect into an R8_UINT target");
+    assert(fetched[0] == (char)0, "pixels outside the triangle keep the clear value");
 }
