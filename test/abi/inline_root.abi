@@ -3,13 +3,8 @@ abi inline_root;
 const uint INLINE_ROOT_WORKGROUP = 64;
 
 push compute InlineRoot {
+    GpuAddress input_gpu;
     GpuAddress output_gpu;
     uint       count;
-    uint       a;
-    uint       b;
-    uint       c;
-    uint       d;
-    uint       e;
-    uint       f;
     uint       _pad0;
 }

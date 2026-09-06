@@ -39,7 +39,7 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
         out.append("\n");
         if (decl.kind != DeclKind.EXTERN_STRUCT) {
             usz width = c3_type_width(decl, types);
-            out.appendf("struct %s {\n", decl.name);
+            out.appendf(decl.push_role != PushRole.NONE ? "struct %s @packed {\n" : "struct %s {\n", decl.name);
             foreach (&field : decl.fields) {
                 TypeInfo info = types.entries.get(field.type_name)!!;
                 out.appendf("    %s", info.c3_name);
@@ -50,7 +50,7 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
         }
         out.appendf("$assert %s::size == %d;\n", decl.name, decl.size);
         foreach (&field : decl.fields) {
-            out.appendf("$assert $reflect(%s.%s).offset == %d;\n", decl.name, field.name, field.offset);
+            out.appendf("$assert $reflect(%s.%s).offset == %d;\n", decl.name, field.name, field.offset - decl.payload_offset);
         }
         if (decl.push_role != PushRole.NONE) {
             out.appendf("$assert %s::size <= %d;\n", decl.name, ROOT_PUSH_CAPACITY - decl.payload_offset);

@@ -369,11 +369,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         create_ops:      &create_ops.shader_module,
     )!;
     defer destroy_pipeline_shader_module(state, &fragment_shader);
-    uint inline_root_offset = merged_inline_root_offset(
-        gpu::GraphicsRootPush::size,
-        &vertex_shader,
-        &fragment_shader,
-    )!;
+    uint inline_root_offset = gpu::GraphicsRootPush::size;
     @pool() {
         vk::Format[] color_formats = {};
         if (key.color_target_count > 0) {

@@ -627,17 +627,14 @@ fn RootAbiMismatch root_push_abi_mismatch(
             );
         if (mismatch != RootAbiMismatch.NONE) return mismatch;
     }
-    uint inline_offset = block.byte_size();
     for (uint i = expected.member_count; i < block.member_count(); i++) {
         spvreflect::BlockVariable* member = block.member(i);
         if (member == null) return RootAbiMismatch.MEMBER_MISSING;
         if (member.byte_offset() < expected.block_size) {
             return RootAbiMismatch.MEMBER_OFFSET;
         }
-        if (member.byte_offset() < inline_offset) inline_offset = member.byte_offset();
     }
     if (block_size_out != null) *block_size_out = block.byte_size();
-    if (inline_offset_out != null) *inline_offset_out = inline_offset;
     return RootAbiMismatch.NONE;
 }
 

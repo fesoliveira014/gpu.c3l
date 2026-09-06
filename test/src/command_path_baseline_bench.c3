@@ -43,15 +43,10 @@ $assert $reflect(ComputeRoot._pad0).offset == 20;
 $assert $reflect(ComputeRoot._pad1).offset == 24;
 $assert $reflect(ComputeRoot._pad2).offset == 28;
 
-struct InlineRoot {
+struct InlineRoot @packed {
+    gpu::GpuAddress input_gpu;
     gpu::GpuAddress output_gpu;
     uint            count;
-    uint            a;
-    uint            b;
-    uint            c;
-    uint            d;
-    uint            e;
-    uint            f;
     uint            _pad0;
 }
 
@@ -662,9 +657,9 @@ fn InlineRootSamples measure_inline_execution(
         gpu::cmd_bind_pipeline(&inline_list, inline_pipeline)!!;
         for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) {
             InlineRoot payload = {
+                .input_gpu  = (gpu::GpuAddress)((ulong)input_gpu + (usz)i * float::size),
                 .output_gpu = (gpu::GpuAddress)((ulong)inline_output_gpu + (usz)i * float::size),
                 .count      = 1,
-                .a          = i + 1,
             };
             gpu::cmd_dispatch(
                 commands:    &inline_list,

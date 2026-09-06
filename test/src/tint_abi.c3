@@ -3,7 +3,7 @@ module gpu_test;
 
 import gpu;
 
-struct TintRoot {
+struct TintRoot @packed {
     Vec4f tint;
 }
 $assert TintRoot::size == 16;

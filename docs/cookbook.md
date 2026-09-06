@@ -499,12 +499,12 @@ sparse backing, and command allocators.
 
 ## Push a small root inline
 
-Up to 120 bytes per command (compute, payload aligned to 8) or 112 bytes
-(graphics, or a payload aligned to 16) can travel in the push block instead
-of a mapped record. No allocation, flush, or ring:
+Up to 120 bytes per command (compute and ray tracing) or 112 bytes (graphics)
+can travel in the push block instead of a mapped record. No allocation,
+flush, or ring:
 
 ```c3
-struct SpriteRoot {
+struct SpriteRoot @packed {
     gpu::Vec4f rect;
     gpu::Vec4f tint;
     uint       texture;

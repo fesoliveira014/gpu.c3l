@@ -8,15 +8,10 @@ const uint INLINE_ROOT_WORKGROUP = 64u;
 
 layout(push_constant) uniform InlineRoot {
     uint64_t root_gpu;
-    layout(offset = 8) uint64_t output_gpu;
-    uint count;
-    uint a;
-    uint b;
-    uint c;
-    uint d;
-    uint e;
-    uint f;
-    uint _pad0;
+    layout(offset = 8) uint64_t input_gpu;
+    layout(offset = 16) uint64_t output_gpu;
+    layout(offset = 24) uint count;
+    layout(offset = 28) uint _pad0;
 } pc;
 
 #endif

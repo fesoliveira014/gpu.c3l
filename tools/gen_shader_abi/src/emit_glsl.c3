@@ -74,9 +74,9 @@ fn void append_guard(String abi_name, DString* out) {
     out.append("_SHADER_ABI_GLSL");
 }
 
-<* Push block with the root header for the role first; the payload starts at
-   the header end rounded up to the payload alignment, so block offsets are
-   that plus the C3 struct offsets. *>
+<* Push block with the root header for the role first; payload fields carry
+   their block offsets, which are the header size plus the packed C3 struct
+   offsets. *>
 fn void emit_push_block(StructDecl* decl, TypeTable* types, DString* out) {
     out.appendf("layout(push_constant) uniform %s {\n", decl.name);
     if (decl.push_role == PushRole.COMPUTE) {
@@ -85,13 +85,9 @@ fn void emit_push_block(StructDecl* decl, TypeTable* types, DString* out) {
         out.append("    uint64_t vertex_root_gpu;\n");
         out.append("    uint64_t fragment_root_gpu;\n");
     }
-    foreach (i, &field : decl.fields) {
+    foreach (&field : decl.fields) {
         TypeInfo info = types.entries.get(field.type_name)!!;
-        if (i == 0) {
-            out.appendf("    layout(offset = %d) %s %s;\n", decl.payload_offset, info.glsl_name, field.name);
-            continue;
-        }
-        out.appendf("    %s %s;\n", info.glsl_name, field.name);
+        out.appendf("    layout(offset = %d) %s %s;\n", field.offset, info.glsl_name, field.name);
     }
     out.append("} pc;\n");
 }

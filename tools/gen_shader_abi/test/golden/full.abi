@@ -31,11 +31,13 @@ push GraphicsRootPush {
 }
 
 push compute InlineTint {
-    vec4 tint;
-    uint material;
     uint _pad0;
     uint _pad1;
+    vec4 tint;
+    uint material;
     uint _pad2;
+    uint _pad3;
+    uint _pad4;
 }
 
 push graphics InlineOffset {

@@ -25,19 +25,20 @@ the 8 or 16-byte header in the same `vkCmdPushConstants`. See
 dispatches, payload 32, 64, and 112 bytes, inline against a memcpy into a
 mapped ring plus a dispatch by address, median of 5. Execution: 1,000
 dispatches that each double one input element into a disjoint output
-element, inline payload (address, count, value) against a per-command
-32-byte record, both legs validated, timed as record-plus-end and as
+element with the same shader logic and the same 24-byte root
+(input address, output address, count), carried inline against a
+per-command record, both legs validated, timed as record-plus-end and as
 submit-plus-wait.
 
 lavapipe (Mesa 25.0.7, WSL2, validation off), 2026-09-06:
 
 | Phase | Inline | Record |
 |---|---:|---:|
-| Recording, 32 B payload | 75.7 ns/op | 71.8 ns/op |
-| Recording, 64 B payload | 80.7 ns/op | 78.2 ns/op |
-| Recording, 112 B payload | 79.2 ns/op | 74.8 ns/op |
-| 1,000 dispatches, record | 139.5 ns/op | 133.8 ns/op |
-| 1,000 dispatches, execute | 68.2 ms | 68.9 ms |
+| Recording, 32 B payload | 84.7 ns/op | 80.6 ns/op |
+| Recording, 64 B payload | 84.2 ns/op | 86.8 ns/op |
+| Recording, 112 B payload | 86.1 ns/op | 79.6 ns/op |
+| 1,000 dispatches, record | 165.1 ns/op | 144.5 ns/op |
+| 1,000 dispatches, execute | 72.5 ms | 74.2 ms |
 
 The two paths are within run-to-run noise on the software driver. The
 dependent load a record costs on hardware is not visible here. The issue's

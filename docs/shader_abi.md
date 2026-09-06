@@ -13,14 +13,13 @@ shaders index into it with values stored in root data.
 ## Root push
 
 Every pipeline layout has one push-constant range of `ROOT_PUSH_CAPACITY`
-(128) bytes. The root-address header occupies the start; an optional inline
-payload follows it. Shaders that read push constants declare the header for
-their pipeline kind first, exactly, and any payload members at or after the
-header end: `INLINE_ROOT_OFFSET_COMPUTE` (8) for compute and ray tracing,
-`INLINE_ROOT_OFFSET_GRAPHICS` (16) for graphics. The payload may start later
-when its first member needs a larger alignment (a `vec4` at 16). The library
-reads that start from the pipeline's shaders and writes the payload there;
-the capacity is 128 minus the start, at most `INLINE_ROOT_CAPACITY` (120).
+(128) bytes. The root-address header occupies the start; the inline payload
+bytes follow it directly, from `INLINE_ROOT_OFFSET_COMPUTE` (8) for compute
+and ray tracing and `INLINE_ROOT_OFFSET_GRAPHICS` (16) for graphics. Shaders
+that read push constants declare the header for their pipeline kind first,
+exactly, and any payload members at or after the header end. The capacity is
+128 minus the header: `INLINE_ROOT_CAPACITY` (120) for compute and ray
+tracing, 112 for graphics.
 
 Compute and ray tracing header, 8 bytes:
 
@@ -62,11 +61,12 @@ A direct command may carry a payload in the same push. `cmd_dispatch`,
 a trailing `char[] inline_root` (default empty). `@inline_root(&value)`
 borrows a value as bytes for the call; the command copies them immediately.
 The length must be a multiple of 4, at most `INLINE_ROOT_CAPACITY`, and fit
-`ROOT_PUSH_CAPACITY` from the bound pipeline's payload start, else
+`ROOT_PUSH_CAPACITY` after the bound pipeline's header, else
 `INVALID_ARGUMENT`. Under `ContractValidation.FULL` a payload longer than the
 bound pipeline's reflected push block reports a `public_contract` diagnostic
-on `inline_root`. Stages of one pipeline that declare a payload must start it
-at the same offset.
+on `inline_root`. Payload byte `n` is block byte `header + n`; a member that
+needs 16-byte alignment in a compute block therefore sits after 8 bytes of
+payload padding.
 
 ```glsl
 layout(push_constant) uniform Push {
@@ -77,7 +77,9 @@ layout(push_constant) uniform Push {
 ```
 
 ```c3
-struct TintRoot {
+struct TintRoot @packed {
+    uint  _pad0;
+    uint  _pad1;
     Vec4f tint;
     uint  material;
 }
@@ -91,10 +93,8 @@ gpu::cmd_dispatch(
 )!;
 ```
 
-Payload offsets in the block are the payload start plus the C3 struct
-offsets, so a std430 struct laid out from 0 mirrors the block from that
-start. A scalar compute payload starts at 8; one that begins with a `vec4`
-starts at 16.
+Payload offsets in the block are the header size plus the packed C3 struct
+offsets, so the payload struct mirrors the block bytes from the header end.
 Generated work updates the header only; payload bytes are unspecified after
 `cmd_dispatch_generated` or `cmd_draw_generated`, and every direct command
 pushes its own payload again.
@@ -350,13 +350,15 @@ assertions; generated GLSL emits `root` types as
 `buffer_reference` blocks and `struct` types as plain structs.
 
 `push compute Name { ... }` and `push graphics Name { ... }` declare an
-inline payload. The C3 side is the payload struct, laid out from 0 and
-asserted against its capacity. The GLSL side is the whole
-`layout(push_constant)` block named `pc`: the header for the role, then the
-fields from `layout(offset = N)` where N is the header end rounded up to the
-payload's alignment. Field names may not repeat the header names. Put a
-role-qualified `push` in a schema of its own, since every shader that
-includes the generated GLSL receives the block. A bare `push` keeps the
+inline payload. The generator lays the fields out in the block from the
+header end, requiring explicit `_padN` fields for any gap (a compute payload
+that starts with a `vec4` begins with `uint _pad0; uint _pad1;`). The C3 side
+is a `@packed` struct whose offsets are the block offsets minus the header,
+asserted against the capacity. The GLSL side is the whole
+`layout(push_constant)` block named `pc`: the header for the role, then every
+field with its `layout(offset = N)`. Field names may not repeat the header
+names. Put a role-qualified `push` in a schema of its own, since every shader
+that includes the generated GLSL receives the block. A bare `push` keeps the
 library header meaning.
 
 Shaders include the library ABI and then the application ABI:
