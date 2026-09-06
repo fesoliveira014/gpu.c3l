@@ -396,20 +396,6 @@ fn void command_allocator_native_creation_is_transactional() @test {
         "failed pool creation releases every host allocation exactly once");
 
     probe = { .fail_buffers = true };
-    assert(@catch(gpu::internal::vk::initialize_command_allocator_slot_with_ops(
-        state: &state,
-        queue: queue,
-        desc:  &desc,
-        slot:  &slot,
-        ops:   &ops,
-    )) == gpu::OUT_OF_DEVICE_MEMORY,
-        "native command-buffer allocation failure remains specific");
-    assert(probe.pool_creates == 1 && probe.pool_destroys == 1
-        && probe.buffer_allocations == 1 && probe.family == 7
-        && probe.buffer_count == 2 && slot.command_buffers.ptr == null,
-        "buffer allocation failure destroys the exact-family pool once");
-
-    probe = {};
     gpu::internal::vk::initialize_command_allocator_slot_with_ops(
         state: &state,
         queue: queue,
@@ -417,11 +403,12 @@ fn void command_allocator_native_creation_is_transactional() @test {
         slot:  &slot,
         ops:   &ops,
     )!!;
-    assert(probe.pool_creates == 1 && probe.buffer_allocations == 1
-        && probe.family == 7 && probe.buffer_count == 2
-        && slot.command_buffers[0] != null
-        && slot.command_buffers[1] != null,
-        "successful creation uses one exact-family pool and one batch allocation");
+    assert(probe.pool_creates == 1 && probe.buffer_allocations == 0
+        && probe.family == 7
+        && slot.command_buffers.len == 2
+        && slot.command_buffers[0] == null
+        && slot.command_buffers[1] == null,
+        "successful creation uses one exact-family pool and allocates no command buffers");
     gpu::internal::vk::destroy_command_allocator_slot_with_ops(&state, &slot, &ops);
     assert(probe.pool_destroys == 1 && slot.command_buffers.ptr == null,
         "successful slot cleanup destroys the injected pool once");
@@ -581,7 +568,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
     assert(success_allocator.releases == 7
         && success_allocator.outstanding == 0
         && probe.pool_creates == 1 && probe.pool_destroys == 1
-        && probe.buffer_allocations == 1,
+        && probe.buffer_allocations == 0,
         "successful cleanup releases every host allocation and native pool");
 }
 
@@ -712,6 +699,148 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
     assert(gpu::internal::vk::slot_name(&slot.debug_name[0]).str_view()
         == "graphics_allocator",
         "allocator debug names are copied into stable backend storage");
+}
+
+fn vk::Result counting_allocate_command_buffers(
+    void* user_data,
+    vk::Device device,
+    vk::CommandBufferAllocateInfo* info,
+    vk::CommandBuffer* command_buffers,
+) {
+    CommandAllocatorCreateProbe* probe =
+        (CommandAllocatorCreateProbe*)user_data;
+    probe.buffer_allocations++;
+    probe.buffer_count = info.command_buffer_count;
+    if (probe.fail_buffers) return vk::Result.ERROR_OUT_OF_DEVICE_MEMORY;
+    return vk::allocate_command_buffers(device, info, command_buffers);
+}
+
+fn void first_begin_allocates_one_command_buffer_per_index() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "command_allocator_lazy_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 2 };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    gpu::internal::vk::CommandAllocatorSlot* slot =
+        state.command_allocators.get(allocator.handle)!!;
+    assert(slot.command_buffers[0] == null && slot.command_buffers[1] == null,
+        "creation allocates no command buffers");
+
+    CommandAllocatorCreateProbe pool_probe;
+    gpu::internal::vk::CommandPoolOps pool_ops = {
+        .user_data = &pool_probe,
+        .create    = &probe_create_command_pool,
+        .destroy   = &probe_destroy_command_pool,
+        .allocate  = &counting_allocate_command_buffers,
+    };
+    gpu::internal::vk::CommandRecordingOps ops =
+        gpu::internal::vk::command_recording_ops_real();
+    gpu::CommandList first;
+    gpu::internal::vk::CommandRecord* first_record = gpu::internal::vk::begin_commands_with_injected_ops(
+        state:        state,
+        allocator:    &allocator,
+        out_commands: &first,
+        ops:          &ops,
+        pool_ops:     &pool_ops,
+    )!!;
+    uint first_index = first_record.allocator_buffer;
+    assert(pool_probe.buffer_allocations == 1 && pool_probe.buffer_count == 1
+        && slot.command_buffers[first_index] != null,
+        "the first begin on an index allocates exactly one command buffer");
+    gpu::CommandList second;
+    gpu::internal::vk::CommandRecord* second_record = gpu::internal::vk::begin_commands_with_injected_ops(
+        state:        state,
+        allocator:    &allocator,
+        out_commands: &second,
+        ops:          &ops,
+        pool_ops:     &pool_ops,
+    )!!;
+    assert(pool_probe.buffer_allocations == 2,
+        "each index allocates its own command buffer on first use");
+    gpu::internal::vk::vk_discard_commands(state, first_record, false)!!;
+    gpu::internal::vk::vk_discard_commands(state, second_record, false)!!;
+
+    gpu::CommandList third;
+    gpu::internal::vk::CommandRecord* third_record = gpu::internal::vk::begin_commands_with_injected_ops(
+        state:        state,
+        allocator:    &allocator,
+        out_commands: &third,
+        ops:          &ops,
+        pool_ops:     &pool_ops,
+    )!!;
+    assert(pool_probe.buffer_allocations == 2,
+        "a reused index allocates nothing");
+    gpu::internal::vk::vk_discard_commands(state, third_record, false)!!;
+
+    gpu::CommandAllocator fresh = gpu::create_command_allocator(
+        &device,
+        queue,
+        &desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&fresh)!!;
+    gpu::internal::vk::CommandAllocatorSlot* fresh_slot =
+        state.command_allocators.get(fresh.handle)!!;
+    pool_probe = { .fail_buffers = true };
+    gpu::CommandList failed;
+    assert(@catch(gpu::internal::vk::begin_commands_with_injected_ops(
+        state:        state,
+        allocator:    &fresh,
+        out_commands: &failed,
+        ops:          &ops,
+        pool_ops:     &pool_ops,
+    )) == gpu::OUT_OF_DEVICE_MEMORY,
+        "a failed first-use allocation reports the mapped fault");
+    assert(fresh_slot.available_count == 2
+        && fresh_slot.live_recordings == 0
+        && fresh_slot.command_buffers[0] == null
+        && fresh_slot.command_buffers[1] == null,
+        "a failed first-use allocation returns the index and leaves no buffer");
+}
+
+fn void begin_observes_completed_work_without_application_poll() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "command_allocator_poll_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 2 };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    gpu::internal::vk::CommandAllocatorSlot* slot =
+        state.command_allocators.get(allocator.handle)!!;
+
+    gpu::ExecutableCommandList[2] lists;
+    for (uint i = 0; i < 2; i++) {
+        gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+        lists[i] = gpu::end_commands(&commands)!!;
+    }
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
+    assert(slot.available_count == 0 && slot.in_flight_buffers == 2,
+        "every unit is in flight after submission");
+    vk::device_wait_idle(state.device);
+
+    gpu::CommandList reused = gpu::begin_commands(&allocator)!!;
+    assert(slot.in_flight_buffers == 0 && slot.available_count == 1,
+        "begin retired the completed units before claiming one");
+    gpu::discard_commands(&reused)!!;
 }
 
 fn void command_allocator_capacity_and_destroy_are_non_waiting() @test {

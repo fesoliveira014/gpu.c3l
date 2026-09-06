@@ -46,8 +46,9 @@ gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
 defer (void)gpu::discard_executable_commands(&executable);
 ```
 
-`begin_commands` returns `DEVICE_BUSY` when no unit is free; wait on an
-older completion point and retry. `end_commands` consumes the recording
+`begin_commands` retires the queue's completed work when no unit is free
+and returns `DEVICE_BUSY` only if none retired; wait on an older
+completion point and retry. `end_commands` consumes the recording
 token. `submit` consumes the executable token. The deferred discards are
 no-ops after a successful consume and free the unit on an early fault.
 

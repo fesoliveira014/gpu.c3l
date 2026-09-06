@@ -459,17 +459,6 @@ fn void? initialize_command_allocator_slot_with_ops(
         state.device,
         native_queue_family(completion.native_id),
     )!;
-    vk::CommandBufferAllocateInfo allocate_info =
-        vk::command_buffer_allocate_info()
-            .set_command_pool(slot.pool)
-            .set_level(vk::CommandBufferLevel.PRIMARY)
-            .set_command_buffer_count(capacity);
-    check_device_result(state, ops.allocate(
-        ops.user_data,
-        state.device,
-        &allocate_info,
-        slot.command_buffers.ptr,
-    ))!;
 }
 
 fn void? initialize_command_allocator_slot(
@@ -979,11 +968,31 @@ fn CommandRecordingOps command_recording_ops_real() @private {
     };
 }
 
+fn void? ensure_command_buffer_locked(
+    VkDeviceState* state,
+    CommandAllocatorSlot* slot,
+    uint buffer_index,
+    CommandPoolOps* ops,
+) @private {
+    if (slot.command_buffers[buffer_index] != null) return;
+    vk::CommandBufferAllocateInfo info = vk::command_buffer_allocate_info()
+        .set_command_pool(slot.pool)
+        .set_level(vk::CommandBufferLevel.PRIMARY)
+        .set_command_buffer_count(1);
+    check_device_result(state, ops.allocate(
+        ops.user_data,
+        state.device,
+        &info,
+        &slot.command_buffers[buffer_index],
+    ))!;
+}
+
 fn void? vk_begin_commands_with_ops(
     VkDeviceState* state,
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
     CommandRecordingOps* ops,
+    CommandPoolOps* pool_ops = null,
 ) @private {
     CommandAllocatorSlot* slot = lock_command_allocator(
         state,
@@ -1021,6 +1030,12 @@ fn void? vk_begin_commands_with_ops(
         }
     }
 
+    CommandPoolOps real_pool_ops;
+    if (pool_ops == null) {
+        real_pool_ops = command_pool_ops_real(state);
+        pool_ops = &real_pool_ops;
+    }
+    ensure_command_buffer_locked(state, slot, buffer_index, pool_ops)!;
     vk::CommandBuffer command_buffer = slot.command_buffers[buffer_index];
     CommandRecord backend_record = {
         .command_buffer   = command_buffer,
@@ -1075,12 +1090,25 @@ fn void? vk_begin_commands(
     gpu::CommandList* out_commands,
 ) {
     CommandRecordingOps ops = command_recording_ops_real();
-    return vk_begin_commands_with_ops(
+    if (catch err = vk_begin_commands_with_ops(
         state:        state,
         allocator:    allocator,
         out_commands: out_commands,
         ops:          &ops,
-    );
+    )) {
+        if (err != gpu::DEVICE_BUSY) return err~;
+        retire_queue_latest_with_query(
+            state,
+            allocator.queue.id,
+            &real_semaphore_counter_query,
+        )!;
+        return vk_begin_commands_with_ops(
+            state:        state,
+            allocator:    allocator,
+            out_commands: out_commands,
+            ops:          &ops,
+        );
+    }
 }
 
 fn void? vk_end_commands_with_ops(
@@ -1121,12 +1149,14 @@ fn CommandRecord*? begin_commands_with_injected_ops(
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
     CommandRecordingOps* ops,
+    CommandPoolOps* pool_ops = null,
 ) @feat(TESTING) {
     vk_begin_commands_with_ops(
         state:        state,
         allocator:    allocator,
         out_commands: out_commands,
         ops:          ops,
+        pool_ops:     pool_ops,
     )!;
     CommandRecord* record =
         gpu::internal::recording_command(out_commands)!;
