@@ -9,12 +9,35 @@ import std::io;
 const char[*] MESHLET_MESH_SPIRV = $embed("shaders/meshlet.mesh.spv");
 const char[*] MESH_ARGS_SPIRV = $embed("shaders/mesh_args.comp.spv");
 
-fn gpu::Device? make_mesh_device(VulkanValidationCapture* capture = null) {
+struct MeshValidationCapture {
+    uint      errors;
+    char[512] first;
+}
+
+fn void capture_mesh_validation_error(gpu::DebugMessage* message, void* user_data) {
+    if (!message.category.backend || !message.category.validation
+        || message.severity != gpu::DebugMessageSeverity.ERROR) return;
+    MeshValidationCapture* capture = (MeshValidationCapture*)user_data;
+    if (capture.errors == 0 && message.backend_text != null) {
+        String text = message.backend_text.str_view();
+        usz len = text.len < capture.first.len - 1 ? text.len : capture.first.len - 1;
+        capture.first[:len] = text[:len];
+        capture.first[len] = 0;
+    }
+    capture.errors++;
+}
+
+fn void report_mesh_validation(MeshValidationCapture* capture, String what) {
+    if (capture.errors == 0) return;
+    io::eprintfn("%s: %d validation errors, first: %s", what, capture.errors, (ZString)&capture.first[0]);
+}
+
+fn gpu::Device? make_mesh_device(MeshValidationCapture* capture = null) {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_mesh_test",
-        .debug_callback           = capture == null ? null : &capture_vulkan_validation_error,
+        .debug_callback           = capture == null ? null : &capture_mesh_validation_error,
         .debug_user_data          = capture,
     };
     gpu::DeviceDesc device_desc = { .enable_mesh_shaders = true };
@@ -75,7 +98,7 @@ fn void mesh_shaders_gate_on_the_feature() @test {
 }
 
 fn void mesh_pipeline_draws_meshlet_triangle() @test {
-    VulkanValidationCapture validation;
+    MeshValidationCapture validation;
     gpu::Device? candidate = make_mesh_device(&validation);
     if (catch err = candidate) {
         assert(err == gpu::UNSUPPORTED_FEATURE, "device creation faults only for missing support");
@@ -174,11 +197,12 @@ fn void mesh_pipeline_draws_meshlet_triangle() @test {
     char* center = &pixels[(DP_RT / 2 * DP_RT + DP_RT / 2) * 4];
     assert(center[0] == (char)255 && center[1] == (char)0, "the meshlet triangle covers the center in the fragment root color");
     assert(pixels[0] == (char)0, "the corner keeps the clear color");
+    report_mesh_validation(&validation, "mesh draw");
     assert(validation.errors == 0, "the mesh draw is validation clean");
 }
 
 fn void mesh_indirect_draws_execute_gpu_written_arguments() @test {
-    VulkanValidationCapture validation;
+    MeshValidationCapture validation;
     gpu::Device? candidate = make_mesh_device(&validation);
     if (catch err = candidate) {
         assert(err == gpu::UNSUPPORTED_FEATURE, "device creation faults only for missing support");
@@ -289,5 +313,6 @@ fn void mesh_indirect_draws_execute_gpu_written_arguments() @test {
     char* pixels = (char*)test_span_mapping(&device, readback.span).ptr;
     char* center = &pixels[(DP_RT / 2 * DP_RT + DP_RT / 2) * 4];
     assert(center[1] == (char)255 && center[0] == (char)0, "GPU-written mesh arguments draw the triangle");
+    report_mesh_validation(&validation, "indirect mesh draws");
     assert(validation.errors == 0, "indirect mesh draws are validation clean");
 }
