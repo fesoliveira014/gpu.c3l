@@ -18,6 +18,7 @@ enum DeclKind {
 enum TypeKind {
     SCALAR,
     VECTOR,
+    MATRIX,
     SEMANTIC,
     STRUCT_REF,
 }
@@ -39,6 +40,7 @@ struct Field {
     Loc    loc;
     Loc    type_loc;
     uint   offset;
+    uint   array_len;
 }
 
 struct ConstDecl {
@@ -100,6 +102,7 @@ fn void TypeTable.init(&self) {
     self.entries.set("u64",   { .kind = SCALAR, .size = 8, .alignment = 8, .scalar_width = 64, .integer = true, .c3_name = "ulong", .glsl_name = "uint64_t" });
     self.entries.set("vec2",  { .kind = VECTOR, .size = 8,  .alignment = 8,  .scalar_width = 32, .c3_name = "Vec2f", .glsl_name = "vec2" });
     self.entries.set("vec4",  { .kind = VECTOR, .size = 16, .alignment = 16, .scalar_width = 32, .c3_name = "Vec4f", .glsl_name = "vec4" });
+    self.entries.set("mat4",  { .kind = MATRIX, .size = 64, .alignment = 16, .scalar_width = 32, .c3_name = "Mat4f", .glsl_name = "mat4" });
     self.entries.set("GpuAddress",   { .kind = SEMANTIC, .size = 8, .alignment = 8, .scalar_width = 64, .integer = true, .c3_name = "GpuAddress", .glsl_name = "uint64_t" });
     self.entries.set("TextureIndex", { .kind = SEMANTIC, .size = 4, .alignment = 4, .scalar_width = 32, .integer = true, .c3_name = "TextureIndex", .glsl_name = "uint" });
     self.entries.set("SamplerIndex", { .kind = SEMANTIC, .size = 4, .alignment = 4, .scalar_width = 32, .integer = true, .c3_name = "SamplerIndex", .glsl_name = "uint" });
@@ -128,8 +131,24 @@ fn TypeInfo? TypeTable.lookup(&self, String name, Loc loc) {
         diagnostic(loc, "vec3 is not permitted in ABI structs (docs/shader_abi.md section 5); pack into vec4");
         return UNKNOWN_TYPE~;
     }
+    if (is_rejected_matrix(name)) {
+        diagnostic(loc, "only mat4 is permitted in ABI structs (docs/shader_abi.md section 5); pad columns to vec4");
+        return UNKNOWN_TYPE~;
+    }
     diagnostic(loc, "unknown type '%s'", name);
     return UNKNOWN_TYPE~;
+}
+
+fn bool is_rejected_matrix(String name) {
+    if (name.len < 4 || name[0:3] != "mat") return false;
+    if (name.len == 4) return name[3] == '2' || name[3] == '3';
+    return name.len == 6 && name[4] == 'x';
+}
+
+fn uint field_stride(TypeInfo* info) => align_up(info.size, info.alignment);
+
+fn uint field_size(Field* field, TypeInfo* info) {
+    return field.array_len == 0 ? info.size : field.array_len * field_stride(info);
 }
 
 fn bool TypeTable.is_scalar(&self, String name) {

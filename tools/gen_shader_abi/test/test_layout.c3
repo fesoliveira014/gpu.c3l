@@ -178,3 +178,81 @@ fn void nested_struct_alignment_propagates() @test {
     assert(outer.alignment == 16);
     assert(outer.fields.get_ref(3).offset == 16);
 }
+
+fn void mat4_layouts_and_padding() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        struct Leading {
+            mat4 m;
+        }
+        struct Padded {
+            float a;
+            uint  _pad0;
+            uint  _pad1;
+            uint  _pad2;
+            mat4  m;
+        }
+    `, &schema, &types)!!;
+    StructDecl* leading = schema.structs.get_ref(0);
+    assert(leading.size == 64 && leading.alignment == 16);
+    StructDecl* padded = schema.structs.get_ref(1);
+    assert(padded.fields.get_ref(4).offset == 16 && padded.size == 80);
+
+    @expect_fault(`
+        abi t;
+        struct Bad {
+            float a;
+            mat4  m;
+        }
+    `, LAYOUT_ERROR);
+}
+
+fn void array_strides_follow_element_alignment() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        struct Elem {
+            u64  a;
+            u64  b;
+            uint c;
+            uint d;
+        }
+        struct Arrays {
+            float[8] floats;
+            vec2[3]  pairs;
+            uint     _pad0;
+            uint     _pad1;
+            vec4[4]  planes;
+            mat4[2]  bones;
+            Elem[2]  elems;
+        }
+    `, &schema, &types)!!;
+    StructDecl* elem = schema.structs.get_ref(0);
+    assert(elem.size == 24 && elem.alignment == 8);
+    StructDecl* arrays = schema.structs.get_ref(1);
+    assert(arrays.fields.get_ref(0).offset == 0);
+    assert(arrays.fields.get_ref(1).offset == 32);
+    assert(arrays.fields.get_ref(4).offset == 64);
+    assert(arrays.fields.get_ref(5).offset == 128);
+    assert(arrays.fields.get_ref(6).offset == 256);
+    assert(arrays.size == 304 && arrays.alignment == 16);
+
+    @expect_fault(`
+        abi t;
+        struct Bad {
+            vec2[3] pairs;
+            vec4[4] planes;
+        }
+    `, LAYOUT_ERROR);
+}

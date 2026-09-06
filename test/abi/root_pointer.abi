@@ -10,3 +10,12 @@ root ComputeRoot {
     uint       _pad1;
     uint       _pad2;
 }
+
+root MatrixRoot {
+    GpuAddress output_gpu;
+    uint       count;
+    uint       _pad0;
+    mat4       transform;
+    vec4[4]    planes;
+    uint[8]    ids;
+}

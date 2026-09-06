@@ -20,3 +20,19 @@ $assert $reflect(ComputeRoot.count).offset == 16;
 $assert $reflect(ComputeRoot._pad0).offset == 20;
 $assert $reflect(ComputeRoot._pad1).offset == 24;
 $assert $reflect(ComputeRoot._pad2).offset == 28;
+
+struct MatrixRoot {
+    GpuAddress output_gpu;
+    uint       count;
+    uint       _pad0;
+    Mat4f      transform;
+    Vec4f[4]   planes;
+    uint[8]    ids;
+}
+$assert MatrixRoot::size == 176;
+$assert $reflect(MatrixRoot.output_gpu).offset == 0;
+$assert $reflect(MatrixRoot.count).offset == 8;
+$assert $reflect(MatrixRoot._pad0).offset == 12;
+$assert $reflect(MatrixRoot.transform).offset == 16;
+$assert $reflect(MatrixRoot.planes).offset == 80;
+$assert $reflect(MatrixRoot.ids).offset == 144;

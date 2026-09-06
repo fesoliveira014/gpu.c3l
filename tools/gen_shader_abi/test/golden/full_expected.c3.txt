@@ -49,6 +49,22 @@ $assert $reflect(BuildRoot.time).offset == 28;
 $assert $reflect(BuildRoot._pad0).offset == 32;
 $assert $reflect(BuildRoot._pad1).offset == 36;
 
+struct MatrixRoot {
+    GpuAddress output_gpu;
+    uint       count;
+    uint       _pad0;
+    Mat4f      transform;
+    Vec4f[4]   planes;
+    uint[8]    ids;
+}
+$assert MatrixRoot::size == 176;
+$assert $reflect(MatrixRoot.output_gpu).offset == 0;
+$assert $reflect(MatrixRoot.count).offset == 8;
+$assert $reflect(MatrixRoot._pad0).offset == 12;
+$assert $reflect(MatrixRoot.transform).offset == 16;
+$assert $reflect(MatrixRoot.planes).offset == 80;
+$assert $reflect(MatrixRoot.ids).offset == 144;
+
 struct RootPush {
     GpuAddress root_gpu;
 }
