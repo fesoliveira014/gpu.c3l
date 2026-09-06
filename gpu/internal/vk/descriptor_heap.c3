@@ -1230,7 +1230,8 @@ fn void? vk_release_texture_indices(
     uint capacity = (uint)heap.texture_cells.len;
     if (!range.base.is_valid() || range.count == 0) return gpu::INVALID_ARGUMENT~;
     uint first = texture_index_slot(range.base);
-    if (first < heap.texture_reserved_low
+    if (first >= capacity
+        || first < heap.texture_reserved_low
         || range.count > capacity - first) {
         return gpu::INVALID_ARGUMENT~;
     }

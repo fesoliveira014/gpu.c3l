@@ -1075,7 +1075,12 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     defer gpu::destroy_texture_view(&device, small_write)!!;
 
     gpu::TextureIndexRange range = gpu::reserve_texture_indices(&device, 1)!!;
-    gpu::TextureView slot = gpu::create_texture_view_at(&device, range.base, large, null)!!;
+    gpu::TextureView slot = gpu::create_texture_view_at(
+        device:  &device,
+        slot:    range.base,
+        texture: large,
+        desc:    null,
+    )!!;
     gpu::TextureView stale = slot;
 
     gpu::SamplerDesc sampler_desc = {
@@ -1172,13 +1177,28 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     gpu::wait_completion(submit_test_queue(&device, gpu::QueueKind.COMPUTE, &first_submit)!!)!!;
     assert_heap_pattern(&device, output.span, TEX_SIZE);
 
-    gpu::update_texture_view(&device, &slot, small, null)!!;
+    gpu::update_texture_view(
+        device:  &device,
+        view:    &slot,
+        texture: small,
+        desc:    null,
+    )!!;
     assert(slot.index.value == range.base.value && slot.generation != stale.generation,
         "an update keeps the index and advances the generation");
     assert(@catch(gpu::destroy_texture_view(&device, stale)) == gpu::INVALID_HANDLE,
         "a token from before the update is stale");
-    assert(@catch(gpu::update_texture_view(&device, &stale, small, null)) == gpu::INVALID_HANDLE
-        && @catch(gpu::update_texture_view(&device, null, small, null)) == gpu::INVALID_HANDLE,
+    assert(@catch(gpu::update_texture_view(
+        device:  &device,
+        view:    &stale,
+        texture: small,
+        desc:    null,
+    )) == gpu::INVALID_HANDLE
+        && @catch(gpu::update_texture_view(
+        device:  &device,
+        view:    null,
+        texture: small,
+        desc:    null,
+    )) == gpu::INVALID_HANDLE,
         "stale and null tokens are rejected before heap mutation");
     assert(state.textures.get(large)!!.live_descriptor_views == 1
         && state.textures.get(small)!!.live_descriptor_views == 2,

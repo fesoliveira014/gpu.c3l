@@ -2196,7 +2196,12 @@ fn void reserved_range_is_contiguous_and_private() @test {
     gpu::TextureView[8] reserved;
     for (uint i = 0; i < 8; i++) {
         gpu::TextureIndex slot = { .value = range.base.value + i };
-        reserved[i] = gpu::create_texture_view_at(&device, slot, texture, null)!!;
+        reserved[i] = gpu::create_texture_view_at(
+        device:  &device,
+        slot:    slot,
+        texture: texture,
+        desc:    null,
+    )!!;
         assert(reserved[i].index.value == slot.value, "a slot-addressed view keeps its index");
     }
     assert(live_descriptor_view_count(state, texture) == 8,
@@ -2220,10 +2225,25 @@ fn void reserved_range_is_contiguous_and_private() @test {
     assert(@catch(gpu::release_texture_indices(&device, range)) == gpu::RESOURCE_IN_USE,
         "release faults while a reserved slot holds a view");
     gpu::TextureIndex reused = { .value = range.base.value + 2 };
-    reserved[2] = gpu::create_texture_view_at(&device, reused, texture, null)!!;
-    assert(@catch(gpu::create_texture_view_at(&device, reused, texture, null)) == gpu::RESOURCE_IN_USE,
+    reserved[2] = gpu::create_texture_view_at(
+        device:  &device,
+        slot:    reused,
+        texture: texture,
+        desc:    null,
+    )!!;
+    assert(@catch(gpu::create_texture_view_at(
+        device:  &device,
+        slot:    reused,
+        texture: texture,
+        desc:    null,
+    )) == gpu::RESOURCE_IN_USE,
         "an occupied reserved slot faults RESOURCE_IN_USE");
-    assert(@catch(gpu::create_texture_view_at(&device, general[0].index, texture, null)) == gpu::INVALID_ARGUMENT,
+    assert(@catch(gpu::create_texture_view_at(
+        device:  &device,
+        slot:    general[0].index,
+        texture: texture,
+        desc:    null,
+    )) == gpu::INVALID_ARGUMENT,
         "a general slot faults INVALID_ARGUMENT");
 
     for (uint i = 0; i < 8; i++) {
@@ -2260,4 +2280,7 @@ fn void reservation_release_reclaims_holes() @test {
         "a zero-count reservation faults INVALID_ARGUMENT");
     assert(@catch(gpu::reserve_texture_indices(&device, 9)) == gpu::DESCRIPTOR_HEAP_FULL,
         "a reservation beyond capacity faults DESCRIPTOR_HEAP_FULL");
+    gpu::TextureIndexRange outside = { .base = { .value = 10 }, .count = 1 };
+    assert(@catch(gpu::release_texture_indices(&device, outside)) == gpu::INVALID_ARGUMENT,
+        "a range outside the heap faults before indexing");
 }

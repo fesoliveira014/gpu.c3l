@@ -187,8 +187,18 @@ and rewrite any live view's descriptor in place with `update_texture_view`:
 ```c3
 gpu::TextureIndexRange row = gpu::reserve_texture_indices(&device, 4)!;
 gpu::TextureIndex second = { .value = row.base.value + 1 };
-gpu::TextureView slot1 = gpu::create_texture_view_at(&device, second, a, null)!;
-gpu::update_texture_view(&device, &slot1, b, null)!;   // same index, new texture
+gpu::TextureView slot1 = gpu::create_texture_view_at(
+    device:  &device,
+    slot:    second,
+    texture: a,
+    desc:    null,
+)!;
+gpu::update_texture_view(
+    device:  &device,
+    view:    &slot1,
+    texture: b,
+    desc:    null,
+)!;                                                    // same index, new texture
 gpu::destroy_texture_view(&device, slot1)!;            // slot stays reserved
 gpu::release_texture_indices(&device, row)!;           // every slot must be empty
 ```

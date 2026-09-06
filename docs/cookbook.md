@@ -182,13 +182,27 @@ for (uint frame = 0; frame < FRAMES; frame++) {
     for (uint i = 0; i < GBUFFER_COUNT; i++) {
         uint at = frame * GBUFFER_COUNT + i;
         gpu::TextureIndex slot = { .value = rows.base.value + at };
-        views[at] = gpu::create_texture_view_at(device, slot, gbuffer[frame][i], null)!;
+        views[at] = gpu::create_texture_view_at(
+            device:  device,
+            slot:    slot,
+            texture: gbuffer[frame][i],
+            desc:    null,
+        )!;
     }
 }
 root.gbuffer_base = rows.base;          // shader adds frame * GBUFFER_COUNT + i
 
 // after a resize, once the old textures are no longer read:
-gpu::update_texture_view(device, &views[at], resized[frame][i], null)!;
+for (uint frame = 0; frame < FRAMES; frame++) {
+    for (uint i = 0; i < GBUFFER_COUNT; i++) {
+        gpu::update_texture_view(
+            device:  device,
+            view:    &views[frame * GBUFFER_COUNT + i],
+            texture: resized[frame][i],
+            desc:    null,
+        )!;
+    }
+}
 ```
 
 Slots keep their indices across `update_texture_view`, so root records that
