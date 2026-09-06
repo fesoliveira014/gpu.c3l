@@ -1543,7 +1543,8 @@ struct DepthTargetDesc {
     ClearDepth           clear;
 }
 
-<* A dynamic render pass. Every selected attachment must cover the render area. *>
+<* A dynamic render pass. Every selected attachment must cover the render
+   area. A zero `width` and `height` select the first attachment's extent. *>
 struct RenderPassDesc {
     ColorTargetDesc[] colors;
     DepthTargetDesc*  depth;

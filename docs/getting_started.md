@@ -450,12 +450,9 @@ gpu::ColorTargetDesc[1] colors = {{
     .store_op = gpu::StoreOp.STORE,
     .clear    = { .rgba = { 0.04f, 0.05f, 0.10f, 1.0f } },
 }};
-gpu::RenderPassDesc pass = {
-    .colors = colors[..],
-    .width  = swapchain_info.width,
-    .height = swapchain_info.height,
-};
-gpu::GraphicsState state = gpu::render_geometry_state(pass.width, pass.height)!;
+gpu::RenderPassDesc pass = { .colors = colors[..] };
+gpu::GraphicsState state =
+    gpu::render_geometry_state(swapchain_info.width, swapchain_info.height)!;
 gpu::ColorTargetState[1] color_state = { gpu::color_blend_disabled() };
 state.color.targets = color_state[..];
 
