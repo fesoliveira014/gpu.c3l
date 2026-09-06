@@ -60,6 +60,16 @@ char[] bytes = gpu::get_span_mapping(&device, part)!;      // CPU_WRITE / CPU_RE
 gpu::GpuAddress address = gpu::get_span_address(&device, part)!;
 
 gpu::MappedGpuSpan mapped = gpu::mapped_gpu_span(&device, part)!;  // span + bytes + address
+gpu::GpuAllocation owner = part.allocation();                      // token for free_allocation
+```
+
+`allocate_mapped_memory` allocates a mapped class and returns the same
+three views in one call; free it through `span.allocation()`:
+
+```c3
+gpu::MappedGpuSpan frame = gpu::allocate_mapped_memory(&device, &desc)!;
+gpu::GpuAllocation frame_allocation = frame.span.allocation();
+defer (void)gpu::free_allocation(&device, &frame_allocation);
 ```
 
 After writing through a mapping:
@@ -74,8 +84,8 @@ After the GPU wrote and its completion point completed:
 gpu::invalidate_mapped_span(&device, part)!;
 ```
 
-Both are no-ops on coherent memory and required regardless. Neither waits
-for the GPU. A `GpuAddress` is a raw `ulong` valid until the allocation is
+Both are required unless `AllocationInfo.coherent` is true, in which case
+they are no-ops. Neither waits for the GPU. A `GpuAddress` is a raw `ulong` valid until the allocation is
 freed.
 
 ## Memory statistics

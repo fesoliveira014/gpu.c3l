@@ -112,6 +112,26 @@ fn void allocation_ownership_queries_and_consumption() @test {
     gpu::destroy_device(&second)!!;
 }
 
+fn void mapped_allocation_composes_views_and_frees_through_span() @test {
+    gpu::internal::vk::VkDeviceState state;
+    Device device = create_allocation_stub_device(&state);
+    AllocationDesc desc = allocation_stub_desc();
+    MappedGpuSpan mapped = gpu::allocate_mapped_memory(&device, &desc)!!;
+    assert(mapped.bytes.len == mapped.span.size && mapped.span.size == desc.size,
+        "the composed mapping covers the allocation");
+    assert((ulong)mapped.address == (ulong)gpu::get_span_address(&device, mapped.span)!!,
+        "the composed address matches the public query");
+    GpuAllocation allocation = mapped.span.allocation();
+    gpu::free_allocation(&device, &allocation)!!;
+    assert(!state.allocation_live, "freeing through the span accessor releases the stub allocation");
+
+    AllocationDesc private_desc = allocation_stub_desc(MemoryClass.GPU_PRIVATE);
+    assert(@catch(gpu::allocate_mapped_memory(&device, &private_desc)) == gpu::INVALID_ARGUMENT,
+        "an unmapped class faults before allocating");
+    assert(!state.allocation_live, "a rejected class leaves nothing allocated");
+    gpu::destroy_device(&device)!!;
+}
+
 fn void zero_sized_span_resolvers_are_rejected() @test {
     gpu::internal::vk::VkDeviceState state;
     Device device = create_allocation_stub_device(&state);

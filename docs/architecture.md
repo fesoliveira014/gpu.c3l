@@ -135,8 +135,8 @@ flowchart LR
 
 Allocations are not relocated, so a `GpuAddress` is stable until the
 allocation is freed. Host writes need `flush_mapped_span` before submission;
-host reads need `invalidate_mapped_span` after completion. On coherent memory
-both are no-ops, but the calls are always required.
+host reads need `invalidate_mapped_span` after completion. Both are required
+unless `AllocationInfo.coherent` is true, in which case they are no-ops.
 
 ## Textures and shader indices
 

@@ -66,3 +66,11 @@ fn void mapped_gpu_span_checked_slicing_propagates_span_faults() @test {
     assert(@catch(mapped.checked_subspan(1, 1)) == gpu::INVALID_ARGUMENT,
         "GPU address overflow is rejected");
 }
+
+fn void gpu_span_allocation_accessor_round_trips_identity() @test {
+    GpuAllocation allocation = { .owner = 5, .index = 7, .generation = 3 };
+    GpuSpan whole = { .owner = 5, .index = 7, .generation = 3, .offset = 0, .size = 64 };
+    GpuSpan part = whole.checked_subspan(16, 16)!!;
+    assert(whole.allocation() == allocation, "a whole span names its allocation");
+    assert(part.allocation() == allocation, "a subspan names the same allocation");
+}

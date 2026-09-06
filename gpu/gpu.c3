@@ -544,6 +544,14 @@ fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
     return self.unchecked_subspan(offset, size);
 }
 
+<* Owning identity of the allocation this span was carved from. Not validated
+   for liveness.
+
+   @return "The allocation token whose range contains this span." *>
+fn GpuAllocation GpuSpan.allocation(self) {
+    return { .owner = self.owner, .index = self.index, .generation = self.generation };
+}
+
 <* Derive a non-empty exact-sized mapped range within this immediate parent.
    The returned views inherit the owning allocation's lifetime and perform no
    synchronization. The derived byte pointer has no alignment guarantee beyond
@@ -696,8 +704,36 @@ fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
     };
 }
 
+<* Allocate a mapped class and borrow its complete span, mapping, and address.
+   A class without a host mapping faults before any allocation; a later fault
+   frees the allocation. Free with `free_allocation` on `span.allocation()`.
+
+   @param device : "Live device that will own the allocation."
+   @param desc : "Borrowed allocation description with a mapped memory class."
+   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, allocation, or device fault." *>
+fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
+    if (desc == null) return INVALID_ARGUMENT~;
+    if (desc.memory_class == MemoryClass.GPU_PRIVATE
+        || desc.memory_class == MemoryClass.TEXTURE) {
+        return INVALID_ARGUMENT~;
+    }
+    GpuAllocation allocation = allocate_memory(device, desc)!;
+    MappedGpuSpan? mapped = mapped_allocation(device, allocation);
+    if (catch err = mapped) {
+        (void)free_allocation(device, &allocation);
+        return err~;
+    }
+    return mapped;
+}
+
+fn MappedGpuSpan? mapped_allocation(Device* device, GpuAllocation allocation) @private {
+    GpuSpan span = get_allocation_span(device, allocation)!;
+    return mapped_gpu_span(device, span);
+}
+
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
-   Coherent ranges are no-ops; this call does not submit or wait.
+   Required unless `AllocationInfo.coherent` is true; coherent ranges are
+   no-ops. This call does not submit or wait.
 
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose CPU writes become visible."
@@ -714,7 +750,8 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
 }
 
 <* After the relevant GPU completion point, make its writes visible to CPU
-   reads. This call does not wait; coherent ranges are no-ops.
+   reads. Required unless `AllocationInfo.coherent` is true; coherent ranges
+   are no-ops. This call does not wait.
 
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose GPU writes become visible."
