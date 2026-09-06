@@ -34,13 +34,17 @@ gpu::AllocationInfo info = gpu::get_allocation_info(&device, allocation)!;
 
 | `MemoryClass` | Mapped | Addressable | Use |
 |---|---|---|---|
-| `CPU_WRITE` | yes | yes | uploads, root data, per-frame data |
+| `CPU_WRITE` | yes | yes | upload staging read once by a copy |
+| `CPU_WRITE_GPU_LOCAL` | yes | yes | root records, per-frame constants, CPU-written indirect arguments |
 | `CPU_READ` | yes | yes | readback |
 | `GPU_PRIVATE` | no | yes | device-local buffers |
 | `TEXTURE` | no | no | backing for placed and sparse textures |
 
-`AllocationInfo` reports the actual `mapped`, `coherent`, and
-`addressable` properties. `free_allocation` never waits; free only after
+`AllocationInfo` reports the actual `mapped`, `coherent`, `device_local`,
+and `addressable` properties. `CPU_WRITE_GPU_LOCAL` prefers a memory type
+that is both device-local and host-visible and falls back to host memory
+without a fault; `device_local` reports which one was selected.
+`free_allocation` never waits; free only after
 the last completion point that reads the memory. A live placed texture or
 acceleration structure makes it return `RESOURCE_IN_USE`.
 

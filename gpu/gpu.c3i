@@ -505,6 +505,7 @@ const Adapter ADAPTER_INVALID = {};
 struct AdapterMemoryInfo {
     ulong device_local_bytes;
     ulong host_visible_bytes;
+    ulong device_local_host_visible_bytes;
 }
 
 struct AdapterQueueInfo {
@@ -705,6 +706,7 @@ enum MemoryClass : int {
     GPU_PRIVATE,
     CPU_READ,
     TEXTURE,
+    CPU_WRITE_GPU_LOCAL,
 }
 
 <* Non-owning identity and range into generic GPU data. *>
@@ -748,6 +750,7 @@ struct AllocationInfo {
     QueueRoles  access;
     bool        mapped;
     bool        coherent;
+    bool        device_local;
     bool        addressable;
 }
 

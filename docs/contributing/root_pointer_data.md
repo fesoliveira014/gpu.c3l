@@ -8,7 +8,7 @@ per command) beside the root-pointer path?
 
 ## Current path
 
-Write a record into `CPU_WRITE` memory, flush, pass its `GpuAddress` as the
+Write a record into `CPU_WRITE_GPU_LOCAL` memory, flush, pass its `GpuAddress` as the
 root of `cmd_dispatch` or the two roots of `cmd_draw`. The backend pushes 8
 bytes for compute and 16 for graphics. The shader reads the record through a
 `buffer_reference` block. See [shader ABI](../shader_abi.md#root-push).

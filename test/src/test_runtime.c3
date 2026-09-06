@@ -117,6 +117,7 @@ fn void runtimes_enumerate_independent_borrowed_adapters() @test {
     assert(info.name == "stub adapter 0", "semantic adapter name is available");
     assert(info.device_class == AdapterClass.SOFTWARE, "semantic device class is available");
     assert(info.memory.device_local_bytes == 1024, "semantic device-local memory is available");
+    assert(info.memory.device_local_host_visible_bytes == 1024, "semantic device-local host-visible window is available");
     assert(info.queues.available.compute, "semantic queue availability is reported");
 
     AdapterDiagnostics diagnostics = gpu::get_adapter_diagnostics(&first_adapter)!!;
