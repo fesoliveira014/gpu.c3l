@@ -1432,7 +1432,8 @@ fn gpu::AllocationInfo? vk_get_allocation_info(
         .device_local = state.allocation_desc.memory_class
             == gpu::MemoryClass.GPU_PRIVATE
             || state.allocation_desc.memory_class
-            == gpu::MemoryClass.CPU_WRITE_GPU_LOCAL,
+            == gpu::MemoryClass.CPU_WRITE_GPU_LOCAL
+            || texture_memory,
         .addressable  = !texture_memory,
     };
 }

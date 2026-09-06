@@ -391,6 +391,13 @@ fn gpu::GpuAllocation? allocate_texture_memory_for_state_with_ops(
     if ((selected_memory_type & memory_type_bits) == 0) {
         return gpu::BACKEND_ERROR~;
     }
+    vk::MemoryPropertyFlags memory_properties;
+    ops.get_memory_properties(
+        ops.user_data,
+        state.allocator,
+        allocation,
+        &memory_properties,
+    );
 
     char[DEBUG_NAME_CAP] debug_name;
     copy_debug_name(&debug_name[0], desc.debug_name);
@@ -407,6 +414,8 @@ fn gpu::GpuAllocation? allocate_texture_memory_for_state_with_ops(
         .alignment        = desc.alignment,
         .debug_name       = debug_name,
         .memory_class     = gpu::MemoryClass.TEXTURE,
+        .device_local     = ((uint)memory_properties
+            & (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT) != 0,
     };
 
     state.resource_mutex.lock()!!;
@@ -564,7 +573,7 @@ fn gpu::AllocationInfo? allocation_info_for_state(
         .access       = slot.access,
         .mapped       = !slot.texture_memory && slot.backing.cpu_base != null,
         .coherent     = !slot.texture_memory && slot.coherent,
-        .device_local = !slot.texture_memory && slot.device_local,
+        .device_local = slot.device_local,
         .addressable  = !slot.texture_memory
             && (ulong)slot.backing.gpu_base != 0,
     };

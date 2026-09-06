@@ -30,6 +30,7 @@ struct AllocationNativeProbe {
     vk::MemoryRequirements     raw_requirements;
     vma::AllocationCreateInfo  raw_allocation_info;
     vk::MemoryPropertyFlags    memory_properties;
+    bool                       raw_allocation;
     char[64]                   mapping;
     uint                       create_count;
     uint                       allocate_count;
@@ -455,6 +456,7 @@ fn vk::Result allocation_probe_create_buffer(
     (void)allocator;
     AllocationNativeProbe* probe = (AllocationNativeProbe*)user_data;
     probe.create_count++;
+    probe.raw_allocation = false;
     probe.buffer_info = *buffer_info;
     probe.allocation_info = *allocation_info;
     probe.min_alignment = min_alignment;
@@ -513,7 +515,10 @@ fn void allocation_probe_get_properties(
     probe.properties_count++;
     uint flags = (uint)vk::MemoryPropertyFlagBits.HOST_VISIBLE_BIT
         | (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT;
-    if (probe.allocation_info.usage == vma::MemoryUsage.AUTO_PREFER_DEVICE) {
+    bool device_preferred = probe.raw_allocation
+        ? probe.raw_allocation_info.usage == vma::MemoryUsage.GPU_ONLY
+        : probe.allocation_info.usage == vma::MemoryUsage.AUTO_PREFER_DEVICE;
+    if (device_preferred) {
         flags |= (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT;
     }
     probe.memory_properties = (vk::MemoryPropertyFlags)flags;
@@ -556,6 +561,7 @@ fn vk::Result allocation_probe_allocate_memory(
     (void)allocator;
     AllocationNativeProbe* probe = (AllocationNativeProbe*)user_data;
     probe.allocate_count++;
+    probe.raw_allocation = true;
     probe.raw_requirements = *requirements;
     probe.raw_allocation_info = *allocation_info;
     *out_allocation = (vma::Allocation)(void*)0x500;
@@ -962,7 +968,7 @@ fn void texture_memory_uses_raw_non_addressable_allocation() @test {
     assert(info.size == desc.size
         && info.memory_class == gpu::MemoryClass.TEXTURE
         && info.access == desc.access
-        && !info.mapped && !info.coherent && !info.addressable,
+        && !info.mapped && !info.coherent && info.device_local && !info.addressable,
         "texture allocation info exposes no generic data capabilities");
     assert(@catch(vk::allocation_span_for_state(
         &fixture.state,

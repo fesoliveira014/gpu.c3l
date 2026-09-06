@@ -45,8 +45,9 @@ Alternatives considered:
   is a placement preference, and applications would need a fallback branch
   the library can take for them.
 - Require `HOST_COHERENT`. Rejected: VMA's fallback can land on
-  non-coherent memory on some integrated parts; the flush contract is
-  conditional on `AllocationInfo.coherent` instead.
+  non-coherent memory on some integrated parts. `flush_mapped_span` and
+  `invalidate_mapped_span` stay required and are no-ops on coherent memory;
+  #592 relaxes that contract separately.
 
 The cost of host-local root records was inferred from the mapping, not
 measured. The root-record benchmark planned in
