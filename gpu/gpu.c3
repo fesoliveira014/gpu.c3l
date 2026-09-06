@@ -2793,7 +2793,8 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
         }
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
         if (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
-            || desc.readiness_before.indirect) {
+            || desc.readiness_before.indirect
+            || desc.readiness_before.index_input) {
             return INVALID_ARGUMENT~;
         }
     } else if ((uint)desc.readiness_before != 0) {

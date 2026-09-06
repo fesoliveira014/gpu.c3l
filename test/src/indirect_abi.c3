@@ -22,3 +22,13 @@ $assert $reflect(BuildRoot.index_count).offset == 32;
 $assert $reflect(BuildRoot.vertex_count).offset == 36;
 $assert $reflect(BuildRoot.dispatch_x).offset == 40;
 $assert $reflect(BuildRoot.count_value).offset == 44;
+
+struct IndexWriteRoot {
+    GpuAddress indices_gpu;
+    uint       index_count;
+    uint       _pad0;
+}
+$assert IndexWriteRoot::size == 16;
+$assert $reflect(IndexWriteRoot.indices_gpu).offset == 0;
+$assert $reflect(IndexWriteRoot.index_count).offset == 8;
+$assert $reflect(IndexWriteRoot._pad0).offset == 12;

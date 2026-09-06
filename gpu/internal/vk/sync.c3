@@ -724,6 +724,8 @@ fn void? vk_cmd_barrier_with_ops(
     if (rejected_field != null) {
         if (rejected_field.str_view() == "Barrier") {
             invariant = "barrier must be non-null";
+        } else if (barrier.before.index_input) {
+            invariant = "index_input is a destination-only stage";
         } else {
             invariant = "stage mask must be nonempty and noncontradictory";
         }
