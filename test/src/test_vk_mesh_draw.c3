@@ -84,6 +84,7 @@ fn void mesh_pipeline_draws_meshlet_triangle() @test {
     }
     gpu::Device device = candidate;
     defer destroy_test_device(&device)!!;
+    validation.errors = 0;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
     assert(caps.mesh_shaders.enabled && caps.mesh_shaders.max_mesh_work_group_count.x > 0
         && caps.mesh_shaders.max_mesh_output_vertices >= 3,
@@ -185,6 +186,7 @@ fn void mesh_indirect_draws_execute_gpu_written_arguments() @test {
     }
     gpu::Device device = candidate;
     defer destroy_test_device(&device)!!;
+    validation.errors = 0;
     gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
     DepthCtx ctx = make_depth_ctx();
     gpu::PipelineHandle mesh_pipeline = make_mesh_pipeline(&device, &ctx);
