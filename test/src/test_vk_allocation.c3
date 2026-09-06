@@ -30,6 +30,7 @@ struct AllocationNativeProbe {
     vk::MemoryRequirements     raw_requirements;
     vma::AllocationCreateInfo  raw_allocation_info;
     vk::MemoryPropertyFlags    memory_properties;
+    bool                       raw_allocation;
     char[64]                   mapping;
     uint                       create_count;
     uint                       allocate_count;
@@ -455,6 +456,7 @@ fn vk::Result allocation_probe_create_buffer(
     (void)allocator;
     AllocationNativeProbe* probe = (AllocationNativeProbe*)user_data;
     probe.create_count++;
+    probe.raw_allocation = false;
     probe.buffer_info = *buffer_info;
     probe.allocation_info = *allocation_info;
     probe.min_alignment = min_alignment;
@@ -513,6 +515,12 @@ fn void allocation_probe_get_properties(
     probe.properties_count++;
     uint flags = (uint)vk::MemoryPropertyFlagBits.HOST_VISIBLE_BIT
         | (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT;
+    bool device_preferred = probe.raw_allocation
+        ? probe.raw_allocation_info.usage == vma::MemoryUsage.GPU_ONLY
+        : probe.allocation_info.usage == vma::MemoryUsage.AUTO_PREFER_DEVICE;
+    if (device_preferred) {
+        flags |= (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT;
+    }
     probe.memory_properties = (vk::MemoryPropertyFlags)flags;
     *out_properties = probe.memory_properties;
 }
@@ -553,6 +561,7 @@ fn vk::Result allocation_probe_allocate_memory(
     (void)allocator;
     AllocationNativeProbe* probe = (AllocationNativeProbe*)user_data;
     probe.allocate_count++;
+    probe.raw_allocation = true;
     probe.raw_requirements = *requirements;
     probe.raw_allocation_info = *allocation_info;
     *out_allocation = (vma::Allocation)(void*)0x500;
@@ -838,6 +847,12 @@ fn void check_allocation_memory_policy(gpu::MemoryClass memory_class) {
                 && !info.flags.host_access_random
                 && !info.flags.host_access_sequential_write,
                 "GPU_PRIVATE requests no host mapping policy");
+        case gpu::MemoryClass.CPU_WRITE_GPU_LOCAL:
+            assert(info.usage == vma::MemoryUsage.AUTO_PREFER_DEVICE
+                && info.flags.mapped
+                && info.flags.host_access_sequential_write
+                && !info.flags.host_access_random,
+                "CPU_WRITE_GPU_LOCAL requests a persistently mapped sequential device-preferred allocation");
         default:
             unreachable();
     }
@@ -848,8 +863,12 @@ fn void check_allocation_memory_policy(gpu::MemoryClass memory_class) {
         assert((required & (uint)vk::MemoryPropertyFlagBits.HOST_VISIBLE_BIT) != 0,
             "CPU memory classes require HOST_VISIBLE memory");
     }
-    assert(fixture.state.allocations.get(allocation)!!.alignment == 128,
-        "the published slot retains actual alignment");
+    vk::AllocationSlot* slot = fixture.state.allocations.get(allocation)!!;
+    assert(slot.alignment == 128, "the published slot retains actual alignment");
+    bool device_preferred = memory_class == gpu::MemoryClass.GPU_PRIVATE
+        || memory_class == gpu::MemoryClass.CPU_WRITE_GPU_LOCAL;
+    assert(slot.device_local == device_preferred,
+        "device_local follows the selected memory type");
 }
 
 fn void ray_tracing_opt_ins_widen_generic_buffer_usage_exactly() @test {
@@ -888,6 +907,7 @@ fn void allocation_transaction_applies_memory_class_policy() @test {
     check_allocation_memory_policy(gpu::MemoryClass.CPU_WRITE);
     check_allocation_memory_policy(gpu::MemoryClass.CPU_READ);
     check_allocation_memory_policy(gpu::MemoryClass.GPU_PRIVATE);
+    check_allocation_memory_policy(gpu::MemoryClass.CPU_WRITE_GPU_LOCAL);
 }
 
 fn void texture_memory_uses_raw_non_addressable_allocation() @test {
@@ -948,7 +968,7 @@ fn void texture_memory_uses_raw_non_addressable_allocation() @test {
     assert(info.size == desc.size
         && info.memory_class == gpu::MemoryClass.TEXTURE
         && info.access == desc.access
-        && !info.mapped && !info.coherent && !info.addressable,
+        && !info.mapped && !info.coherent && info.device_local && !info.addressable,
         "texture allocation info exposes no generic data capabilities");
     assert(@catch(vk::allocation_span_for_state(
         &fixture.state,
@@ -1058,8 +1078,8 @@ fn void allocation_queries_and_immediate_release() @test {
         && info.memory_class == desc.memory_class
         && info.access == desc.access,
         "allocation info preserves immutable public policy");
-    assert(info.mapped && info.coherent && info.addressable,
-        "allocation info derives actual mapping, coherence, and addressability");
+    assert(info.mapped && info.coherent && !info.device_local && info.addressable,
+        "allocation info derives actual mapping, coherence, placement, and addressability");
 
     gpu::GpuSpan span = vk::allocation_span_for_state(
         &fixture.state,
@@ -1169,14 +1189,19 @@ fn void native_allocation_classes_map_and_release() @test {
         gpu::MemoryClass.CPU_READ,
         "cpu_read",
     );
+    gpu::AllocationDesc local_desc = native_allocation_desc(
+        gpu::MemoryClass.CPU_WRITE_GPU_LOCAL,
+        "cpu_write_gpu_local",
+    );
     gpu::GpuAllocation write = gpu::allocate_memory(&device, &write_desc)!!;
     gpu::GpuAllocation private = gpu::allocate_memory(&device, &private_desc)!!;
     gpu::GpuAllocation read = gpu::allocate_memory(&device, &read_desc)!!;
+    gpu::GpuAllocation local = gpu::allocate_memory(&device, &local_desc)!!;
     gpu::GpuAllocation stale_write = write;
 
-    assert(write != private && write != read && private != read,
+    assert(write != private && write != read && private != read && local != write,
         "live allocations have distinct identities");
-    gpu::GpuAllocation[3] allocations = { write, private, read };
+    gpu::GpuAllocation[4] allocations = { write, private, read, local };
     foreach (allocation : allocations) {
         gpu::AllocationInfo info = gpu::get_allocation_info(
             &device,
@@ -1201,6 +1226,11 @@ fn void native_allocation_classes_map_and_release() @test {
         );
         assert(info.alignment >= (usz)native_requirements.alignment,
             "reported alignment includes the native Vulkan requirement");
+        vk::MemoryPropertyFlags properties;
+        state.allocator.get_allocation_memory_properties(slot.backing.allocation, &properties);
+        assert(info.device_local
+                == (((uint)properties & (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT) != 0),
+            "device_local reports the selected memory type");
     }
 
     gpu::GpuSpan write_span = gpu::get_allocation_span(&device, write)!!;
@@ -1216,6 +1246,13 @@ fn void native_allocation_classes_map_and_release() @test {
         && write_mapping[64] == 0x3B,
         "CPU_WRITE exposes exact writable full and subspan mappings");
 
+    gpu::GpuSpan local_span = gpu::get_allocation_span(&device, local)!!;
+    char[] local_mapping = gpu::get_span_mapping(&device, local_span)!!;
+    local_mapping[0] = 0x5D;
+    assert(local_mapping.len == 256 && local_mapping[0] == 0x5D
+        && gpu::get_allocation_info(&device, local)!!.mapped,
+        "CPU_WRITE_GPU_LOCAL exposes a writable host mapping");
+
     gpu::GpuSpan read_span = gpu::get_allocation_span(&device, read)!!;
     char[] read_mapping = gpu::get_span_mapping(&device, read_span)!!;
     read_mapping[0] = 0x4C;
@@ -1227,7 +1264,7 @@ fn void native_allocation_classes_map_and_release() @test {
         == gpu::INVALID_ARGUMENT,
         "GPU_PRIVATE never exposes a host mapping");
     gpu::MemoryStats live = gpu::get_memory_stats(&device)!!;
-    assert(live.live_allocation_count >= baseline.live_allocation_count + 3,
+    assert(live.live_allocation_count >= baseline.live_allocation_count + 4,
         "independent allocations contribute to VMA allocation statistics");
     assert(live.heap_count == baseline.heap_count
         && live.heap_count > 0
@@ -1250,6 +1287,7 @@ fn void native_allocation_classes_map_and_release() @test {
 
     gpu::free_allocation(&device, &private)!!;
     gpu::free_allocation(&device, &read)!!;
+    gpu::free_allocation(&device, &local)!!;
     gpu::MemoryStats released = gpu::get_memory_stats(&device)!!;
     assert(released.live_allocation_count == baseline.live_allocation_count,
         "immediate release returns VMA allocation statistics to baseline");

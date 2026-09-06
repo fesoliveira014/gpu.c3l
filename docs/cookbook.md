@@ -495,7 +495,10 @@ fn void end_frame(FrameSlot* slot, gpu::CompletionPoint submitted) {
 ```
 
 The same rule covers root records, indirect arguments, readback buffers,
-sparse backing, and command allocators.
+sparse backing, and command allocators. Allocate the ring in
+`CPU_WRITE_GPU_LOCAL` so the GPU reads it from device-local memory where the
+adapter has a host-visible window; `AllocationInfo.device_local` reports the
+outcome.
 
 ## Draw indirectly
 

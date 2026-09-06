@@ -54,6 +54,7 @@ fn bool memory_class_is_known(MemoryClass memory_class) @private {
         case MemoryClass.GPU_PRIVATE:
         case MemoryClass.CPU_READ:
         case MemoryClass.TEXTURE:
+        case MemoryClass.CPU_WRITE_GPU_LOCAL:
             return true;
         default:
             return false;
